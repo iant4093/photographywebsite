@@ -149,6 +149,21 @@ function UserDashboard() {
         }
     }
 
+    // Group albums by category. Treat falsy values as "Uncategorized"
+    const groupedAlbums = albums.reduce((acc, album) => {
+        const cat = album.category || 'Uncategorized';
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(album);
+        return acc;
+    }, {});
+
+    // Sort categories alphabetically, but put "Uncategorized" at the end
+    const categories = Object.keys(groupedAlbums).sort((a, b) => {
+        if (a === 'Uncategorized') return 1;
+        if (b === 'Uncategorized') return -1;
+        return a.localeCompare(b);
+    });
+
     return (
         <div className="max-w-5xl mx-auto px-6 py-12">
             <div className="animate-slide-up">
@@ -239,34 +254,44 @@ function UserDashboard() {
                                 <p className="text-warm-gray/70 text-sm mt-1">Check back soon!</p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {albums.map((album) => (
-                                    <button
-                                        key={album.albumId}
-                                        onClick={() => openAlbum(album)}
-                                        className="group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white text-left cursor-pointer"
-                                    >
-                                        {/* Cover image */}
-                                        <div className="aspect-[4/3] overflow-hidden">
-                                            {album.coverImageUrl ? (
-                                                <img
-                                                    src={album.coverImageUrl}
-                                                    alt={album.title}
-                                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
-                                                />
-                                            ) : (
-                                                <div className="w-full h-full bg-cream-dark flex items-center justify-center">
-                                                    <svg className="w-12 h-12 text-warm-gray/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                                    </svg>
-                                                </div>
-                                            )}
+                            <div className="flex flex-col gap-12">
+                                {categories.map((cat) => (
+                                    <div key={cat}>
+                                        <div className="flex items-center gap-4 mb-6">
+                                            <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
+                                            <div className="h-px bg-warm-border flex-1"></div>
                                         </div>
-                                        <div className="p-5">
-                                            <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors">{album.title}</h3>
-                                            {album.description && <p className="mt-1 text-sm text-warm-gray line-clamp-2">{album.description}</p>}
+                                        <div className="flex overflow-x-auto gap-6 pb-6 snap-x snap-mandatory scrollbar-hide">
+                                            {groupedAlbums[cat].map((album) => (
+                                                <button
+                                                    key={album.albumId}
+                                                    onClick={() => openAlbum(album)}
+                                                    className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white text-left cursor-pointer"
+                                                >
+                                                    {/* Cover image */}
+                                                    <div className="aspect-[4/3] overflow-hidden">
+                                                        {album.coverImageUrl ? (
+                                                            <img
+                                                                src={album.coverImageUrl}
+                                                                alt={album.title}
+                                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                                                            />
+                                                        ) : (
+                                                            <div className="w-full h-full bg-cream-dark flex items-center justify-center">
+                                                                <svg className="w-12 h-12 text-warm-gray/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                                </svg>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="p-5">
+                                                        <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors">{album.title}</h3>
+                                                        {album.description && <p className="mt-1 text-sm text-warm-gray line-clamp-2">{album.description}</p>}
+                                                    </div>
+                                                </button>
+                                            ))}
                                         </div>
-                                    </button>
+                                    </div>
                                 ))}
                             </div>
                         )}
