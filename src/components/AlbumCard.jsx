@@ -6,7 +6,7 @@ function AlbumCard({ album }) {
     return (
         <Link
             to={`/album/${album.albumId}`}
-            className="group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white animate-scale-in"
+            className="group flex flex-col h-full rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white animate-scale-in"
         >
             {/* Cover image with warm overlay on hover */}
             <div className="relative aspect-[4/3] overflow-hidden bg-cream-dark">
@@ -29,7 +29,7 @@ function AlbumCard({ album }) {
             </div>
 
             {/* Card info */}
-            <div className="p-5">
+            <div className="p-5 flex-1 flex flex-col">
                 <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors duration-300">
                     {album.title}
                 </h3>
@@ -39,7 +39,7 @@ function AlbumCard({ album }) {
                     </p>
                 )}
                 {album.createdAt && (
-                    <p className="mt-2 text-xs text-warm-gray/70">
+                    <p className="mt-auto pt-4 text-xs text-warm-gray/70">
                         {new Date(album.createdAt).toLocaleDateString('en-US', {
                             year: 'numeric',
                             month: 'long',
