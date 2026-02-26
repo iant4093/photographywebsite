@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { fetchAlbumsFiltered, fetchAlbum } from '../utils/api'
 import JSZip from 'jszip'
+import ProgressiveImage from '../components/ProgressiveImage'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -65,13 +66,17 @@ function UserDashboard() {
             // inside loops as anti-tracking or strict CORS violations.
             const fetchPromises = images.map(async (img, index) => {
                 try {
-                    const urlObj = new URL(img.url)
+                    const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+                    const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+                    const urlObj = new URL(rawUrl)
                     urlObj.searchParams.set('dl', '1')
 
                     const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
                     if (!response.ok) throw new Error(`HTTP error ${response.status}`)
                     const blob = await response.blob()
-                    const fileName = img.key ? img.key.split('/').pop() : `photo-${index + 1}.jpg`
+
+                    const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
+                    const fileName = keyString ? keyString.split('/').pop() : `photo-${index + 1}.jpg`
                     folder.file(fileName, blob)
                 } catch (err) {
                     console.error('Failed to fetch image for zip:', err)
@@ -123,8 +128,10 @@ function UserDashboard() {
         const img = images[lightboxIndex]
         if (!img) return
 
-        const urlToDownload = img.url
-        const fileName = img.key ? img.key.split('/').pop() : 'photo.jpg'
+        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+        const urlToDownload = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
+        const fileName = keyString ? keyString.split('/').pop() : 'photo.jpg'
 
         try {
             // Reverted back to cache: no-store instead of dynamic timestamps because iOS Safari 
@@ -221,20 +228,28 @@ function UserDashboard() {
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {images.map((img, index) => (
-                                    <div
-                                        key={img.key || index}
-                                        className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-square"
-                                        onClick={() => setLightboxIndex(index)}
-                                    >
-                                        <img
-                                            src={img.url}
-                                            alt={`Photo ${index + 1}`}
-                                            className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-700 ease-out"
-                                            loading="lazy"
-                                        />
-                                    </div>
-                                ))}
+                                {images.map((img, index) => {
+                                    const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+                                    const thumbUrl = isLegacyOrDemo
+                                        ? (img.url || img)
+                                        : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                                    const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+
+                                    return (
+                                        <div
+                                            key={img.key || img.rawKey || index}
+                                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
+                                            onClick={() => setLightboxIndex(index)}
+                                        >
+                                            <ProgressiveImage
+                                                src={thumbUrl}
+                                                blurhash={img.blurhash}
+                                                alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
+                                                className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                            />
+                                        </div>
+                                    )
+                                })}
                             </div>
                         )}
                     </div>
@@ -334,11 +349,18 @@ function UserDashboard() {
 
                     {/* Image Wrapper */}
                     <div className="flex-1 w-full min-h-0 flex items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
-                        <img
-                            src={images[lightboxIndex].url}
-                            alt="Full size preview"
-                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
-                        />
+                        {(() => {
+                            const activeImg = images[lightboxIndex]
+                            const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
+                            const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+                            return (
+                                <img
+                                    src={activeRawUrl}
+                                    alt="Full size preview"
+                                    className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
+                                />
+                            )
+                        })()}
                     </div>
 
                     {/* Download & Image counter */}
