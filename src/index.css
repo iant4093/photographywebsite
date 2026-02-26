@@ -1,0 +1,98 @@
+/* Tailwind v4 base import */
+@import "tailwindcss";
+
+/* Beige & Taupe Design System */
+@theme {
+  /* Color palette — warm beige tones */
+  --color-cream: #faf8f5;
+  --color-cream-dark: #f0ece6;
+  --color-charcoal: #2c2825;
+  --color-charcoal-light: #4a4541;
+  --color-amber: #a08c7b;
+  --color-amber-dark: #8b7565;
+  --color-amber-light: #b8a494;
+  --color-warm-gray: #8a8078;
+  --color-warm-border: #e2ddd7;
+
+  /* Warm shadows — softer, neutral-toned */
+  --shadow-warm-sm: 0 1px 3px rgba(44, 40, 37, 0.06), 0 1px 2px rgba(44, 40, 37, 0.04);
+  --shadow-warm: 0 4px 12px rgba(44, 40, 37, 0.08), 0 2px 4px rgba(44, 40, 37, 0.05);
+  --shadow-warm-lg: 0 10px 30px rgba(44, 40, 37, 0.1), 0 4px 8px rgba(44, 40, 37, 0.06);
+  --shadow-warm-xl: 0 20px 50px rgba(44, 40, 37, 0.12), 0 8px 16px rgba(44, 40, 37, 0.08);
+
+  /* Font families */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: 'Playfair Display', Georgia, serif;
+
+  /* Animations */
+  --animate-fade-in: fade-in 0.6s ease-out;
+  --animate-slide-up: slide-up 0.5s ease-out;
+  --animate-scale-in: scale-in 0.3s ease-out;
+}
+
+/* Keyframe animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Global styles */
+body {
+  font-family: var(--font-sans);
+  color: var(--color-charcoal);
+  background-color: var(--color-cream);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar with warm tones */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-cream);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-warm-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-warm-gray);
+}

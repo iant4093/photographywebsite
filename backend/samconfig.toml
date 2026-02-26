@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "ian-website"
+resolve_s3 = true
+s3_prefix = "ian-website"
+region = "us-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=\"prod\""
+image_repositories = []
+
+[default.global.parameters]
+region = "us-west-2"

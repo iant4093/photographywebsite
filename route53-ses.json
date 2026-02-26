@@ -1,0 +1,57 @@
+{
+  "Comment": "DNS validation for SES",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "_amazonses.iantruongphotography.com.",
+        "Type": "TXT",
+        "TTL": 1800,
+        "ResourceRecords": [
+          {
+            "Value": "\"mcxW8z18pwTUSW+SoKIDRv8Iayv7y/fPdkgo6W2awbM=\""
+          }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "sbcxtg6voeyisentgkmi7fvhtxmwibls._domainkey.iantruongphotography.com.",
+        "Type": "CNAME",
+        "TTL": 1800,
+        "ResourceRecords": [
+          {
+            "Value": "sbcxtg6voeyisentgkmi7fvhtxmwibls.dkim.amazonses.com."
+          }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "aszzxiuq43o2fpnk65fxwoqm7gajif4b._domainkey.iantruongphotography.com.",
+        "Type": "CNAME",
+        "TTL": 1800,
+        "ResourceRecords": [
+          {
+            "Value": "aszzxiuq43o2fpnk65fxwoqm7gajif4b.dkim.amazonses.com."
+          }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "ysaw4jdpcrx77qqls25wrorohfwla7yq._domainkey.iantruongphotography.com.",
+        "Type": "CNAME",
+        "TTL": 1800,
+        "ResourceRecords": [
+          {
+            "Value": "ysaw4jdpcrx77qqls25wrorohfwla7yq.dkim.amazonses.com."
+          }
+        ]
+      }
+    }
+  ]
+}

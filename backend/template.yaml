@@ -1,0 +1,410 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Ian Truong Photography Portfolio — Serverless Backend
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 15
+    MemorySize: 256
+    Environment:
+      Variables:
+        ALBUMS_TABLE: !Ref AlbumsTable
+        IMAGES_BUCKET: !Ref ImagesBucket
+        CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+        SENDER_EMAIL: !Ref SenderEmail
+        FRONTEND_URL: !Ref FrontendUrl
+        COGNITO_USER_POOL_ID: !Ref UserPool
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+  SenderEmail:
+    Type: String
+    Default: admin@iantruongphotography.com
+  FrontendUrl:
+    Type: String
+    Default: https://iantruongphotography.com
+
+Resources:
+  # ─── DynamoDB ───
+  AlbumsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GoldenHour-Albums-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: albumId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: albumId
+          KeyType: HASH
+
+  # ─── S3 Image Bucket ───
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'goldenhour-images-${AWS::AccountId}-${Stage}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT]
+            AllowedOrigins: ['*']
+            MaxAge: 3600
+
+  ImagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ImagesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${ImagesBucket}/*'
+
+  # ─── CloudFront CDN ───
+  ImagesCloudFront:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'GoldenHour Images CDN - ${Stage}'
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt ImagesBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MinTTL: 0
+          DefaultTTL: 86400
+          MaxTTL: 31536000
+          Compress: true
+        PriceClass: PriceClass_100
+
+  # ─── Cognito ───
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'GoldenHour-Users-${Stage}'
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'GoldenHour-WebClient-${Stage}'
+      UserPoolId: !Ref UserPool
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: false
+
+  # Admin group — users in this group have write access
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      UserPoolId: !Ref UserPool
+      Description: Admin users with write access
+
+  # ─── API Gateway ───
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+        AllowHeaders: ['Content-Type', 'Authorization']
+        AllowOrigins: ['*']
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+              audience:
+                - !Ref UserPoolClient
+
+  # ─── Lambda Functions ───
+
+  # Public: list all albums
+  GetAlbumsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: get_albums.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        GetAlbums:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  # Public: get single album with images
+  GetAlbumFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: get_album.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        GetAlbum:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  # Protected: create album
+  CreateAlbumFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: create_album.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
+      Events:
+        CreateAlbum:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums
+            Method: POST
+
+  # Protected: update album
+  UpdateAlbumFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: update_album.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
+      Events:
+        UpdateAlbum:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}
+            Method: PUT
+
+  # Protected: delete album
+  DeleteAlbumFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: delete_album.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        DeleteAlbum:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}
+            Method: DELETE
+
+  # Protected: delete specific images from album
+  DeleteImagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: delete_images.handler
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        DeleteImages:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}/delete-images
+            Method: POST
+
+  # Protected: request presigned upload URL
+  GetUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: get_upload_url.handler
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        GetUploadUrl:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /upload-url
+            Method: POST
+
+  # Protected: create user (admin)
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: create_user.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminSetUserPassword
+              Resource: !GetAtt UserPool.Arn
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
+      Events:
+        CreateUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /users
+            Method: POST
+
+  # Protected: list users (admin)
+  ListUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: list_users.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:ListUsers
+              Resource: !GetAtt UserPool.Arn
+      Events:
+        ListUsers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /users
+            Method: GET
+
+  # Protected: delete user + cascade delete albums (admin)
+  DeleteUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: delete_user.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ImagesBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminDeleteUser
+              Resource: !GetAtt UserPool.Arn
+      Events:
+        DeleteUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /users/{email}
+            Method: DELETE
+
+  # Protected: edit user email/password + migrate albums (admin)
+  EditUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: edit_user.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminUpdateUserAttributes
+                - cognito-idp:AdminSetUserPassword
+              Resource: !GetAtt UserPool.Arn
+      Events:
+        EditUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /users/{email}
+            Method: PUT
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+  ImagesBucketName:
+    Description: S3 bucket for images
+    Value: !Ref ImagesBucket

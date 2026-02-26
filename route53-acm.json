@@ -1,0 +1,18 @@
+{
+  "Comment": "DNS validation for ACM certificate",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "_8c02224236796b632138af6020cc8216.iantruongphotography.com.",
+        "Type": "CNAME",
+        "TTL": 300,
+        "ResourceRecords": [
+          {
+            "Value": "_76e80f0200133e3eeccd7c8177d6e384.jkddzztszm.acm-validations.aws."
+          }
+        ]
+      }
+    }
+  ]
+}
