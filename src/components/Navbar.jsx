@@ -27,7 +27,7 @@ function Navbar() {
     return (
         <>
             {/* Top Navigation Bar */}
-            <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isMenuOpen ? 'bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
+            <nav className={`sticky top-0 z-50 transition-all duration-300 ${isMenuOpen ? 'bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
                     <Link to="/" className="flex items-center gap-3 group z-50 relative">
