@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { fetchAlbum } from '../utils/api'
 import { useAuth } from '../context/authContext'
 import JSZip from 'jszip'
+import ProgressiveImage from '../components/ProgressiveImage'
 
 // Demo images for when the backend isn't connected
 const DEMO_IMAGES = [
@@ -228,20 +229,29 @@ function AlbumGallery() {
 
                     {/* Image grid */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {images.map((img, index) => (
-                            <div
-                                key={img.key || index}
-                                className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-square"
-                                onClick={() => setLightboxIndex(index)}
-                            >
-                                <img
-                                    src={img.url || img}
-                                    alt={`Photo ${index + 1} from ${album.title}`}
-                                    className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-700 ease-out"
-                                    loading="lazy"
-                                />
-                            </div>
-                        ))}
+                        {images.map((img, index) => {
+                            // Extract URL from generic strings (demo) or the specific image payload object
+                            const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+                            const thumbUrl = isLegacyOrDemo
+                                ? (img.url || img)
+                                : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                            const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+
+                            return (
+                                <div
+                                    key={img.key || img.rawKey || index}
+                                    className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
+                                    onClick={() => setLightboxIndex({ index, url: rawUrl })}
+                                >
+                                    <ProgressiveImage
+                                        src={thumbUrl}
+                                        blurhash={img.blurhash}
+                                        alt={`Photo ${index + 1} from ${album.title}`}
+                                        className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                    />
+                                </div>
+                            )
+                        })}
                     </div>
 
                     {/* Empty state */}
