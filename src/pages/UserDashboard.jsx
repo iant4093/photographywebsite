@@ -355,11 +355,13 @@ function UserDashboard() {
                             const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
                             return (
                                 <>
-                                    <img
-                                        src={activeRawUrl}
-                                        alt="Full size preview"
-                                        className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-warm-xl animate-scale-in"
-                                    />
+                                    <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+                                        <img
+                                            src={activeRawUrl}
+                                            alt="Full size preview"
+                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
+                                        />
+                                    </div>
 
                                     {/* EXIF Data Overlay */}
                                     {activeImg && activeImg.exif && (
