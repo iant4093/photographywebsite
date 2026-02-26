@@ -2,3 +2,4 @@ PyJWT
 cryptography
 requests
 resend
+ExifRead
