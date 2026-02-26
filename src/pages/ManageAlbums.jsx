@@ -162,8 +162,12 @@ function ManageAlbums() {
     async function handleSetCover(img) {
         try {
             const token = await getIdToken()
-            // Store the S3 key — the backend converts it to a full URL when fetching
-            await updateAlbum(token, expandedAlbumId, { coverImageUrl: img.key })
+            const imgKey = img.rawKey || img.key;
+            const updates = { coverImageUrl: imgKey };
+            if (img.thumbKey) updates.coverThumbKey = img.thumbKey;
+            if (img.blurhash) updates.coverBlurhash = img.blurhash;
+
+            await updateAlbum(token, expandedAlbumId, updates)
             setActionSuccess('Cover image updated!')
             loadAlbums()
             setTimeout(() => setActionSuccess(''), 3000)
@@ -382,19 +386,19 @@ function ManageAlbums() {
                                         {/* Add more images */}
                                         <div className="mb-6 p-4 bg-cream/50 rounded-xl border border-warm-border">
                                             <p className="text-sm font-medium text-charcoal mb-2">Add more photos</p>
-                                            <div className="flex gap-3 items-center">
+                                            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
                                                 <input
                                                     ref={addFilesRef}
                                                     type="file"
                                                     accept="image/*"
                                                     multiple
                                                     onChange={(e) => setAddingFiles(Array.from(e.target.files))}
-                                                    className="flex-1 text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-amber/10 file:text-amber-dark file:font-medium file:cursor-pointer"
+                                                    className="flex-1 w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-amber/10 file:text-amber-dark file:font-medium file:cursor-pointer"
                                                 />
                                                 <button
                                                     onClick={handleAddImages}
                                                     disabled={!addingFiles.length || uploadingMore}
-                                                    className="px-4 py-2 rounded-lg bg-amber text-white text-sm font-medium cursor-pointer hover:bg-amber-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                    className="w-full sm:w-auto px-4 py-2 rounded-lg bg-amber text-white text-sm font-medium cursor-pointer hover:bg-amber-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                                 >
                                                     {uploadingMore ? 'Uploading…' : 'Add'}
                                                 </button>
@@ -409,32 +413,38 @@ function ManageAlbums() {
                                         ) : albumImages.length === 0 ? (
                                             <p className="text-center py-8 text-warm-gray">No photos yet.</p>
                                         ) : (
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                                                {albumImages.map((img) => (
-                                                    <div key={img.key} className="group relative rounded-xl overflow-hidden aspect-square">
-                                                        <img src={img.url} alt="" className="w-full h-full object-cover" loading="lazy" />
-                                                        {/* Set as cover button (top-left) */}
-                                                        <button
-                                                            onClick={() => handleSetCover(img)}
-                                                            title="Set as cover image"
-                                                            className="absolute top-2 left-2 w-7 h-7 rounded-full bg-amber/80 hover:bg-amber text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                                                            </svg>
-                                                        </button>
-                                                        {/* Remove button (top-right) */}
-                                                        <button
-                                                            onClick={() => handleRemoveImage(img.key)}
-                                                            title="Remove image"
-                                                            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/80 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                            </svg>
-                                                        </button>
-                                                    </div>
-                                                ))}
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
+                                                {albumImages.map((img, idx) => {
+                                                    const isLegacy = !img.thumbKey
+                                                    const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                                                    const imgKey = img.rawKey || img.key || `fallback-${idx}`
+
+                                                    return (
+                                                        <div key={imgKey} className="group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30">
+                                                            <img src={thumbUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                                            {/* Set as cover button (top-left) */}
+                                                            <button
+                                                                onClick={() => handleSetCover(img)}
+                                                                title="Set as cover image"
+                                                                className="absolute top-2 left-2 w-7 h-7 rounded-full bg-amber/80 hover:bg-amber text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                                                                </svg>
+                                                            </button>
+                                                            {/* Remove button (top-right) */}
+                                                            <button
+                                                                onClick={() => handleRemoveImage(imgKey)}
+                                                                title="Remove image"
+                                                                className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/80 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                                </svg>
+                                                            </button>
+                                                        </div>
+                                                    )
+                                                })}
                                             </div>
                                         )}
                                     </div>
