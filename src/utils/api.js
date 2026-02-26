@@ -87,6 +87,15 @@ export function updateAlbum(token, albumId, data) {
     })
 }
 
+// Add new images to an existing album
+export function addImagesToAlbum(token, albumId, images) {
+    return apiFetch(`/albums/${albumId}/images`, {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({ images }),
+    })
+}
+
 // Delete an album and all its images
 export function deleteAlbum(token, albumId) {
     return apiFetch(`/albums/${albumId}`, {

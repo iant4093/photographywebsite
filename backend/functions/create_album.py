@@ -1,10 +1,13 @@
 import json
 import os
+import io
 import boto3
+import exifread
 
-# DynamoDB resource for creating album records
+# DynamoDB and S3 resources
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
+s3 = boto3.client('s3')
 
 from auth_helpers import require_admin
 from email_helpers import send_email
@@ -35,6 +38,45 @@ def handler(event, context):
                 'body': json.dumps({'error': 'Cannot create private albums for the admin account'}),
             }
 
+        images = body.get('images', [])
+        
+        # Extract EXIF data from first 64KB of S3 object dynamically
+        if 'IMAGES_BUCKET' in os.environ:
+            for img in images:
+                raw_key = img.get('rawKey')
+                if not raw_key: continue
+                try:
+                    resp = s3.get_object(Bucket=os.environ['IMAGES_BUCKET'], Key=raw_key, Range='bytes=0-65535')
+                    tags = exifread.process_file(io.BytesIO(resp['Body'].read()), details=False)
+                    
+                    exif_data = {}
+                    if 'Image Model' in tags:
+                        exif_data['model'] = str(tags['Image Model']).strip()
+                    if 'EXIF LensModel' in tags:
+                        exif_data['lens'] = str(tags['EXIF LensModel']).strip()
+                        
+                    if 'EXIF FNumber' in tags:
+                        val = tags['EXIF FNumber'].values[0]
+                        if val.den != 0:
+                            f_val = val.num / val.den
+                            exif_data['focalRatio'] = f"f/{f_val:g}"
+                            
+                    if 'EXIF ExposureTime' in tags:
+                        val = tags['EXIF ExposureTime'].values[0]
+                        if val.den != 0 and val.num != 0:
+                            if val.num >= val.den:
+                                exif_data['shutterSpeed'] = f"{val.num / val.den:g}s"
+                            else:
+                                exif_data['shutterSpeed'] = f"{val.num}/{val.den}s"
+                                
+                    if 'EXIF ISOSpeedRatings' in tags:
+                        exif_data['iso'] = f"ISO {tags['EXIF ISOSpeedRatings']}"
+                        
+                    if exif_data:
+                        img['exif'] = exif_data
+                except Exception as e:
+                    print(f"EXIF extraction error for {raw_key}: {e}")
+
         # Write the album record with visibility and ownerEmail
         item = {
             'albumId': body['albumId'],
@@ -44,7 +86,7 @@ def handler(event, context):
             'coverImageUrl': body.get('coverImageUrl', ''),
             'coverThumbKey': body.get('coverThumbKey', ''),
             'coverBlurhash': body.get('coverBlurhash', ''),
-            'images': body.get('images', []),
+            'images': images,
             's3Prefix': body['s3Prefix'],
             'createdAt': body['createdAt'],
             'visibility': body.get('visibility', 'public'),

@@ -250,6 +250,25 @@ Resources:
             Path: /albums/{albumId}
             Method: DELETE
 
+  # Protected: add images to existing album
+  AddImagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: add_images.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        AddImages:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}/images
+            Method: POST
+
   # Protected: delete specific images from album
   DeleteImagesFunction:
     Type: AWS::Serverless::Function

@@ -301,17 +301,42 @@ function AlbumGallery() {
                     </button>
 
                     {/* Image Wrapper */}
-                    <div className="flex-1 w-full min-h-0 flex items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
                         {(() => {
                             const activeImg = images[lightboxIndex]
                             const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
                             const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
                             return (
-                                <img
-                                    src={activeRawUrl}
-                                    alt="Full size preview"
-                                    className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
-                                />
+                                <>
+                                    <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+                                        <img
+                                            src={activeRawUrl}
+                                            alt="Full size preview"
+                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
+                                        />
+                                    </div>
+
+                                    {/* EXIF Data Overlay */}
+                                    {!isLegacyOrDemo && activeImg.exif && (
+                                        <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
+                                            {activeImg.exif.model && (
+                                                <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
+                                                    {activeImg.exif.model}
+                                                </p>
+                                            )}
+                                            {activeImg.exif.lens && (
+                                                <p className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
+                                                    {activeImg.exif.lens}
+                                                </p>
+                                            )}
+                                            <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
+                                                {activeImg.exif.focalRatio && <span>{activeImg.exif.focalRatio}</span>}
+                                                {activeImg.exif.shutterSpeed && <span>{activeImg.exif.shutterSpeed}</span>}
+                                                {activeImg.exif.iso && <span>{activeImg.exif.iso}</span>}
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
                             )
                         })()}
                     </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
+import { encode } from 'blurhash'
 import { useAuth } from '../context/authContext'
 import {
     fetchAlbumsFiltered,
@@ -10,6 +11,7 @@ import {
     requestUploadUrl,
     uploadFileToS3,
     fetchAlbum,
+    addImagesToAlbum,
 } from '../utils/api'
 
 // Manage albums page — full CRUD for main gallery and per-user albums
@@ -176,6 +178,62 @@ function ManageAlbums() {
         }
     }
 
+    // Generate thumbnail and blurhash from file (mirrors Admin.jsx)
+    async function processImage(file) {
+        return new Promise((resolve, reject) => {
+            const img = new Image()
+            const url = URL.createObjectURL(file)
+
+            img.onload = () => {
+                const MAX_SIZE = 800
+                let width = img.width
+                let height = img.height
+
+                if (width > height && width > MAX_SIZE) {
+                    height *= MAX_SIZE / width
+                    width = MAX_SIZE
+                } else if (height > width && height > MAX_SIZE) {
+                    width *= MAX_SIZE / height
+                    height = MAX_SIZE
+                }
+
+                width = Math.round(width)
+                height = Math.round(height)
+
+                const canvas = document.createElement('canvas')
+                canvas.width = width
+                canvas.height = height
+                const ctx = canvas.getContext('2d')
+
+                ctx.drawImage(img, 0, 0, width, height)
+
+                const hashCanvas = document.createElement('canvas')
+                const hashSize = 32
+                hashCanvas.width = hashSize
+                hashCanvas.height = Math.round(hashSize * (height / width))
+                const hashCtx = hashCanvas.getContext('2d')
+                hashCtx.drawImage(img, 0, 0, hashCanvas.width, hashCanvas.height)
+                const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
+
+                const componentX = 4
+                const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
+                const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
+
+                canvas.toBlob((blob) => {
+                    URL.revokeObjectURL(url)
+                    resolve({
+                        thumbnail: blob,
+                        blurhash,
+                        width: img.width,
+                        height: img.height
+                    })
+                }, 'image/jpeg', 0.85)
+            }
+            img.onerror = () => reject(new Error('Failed to load image for processing'))
+            img.src = url
+        })
+    }
+
     // Add more images to an existing album
     async function handleAddImages() {
         if (!addingFiles.length || !expandedAlbumId) return
@@ -186,16 +244,42 @@ function ManageAlbums() {
             const token = await getIdToken()
             const s3Prefix = expandedAlbum?.s3Prefix || `albums/${expandedAlbumId}/`
 
+            const finalImages = []
+
             for (const file of addingFiles) {
-                const { uploadUrl } = await requestUploadUrl(token, `${s3Prefix}${file.name}`, file.type)
-                await uploadFileToS3(uploadUrl, file)
+                // 1. Process local thumbnail/hash
+                const { thumbnail, blurhash, width, height } = await processImage(file)
+
+                // 2. Request both Pre-signed URLs
+                const rawKey = `${s3Prefix}${file.name}`
+                const thumbKey = `${s3Prefix}thumb_${file.name}`
+
+                const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
+                const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+
+                // 3. Upload both to S3
+                await Promise.all([
+                    uploadFileToS3(rawUploadUrl, file),
+                    uploadFileToS3(thumbUploadUrl, thumbnail)
+                ])
+
+                finalImages.push({
+                    rawKey,
+                    thumbKey,
+                    blurhash,
+                    width,
+                    height
+                })
             }
+
+            // Append to database
+            await addImagesToAlbum(token, expandedAlbumId, finalImages)
 
             setAddingFiles([])
             if (addFilesRef.current) addFilesRef.current.value = ''
             setActionSuccess(`Added ${addingFiles.length} image(s)!`)
             // Reload images
-            const data = await fetchAlbum(expandedAlbumId)
+            const data = await fetchAlbum(expandedAlbumId, token)
             setAlbumImages(data.images || [])
             setTimeout(() => setActionSuccess(''), 3000)
         } catch (err) {
