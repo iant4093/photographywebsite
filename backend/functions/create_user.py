@@ -45,7 +45,7 @@ def handler(event, context):
             Permanent=True,
         )
 
-        portal_url = os.environ.get('FRONTEND_URL', 'https://d18laf2e76iqpa.cloudfront.net')
+        portal_url = os.environ.get('FRONTEND_URL', 'https://iantruongphotography.com')
         subject = "Welcome to Ian Truong Photography"
         html = f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: auto;">

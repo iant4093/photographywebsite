@@ -49,7 +49,7 @@ def handler(event, context):
         table.put_item(Item=item)
 
         if item.get('visibility') == 'private' and item.get('ownerEmail'):
-            portal_url = os.environ.get('FRONTEND_URL', 'https://d18laf2e76iqpa.cloudfront.net')
+            portal_url = os.environ.get('FRONTEND_URL', 'https://iantruongphotography.com')
             subject = f"Your New Photos Are Ready: {item['title']}"
             html = f"""
             <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
