@@ -35,3 +35,6 @@ env/
 .pytest_cache/
 cf-config*.json
 cf-etag.txt
+
+# Agent artifacts
+.agent/

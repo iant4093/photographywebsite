@@ -28,6 +28,7 @@ function ManageAlbums() {
     const [editTitle, setEditTitle] = useState('')
     const [editDesc, setEditDesc] = useState('')
     const [editDate, setEditDate] = useState('')
+    const [editCategory, setEditCategory] = useState('')
 
     // Album detail view (images) — tracks which albumId is expanded
     const [expandedAlbumId, setExpandedAlbumId] = useState(null)
@@ -105,6 +106,7 @@ function ManageAlbums() {
         setEditingAlbum(album.albumId)
         setEditTitle(album.title)
         setEditDesc(album.description || '')
+        setEditCategory(album.category || '')
         // Parse ISO date to YYYY-MM-DD for the date input
         setEditDate(album.createdAt ? album.createdAt.split('T')[0] : '')
     }
@@ -114,7 +116,7 @@ function ManageAlbums() {
         setActionError('')
         try {
             const token = await getIdToken()
-            const updates = { title: editTitle, description: editDesc }
+            const updates = { title: editTitle, description: editDesc, category: editCategory }
             if (editDate) updates.createdAt = new Date(editDate + 'T12:00:00').toISOString()
             await updateAlbum(token, albumId, updates)
             setEditingAlbum(null)
@@ -203,6 +205,9 @@ function ManageAlbums() {
     const filteredUsers = users.filter((u) =>
         u.email.toLowerCase().includes(userSearch.toLowerCase())
     )
+
+    // Derived list of existing categories for autocomplete
+    const existingCategories = [...new Set(albums.map(a => a.category).filter(Boolean))]
 
     return (
         <div className="max-w-5xl mx-auto px-6 py-12">
@@ -303,6 +308,19 @@ function ManageAlbums() {
                                                 className="w-full px-3 py-2 rounded-lg border border-warm-border text-sm focus:outline-none focus:ring-2 focus:ring-amber/40 resize-none"
                                             />
                                             <input
+                                                type="text"
+                                                list={`categories-${album.albumId}`}
+                                                value={editCategory}
+                                                onChange={(e) => setEditCategory(e.target.value)}
+                                                placeholder="Category (e.g. Wildlife, Sports)"
+                                                className="w-full px-3 py-2 rounded-lg border border-warm-border text-sm focus:outline-none focus:ring-2 focus:ring-amber/40"
+                                            />
+                                            <datalist id={`categories-${album.albumId}`}>
+                                                {existingCategories.map(cat => (
+                                                    <option key={cat} value={cat} />
+                                                ))}
+                                            </datalist>
+                                            <input
                                                 type="date"
                                                 value={editDate}
                                                 onChange={(e) => setEditDate(e.target.value)}
@@ -317,7 +335,14 @@ function ManageAlbums() {
                                         /* View mode */
                                         <div className="flex items-start justify-between">
                                             <div className="flex-1">
-                                                <h3 className="font-serif text-lg font-semibold text-charcoal">{album.title}</h3>
+                                                <div className="flex items-center gap-3">
+                                                    <h3 className="font-serif text-lg font-semibold text-charcoal">{album.title}</h3>
+                                                    {album.category && (
+                                                        <span className="px-2.5 py-0.5 rounded-full bg-cream-dark text-xs font-medium text-warm-gray">
+                                                            {album.category}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 {album.description && <p className="text-sm text-warm-gray mt-1">{album.description}</p>}
                                                 <p className="text-xs text-warm-gray/70 mt-1">
                                                     {new Date(album.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
