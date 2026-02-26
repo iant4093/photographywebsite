@@ -280,6 +280,8 @@ Resources:
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ImagesBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
       Events:
         DeleteImages:
           Type: HttpApi

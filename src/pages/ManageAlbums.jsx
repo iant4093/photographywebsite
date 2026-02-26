@@ -152,7 +152,7 @@ function ManageAlbums() {
         try {
             const token = await getIdToken()
             await deleteImages(token, expandedAlbumId, [key])
-            setAlbumImages((prev) => prev.filter((img) => img.key !== key))
+            setAlbumImages((prev) => prev.filter((img) => (img.rawKey || img.key) !== key))
             setActionSuccess('Image removed!')
             setTimeout(() => setActionSuccess(''), 3000)
         } catch (err) {
