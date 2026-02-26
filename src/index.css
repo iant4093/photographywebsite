@@ -96,3 +96,13 @@ html {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-warm-gray);
 }
+
+/* Utility to hide scrollbars on horizontal lists */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
