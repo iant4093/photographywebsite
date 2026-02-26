@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
-import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers } from '../utils/api'
+import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 
 // Upload page — create album for main gallery or specific user
 function Upload() {
@@ -15,8 +15,10 @@ function Upload() {
     const [visibility, setVisibility] = useState('public')
     const [ownerEmail, setOwnerEmail] = useState('')
     const [albumDate, setAlbumDate] = useState(() => new Date().toISOString().split('T')[0])
+    const [category, setCategory] = useState('')
     const [users, setUsers] = useState([])
     const [usersLoaded, setUsersLoaded] = useState(false)
+    const [existingCategories, setExistingCategories] = useState([])
 
     // File input ref to clear after upload
     const fileInputRef = useRef(null)
@@ -27,24 +29,37 @@ function Upload() {
     const [success, setSuccess] = useState(false)
     const [error, setError] = useState('')
 
-    // Load users when switching to private mode
-    async function loadUsers() {
-        if (usersLoaded) return
+    // Load users and existing albums
+    async function loadInitialData() {
+        if (!usersLoaded) {
+            try {
+                const token = await getIdToken()
+                const data = await listUsers(token)
+                setUsers(data.filter((u) => u.email !== 'iant4093@gmail.com'))
+                setUsersLoaded(true)
+            } catch (err) {
+                console.error('Failed to load users:', err)
+            }
+        }
+
         try {
-            const token = await getIdToken()
-            const data = await listUsers(token)
-            setUsers(data.filter((u) => u.email !== 'iant4093@gmail.com'))
-            setUsersLoaded(true)
+            // Also fetch public albums to extract categories for the datalist
+            const albums = await fetchAlbums()
+            const uniqueCategories = [...new Set(albums.map(a => a.category).filter(Boolean))]
+            setExistingCategories(uniqueCategories)
         } catch (err) {
-            console.error('Failed to load users:', err)
+            console.error('Failed to load categories', err)
         }
     }
 
     // Toggle handler
     function handleVisibilityChange(newVisibility) {
         setVisibility(newVisibility)
-        if (newVisibility === 'private') loadUsers()
-        if (newVisibility === 'public') setOwnerEmail('')
+        if (newVisibility === 'private') loadInitialData()
+        if (newVisibility === 'public') {
+            setOwnerEmail('')
+            loadInitialData() // Make sure categories load even if public
+        }
     }
 
     // Upload handler
@@ -79,6 +94,7 @@ function Upload() {
                 albumId,
                 title,
                 description,
+                category: category || 'Uncategorized',
                 coverImageUrl: `${s3Prefix}${photoFiles[0]?.name || ''}`,
                 s3Prefix,
                 createdAt: new Date(albumDate + 'T12:00:00').toISOString(),
@@ -88,6 +104,7 @@ function Upload() {
 
             setSuccess(true)
             setTitle('')
+            setCategory('')
             setDescription('')
             setPhotoFiles([])
             setOwnerEmail('')
@@ -192,6 +209,25 @@ function Upload() {
                             className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
                             placeholder="e.g. Summer Solstice 2026"
                         />
+                    </div>
+
+                    {/* Category input */}
+                    <div className="mb-6">
+                        <label htmlFor="category" className="block text-sm font-medium text-charcoal mb-2">Category</label>
+                        <input
+                            id="category"
+                            type="text"
+                            list="categoriesList"
+                            value={category}
+                            onChange={(e) => setCategory(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
+                            placeholder="e.g. Wildlife, Sports, or type a new one..."
+                        />
+                        <datalist id="categoriesList">
+                            {existingCategories.map(cat => (
+                                <option key={cat} value={cat} />
+                            ))}
+                        </datalist>
                     </div>
 
                     {/* Album date */}

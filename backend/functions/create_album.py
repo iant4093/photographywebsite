@@ -40,6 +40,7 @@ def handler(event, context):
             'albumId': body['albumId'],
             'title': body['title'],
             'description': body.get('description', ''),
+            'category': body.get('category', 'Uncategorized'),
             'coverImageUrl': body.get('coverImageUrl', ''),
             's3Prefix': body['s3Prefix'],
             'createdAt': body['createdAt'],

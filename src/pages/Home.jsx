@@ -65,6 +65,21 @@ function Home() {
             .finally(() => setLoading(false))
     }, [])
 
+    // Group albums by category. Treat falsy values as "Uncategorized"
+    const groupedAlbums = albums.reduce((acc, album) => {
+        const cat = album.category || 'Uncategorized';
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(album);
+        return acc;
+    }, {});
+
+    // Sort categories alphabetically, but put "Uncategorized" at the end
+    const categories = Object.keys(groupedAlbums).sort((a, b) => {
+        if (a === 'Uncategorized') return 1;
+        if (b === 'Uncategorized') return -1;
+        return a.localeCompare(b);
+    });
+
     return (
         <div>
             {/* Hero section */}
@@ -126,14 +141,20 @@ function Home() {
                     </div>
                 )}
 
-                {/* Albums grid */}
-                {!loading && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {albums.map((album) => (
-                            <AlbumCard key={album.albumId} album={album} />
-                        ))}
+                {/* Albums grouped by category */}
+                {!loading && categories.map((cat) => (
+                    <div key={cat} className="mb-16">
+                        <div className="flex items-center gap-4 mb-8">
+                            <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
+                            <div className="h-px bg-warm-border flex-1"></div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                            {groupedAlbums[cat].map((album) => (
+                                <AlbumCard key={album.albumId} album={album} />
+                            ))}
+                        </div>
                     </div>
-                )}
+                ))}
             </section>
         </div>
     )

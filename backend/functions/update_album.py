@@ -33,6 +33,11 @@ def handler(event, context):
             values[':desc'] = body['description']
             names['#d'] = 'description'
 
+        if 'category' in body:
+            update_parts.append('#cat = :category')
+            values[':category'] = body['category']
+            names['#cat'] = 'category'
+
         if 'coverImageUrl' in body:
             update_parts.append('#c = :cover')
             values[':cover'] = body['coverImageUrl']
