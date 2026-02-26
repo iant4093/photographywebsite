@@ -87,8 +87,10 @@ function AlbumGallery() {
         const img = images[lightboxIndex]
         if (!img) return
 
-        const urlToDownload = typeof img === 'string' ? img : img.url
-        const fileName = typeof img !== 'string' && img.key ? img.key.split('/').pop() : 'photo.jpg'
+        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+        const urlToDownload = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
+        const fileName = keyString ? keyString.split('/').pop() : 'photo.jpg'
 
         try {
             // Reverted back to cache: no-store instead of dynamic timestamps because iOS Safari 
@@ -127,14 +129,16 @@ function AlbumGallery() {
             // inside loops as anti-tracking or strict CORS violations.
             const fetchPromises = images.map(async (img, index) => {
                 try {
-                    const urlObj = new URL(img.url || img)
+                    const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+                    const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+                    const urlObj = new URL(rawUrl)
                     urlObj.searchParams.set('dl', '1')
 
                     const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
                     if (!response.ok) throw new Error(`HTTP error ${response.status}`)
                     const blob = await response.blob()
                     // Handle objects vs raw strings for demo images
-                    const keyString = typeof img === 'string' ? img : img.key
+                    const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
                     const fileName = keyString ? keyString.split('/').pop() : `photo-${index + 1}.jpg`
                     folder.file(fileName, blob)
                 } catch (err) {
@@ -241,7 +245,7 @@ function AlbumGallery() {
                                 <div
                                     key={img.key || img.rawKey || index}
                                     className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
-                                    onClick={() => setLightboxIndex({ index, url: rawUrl })}
+                                    onClick={() => setLightboxIndex(index)}
                                 >
                                     <ProgressiveImage
                                         src={thumbUrl}
@@ -298,11 +302,18 @@ function AlbumGallery() {
 
                     {/* Image Wrapper */}
                     <div className="flex-1 w-full min-h-0 flex items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
-                        <img
-                            src={images[lightboxIndex].url || images[lightboxIndex]}
-                            alt="Full size preview"
-                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
-                        />
+                        {(() => {
+                            const activeImg = images[lightboxIndex]
+                            const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
+                            const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+                            return (
+                                <img
+                                    src={activeRawUrl}
+                                    alt="Full size preview"
+                                    className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
+                                />
+                            )
+                        })()}
                     </div>
 
                     {/* Download & Image counter */}

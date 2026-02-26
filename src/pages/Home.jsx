@@ -148,7 +148,7 @@ function Home() {
                             <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
                             <div className="h-px bg-warm-border flex-1"></div>
                         </div>
-                        <div className="flex overflow-x-auto gap-6 pb-8 snap-x snap-mandatory">
+                        <div className="flex overflow-x-auto gap-6 pb-8 snap-x snap-mandatory scrollbar-hide">
                             {groupedAlbums[cat].map((album) => (
                                 <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start">
                                     <AlbumCard album={album} />

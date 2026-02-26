@@ -4,6 +4,13 @@ import boto3
 import jwt
 from jwt import PyJWKClient
 
+from decimal import Decimal
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        return super(DecimalEncoder, self).default(obj)
+
 # DynamoDB resource for fetching the album record
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
@@ -68,24 +75,29 @@ def handler(event, context):
         if cover and not cover.startswith('http'):
             album['coverImageUrl'] = f'https://{cf_domain}/{cover}'
 
-        # List all objects in the album's S3 prefix
-        s3_prefix = album.get('s3Prefix', f'albums/{album_id}/')
-        s3_response = s3.list_objects_v2(Bucket=BUCKET, Prefix=s3_prefix)
-        objects = s3_response.get('Contents', [])
+        # If the album already has the new image manifest (with thumbKeys/blurhashes), use it
+        # This completely skips the slow S3 list_objects_v2 API call!
+        images = album.get('images')
+        
+        if not images:
+            # Fallback for old albums: List all objects in the S3 prefix
+            s3_prefix = album.get('s3Prefix', f'albums/{album_id}/')
+            s3_response = s3.list_objects_v2(Bucket=BUCKET, Prefix=s3_prefix)
+            objects = s3_response.get('Contents', [])
 
-        # Build image URLs sorted alphabetically by key (chronological order)
-        images = []
-        for obj in sorted(objects, key=lambda o: o['Key']):
-            # Skip folder markers
-            if obj['Key'].endswith('/'):
-                continue
-            url = f'https://{cf_domain}/{obj["Key"]}'
-            images.append({'key': obj['Key'], 'url': url})
+            # Build image URLs sorted alphabetically by key (chronological order)
+            images = []
+            for obj in sorted(objects, key=lambda o: o['Key']):
+                # Skip folder markers
+                if obj['Key'].endswith('/'):
+                    continue
+                url = f'https://{cf_domain}/{obj["Key"]}'
+                images.append({'key': obj['Key'], 'url': url})
 
         return {
             'statusCode': 200,
             'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'album': album, 'images': images}),
+            'body': json.dumps({'album': album, 'images': images}, cls=DecimalEncoder),
         }
     except Exception as e:
         return {

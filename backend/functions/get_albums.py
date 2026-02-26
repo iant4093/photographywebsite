@@ -8,6 +8,13 @@ table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
 BUCKET = os.environ['IMAGES_BUCKET']
 s3 = boto3.client('s3')
 
+from decimal import Decimal
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        return super(DecimalEncoder, self).default(obj)
+
 
 def handler(event, context):
     """GET /albums — returns albums filtered by visibility and ownerEmail."""
@@ -50,7 +57,7 @@ def handler(event, context):
         return {
             'statusCode': 200,
             'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps(albums),
+            'body': json.dumps(albums, cls=DecimalEncoder),
         }
     except Exception as e:
         return {
