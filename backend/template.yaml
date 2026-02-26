@@ -12,20 +12,18 @@ Globals:
         ALBUMS_TABLE: !Ref AlbumsTable
         IMAGES_BUCKET: !Ref ImagesBucket
         CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
-        SENDER_EMAIL: !Ref SenderEmail
-        FRONTEND_URL: !Ref FrontendUrl
         COGNITO_USER_POOL_ID: !Ref UserPool
+        RESEND_API_KEY: !Ref ResendApiKey
 
 Parameters:
   Stage:
     Type: String
     Default: prod
-  SenderEmail:
-    Type: String
-    Default: admin@iantruongphotography.com
   FrontendUrl:
     Type: String
     Default: https://iantruongphotography.com
+  ResendApiKey:
+    Type: String
 
 Resources:
   # ─── DynamoDB ───
@@ -208,11 +206,6 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlbumsTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - ses:SendEmail
-              Resource: "*"
       Events:
         CreateAlbum:
           Type: HttpApi
@@ -307,10 +300,6 @@ Resources:
                 - cognito-idp:AdminCreateUser
                 - cognito-idp:AdminSetUserPassword
               Resource: !GetAtt UserPool.Arn
-            - Effect: Allow
-              Action:
-                - ses:SendEmail
-              Resource: "*"
       Events:
         CreateUser:
           Type: HttpApi
