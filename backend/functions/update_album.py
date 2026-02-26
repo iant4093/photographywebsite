@@ -1,6 +1,16 @@
 import json
 import os
 import boto3
+import decimal
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, decimal.Decimal):
+            if obj % 1 > 0:
+                return float(obj)
+            else:
+                return int(obj)
+        return super(DecimalEncoder, self).default(obj)
 
 # DynamoDB resource for updating album records
 dynamodb = boto3.resource('dynamodb')
@@ -65,10 +75,11 @@ def handler(event, context):
         return {
             'statusCode': 200,
             'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps(response.get('Attributes', {})),
+            'body': json.dumps(response.get('Attributes', {}), cls=DecimalEncoder),
         }
     except Exception as e:
         return {
             'statusCode': 500,
             'body': json.dumps({'error': str(e)}),
         }
+
