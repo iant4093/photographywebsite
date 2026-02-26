@@ -165,9 +165,11 @@ function ManageAlbums() {
         try {
             const token = await getIdToken()
             const imgKey = img.rawKey || img.key;
-            const updates = { coverImageUrl: imgKey };
-            if (img.thumbKey) updates.coverThumbKey = img.thumbKey;
-            if (img.blurhash) updates.coverBlurhash = img.blurhash;
+            const updates = {
+                coverImageUrl: imgKey,
+                coverThumbKey: img.thumbKey || '',
+                coverBlurhash: img.blurhash || ''
+            };
 
             await updateAlbum(token, expandedAlbumId, updates)
             setActionSuccess('Cover image updated!')

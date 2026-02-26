@@ -206,6 +206,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlbumsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ImagesBucket
       Events:
         CreateAlbum:
           Type: HttpApi

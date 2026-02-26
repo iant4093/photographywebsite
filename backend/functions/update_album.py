@@ -53,6 +53,16 @@ def handler(event, context):
             values[':cover'] = body['coverImageUrl']
             names['#c'] = 'coverImageUrl'
 
+        if 'coverThumbKey' in body:
+            update_parts.append('#ct = :coverThumb')
+            values[':coverThumb'] = body['coverThumbKey']
+            names['#ct'] = 'coverThumbKey'
+
+        if 'coverBlurhash' in body:
+            update_parts.append('#cb = :coverBlur')
+            values[':coverBlur'] = body['coverBlurhash']
+            names['#cb'] = 'coverBlurhash'
+
         if 'createdAt' in body:
             update_parts.append('#ca = :created')
             values[':created'] = body['createdAt']
