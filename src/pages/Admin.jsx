@@ -118,9 +118,9 @@ function Upload() {
     function handleVisibilityChange(newVisibility) {
         setVisibility(newVisibility)
         if (newVisibility === 'private') loadInitialData()
-        if (newVisibility === 'public') {
+        if (newVisibility === 'public' || newVisibility === 'unlisted') {
             setOwnerEmail('')
-            loadInitialData() // Make sure categories load even if public
+            loadInitialData() // Make sure categories load even if public/unlisted
         }
     }
 

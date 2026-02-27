@@ -68,9 +68,14 @@ function ManageAlbums() {
         setExpandedAlbumId(null)
         setAlbumImages([])
         try {
-            const params = scope === 'public'
-                ? { visibility: 'public' }
-                : { visibility: 'private', ownerEmail: scope }
+            let params = {}
+            if (scope === 'public') {
+                params = { visibility: 'public' }
+            } else if (scope === 'unlisted') {
+                params = { visibility: 'unlisted' }
+            } else {
+                params = { visibility: 'private', ownerEmail: scope }
+            }
             const data = await fetchAlbumsFiltered(params)
             setAlbums(data)
         } catch (err) {
@@ -80,8 +85,6 @@ function ManageAlbums() {
             setLoading(false)
         }
     }
-
-    // Toggle album detail to manage images — shows inline under the album card
     async function toggleAlbumImages(album) {
         if (expandedAlbumId === album.albumId) {
             // Collapse
@@ -146,33 +149,7 @@ function ManageAlbums() {
         }
     }
 
-    // Toggle link sharing status
-    async function toggleShareStatus(album) {
-        setActionError('')
-        try {
-            const token = await getIdToken()
-            const newIsShared = !album.isShared
-            const updates = { isShared: newIsShared }
 
-            // If turning ON for the first time, backend will optionally need a code
-            // But our updated backend update_album handles `shareCode` passing. 
-            // Better yet, we should just let the toggle flip `isShared` to true/false
-            // And generate the code here if it's missing.
-            if (newIsShared && !album.shareCode) {
-                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-                let code = ''
-                for (let i = 0; i < 8; i++) code += chars.charAt(Math.floor(Math.random() * chars.length))
-                updates.shareCode = code
-            }
-
-            await updateAlbum(token, album.albumId, updates)
-            setActionSuccess(`Link sharing ${newIsShared ? 'enabled' : 'disabled'}!`)
-            loadAlbums()
-            setTimeout(() => setActionSuccess(''), 3000)
-        } catch (err) {
-            setActionError(err.message)
-        }
-    }
 
     // Remove specific image
     async function handleRemoveImage(key) {
@@ -364,6 +341,15 @@ function ManageAlbums() {
                         >
                             Main Gallery
                         </button>
+                        <button
+                            onClick={() => setScope('unlisted')}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${scope === 'unlisted'
+                                ? 'bg-amber text-white'
+                                : 'bg-cream text-warm-gray hover:bg-cream-dark'
+                                }`}
+                        >
+                            Link Only
+                        </button>
                         {/* User dropdown with search */}
                         <div className="flex-1 min-w-[200px]">
                             <input
@@ -391,7 +377,7 @@ function ManageAlbums() {
                             )}
                         </div>
                     </div>
-                    {scope !== 'public' && (
+                    {scope !== 'public' && scope !== 'unlisted' && (
                         <p className="mt-2 text-sm text-amber-dark font-medium">Viewing albums for: {scope}</p>
                     )}
                 </div>
@@ -482,40 +468,34 @@ function ManageAlbums() {
                                         </div>
                                     )}
 
-                                    {/* Link Sharing Management Panel (Visible in both View and Edit modes for quick access) */}
-                                    <div className="mt-4 pt-4 border-t border-warm-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                        <div>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <svg className={`w-4 h-4 ${album.isShared ? 'text-green-500' : 'text-warm-gray'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-                                                <span className="text-sm font-medium text-charcoal">Link Sharing is {album.isShared ? 'On' : 'Off'}</span>
-                                            </div>
-                                            {album.isShared && album.shareCode && (
-                                                <div className="flex items-center gap-2 mt-2">
-                                                    <code className="text-xs font-mono bg-cream-dark px-2 py-1 rounded text-charcoal border border-warm-border">
-                                                        {window.location.origin}/sharedalbum/{album.shareCode}
-                                                    </code>
-                                                    <button
-                                                        onClick={() => {
-                                                            navigator.clipboard.writeText(`${window.location.origin}/sharedalbum/${album.shareCode}`)
-                                                            setActionSuccess('Link copied to clipboard!')
-                                                            setTimeout(() => setActionSuccess(''), 3000)
-                                                        }}
-                                                        className="text-xs text-amber hover:text-amber-dark font-medium transition-colors cursor-pointer"
-                                                    >
-                                                        Copy Link
-                                                    </button>
+                                    {/* Link Sharing Management Panel (Visible only for unlisted albums) */}
+                                    {album.visibility === 'unlisted' && album.shareCode && (
+                                        <div className="mt-4 pt-4 border-t border-warm-border">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <div>
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                                                        <span className="text-sm font-medium text-charcoal">Link Sharing is Active</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 mt-2">
+                                                        <code className="text-xs font-mono bg-cream-dark px-2 py-1 rounded text-charcoal border border-warm-border">
+                                                            {window.location.origin}/sharedalbum/{album.shareCode}
+                                                        </code>
+                                                        <button
+                                                            onClick={() => {
+                                                                navigator.clipboard.writeText(`${window.location.origin}/sharedalbum/${album.shareCode}`)
+                                                                setActionSuccess('Link copied to clipboard!')
+                                                                setTimeout(() => setActionSuccess(''), 3000)
+                                                            }}
+                                                            className="text-xs text-amber hover:text-amber-dark font-medium transition-colors cursor-pointer"
+                                                        >
+                                                            Copy Link
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                            )}
+                                            </div>
                                         </div>
-
-                                        {/* Toggle Component */}
-                                        <button
-                                            onClick={() => toggleShareStatus(album)}
-                                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber focus:ring-offset-2 ${album.isShared ? 'bg-amber' : 'bg-warm-border'}`}
-                                        >
-                                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${album.isShared ? 'translate-x-5' : 'translate-x-0'}`} />
-                                        </button>
-                                    </div>
+                                    )}
                                 </div>
 
                                 {/* Inline photo panel — renders directly below this album card */}
