@@ -3,6 +3,7 @@ import json
 import boto3
 from boto3.dynamodb.conditions import Key
 from decimal import Decimal
+from security_helpers import validate_turnstile, check_rate_limit
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -15,9 +16,25 @@ table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
 
 def handler(event, context):
     try:
+        ip = event.get('requestContext', {}).get('http', {}).get('sourceIp', 'unknown_ip')
         share_code = event['pathParameters'].get('shareCode')
+        
+        headers = event.get('headers', {})
+        # Normalize header keys to lowercase for standard retrieval
+        normalized_headers = {k.lower(): v for k, v in headers.items()}
+        token = normalized_headers.get('x-turnstile-token')
+        
+        print(f"Fetch Shared Album: Code={share_code}, IP={ip}")
+        print(f"Headers: {json.dumps(headers)}")
+        print(f"Token Found: {'Yes' if token else 'No'}")
+
         if not share_code:
             return {'statusCode': 400, 'body': json.dumps({'error': 'Share code is required'})}
+            
+        # 1. IP Rate Limit (max 20 requests per 60 seconds)
+        # We removed Turnstile CAPTCHA for shared album fetches to allow direct links to work seamlessly.
+        if not check_rate_limit(ip, 'shared_album_fetch', max_requests=20, window_seconds=60):
+            return {'statusCode': 429, 'body': json.dumps({'error': 'Too many requests. Please try again later.'})}
             
         # Query the GSI for the provided share code
         response = table.query(

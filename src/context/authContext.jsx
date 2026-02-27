@@ -3,6 +3,10 @@ import {
     CognitoUserPool,
     CognitoUser,
     AuthenticationDetails,
+    CognitoIdToken,
+    CognitoAccessToken,
+    CognitoRefreshToken,
+    CognitoUserSession,
 } from 'amazon-cognito-identity-js'
 
 // Cognito configuration
@@ -88,27 +92,55 @@ export function AuthProvider({ children }) {
         }
     }, [])
 
-    // Log in with email and password
-    function login(email, password) {
+    // Log in with email and password via custom secure proxy
+    async function login(email, password, turnstileToken) {
         if (!userPool) {
-            return Promise.reject(new Error('Cognito is not configured.'))
+            throw new Error('Cognito is not configured.')
         }
-        return new Promise((resolve, reject) => {
-            const cognitoUser = new CognitoUser({ Username: email, Pool: userPool })
-            const authDetails = new AuthenticationDetails({ Username: email, Password: password })
 
-            cognitoUser.authenticateUser(authDetails, {
-                onSuccess: (session) => {
-                    setUser(cognitoUser)
-                    extractUserInfo(session)
-                    resolve(session)
-                },
-                onFailure: (err) => reject(err),
-                newPasswordRequired: () => {
-                    reject({ code: 'NewPasswordRequired', message: 'You must set a new password.' })
-                },
-            })
+        const API_BASE = import.meta.env.VITE_API_BASE_URL
+        const response = await fetch(`${API_BASE}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, turnstileToken })
         })
+
+        const data = await response.json()
+        if (!response.ok) {
+            throw new Error(data.error || 'Login failed')
+        }
+
+        // The response contains the Cognito AuthenticationResult
+        if (data.ChallengeName) {
+            // Handle challenges (like NEW_PASSWORD_REQUIRED) if needed
+            if (data.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
+                const error = new Error('New password required')
+                error.code = 'NewPasswordRequired'
+                throw error
+            }
+            throw new Error(`Challenge ${data.ChallengeName} not implemented yet`)
+        }
+
+        const authResult = data.AuthenticationResult
+        const idToken = new CognitoIdToken({ IdToken: authResult.IdToken })
+        const accessToken = new CognitoAccessToken({ AccessToken: authResult.AccessToken })
+        const refreshToken = new CognitoRefreshToken({ RefreshToken: authResult.RefreshToken })
+
+        const session = new CognitoUserSession({
+            IdToken: idToken,
+            AccessToken: accessToken,
+            RefreshToken: refreshToken,
+        })
+
+        const cognitoUser = new CognitoUser({ Username: email, Pool: userPool })
+
+        // This is CRITICAL: it saves the session to local storage for the SDK
+        cognitoUser.setSignInUserSession(session)
+
+        setUser(cognitoUser)
+        extractUserInfo(session)
+
+        return session
     }
 
     // Log out

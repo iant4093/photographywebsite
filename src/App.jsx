@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Home from './pages/Home'
 import AlbumGallery from './pages/AlbumGallery'
 import SharedAlbum from './pages/SharedAlbum'
+import Contact from './pages/Contact'
 import Login from './pages/Login'
 import AdminDashboard from './pages/AdminDashboard'
 import Upload from './pages/Admin'
@@ -28,6 +29,7 @@ function App() {
           <Route path="/album/:albumId" element={<AlbumGallery />} />
           <Route path="/sharedalbum" element={<SharedAlbum />} />
           <Route path="/sharedalbum/:code" element={<SharedAlbum />} />
+          <Route path="/contact" element={<Contact />} />
           <Route path="/login" element={<Login />} />
 
           {/* Admin routes */}

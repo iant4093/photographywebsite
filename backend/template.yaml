@@ -12,8 +12,11 @@ Globals:
         ALBUMS_TABLE: !Ref AlbumsTable
         IMAGES_BUCKET: !Ref ImagesBucket
         CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
-        COGNITO_USER_POOL_ID: !Ref UserPool
         RESEND_API_KEY: !Ref ResendApiKey
+        TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
+        RATE_LIMIT_TABLE: !Ref RateLimitTable
+        COGNITO_USER_POOL_ID: !Ref UserPool
+        COGNITO_CLIENT_ID: !Ref UserPoolClient
 
 Parameters:
   Stage:
@@ -23,6 +26,8 @@ Parameters:
     Type: String
     Default: https://iantruongphotography.com
   ResendApiKey:
+    Type: String
+  TurnstileSecretKey:
     Type: String
 
 Resources:
@@ -47,6 +52,27 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
+
+  RateLimitTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GoldenHour-RateLimits-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: identifier
+          AttributeType: S
+      KeySchema:
+        - AttributeName: identifier
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      KeySchema:
+        - AttributeName: identifier
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   # ─── S3 Image Bucket ───
   ImagesBucket:
@@ -110,6 +136,7 @@ Resources:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub 'GoldenHour-Users-${Stage}'
+      LambdaConfig: {}
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
       AutoVerifiedAttributes:
@@ -133,6 +160,7 @@ Resources:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
       GenerateSecret: false
 
   # Admin group — users in this group have write access
@@ -150,7 +178,7 @@ Resources:
       StageName: !Ref Stage
       CorsConfiguration:
         AllowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-        AllowHeaders: ['Content-Type', 'Authorization']
+        AllowHeaders: ['Content-Type', 'Authorization', 'X-Turnstile-Token']
         AllowOrigins: ['*']
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
@@ -217,6 +245,8 @@ Resources:
             TableName: !Ref AlbumsTable
         - S3ReadPolicy:
             BucketName: !Ref ImagesBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
       Events:
         GetSharedAlbum:
           Type: HttpApi
@@ -226,6 +256,52 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+
+  # Public: login endpoint
+  LoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: login.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminInitiateAuth
+              Resource: !GetAtt UserPool.Arn
+      Events:
+        Login:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /login
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  # Public: contact form endpoint
+  ContactFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: contact.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitTable
+      Events:
+        ContactForm:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /contact
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  # Admin: get all albums (internal)o pre-auth trigger for CAPTCHA validation
+# PreAuthenticationFunction is removed in favor of LoginFunction proxy approach
 
   # Protected: create album
   CreateAlbumFunction:

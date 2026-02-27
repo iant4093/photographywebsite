@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { fetchSharedAlbum } from '../utils/api'
 import ProgressiveImage from '../components/ProgressiveImage'
 import JSZip from 'jszip'
+import { Turnstile } from '@marsidev/react-turnstile'
 
 export default function SharedAlbum() {
     const { code } = useParams()
@@ -14,6 +15,7 @@ export default function SharedAlbum() {
     const [downloading, setDownloading] = useState(false)
     const [error, setError] = useState(null)
     const [inputCode, setInputCode] = useState('')
+    const [turnstileToken, setTurnstileToken] = useState(null)
 
     // Lightbox
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -28,15 +30,15 @@ export default function SharedAlbum() {
         setLoading(true)
         setError(null)
 
-        fetchSharedAlbum(code).then(data => {
+        fetchSharedAlbum(code, turnstileToken).then(data => {
             setAlbum(data)
             setImages(data.images || [])
             setLoading(false)
         }).catch(err => {
-            setError(err.message || 'Invalid or expired share link')
+            setError(err.message || 'The gallery could not be loaded. Please check your connection or try again later.')
             setLoading(false)
         })
-    }, [code])
+    }, [code]) // Only depend on code now, not turnstileToken
 
     const handleManualSubmit = (e) => {
         e.preventDefault()
@@ -164,22 +166,25 @@ export default function SharedAlbum() {
                 <h1 className="font-serif text-3xl font-semibold text-charcoal mb-4">View Shared Album</h1>
                 <p className="text-warm-gray mb-8">Enter the unique access code provided to you by the photographer.</p>
 
-                <form onSubmit={handleManualSubmit} className="flex gap-3">
+                <form onSubmit={handleManualSubmit} className="flex flex-col gap-3">
                     <input
                         type="text"
                         placeholder="e.g. xY7bQk9P"
                         value={inputCode}
                         onChange={(e) => setInputCode(e.target.value)}
-                        className="flex-1 px-4 py-3 bg-white border border-warm-border rounded-xl focus:ring-2 focus:ring-amber focus:border-transparent outline-none transition-all shadow-sm"
+                        className="w-full px-6 py-4 rounded-xl border border-warm-border bg-charcoal/5 text-charcoal text-center text-xl tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all shadow-inner"
                     />
-                    <button
-                        type="submit"
-                        disabled={!inputCode.trim()}
-                        className="px-6 py-3 bg-charcoal text-white font-medium rounded-xl hover:bg-charcoal-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-warm"
-                    >
-                        View
+                    <button type="submit" disabled={!inputCode.trim() || !turnstileToken} className="w-full py-4 rounded-xl bg-charcoal text-white font-medium hover:bg-charcoal-light transition-colors duration-300 shadow-warm disabled:opacity-50">
+                        Access Gallery
                     </button>
                 </form>
+                <div className="mt-8 flex justify-center">
+                    <Turnstile
+                        siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                        onSuccess={(token) => setTurnstileToken(token)}
+                        options={{ theme: 'light' }}
+                    />
+                </div>
             </div>
         )
     }

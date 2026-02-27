@@ -48,8 +48,10 @@ export function fetchAlbum(albumId, token = null) {
 }
 
 // Fetch a shared album by its unique code (no auth required)
-export function fetchSharedAlbum(shareCode) {
-    return apiFetch(`/shared/${shareCode}`)
+export function fetchSharedAlbum(shareCode, turnstileToken) {
+    return apiFetch(`/shared/${shareCode}`, {
+        headers: { 'X-Turnstile-Token': turnstileToken || '' }
+    })
 }
 
 // ─── Protected Endpoints ───

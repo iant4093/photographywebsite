@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
+import { Turnstile } from '@marsidev/react-turnstile'
 
 // Login page — email + password only, no sign-up
 function Login() {
@@ -11,6 +12,7 @@ function Login() {
     const [password, setPassword] = useState('')
     const [error, setError] = useState('')
     const [submitting, setSubmitting] = useState(false)
+    const [turnstileToken, setTurnstileToken] = useState(null)
 
     // Redirect if already logged in — admin goes to /admin, user goes to /dashboard
     useEffect(() => {
@@ -21,10 +23,16 @@ function Login() {
     async function handleSubmit(e) {
         e.preventDefault()
         setError('')
+
+        if (!turnstileToken) {
+            setError('Please verify you are human before logging in.')
+            return
+        }
+
         setSubmitting(true)
 
         try {
-            await login(email, password)
+            await login(email, password, turnstileToken)
             // useEffect will handle role-based redirect
         } catch (err) {
             if (err.code === 'NewPasswordRequired') {
@@ -102,6 +110,14 @@ function Login() {
                             autoComplete="current-password"
                             className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
                             placeholder="••••••••"
+                        />
+                    </div>
+
+                    <div className="mb-6 flex justify-center">
+                        <Turnstile
+                            siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                            onSuccess={(token) => setTurnstileToken(token)}
+                            options={{ theme: 'light' }}
                         />
                     </div>
 

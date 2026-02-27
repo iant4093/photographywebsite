@@ -39,16 +39,21 @@ function Navbar() {
                         </span>
                     </Link>
 
-                    {/* Hamburger Toggle */}
-                    <button
-                        onClick={() => setIsMenuOpen(!isMenuOpen)}
-                        className="relative z-50 w-10 h-10 rounded-xl bg-cream/50 hover:bg-cream border border-warm-border flex flex-col justify-center items-center gap-1.5 transition-colors duration-300 cursor-pointer"
-                        aria-label="Toggle menu"
-                    >
-                        <span className={`w-5 h-0.5 bg-charcoal rounded-full transition-all duration-300 ${isMenuOpen ? 'rotate-45 translate-y-2' : ''}`} />
-                        <span className={`w-5 h-0.5 bg-charcoal rounded-full transition-all duration-300 ${isMenuOpen ? 'opacity-0' : ''}`} />
-                        <span className={`w-5 h-0.5 bg-charcoal rounded-full transition-all duration-300 ${isMenuOpen ? '-rotate-45 -translate-y-2' : ''}`} />
-                    </button>
+                    {/* Navigation Container */}
+                    <div className="flex items-center gap-6 relative z-50">
+                        {/* Desktop Links removed from here per user request */}
+
+                        {/* Hamburger Toggle */}
+                        <button
+                            onClick={() => setIsMenuOpen(!isMenuOpen)}
+                            className="w-10 h-10 rounded-xl bg-cream/50 hover:bg-cream border border-warm-border flex flex-col justify-center items-center gap-1.5 transition-colors duration-300 cursor-pointer"
+                            aria-label="Toggle menu"
+                        >
+                            <span className={`w-5 h-0.5 bg-charcoal rounded-full transition-all duration-300 ${isMenuOpen ? 'rotate-45 translate-y-2' : ''}`} />
+                            <span className={`w-5 h-0.5 bg-charcoal rounded-full transition-all duration-300 ${isMenuOpen ? 'opacity-0' : ''}`} />
+                            <span className={`w-5 h-0.5 bg-charcoal rounded-full transition-all duration-300 ${isMenuOpen ? '-rotate-45 -translate-y-2' : ''}`} />
+                        </button>
+                    </div>
                 </div>
             </nav>
 
@@ -64,9 +69,9 @@ function Navbar() {
                         Find Album
                     </Link>
 
-                    {/* Future Tabs can go here seamlessly */}
-                    {/* <Link to="/about" className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">About</Link> */}
-                    {/* <Link to="/contact" className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">Contact</Link> */}
+                    <Link to="/contact" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
+                        Contact Me
+                    </Link>
 
                     {user ? (
                         <>
