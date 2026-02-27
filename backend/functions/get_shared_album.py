@@ -25,8 +25,8 @@ def handler(event, context):
         token = normalized_headers.get('x-turnstile-token')
         
         print(f"Fetch Shared Album: Code={share_code}, IP={ip}")
-        print(f"Headers: {json.dumps(headers)}")
-        print(f"Token Found: {'Yes' if token else 'No'}")
+        print(f"User Agent: {normalized_headers.get('user-agent', 'unknown')}")
+        print(f"Token Present: {'Yes' if token else 'No'}")
 
         if not share_code:
             return {'statusCode': 400, 'body': json.dumps({'error': 'Share code is required'})}

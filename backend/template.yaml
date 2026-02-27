@@ -433,9 +433,6 @@ Resources:
     Properties:
       CodeUri: functions/
       Handler: create_user.handler
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref UserPool
       Policies:
         - Statement:
             - Effect: Allow
@@ -457,9 +454,6 @@ Resources:
     Properties:
       CodeUri: functions/
       Handler: list_users.handler
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref UserPool
       Policies:
         - Statement:
             - Effect: Allow
@@ -480,9 +474,6 @@ Resources:
     Properties:
       CodeUri: functions/
       Handler: delete_user.handler
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref UserPool
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlbumsTable
@@ -507,9 +498,6 @@ Resources:
     Properties:
       CodeUri: functions/
       Handler: edit_user.handler
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref UserPool
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AlbumsTable
