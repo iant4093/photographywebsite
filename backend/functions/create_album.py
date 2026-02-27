@@ -12,6 +12,118 @@ s3 = boto3.client('s3')
 from auth_helpers import require_admin
 from email_helpers import send_email
 
+def start_mediaconvert_job(s3_input_uri, s3_output_prefix):
+    """Starts an AWS MediaConvert job to convert a video to HLS format."""
+    mc_client = boto3.client('mediaconvert')
+    # Get the account-specific MediaConvert endpoint
+    endpoints = mc_client.describe_endpoints(MaxResults=1)
+    endpoint_url = endpoints['Endpoints'][0]['Url']
+    
+    mc = boto3.client('mediaconvert', endpoint_url=endpoint_url)
+    role_arn = os.environ.get('MEDIACONVERT_ROLE_ARN', '')
+    
+    if not role_arn:
+        print("Warning: MEDIACONVERT_ROLE_ARN not set, skipping video processing")
+        return
+        
+    job_settings = {
+        "Inputs": [
+            {
+                "AudioSelectors": {
+                    "Audio Selector 1": {
+                        "DefaultSelection": "DEFAULT"
+                    }
+                },
+                "VideoSelector": {},
+                "TimecodeSource": "ZEROBASED",
+                "FileInput": s3_input_uri
+            }
+        ],
+        "OutputGroups": [
+            {
+                "Name": "Apple HLS",
+                "OutputGroupSettings": {
+                    "Type": "HLS_GROUP_SETTINGS",
+                    "HlsGroupSettings": {
+                        "SegmentLength": 10,
+                        "Destination": s3_output_prefix,
+                        "MinSegmentLength": 0
+                    }
+                },
+                "Outputs": [
+                    {
+                        "ContainerSettings": {
+                            "Container": "M3U8",
+                            "M3u8Settings": {}
+                        },
+                        "VideoDescription": {
+                            "CodecSettings": {
+                                "Codec": "H_264",
+                                "H264Settings": {
+                                    "MaxBitrate": 5000000,
+                                    "RateControlMode": "QVBR",
+                                    "SceneChangeDetect": "TRANSITION_DETECTION"
+                                }
+                            },
+                            "Width": 1920,
+                            "Height": 1080
+                        },
+                        "AudioDescriptions": [
+                            {
+                                "CodecSettings": {
+                                    "Codec": "AAC",
+                                    "AacSettings": {
+                                        "Bitrate": 96000,
+                                        "CodingMode": "CODING_MODE_2_0",
+                                        "SampleRate": 48000
+                                    }
+                                }
+                            }
+                        ],
+                        "NameModifier": "_1080p"
+                    },
+                    {
+                        "ContainerSettings": {
+                            "Container": "M3U8",
+                            "M3u8Settings": {}
+                        },
+                        "VideoDescription": {
+                            "CodecSettings": {
+                                "Codec": "H_264",
+                                "H264Settings": {
+                                    "MaxBitrate": 2000000,
+                                    "RateControlMode": "QVBR",
+                                    "SceneChangeDetect": "TRANSITION_DETECTION"
+                                }
+                            },
+                            "Width": 1280,
+                            "Height": 720
+                        },
+                        "AudioDescriptions": [
+                            {
+                                "CodecSettings": {
+                                    "Codec": "AAC",
+                                    "AacSettings": {
+                                        "Bitrate": 96000,
+                                        "CodingMode": "CODING_MODE_2_0",
+                                        "SampleRate": 48000
+                                    }
+                                }
+                            }
+                        ],
+                        "NameModifier": "_720p"
+                    }
+                ]
+            }
+        ]
+    }
+    
+    mc.create_job(
+        Role=role_arn,
+        Settings=job_settings,
+        Queue="Default"
+    )
+
 
 def handler(event, context):
     """POST /albums — creates a new album record in DynamoDB (admin-only)."""
@@ -38,6 +150,7 @@ def handler(event, context):
                 'body': json.dumps({'error': 'Cannot create private albums for the admin account'}),
             }
 
+        album_type = body.get('type', 'photo')
         images = body.get('images', [])
         
         # Extract EXIF data from first 64KB of S3 object dynamically
@@ -79,12 +192,36 @@ def handler(event, context):
 
         import secrets
         
+        # If it's a video album, kick off MediaConvert jobs
+        if album_type == 'video' and 'IMAGES_BUCKET' in os.environ:
+            bucket = os.environ['IMAGES_BUCKET']
+            for img in images:
+                raw_key = img.get('rawKey')
+                if not raw_key: continue
+                # S3 input URI format: s3://bucket/key
+                s3_input_uri = f"s3://{bucket}/{raw_key}"
+                
+                # S3 output prefix format: s3://bucket/albums/..../hls/
+                # We'll save the output to an 'hls/' subdirectory next to the raw video
+                base_name = raw_key.rsplit('.', 1)[0]
+                s3_output_prefix = f"s3://{bucket}/{base_name}_hls/"
+                
+                # Start MediaConvert job asynchronously
+                try:
+                    start_mediaconvert_job(s3_input_uri, s3_output_prefix)
+                    # The frontend will be looking for the .m3u8 file
+                    # We store the expected master playlist key
+                    img['hlsUrl'] = f"{base_name}_hls/master.m3u8"
+                except Exception as e:
+                    print(f"Failed to start MediaConvert for {raw_key}: {e}")
+
         is_shared = body.get('isShared', False)
         share_code = secrets.token_urlsafe(6) if is_shared else ''
 
         # Write the album record with visibility and ownerEmail
         item = {
             'albumId': body['albumId'],
+            'type': album_type,
             'title': body['title'],
             'description': body.get('description', ''),
             'category': body.get('category', 'Uncategorized'),

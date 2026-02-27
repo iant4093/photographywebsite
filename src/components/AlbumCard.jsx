@@ -5,7 +5,7 @@ import ProgressiveImage from './ProgressiveImage'
 function AlbumCard({ album }) {
     return (
         <Link
-            to={`/album/${album.albumId}`}
+            to={`/${album.type === 'video' ? 'video' : 'album'}/${album.albumId}`}
             className="group flex flex-col h-full rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white animate-scale-in"
         >
             {/* Cover image with warm overlay on hover */}

@@ -9,6 +9,7 @@ import Contact from './pages/Contact'
 import Login from './pages/Login'
 import AdminDashboard from './pages/AdminDashboard'
 import Upload from './pages/Admin'
+import UploadVideo from './pages/UploadVideo'
 import ManageAlbums from './pages/ManageAlbums'
 import ManageUsers from './pages/ManageUsers'
 import AddUser from './pages/AddUser'
@@ -16,6 +17,7 @@ import DeleteUser from './pages/DeleteUser'
 import EditUser from './pages/EditUser'
 import UserDashboard from './pages/UserDashboard'
 import NotFound from './pages/NotFound'
+import VideoGallery from './pages/VideoGallery'
 
 // Main app shell with routing
 function App() {
@@ -28,6 +30,7 @@ function App() {
           {/* Public routes */}
           <Route path="/" element={<Home />} />
           <Route path="/album/:albumId" element={<AlbumGallery />} />
+          <Route path="/video/:albumId" element={<VideoGallery />} />
           <Route path="/sharedalbum" element={<SharedAlbum />} />
           <Route path="/sharedalbum/:code" element={<SharedAlbum />} />
           <Route path="/contact" element={<Contact />} />
@@ -36,6 +39,7 @@ function App() {
           {/* Admin routes */}
           <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/upload" element={<ProtectedRoute adminOnly><Upload /></ProtectedRoute>} />
+          <Route path="/admin/upload-video" element={<ProtectedRoute adminOnly><UploadVideo /></ProtectedRoute>} />
           <Route path="/admin/manage" element={<ProtectedRoute adminOnly><ManageAlbums /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute adminOnly><ManageUsers /></ProtectedRoute>} />
           <Route path="/admin/users/add" element={<ProtectedRoute adminOnly><AddUser /></ProtectedRoute>} />
