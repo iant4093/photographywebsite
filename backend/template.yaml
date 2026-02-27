@@ -35,9 +35,18 @@ Resources:
       AttributeDefinitions:
         - AttributeName: albumId
           AttributeType: S
+        - AttributeName: shareCode
+          AttributeType: S
       KeySchema:
         - AttributeName: albumId
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ShareCodeIndex
+          KeySchema:
+            - AttributeName: shareCode
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
 
   # ─── S3 Image Bucket ───
   ImagesBucket:
@@ -193,6 +202,27 @@ Resources:
           Properties:
             ApiId: !Ref Api
             Path: /albums/{albumId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  # Public: get shared album by unique code
+  GetSharedAlbumFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: get_shared_album.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        GetSharedAlbum:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /shared/{shareCode}
             Method: GET
             Auth:
               Authorizer: NONE

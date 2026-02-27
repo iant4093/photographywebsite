@@ -77,6 +77,11 @@ def handler(event, context):
                 except Exception as e:
                     print(f"EXIF extraction error for {raw_key}: {e}")
 
+        import secrets
+        
+        is_shared = body.get('isShared', False)
+        share_code = secrets.token_urlsafe(6) if is_shared else ''
+
         # Write the album record with visibility and ownerEmail
         item = {
             'albumId': body['albumId'],
@@ -91,6 +96,8 @@ def handler(event, context):
             'createdAt': body['createdAt'],
             'visibility': body.get('visibility', 'public'),
             'ownerEmail': body.get('ownerEmail', ''),
+            'isShared': is_shared,
+            'shareCode': share_code,
         }
         table.put_item(Item=item)
 

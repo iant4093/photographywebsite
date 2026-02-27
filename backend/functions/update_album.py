@@ -67,6 +67,16 @@ def handler(event, context):
             update_parts.append('#ca = :created')
             values[':created'] = body['createdAt']
             names['#ca'] = 'createdAt'
+            
+        if 'isShared' in body:
+            update_parts.append('#is = :isShared')
+            values[':isShared'] = body['isShared']
+            names['#is'] = 'isShared'
+            
+        if 'shareCode' in body:
+            update_parts.append('#sc = :shareCode')
+            values[':shareCode'] = body['shareCode']
+            names['#sc'] = 'shareCode'
 
         if not update_parts:
             return {

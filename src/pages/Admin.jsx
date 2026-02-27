@@ -17,6 +17,7 @@ function Upload() {
     const [ownerEmail, setOwnerEmail] = useState('')
     const [albumDate, setAlbumDate] = useState(() => new Date().toISOString().split('T')[0])
     const [category, setCategory] = useState('')
+    const [isShared, setIsShared] = useState(false)
     const [users, setUsers] = useState([])
     const [usersLoaded, setUsersLoaded] = useState(false)
     const [existingCategories, setExistingCategories] = useState([])
@@ -195,11 +196,13 @@ function Upload() {
                 createdAt: new Date(albumDate + 'T12:00:00').toISOString(),
                 visibility,
                 ownerEmail: visibility === 'private' ? ownerEmail : '',
+                isShared,
             })
 
             setSuccess(true)
             setTitle('')
             setCategory('')
+            setIsShared(false)
             setDescription('')
             setPhotoFiles([])
             setOwnerEmail('')
@@ -291,6 +294,19 @@ function Upload() {
                             </select>
                         </div>
                     )}
+
+                    {/* Shared Link Toggle */}
+                    <div className="mb-8 border border-warm-border rounded-xl p-4 bg-cream/30">
+                        <div className="flex items-center justify-between cursor-pointer group" onClick={() => setIsShared(!isShared)}>
+                            <div>
+                                <h3 className="text-sm font-medium text-charcoal">Enable Link Sharing</h3>
+                                <p className="text-xs text-warm-gray mt-1">Generate a secure code to share this album with anyone.</p>
+                            </div>
+                            <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-300 ${isShared ? 'bg-amber' : 'bg-warm-border'}`}>
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-300 shadow-sm ${isShared ? 'translate-x-6' : 'translate-x-1'}`} />
+                            </div>
+                        </div>
+                    </div>
 
                     {/* Album title */}
                     <div className="mb-6">

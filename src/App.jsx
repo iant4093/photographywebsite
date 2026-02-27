@@ -4,6 +4,7 @@ import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
 import Home from './pages/Home'
 import AlbumGallery from './pages/AlbumGallery'
+import SharedAlbum from './pages/SharedAlbum'
 import Login from './pages/Login'
 import AdminDashboard from './pages/AdminDashboard'
 import Upload from './pages/Admin'
@@ -25,6 +26,8 @@ function App() {
           {/* Public routes */}
           <Route path="/" element={<Home />} />
           <Route path="/album/:albumId" element={<AlbumGallery />} />
+          <Route path="/sharedalbum" element={<SharedAlbum />} />
+          <Route path="/sharedalbum/:code" element={<SharedAlbum />} />
           <Route path="/login" element={<Login />} />
 
           {/* Admin routes */}

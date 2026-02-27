@@ -47,6 +47,11 @@ export function fetchAlbum(albumId, token = null) {
     return apiFetch(`/albums/${albumId}`, options)
 }
 
+// Fetch a shared album by its unique code (no auth required)
+export function fetchSharedAlbum(shareCode) {
+    return apiFetch(`/shared/${shareCode}`)
+}
+
 // ─── Protected Endpoints ───
 
 // Request a presigned upload URL
