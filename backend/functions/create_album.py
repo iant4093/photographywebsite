@@ -211,8 +211,9 @@ def handler(event, context):
                 try:
                     start_mediaconvert_job(s3_input_uri, s3_output_prefix)
                     # The frontend will be looking for the .m3u8 file
-                    # We store the expected master playlist key
-                    img['hlsUrl'] = f"{base_name}_hls/master.m3u8"
+                    # MediaConvert defaults the master playlist to the input base name
+                    filename = raw_key.split('/')[-1].rsplit('.', 1)[0]
+                    img['hlsUrl'] = f"{base_name}_hls/{filename}.m3u8"
                 except Exception as e:
                     print(f"Failed to start MediaConvert for {raw_key}: {e}")
 
@@ -242,6 +243,8 @@ def handler(event, context):
         if is_shared:
             item['shareCode'] = share_code
 
+        # Safety catch for any straggling python floats before inserting into DynamoDB
+        item = json.loads(json.dumps(item), parse_float=decimal.Decimal)
         table.put_item(Item=item)
 
         if item.get('visibility') == 'private' and item.get('ownerEmail'):
