@@ -28,15 +28,15 @@ def handler(event, context):
                 'body': json.dumps({'error': 'Invalid CAPTCHA security token. Are you a robot?'})
             }
 
-        # 2. Rate Limit by IP
-        if not check_rate_limit(ip, 'login_attempt_ip', max_requests=10, window_seconds=600):
+        # 2. Rate Limit by IP (Relaxed to 25 attempts per 10 mins)
+        if not check_rate_limit(ip, 'login_attempt_ip', max_requests=25, window_seconds=600):
             return {
                 'statusCode': 429,
                 'body': json.dumps({'error': 'Too many login attempts from this IP. Please try again later.'})
             }
 
-        # 3. Rate Limit by Username (to prevent brute force)
-        if not check_rate_limit(email, 'login_attempt_user', max_requests=5, window_seconds=300):
+        # 3. Rate Limit by Username (Relaxed to 10 attempts per 5 mins)
+        if not check_rate_limit(email, 'login_attempt_user', max_requests=10, window_seconds=300):
             return {
                 'statusCode': 429,
                 'body': json.dumps({'error': 'Too many login attempts for this account. Please try again later.'})
