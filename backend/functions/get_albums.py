@@ -43,6 +43,9 @@ def handler(event, context):
         cf_domain = os.environ.get('CLOUDFRONT_DOMAIN', f'{BUCKET}.s3.amazonaws.com')
         # Convert coverImageUrl from S3 key to full public URL
         for album in albums:
+            # Provide image count for frontend structural routing
+            album['imageCount'] = len(album.get('images', []))
+            
             cover = album.get('coverImageUrl', '')
             if cover and not cover.startswith('http'):
                 album['coverImageUrl'] = f'https://{cf_domain}/{cover}'

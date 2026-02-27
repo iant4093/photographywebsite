@@ -41,7 +41,8 @@ function UserDashboard() {
     // Open photo album to view images inline
     async function openAlbum(album) {
         if (album.type === 'video') {
-            navigate(`/video/${album.albumId}`)
+            const isSingleVideo = album.imageCount === 1
+            navigate(`/video/${album.albumId}${isSingleVideo ? '?play=1' : ''}`)
             return
         }
 
@@ -212,8 +213,19 @@ function UserDashboard() {
                                 )}
                                 {album.type === 'video' && (
                                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                        <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white shadow-lg">
-                                            <svg className="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                        <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white shadow-lg relative">
+                                            {album.imageCount > 1 && (
+                                                <div className="absolute -top-1 -right-1 bg-amber text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-charcoal">
+                                                    {album.imageCount}
+                                                </div>
+                                            )}
+                                            {album.imageCount > 1 ? (
+                                                <svg className="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                                    <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z" />
+                                                </svg>
+                                            ) : (
+                                                <svg className="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                            )}
                                         </div>
                                     </div>
                                 )}

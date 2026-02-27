@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchAlbum } from '../utils/api'
 import { useAuth } from '../context/authContext'
 import ProgressiveImage from '../components/ProgressiveImage'
@@ -8,6 +8,7 @@ import VideoPlayer from '../components/VideoPlayer'
 export default function VideoGallery() {
     const { albumId } = useParams()
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
     const [loading, setLoading] = useState(true)
@@ -30,6 +31,10 @@ export default function VideoGallery() {
 
                 setAlbum(fetchedAlbum)
                 setImages(fetchedImages)
+
+                if (searchParams.get('play') === '1' && fetchedImages.length > 0) {
+                    setLightboxIndex(0)
+                }
             } catch (err) {
                 console.error("Failed to load video album:", err)
             } finally {
