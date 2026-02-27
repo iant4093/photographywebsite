@@ -7,7 +7,7 @@ s3_prefix = "ian-website"
 region = "us-west-2"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "Stage=\"prod\" TurnstileSecretKey=\"0x4AAAAAACi8_pdFmk0uABDzVv9e7NCcM8k\""
+parameter_overrides = "Stage=\"prod\""
 image_repositories = []
 
 [default.global.parameters]

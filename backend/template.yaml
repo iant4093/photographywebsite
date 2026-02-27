@@ -179,7 +179,7 @@ Resources:
       CorsConfiguration:
         AllowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
         AllowHeaders: ['Content-Type', 'Authorization', 'X-Turnstile-Token']
-        AllowOrigins: ['*']
+        AllowOrigins: ['https://iantruongphotography.com']
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
