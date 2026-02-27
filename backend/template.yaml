@@ -80,10 +80,10 @@ Resources:
     Properties:
       BucketName: !Sub 'goldenhour-images-${AWS::AccountId}-${Stage}'
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ['*']
@@ -98,11 +98,15 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: PublicReadGetObject
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
             Effect: Allow
-            Principal: '*'
+            Principal:
+              Service: cloudfront.amazonaws.com
             Action: 's3:GetObject'
             Resource: !Sub 'arn:aws:s3:::${ImagesBucket}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
 
   # ─── CloudFront CDN ───
   ImagesCloudFront:
@@ -114,6 +118,7 @@ Resources:
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt ImagesBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt ImagesOriginAccessControl.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
         DefaultCacheBehavior:
@@ -130,6 +135,15 @@ Resources:
           MaxTTL: 31536000
           Compress: true
         PriceClass: PriceClass_100
+
+  ImagesOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'ImagesOAC-${Stage}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
 
   # ─── Cognito ───
   UserPool:
