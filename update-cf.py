@@ -1,4 +1,8 @@
 import json
+import os
+
+# Set via environment variable for portability and security
+ACM_CERT_ARN = os.environ.get('ACM_CERTIFICATE_ARN', 'arn:aws:acm:us-east-1:428207759706:certificate/60e0dd6b-9a68-4a5c-a2f2-033e938ba836')
 
 with open('cf-config.json', 'r') as f:
     config = json.load(f)
@@ -9,10 +13,10 @@ config['Aliases'] = {
 }
 config['ViewerCertificate'] = {
     'CloudFrontDefaultCertificate': False,
-    'ACMCertificateArn': 'arn:aws:acm:us-east-1:428207759706:certificate/60e0dd6b-9a68-4a5c-a2f2-033e938ba836',
+    'ACMCertificateArn': ACM_CERT_ARN,
     'SSLSupportMethod': 'sni-only',
     'MinimumProtocolVersion': 'TLSv1.2_2021',
-    'Certificate': 'arn:aws:acm:us-east-1:428207759706:certificate/60e0dd6b-9a68-4a5c-a2f2-033e938ba836',
+    'Certificate': ACM_CERT_ARN,
     'CertificateSource': 'acm'
 }
 
