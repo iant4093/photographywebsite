@@ -56,8 +56,12 @@ function Navbar() {
             <div className={`fixed inset-0 z-40 bg-cream/95 backdrop-blur-xl transition-all duration-500 ease-in-out flex flex-col items-center justify-center ${isMenuOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'}`}>
                 <div className={`flex flex-col items-center gap-8 md:gap-12 transition-all duration-500 delay-100 ${isMenuOpen ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
 
-                    <Link to="/" className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
+                    <Link to="/" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
                         Gallery
+                    </Link>
+
+                    <Link to="/sharedalbum" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
+                        Find Album
                     </Link>
 
                     {/* Future Tabs can go here seamlessly */}

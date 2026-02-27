@@ -17,7 +17,6 @@ function Upload() {
     const [ownerEmail, setOwnerEmail] = useState('')
     const [albumDate, setAlbumDate] = useState(() => new Date().toISOString().split('T')[0])
     const [category, setCategory] = useState('')
-    const [isShared, setIsShared] = useState(false)
     const [users, setUsers] = useState([])
     const [usersLoaded, setUsersLoaded] = useState(false)
     const [existingCategories, setExistingCategories] = useState([])
@@ -196,13 +195,12 @@ function Upload() {
                 createdAt: new Date(albumDate + 'T12:00:00').toISOString(),
                 visibility,
                 ownerEmail: visibility === 'private' ? ownerEmail : '',
-                isShared,
+                isShared: visibility === 'unlisted',
             })
 
             setSuccess(true)
             setTitle('')
             setCategory('')
-            setIsShared(false)
             setDescription('')
             setPhotoFiles([])
             setOwnerEmail('')
@@ -250,11 +248,11 @@ function Upload() {
                     {/* Visibility toggle */}
                     <div className="mb-6">
                         <label className="block text-sm font-medium text-charcoal mb-3">Upload To</label>
-                        <div className="flex rounded-xl overflow-hidden border border-warm-border">
+                        <div className="flex flex-col sm:flex-row rounded-xl overflow-hidden border border-warm-border">
                             <button
                                 type="button"
                                 onClick={() => handleVisibilityChange('public')}
-                                className={`flex-1 py-3 text-sm font-medium transition-all duration-200 cursor-pointer ${visibility === 'public'
+                                className={`flex-1 py-3 px-2 text-sm font-medium transition-all duration-200 cursor-pointer ${visibility === 'public'
                                     ? 'bg-amber text-white'
                                     : 'bg-cream text-warm-gray hover:bg-cream-dark'
                                     }`}
@@ -264,12 +262,22 @@ function Upload() {
                             <button
                                 type="button"
                                 onClick={() => handleVisibilityChange('private')}
-                                className={`flex-1 py-3 text-sm font-medium transition-all duration-200 cursor-pointer ${visibility === 'private'
+                                className={`flex-1 py-3 px-2 text-sm border-t sm:border-t-0 sm:border-l border-warm-border font-medium transition-all duration-200 cursor-pointer ${visibility === 'private'
                                     ? 'bg-amber text-white'
                                     : 'bg-cream text-warm-gray hover:bg-cream-dark'
                                     }`}
                             >
                                 Specific User
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleVisibilityChange('unlisted')}
+                                className={`flex-1 py-3 px-2 text-sm border-t sm:border-t-0 sm:border-l border-warm-border font-medium transition-all duration-200 cursor-pointer ${visibility === 'unlisted'
+                                    ? 'bg-amber text-white'
+                                    : 'bg-cream text-warm-gray hover:bg-cream-dark'
+                                    }`}
+                            >
+                                Link Only
                             </button>
                         </div>
                     </div>
@@ -295,18 +303,7 @@ function Upload() {
                         </div>
                     )}
 
-                    {/* Shared Link Toggle */}
-                    <div className="mb-8 border border-warm-border rounded-xl p-4 bg-cream/30">
-                        <div className="flex items-center justify-between cursor-pointer group" onClick={() => setIsShared(!isShared)}>
-                            <div>
-                                <h3 className="text-sm font-medium text-charcoal">Enable Link Sharing</h3>
-                                <p className="text-xs text-warm-gray mt-1">Generate a secure code to share this album with anyone.</p>
-                            </div>
-                            <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-300 ${isShared ? 'bg-amber' : 'bg-warm-border'}`}>
-                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-300 shadow-sm ${isShared ? 'translate-x-6' : 'translate-x-1'}`} />
-                            </div>
-                        </div>
-                    </div>
+
 
                     {/* Album title */}
                     <div className="mb-6">

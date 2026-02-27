@@ -34,6 +34,8 @@ def handler(event, context):
             albums = [a for a in albums if a.get('visibility') == 'private' and a.get('ownerEmail') == owner_email]
         elif visibility == 'all':
             pass  # return everything (admin view)
+        elif visibility == 'unlisted':
+            albums = [a for a in albums if a.get('visibility') == 'unlisted']
 
         # Sort by createdAt descending (newest first)
         albums.sort(key=lambda a: a.get('createdAt', ''), reverse=True)
