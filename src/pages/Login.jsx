@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { Turnstile } from '@marsidev/react-turnstile'
@@ -7,6 +7,7 @@ import { Turnstile } from '@marsidev/react-turnstile'
 function Login() {
     const { login, user, isAdmin } = useAuth()
     const navigate = useNavigate()
+    const turnstileRef = useRef()
 
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -44,6 +45,9 @@ function Login() {
             } else {
                 setError(err.message || 'An error occurred. Please try again.')
             }
+            // Reset Turnstile on error so a new token can be generated
+            turnstileRef.current?.reset()
+            setTurnstileToken(null)
         } finally {
             setSubmitting(false)
         }
@@ -115,6 +119,7 @@ function Login() {
 
                     <div className="mb-6 flex justify-center">
                         <Turnstile
+                            ref={turnstileRef}
                             siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                             onSuccess={(token) => setTurnstileToken(token)}
                             options={{ theme: 'light' }}
