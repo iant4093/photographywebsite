@@ -25,7 +25,7 @@ function VideoThumbnailScrubber({ file, time, onTimeChange }) {
     }
 
     const handleChange = (e) => {
-        const newTime = parseFloat(e.target.value)
+        const newTime = parseInt(e.target.value, 10)
         onTimeChange(newTime)
         if (videoRef.current) {
             videoRef.current.currentTime = newTime
@@ -49,17 +49,17 @@ function VideoThumbnailScrubber({ file, time, onTimeChange }) {
             <div className="flex-1">
                 <p className="text-sm font-medium text-charcoal truncate mb-2">{file.name}</p>
                 <div className="flex items-center gap-2">
-                    <span className="text-xs text-warm-gray">{time.toFixed(1)}s</span>
+                    <span className="text-xs text-warm-gray">{time}s</span>
                     <input
                         type="range"
                         min="0"
-                        max={duration || 100}
-                        step="0.1"
+                        max={duration ? Math.floor(duration) : 100}
+                        step="1"
                         value={time}
                         onChange={handleChange}
                         className="flex-1 text-amber accent-amber"
                     />
-                    <span className="text-xs text-warm-gray">{duration.toFixed(1)}s</span>
+                    <span className="text-xs text-warm-gray">{Math.floor(duration)}s</span>
                 </div>
             </div>
         </div>
@@ -112,7 +112,7 @@ export default function UploadVideo() {
 
     const handleFileChange = (e) => {
         const files = Array.from(e.target.files)
-        setVideoFiles(files.map(file => ({ file, time: 0.0 })))
+        setVideoFiles(files.map(file => ({ file, time: 0 })))
     }
 
     const handleTimeChange = (index, newTime) => {

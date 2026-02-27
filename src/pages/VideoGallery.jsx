@@ -216,7 +216,7 @@ export default function VideoGallery() {
                     {/* React Player Container */}
                     <div className="w-full h-full max-w-6xl max-h-[85vh] flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
                         <ReactPlayer
-                            url={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${images[lightboxIndex].hlsUrl || images[lightboxIndex].rawKey}`}
+                            url={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${images[lightboxIndex].hlsUrl ? images[lightboxIndex].hlsUrl : images[lightboxIndex].rawKey}`}
                             controls
                             playing
                             width="100%"
@@ -225,6 +225,10 @@ export default function VideoGallery() {
                             config={{
                                 file: {
                                     forceHLS: !!images[lightboxIndex].hlsUrl,
+                                    forceVideo: !images[lightboxIndex].hlsUrl,
+                                    attributes: {
+                                        crossOrigin: "anonymous"
+                                    }
                                 }
                             }}
                             onError={(e) => console.log("Player error:", e)}
