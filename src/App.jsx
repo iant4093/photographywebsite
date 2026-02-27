@@ -15,6 +15,7 @@ import AddUser from './pages/AddUser'
 import DeleteUser from './pages/DeleteUser'
 import EditUser from './pages/EditUser'
 import UserDashboard from './pages/UserDashboard'
+import NotFound from './pages/NotFound'
 
 // Main app shell with routing
 function App() {
@@ -43,6 +44,7 @@ function App() {
 
           {/* User route */}
           <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
 
