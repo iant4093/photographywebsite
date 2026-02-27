@@ -97,8 +97,13 @@ def handler(event, context):
             'visibility': body.get('visibility', 'public'),
             'ownerEmail': body.get('ownerEmail', ''),
             'isShared': is_shared,
-            'shareCode': share_code,
         }
+        
+        # Sparse Indexing: Only include shareCode if the album is shared.
+        # DynamoDB GSI keys cannot be empty strings.
+        if is_shared:
+            item['shareCode'] = share_code
+
         table.put_item(Item=item)
 
         if item.get('visibility') == 'private' and item.get('ownerEmail'):
