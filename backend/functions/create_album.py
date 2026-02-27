@@ -3,6 +3,7 @@ import os
 import io
 import boto3
 import exifread
+import decimal
 
 # DynamoDB and S3 resources
 dynamodb = boto3.resource('dynamodb')
@@ -132,7 +133,7 @@ def handler(event, context):
     if denied:
         return denied
     try:
-        body = json.loads(event.get('body', '{}'))
+        body = json.loads(event.get('body', '{}'), parse_float=decimal.Decimal)
 
         # Validate required fields
         required = ['albumId', 'title', 's3Prefix', 'createdAt']

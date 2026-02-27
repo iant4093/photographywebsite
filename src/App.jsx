@@ -18,6 +18,7 @@ import EditUser from './pages/EditUser'
 import UserDashboard from './pages/UserDashboard'
 import NotFound from './pages/NotFound'
 import VideoGallery from './pages/VideoGallery'
+import Videos from './pages/Videos'
 
 // Main app shell with routing
 function App() {
@@ -29,6 +30,7 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Home />} />
+          <Route path="/videos" element={<Videos />} />
           <Route path="/album/:albumId" element={<AlbumGallery />} />
           <Route path="/video/:albumId" element={<VideoGallery />} />
           <Route path="/sharedalbum" element={<SharedAlbum />} />

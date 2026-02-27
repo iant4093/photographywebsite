@@ -65,6 +65,10 @@ function Navbar() {
                         Gallery
                     </Link>
 
+                    <Link to="/videos" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
+                        Videos
+                    </Link>
+
                     <Link to="/sharedalbum" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
                         Find Album
                     </Link>
