@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { fetchAlbum } from '../utils/api'
 import { useAuth } from '../context/authContext'
 import ProgressiveImage from '../components/ProgressiveImage'
-import ReactPlayer from 'react-player'
+import VideoPlayer from '../components/VideoPlayer'
 
 export default function VideoGallery() {
     const { albumId } = useParams()
@@ -215,38 +215,7 @@ export default function VideoGallery() {
 
                     {/* React Player Container */}
                     <div className="w-full h-full max-w-6xl max-h-[85vh] flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
-                        {(() => {
-                            let videoUrl = images[lightboxIndex].hlsUrl ? images[lightboxIndex].hlsUrl : images[lightboxIndex].rawKey;
-                            if (videoUrl && videoUrl.endsWith('/master.m3u8')) {
-                                const parts = videoUrl.split('/');
-                                const prefix = parts[parts.length - 2];
-                                if (prefix && prefix.endsWith('_hls')) {
-                                    const baseName = prefix.slice(0, -4);
-                                    parts[parts.length - 1] = `${baseName}.m3u8`;
-                                    videoUrl = parts.join('/');
-                                }
-                            }
-                            return (
-                                <ReactPlayer
-                                    url={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${videoUrl}`}
-                                    controls
-                                    playing
-                                    width="100%"
-                                    height="100%"
-                                    style={{ position: 'absolute', top: 0, left: 0 }}
-                                    config={{
-                                        file: {
-                                            forceHLS: !!images[lightboxIndex].hlsUrl,
-                                            forceVideo: !images[lightboxIndex].hlsUrl,
-                                            attributes: {
-                                                crossOrigin: "anonymous"
-                                            }
-                                        }
-                                    }}
-                                    onError={(e) => console.log("Player error:", e)}
-                                />
-                            );
-                        })()}
+                        <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={true} />
                     </div>
 
                     {/* Info & Download Footer */}

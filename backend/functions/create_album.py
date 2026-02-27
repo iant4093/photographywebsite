@@ -243,8 +243,6 @@ def handler(event, context):
         if is_shared:
             item['shareCode'] = share_code
 
-        # Safety catch for any straggling python floats before inserting into DynamoDB
-        item = json.loads(json.dumps(item), parse_float=decimal.Decimal)
         table.put_item(Item=item)
 
         if item.get('visibility') == 'private' and item.get('ownerEmail'):

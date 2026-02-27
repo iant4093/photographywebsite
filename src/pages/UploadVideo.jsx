@@ -129,52 +129,64 @@ export default function UploadVideo() {
             const video = document.createElement('video')
             video.muted = true
             video.playsInline = true
-            video.crossOrigin = "anonymous"
+            video.preload = "auto" // Ensure it buffers enough to seek
             const url = URL.createObjectURL(file)
 
             video.onloadedmetadata = () => {
-                video.currentTime = time
+                // Force a tiny offset if 0 to guarantee a seeked event fires and skip black fade-ins
+                video.currentTime = Math.max(0.1, time)
             }
 
             video.onseeked = () => {
-                const canvas = document.createElement('canvas')
-                const MAX_SIZE = 800
-                let width = video.videoWidth
-                let height = video.videoHeight
+                // We MUST wait for the frame to actually paint. onseeked fires when
+                // the playhead moves, not when the GPU renders the new frame.
+                const extractFrame = () => {
+                    const canvas = document.createElement('canvas')
+                    const MAX_SIZE = 800
+                    let width = video.videoWidth
+                    let height = video.videoHeight
 
-                if (width > height && width > MAX_SIZE) {
-                    height *= MAX_SIZE / width
-                    width = MAX_SIZE
-                } else if (height > width && height > MAX_SIZE) {
-                    width *= MAX_SIZE / height
-                    height = MAX_SIZE
+                    if (width > height && width > MAX_SIZE) {
+                        height *= MAX_SIZE / width
+                        width = MAX_SIZE
+                    } else if (height > width && height > MAX_SIZE) {
+                        width *= MAX_SIZE / height
+                        height = MAX_SIZE
+                    }
+
+                    width = Math.round(width)
+                    height = Math.round(height)
+
+                    canvas.width = width
+                    canvas.height = height
+                    const ctx = canvas.getContext('2d')
+                    ctx.drawImage(video, 0, 0, width, height)
+
+                    // Blurhash computation
+                    const hashCanvas = document.createElement('canvas')
+                    const hashSize = 32
+                    hashCanvas.width = hashSize
+                    hashCanvas.height = Math.round(hashSize * (height / width))
+                    const hashCtx = hashCanvas.getContext('2d')
+                    hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
+                    const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
+
+                    const componentX = 4
+                    const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
+                    const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
+
+                    canvas.toBlob((blob) => {
+                        URL.revokeObjectURL(url)
+                        resolve({ thumbnail: blob, blurhash, width: video.videoWidth, height: video.videoHeight })
+                    }, 'image/jpeg', 0.85)
                 }
 
-                width = Math.round(width)
-                height = Math.round(height)
-
-                canvas.width = width
-                canvas.height = height
-                const ctx = canvas.getContext('2d')
-                ctx.drawImage(video, 0, 0, width, height)
-
-                // Blurhash computation
-                const hashCanvas = document.createElement('canvas')
-                const hashSize = 32
-                hashCanvas.width = hashSize
-                hashCanvas.height = Math.round(hashSize * (height / width))
-                const hashCtx = hashCanvas.getContext('2d')
-                hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
-                const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
-
-                const componentX = 4
-                const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
-                const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
-
-                canvas.toBlob((blob) => {
-                    URL.revokeObjectURL(url)
-                    resolve({ thumbnail: blob, blurhash, width: video.videoWidth, height: video.videoHeight })
-                }, 'image/jpeg', 0.85)
+                // Wait for the browser to decode and paint the frame
+                if ('requestVideoFrameCallback' in video) {
+                    video.requestVideoFrameCallback(extractFrame);
+                } else {
+                    setTimeout(extractFrame, 150);
+                }
             }
 
             video.onerror = (e) => reject(e)

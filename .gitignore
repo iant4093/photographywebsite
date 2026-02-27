@@ -38,3 +38,5 @@ cf-etag.txt
 
 # Agent artifacts
 .agent/
+
+debug/

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { fetchSharedAlbum } from '../utils/api'
 import ProgressiveImage from '../components/ProgressiveImage'
+import VideoPlayer from '../components/VideoPlayer'
 import JSZip from 'jszip'
 import { Turnstile } from '@marsidev/react-turnstile'
 
@@ -34,6 +35,11 @@ export default function SharedAlbum() {
             setAlbum(data)
             setImages(data.images || [])
             setLoading(false)
+
+            // If it's a video album and there's only 1 video, bypass the gallery and go straight to the player
+            if (data.type === 'video' && data.images?.length === 1) {
+                setLightboxIndex(0)
+            }
         }).catch(err => {
             setError(err.message || 'The gallery could not be loaded. Please check your connection or try again later.')
             setLoading(false)
@@ -67,11 +73,12 @@ export default function SharedAlbum() {
         function handleKey(e) {
             if (e.key === 'ArrowRight') goNext()
             if (e.key === 'ArrowLeft') goPrev()
-            if (e.key === 'Escape') setLightboxIndex(null)
+            // Only allow escaping if there's more than 1 video or if it's a photo album
+            if (e.key === 'Escape' && (images.length > 1 || album?.type !== 'video')) setLightboxIndex(null)
         }
         window.addEventListener('keydown', handleKey)
         return () => window.removeEventListener('keydown', handleKey)
-    }, [lightboxIndex, goNext, goPrev])
+    }, [lightboxIndex, goNext, goPrev, images.length, album?.type])
 
     // Download a single image
     const downloadImage = async (e) => {
@@ -221,109 +228,130 @@ export default function SharedAlbum() {
     // State 4: Album Loaded — Render Grid
     return (
         <div className="max-w-7xl mx-auto px-6 py-12">
-            <div className="animate-fade-in">
-                {/* Album header */}
-                <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
-                    <div>
-                        <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
-                            {album.title}
-                        </h1>
-                        {album.description && (
-                            <p className="text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap">
-                                {album.description}
+            {!((album.type === 'video') && (images.length === 1)) && (
+                <div className="animate-fade-in">
+                    {/* Album header */}
+                    <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
+                        <div>
+                            <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
+                                {album.title}
+                            </h1>
+                            {album.description && (
+                                <p className="text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap">
+                                    {album.description}
+                                </p>
+                            )}
+                            <p className="text-sm text-warm-gray/70 mt-4 uppercase tracking-wider font-medium">
+                                {new Date(album.createdAt).toLocaleDateString('en-US', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                })}
                             </p>
+                        </div>
+
+                        {/* Download All Button */}
+                        {images.length > 0 && (
+                            <button
+                                onClick={downloadAll}
+                                disabled={downloading}
+                                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark shrink-0 mb-1 cursor-pointer"
+                            >
+                                {downloading ? (
+                                    <>
+                                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                        Zipping...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                        </svg>
+                                        Download All
+                                    </>
+                                )}
+                            </button>
                         )}
-                        <p className="text-sm text-warm-gray/70 mt-4 uppercase tracking-wider font-medium">
-                            {new Date(album.createdAt).toLocaleDateString('en-US', {
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric',
-                            })}
-                        </p>
                     </div>
 
-                    {/* Download All Button */}
-                    {images.length > 0 && (
-                        <button
-                            onClick={downloadAll}
-                            disabled={downloading}
-                            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark shrink-0 mb-1 cursor-pointer"
-                        >
-                            {downloading ? (
-                                <>
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    Zipping...
-                                </>
-                            ) : (
-                                <>
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    Download All
-                                </>
-                            )}
-                        </button>
+                    {/* Image grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {images.map((img, index) => {
+                            const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+                            const thumbUrl = isLegacyOrDemo
+                                ? (img.url || img)
+                                : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+
+                            return (
+                                <div
+                                    key={img.key || img.rawKey || index}
+                                    className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative"
+                                    onClick={() => setLightboxIndex(index)}
+                                >
+                                    <ProgressiveImage
+                                        src={thumbUrl}
+                                        blurhash={img.blurhash}
+                                        alt={`Item ${index + 1} from ${album.title}`}
+                                        className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                    />
+                                    {album.type === 'video' && (
+                                        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                            <div className="w-16 h-16 rounded-full bg-white/30 backdrop-blur-sm flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                                                <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                                    <path d="M8 5v14l11-7z" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        })}
+                    </div>
+
+                    {/* Empty state */}
+                    {images.length === 0 && (
+                        <div className="text-center py-20 text-warm-gray">
+                            <p className="text-lg">No photos in this album yet.</p>
+                        </div>
                     )}
                 </div>
-
-                {/* Image grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {images.map((img, index) => {
-                        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-                        const thumbUrl = isLegacyOrDemo
-                            ? (img.url || img)
-                            : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
-
-                        return (
-                            <div
-                                key={img.key || img.rawKey || index}
-                                className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
-                                onClick={() => setLightboxIndex(index)}
-                            >
-                                <ProgressiveImage
-                                    src={thumbUrl}
-                                    blurhash={img.blurhash}
-                                    alt={`Photo ${index + 1} from ${album.title}`}
-                                    className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
-                                />
-                            </div>
-                        )
-                    })}
-                </div>
-
-                {/* Empty state */}
-                {images.length === 0 && (
-                    <div className="text-center py-20 text-warm-gray">
-                        <p className="text-lg">No photos in this album yet.</p>
-                    </div>
-                )}
-            </div>
+            )}
 
             {/* Lightbox Overlay */}
             {lightboxIndex !== null && images[lightboxIndex] && (
                 <div
-                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 pt-16 pb-8 animate-fade-in"
+                    className={`fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in ${album.type === 'video' ? 'p-0 md:p-8' : 'p-4 pt-16 pb-8'}`}
                     onClick={() => setLightboxIndex(null)}
                 >
-                    <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
+                    <button onClick={() => {
+                        if (album.type === 'video' && images.length === 1) {
+                            navigate(-1)
+                        } else {
+                            setLightboxIndex(null)
+                        }
+                    }} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                     </button>
 
                     {/* Navigation Arrows */}
-                    <button
-                        onClick={(e) => { e.stopPropagation(); goPrev() }}
-                        className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                    >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                    </button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); goNext() }}
-                        className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                    >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                    </button>
+                    {images.length > 1 && (
+                        <>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); goPrev() }}
+                                className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); goNext() }}
+                                className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                            </button>
+                        </>
+                    )}
 
                     {/* Image Wrapper */}
                     <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
@@ -331,6 +359,15 @@ export default function SharedAlbum() {
                             const activeImg = images[lightboxIndex]
                             const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
                             const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+
+                            if (album.type === 'video') {
+                                return (
+                                    <div className="w-full h-full max-w-6xl max-h-[85vh] flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden mt-8 md:mt-0">
+                                        <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={false} />
+                                    </div>
+                                )
+                            }
+
                             return (
                                 <>
                                     <div className="flex-1 min-h-0 flex items-center justify-center w-full">

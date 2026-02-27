@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { fetchAlbumsFiltered, fetchAlbum } from '../utils/api'
 import JSZip from 'jszip'
@@ -9,6 +9,7 @@ import ProgressiveImage from '../components/ProgressiveImage'
 function UserDashboard() {
     const { userEmail, getIdToken } = useAuth()
     const location = useLocation()
+    const navigate = useNavigate()
     const [albums, setAlbums] = useState([])
     const [loading, setLoading] = useState(true)
 
@@ -37,8 +38,13 @@ function UserDashboard() {
         setLightboxIndex(null)
     }, [location.key])
 
-    // Open album to view images
+    // Open photo album to view images inline
     async function openAlbum(album) {
+        if (album.type === 'video') {
+            navigate(`/video/${album.albumId}`)
+            return
+        }
+
         setLoadingImages(true)
         setSelectedAlbum(album)
         try {
@@ -61,9 +67,6 @@ function UserDashboard() {
             const folderName = selectedAlbum?.title || 'album'
             const folder = zip.folder(folderName)
 
-            // Fetch all images in parallel for speed. 
-            // We use cache: 'no-store' instead of dynamic URLs because Safari heavily blocks dynamic query string fetches 
-            // inside loops as anti-tracking or strict CORS violations.
             const fetchPromises = images.map(async (img, index) => {
                 try {
                     const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
@@ -134,8 +137,6 @@ function UserDashboard() {
         const fileName = keyString ? keyString.split('/').pop() : 'photo.jpg'
 
         try {
-            // Reverted back to cache: no-store instead of dynamic timestamps because iOS Safari 
-            // natively parses this correctly into a View/Download prompt, while dynamic urls throw CORS errors and get popup blocked.
             const urlObj = new URL(urlToDownload)
             urlObj.searchParams.set('dl', '1')
             const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
@@ -150,37 +151,87 @@ function UserDashboard() {
             setTimeout(() => URL.revokeObjectURL(url), 100)
         } catch (err) {
             console.error('Download failed, falling back to direct navigation:', err)
-            // window.open() inside an async catch block is heavily blocked by iOS Safari popup blockers.
-            // Using window.location.assign gracefully navigates the user directly to the image where they can save it.
             window.location.assign(urlToDownload)
         }
     }
 
-    // Group albums by category. Treat falsy values as "Uncategorized"
-    const groupedAlbums = albums.reduce((acc, album) => {
-        const cat = album.category || 'Uncategorized';
-        if (!acc[cat]) acc[cat] = [];
-        acc[cat].push(album);
-        return acc;
-    }, {});
+    const photoAlbums = albums.filter(a => a.type !== 'video');
+    const videoAlbums = albums.filter(a => a.type === 'video');
 
-    // Sort categories alphabetically, but put "Uncategorized" at the end
-    const categories = Object.keys(groupedAlbums).sort((a, b) => {
-        if (a === 'Uncategorized') return 1;
-        if (b === 'Uncategorized') return -1;
-        return a.localeCompare(b);
-    });
+    function groupAlbums(albumList) {
+        const grouped = albumList.reduce((acc, album) => {
+            const cat = album.category || 'Uncategorized';
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(album);
+            return acc;
+        }, {});
+        return Object.keys(grouped).sort((a, b) => {
+            if (a === 'Uncategorized') return 1;
+            if (b === 'Uncategorized') return -1;
+            return a.localeCompare(b);
+        }).map(cat => ({ category: cat, items: grouped[cat] }));
+    }
+
+    const photoCategories = groupAlbums(photoAlbums);
+    const videoCategories = groupAlbums(videoAlbums);
+
+    const renderAlbumGrid = (categoriesList) => {
+        return categoriesList.map(({ category, items }) => (
+            <div key={category}>
+                <div className="flex items-center gap-4 mb-6">
+                    <h3 className="font-serif text-2xl font-medium text-charcoal">{category}</h3>
+                    <div className="h-px bg-warm-border flex-1"></div>
+                </div>
+                <div className="flex overflow-x-auto gap-6 pb-6 snap-x snap-mandatory scrollbar-hide">
+                    {items.map((album) => (
+                        <button
+                            key={album.albumId}
+                            onClick={() => openAlbum(album)}
+                            className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white text-left cursor-pointer"
+                        >
+                            {/* Cover image */}
+                            <div className="aspect-[4/3] overflow-hidden relative">
+                                {album.coverImageUrl ? (
+                                    <img
+                                        src={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverImageUrl}`}
+                                        alt={album.title}
+                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                                        onError={(e) => {
+                                            // Fallback if domain fails or is legacy
+                                            if (e.target.src.includes('cloudfront')) {
+                                                e.target.src = album.coverImageUrl;
+                                            }
+                                        }}
+                                    />
+                                ) : (
+                                    <div className="w-full h-full bg-cream-dark flex items-center justify-center">
+                                        <svg className="w-12 h-12 text-warm-gray/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                    </div>
+                                )}
+                                {album.type === 'video' && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white shadow-lg">
+                                            <svg className="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="p-5">
+                                <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors">{album.title}</h3>
+                                {album.description && <p className="mt-1 text-sm text-warm-gray line-clamp-2">{album.description}</p>}
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        ))
+    }
 
     return (
         <div className="max-w-5xl mx-auto px-6 py-12">
             <div className="animate-slide-up">
-                <div className="mb-10">
-                    <h1 className="font-serif text-4xl font-semibold text-charcoal">Your Photos</h1>
-                    <p className="mt-2 text-warm-gray">
-                        Browse and download your photo albums.
-                    </p>
-                </div>
-
                 {/* Albums grid or selected album view */}
                 {selectedAlbum ? (
                     /* Album detail view */
@@ -233,7 +284,6 @@ function UserDashboard() {
                                     const thumbUrl = isLegacyOrDemo
                                         ? (img.url || img)
                                         : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
-                                    const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
 
                                     return (
                                         <div
@@ -265,49 +315,40 @@ function UserDashboard() {
                                 <svg className="w-16 h-16 mx-auto text-warm-gray/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
-                                <p className="text-warm-gray text-lg">No photos available yet.</p>
+                                <p className="text-warm-gray text-lg">No photos or videos available yet.</p>
                                 <p className="text-warm-gray/70 text-sm mt-1">Check back soon!</p>
                             </div>
                         ) : (
-                            <div className="flex flex-col gap-12">
-                                {categories.map((cat) => (
-                                    <div key={cat}>
-                                        <div className="flex items-center gap-4 mb-6">
-                                            <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
-                                            <div className="h-px bg-warm-border flex-1"></div>
+                            <div className="flex flex-col gap-16">
+                                {/* Photos Section */}
+                                {photoAlbums.length > 0 && (
+                                    <div>
+                                        <div className="mb-8">
+                                            <h1 className="font-serif text-4xl font-semibold text-charcoal">Your Photos</h1>
+                                            <p className="mt-2 text-warm-gray">
+                                                Browse and download your photo albums.
+                                            </p>
                                         </div>
-                                        <div className="flex overflow-x-auto gap-6 pb-6 snap-x snap-mandatory scrollbar-hide">
-                                            {groupedAlbums[cat].map((album) => (
-                                                <button
-                                                    key={album.albumId}
-                                                    onClick={() => openAlbum(album)}
-                                                    className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white text-left cursor-pointer"
-                                                >
-                                                    {/* Cover image */}
-                                                    <div className="aspect-[4/3] overflow-hidden">
-                                                        {album.coverImageUrl ? (
-                                                            <img
-                                                                src={album.coverImageUrl}
-                                                                alt={album.title}
-                                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
-                                                            />
-                                                        ) : (
-                                                            <div className="w-full h-full bg-cream-dark flex items-center justify-center">
-                                                                <svg className="w-12 h-12 text-warm-gray/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                                                </svg>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <div className="p-5">
-                                                        <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors">{album.title}</h3>
-                                                        {album.description && <p className="mt-1 text-sm text-warm-gray line-clamp-2">{album.description}</p>}
-                                                    </div>
-                                                </button>
-                                            ))}
+                                        <div className="flex flex-col gap-8">
+                                            {renderAlbumGrid(photoCategories)}
                                         </div>
                                     </div>
-                                ))}
+                                )}
+
+                                {/* Videos Section */}
+                                {videoAlbums.length > 0 && (
+                                    <div>
+                                        <div className="mb-8">
+                                            <h1 className="font-serif text-4xl font-semibold text-charcoal border-t border-warm-border pt-12 md:pt-0 md:border-none">Your Videos</h1>
+                                            <p className="mt-2 text-warm-gray">
+                                                Watch your private video galleries.
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col gap-8">
+                                            {renderAlbumGrid(videoCategories)}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </>
