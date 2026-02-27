@@ -182,7 +182,7 @@ function Upload() {
             }
 
             // Create album — cover is auto-set to first image by backend
-            await createAlbum(token, {
+            const createdAlbum = await createAlbum(token, {
                 albumId,
                 title,
                 description,
@@ -198,7 +198,11 @@ function Upload() {
                 isShared: visibility === 'unlisted',
             })
 
-            setSuccess(true)
+            if (visibility === 'unlisted' && createdAlbum && createdAlbum.shareCode) {
+                setSuccess(`${window.location.origin}/sharedalbum/${createdAlbum.shareCode}`)
+            } else {
+                setSuccess(true)
+            }
             setTitle('')
             setCategory('')
             setDescription('')
@@ -233,7 +237,14 @@ function Upload() {
                 {/* Success */}
                 {success && (
                     <div className="mb-8 p-5 rounded-2xl bg-green-50 border border-green-200 text-green-800 animate-scale-in">
-                        <p className="font-medium">Album created successfully!</p>
+                        {typeof success === 'string' ? (
+                            <div>
+                                <p className="font-medium mb-1">Link Only album created successfully!</p>
+                                <p className="text-sm">Link: <code className="font-mono bg-green-100/50 px-2 py-0.5 rounded border border-green-200 select-all">{success}</code></p>
+                            </div>
+                        ) : (
+                            <p className="font-medium">Album created successfully!</p>
+                        )}
                     </div>
                 )}
 
