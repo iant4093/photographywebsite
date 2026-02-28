@@ -51,7 +51,7 @@ function Videos() {
             <section className="relative overflow-hidden">
                 <div className="absolute inset-0">
                     <img
-                        src="https://images.unsplash.com/photo-1485846234645-a62644f84728?w=2000&q=80"
+                        src="https://d1twwtwfz1yeo4.cloudfront.net/mainimage/video.jpeg"
                         alt="Cinematography"
                         className="w-full h-full object-cover"
                     />
