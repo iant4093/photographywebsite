@@ -51,7 +51,7 @@ function Videos() {
             <section className="relative overflow-hidden">
                 <div className="absolute inset-0">
                     <img
-                        src="https://d1twwtwfz1yeo4.cloudfront.net/mainimage/video.jpeg"
+                        src="https://d1twwtwfz1yeo4.cloudfront.net/main-image/video.jpeg"
                         alt="Cinematography"
                         className="w-full h-full object-cover"
                     />
@@ -61,10 +61,10 @@ function Videos() {
                 <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="max-w-2xl animate-fade-in">
                         <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight">
-                            Cinematography
+                            Videography
                         </h1>
                         <p className="mt-6 text-lg md:text-xl text-white/90 font-light leading-relaxed">
-                            Explore my video projects, short films, and cinematic captures.
+                            Explore some of my video work!
                         </p>
                     </div>
                 </div>
