@@ -16,15 +16,26 @@ function AdminDashboard() {
             color: 'from-amber to-amber-dark',
         },
         {
-            title: 'Manage Albums',
-            description: 'Edit, delete, and manage photos across all albums and users.',
+            title: 'Manage Photo Albums',
+            description: 'Edit, delete, and manage photos across all photography albums.',
             icon: (
                 <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
             ),
-            link: '/admin/manage',
+            link: '/admin/manage?type=photo',
             color: 'from-charcoal to-charcoal-light',
+        },
+        {
+            title: 'Manage Video Albums',
+            description: 'Edit, delete, and manage your cinematic video projects.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+            ),
+            link: '/admin/manage?type=video',
+            color: 'from-blue-600 to-blue-700',
         },
         {
             title: 'Manage Users',
