@@ -8,6 +8,11 @@
     overscroll-behavior-y: none;
     background-color: var(--color-cream);
   }
+
+  ::selection {
+    background-color: var(--color-amber);
+    color: white;
+  }
 }
 
 /* Beige & Taupe Design System */
