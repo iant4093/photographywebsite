@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { fetchAlbumsFiltered, fetchAlbum } from '../utils/api'
@@ -68,26 +68,33 @@ function UserDashboard() {
             const folderName = selectedAlbum?.title || 'album'
             const folder = zip.folder(folderName)
 
-            const fetchPromises = images.map(async (img, index) => {
-                try {
-                    const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-                    const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
-                    const urlObj = new URL(rawUrl)
-                    urlObj.searchParams.set('dl', '1')
+            // Process images in batches to prevent memory exhaustion during fetch
+            const BATCH_SIZE = 5;
+            for (let i = 0; i < images.length; i += BATCH_SIZE) {
+                const batch = images.slice(i, i + BATCH_SIZE);
+                const fetchPromises = batch.map(async (img, indexInBatch) => {
+                    const index = i + indexInBatch;
+                    try {
+                        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+                        const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+                        const urlObj = new URL(rawUrl)
+                        urlObj.searchParams.set('dl', '1')
 
-                    const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
-                    if (!response.ok) throw new Error(`HTTP error ${response.status}`)
-                    const blob = await response.blob()
+                        const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
+                        if (!response.ok) throw new Error(`HTTP error ${response.status}`)
+                        const blob = await response.blob()
 
-                    const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
-                    const fileName = keyString ? keyString.split('/').pop() : `photo-${index + 1}.jpg`
-                    folder.file(fileName, blob)
-                } catch (err) {
-                    console.error('Failed to fetch image for zip:', err)
-                }
-            })
+                        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
+                        const fileName = keyString ? keyString.split('/').pop() : `photo-${index + 1}.jpg`
+                        folder.file(fileName, blob)
+                    } catch (err) {
+                        console.error('Failed to fetch image for zip:', err)
+                    }
+                })
 
-            await Promise.all(fetchPromises)
+                // Wait for the current batch to finish before starting the next
+                await Promise.all(fetchPromises)
+            }
 
             const zipBlob = await zip.generateAsync({ type: 'blob' })
             const url = URL.createObjectURL(zipBlob)
@@ -156,10 +163,10 @@ function UserDashboard() {
         }
     }
 
-    const photoAlbums = albums.filter(a => a.type !== 'video');
-    const videoAlbums = albums.filter(a => a.type === 'video');
+    const photoAlbums = useMemo(() => albums.filter(a => a.type !== 'video'), [albums]);
+    const videoAlbums = useMemo(() => albums.filter(a => a.type === 'video'), [albums]);
 
-    function groupAlbums(albumList) {
+    const groupAlbums = useCallback((albumList) => {
         const grouped = albumList.reduce((acc, album) => {
             const cat = album.category || 'Uncategorized';
             if (!acc[cat]) acc[cat] = [];
@@ -171,10 +178,10 @@ function UserDashboard() {
             if (b === 'Uncategorized') return -1;
             return a.localeCompare(b);
         }).map(cat => ({ category: cat, items: grouped[cat] }));
-    }
+    }, []);
 
-    const photoCategories = groupAlbums(photoAlbums);
-    const videoCategories = groupAlbums(videoAlbums);
+    const photoCategories = useMemo(() => groupAlbums(photoAlbums), [photoAlbums, groupAlbums]);
+    const videoCategories = useMemo(() => groupAlbums(videoAlbums), [videoAlbums, groupAlbums]);
 
     const renderAlbumGrid = (categoriesList) => {
         return categoriesList.map(({ category, items }) => (

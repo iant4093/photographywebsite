@@ -5,18 +5,7 @@ import { useAuth } from '../context/authContext'
 import JSZip from 'jszip'
 import ProgressiveImage from '../components/ProgressiveImage'
 
-// Demo images for when the backend isn't connected
-const DEMO_IMAGES = [
-    'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?w=800&q=80',
-    'https://images.unsplash.com/photo-1495616811223-4d98c6e9c869?w=800&q=80',
-    'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
-    'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=800&q=80',
-    'https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800&q=80',
-    'https://images.unsplash.com/photo-1514565131-fce0801e5785?w=800&q=80',
-    'https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&q=80',
-    'https://images.unsplash.com/photo-1470770841497-7b3200f18291?w=800&q=80',
-    'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=800&q=80',
-]
+
 
 // Album gallery page — displays all images in a masonry-like grid
 function AlbumGallery() {
@@ -31,7 +20,7 @@ function AlbumGallery() {
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
 
-    // Fetch album data on mount — falls back to demo data
+    // Fetch album data on mount
     useEffect(() => {
         const load = async () => {
             let token = null
@@ -45,14 +34,7 @@ function AlbumGallery() {
                 setAlbum(data.album || data)
                 setImages(data.images || [])
             } catch (err) {
-                // Fallback to demo data
-                setAlbum({
-                    albumId,
-                    title: 'Summer Solstice',
-                    description: 'Golden light dancing across the meadows at dusk. A collection of warm, sun-kissed moments.',
-                    createdAt: '2026-01-15T18:30:00Z',
-                })
-                setImages(DEMO_IMAGES.map((url, i) => ({ url, key: `image-${i}` })))
+                console.error("Failed to load album:", err)
             } finally {
                 setLoading(false)
             }
@@ -124,29 +106,33 @@ function AlbumGallery() {
             const folderName = album?.title || 'album'
             const folder = zip.folder(folderName)
 
-            // Fetch all images in parallel for speed. 
-            // We use cache: 'no-store' instead of dynamic URLs because Safari heavily blocks dynamic query string fetches 
-            // inside loops as anti-tracking or strict CORS violations.
-            const fetchPromises = images.map(async (img, index) => {
-                try {
-                    const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-                    const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
-                    const urlObj = new URL(rawUrl)
-                    urlObj.searchParams.set('dl', '1')
+            // Process images in batches to prevent memory exhaustion during fetch
+            const BATCH_SIZE = 5;
+            for (let i = 0; i < images.length; i += BATCH_SIZE) {
+                const batch = images.slice(i, i + BATCH_SIZE);
+                const fetchPromises = batch.map(async (img, indexInBatch) => {
+                    const index = i + indexInBatch;
+                    try {
+                        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
+                        const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
+                        const urlObj = new URL(rawUrl)
+                        urlObj.searchParams.set('dl', '1')
 
-                    const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
-                    if (!response.ok) throw new Error(`HTTP error ${response.status}`)
-                    const blob = await response.blob()
-                    // Handle objects vs raw strings for demo images
-                    const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
-                    const fileName = keyString ? keyString.split('/').pop() : `photo-${index + 1}.jpg`
-                    folder.file(fileName, blob)
-                } catch (err) {
-                    console.error('Failed to fetch image for zip:', err)
-                }
-            })
+                        const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
+                        if (!response.ok) throw new Error(`HTTP error ${response.status}`)
+                        const blob = await response.blob()
+                        // Handle objects vs raw strings for demo images
+                        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
+                        const fileName = keyString ? keyString.split('/').pop() : `photo-${index + 1}.jpg`
+                        folder.file(fileName, blob)
+                    } catch (err) {
+                        console.error('Failed to fetch image for zip:', err)
+                    }
+                })
 
-            await Promise.all(fetchPromises)
+                // Wait for the current batch to finish before starting the next
+                await Promise.all(fetchPromises)
+            }
 
             const zipBlob = await zip.generateAsync({ type: 'blob' })
             const url = URL.createObjectURL(zipBlob)

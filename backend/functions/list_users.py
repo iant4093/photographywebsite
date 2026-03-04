@@ -15,23 +15,39 @@ def handler(event, context):
     if denied:
         return denied
     try:
-        response = cognito.list_users(UserPoolId=USER_POOL_ID)
+        query_params = event.get('queryStringParameters') or {}
+        pagination_token = query_params.get('paginationToken')
+        
+        list_params = {
+            'UserPoolId': os.environ['COGNITO_USER_POOL_ID'],
+            'Limit': 60 # Cognito max limit
+        }
+        if pagination_token:
+            list_params['PaginationToken'] = pagination_token
 
-        # Extract relevant user info
+        response = cognito.list_users(**list_params)
+
         users = []
         for user in response.get('Users', []):
-            attrs = {a['Name']: a['Value'] for a in user.get('Attributes', [])}
+            attrs = {attr['Name']: attr['Value'] for attr in user['Attributes']}
             users.append({
+                'username': user['Username'],
                 'email': attrs.get('email', ''),
-                'status': user.get('UserStatus', ''),
-                'enabled': user.get('Enabled', False),
-                'createdAt': user.get('UserCreateDate', '').isoformat() if user.get('UserCreateDate') else '',
+                'status': user['UserStatus'],
+                'created': user['UserCreateDate'].isoformat()
             })
+
+        body_data = {'users': users}
+        if 'PaginationToken' in response:
+            body_data['paginationToken'] = response['PaginationToken']
 
         return {
             'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps(users),
+            'headers': {
+                'Access-Control-Allow-Origin': '*',
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps(body_data)
         }
     except Exception as e:
         return {

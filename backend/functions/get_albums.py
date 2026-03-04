@@ -24,18 +24,30 @@ def handler(event, context):
         visibility = params.get('visibility', 'public')
         owner_email = params.get('ownerEmail', '')
 
-        response = table.scan()
-        albums = response.get('Items', [])
-
-        # Filter by visibility
-        if visibility == 'public':
-            albums = [a for a in albums if a.get('visibility', 'public') == 'public']
-        elif visibility == 'private' and owner_email:
-            albums = [a for a in albums if a.get('visibility') == 'private' and a.get('ownerEmail') == owner_email]
+        # Filter by visibility or ownerEmail using GSI
+        if owner_email:
+            response = table.query(
+                IndexName='ownerEmail-index',
+                KeyConditionExpression=boto3.dynamodb.conditions.Key('ownerEmail').eq(owner_email)
+            )
+            # Since owner can be public or private albums they own, we might still need to filter by visibility
+            # if specific visibility was passed, though usually user requests all their own albums.
+            albums = response.get('Items', [])
+            if visibility and visibility != 'all': # 'all' means no visibility filter
+                albums = [item for item in albums if item.get('visibility') == visibility]
         elif visibility == 'all':
-            pass  # return everything (admin view)
-        elif visibility == 'unlisted':
-            albums = [a for a in albums if a.get('visibility') == 'unlisted']
+            # If 'all' visibility is requested without owner_email, we still need to scan or query all.
+            # For now, let's do a full scan if 'all' is requested and no owner_email.
+            # In a real-world scenario, you might have an 'all-albums-index' or handle admin access differently.
+            response = table.scan()
+            albums = response.get('Items', [])
+        else:
+            # Query by visibility index directly (e.g., 'public' or 'unlisted')
+            response = table.query(
+                IndexName='visibility-index',
+                KeyConditionExpression=boto3.dynamodb.conditions.Key('visibility').eq(visibility)
+            )
+            albums = response.get('Items', [])
 
         # Sort by createdAt descending (newest first)
         albums.sort(key=lambda a: a.get('createdAt', ''), reverse=True)

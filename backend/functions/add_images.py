@@ -3,125 +3,30 @@ import os
 import io
 import boto3
 import exifread
+from datetime import datetime
+from botocore.exceptions import ClientError
+from auth_helpers import require_admin, get_email_from_token
+from media_helpers import format_fraction, extract_exif_data, start_mediaconvert_job
 
 # DynamoDB and S3 resources
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
 s3 = boto3.client('s3')
 
-from auth_helpers import require_admin
 
-def start_mediaconvert_job(s3_input_uri, s3_output_prefix):
-    """Starts an AWS MediaConvert job to convert a video to HLS format."""
-    mc_client = boto3.client('mediaconvert')
-    # Get the account-specific MediaConvert endpoint
-    endpoints = mc_client.describe_endpoints(MaxResults=1)
-    endpoint_url = endpoints['Endpoints'][0]['Url']
-    
-    mc = boto3.client('mediaconvert', endpoint_url=endpoint_url)
-    role_arn = os.environ.get('MEDIACONVERT_ROLE_ARN', '')
-    
-    if not role_arn:
-        print("Warning: MEDIACONVERT_ROLE_ARN not set, skipping video processing")
-        return
-        
-    job_settings = {
-        "Inputs": [
-            {
-                "AudioSelectors": {
-                    "Audio Selector 1": {
-                        "DefaultSelection": "DEFAULT"
-                    }
-                },
-                "VideoSelector": {},
-                "TimecodeSource": "ZEROBASED",
-                "FileInput": s3_input_uri
-            }
-        ],
-        "OutputGroups": [
-            {
-                "Name": "Apple HLS",
-                "OutputGroupSettings": {
-                    "Type": "HLS_GROUP_SETTINGS",
-                    "HlsGroupSettings": {
-                        "SegmentLength": 10,
-                        "Destination": s3_output_prefix,
-                        "MinSegmentLength": 0
-                    }
-                },
-                "Outputs": [
-                    {
-                        "ContainerSettings": {
-                            "Container": "M3U8",
-                            "M3u8Settings": {}
-                        },
-                        "VideoDescription": {
-                            "CodecSettings": {
-                                "Codec": "H_264",
-                                "H264Settings": {
-                                    "MaxBitrate": 5000000,
-                                    "RateControlMode": "QVBR",
-                                    "SceneChangeDetect": "TRANSITION_DETECTION"
-                                }
-                            },
-                            "Width": 1920,
-                            "Height": 1080
-                        },
-                        "AudioDescriptions": [
-                            {
-                                "CodecSettings": {
-                                    "Codec": "AAC",
-                                    "AacSettings": {
-                                        "Bitrate": 96000,
-                                        "CodingMode": "CODING_MODE_2_0",
-                                        "SampleRate": 48000
-                                    }
-                                }
-                            }
-                        ],
-                        "NameModifier": "_1080p"
-                    },
-                    {
-                        "ContainerSettings": {
-                            "Container": "M3U8",
-                            "M3u8Settings": {}
-                        },
-                        "VideoDescription": {
-                            "CodecSettings": {
-                                "Codec": "H_264",
-                                "H264Settings": {
-                                    "MaxBitrate": 2000000,
-                                    "RateControlMode": "QVBR",
-                                    "SceneChangeDetect": "TRANSITION_DETECTION"
-                                }
-                            },
-                            "Width": 1280,
-                            "Height": 720
-                        },
-                        "AudioDescriptions": [
-                            {
-                                "CodecSettings": {
-                                    "Codec": "AAC",
-                                    "AacSettings": {
-                                        "Bitrate": 96000,
-                                        "CodingMode": "CODING_MODE_2_0",
-                                        "SampleRate": 48000
-                                    }
-                                }
-                            }
-                        ],
-                        "NameModifier": "_720p"
-                    }
-                ]
-            }
-        ]
+def get_image_dimensions_and_exif(bucket, key):
+    """
+    Dummy wrapper to keep existing signature if needed, or we just
+    call extract_exif_data directly. We don't get dimensions from Exif
+    easily without loading the whole image in memory, which we avoid here.
+    """
+    exif_data = extract_exif_data(bucket, key)
+    # The frontend already handled dimensions and sent them in the payload.
+    return {
+        "width": None,
+        "height": None,
+        "exif": exif_data
     }
-    
-    mc.create_job(
-        Role=role_arn,
-        Settings=job_settings,
-        Queue="Default"
-    )
 
 def handler(event, context):
     """POST /albums/{albumId}/images — appends new images to an existing album and extracts EXIF."""
@@ -155,52 +60,20 @@ def handler(event, context):
                     # S3 input URI format: s3://bucket/key
                     s3_input_uri = f"s3://{bucket}/{raw_key}"
                     base_name = raw_key.rsplit('.', 1)[0]
-                    s3_output_prefix = f"s3://{bucket}/{base_name}_hls/"
+                    # The destination prefix for MediaConvert outputs should be unique per album/video
+                    s3_output_prefix = f"s3://{bucket}/albums/{album_id}/{base_name}_hls/"
                     
                     try:
-                        start_mediaconvert_job(s3_input_uri, s3_output_prefix)
+                        job_id = start_mediaconvert_job(s3_input_uri, s3_output_prefix)
                         filename = raw_key.split('/')[-1].rsplit('.', 1)[0]
-                        img['hlsUrl'] = f"{base_name}_hls/{filename}.m3u8"
+                        img['hlsUrl'] = f"albums/{album_id}/{base_name}_hls/{filename}.m3u8"
+                        img['mediaConvertJobId'] = job_id
                     except Exception as e:
                         print(f"Failed to start MediaConvert for {raw_key}: {e}")
                 else:
                     # Photo EXIF extraction
                     try:
-                        resp = s3.get_object(Bucket=bucket, Key=raw_key, Range='bytes=0-65535')
-                        tags = exifread.process_file(io.BytesIO(resp['Body'].read()), details=False)
-                        
-                        exif_data = {}
-                        if 'Image Model' in tags:
-                            exif_data['model'] = str(tags['Image Model']).strip()
-                        if 'EXIF LensModel' in tags:
-                            exif_data['lens'] = str(tags['EXIF LensModel']).strip()
-                            
-                        if 'EXIF FocalLength' in tags:
-                            val = tags['EXIF FocalLength'].values[0]
-                            if val.den != 0:
-                                focal_length = val.num / val.den
-                                if focal_length.is_integer():
-                                    exif_data['focalLength'] = f"{int(focal_length)}mm"
-                                else:
-                                    exif_data['focalLength'] = f"{focal_length:g}mm"
-
-                        if 'EXIF FNumber' in tags:
-                            val = tags['EXIF FNumber'].values[0]
-                            if val.den != 0:
-                                f_val = val.num / val.den
-                                exif_data['focalRatio'] = f"f/{f_val:g}"
-                                
-                        if 'EXIF ExposureTime' in tags:
-                            val = tags['EXIF ExposureTime'].values[0]
-                            if val.den != 0 and val.num != 0:
-                                if val.num >= val.den:
-                                    exif_data['shutterSpeed'] = f"{val.num / val.den:g}s"
-                                else:
-                                    exif_data['shutterSpeed'] = f"{val.num}/{val.den}s"
-                                    
-                        if 'EXIF ISOSpeedRatings' in tags:
-                            exif_data['iso'] = f"ISO {tags['EXIF ISOSpeedRatings']}"
-                            
+                        exif_data = extract_exif_data(bucket, raw_key)
                         if exif_data:
                             img['exif'] = exif_data
                     except Exception as e:

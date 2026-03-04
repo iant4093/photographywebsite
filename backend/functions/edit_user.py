@@ -39,10 +39,13 @@ def handler(event, context):
             )
 
             # Migrate all private albums from old email to new email
-            response = table.scan()
+            response = table.query(
+                IndexName='ownerEmail-index',
+                KeyConditionExpression=Key('ownerEmail').eq(old_email)
+            )
             albums = [
                 a for a in response.get('Items', [])
-                if a.get('visibility') == 'private' and a.get('ownerEmail') == old_email
+                if a.get('visibility') == 'private'
             ]
             for album in albums:
                 table.update_item(

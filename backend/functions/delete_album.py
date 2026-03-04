@@ -30,15 +30,35 @@ def handler(event, context):
             }
 
         # Delete all S3 objects under the album's prefix
-        s3_prefix = album.get('s3Prefix', f'albums/{album_id}/')
-        s3_response = s3.list_objects_v2(Bucket=BUCKET, Prefix=s3_prefix)
-        objects = s3_response.get('Contents', [])
-
-        if objects:
-            s3.delete_objects(
-                Bucket=BUCKET,
-                Delete={'Objects': [{'Key': obj['Key']} for obj in objects]},
-            )
+        # Use pagination for S3 deletion to handle >1000 objects
+        if 'IMAGES_BUCKET' in os.environ:
+            bucket = os.environ['IMAGES_BUCKET']
+            prefix = album.get('s3Prefix', f'albums/{album_id}/') # Use album's s3Prefix if available
+            
+            paginator = s3.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
+            
+            objects_to_delete = []
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        objects_to_delete.append({'Key': obj['Key']})
+                        
+                    # Delete in batches of 1000
+                    # S3 DeleteObjects API can take up to 1000 objects
+                    if len(objects_to_delete) >= 1000:
+                        s3.delete_objects(
+                            Bucket=bucket,
+                            Delete={'Objects': objects_to_delete}
+                        )
+                        objects_to_delete = []
+            
+            # Delete any remaining objects
+            if objects_to_delete:
+                s3.delete_objects(
+                    Bucket=bucket,
+                    Delete={'Objects': objects_to_delete}
+                )
 
         # Delete the DynamoDB record
         table.delete_item(Key={'albumId': album_id})

@@ -21,21 +21,45 @@ def handler(event, context):
         email = event['pathParameters']['email']
 
         # 1. Find all private albums owned by this user
-        response = table.scan()
+        response = table.query(
+            IndexName='ownerEmail-index',
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('ownerEmail').eq(email)
+        )
         albums = [
             a for a in response.get('Items', [])
-            if a.get('visibility') == 'private' and a.get('ownerEmail') == email
+            if a.get('visibility') == 'private'
         ]
 
         # 2. Delete all S3 objects and DynamoDB records for each album
         for album in albums:
-            s3_prefix = album.get('s3Prefix', f'albums/{album["albumId"]}/')
-            s3_resp = s3.list_objects_v2(Bucket=BUCKET, Prefix=s3_prefix)
-            objects = s3_resp.get('Contents', [])
-            if objects:
+            # Use the already defined BUCKET variable
+            bucket_name = BUCKET
+            album_id = album['albumId']
+            prefix = album.get('s3Prefix', f'albums/{album_id}/') # Use existing s3Prefix logic
+
+            # Use pagination for S3 deletion to handle >1000 objects
+            paginator = s3.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+
+            objects_to_delete = []
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        objects_to_delete.append({'Key': obj['Key']})
+
+                    # Delete in batches of 1000
+                    if len(objects_to_delete) >= 1000:
+                        s3.delete_objects(
+                            Bucket=bucket_name,
+                            Delete={'Objects': objects_to_delete}
+                        )
+                        objects_to_delete = []
+
+            # Delete any remaining objects
+            if objects_to_delete:
                 s3.delete_objects(
-                    Bucket=BUCKET,
-                    Delete={'Objects': [{'Key': obj['Key']} for obj in objects]},
+                    Bucket=bucket_name,
+                    Delete={'Objects': objects_to_delete}
                 )
             table.delete_item(Key={'albumId': album['albumId']})
 

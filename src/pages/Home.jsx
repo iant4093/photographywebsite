@@ -1,53 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import AlbumCard from '../components/AlbumCard'
 import { fetchAlbums } from '../utils/api'
 
-// Placeholder albums used when the backend isn't connected yet
-const PLACEHOLDER_ALBUMS = [
-    {
-        albumId: 'demo-1',
-        title: 'Summer Solstice',
-        description: 'Golden light dancing across the meadows at dusk.',
-        coverImageUrl: 'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?w=800&q=80',
-        createdAt: '2026-01-15T18:30:00Z',
-    },
-    {
-        albumId: 'demo-2',
-        title: 'Coastal Dreams',
-        description: 'Pacific sunsets painting the sky in amber and coral.',
-        coverImageUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&q=80',
-        createdAt: '2026-02-01T17:00:00Z',
-    },
-    {
-        albumId: 'demo-3',
-        title: 'Mountain Glow',
-        description: 'Alpine peaks bathed in the last rays of sunlight.',
-        coverImageUrl: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=800&q=80',
-        createdAt: '2026-02-10T19:00:00Z',
-    },
-    {
-        albumId: 'demo-4',
-        title: 'Desert Bloom',
-        description: 'Warm hues sweeping over the arid landscape.',
-        coverImageUrl: 'https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800&q=80',
-        createdAt: '2026-02-14T17:45:00Z',
-    },
-    {
-        albumId: 'demo-5',
-        title: 'Urban Twilight',
-        description: 'City lights meeting the golden afterglow.',
-        coverImageUrl: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?w=800&q=80',
-        createdAt: '2026-02-20T18:15:00Z',
-    },
-    {
-        albumId: 'demo-6',
-        title: 'Forest Light',
-        description: 'Sunbeams filtering through the canopy.',
-        coverImageUrl: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&q=80',
-        createdAt: '2026-02-24T16:00:00Z',
-    },
-]
+
 
 // Home page with hero section and album grid
 function Home() {
@@ -55,34 +11,37 @@ function Home() {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
 
-    // Fetch albums on mount — falls back to placeholder data if API is unavailable
+    // Fetch albums on mount
     useEffect(() => {
         fetchAlbums()
             .then((data) => setAlbums(data))
-            .catch(() => {
-                setAlbums(PLACEHOLDER_ALBUMS)
-                setError(null) // silently use placeholders
+            .catch((err) => {
+                console.error("Failed to load albums:", err);
+                setError("Failed to load albums.")
             })
             .finally(() => setLoading(false))
     }, [])
 
-    // Group albums by category helper
-    const groupAlbums = (albumList) => albumList.reduce((acc, album) => {
-        const cat = album.category || 'Uncategorized';
-        if (!acc[cat]) acc[cat] = [];
-        acc[cat].push(album);
-        return acc;
-    }, {});
-
     const photoAlbums = albums.filter(a => a.type !== 'video');
-    const groupedPhotoAlbums = groupAlbums(photoAlbums);
 
-    // Sort categories alphabetically, but put "Uncategorized" at the end
-    const photoCategories = Object.keys(groupedPhotoAlbums).sort((a, b) => {
-        if (a === 'Uncategorized') return 1;
-        if (b === 'Uncategorized') return -1;
-        return a.localeCompare(b);
-    });
+    // Group albums by category and sort categories, memoized
+    const { groupedPhotoAlbums, photoCategories } = useMemo(() => {
+        const grouped = photoAlbums.reduce((acc, album) => {
+            const cat = album.category || 'Uncategorized';
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(album);
+            return acc;
+        }, {});
+
+        const sorted = Object.keys(grouped).sort((a, b) => {
+            if (a === 'Uncategorized') return 1;
+            if (b === 'Uncategorized') return -1;
+            return a.localeCompare(b);
+        });
+
+        return { groupedPhotoAlbums: grouped, photoCategories: sorted };
+    }, [photoAlbums]);
+
 
     return (
         <div>

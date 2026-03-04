@@ -9,7 +9,17 @@ import boto3
 table = boto3.resource('dynamodb').Table(os.environ['RATE_LIMIT_TABLE'])
 TURNSTILE_SECRET = os.environ.get('TURNSTILE_SECRET_KEY')
 
-def validate_turnstile(token, ip=None):
+def verify_turnstile(token, ip_address=None):
+    """
+    Verifies a Cloudflare Turnstile CAPTCHA token against the site verify API.
+    
+    Args:
+        token (str): The CAPTCHA token provided by the frontend.
+        ip_address (str, optional): The physical IP address of the client making the request.
+
+    Returns:
+        bool: True if the token is valid, False otherwise.
+    """
     if not token:
         print("Missing Turnstile token")
         return False
@@ -38,7 +48,17 @@ def validate_turnstile(token, ip=None):
 
 def check_rate_limit(identifier, action, max_requests, window_seconds):
     """
-    Increments an atomic counter in DynamoDB. Auto-expires using TTL.
+    Checks if a specific action by an identifier has exceeded its rate limit using DynamoDB.
+    Increments an atomic counter and auto-expires using TTL.
+
+    Args:
+        identifier (str): The unique identifier for the caller (e.g., IP address, username).
+        action (str): The type of action being performed (e.g., 'login', 'contact').
+        max_requests (int): Maximum allowed attempts within the window.
+        window_seconds (int): Time window for the limit in seconds.
+
+    Returns:
+        bool: True if the action is allowed (under limit), False if rate limited.
     """
     key_id = f"{identifier}#{action}"
     now = int(time.time())

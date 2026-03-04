@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import AlbumCard from '../components/AlbumCard'
 import { fetchAlbums } from '../utils/api'
 
@@ -29,21 +29,25 @@ function Videos() {
             .finally(() => setLoading(false))
     }, [])
 
-    const groupAlbums = (albumList) => albumList.reduce((acc, album) => {
-        const cat = album.category || 'Uncategorized';
-        if (!acc[cat]) acc[cat] = [];
-        acc[cat].push(album);
-        return acc;
-    }, {});
-
     const videoAlbums = albums.filter(a => a.type === 'video');
-    const groupedVideoAlbums = groupAlbums(videoAlbums);
 
-    const videoCategories = Object.keys(groupedVideoAlbums).sort((a, b) => {
-        if (a === 'Uncategorized') return 1;
-        if (b === 'Uncategorized') return -1;
-        return a.localeCompare(b);
-    });
+    // Group albums by category natively, memoized
+    const { groupedVideoAlbums, videoCategories } = useMemo(() => {
+        const grouped = videoAlbums.reduce((acc, album) => {
+            const cat = album.category || 'Uncategorized';
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(album);
+            return acc;
+        }, {});
+
+        const sorted = Object.keys(grouped).sort((a, b) => {
+            if (a === 'Uncategorized') return 1;
+            if (b === 'Uncategorized') return -1;
+            return a.localeCompare(b);
+        });
+
+        return { groupedVideoAlbums: grouped, videoCategories: sorted };
+    }, [videoAlbums]);
 
     return (
         <div>

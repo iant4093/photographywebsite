@@ -8,12 +8,39 @@ export default function ProgressiveImage({
     className = ""
 }) {
     const [isLoaded, setIsLoaded] = useState(false)
+    const [shouldLoad, setShouldLoad] = useState(false)
+    const containerRef = useRef(null)
 
     useEffect(() => {
         if (!src) return
 
-        // Reset state when src changes
         setIsLoaded(false)
+        setShouldLoad(false)
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    setShouldLoad(true)
+                    observer.disconnect()
+                }
+            },
+            {
+                rootMargin: '200px', // Load slightly before it comes into view
+                threshold: 0.01
+            }
+        )
+
+        if (containerRef.current) {
+            observer.observe(containerRef.current)
+        }
+
+        return () => {
+            observer.disconnect()
+        }
+    }, [src])
+
+    useEffect(() => {
+        if (!src || !shouldLoad) return
 
         const img = new Image()
         img.onload = () => setIsLoaded(true)
@@ -22,10 +49,10 @@ export default function ProgressiveImage({
         return () => {
             img.onload = null
         }
-    }, [src])
+    }, [src, shouldLoad])
 
     return (
-        <div className={`relative overflow-hidden ${className}`}>
+        <div ref={containerRef} className={`relative overflow-hidden ${className}`}>
             {/* Blurhash Placeholder */}
             {blurhash && (
                 <div
@@ -44,12 +71,14 @@ export default function ProgressiveImage({
             )}
 
             {/* Actual Image */}
-            <img
-                src={src}
-                alt={alt}
-                className={`absolute inset-0 w-full h-full object-cover transition-all duration-700 ease-in-out z-0
-                    ${isLoaded ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}`}
-            />
+            {shouldLoad && (
+                <img
+                    src={src}
+                    alt={alt}
+                    className={`absolute inset-0 w-full h-full object-cover transition-all duration-700 ease-in-out z-0
+                        ${isLoaded ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}`}
+                />
+            )}
         </div>
     )
 }
