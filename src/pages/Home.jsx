@@ -6,7 +6,7 @@ import ScrollRow from '../components/ScrollRow'
 import { fetchAlbums } from '../utils/api'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { useAuth } from '../context/authContext'
-import { useScrollRestoration } from '../utils/scroll'
+import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
 import { useLocation } from 'react-router-dom'
 
 // Home page with hero section and album grid
@@ -58,15 +58,23 @@ function Home() {
     // Scroll-triggered animations via Intersection Observer
     const observeRef = useCallback((el) => {
         if (!el) return
-        sectionRefs.current.push(el)
+        if (!sectionRefs.current.includes(el)) sectionRefs.current.push(el)
     }, [])
 
     useEffect(() => {
+        // Handle elements already revealed in the session
+        sectionRefs.current.forEach((el) => {
+            if (el && isRevealed(el.id)) {
+                el.classList.add('is-visible')
+            }
+        })
+
         const observer = new IntersectionObserver(
             (entries) => {
                 entries.forEach((entry) => {
                     if (entry.isIntersecting) {
                         entry.target.classList.add('is-visible')
+                        markAsRevealed(entry.target.id)
                         observer.unobserve(entry.target)
                     }
                 })
@@ -74,7 +82,11 @@ function Home() {
             { rootMargin: '0px 0px -60px 0px', threshold: 0.1 }
         )
 
-        sectionRefs.current.forEach((el) => observer.observe(el))
+        sectionRefs.current.forEach((el) => {
+            if (el && !isRevealed(el.id)) {
+                observer.observe(el)
+            }
+        })
         return () => observer.disconnect()
     }, [loading, albums])
 
@@ -190,6 +202,7 @@ function Home() {
                 {!loading && photoAlbums.length > 0 && photoCategories.map((cat, catIndex) => (
                     <div
                         key={`photo-${cat}`}
+                        id={`photo-cat-${cat.toLowerCase().replace(/\s+/g, '-')}`}
                         ref={observeRef}
                         className="mb-16 scroll-animate"
                         style={{ transitionDelay: `${catIndex * 100}ms` }}

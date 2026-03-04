@@ -1,5 +1,19 @@
 // Shared scroll memory for the session
 const scrollPositions = new Map()
+// Shared set of elements (ids) that have already been revealed
+const revealedIds = new Set()
+
+/**
+ * Checks if an element ID has already been revealed in this session.
+ */
+export const isRevealed = (id) => revealedIds.has(id)
+
+/**
+ * Marks an element ID as revealed so it doesn't animate again.
+ */
+export const markAsRevealed = (id) => {
+    if (id) revealedIds.add(id)
+}
 
 /**
  * Hook to save and restore scroll position for a specific page.

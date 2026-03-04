@@ -6,8 +6,8 @@ import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbums } from '../utils/api'
 import { useAuth } from '../context/authContext'
-import { useScrollRestoration } from '../utils/scroll'
-import { useLocation } from 'react-router-dom'
+import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
+import { useLocation, useNavigationType } from 'react-router-dom'
 
 // Placeholder videos used when the backend isn't connected yet
 const PLACEHOLDER_VIDEOS = [
@@ -71,11 +71,19 @@ function Videos() {
     }, [])
 
     useEffect(() => {
+        // Handle elements already revealed in the session
+        sectionRefs.current.forEach((el) => {
+            if (el && isRevealed(el.id)) {
+                el.classList.add('is-visible')
+            }
+        })
+
         const observer = new IntersectionObserver(
             (entries) => {
                 entries.forEach((entry) => {
                     if (entry.isIntersecting) {
                         entry.target.classList.add('is-visible')
+                        markAsRevealed(entry.target.id)
                         observer.unobserve(entry.target)
                     }
                 })
@@ -84,7 +92,9 @@ function Videos() {
         )
 
         sectionRefs.current.forEach((el) => {
-            if (el) observer.observe(el)
+            if (el && !isRevealed(el.id)) {
+                observer.observe(el)
+            }
         })
         return () => observer.disconnect()
     }, [loading, albums])
@@ -180,6 +190,7 @@ function Videos() {
                     {!loading && videoAlbums.length > 0 && videoCategories.map((cat, catIndex) => (
                         <div
                             key={`video-${cat}`}
+                            id={`video-cat-${cat.toLowerCase().replace(/\s+/g, '-')}`}
                             ref={observeRef}
                             className="mb-16 scroll-animate"
                             style={{ transitionDelay: `${catIndex * 100}ms` }}

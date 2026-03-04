@@ -6,7 +6,7 @@ import JSZip from 'jszip'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { useScrollRestoration } from '../utils/scroll'
+import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
 import { useLocation } from 'react-router-dom'
 
 
@@ -254,13 +254,17 @@ function AlbumGallery() {
                                             ? (img.url || img)
                                             : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
 
+                                        const photoId = `photo-${album.albumId}-${index}`
+                                        const hasBeenRevealed = isRevealed(photoId)
+
                                         return (
                                             <motion.div
                                                 key={img.key || img.rawKey || index}
-                                                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                                                whileInView={{ opacity: 1, scale: 1, y: 0 }}
+                                                initial={hasBeenRevealed ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 20 }}
+                                                whileInView={hasBeenRevealed ? {} : { opacity: 1, scale: 1, y: 0 }}
+                                                onViewportEnter={() => !hasBeenRevealed && markAsRevealed(photoId)}
                                                 viewport={{ once: true, margin: "100px" }}
-                                                transition={{ duration: 0.5, ease: "easeOut", delay: (index % 6) * 0.08 }}
+                                                transition={{ duration: 0.5, ease: "easeOut", delay: hasBeenRevealed ? 0 : (index % 6) * 0.08 }}
                                                 className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
                                                 onClick={() => setLightboxIndex(index)}
                                             >
