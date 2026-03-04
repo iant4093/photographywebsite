@@ -131,7 +131,19 @@ export default function UploadVideo() {
             video.muted = true
             video.playsInline = true
             video.preload = "auto" // Ensure it buffers enough to seek
+            video.style.display = "none"
+            document.body.appendChild(video)
+
             const url = URL.createObjectURL(file)
+
+            const cleanup = () => {
+                video.onloadedmetadata = null
+                video.onseeked = null
+                video.onerror = null
+                if (document.body.contains(video)) {
+                    document.body.removeChild(video)
+                }
+            }
 
             video.onloadedmetadata = () => {
                 // Force a tiny offset if 0 to guarantee a seeked event fires and skip black fade-ins
@@ -139,8 +151,6 @@ export default function UploadVideo() {
             }
 
             video.onseeked = () => {
-                // We MUST wait for the frame to actually paint. onseeked fires when
-                // the playhead moves, not when the GPU renders the new frame.
                 const extractFrame = () => {
                     const canvas = document.createElement('canvas')
                     const MAX_SIZE = 800
@@ -178,19 +188,19 @@ export default function UploadVideo() {
 
                     canvas.toBlob((blob) => {
                         URL.revokeObjectURL(url)
+                        cleanup()
                         resolve({ thumbnail: blob, blurhash, width: video.videoWidth, height: video.videoHeight })
                     }, 'image/jpeg', 0.85)
                 }
 
-                // Wait for the browser to decode and paint the frame
-                if ('requestVideoFrameCallback' in video) {
-                    video.requestVideoFrameCallback(extractFrame);
-                } else {
-                    setTimeout(extractFrame, 150);
-                }
+                // Wait a tiny bit for the browser to decode the frame after a seek
+                setTimeout(extractFrame, 200);
             }
 
-            video.onerror = (e) => reject(e)
+            video.onerror = (e) => {
+                cleanup()
+                reject(e)
+            }
             video.src = url
         })
     }

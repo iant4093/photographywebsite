@@ -399,7 +399,19 @@ function ManageAlbums() {
             video.muted = true
             video.playsInline = true
             video.preload = "auto"
+            video.style.display = "none"
+            document.body.appendChild(video)
+
             const url = URL.createObjectURL(file)
+
+            const cleanup = () => {
+                video.onloadedmetadata = null
+                video.onseeked = null
+                video.onerror = null
+                if (document.body.contains(video)) {
+                    document.body.removeChild(video)
+                }
+            }
 
             video.onloadedmetadata = () => {
                 video.currentTime = Math.max(0.1, time)
@@ -442,18 +454,20 @@ function ManageAlbums() {
 
                     canvas.toBlob((blob) => {
                         URL.revokeObjectURL(url)
+                        cleanup()
                         resolve({ thumbnail: blob, blurhash, width: video.videoWidth, height: video.videoHeight })
                     }, 'image/jpeg', 0.85)
                 }
 
-                if ('requestVideoFrameCallback' in video) {
-                    video.requestVideoFrameCallback(extractFrame);
-                } else {
-                    setTimeout(extractFrame, 150);
-                }
+                // Wait a tiny bit for the browser to decode the frame after a seek, 
+                // avoiding requestVideoFrameCallback which hangs on unattached DOM nodes in Chrome.
+                setTimeout(extractFrame, 200);
             }
 
-            video.onerror = (e) => reject(e)
+            video.onerror = (e) => {
+                cleanup()
+                reject(e)
+            }
             video.src = url
         })
     }
