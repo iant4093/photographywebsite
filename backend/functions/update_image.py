@@ -1,7 +1,7 @@
 import json
 import os
 import boto3
-from auth import require_admin
+from auth_helpers import require_admin
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
@@ -11,9 +11,9 @@ def handler(event, context):
     """Update a single image's thumbKey and/or blurhash within an album."""
     try:
         # Auth check — admin only
-        claims = require_admin(event)
-        if isinstance(claims, dict) and 'statusCode' in claims:
-            return claims
+        denied = require_admin(event)
+        if denied:
+            return denied
 
         album_id = event.get('pathParameters', {}).get('albumId')
         if not album_id:
