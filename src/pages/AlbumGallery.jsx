@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { fetchAlbum } from '../utils/api'
 import { useAuth } from '../context/authContext'
@@ -16,9 +16,31 @@ function AlbumGallery() {
     const [loading, setLoading] = useState(true)
     const [downloading, setDownloading] = useState(false)
     const { getIdToken } = useAuth()
+    const gridRef = useRef(null)
 
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
+
+    // Scroll-triggered staggered grid animations
+    useEffect(() => {
+        if (!gridRef.current || loading) return
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible')
+                        observer.unobserve(entry.target)
+                    }
+                })
+            },
+            { rootMargin: '0px 0px -40px 0px', threshold: 0.05 }
+        )
+
+        const items = gridRef.current.querySelectorAll('.grid-item')
+        items.forEach((item) => observer.observe(item))
+
+        return () => observer.disconnect()
+    }, [images, loading])
 
     // Fetch album data on mount
     useEffect(() => {
@@ -172,10 +194,10 @@ function AlbumGallery() {
 
             {/* Album content */}
             {!loading && album && (
-                <div className="animate-fade-in">
-                    {/* Album header */}
-                    <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
-                        <div>
+                <div>
+                    {/* Album header with slide-up animation */}
+                    <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in">
+                        <div className="animate-slide-up">
                             <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
                                 {album.title}
                             </h1>
@@ -198,7 +220,7 @@ function AlbumGallery() {
                             <button
                                 onClick={downloadAll}
                                 disabled={downloading}
-                                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark shrink-0 mb-1"
+                                className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark hover:scale-105 active:scale-95 shrink-0 mb-1"
                             >
                                 {downloading ? (
                                     <>
@@ -217,28 +239,31 @@ function AlbumGallery() {
                         )}
                     </div>
 
-                    {/* Image grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {/* Image grid with staggered scroll-triggered animations */}
+                    <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                         {images.map((img, index) => {
-                            // Extract URL from generic strings (demo) or the specific image payload object
                             const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
                             const thumbUrl = isLegacyOrDemo
                                 ? (img.url || img)
                                 : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
-                            const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
 
                             return (
                                 <div
                                     key={img.key || img.rawKey || index}
-                                    className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
+                                    className="grid-item group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-xl hover:-translate-y-1 transition-all duration-500 aspect-[4/3] opacity-0 translate-y-6"
+                                    style={{ transitionDelay: `${(index % 6) * 80}ms` }}
                                     onClick={() => setLightboxIndex(index)}
                                 >
-                                    <ProgressiveImage
-                                        src={thumbUrl}
-                                        blurhash={img.blurhash}
-                                        alt={`Photo ${index + 1} from ${album.title}`}
-                                        className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
-                                    />
+                                    <div className="relative w-full h-full">
+                                        <ProgressiveImage
+                                            src={thumbUrl}
+                                            blurhash={img.blurhash}
+                                            alt={`Photo ${index + 1} from ${album.title}`}
+                                            className="w-full h-full group-hover:scale-105 transition-transform duration-700 ease-out"
+                                        />
+                                        {/* Warm overlay on hover */}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                                    </div>
                                 </div>
                             )
                         })}
