@@ -260,6 +260,26 @@ def handler(event, context):
             """
             send_email(item['ownerEmail'], subject, html)
 
+        # Trigger Google Drive sync if requested
+        backup_to_drive = body.get('backupToGoogleDrive', False)
+        if backup_to_drive and 'GOOGLE_DRIVE_SYNC_FUNCTION_NAME' in os.environ:
+            try:
+                sync_payload = {
+                    "albumType": album_type,
+                    "albumTitle": body['title'],
+                    "bucket": os.environ.get('IMAGES_BUCKET'),
+                    "keys": [img['rawKey'] for img in images if 'rawKey' in img]
+                }
+                lambda_client = boto3.client('lambda')
+                lambda_client.invoke(
+                    FunctionName=os.environ['GOOGLE_DRIVE_SYNC_FUNCTION_NAME'],
+                    InvocationType='Event',
+                    Payload=json.dumps(sync_payload)
+                )
+                print(f"Triggered Drive Sync for album {body['title']}")
+            except Exception as e:
+                print(f"Failed to trigger Google Drive sync: {e}")
+
         return {
             'statusCode': 201,
             'headers': {'Content-Type': 'application/json'},

@@ -17,6 +17,7 @@ Globals:
         RATE_LIMIT_TABLE: !Ref RateLimitTable
         COGNITO_USER_POOL_ID: !Ref UserPool
         COGNITO_CLIENT_ID: !Ref UserPoolClient
+        GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
 
 Parameters:
   Stage:
@@ -28,6 +29,8 @@ Parameters:
   ResendApiKey:
     Type: String
   TurnstileSecretKey:
+    Type: String
+  GoogleDriveFolderId:
     Type: String
 
 Resources:
@@ -339,6 +342,18 @@ Resources:
   # Admin: get all albums (internal)o pre-auth trigger for CAPTCHA validation
 # PreAuthenticationFunction is removed in favor of LoginFunction proxy approach
 
+  # Async: Backup files to Google Drive
+  GoogleDriveBackupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: google_drive_sync.handler
+      Timeout: 900
+      MemorySize: 512
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ImagesBucket
+
   # Protected: create album
   CreateAlbumFunction:
     Type: AWS::Serverless::Function
@@ -361,9 +376,15 @@ Resources:
               Action:
                 - iam:PassRole
               Resource: !GetAtt MediaConvertRole.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt GoogleDriveBackupFunction.Arn
       Environment:
         Variables:
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
+          GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Events:
         CreateAlbum:
           Type: HttpApi
@@ -430,9 +451,15 @@ Resources:
               Action:
                 - iam:PassRole
               Resource: !GetAtt MediaConvertRole.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt GoogleDriveBackupFunction.Arn
       Environment:
         Variables:
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
+          GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Events:
         AddImages:
           Type: HttpApi

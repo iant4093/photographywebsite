@@ -12,6 +12,7 @@ function Upload() {
     // Form state
     const [title, setTitle] = useState('')
     const [description, setDescription] = useState('')
+    const [backupToGoogleDrive, setBackupToGoogleDrive] = useState(false)
     const [photoFiles, setPhotoFiles] = useState([])
     const [visibility, setVisibility] = useState('public')
     const [ownerEmail, setOwnerEmail] = useState('')
@@ -196,6 +197,7 @@ function Upload() {
                 visibility,
                 ownerEmail: visibility === 'private' ? ownerEmail : '',
                 isShared: visibility === 'unlisted',
+                backupToGoogleDrive,
             })
 
             if (visibility === 'unlisted' && createdAlbum && createdAlbum.shareCode) {
@@ -397,6 +399,20 @@ function Upload() {
                                 </p>
                             )}
                         </div>
+                    </div>
+
+                    {/* Google Drive Backup Checkbox */}
+                    <div className="mb-8 flex items-center gap-3">
+                        <input
+                            id="driveBackup"
+                            type="checkbox"
+                            checked={backupToGoogleDrive}
+                            onChange={(e) => setBackupToGoogleDrive(e.target.checked)}
+                            className="w-5 h-5 text-amber border-warm-border rounded focus:ring-amber/40 cursor-pointer"
+                        />
+                        <label htmlFor="driveBackup" className="text-sm font-medium text-charcoal cursor-pointer">
+                            Backup original files to Google Drive
+                        </label>
                     </div>
 
                     {/* Progress */}

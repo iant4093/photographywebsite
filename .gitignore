@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .env
 .env.*
+voice-assistant-*.json
+google_client_secret.json
+google_oauth_token.json
 
 # Editor directories and files
 .vscode/*
@@ -40,3 +43,5 @@ cf-etag.txt
 .agent/
 
 debug/
+
+scripts/
