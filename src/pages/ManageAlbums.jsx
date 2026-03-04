@@ -451,6 +451,71 @@ function ManageAlbums() {
         })
     }
 
+    // Extract a thumbnail frame + blurhash from a video URL without downloading the whole file
+    async function processVideoFromUrl(videoUrl, time) {
+        return new Promise((resolve, reject) => {
+            const video = document.createElement('video')
+            video.muted = true
+            video.playsInline = true
+            video.preload = 'auto'
+            video.crossOrigin = 'anonymous'
+
+            video.onloadedmetadata = () => {
+                video.currentTime = Math.max(0.1, time)
+            }
+
+            video.onseeked = () => {
+                const extractFrame = () => {
+                    const canvas = document.createElement('canvas')
+                    const MAX_SIZE = 800
+                    let width = video.videoWidth
+                    let height = video.videoHeight
+
+                    if (width > height && width > MAX_SIZE) {
+                        height *= MAX_SIZE / width
+                        width = MAX_SIZE
+                    } else if (height > width && height > MAX_SIZE) {
+                        width *= MAX_SIZE / height
+                        height = MAX_SIZE
+                    }
+
+                    width = Math.round(width)
+                    height = Math.round(height)
+
+                    canvas.width = width
+                    canvas.height = height
+                    const ctx = canvas.getContext('2d')
+                    ctx.drawImage(video, 0, 0, width, height)
+
+                    const hashCanvas = document.createElement('canvas')
+                    const hashSize = 32
+                    hashCanvas.width = hashSize
+                    hashCanvas.height = Math.round(hashSize * (height / width))
+                    const hashCtx = hashCanvas.getContext('2d')
+                    hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
+                    const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
+
+                    const componentX = 4
+                    const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
+                    const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
+
+                    canvas.toBlob((blob) => {
+                        resolve({ thumbnail: blob, blurhash })
+                    }, 'image/jpeg', 0.85)
+                }
+
+                if ('requestVideoFrameCallback' in video) {
+                    video.requestVideoFrameCallback(extractFrame)
+                } else {
+                    setTimeout(extractFrame, 150)
+                }
+            }
+
+            video.onerror = (e) => reject(new Error('Failed to load video for thumbnail extraction'))
+            video.src = videoUrl
+        })
+    }
+
     // Change the thumbnail of an already-uploaded video by scrubbing to a new time
     async function handleChangeVideoThumbnail(img) {
         const rawKey = img.rawKey || img.key
@@ -461,24 +526,18 @@ function ManageAlbums() {
         setUpdatingThumb(true)
         setActionError('')
         try {
-            // 1. Fetch the video as a blob from CloudFront
-            const res = await fetch(videoUrl)
-            if (!res.ok) throw new Error(`Failed to fetch video: ${res.status}`)
-            const blob = await res.blob()
-            const file = new File([blob], rawKey.split('/').pop(), { type: blob.type || 'video/mp4' })
+            // 1. Extract the frame at the chosen time directly from the URL
+            const { thumbnail, blurhash } = await processVideoFromUrl(videoUrl, editingThumbTime)
 
-            // 2. Extract the frame at the chosen time
-            const { thumbnail, blurhash } = await processVideo(file, editingThumbTime)
-
-            // 3. Upload the new thumbnail to S3 (overwrite existing thumb)
+            // 2. Upload the new thumbnail to S3 (overwrite existing thumb)
             const token = await getIdToken()
             const { uploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
             await uploadFileToS3(uploadUrl, thumbnail)
 
-            // 4. Persist the new thumbKey + blurhash to DynamoDB
+            // 3. Persist the new thumbKey + blurhash to DynamoDB
             await updateImageThumbnail(token, expandedAlbumId, rawKey, { thumbKey, blurhash })
 
-            // 5. Refresh local state so the grid shows the new thumbnail
+            // 4. Refresh local state so the grid shows the new thumbnail
             const data = await fetchAlbum(expandedAlbumId, token)
             setAlbumImages(data.images || [])
 
