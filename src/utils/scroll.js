@@ -40,6 +40,13 @@ export const saveVerticalScroll = (pathname) => {
 }
 
 /**
+ * Read the saved vertical scroll position for a pathname.
+ */
+export const getSavedScroll = (pathname) => {
+    return scrollPositions.get(pathname)
+}
+
+/**
  * Hook to save and restore scroll position for a specific page.
  * @param {string} pathname The current route path
  * @param {boolean} isPOP Whether the current navigation is a POP (back/forward)

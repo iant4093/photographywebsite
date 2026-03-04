@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { useScrollRestoration, saveVerticalScroll, isRevealed, markAsRevealed } from '../utils/scroll'
+import { useScrollRestoration, saveVerticalScroll, getSavedScroll, isRevealed, markAsRevealed } from '../utils/scroll'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -41,6 +41,18 @@ function UserDashboard() {
             .catch(() => setAlbums([]))
             .finally(() => setLoading(false))
     }, [userEmail])
+
+    // Restore scroll position after data loads on POP navigation
+    useEffect(() => {
+        if (!loading && navType === 'POP') {
+            const saved = getSavedScroll(location.pathname)
+            if (saved !== undefined) {
+                requestAnimationFrame(() => {
+                    window.scrollTo({ top: saved, behavior: 'instant' })
+                })
+            }
+        }
+    }, [loading])
 
     // Reset to albums list when navigating to this page (e.g. clicking Dashboard in nav)
     useEffect(() => {
