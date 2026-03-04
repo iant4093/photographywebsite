@@ -114,11 +114,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
-
 /* Custom scrollbar with warm tones */
 ::-webkit-scrollbar {
   width: 8px;

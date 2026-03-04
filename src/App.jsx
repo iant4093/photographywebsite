@@ -4,47 +4,6 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
-
-// Set scroll restoration to manual globally to prevent browser interference with animations
-if (typeof window !== 'undefined') {
-  window.history.scrollRestoration = 'manual'
-}
-
-// Component to handle precise scroll restoration and resets
-function ScrollManager() {
-  const { pathname } = useLocation()
-  const navType = useNavigationType()
-
-  // Use a ref to store scroll positions in memory for this session
-  // Using session storage would persist across reloads, but ref is safer for SPA logic
-  const scrollPositions = useRef(new Map())
-
-  // Save scroll position before navigating away
-  useEffect(() => {
-    const handleScroll = () => {
-      scrollPositions.current.set(window.location.pathname, window.scrollY)
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
-  useLayoutEffect(() => {
-    if (navType === 'POP') {
-      const savedPosition = scrollPositions.current.get(pathname)
-      if (savedPosition !== undefined) {
-        window.scrollTo(0, savedPosition)
-      } else {
-        window.scrollTo(0, 0)
-      }
-    } else {
-      // For PUSH/REPLACE, always start at the top
-      window.scrollTo(0, 0)
-    }
-  }, [pathname, navType])
-
-  return null
-}
 import Home from './pages/Home'
 import AlbumGallery from './pages/AlbumGallery'
 import SharedAlbum from './pages/SharedAlbum'
@@ -64,20 +23,49 @@ import NotFound from './pages/NotFound'
 import VideoGallery from './pages/VideoGallery'
 import Videos from './pages/Videos'
 
+// Set scroll restoration to manual globally to prevent browser interference with animations
+if (typeof window !== 'undefined') {
+  window.history.scrollRestoration = 'manual'
+}
+
 // Main app shell with routing
 function App() {
   const location = useLocation()
+  const navType = useNavigationType()
+  const scrollPositions = useRef(new Map())
+
+  // Save scroll position on every scroll
+  useEffect(() => {
+    const handleScroll = () => {
+      scrollPositions.current.set(window.location.pathname, window.scrollY)
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Execute scroll adjustment only after the outgoing page has completely faded out
+  const handleExitComplete = () => {
+    if (navType === 'POP') {
+      const savedPosition = scrollPositions.current.get(location.pathname)
+      if (savedPosition !== undefined) {
+        window.scrollTo({ top: savedPosition, left: 0, behavior: 'instant' })
+      } else {
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      }
+    } else {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    }
+  }
 
   // Pages that intentionally render their hero image underneath the transparent navbar
   const isHeroPage = location.pathname === '/' || location.pathname === '/videos'
 
   return (
     <div className="min-h-screen flex flex-col bg-cream">
-      <ScrollManager />
       <Navbar />
 
       <main className={`flex-1 ${!isHeroPage ? 'pt-[88px] md:pt-[104px]' : ''}`}>
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="wait" onExitComplete={handleExitComplete}>
           <Routes location={location} key={location.pathname}>
             {/* Public routes */}
             <Route path="/" element={<Home />} />
