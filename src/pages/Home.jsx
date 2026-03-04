@@ -162,7 +162,7 @@ function Home() {
             {/* Albums grid */}
             <section id="albums" className="max-w-7xl mx-auto px-6 py-16 md:py-24">
                 <div className="text-center mb-12 animate-slide-up">
-                    <h2 className="font-serif text-3xl md:text-4xl font-semibold text-charcoal">
+                    <h2 className="font-serif text-3xl md:text-4xl font-semibold text-charcoal inline-block">
                         Photo Albums
                     </h2>
                 </div>
@@ -181,7 +181,7 @@ function Home() {
                         style={{ transitionDelay: `${catIndex * 100}ms` }}
                     >
                         <div className="flex items-center gap-4 mb-8">
-                            <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
+                            <h3 className="font-serif text-2xl font-medium text-charcoal w-fit">{cat}</h3>
                             <div className="h-px bg-warm-border flex-1"></div>
                         </div>
                         <ScrollRow>

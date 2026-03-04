@@ -104,7 +104,7 @@ function Videos() {
     const renderLoading = () => (
         <div className="max-w-7xl mx-auto px-6 py-12">
             <div className="mb-12">
-                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">Latest Videos</h1>
+                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">Latest Videos</h1>
                 <p className="text-lg text-warm-gray max-w-2xl">
                     A collection of my recent video work and visual stories.
                 </p>
@@ -134,7 +134,7 @@ function Videos() {
 
                 <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="max-w-2xl animate-fade-in">
-                        <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight">
+                        <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight w-fit">
                             Videography
                         </h1>
                         <p className="mt-6 text-lg md:text-xl text-white/90 font-light leading-relaxed">

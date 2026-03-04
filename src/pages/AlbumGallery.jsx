@@ -190,7 +190,7 @@ function AlbumGallery() {
                         {/* Album header with slide-up animation */}
                         <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in">
                             <div className="animate-slide-up">
-                                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
+                                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
                                     {album.title}
                                 </h1>
                                 {album.description && (

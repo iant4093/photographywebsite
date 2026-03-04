@@ -150,7 +150,7 @@ export default function VideoGallery() {
             </button>
 
             <div className="mb-12">
-                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
+                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
                     {album.title}
                 </h1>
                 {album.description && (
