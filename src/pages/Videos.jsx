@@ -21,6 +21,7 @@ const PLACEHOLDER_VIDEOS = [
 
 function Videos() {
     const { publicAlbums, setPublicAlbums } = useAuth()
+    const navType = useNavigationType()
     const [albums, setAlbums] = useState(publicAlbums || [])
     const [loading, setLoading] = useState(publicAlbums.length === 0)
     const [error, setError] = useState(null)
@@ -59,7 +60,7 @@ function Videos() {
     // Scroll-triggered animations via Intersection Observer
     const observeRef = useCallback((el) => {
         if (!el) return
-        sectionRefs.current.push(el)
+        if (!sectionRefs.current.includes(el)) sectionRefs.current.push(el)
     }, [])
 
     useEffect(() => {
@@ -75,7 +76,9 @@ function Videos() {
             { rootMargin: '0px 0px -60px 0px', threshold: 0.1 }
         )
 
-        sectionRefs.current.forEach((el) => observer.observe(el))
+        sectionRefs.current.forEach((el) => {
+            if (el) observer.observe(el)
+        })
         return () => observer.disconnect()
     }, [loading, albums])
 
@@ -101,9 +104,9 @@ function Videos() {
 
     // Page transition animation variants
     const pageVariants = {
-        initial: { opacity: 0, y: 15 },
+        initial: { opacity: 0, y: navType === 'POP' ? 0 : 15 },
         animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+        exit: { opacity: 0, y: navType === 'POP' ? 0 : -15, transition: { duration: 0.3, ease: "easeIn" } }
     }
 
     const renderLoading = () => (

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useParams, Link, useNavigate, useNavigationType } from 'react-router-dom'
 import { fetchAlbum } from '../utils/api'
 import { useAuth } from '../context/authContext'
 import JSZip from 'jszip'
@@ -13,6 +13,7 @@ import SkeletonGrid from '../components/SkeletonGrid'
 function AlbumGallery() {
     const { albumId } = useParams()
     const navigate = useNavigate()
+    const navType = useNavigationType()
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
     const [loading, setLoading] = useState(true)
@@ -20,6 +21,13 @@ function AlbumGallery() {
     const { getIdToken } = useAuth()
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
+
+    // Page transition animation variants
+    const pageVariants = {
+        initial: { opacity: 0, y: navType === 'POP' ? 0 : 15 },
+        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, y: navType === 'POP' ? 0 : -15, transition: { duration: 0.3, ease: "easeIn" } }
+    }
 
     // Fetch album data on mount
     useEffect(() => {
@@ -151,11 +159,7 @@ function AlbumGallery() {
         }
     }
 
-    const pageVariants = {
-        initial: { opacity: 0, y: 15 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
-    }
+
 
     return (
         <motion.div

@@ -1,6 +1,6 @@
 import { Routes, Route, useLocation, useNavigationType } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect } from 'react'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -10,7 +10,7 @@ function ScrollToTop() {
   const { pathname } = useLocation()
   const navType = useNavigationType()
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Scroll to top on PUSH or REPLACE (new navigation)
     // Do NOT scroll on POP (back/forward) to allow browser to restore scroll position
     if (navType !== 'POP') {
