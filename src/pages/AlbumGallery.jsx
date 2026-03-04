@@ -260,7 +260,6 @@ function AlbumGallery() {
                                         return (
                                             <motion.div
                                                 key={img.key || img.rawKey || index}
-                                                layoutId={`photo-container-${img.rawKey || index}`}
                                                 initial={hasBeenRevealed ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 20 }}
                                                 whileInView={hasBeenRevealed ? {} : { opacity: 1, scale: 1, y: 0 }}
                                                 onViewportEnter={() => !hasBeenRevealed && markAsRevealed(photoId)}
@@ -333,10 +332,7 @@ function AlbumGallery() {
                                     </button>
 
                                     {/* Image Wrapper */}
-                                    <motion.div
-                                        layoutId={`photo-container-${images[lightboxIndex].rawKey || lightboxIndex}`}
-                                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                                        style={{ willChange: "transform, opacity" }}
+                                    <div
                                         className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
                                         onClick={(e) => e.stopPropagation()}
                                     >
@@ -396,7 +392,7 @@ function AlbumGallery() {
                                                 </>
                                             )
                                         })()}
-                                    </motion.div>
+                                    </div>
 
                                     {/* Download & Image counter */}
                                     <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>

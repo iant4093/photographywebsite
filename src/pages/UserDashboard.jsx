@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
+import { useScrollRestoration, saveVerticalScroll, isRevealed, markAsRevealed } from '../utils/scroll'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -51,8 +51,11 @@ function UserDashboard() {
 
     // Open photo album to view images inline
     async function openAlbum(album) {
+        savedScrollY.current = window.scrollY
+
         if (album.type === 'video') {
             const isSingleVideo = album.imageCount === 1
+            saveVerticalScroll(location.pathname)
             navigate(`/video/${album.albumId}${isSingleVideo ? '?play=1' : ''}`)
             return
         }

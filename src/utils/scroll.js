@@ -32,6 +32,14 @@ export const getHorizontalScroll = (key) => {
 }
 
 /**
+ * Explicitly save the current vertical scroll position for a pathname.
+ * Useful before programmatic navigate() calls to prevent overwrite during transition.
+ */
+export const saveVerticalScroll = (pathname) => {
+    scrollPositions.set(pathname, window.scrollY)
+}
+
+/**
  * Hook to save and restore scroll position for a specific page.
  * @param {string} pathname The current route path
  * @param {boolean} isPOP Whether the current navigation is a POP (back/forward)
