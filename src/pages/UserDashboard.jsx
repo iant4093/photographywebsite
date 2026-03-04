@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { fetchAlbumsFiltered, fetchAlbum } from '../utils/api'
@@ -30,6 +30,9 @@ function UserDashboard() {
     // Lightbox state — store index instead of URL for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
 
+    // Save scroll position before entering an album detail view
+    const savedScrollY = useRef(0)
+
     // Fetch user's albums on mount
     useEffect(() => {
         if (!userEmail) return
@@ -54,6 +57,7 @@ function UserDashboard() {
             return
         }
 
+        savedScrollY.current = window.scrollY
         setLoadingImages(true)
         setSelectedAlbum(album)
         try {
@@ -279,7 +283,7 @@ function UserDashboard() {
                     /* Album detail view */
                     <div className="animate-fade-in">
                         <button
-                            onClick={() => { setSelectedAlbum(null); setImages([]) }}
+                            onClick={() => { setSelectedAlbum(null); setImages([]); requestAnimationFrame(() => window.scrollTo({ top: savedScrollY.current, behavior: 'instant' })) }}
                             className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -328,21 +332,22 @@ function UserDashboard() {
                                         : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
 
                                     return (
-                                        <motion.div
+                                        <div
                                             key={img.key || img.rawKey || index}
-                                            layoutId={`user-photo-container-${img.rawKey || index}`}
-                                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                                            style={{ willChange: "transform, opacity" }}
-                                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative"
+                                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
                                             onClick={() => setLightboxIndex(index)}
                                         >
-                                            <ProgressiveImage
-                                                src={thumbUrl}
-                                                blurhash={img.blurhash}
-                                                alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
-                                                className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
-                                            />
-                                        </motion.div>
+                                            <div className="relative w-full h-full">
+                                                <ProgressiveImage
+                                                    src={thumbUrl}
+                                                    blurhash={img.blurhash}
+                                                    alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
+                                                    className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                                />
+                                                {/* Warm overlay on hover */}
+                                                <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                                            </div>
+                                        </div>
                                     )
                                 })}
                             </div>
@@ -408,7 +413,7 @@ function UserDashboard() {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.2 }}
-                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 md:p-12"
+                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0"
                         onClick={() => setLightboxIndex(null)}
                     >
                         <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
@@ -438,10 +443,7 @@ function UserDashboard() {
                         </button>
 
                         {/* Image Wrapper & Info */}
-                        <motion.div
-                            layoutId={`user-photo-container-${images[lightboxIndex].rawKey || lightboxIndex}`}
-                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                            style={{ willChange: "transform, opacity" }}
+                        <div
                             className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
                             onClick={(e) => e.stopPropagation()}
                         >
@@ -501,7 +503,7 @@ function UserDashboard() {
                                     </>
                                 )
                             })()}
-                        </motion.div>
+                        </div>
 
                         {/* Download & Image counter */}
                         <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>
