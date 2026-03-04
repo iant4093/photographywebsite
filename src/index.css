@@ -1,6 +1,15 @@
 /* Tailwind v4 base import */
 @import "tailwindcss";
 
+@layer base {
+
+  html,
+  body {
+    overscroll-behavior-y: none;
+    background-color: var(--color-cream);
+  }
+}
+
 /* Beige & Taupe Design System */
 @theme {
   /* Color palette — warm beige tones */

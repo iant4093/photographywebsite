@@ -29,10 +29,11 @@ function Home() {
     useEffect(() => {
         const handleScroll = () => {
             if (heroRef.current) {
-                const scrollY = window.scrollY
-                // Clamp parallax to prevent exposing blank space
-                const maxShift = 120
-                const shift = Math.min(scrollY * 0.25, maxShift)
+                // Prevent negative scroll value during macOS overscroll bounce
+                const scrollY = Math.max(0, window.scrollY)
+                // Limit shift to keep within the 10% extra image height (e.g. ~60-80px)
+                const maxShift = 60
+                const shift = Math.min(scrollY * 0.15, maxShift)
                 heroRef.current.style.transform = `translateY(${shift}px)`
             }
         }
@@ -94,7 +95,7 @@ function Home() {
                         ref={heroRef}
                         src="https://d1twwtwfz1yeo4.cloudfront.net/main-image/mainimage.jpeg"
                         alt="Golden hour landscape"
-                        className="w-full h-[140%] object-cover parallax-hero"
+                        className="w-full h-[110%] object-cover parallax-hero"
                     />
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/40 via-charcoal/20 to-cream" />
                 </div>
