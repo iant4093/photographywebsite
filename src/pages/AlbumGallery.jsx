@@ -250,7 +250,7 @@ function AlbumGallery() {
                             return (
                                 <div
                                     key={img.key || img.rawKey || index}
-                                    className="grid-item group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-xl hover:-translate-y-1 transition-all duration-500 aspect-[4/3] opacity-0 translate-y-6"
+                                    className="grid-item group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
                                     style={{ transitionDelay: `${(index % 6) * 80}ms` }}
                                     onClick={() => setLightboxIndex(index)}
                                 >
@@ -259,7 +259,7 @@ function AlbumGallery() {
                                             src={thumbUrl}
                                             blurhash={img.blurhash}
                                             alt={`Photo ${index + 1} from ${album.title}`}
-                                            className="w-full h-full group-hover:scale-105 transition-transform duration-700 ease-out"
+                                            className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                                         />
                                         {/* Warm overlay on hover */}
                                         <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
