@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { fetchAlbumsFiltered, fetchAlbum } from '../utils/api'
 import JSZip from 'jszip'
@@ -7,13 +7,17 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { isRevealed, markAsRevealed } from '../utils/scroll'
+import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
     const { userEmail, getIdToken } = useAuth()
     const location = useLocation()
     const navigate = useNavigate()
+    const navType = useNavigationType()
+
+    // Manage scroll memory for this page
+    useScrollRestoration(location.pathname, navType === 'POP')
     const [albums, setAlbums] = useState([])
     const [loading, setLoading] = useState(true)
 
