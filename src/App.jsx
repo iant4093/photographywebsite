@@ -26,11 +26,14 @@ import Videos from './pages/Videos'
 function App() {
   const location = useLocation()
 
+  // Pages that intentionally render their hero image underneath the transparent navbar
+  const isHeroPage = location.pathname === '/' || location.pathname === '/videos'
+
   return (
     <div className="min-h-screen flex flex-col bg-cream">
       <Navbar />
 
-      <main className="flex-1">
+      <main className={`flex-1 ${!isHeroPage ? 'pt-[88px] md:pt-[104px]' : ''}`}>
         <AnimatePresence mode="wait">
           <Routes location={location} key={location.pathname}>
             {/* Public routes */}

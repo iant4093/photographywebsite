@@ -118,7 +118,7 @@ function Home() {
                         ref={heroRef}
                         src="https://d1twwtwfz1yeo4.cloudfront.net/main-image/mainimage.jpeg"
                         alt="Golden hour landscape"
-                        className="w-full h-[110%] object-cover parallax-hero"
+                        className="w-full h-[110%] object-cover object-[center_30%] parallax-hero"
                     />
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/40 via-charcoal/20 to-cream" />
                 </div>
