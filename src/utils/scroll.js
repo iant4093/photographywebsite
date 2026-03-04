@@ -1,18 +1,37 @@
 // Shared scroll memory for the session
 const scrollPositions = new Map()
-// Shared set of elements (ids) that have already been revealed
-const revealedIds = new Set()
+
+// Persistent set of revealed IDs using sessionStorage to survive reloads/navigation
+const getSavedRevealed = () => {
+    try {
+        const saved = sessionStorage.getItem('revealed_elements')
+        return saved ? new Set(JSON.parse(saved)) : new Set()
+    } catch (e) {
+        return new Set()
+    }
+}
+
+const revealedIds = getSavedRevealed()
+
+const saveRevealed = () => {
+    try {
+        sessionStorage.setItem('revealed_elements', JSON.stringify([...revealedIds]))
+    } catch (e) { }
+}
 
 /**
  * Checks if an element ID has already been revealed in this session.
  */
-export const isRevealed = (id) => revealedIds.has(id)
+export const isRevealed = (id) => id ? revealedIds.has(id) : false
 
 /**
  * Marks an element ID as revealed so it doesn't animate again.
  */
 export const markAsRevealed = (id) => {
-    if (id) revealedIds.add(id)
+    if (id && !revealedIds.has(id)) {
+        revealedIds.add(id)
+        saveRevealed()
+    }
 }
 
 /**

@@ -66,6 +66,7 @@ function Home() {
         sectionRefs.current.forEach((el) => {
             if (el && isRevealed(el.id)) {
                 el.classList.add('is-visible')
+                el.classList.add('no-stagger')
             }
         })
 
@@ -187,7 +188,11 @@ function Home() {
 
             {/* Albums grid */}
             <section id="albums" className="max-w-7xl mx-auto px-6 py-16 md:py-24">
-                <div className="text-center mb-12 animate-slide-up">
+                <div
+                    id="home-photo-header"
+                    ref={observeRef}
+                    className={`text-center mb-12 animate-slide-up ${isRevealed('home-photo-header') ? 'no-stagger' : ''}`}
+                >
                     <h2 className="font-serif text-3xl md:text-4xl font-semibold text-charcoal inline-block">
                         Photo Albums
                     </h2>
@@ -199,27 +204,32 @@ function Home() {
                     </div>
                 )}
 
-                {!loading && photoAlbums.length > 0 && photoCategories.map((cat, catIndex) => (
-                    <div
-                        key={`photo-${cat}`}
-                        id={`photo-cat-${cat.toLowerCase().replace(/\s+/g, '-')}`}
-                        ref={observeRef}
-                        className="mb-16 scroll-animate"
-                        style={{ transitionDelay: `${catIndex * 100}ms` }}
-                    >
-                        <div className="flex items-center gap-4 mb-8">
-                            <h3 className="font-serif text-2xl font-medium text-charcoal w-fit">{cat}</h3>
-                            <div className="h-px bg-warm-border flex-1"></div>
+                {!loading && photoAlbums.length > 0 && photoCategories.map((cat, catIndex) => {
+                    const sectionId = `photo-cat-${cat.toLowerCase().replace(/\s+/g, '-')}`
+                    const alreadyRevealed = isRevealed(sectionId)
+
+                    return (
+                        <div
+                            key={`photo-${cat}`}
+                            id={sectionId}
+                            ref={observeRef}
+                            className={`mb-16 scroll-animate ${alreadyRevealed ? 'is-visible no-stagger' : ''}`}
+                            style={{ transitionDelay: alreadyRevealed ? '0ms' : `${catIndex * 100}ms` }}
+                        >
+                            <div className="flex items-center gap-4 mb-8">
+                                <h3 className="font-serif text-2xl font-medium text-charcoal w-fit">{cat}</h3>
+                                <div className="h-px bg-warm-border flex-1"></div>
+                            </div>
+                            <ScrollRow>
+                                {groupedPhotoAlbums[cat].map((album) => (
+                                    <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
+                                        <AlbumCard album={album} />
+                                    </div>
+                                ))}
+                            </ScrollRow>
                         </div>
-                        <ScrollRow>
-                            {groupedPhotoAlbums[cat].map((album) => (
-                                <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
-                                    <AlbumCard album={album} />
-                                </div>
-                            ))}
-                        </ScrollRow>
-                    </div>
-                ))}
+                    )
+                })}
 
                 {!loading && photoAlbums.length === 0 && (
                     <div className="text-center py-12 text-warm-gray"><p>No photo albums found.</p></div>
