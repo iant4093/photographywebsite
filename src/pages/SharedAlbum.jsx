@@ -388,6 +388,9 @@ export default function SharedAlbum() {
                             {(() => {
                                 const activeImg = images[lightboxIndex]
                                 const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
+                                const thumbUrl = isLegacyOrDemo
+                                    ? (activeImg.url || activeImg)
+                                    : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.thumbKey}`
                                 const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
 
                                 if (album.type === 'video') {
