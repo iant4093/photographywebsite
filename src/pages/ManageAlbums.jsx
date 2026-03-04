@@ -77,9 +77,14 @@ function VideoThumbnailScrubber({ file, time, onTimeChange }) {
 }
 
 // Scrubber for an already-uploaded video identified by URL (used for thumbnail re-generation)
-function VideoThumbnailFromUrl({ videoUrl, time, onTimeChange }) {
+function VideoThumbnailFromUrl({ videoUrl, time, onTimeChange, onVideoRef }) {
     const videoRef = useRef(null)
     const [duration, setDuration] = useState(0)
+
+    const setRef = (el) => {
+        videoRef.current = el
+        if (onVideoRef) onVideoRef(el)
+    }
 
     const handleLoadedMetadata = () => {
         if (videoRef.current) {
@@ -100,7 +105,7 @@ function VideoThumbnailFromUrl({ videoUrl, time, onTimeChange }) {
         <div className="flex items-center gap-4 bg-cream/30 p-3 rounded-lg border border-warm-border/50">
             <div className="w-24 h-16 bg-black rounded overflow-hidden shrink-0">
                 <video
-                    ref={videoRef}
+                    ref={setRef}
                     src={videoUrl}
                     onLoadedMetadata={handleLoadedMetadata}
                     onError={(e) => console.error('VideoThumbnailFromUrl load error:', e.target.error)}
@@ -163,6 +168,7 @@ function ManageAlbums() {
     const [editingThumbKey, setEditingThumbKey] = useState(null) // rawKey of video being edited
     const [editingThumbTime, setEditingThumbTime] = useState(0)
     const [updatingThumb, setUpdatingThumb] = useState(false)
+    const scrubberVideoRef = useRef(null)  // ref to the scrubber's <video> element
 
     const [actionError, setActionError] = useState('')
     const [actionSuccess, setActionSuccess] = useState('')
@@ -451,111 +457,82 @@ function ManageAlbums() {
         })
     }
 
-    // Extract a thumbnail frame + blurhash from a video URL without downloading the whole file
-    async function processVideoFromUrl(videoUrl, time) {
+    // Extract a thumbnail + blurhash from an already-loaded <video> element (no re-download needed)
+    function extractFrameFromVideoElement(video) {
         return new Promise((resolve, reject) => {
-            const video = document.createElement('video')
-            video.muted = true
-            video.playsInline = true
-            video.preload = 'auto'
-            video.crossOrigin = 'anonymous'
+            try {
+                const canvas = document.createElement('canvas')
+                const MAX_SIZE = 800
+                let width = video.videoWidth
+                let height = video.videoHeight
 
-            let settled = false
-            const settle = (fn) => { if (!settled) { settled = true; fn() } }
+                if (!width || !height) {
+                    return reject(new Error('Video has no dimensions — is it loaded?'))
+                }
 
-            const tryExtract = () => {
-                const extractFrame = () => {
-                    try {
-                        const canvas = document.createElement('canvas')
-                        const MAX_SIZE = 800
-                        let width = video.videoWidth
-                        let height = video.videoHeight
+                if (width > height && width > MAX_SIZE) {
+                    height *= MAX_SIZE / width
+                    width = MAX_SIZE
+                } else if (height > width && height > MAX_SIZE) {
+                    width *= MAX_SIZE / height
+                    height = MAX_SIZE
+                }
 
-                        if (width > height && width > MAX_SIZE) {
-                            height *= MAX_SIZE / width
-                            width = MAX_SIZE
-                        } else if (height > width && height > MAX_SIZE) {
-                            width *= MAX_SIZE / height
-                            height = MAX_SIZE
-                        }
+                width = Math.round(width)
+                height = Math.round(height)
 
-                        width = Math.round(width)
-                        height = Math.round(height)
+                canvas.width = width
+                canvas.height = height
+                const ctx = canvas.getContext('2d')
+                ctx.drawImage(video, 0, 0, width, height)
 
-                        canvas.width = width
-                        canvas.height = height
-                        const ctx = canvas.getContext('2d')
-                        ctx.drawImage(video, 0, 0, width, height)
+                // Attempt blurhash (may fail on tainted canvas)
+                let blurhash = null
+                try {
+                    const hashCanvas = document.createElement('canvas')
+                    const hashSize = 32
+                    hashCanvas.width = hashSize
+                    hashCanvas.height = Math.round(hashSize * (height / width))
+                    const hashCtx = hashCanvas.getContext('2d')
+                    hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
+                    const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
+                    const componentX = 4
+                    const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
+                    blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
+                } catch (e) {
+                    console.warn('Blurhash extraction failed (tainted canvas), using existing')
+                }
 
-                        // Attempt blurhash (may fail on tainted canvas)
-                        let blurhash = null
-                        try {
-                            const hashCanvas = document.createElement('canvas')
-                            const hashSize = 32
-                            hashCanvas.width = hashSize
-                            hashCanvas.height = Math.round(hashSize * (height / width))
-                            const hashCtx = hashCanvas.getContext('2d')
-                            hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
-                            const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
-                            const componentX = 4
-                            const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
-                            blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
-                        } catch (e) {
-                            console.warn('Blurhash extraction failed (tainted canvas), using existing blurhash')
-                        }
-
-                        canvas.toBlob((blob) => {
-                            if (blob) {
-                                settle(() => resolve({ thumbnail: blob, blurhash }))
-                            } else {
-                                settle(() => reject(new Error('canvas.toBlob returned null')))
-                            }
-                        }, 'image/jpeg', 0.85)
-                    } catch (err) {
-                        settle(() => reject(err))
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        resolve({ thumbnail: blob, blurhash })
+                    } else {
+                        reject(new Error('canvas.toBlob returned null'))
                     }
-                }
-
-                if ('requestVideoFrameCallback' in video) {
-                    video.requestVideoFrameCallback(extractFrame)
-                } else {
-                    setTimeout(extractFrame, 200)
-                }
+                }, 'image/jpeg', 0.85)
+            } catch (err) {
+                reject(err)
             }
-
-            video.onloadedmetadata = () => {
-                video.currentTime = Math.max(0.1, time)
-            }
-            video.onseeked = tryExtract
-            video.onerror = (e) => {
-                console.error('processVideoFromUrl: video load error', video.error)
-                // Retry once without crossOrigin
-                if (video.crossOrigin) {
-                    console.log('Retrying without crossOrigin...')
-                    video.crossOrigin = null
-                    video.src = videoUrl
-                } else {
-                    settle(() => reject(new Error('Failed to load video for thumbnail extraction')))
-                }
-            }
-            video.src = videoUrl
         })
     }
 
-    // Change the thumbnail of an already-uploaded video by scrubbing to a new time
+    // Change the thumbnail of an already-uploaded video using the scrubber's video element
     async function handleChangeVideoThumbnail(img) {
         const rawKey = img.rawKey || img.key
-        const cfDomain = import.meta.env.VITE_CLOUDFRONT_DOMAIN
-        const videoUrl = `https://${cfDomain}/${rawKey}`
         const thumbKey = img.thumbKey || `${rawKey}.thumb.jpg`
+
+        if (!scrubberVideoRef.current) {
+            setActionError('Video not loaded yet — try again in a moment')
+            return
+        }
 
         setUpdatingThumb(true)
         setActionError('')
         try {
-            // 1. Extract the frame at the chosen time directly from the URL
-            const { thumbnail, blurhash } = await processVideoFromUrl(videoUrl, editingThumbTime)
+            // 1. Extract frame from the already-loaded scrubber video element
+            const { thumbnail, blurhash } = await extractFrameFromVideoElement(scrubberVideoRef.current)
 
-            // 2. Upload the new thumbnail to S3 (overwrite existing thumb)
+            // 2. Upload the new thumbnail to S3
             const token = await getIdToken()
             const { uploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
             await uploadFileToS3(uploadUrl, thumbnail)
@@ -563,7 +540,7 @@ function ManageAlbums() {
             // 3. Persist the new thumbKey + blurhash to DynamoDB
             await updateImageThumbnail(token, expandedAlbumId, rawKey, { thumbKey, blurhash })
 
-            // 4. Refresh local state so the grid shows the new thumbnail
+            // 4. Refresh local state
             const data = await fetchAlbum(expandedAlbumId, token)
             setAlbumImages(data.images || [])
 
@@ -1027,6 +1004,7 @@ function ManageAlbums() {
                                                                         videoUrl={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${editingThumbKey}`}
                                                                         time={editingThumbTime}
                                                                         onTimeChange={setEditingThumbTime}
+                                                                        onVideoRef={(el) => { scrubberVideoRef.current = el }}
                                                                     />
                                                                     <div className="mt-3 flex gap-2">
                                                                         <button
