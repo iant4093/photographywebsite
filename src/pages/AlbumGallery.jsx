@@ -18,31 +18,8 @@ function AlbumGallery() {
     const [loading, setLoading] = useState(true)
     const [downloading, setDownloading] = useState(false)
     const { getIdToken } = useAuth()
-    const gridRef = useRef(null)
-
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
-
-    // Scroll-triggered staggered grid animations
-    useEffect(() => {
-        if (!gridRef.current || loading) return
-        const observer = new IntersectionObserver(
-            (entries) => {
-                entries.forEach((entry) => {
-                    if (entry.isIntersecting) {
-                        entry.target.classList.add('is-visible')
-                        observer.unobserve(entry.target)
-                    }
-                })
-            },
-            { rootMargin: '0px 0px -40px 0px', threshold: 0.05 }
-        )
-
-        const items = gridRef.current.querySelectorAll('.grid-item')
-        items.forEach((item) => observer.observe(item))
-
-        return () => observer.disconnect()
-    }, [images, loading])
 
     // Fetch album data on mount
     useEffect(() => {
@@ -258,7 +235,18 @@ function AlbumGallery() {
                         {loading ? (
                             <SkeletonGrid count={6} type="photo" />
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <motion.div
+                                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+                                initial="hidden"
+                                animate="visible"
+                                variants={{
+                                    hidden: { opacity: 0 },
+                                    visible: {
+                                        opacity: 1,
+                                        transition: { staggerChildren: 0.08 }
+                                    }
+                                }}
+                            >
                                 {images.slice(0, 100).map((img, index) => {
                                     const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
                                     const thumbUrl = isLegacyOrDemo
@@ -266,10 +254,18 @@ function AlbumGallery() {
                                         : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
 
                                     return (
-                                        <div
+                                        <motion.div
                                             key={img.key || img.rawKey || index}
-                                            className="grid-item group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
-                                            style={{ transitionDelay: `${(index % 6) * 80}ms` }}
+                                            variants={{
+                                                hidden: { opacity: 0, scale: 0.95, y: 20 },
+                                                visible: {
+                                                    opacity: 1,
+                                                    scale: 1,
+                                                    y: 0,
+                                                    transition: { duration: 0.5, ease: "easeOut" }
+                                                }
+                                            }}
+                                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
                                             onClick={() => setLightboxIndex(index)}
                                         >
                                             <div className="relative w-full h-full">
@@ -283,10 +279,10 @@ function AlbumGallery() {
                                                 {/* Warm overlay on hover */}
                                                 <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                                             </div>
-                                        </div>
+                                        </motion.div>
                                     )
                                 })}
-                            </div>
+                            </motion.div>
                         )}
 
                         {/* Empty state */}
