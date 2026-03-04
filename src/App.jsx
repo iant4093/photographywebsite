@@ -5,15 +5,40 @@ import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
 
-// Component to handle scroll restoration logic
-function ScrollToTop() {
+// Set scroll restoration to manual globally to prevent browser interference with animations
+if (typeof window !== 'undefined') {
+  window.history.scrollRestoration = 'manual'
+}
+
+// Component to handle precise scroll restoration and resets
+function ScrollManager() {
   const { pathname } = useLocation()
   const navType = useNavigationType()
 
+  // Use a ref to store scroll positions in memory for this session
+  // Using session storage would persist across reloads, but ref is safer for SPA logic
+  const scrollPositions = useRef(new Map())
+
+  // Save scroll position before navigating away
+  useEffect(() => {
+    const handleScroll = () => {
+      scrollPositions.current.set(window.location.pathname, window.scrollY)
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
   useLayoutEffect(() => {
-    // Scroll to top on PUSH or REPLACE (new navigation)
-    // Do NOT scroll on POP (back/forward) to allow browser to restore scroll position
-    if (navType !== 'POP') {
+    if (navType === 'POP') {
+      const savedPosition = scrollPositions.current.get(pathname)
+      if (savedPosition !== undefined) {
+        window.scrollTo(0, savedPosition)
+      } else {
+        window.scrollTo(0, 0)
+      }
+    } else {
+      // For PUSH/REPLACE, always start at the top
       window.scrollTo(0, 0)
     }
   }, [pathname, navType])
@@ -48,7 +73,7 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-cream">
-      <ScrollToTop />
+      <ScrollManager />
       <Navbar />
 
       <main className={`flex-1 ${!isHeroPage ? 'pt-[88px] md:pt-[104px]' : ''}`}>

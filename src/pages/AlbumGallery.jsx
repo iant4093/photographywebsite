@@ -13,7 +13,6 @@ import SkeletonGrid from '../components/SkeletonGrid'
 function AlbumGallery() {
     const { albumId } = useParams()
     const navigate = useNavigate()
-    const navType = useNavigationType()
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
     const [loading, setLoading] = useState(true)
@@ -24,9 +23,9 @@ function AlbumGallery() {
 
     // Page transition animation variants
     const pageVariants = {
-        initial: { opacity: 0, y: navType === 'POP' ? 0 : 15 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, y: navType === 'POP' ? 0 : -15, transition: { duration: 0.3, ease: "easeIn" } }
+        initial: { opacity: 0 },
+        animate: { opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
     }
 
     // Fetch album data on mount
