@@ -31,6 +31,7 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-cream">
+      <ScrollToTop />
       <Navbar />
 
       <main className={`flex-1 ${!isHeroPage ? 'pt-[88px] md:pt-[104px]' : ''}`}>

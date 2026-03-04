@@ -5,6 +5,7 @@ import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbums } from '../utils/api'
+import { useAuth } from '../context/authContext'
 
 // Placeholder videos used when the backend isn't connected yet
 const PLACEHOLDER_VIDEOS = [
@@ -19,21 +20,25 @@ const PLACEHOLDER_VIDEOS = [
 ]
 
 function Videos() {
-    const [albums, setAlbums] = useState([])
-    const [loading, setLoading] = useState(true)
+    const { publicAlbums, setPublicAlbums } = useAuth()
+    const [albums, setAlbums] = useState(publicAlbums || [])
+    const [loading, setLoading] = useState(publicAlbums.length === 0)
     const [error, setError] = useState(null)
     const heroRef = useRef(null)
     const sectionRefs = useRef([])
 
     useEffect(() => {
         fetchAlbums()
-            .then((data) => setAlbums(data))
+            .then((data) => {
+                setAlbums(data)
+                setPublicAlbums(data)
+            })
             .catch(() => {
-                setAlbums(PLACEHOLDER_VIDEOS)
+                if (albums.length === 0) setAlbums(PLACEHOLDER_VIDEOS)
                 setError(null)
             })
             .finally(() => setLoading(false))
-    }, [])
+    }, [setPublicAlbums])
 
     // Hero parallax on scroll
     useEffect(() => {

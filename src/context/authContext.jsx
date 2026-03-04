@@ -58,6 +58,7 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
     const [userEmail, setUserEmail] = useState('')
+    const [publicAlbums, setPublicAlbums] = useState([])
 
     // Extract role and email from a Cognito session
     function extractUserInfo(session) {
@@ -166,7 +167,17 @@ export function AuthProvider({ children }) {
         })
     }
 
-    const value = { user, loading, isAdmin, userEmail, login, logout, getIdToken }
+    const value = {
+        user,
+        loading,
+        isAdmin,
+        userEmail,
+        publicAlbums,
+        setPublicAlbums,
+        login,
+        logout,
+        getIdToken
+    }
 
     return (
         <AuthContext.Provider value={value}>

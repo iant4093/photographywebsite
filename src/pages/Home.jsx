@@ -8,22 +8,27 @@ import SkeletonGrid from '../components/SkeletonGrid'
 
 // Home page with hero section and album grid
 function Home() {
-    const [albums, setAlbums] = useState([])
-    const [loading, setLoading] = useState(true)
+    const { publicAlbums, setPublicAlbums } = useAuth()
+    const [albums, setAlbums] = useState(publicAlbums || [])
+    const [loading, setLoading] = useState(publicAlbums.length === 0)
     const [error, setError] = useState(null)
     const heroRef = useRef(null)
     const sectionRefs = useRef([])
 
     // Fetch albums on mount
     useEffect(() => {
+        // If we have cached albums, we can still fetch in the background to refresh
         fetchAlbums()
-            .then((data) => setAlbums(data))
+            .then((data) => {
+                setAlbums(data)
+                setPublicAlbums(data)
+            })
             .catch((err) => {
                 console.error("Failed to load albums:", err);
-                setError("Failed to load albums.")
+                if (albums.length === 0) setError("Failed to load albums.")
             })
             .finally(() => setLoading(false))
-    }, [])
+    }, [setPublicAlbums])
 
     // Hero parallax on scroll
     useEffect(() => {
