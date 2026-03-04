@@ -1,5 +1,5 @@
 import json
-from security_helpers import validate_turnstile, check_rate_limit, sanitize_text
+from security_helpers import verify_turnstile, check_rate_limit, sanitize_text
 from email_helpers import send_email
 
 def handler(event, context):
@@ -16,7 +16,7 @@ def handler(event, context):
             return {'statusCode': 400, 'body': json.dumps({'error': 'Missing contact fields'})}
 
         # 1. Turnstile explicitly required
-        if not validate_turnstile(token, ip):
+        if not verify_turnstile(token, ip):
             return {'statusCode': 403, 'body': json.dumps({'error': 'Invalid CAPTCHA security token. Are you a robot?'})}
 
         # 2. Rate limit contact requests globally per IP (Max 3 every 10 minutes)

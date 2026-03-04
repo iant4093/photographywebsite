@@ -3,7 +3,7 @@ import json
 import boto3
 from boto3.dynamodb.conditions import Key
 from decimal import Decimal
-from security_helpers import validate_turnstile, check_rate_limit
+from security_helpers import verify_turnstile, check_rate_limit
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):

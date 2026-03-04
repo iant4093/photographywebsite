@@ -212,11 +212,12 @@ export function createUser(token, email, password) {
  * @param {string} token - Auth token.
  * @returns {Promise<Array>} Array of users.
  */
-export function listUsers(token) {
-    return apiFetch('/users', {
+export async function listUsers(token) {
+    const data = await apiFetch('/users', {
         method: 'GET',
         headers: authHeaders(token),
     })
+    return data.users || data
 }
 
 /**

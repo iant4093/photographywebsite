@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 import io
+import secrets
 import boto3
 import exifread
 import decimal

@@ -1,29 +1,47 @@
-import React, { useEffect, useRef } from 'react'
-import ReactPlayer from 'react-player'
+import React, { useEffect, useRef, useState } from 'react'
 import Hls from 'hls.js'
 
 export default function VideoPlayer({ videoInfo, autoplay = true, controls = true }) {
     const videoRef = useRef(null)
+    const [hlsFailed, setHlsFailed] = useState(false)
 
-    const isHls = !!videoInfo.hlsUrl;
+    const hasHlsUrl = !!videoInfo.hlsUrl;
+    const isHls = hasHlsUrl && !hlsFailed;
     const posterUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${videoInfo.thumbKey}`;
+    const rawUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${videoInfo.rawKey}`;
 
-    let videoUrl = isHls ? videoInfo.hlsUrl : videoInfo.rawKey;
-    if (videoUrl && videoUrl.endsWith('/master.m3u8')) {
-        const parts = videoUrl.split('/');
+    // Build the HLS URL
+    let hlsVideoUrl = videoInfo.hlsUrl || '';
+    if (hlsVideoUrl && hlsVideoUrl.endsWith('/master.m3u8')) {
+        const parts = hlsVideoUrl.split('/');
         const prefix = parts[parts.length - 2];
         if (prefix && prefix.endsWith('_hls')) {
             const baseName = prefix.slice(0, -4);
             parts[parts.length - 1] = `${baseName}.m3u8`;
-            videoUrl = parts.join('/');
+            hlsVideoUrl = parts.join('/');
         }
     }
-    const finalUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${videoUrl}`;
-    const rawUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${videoInfo.rawKey}`;
+    const hlsFinalUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${hlsVideoUrl}`;
 
     useEffect(() => {
-        if (!isHls || !videoRef.current) return;
+        if (!videoRef.current) return;
 
+        // If not using HLS, play the raw video directly
+        if (!isHls) {
+            const video = videoRef.current;
+            video.src = rawUrl;
+            video.load();
+            if (autoplay) {
+                // Try muted autoplay first (browsers allow this), then unmute
+                video.muted = true;
+                video.play().then(() => {
+                    video.muted = false;
+                }).catch(e => console.warn("Autoplay blocked:", e));
+            }
+            return;
+        }
+
+        // HLS playback path
         let hls;
 
         if (Hls.isSupported()) {
@@ -33,64 +51,50 @@ export default function VideoPlayer({ videoInfo, autoplay = true, controls = tru
                     xhr.withCredentials = false;
                 }
             });
-            hls.loadSource(finalUrl);
+            hls.loadSource(hlsFinalUrl);
             hls.attachMedia(videoRef.current);
             hls.on(Hls.Events.MANIFEST_PARSED, function () {
                 if (autoplay && videoRef.current) {
-                    videoRef.current.play().catch(e => console.warn("Autoplay blocked:", e));
+                    videoRef.current.muted = true;
+                    videoRef.current.play().then(() => {
+                        videoRef.current.muted = false;
+                    }).catch(e => console.warn("Autoplay blocked:", e));
                 }
             });
             hls.on(Hls.Events.ERROR, function (event, data) {
                 if (data.fatal) {
-                    switch (data.type) {
-                        case Hls.ErrorTypes.NETWORK_ERROR:
-                            console.error("fatal network error encountered, try to recover");
-                            hls.startLoad();
-                            break;
-                        case Hls.ErrorTypes.MEDIA_ERROR:
-                            console.error("fatal media error encountered, try to recover");
-                            hls.recoverMediaError();
-                            break;
-                        default:
-                            hls.destroy();
-                            break;
-                    }
+                    console.warn("HLS fatal error, falling back to direct playback:", data.type);
+                    hls.destroy();
+                    setHlsFailed(true);
                 }
             });
         } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-            videoRef.current.src = finalUrl;
+            // Safari native HLS support
+            videoRef.current.src = hlsFinalUrl;
             videoRef.current.addEventListener('loadedmetadata', function () {
                 if (autoplay && videoRef.current) {
-                    videoRef.current.play().catch(e => console.warn("Autoplay blocked:", e));
+                    videoRef.current.muted = true;
+                    videoRef.current.play().then(() => {
+                        videoRef.current.muted = false;
+                    }).catch(e => console.warn("Autoplay blocked:", e));
                 }
+            });
+            videoRef.current.addEventListener('error', function () {
+                console.warn("Native HLS failed, falling back to direct playback");
+                setHlsFailed(true);
             });
         }
 
         return () => {
             if (hls) hls.destroy();
         };
-    }, [isHls, finalUrl, autoplay]);
+    }, [isHls, hlsFinalUrl, rawUrl, autoplay]);
 
-    if (!isHls) {
-        return (
-            <ReactPlayer
-                url={rawUrl}
-                controls={controls}
-                playing={autoplay}
-                muted={true}
-                light={posterUrl}
-                width="100%"
-                height="100%"
-                style={{ position: 'absolute', top: 0, left: 0 }}
-            />
-        );
-    }
-
+    // Single native <video> element for both paths
     return (
         <video
             ref={videoRef}
             controls={controls}
-            muted
             playsInline
             poster={posterUrl}
             className="w-full h-full outline-none"

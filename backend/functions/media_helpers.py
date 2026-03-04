@@ -159,4 +159,4 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
         return response['Job']['Id']
     except Exception as e:
         print(f"Error starting MediaConvert job: {e}")
-        return None
+        raise
