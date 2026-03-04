@@ -185,7 +185,7 @@ function AlbumGallery() {
 
             {/* Album content */}
             {!loading && album && (
-                <div>
+                <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                     {/* Album header with slide-up animation */}
                     <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in">
                         <div className="animate-slide-up">
@@ -235,18 +235,7 @@ function AlbumGallery() {
                         {loading ? (
                             <SkeletonGrid count={6} type="photo" />
                         ) : (
-                            <motion.div
-                                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-                                initial="hidden"
-                                animate="visible"
-                                variants={{
-                                    hidden: { opacity: 0 },
-                                    visible: {
-                                        opacity: 1,
-                                        transition: { staggerChildren: 0.08 }
-                                    }
-                                }}
-                            >
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {images.slice(0, 100).map((img, index) => {
                                     const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
                                     const thumbUrl = isLegacyOrDemo
@@ -256,15 +245,10 @@ function AlbumGallery() {
                                     return (
                                         <motion.div
                                             key={img.key || img.rawKey || index}
-                                            variants={{
-                                                hidden: { opacity: 0, scale: 0.95, y: 20 },
-                                                visible: {
-                                                    opacity: 1,
-                                                    scale: 1,
-                                                    y: 0,
-                                                    transition: { duration: 0.5, ease: "easeOut" }
-                                                }
-                                            }}
+                                            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                                            whileInView={{ opacity: 1, scale: 1, y: 0 }}
+                                            viewport={{ once: true, margin: "100px" }}
+                                            transition={{ duration: 0.5, ease: "easeOut", delay: (index % 6) * 0.08 }}
                                             className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
                                             onClick={() => setLightboxIndex(index)}
                                         >
@@ -282,7 +266,7 @@ function AlbumGallery() {
                                         </motion.div>
                                     )
                                 })}
-                            </motion.div>
+                            </div>
                         )}
 
                         {/* Empty state */}
