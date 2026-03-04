@@ -76,6 +76,7 @@ export async function processVideo(file, time) {
         document.body.appendChild(video)
 
         const url = URL.createObjectURL(file)
+        let initialized = false
 
         const cleanup = () => {
             video.oncanplay = null
@@ -86,7 +87,10 @@ export async function processVideo(file, time) {
             }
         }
 
+        // Using oncanplay ensures the video is ready to be seeked
         video.oncanplay = () => {
+            if (initialized) return
+            initialized = true
             // Force a tiny offset if 0 to guarantee a seeked event fires and skip black fade-ins
             video.currentTime = Math.max(0.1, time)
         }
@@ -99,8 +103,8 @@ export async function processVideo(file, time) {
                 let height = video.videoHeight
 
                 if (!width || !height) {
-                    cleanup();
-                    return reject(new Error('Video has no dimensions during extraction'));
+                    cleanup()
+                    return reject(new Error('Video has no dimensions during extraction'))
                 }
 
                 if (width > height && width > MAX_SIZE) {
@@ -138,17 +142,10 @@ export async function processVideo(file, time) {
                 }, 'image/jpeg', 0.85)
             }
 
-            // Using requestVideoFrameCallback if available for frame-accurate capture.
-            // Still keeping a setTimeout fallback for browsers where rVFC might not trigger in off-screen tabs.
-            if ('requestVideoFrameCallback' in video) {
-                video.requestVideoFrameCallback(() => {
-                    // Small additional delay to allow the GPU decoder to "settle" the frame
-                    setTimeout(extractFrame, 100);
-                });
-            } else {
-                // Fallback for Safari and older browsers
-                setTimeout(extractFrame, 300);
-            }
+            // IMPORTANT: requestVideoFrameCallback often fails to fire for off-screen/non-DOM elements 
+            // in modern Chrome (causing the "Processing" hang). 
+            // Using a guaranteed setTimeout after 'seeked' is much more reliable for background extraction.
+            setTimeout(extractFrame, 300)
         }
 
         video.onerror = (e) => {
