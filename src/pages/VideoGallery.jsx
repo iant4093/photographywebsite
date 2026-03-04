@@ -232,22 +232,22 @@ export default function VideoGallery() {
                         <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={true} />
                     </div>
 
-                    {/* Info & Download Footer */}
-                    <div className="shrink-0 mt-6 flex flex-col items-center gap-3 z-10">
+                    {/* Download & Counter */}
+                    <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
+                        <button
+                            onClick={downloadOriginal}
+                            className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
+                            title="Download Video"
+                        >
+                            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                        </button>
                         {images.length > 1 && (
                             <span className="text-white/70 text-sm font-medium drop-shadow-md">
                                 {lightboxIndex + 1} / {images.length}
                             </span>
                         )}
-                        <button
-                            onClick={downloadOriginal}
-                            className="bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white px-6 py-2.5 rounded-full flex items-center gap-2 text-sm font-medium transition-colors shadow-lg cursor-pointer"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            Download Original File
-                        </button>
                     </div>
                 </div>
             )}

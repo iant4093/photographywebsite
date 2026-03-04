@@ -215,16 +215,11 @@ function UserDashboard() {
                             {/* Cover image */}
                             <div className="aspect-[4/3] overflow-hidden relative">
                                 {album.coverImageUrl ? (
-                                    <img
-                                        src={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverImageUrl}`}
+                                    <ProgressiveImage
+                                        src={album.coverThumbKey ? `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverThumbKey}` : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverImageUrl}`}
+                                        blurhash={album.coverBlurhash}
                                         alt={album.title}
-                                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
-                                        onError={(e) => {
-                                            // Fallback if domain fails or is legacy
-                                            if (e.target.src.includes('cloudfront')) {
-                                                e.target.src = album.coverImageUrl;
-                                            }
-                                        }}
+                                        className="w-full h-full group-hover:scale-105 transition-transform duration-700 ease-out"
                                     />
                                 ) : (
                                     <div className="w-full h-full bg-cream-dark flex items-center justify-center">
