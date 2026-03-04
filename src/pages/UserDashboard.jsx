@@ -4,6 +4,7 @@ import { useAuth } from '../context/authContext'
 import { fetchAlbumsFiltered, fetchAlbum } from '../utils/api'
 import JSZip from 'jszip'
 import ProgressiveImage from '../components/ProgressiveImage'
+import ScrollRow from '../components/ScrollRow'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -190,12 +191,12 @@ function UserDashboard() {
                     <h3 className="font-serif text-2xl font-medium text-charcoal">{category}</h3>
                     <div className="h-px bg-warm-border flex-1"></div>
                 </div>
-                <div className="flex overflow-x-auto gap-6 pb-6 snap-x snap-mandatory scrollbar-hide">
+                <ScrollRow>
                     {items.map((album) => (
                         <button
                             key={album.albumId}
                             onClick={() => openAlbum(album)}
-                            className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white text-left cursor-pointer"
+                            className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start stagger-child group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-xl hover:-translate-y-1.5 transition-all duration-500 bg-white text-left cursor-pointer"
                         >
                             {/* Cover image */}
                             <div className="aspect-[4/3] overflow-hidden relative">
@@ -236,6 +237,8 @@ function UserDashboard() {
                                         </div>
                                     </div>
                                 )}
+                                {/* Golden gradient overlay on hover */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-amber-dark/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-20 pointer-events-none" />
                             </div>
                             <div className="p-5">
                                 <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors">{album.title}</h3>
@@ -243,7 +246,7 @@ function UserDashboard() {
                             </div>
                         </button>
                     ))}
-                </div>
+                </ScrollRow>
             </div>
         ))
     }

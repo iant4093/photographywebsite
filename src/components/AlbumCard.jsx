@@ -12,7 +12,7 @@ function AlbumCard({ album }) {
     return (
         <Link
             to={targetRoute}
-            className="group flex flex-col h-full rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-lg transition-all duration-500 bg-white animate-scale-in"
+            className="group flex flex-col h-full rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-xl transition-all duration-500 bg-white hover:-translate-y-1.5"
         >
             {/* Cover image with warm overlay on hover */}
             <div className="relative aspect-[4/3] overflow-hidden bg-cream-dark">
@@ -21,7 +21,7 @@ function AlbumCard({ album }) {
                         src={album.coverThumbKey ? `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverThumbKey}` : album.coverImageUrl}
                         blurhash={album.coverBlurhash}
                         alt={album.title}
-                        className="w-full h-full group-hover:scale-105 transition-transform duration-700 ease-out"
+                        className="w-full h-full group-hover:scale-[1.08] transition-transform duration-700 ease-out"
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">

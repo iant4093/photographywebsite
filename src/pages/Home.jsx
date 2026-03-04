@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import AlbumCard from '../components/AlbumCard'
+import ScrollRow from '../components/ScrollRow'
 import { fetchAlbums } from '../utils/api'
 
 
@@ -10,6 +11,8 @@ function Home() {
     const [albums, setAlbums] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const heroRef = useRef(null)
+    const sectionRefs = useRef([])
 
     // Fetch albums on mount
     useEffect(() => {
@@ -21,6 +24,41 @@ function Home() {
             })
             .finally(() => setLoading(false))
     }, [])
+
+    // Hero parallax on scroll
+    useEffect(() => {
+        const handleScroll = () => {
+            if (heroRef.current) {
+                const scrollY = window.scrollY
+                heroRef.current.style.transform = `translateY(${scrollY * 0.35}px)`
+            }
+        }
+        window.addEventListener('scroll', handleScroll, { passive: true })
+        return () => window.removeEventListener('scroll', handleScroll)
+    }, [])
+
+    // Scroll-triggered animations via Intersection Observer
+    const observeRef = useCallback((el) => {
+        if (!el) return
+        sectionRefs.current.push(el)
+    }, [])
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible')
+                        observer.unobserve(entry.target)
+                    }
+                })
+            },
+            { rootMargin: '0px 0px -60px 0px', threshold: 0.1 }
+        )
+
+        sectionRefs.current.forEach((el) => observer.observe(el))
+        return () => observer.disconnect()
+    }, [loading, albums])
 
     const photoAlbums = albums.filter(a => a.type !== 'video');
 
@@ -45,14 +83,15 @@ function Home() {
 
     return (
         <div>
-            {/* Hero section */}
+            {/* Hero section with parallax */}
             <section className="relative overflow-hidden">
                 {/* Background image with warm overlay */}
-                <div className="absolute inset-0">
+                <div className="absolute inset-0 overflow-hidden">
                     <img
+                        ref={heroRef}
                         src="https://d1twwtwfz1yeo4.cloudfront.net/main-image/mainimage.jpeg"
                         alt="Golden hour landscape"
-                        className="w-full h-full object-cover"
+                        className="w-full h-[120%] object-cover parallax-hero"
                     />
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/40 via-charcoal/20 to-cream" />
                 </div>
@@ -71,7 +110,7 @@ function Home() {
                         <div className="flex flex-wrap items-center gap-4 mt-8">
                             <a
                                 href="#albums"
-                                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-amber text-white font-medium hover:bg-amber-dark transition-all duration-300 shadow-warm hover:shadow-warm-lg"
+                                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-amber text-white font-medium hover:bg-amber-dark transition-all duration-300 shadow-warm hover:shadow-warm-lg hover:scale-105 active:scale-95"
                             >
                                 Explore Photos
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -80,7 +119,7 @@ function Home() {
                             </a>
                             <Link
                                 to="/videos"
-                                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 backdrop-blur-md text-white border border-white/20 font-medium transition-all duration-300 shadow-warm hover:shadow-warm-lg"
+                                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 backdrop-blur-md text-white border border-white/20 font-medium transition-all duration-300 shadow-warm hover:shadow-warm-lg hover:scale-105 active:scale-95"
                             >
                                 Explore Videos
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -113,19 +152,24 @@ function Home() {
                     </div>
                 )}
 
-                {!loading && photoAlbums.length > 0 && photoCategories.map((cat) => (
-                    <div key={`photo-${cat}`} className="mb-16">
+                {!loading && photoAlbums.length > 0 && photoCategories.map((cat, catIndex) => (
+                    <div
+                        key={`photo-${cat}`}
+                        ref={observeRef}
+                        className="mb-16 scroll-animate"
+                        style={{ transitionDelay: `${catIndex * 100}ms` }}
+                    >
                         <div className="flex items-center gap-4 mb-8">
                             <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
                             <div className="h-px bg-warm-border flex-1"></div>
                         </div>
-                        <div className="flex overflow-x-auto gap-6 pb-8 snap-x snap-mandatory scrollbar-hide">
+                        <ScrollRow>
                             {groupedPhotoAlbums[cat].map((album) => (
-                                <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start">
+                                <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
                                     <AlbumCard album={album} />
                                 </div>
                             ))}
-                        </div>
+                        </ScrollRow>
                     </div>
                 ))}
 

@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import AlbumCard from '../components/AlbumCard'
+import ScrollRow from '../components/ScrollRow'
 import { fetchAlbums } from '../utils/api'
 
 // Placeholder videos used when the backend isn't connected yet
@@ -18,6 +19,8 @@ function Videos() {
     const [albums, setAlbums] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const heroRef = useRef(null)
+    const sectionRefs = useRef([])
 
     useEffect(() => {
         fetchAlbums()
@@ -28,6 +31,41 @@ function Videos() {
             })
             .finally(() => setLoading(false))
     }, [])
+
+    // Hero parallax on scroll
+    useEffect(() => {
+        const handleScroll = () => {
+            if (heroRef.current) {
+                const scrollY = window.scrollY
+                heroRef.current.style.transform = `translateY(${scrollY * 0.35}px)`
+            }
+        }
+        window.addEventListener('scroll', handleScroll, { passive: true })
+        return () => window.removeEventListener('scroll', handleScroll)
+    }, [])
+
+    // Scroll-triggered animations via Intersection Observer
+    const observeRef = useCallback((el) => {
+        if (!el) return
+        sectionRefs.current.push(el)
+    }, [])
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible')
+                        observer.unobserve(entry.target)
+                    }
+                })
+            },
+            { rootMargin: '0px 0px -60px 0px', threshold: 0.1 }
+        )
+
+        sectionRefs.current.forEach((el) => observer.observe(el))
+        return () => observer.disconnect()
+    }, [loading, albums])
 
     const videoAlbums = albums.filter(a => a.type === 'video');
 
@@ -51,13 +89,14 @@ function Videos() {
 
     return (
         <div>
-            {/* Hero section */}
+            {/* Hero section with parallax */}
             <section className="relative overflow-hidden">
-                <div className="absolute inset-0">
+                <div className="absolute inset-0 overflow-hidden">
                     <img
+                        ref={heroRef}
                         src="https://d1twwtwfz1yeo4.cloudfront.net/main-image/video.jpeg"
                         alt="Cinematography"
-                        className="w-full h-full object-cover"
+                        className="w-full h-[120%] object-cover parallax-hero"
                     />
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/60 via-charcoal/40 to-cream" />
                 </div>
@@ -98,19 +137,24 @@ function Videos() {
                         </div>
                     )}
 
-                    {!loading && videoAlbums.length > 0 && videoCategories.map((cat) => (
-                        <div key={`video-${cat}`} className="mb-16">
+                    {!loading && videoAlbums.length > 0 && videoCategories.map((cat, catIndex) => (
+                        <div
+                            key={`video-${cat}`}
+                            ref={observeRef}
+                            className="mb-16 scroll-animate"
+                            style={{ transitionDelay: `${catIndex * 100}ms` }}
+                        >
                             <div className="flex items-center gap-4 mb-8">
                                 <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
                                 <div className="h-px bg-warm-border flex-1"></div>
                             </div>
-                            <div className="flex overflow-x-auto gap-6 pb-8 snap-x snap-mandatory scrollbar-hide">
+                            <ScrollRow>
                                 {groupedVideoAlbums[cat].map((album) => (
-                                    <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start">
+                                    <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
                                         <AlbumCard album={album} />
                                     </div>
                                 ))}
-                            </div>
+                            </ScrollRow>
                         </div>
                     ))}
 
