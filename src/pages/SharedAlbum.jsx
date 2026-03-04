@@ -313,10 +313,7 @@ export default function SharedAlbum() {
                                 className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative"
                                 onClick={() => setLightboxIndex(index)}
                             >
-                                <motion.div
-                                    layoutId={`shared-photo-container-${img.rawKey || index}`}
-                                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                                    style={{ willChange: "transform, opacity" }}
+                                <div
                                     className="w-full h-full relative"
                                 >
                                     <ProgressiveImage
@@ -325,7 +322,7 @@ export default function SharedAlbum() {
                                         alt={`Item ${index + 1} from ${album.title}`}
                                         className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                                     />
-                                </motion.div>
+                                </div>
                                 {album.type === 'video' && (
                                     <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors flex items-center justify-center">
                                         <div className="w-16 h-16 rounded-full bg-white/30 backdrop-blur-sm flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
@@ -403,10 +400,7 @@ export default function SharedAlbum() {
 
                                 return (
                                     <>
-                                        <motion.div
-                                            layoutId={`shared-photo-container-${activeImg.rawKey || lightboxIndex}`}
-                                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                                            style={{ willChange: "transform, opacity" }}
+                                        <div
                                             className="flex-1 min-h-0 flex items-center justify-center w-full relative"
                                         >
                                             {/* High-res image with faded-in loading */}
@@ -428,7 +422,7 @@ export default function SharedAlbum() {
                                                 alt=""
                                                 className="absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
                                             />
-                                        </motion.div>
+                                        </div>
 
                                         {/* EXIF Data Overlay */}
                                         {!isLegacyOrDemo && activeImg.exif && (
