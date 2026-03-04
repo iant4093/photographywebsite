@@ -167,7 +167,7 @@ export default function VideoGallery() {
             {/* Video Lightbox Player */}
             {lightboxIndex !== null && images[lightboxIndex] && (
                 <div
-                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-0 md:p-8 animate-fade-in"
+                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 animate-fade-in"
                 >
                     {/* Close button */}
                     <button
@@ -203,12 +203,12 @@ export default function VideoGallery() {
                     )}
 
                     {/* React Player Container */}
-                    <div className="w-full h-full max-w-6xl max-h-[85vh] flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
+                    <div className="flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
                         <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={true} />
                     </div>
 
                     {/* Info & Download Footer */}
-                    <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center gap-2 z-10">
+                    <div className="shrink-0 mt-6 flex flex-col items-center gap-3 z-10">
                         {images.length > 1 && (
                             <span className="text-white/70 text-sm font-medium drop-shadow-md">
                                 {lightboxIndex + 1} / {images.length}

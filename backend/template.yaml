@@ -419,6 +419,20 @@ Resources:
             TableName: !Ref AlbumsTable
         - S3ReadPolicy:
             BucketName: !Ref ImagesBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - mediaconvert:DescribeEndpoints
+                - mediaconvert:CreateJob
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt MediaConvertRole.Arn
+      Environment:
+        Variables:
+          MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
       Events:
         AddImages:
           Type: HttpApi
@@ -445,6 +459,23 @@ Resources:
             ApiId: !Ref Api
             Path: /albums/{albumId}/delete-images
             Method: POST
+
+  # Protected: update a single image's thumbKey/blurhash within an album
+  UpdateImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: update_image.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlbumsTable
+      Events:
+        UpdateImage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}/images
+            Method: PATCH
 
   # Protected: request presigned upload URL
   GetUploadUrlFunction:

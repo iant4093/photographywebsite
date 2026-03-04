@@ -55,12 +55,33 @@ def handler(event, context):
                 ExpressionAttributeValues={':images': new_images}
             )
 
-        # Delete the specified objects from S3
         if objects_to_delete:
-            s3.delete_objects(
-                Bucket=BUCKET,
-                Delete={'Objects': objects_to_delete},
-            )
+            # Also check for HLS prefixes for each video being deleted
+            hls_objects = []
+            for obj in objects_to_delete:
+                key = obj['Key']
+                # If it's a raw video (not a thumb), check for its HLS folder
+                if not key.endswith('.jpg') and '.' in key:
+                    base_name = key.rsplit('.', 1)[0]
+                    hls_prefix = f"{base_name}_hls/"
+                    
+                    # List all objects in the HLS folder
+                    paginator = s3.get_paginator('list_objects_v2')
+                    for page in paginator.paginate(Bucket=BUCKET, Prefix=hls_prefix):
+                        if 'Contents' in page:
+                            for item in page['Contents']:
+                                hls_objects.append({'Key': item['Key']})
+            
+            # Combine all objects to delete
+            all_to_delete = objects_to_delete + hls_objects
+            
+            # S3 delete_objects has a limit of 1000 keys per call
+            for i in range(0, len(all_to_delete), 1000):
+                chunk = all_to_delete[i:i + 1000]
+                s3.delete_objects(
+                    Bucket=BUCKET,
+                    Delete={'Objects': chunk},
+                )
 
         return {
             'statusCode': 200,

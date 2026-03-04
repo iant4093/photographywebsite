@@ -120,6 +120,16 @@ export function deleteImages(token, albumId, keys) {
     })
 }
 
+// Update an individual image's thumbKey and blurhash (for video thumbnail re-generation)
+export function updateImageThumbnail(token, albumId, rawKey, data) {
+    return apiFetch(`/albums/${albumId}/images`, {
+        method: 'PATCH',
+        headers: authHeaders(token),
+        body: JSON.stringify({ rawKey, ...data }),
+    })
+}
+
+
 // Create a new Cognito user (admin only)
 export function createUser(token, email, password) {
     return apiFetch('/users', {

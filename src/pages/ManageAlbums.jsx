@@ -12,7 +12,122 @@ import {
     uploadFileToS3,
     fetchAlbum,
     addImagesToAlbum,
+    updateImageThumbnail,
 } from '../utils/api'
+
+// Helper component for picking a thumbnail time for a video
+function VideoThumbnailScrubber({ file, time, onTimeChange }) {
+    const videoRef = useRef(null)
+    const [duration, setDuration] = useState(0)
+    const [url, setUrl] = useState('')
+
+    useEffect(() => {
+        const objectUrl = URL.createObjectURL(file)
+        setUrl(objectUrl)
+        return () => URL.revokeObjectURL(objectUrl)
+    }, [file])
+
+    const handleLoadedMetadata = () => {
+        if (videoRef.current) {
+            setDuration(videoRef.current.duration)
+            videoRef.current.currentTime = time
+        }
+    }
+
+    const handleChange = (e) => {
+        const newTime = parseInt(e.target.value, 10)
+        onTimeChange(newTime)
+        if (videoRef.current) {
+            videoRef.current.currentTime = newTime
+        }
+    }
+
+    return (
+        <div className="flex items-center gap-4 bg-cream/30 p-3 rounded-lg border border-warm-border/50">
+            <div className="w-24 h-16 bg-black rounded overflow-hidden shrink-0 relative">
+                {url && (
+                    <video
+                        ref={videoRef}
+                        src={url}
+                        onLoadedMetadata={handleLoadedMetadata}
+                        className="w-full h-full object-contain"
+                        muted
+                        playsInline
+                    />
+                )}
+            </div>
+            <div className="flex-1">
+                <p className="text-sm font-medium text-charcoal truncate mb-2">{file.name}</p>
+                <div className="flex items-center gap-2">
+                    <span className="text-xs text-warm-gray">{time}s</span>
+                    <input
+                        type="range"
+                        min="0"
+                        max={duration ? Math.floor(duration) : 100}
+                        step="1"
+                        value={time}
+                        onChange={handleChange}
+                        className="flex-1 text-amber accent-amber"
+                    />
+                    <span className="text-xs text-warm-gray">{Math.floor(duration)}s</span>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+// Scrubber for an already-uploaded video identified by URL (used for thumbnail re-generation)
+function VideoThumbnailFromUrl({ videoUrl, time, onTimeChange }) {
+    const videoRef = useRef(null)
+    const [duration, setDuration] = useState(0)
+
+    const handleLoadedMetadata = () => {
+        if (videoRef.current) {
+            setDuration(videoRef.current.duration)
+            videoRef.current.currentTime = time
+        }
+    }
+
+    const handleChange = (e) => {
+        const newTime = parseInt(e.target.value, 10)
+        onTimeChange(newTime)
+        if (videoRef.current) {
+            videoRef.current.currentTime = newTime
+        }
+    }
+
+    return (
+        <div className="flex items-center gap-4 bg-cream/30 p-3 rounded-lg border border-warm-border/50">
+            <div className="w-24 h-16 bg-black rounded overflow-hidden shrink-0">
+                <video
+                    ref={videoRef}
+                    src={videoUrl}
+                    onLoadedMetadata={handleLoadedMetadata}
+                    className="w-full h-full object-contain"
+                    crossOrigin="anonymous"
+                    muted
+                    playsInline
+                />
+            </div>
+            <div className="flex-1">
+                <p className="text-xs text-warm-gray truncate mb-2">{videoUrl.split('/').pop()}</p>
+                <div className="flex items-center gap-2">
+                    <span className="text-xs text-warm-gray">{time}s</span>
+                    <input
+                        type="range"
+                        min="0"
+                        max={duration ? Math.floor(duration) : 100}
+                        step="1"
+                        value={time}
+                        onChange={handleChange}
+                        className="flex-1 text-amber accent-amber"
+                    />
+                    <span className="text-xs text-warm-gray">{Math.floor(duration)}s</span>
+                </div>
+            </div>
+        </div>
+    )
+}
 
 // Manage albums page — full CRUD for main gallery and per-user albums
 function ManageAlbums() {
@@ -40,8 +155,14 @@ function ManageAlbums() {
     const [albumImages, setAlbumImages] = useState([])
     const [loadingImages, setLoadingImages] = useState(false)
     const [addingFiles, setAddingFiles] = useState([])
+    const [addingVideoFiles, setAddingVideoFiles] = useState([]) // [{ file, time }]
     const [uploadingMore, setUploadingMore] = useState(false)
     const addFilesRef = useRef(null)
+
+    // Per-video thumbnail editing state
+    const [editingThumbKey, setEditingThumbKey] = useState(null) // rawKey of video being edited
+    const [editingThumbTime, setEditingThumbTime] = useState(0)
+    const [updatingThumb, setUpdatingThumb] = useState(false)
 
     const [actionError, setActionError] = useState('')
     const [actionSuccess, setActionSuccess] = useState('')
@@ -97,11 +218,14 @@ function ManageAlbums() {
             // Collapse
             setExpandedAlbumId(null)
             setAlbumImages([])
+            setAddingFiles([])
+            setAddingVideoFiles([])
             return
         }
-        setLoadingImages(true)
         setExpandedAlbumId(album.albumId)
         setAddingFiles([])
+        setAddingVideoFiles([])
+        setLoadingImages(true)
         try {
             const token = await getIdToken()
             const data = await fetchAlbum(album.albumId, token)
@@ -111,6 +235,19 @@ function ManageAlbums() {
         } finally {
             setLoadingImages(false)
         }
+    }
+
+    const handleVideoFileChange = (e) => {
+        const files = Array.from(e.target.files)
+        setAddingVideoFiles(files.map(file => ({ file, time: 0 })))
+    }
+
+    const handleVideoTimeChange = (index, newTime) => {
+        setAddingVideoFiles(prev => {
+            const copy = [...prev]
+            copy[index].time = newTime
+            return copy
+        })
     }
 
     // Start editing album metadata
@@ -248,9 +385,120 @@ function ManageAlbums() {
         })
     }
 
-    // Add more images to an existing album
+    // Generate thumbnail and blurhash from video frame
+    async function processVideo(file, time) {
+        return new Promise((resolve, reject) => {
+            const video = document.createElement('video')
+            video.muted = true
+            video.playsInline = true
+            video.preload = "auto"
+            const url = URL.createObjectURL(file)
+
+            video.onloadedmetadata = () => {
+                video.currentTime = Math.max(0.1, time)
+            }
+
+            video.onseeked = () => {
+                const extractFrame = () => {
+                    const canvas = document.createElement('canvas')
+                    const MAX_SIZE = 800
+                    let width = video.videoWidth
+                    let height = video.videoHeight
+
+                    if (width > height && width > MAX_SIZE) {
+                        height *= MAX_SIZE / width
+                        width = MAX_SIZE
+                    } else if (height > width && height > MAX_SIZE) {
+                        width *= MAX_SIZE / height
+                        height = MAX_SIZE
+                    }
+
+                    width = Math.round(width)
+                    height = Math.round(height)
+
+                    canvas.width = width
+                    canvas.height = height
+                    const ctx = canvas.getContext('2d')
+                    ctx.drawImage(video, 0, 0, width, height)
+
+                    const hashCanvas = document.createElement('canvas')
+                    const hashSize = 32
+                    hashCanvas.width = hashSize
+                    hashCanvas.height = Math.round(hashSize * (height / width))
+                    const hashCtx = hashCanvas.getContext('2d')
+                    hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
+                    const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
+
+                    const componentX = 4
+                    const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
+                    const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
+
+                    canvas.toBlob((blob) => {
+                        URL.revokeObjectURL(url)
+                        resolve({ thumbnail: blob, blurhash, width: video.videoWidth, height: video.videoHeight })
+                    }, 'image/jpeg', 0.85)
+                }
+
+                if ('requestVideoFrameCallback' in video) {
+                    video.requestVideoFrameCallback(extractFrame);
+                } else {
+                    setTimeout(extractFrame, 150);
+                }
+            }
+
+            video.onerror = (e) => reject(e)
+            video.src = url
+        })
+    }
+
+    // Change the thumbnail of an already-uploaded video by scrubbing to a new time
+    async function handleChangeVideoThumbnail(img) {
+        const rawKey = img.rawKey || img.key
+        const cfDomain = import.meta.env.VITE_CLOUDFRONT_DOMAIN
+        const videoUrl = `https://${cfDomain}/${rawKey}`
+        const thumbKey = img.thumbKey || `${rawKey}.thumb.jpg`
+
+        setUpdatingThumb(true)
+        setActionError('')
+        try {
+            // 1. Fetch the video as a blob from CloudFront
+            const res = await fetch(videoUrl)
+            if (!res.ok) throw new Error(`Failed to fetch video: ${res.status}`)
+            const blob = await res.blob()
+            const file = new File([blob], rawKey.split('/').pop(), { type: blob.type || 'video/mp4' })
+
+            // 2. Extract the frame at the chosen time
+            const { thumbnail, blurhash } = await processVideo(file, editingThumbTime)
+
+            // 3. Upload the new thumbnail to S3 (overwrite existing thumb)
+            const token = await getIdToken()
+            const { uploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+            await uploadFileToS3(uploadUrl, thumbnail)
+
+            // 4. Persist the new thumbKey + blurhash to DynamoDB
+            await updateImageThumbnail(token, expandedAlbumId, rawKey, { thumbKey, blurhash })
+
+            // 5. Refresh local state so the grid shows the new thumbnail
+            const data = await fetchAlbum(expandedAlbumId, token)
+            setAlbumImages(data.images || [])
+
+            setEditingThumbKey(null)
+            setActionSuccess('Thumbnail updated!')
+            setTimeout(() => setActionSuccess(''), 3000)
+        } catch (err) {
+            setActionError(err.message)
+        } finally {
+            setUpdatingThumb(false)
+        }
+    }
+
+    // Add more images/videos to an existing album
     async function handleAddImages() {
-        if (!addingFiles.length || !expandedAlbumId) return
+        const isVideo = typeFilter === 'video'
+        if (isVideo && !addingVideoFiles.length) return
+        if (!isVideo && !addingFiles.length) return
+        if (!expandedAlbumId) return
+
         setUploadingMore(true)
         setActionError('')
         const expandedAlbum = albums.find((a) => a.albumId === expandedAlbumId)
@@ -258,40 +506,71 @@ function ManageAlbums() {
             const token = await getIdToken()
             const s3Prefix = expandedAlbum?.s3Prefix || `albums/${expandedAlbumId}/`
 
-            const finalImages = []
+            const finalItems = []
 
-            for (const file of addingFiles) {
-                // 1. Process local thumbnail/hash
-                const { thumbnail, blurhash, width, height } = await processImage(file)
+            if (isVideo) {
+                for (const vf of addingVideoFiles) {
+                    const { file, time } = vf
+                    // 1. Process local thumbnail/hash
+                    const { thumbnail, blurhash, width, height } = await processVideo(file, time)
 
-                // 2. Request both Pre-signed URLs
-                const rawKey = `${s3Prefix}${file.name}`
-                const thumbKey = `${s3Prefix}thumb_${file.name}`
+                    // 2. Request both Pre-signed URLs
+                    const rawKey = `${s3Prefix}${file.name}`
+                    const thumbKey = `${s3Prefix}thumb_${file.name}.jpg`
 
-                const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
-                const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+                    const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
+                    const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
 
-                // 3. Upload both to S3
-                await Promise.all([
-                    uploadFileToS3(rawUploadUrl, file),
-                    uploadFileToS3(thumbUploadUrl, thumbnail)
-                ])
+                    // 3. Upload both to S3
+                    await Promise.all([
+                        uploadFileToS3(rawUploadUrl, file),
+                        uploadFileToS3(thumbUploadUrl, thumbnail)
+                    ])
 
-                finalImages.push({
-                    rawKey,
-                    thumbKey,
-                    blurhash,
-                    width,
-                    height
-                })
+                    finalItems.push({
+                        rawKey,
+                        thumbKey,
+                        blurhash,
+                        width,
+                        height,
+                        thumbnailTime: time
+                    })
+                }
+            } else {
+                for (const file of addingFiles) {
+                    // 1. Process local thumbnail/hash
+                    const { thumbnail, blurhash, width, height } = await processImage(file)
+
+                    // 2. Request both Pre-signed URLs
+                    const rawKey = `${s3Prefix}${file.name}`
+                    const thumbKey = `${s3Prefix}thumb_${file.name}`
+
+                    const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
+                    const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+
+                    // 3. Upload both to S3
+                    await Promise.all([
+                        uploadFileToS3(rawUploadUrl, file),
+                        uploadFileToS3(thumbUploadUrl, thumbnail)
+                    ])
+
+                    finalItems.push({
+                        rawKey,
+                        thumbKey,
+                        blurhash,
+                        width,
+                        height
+                    })
+                }
             }
 
             // Append to database
-            await addImagesToAlbum(token, expandedAlbumId, finalImages)
+            await addImagesToAlbum(token, expandedAlbumId, finalItems)
 
             setAddingFiles([])
+            setAddingVideoFiles([])
             if (addFilesRef.current) addFilesRef.current.value = ''
-            setActionSuccess(`Added ${addingFiles.length} image(s)!`)
+            setActionSuccess(`Added ${isVideo ? addingVideoFiles.length : addingFiles.length} ${isVideo ? 'video(s)' : 'image(s)'}!`)
             // Reload images
             const data = await fetchAlbum(expandedAlbumId, token)
             setAlbumImages(data.images || [])
@@ -537,80 +816,151 @@ function ManageAlbums() {
                                                         </button>
                                                     </div>
 
-                                                    {/* Add more images (only for photos) */}
-                                                    {typeFilter !== 'video' && (
-                                                        <div className="mb-6 p-4 bg-cream/50 rounded-xl border border-warm-border">
-                                                            <p className="text-sm font-medium text-charcoal mb-2">Add more photos</p>
+                                                    {/* Add more images (only for photos) or Add more videos */}
+                                                    <div className="mb-6 p-4 bg-cream/50 rounded-xl border border-warm-border">
+                                                        <p className="text-sm font-medium text-charcoal mb-2">Add more {typeFilter === 'video' ? 'videos' : 'photos'}</p>
+                                                        <div className="flex flex-col gap-3">
                                                             <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
                                                                 <input
                                                                     ref={addFilesRef}
                                                                     type="file"
-                                                                    accept="image/*"
+                                                                    accept={typeFilter === 'video' ? 'video/*' : 'image/*'}
                                                                     multiple
-                                                                    onChange={(e) => setAddingFiles(Array.from(e.target.files))}
+                                                                    onChange={typeFilter === 'video' ? handleVideoFileChange : (e) => setAddingFiles(Array.from(e.target.files))}
                                                                     className="flex-1 w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-amber/10 file:text-amber-dark file:font-medium file:cursor-pointer"
                                                                 />
                                                                 <button
                                                                     onClick={handleAddImages}
-                                                                    disabled={!addingFiles.length || uploadingMore}
+                                                                    disabled={(typeFilter === 'video' ? !addingVideoFiles.length : !addingFiles.length) || uploadingMore}
                                                                     className="w-full sm:w-auto px-4 py-2 rounded-lg bg-amber text-white text-sm font-medium cursor-pointer hover:bg-amber-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                                                 >
                                                                     {uploadingMore ? 'Uploading…' : 'Add'}
                                                                 </button>
                                                             </div>
-                                                        </div>
-                                                    )}
 
-                                                    {/* Images grid (Photos) or Video details */}
+                                                            {typeFilter === 'video' && addingVideoFiles.length > 0 && (
+                                                                <div className="mt-4 space-y-3">
+                                                                    <p className="text-sm font-medium text-charcoal mb-1">Adjust Thumbnails (Optional):</p>
+                                                                    {addingVideoFiles.map((vf, i) => (
+                                                                        <VideoThumbnailScrubber
+                                                                            key={i}
+                                                                            file={vf.file}
+                                                                            time={vf.time}
+                                                                            onTimeChange={(val) => handleVideoTimeChange(i, val)}
+                                                                        />
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Images grid (Photos) or Video grid */}
                                                     {loadingImages ? (
                                                         <div className="flex justify-center py-10">
                                                             <div className="w-8 h-8 border-3 border-amber border-t-transparent rounded-full animate-spin" />
                                                         </div>
-                                                    ) : typeFilter === 'video' ? (
-                                                        <div className="space-y-4">
-                                                            <p className="text-sm text-charcoal">
-                                                                <span className="font-semibold">S3 Key:</span> {album.coverImageUrl}
-                                                            </p>
-                                                            <p className="text-xs text-warm-gray italic">
-                                                                Video processing and high-quality transcodes are managed during upload.
-                                                            </p>
-                                                        </div>
                                                     ) : albumImages.length === 0 ? (
-                                                        <p className="text-center py-8 text-warm-gray">No photos yet.</p>
+                                                        <p className="text-center py-8 text-warm-gray">No items yet.</p>
                                                     ) : (
-                                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
-                                                            {albumImages.map((img, idx) => {
-                                                                const isLegacy = !img.thumbKey
-                                                                const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
-                                                                const imgKey = img.rawKey || img.key || `fallback-${idx}`
+                                                        <>
+                                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
+                                                                {albumImages.map((img, idx) => {
+                                                                    const isLegacy = !img.thumbKey
+                                                                    const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                                                                    const imgKey = img.rawKey || img.key || `fallback-${idx}`
+                                                                    const isEditingThisThumb = editingThumbKey === imgKey
 
-                                                                return (
-                                                                    <div key={imgKey} className="group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30">
-                                                                        <img src={thumbUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
-                                                                        {/* Set as cover button (top-left) */}
-                                                                        <button
-                                                                            onClick={() => handleSetCover(img)}
-                                                                            title="Set as cover image"
-                                                                            className="absolute top-2 left-2 w-7 h-7 rounded-full bg-amber/80 hover:bg-amber text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                                                                        >
-                                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                                                                            </svg>
-                                                                        </button>
-                                                                        {/* Remove button (top-right) */}
-                                                                        <button
-                                                                            onClick={() => handleRemoveImage(imgKey)}
-                                                                            title="Remove image"
-                                                                            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/80 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                                                                        >
+                                                                    return (
+                                                                        <div key={imgKey} className="group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30">
+                                                                            <img src={thumbUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                                                            {/* Set as cover button (top-left) */}
+                                                                            <button
+                                                                                onClick={() => handleSetCover(img)}
+                                                                                title="Set as album cover"
+                                                                                className="absolute top-2 left-2 w-7 h-7 rounded-full bg-amber/80 hover:bg-amber text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                                            >
+                                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                                                                                </svg>
+                                                                            </button>
+                                                                            {/* Remove button (top-right) */}
+                                                                            <button
+                                                                                onClick={() => handleRemoveImage(imgKey)}
+                                                                                title="Remove"
+                                                                                className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/80 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                                            >
+                                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                                                </svg>
+                                                                            </button>
+
+                                                                            {typeFilter === 'video' && (
+                                                                                <>
+                                                                                    {/* Play icon overlay */}
+                                                                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity">
+                                                                                        <div className="w-10 h-10 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center border border-white/30">
+                                                                                            <svg className="w-5 h-5 text-white fill-current ml-1" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    {/* Change thumbnail button */}
+                                                                                    <button
+                                                                                        onClick={() => {
+                                                                                            if (isEditingThisThumb) {
+                                                                                                setEditingThumbKey(null)
+                                                                                            } else {
+                                                                                                setEditingThumbKey(imgKey)
+                                                                                                setEditingThumbTime(0)
+                                                                                            }
+                                                                                        }}
+                                                                                        title="Change thumbnail"
+                                                                                        className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-lg text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center gap-1 ${isEditingThisThumb ? 'bg-amber' : 'bg-black/60 hover:bg-amber'}`}
+                                                                                    >
+                                                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                                                        </svg>
+                                                                                        Thumbnail
+                                                                                    </button>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+
+                                                            {/* Inline thumbnail editor */}
+                                                            {typeFilter === 'video' && editingThumbKey && albumImages.some(i => (i.rawKey || i.key) === editingThumbKey) && (
+                                                                <div className="mt-4 p-4 bg-cream/50 rounded-xl border border-warm-border animate-slide-up">
+                                                                    <div className="flex items-center justify-between mb-3">
+                                                                        <p className="text-sm font-medium text-charcoal">Change Thumbnail</p>
+                                                                        <button onClick={() => setEditingThumbKey(null)} className="text-warm-gray hover:text-charcoal cursor-pointer">
                                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                                                             </svg>
                                                                         </button>
                                                                     </div>
-                                                                )
-                                                            })}
-                                                        </div>
+                                                                    <VideoThumbnailFromUrl
+                                                                        videoUrl={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${editingThumbKey}`}
+                                                                        time={editingThumbTime}
+                                                                        onTimeChange={setEditingThumbTime}
+                                                                    />
+                                                                    <div className="mt-3 flex gap-2">
+                                                                        <button
+                                                                            onClick={() => handleChangeVideoThumbnail(albumImages.find(i => (i.rawKey || i.key) === editingThumbKey))}
+                                                                            disabled={updatingThumb}
+                                                                            className="px-4 py-2 rounded-lg bg-amber text-white text-sm font-medium cursor-pointer hover:bg-amber-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                                        >
+                                                                            {updatingThumb ? 'Saving\u2026' : 'Save Thumbnail'}
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => setEditingThumbKey(null)}
+                                                                            className="px-4 py-2 rounded-lg bg-cream text-warm-gray text-sm font-medium cursor-pointer hover:bg-cream-dark transition-colors"
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
                                             )}
