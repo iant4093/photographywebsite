@@ -63,6 +63,7 @@ export async function processVideo(file, time) {
         video.muted = true
         video.playsInline = true
         video.preload = "auto"
+
         // IMPORTANT: Do NOT use display:none — browsers won't decode frames
         // for hidden elements, resulting in black canvas captures.
         video.style.position = 'fixed'
@@ -77,7 +78,7 @@ export async function processVideo(file, time) {
         const url = URL.createObjectURL(file)
 
         const cleanup = () => {
-            video.onloadedmetadata = null
+            video.oncanplay = null
             video.onseeked = null
             video.onerror = null
             if (document.body.contains(video)) {
@@ -85,7 +86,8 @@ export async function processVideo(file, time) {
             }
         }
 
-        video.onloadedmetadata = () => {
+        video.oncanplay = () => {
+            // Force a tiny offset if 0 to guarantee a seeked event fires and skip black fade-ins
             video.currentTime = Math.max(0.1, time)
         }
 
@@ -95,6 +97,11 @@ export async function processVideo(file, time) {
                 const MAX_SIZE = 800
                 let width = video.videoWidth
                 let height = video.videoHeight
+
+                if (!width || !height) {
+                    cleanup();
+                    return reject(new Error('Video has no dimensions during extraction'));
+                }
 
                 if (width > height && width > MAX_SIZE) {
                     height *= MAX_SIZE / width
@@ -131,9 +138,17 @@ export async function processVideo(file, time) {
                 }, 'image/jpeg', 0.85)
             }
 
-            // Wait a tiny bit for the browser to decode the frame after a seek, 
-            // avoiding requestVideoFrameCallback which hangs on unattached DOM nodes in Chrome.
-            setTimeout(extractFrame, 200);
+            // Using requestVideoFrameCallback if available for frame-accurate capture.
+            // Still keeping a setTimeout fallback for browsers where rVFC might not trigger in off-screen tabs.
+            if ('requestVideoFrameCallback' in video) {
+                video.requestVideoFrameCallback(() => {
+                    // Small additional delay to allow the GPU decoder to "settle" the frame
+                    setTimeout(extractFrame, 100);
+                });
+            } else {
+                // Fallback for Safari and older browsers
+                setTimeout(extractFrame, 300);
+            }
         }
 
         video.onerror = (e) => {

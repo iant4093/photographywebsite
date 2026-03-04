@@ -148,6 +148,10 @@ export default function UploadVideo() {
             for (let i = 0; i < videoFiles.length; i++) {
                 const { file, time } = videoFiles[i]
 
+                // Add a tiny extra delay for the first video to ensure the browser's 
+                // media subsystem is fully ready for off-screen drawing
+                if (i === 0) await new Promise(r => setTimeout(r, 200));
+
                 // 1. Extract thumbnail
                 setProgress({ current: i, total: videoFiles.length, status: `Processing ${file.name}...` })
                 const { thumbnail, blurhash, width, height } = await processVideo(file, time)
