@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { motion } from 'framer-motion'
 
 // Admin dashboard — hub with widget cards for Upload, Manage, and Add Users
 function AdminDashboard() {
@@ -61,8 +62,20 @@ function AdminDashboard() {
         },
     ]
 
+    const pageVariants = {
+        initial: { opacity: 0 },
+        animate: { opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
+    }
+
     return (
-        <div className="max-w-5xl mx-auto px-6 py-12">
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]"
+        >
             <div className="animate-slide-up">
                 {/* Header */}
                 <div className="mb-10">
@@ -104,7 +117,7 @@ function AdminDashboard() {
                     ))}
                 </div>
             </div>
-        </div>
+        </motion.div>
     )
 }
 

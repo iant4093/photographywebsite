@@ -49,7 +49,7 @@ function App() {
     <div className="min-h-screen flex flex-col bg-cream">
       <Navbar />
 
-      <main className={`flex-1 ${!isHeroPage ? 'pt-[88px] md:pt-[104px]' : ''}`}>
+      <main className="flex-1">
         <AnimatePresence mode="wait" onExitComplete={handleExitComplete}>
           <Routes location={location} key={location.pathname}>
             {/* Public routes */}

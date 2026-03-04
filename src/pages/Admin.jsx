@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { motion } from 'framer-motion'
 import { encode } from 'blurhash'
 import { v4 as uuidv4 } from 'uuid'
 import { Link } from 'react-router-dom'
@@ -220,8 +221,21 @@ function Upload() {
         }
     }
 
+    // Page transition animation variants
+    const pageVariants = {
+        initial: { opacity: 0 },
+        animate: { opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
+    }
+
     return (
-        <div className="max-w-3xl mx-auto px-6 py-12">
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="max-w-3xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]"
+        >
             <div className="animate-slide-up">
                 {/* Back link */}
                 <Link to="/admin" className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8">
@@ -448,7 +462,7 @@ function Upload() {
                     </button>
                 </form>
             </div>
-        </div>
+        </motion.div>
     )
 }
 

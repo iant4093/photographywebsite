@@ -174,7 +174,7 @@ function AlbumGallery() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="flex-1 bg-cream animate-fade-in pb-16"
+            className="flex-1 bg-cream animate-fade-in pb-16 pt-[88px] md:pt-[104px]"
         >
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}

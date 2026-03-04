@@ -55,7 +55,7 @@ export default function Contact() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="max-w-3xl mx-auto px-6 py-20 flex-1 w-full"
+            className="max-w-3xl mx-auto px-6 py-20 pt-[88px] md:pt-[104px] flex-1 w-full"
         >
             <div className="text-center mb-16">
                 <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">Get In Touch</h1>

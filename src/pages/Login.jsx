@@ -66,7 +66,7 @@ function Login() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="min-h-[80vh] flex items-center justify-center px-6 py-12"
+            className="min-h-[80vh] flex items-center justify-center px-6 py-12 pt-[88px] md:pt-[104px]"
         >
             <div className="w-full max-w-md">
                 {/* Header */}
