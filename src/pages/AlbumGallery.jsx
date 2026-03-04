@@ -260,17 +260,18 @@ function AlbumGallery() {
                                         return (
                                             <motion.div
                                                 key={img.key || img.rawKey || index}
+                                                layoutId={`photo-container-${img.rawKey || index}`}
                                                 initial={hasBeenRevealed ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 20 }}
                                                 whileInView={hasBeenRevealed ? {} : { opacity: 1, scale: 1, y: 0 }}
                                                 onViewportEnter={() => !hasBeenRevealed && markAsRevealed(photoId)}
                                                 viewport={{ once: true, margin: "100px" }}
-                                                transition={{ duration: 0.5, ease: "easeOut", delay: hasBeenRevealed ? 0 : (index % 6) * 0.08 }}
+                                                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                                style={{ willChange: "transform, opacity" }}
                                                 className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
                                                 onClick={() => setLightboxIndex(index)}
                                             >
                                                 <div className="relative w-full h-full">
                                                     <ProgressiveImage
-                                                        layoutId={`photo-${img.rawKey || index}`}
                                                         src={thumbUrl}
                                                         blurhash={img.blurhash}
                                                         alt={`Item ${index + 1} from ${album.title}`}
@@ -300,7 +301,8 @@ function AlbumGallery() {
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
                                     exit={{ opacity: 0 }}
-                                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12"
+                                    transition={{ duration: 0.2 }}
+                                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0"
                                     onClick={() => setLightboxIndex(null)}
                                 >
                                     {/* Close button */}
@@ -331,19 +333,42 @@ function AlbumGallery() {
                                     </button>
 
                                     {/* Image Wrapper */}
-                                    <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
+                                    <motion.div
+                                        layoutId={`photo-container-${images[lightboxIndex].rawKey || lightboxIndex}`}
+                                        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                        style={{ willChange: "transform, opacity" }}
+                                        className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
                                         {(() => {
                                             const activeImg = images[lightboxIndex]
                                             const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
+                                            const thumbUrl = isLegacyOrDemo
+                                                ? (activeImg.url || activeImg)
+                                                : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.thumbKey}`
                                             const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+
                                             return (
                                                 <>
-                                                    <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+                                                    <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
+                                                        {/* High-res image with faded-in loading */}
                                                         <motion.img
-                                                            layoutId={`photo-${activeImg.rawKey || lightboxIndex}`}
+                                                            key={`high-${activeImg.rawKey || lightboxIndex}`}
                                                             src={activeRawUrl}
                                                             alt="Full size preview"
-                                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl"
+                                                            initial={{ opacity: 0 }}
+                                                            animate={{ opacity: 1 }}
+                                                            exit={{ opacity: 0 }}
+                                                            transition={{ duration: 0.4, delay: 0.1 }}
+                                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl relative z-20"
+                                                            style={{ willChange: "opacity" }}
+                                                        />
+
+                                                        {/* Placeholder thumbnail for instant visual feedback */}
+                                                        <img
+                                                            src={thumbUrl}
+                                                            alt=""
+                                                            className="absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
                                                         />
                                                     </div>
 
@@ -371,7 +396,7 @@ function AlbumGallery() {
                                                 </>
                                             )
                                         })()}
-                                    </div>
+                                    </motion.div>
 
                                     {/* Download & Image counter */}
                                     <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>

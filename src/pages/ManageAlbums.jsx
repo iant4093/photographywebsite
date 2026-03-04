@@ -502,7 +502,7 @@ function ManageAlbums() {
     }, [albums]);
 
     return (
-        <div className="max-w-5xl mx-auto px-6 py-12">
+        <div className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
             <div className="animate-slide-up">
                 {/* Back link */}
                 <Link to="/admin" className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8">

@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
+import { isRevealed, markAsRevealed } from '../utils/scroll'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -201,10 +202,15 @@ function UserDashboard() {
                 </div>
                 <ScrollRow>
                     {items.map((album) => (
-                        <button
+                        <motion.div
                             key={album.albumId}
+                            initial={isRevealed(`user-album-${album.albumId}`) ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
+                            whileInView={isRevealed(`user-album-${album.albumId}`) ? {} : { opacity: 1, y: 0 }}
+                            onViewportEnter={() => markAsRevealed(`user-album-${album.albumId}`)}
+                            viewport={{ once: true, margin: "50px" }}
+                            transition={{ duration: 0.5, ease: "easeOut" }}
                             onClick={() => openAlbum(album)}
-                            className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start stagger-child group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-xl hover:-translate-y-1.5 transition-all duration-500 bg-white text-left cursor-pointer"
+                            className={`shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start stagger-child group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-xl hover:-translate-y-1.5 transition-all duration-500 bg-white text-left cursor-pointer ${isRevealed(`user-album-${album.albumId}`) ? 'no-stagger' : ''}`}
                         >
                             {/* Cover image */}
                             <div className="aspect-[4/3] overflow-hidden relative">
@@ -252,7 +258,7 @@ function UserDashboard() {
                                 <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors">{album.title}</h3>
                                 {album.description && <p className="mt-1 text-sm text-warm-gray line-clamp-2">{album.description}</p>}
                             </div>
-                        </button>
+                        </motion.div>
                     ))}
                 </ScrollRow>
             </div>
@@ -268,7 +274,7 @@ function UserDashboard() {
             className="flex-1 bg-cream animate-fade-in"
         >
             {/* Header section with User Info */}
-            <div className="max-w-5xl mx-auto px-6 py-12">
+            <div className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
                 {/* Albums grid or selected album view */}
                 {selectedAlbum ? (
                     /* Album detail view */
@@ -323,19 +329,21 @@ function UserDashboard() {
                                         : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
 
                                     return (
-                                        <div
+                                        <motion.div
                                             key={img.key || img.rawKey || index}
-                                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3]"
+                                            layoutId={`user-photo-container-${img.rawKey || index}`}
+                                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                            style={{ willChange: "transform, opacity" }}
+                                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative"
                                             onClick={() => setLightboxIndex(index)}
                                         >
                                             <ProgressiveImage
-                                                layoutId={`user-${img.rawKey || index}`}
                                                 src={thumbUrl}
                                                 blurhash={img.blurhash}
                                                 alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
                                                 className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                                             />
-                                        </div>
+                                        </motion.div>
                                     )
                                 })}
                             </div>
@@ -400,7 +408,8 @@ function UserDashboard() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12"
+                        transition={{ duration: 0.2 }}
+                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 md:p-12"
                         onClick={() => setLightboxIndex(null)}
                     >
                         <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
@@ -430,19 +439,42 @@ function UserDashboard() {
                         </button>
 
                         {/* Image Wrapper & Info */}
-                        <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
+                        <motion.div
+                            layoutId={`user-photo-container-${images[lightboxIndex].rawKey || lightboxIndex}`}
+                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                            style={{ willChange: "transform, opacity" }}
+                            className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             {(() => {
                                 const activeImg = images[lightboxIndex]
                                 const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
+                                const thumbUrl = isLegacyOrDemo
+                                    ? (activeImg.url || activeImg)
+                                    : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.thumbKey}`
                                 const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+
                                 return (
                                     <>
-                                        <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+                                        <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
+                                            {/* High-res image with faded-in loading */}
                                             <motion.img
-                                                layoutId={`user-${activeImg.rawKey || lightboxIndex}`}
+                                                key={`high-${activeImg.rawKey || lightboxIndex}`}
                                                 src={activeRawUrl}
                                                 alt="Full size preview"
-                                                className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl"
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                exit={{ opacity: 0 }}
+                                                transition={{ duration: 0.4, delay: 0.1 }}
+                                                className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl relative z-20"
+                                                style={{ willChange: "opacity" }}
+                                            />
+
+                                            {/* Placeholder thumbnail for instant visual feedback */}
+                                            <img
+                                                src={thumbUrl}
+                                                alt=""
+                                                className="absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
                                             />
                                         </div>
 
@@ -470,7 +502,7 @@ function UserDashboard() {
                                     </>
                                 )
                             })()}
-                        </div>
+                        </motion.div>
 
                         {/* Download & Image counter */}
                         <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>

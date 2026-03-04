@@ -173,7 +173,7 @@ export default function SharedAlbum() {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="max-w-md mx-auto px-6 py-24 text-center"
+                className="max-w-md mx-auto px-6 py-24 text-center pt-[88px] md:pt-[104px]"
             >
                 <svg className="w-16 h-16 mx-auto text-amber mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -212,7 +212,7 @@ export default function SharedAlbum() {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="max-w-md mx-auto px-6 py-24 text-center"
+                className="max-w-md mx-auto px-6 py-24 text-center pt-[88px] md:pt-[104px]"
             >
                 <svg className="w-16 h-16 mx-auto text-red-400 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -237,7 +237,7 @@ export default function SharedAlbum() {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="flex flex-col flex-1 items-center justify-center py-32"
+                className="flex flex-col flex-1 items-center justify-center py-32 pt-[88px] md:pt-[104px]"
             >
                 <div className="w-12 h-12 border-4 border-amber border-t-transparent rounded-full animate-spin"></div>
                 <p className="mt-4 text-warm-gray font-medium">Accessing gallery...</p>
@@ -313,13 +313,19 @@ export default function SharedAlbum() {
                                 className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative"
                                 onClick={() => setLightboxIndex(index)}
                             >
-                                <ProgressiveImage
-                                    layoutId={`shared-${img.rawKey || index}`}
-                                    src={thumbUrl}
-                                    blurhash={img.blurhash}
-                                    alt={`Item ${index + 1} from ${album.title}`}
-                                    className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
-                                />
+                                <motion.div
+                                    layoutId={`shared-photo-container-${img.rawKey || index}`}
+                                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                    style={{ willChange: "transform, opacity" }}
+                                    className="w-full h-full relative"
+                                >
+                                    <ProgressiveImage
+                                        src={thumbUrl}
+                                        blurhash={img.blurhash}
+                                        alt={`Item ${index + 1} from ${album.title}`}
+                                        className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                    />
+                                </motion.div>
                                 {album.type === 'video' && (
                                     <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors flex items-center justify-center">
                                         <div className="w-16 h-16 rounded-full bg-white/30 backdrop-blur-sm flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
@@ -349,7 +355,8 @@ export default function SharedAlbum() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12"
+                        transition={{ duration: 0.2 }}
+                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 md:p-12"
                         onClick={() => setLightboxIndex(null)}
                     >
                         <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
@@ -393,14 +400,32 @@ export default function SharedAlbum() {
 
                                 return (
                                     <>
-                                        <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+                                        <motion.div
+                                            layoutId={`shared-photo-container-${activeImg.rawKey || lightboxIndex}`}
+                                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                            style={{ willChange: "transform, opacity" }}
+                                            className="flex-1 min-h-0 flex items-center justify-center w-full relative"
+                                        >
+                                            {/* High-res image with faded-in loading */}
                                             <motion.img
-                                                layoutId={`shared-${activeImg.rawKey || lightboxIndex}`}
+                                                key={`high-${activeImg.rawKey || lightboxIndex}`}
                                                 src={activeRawUrl}
                                                 alt="Full size preview"
-                                                className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl"
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                exit={{ opacity: 0 }}
+                                                transition={{ duration: 0.4, delay: 0.1 }}
+                                                className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl relative z-20"
+                                                style={{ willChange: "opacity" }}
                                             />
-                                        </div>
+
+                                            {/* Placeholder thumbnail for instant visual feedback */}
+                                            <img
+                                                src={thumbUrl}
+                                                alt=""
+                                                className="absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
+                                            />
+                                        </motion.div>
 
                                         {/* EXIF Data Overlay */}
                                         {!isLegacyOrDemo && activeImg.exif && (
