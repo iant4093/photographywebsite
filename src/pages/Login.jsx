@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { Turnstile } from '@marsidev/react-turnstile'
+import { motion } from 'framer-motion'
 
 // Login page — email + password only, no sign-up
 function Login() {
@@ -53,9 +54,21 @@ function Login() {
         }
     }
 
+    const pageVariants = {
+        initial: { opacity: 0, y: 15 },
+        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+    }
+
     return (
-        <div className="min-h-[80vh] flex items-center justify-center px-6">
-            <div className="w-full max-w-md animate-slide-up">
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="min-h-[80vh] flex items-center justify-center px-6 py-12"
+        >
+            <div className="w-full max-w-md">
                 {/* Header */}
                 <div className="text-center mb-8">
                     <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-lg mb-6">
@@ -84,10 +97,7 @@ function Login() {
                     )}
 
                     {/* Email field */}
-                    <div className="mb-5">
-                        <label htmlFor="email" className="block text-sm font-medium text-charcoal mb-2">
-                            Email
-                        </label>
+                    <div className="relative mb-5">
                         <input
                             id="email"
                             type="email"
@@ -95,16 +105,19 @@ function Login() {
                             onChange={(e) => setEmail(e.target.value)}
                             required
                             autoComplete="email"
-                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
-                            placeholder="admin@example.com"
+                            className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-transparent focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
+                            placeholder="Email"
                         />
+                        <label
+                            htmlFor="email"
+                            className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/50 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
+                        >
+                            Email
+                        </label>
                     </div>
 
                     {/* Password field */}
-                    <div className="mb-6">
-                        <label htmlFor="password" className="block text-sm font-medium text-charcoal mb-2">
-                            Password
-                        </label>
+                    <div className="relative mb-6">
                         <input
                             id="password"
                             type="password"
@@ -112,9 +125,15 @@ function Login() {
                             onChange={(e) => setPassword(e.target.value)}
                             required
                             autoComplete="current-password"
-                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
-                            placeholder="••••••••"
+                            className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-transparent focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
+                            placeholder="Password"
                         />
+                        <label
+                            htmlFor="password"
+                            className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/50 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
+                        >
+                            Password
+                        </label>
                     </div>
 
                     <div className="mb-6 flex justify-center">
@@ -143,7 +162,7 @@ function Login() {
                     </button>
                 </form>
             </div>
-        </div>
+        </motion.div>
     )
 }
 

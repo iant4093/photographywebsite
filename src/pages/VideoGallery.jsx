@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchAlbum } from '../utils/api'
 import { useAuth } from '../context/authContext'
+import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 
@@ -94,25 +95,49 @@ export default function VideoGallery() {
         }
     }
 
+    const pageVariants = {
+        initial: { opacity: 0, y: 15 },
+        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+    }
+
     if (loading) {
         return (
-            <div className="max-w-7xl mx-auto px-6 py-12 flex justify-center py-32">
+            <motion.div
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="max-w-7xl mx-auto px-6 flex justify-center py-32"
+            >
                 <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
-            </div>
+            </motion.div>
         )
     }
 
     if (!album) {
         return (
-            <div className="max-w-7xl mx-auto px-6 py-12 text-center text-warm-gray">
+            <motion.div
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="max-w-7xl mx-auto px-6 py-12 text-center text-warm-gray"
+            >
                 <p>Failed to load video album. It may not exist or be private.</p>
                 <button onClick={handleBack} className="mt-4 text-amber hover:underline">Go Back</button>
-            </div>
+            </motion.div>
         )
     }
 
     return (
-        <div className="max-w-7xl mx-auto px-6 py-12">
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="max-w-7xl mx-auto px-6 py-12"
+        >
             {/* Gallery View Header */}
             <button
                 onClick={handleBack}
@@ -226,6 +251,6 @@ export default function VideoGallery() {
                     </div>
                 </div>
             )}
-        </div>
+        </motion.div>
     )
 }

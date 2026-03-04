@@ -7,7 +7,30 @@ function Navbar() {
     const { user, isAdmin, logout } = useAuth()
 
     const [isMenuOpen, setIsMenuOpen] = useState(false)
+    const [isVisible, setIsVisible] = useState(true)
+    const [lastScrollY, setLastScrollY] = useState(0)
     const location = useLocation()
+
+    // Smart Navbar scroll logic
+    useEffect(() => {
+        const handleScroll = () => {
+            const currentScrollY = window.scrollY
+
+            // Show navbar at the very top, or when scrolling UP
+            if (currentScrollY < 10 || currentScrollY < lastScrollY) {
+                setIsVisible(true)
+            }
+            // Hide navbar when scrolling DOWN (past a threshold)
+            else if (currentScrollY > 50 && currentScrollY > lastScrollY) {
+                setIsVisible(false)
+            }
+
+            setLastScrollY(currentScrollY)
+        }
+
+        window.addEventListener('scroll', handleScroll, { passive: true })
+        return () => window.removeEventListener('scroll', handleScroll)
+    }, [lastScrollY])
 
     // Close menu when route changes
     useEffect(() => {
@@ -27,7 +50,7 @@ function Navbar() {
     return (
         <>
             {/* Top Navigation Bar */}
-            <nav className={`sticky top-0 z-50 transition-all duration-300 ${isMenuOpen ? 'bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
+            <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
                     <Link to="/" className="flex items-center gap-3 group z-50 relative">

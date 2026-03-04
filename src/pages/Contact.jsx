@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Turnstile } from '@marsidev/react-turnstile'
+import { motion } from 'framer-motion'
 
 export default function Contact() {
     const [name, setName] = useState('')
@@ -42,8 +43,20 @@ export default function Contact() {
         }
     }
 
+    const pageVariants = {
+        initial: { opacity: 0, y: 15 },
+        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+    }
+
     return (
-        <div className="max-w-3xl mx-auto px-6 py-20 flex-1 w-full animate-fade-in">
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="max-w-3xl mx-auto px-6 py-20 flex-1 w-full"
+        >
             <div className="text-center mb-16">
                 <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">Get In Touch</h1>
                 <p className="text-warm-gray text-lg max-w-xl mx-auto">
@@ -59,43 +72,58 @@ export default function Contact() {
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div>
-                        <label htmlFor="name" className="block text-sm font-medium text-charcoal mb-2">Name</label>
+                    <div className="relative">
                         <input
                             id="name"
                             type="text"
                             required
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all"
-                            placeholder="Jane Doe"
+                            className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all placeholder-transparent"
+                            placeholder="Name"
                         />
+                        <label
+                            htmlFor="name"
+                            className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/70 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
+                        >
+                            Name
+                        </label>
                     </div>
-                    <div>
-                        <label htmlFor="email" className="block text-sm font-medium text-charcoal mb-2">Email</label>
+                    <div className="relative">
                         <input
                             id="email"
                             type="email"
                             required
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all"
-                            placeholder="jane@example.com"
+                            className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all placeholder-transparent"
+                            placeholder="Email"
                         />
+                        <label
+                            htmlFor="email"
+                            className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/70 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
+                        >
+                            Email
+                        </label>
                     </div>
                 </div>
 
-                <div className="mb-6">
-                    <label htmlFor="message" className="block text-sm font-medium text-charcoal mb-2">Message</label>
+                <div className="relative mb-6">
                     <textarea
                         id="message"
                         required
                         rows={6}
                         value={message}
                         onChange={(e) => setMessage(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all resize-none"
-                        placeholder="How can I help you?"
+                        className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all resize-none placeholder-transparent"
+                        placeholder="Message"
                     />
+                    <label
+                        htmlFor="message"
+                        className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/70 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
+                    >
+                        Message
+                    </label>
                 </div>
 
                 <div className="mb-8 flex justify-center">
@@ -114,6 +142,6 @@ export default function Contact() {
                     {submitting ? 'Sending...' : 'Send Message'}
                 </button>
             </form>
-        </div>
+        </motion.div>
     )
 }

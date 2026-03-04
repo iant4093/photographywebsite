@@ -4,6 +4,7 @@ import { fetchSharedAlbum } from '../utils/api'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 import JSZip from 'jszip'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Turnstile } from '@marsidev/react-turnstile'
 
 export default function SharedAlbum() {
@@ -158,10 +159,22 @@ export default function SharedAlbum() {
         }
     }
 
+    const pageVariants = {
+        initial: { opacity: 0, y: 15 },
+        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+    }
+
     // State 1: No code in URL, show manual entry
     if (!code) {
         return (
-            <div className="max-w-md mx-auto px-6 py-24 text-center animate-fade-in">
+            <motion.div
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="max-w-md mx-auto px-6 py-24 text-center"
+            >
                 <svg className="w-16 h-16 mx-auto text-amber mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
@@ -187,14 +200,20 @@ export default function SharedAlbum() {
                         options={{ theme: 'light' }}
                     />
                 </div>
-            </div>
+            </motion.div>
         )
     }
 
     // State 2: Error loading or bad code
     if (error) {
         return (
-            <div className="max-w-md mx-auto px-6 py-24 text-center animate-fade-in">
+            <motion.div
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="max-w-md mx-auto px-6 py-24 text-center"
+            >
                 <svg className="w-16 h-16 mx-auto text-red-400 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
@@ -206,23 +225,35 @@ export default function SharedAlbum() {
                 >
                     Try another code
                 </button>
-            </div>
+            </motion.div>
         )
     }
 
     // State 3: Loading album
     if (loading || !album) {
         return (
-            <div className="flex flex-col flex-1 items-center justify-center py-32 animate-fade-in">
+            <motion.div
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="flex flex-col flex-1 items-center justify-center py-32"
+            >
                 <div className="w-12 h-12 border-4 border-amber border-t-transparent rounded-full animate-spin"></div>
                 <p className="mt-4 text-warm-gray font-medium">Accessing gallery...</p>
-            </div>
+            </motion.div>
         )
     }
 
     // State 4: Album Loaded — Render Grid
     return (
-        <div className="max-w-7xl mx-auto px-6 py-12">
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="max-w-7xl mx-auto px-6 py-12"
+        >
             <div className="animate-fade-in">
                 {/* Album header */}
                 <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
@@ -283,6 +314,7 @@ export default function SharedAlbum() {
                                 onClick={() => setLightboxIndex(index)}
                             >
                                 <ProgressiveImage
+                                    layoutId={`shared-${img.rawKey || index}`}
                                     src={thumbUrl}
                                     blurhash={img.blurhash}
                                     alt={`Item ${index + 1} from ${album.title}`}
@@ -311,105 +343,111 @@ export default function SharedAlbum() {
             </div>
 
             {/* Lightbox Overlay */}
-            {lightboxIndex !== null && images[lightboxIndex] && (
-                <div
-                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 animate-fade-in"
-                    onClick={() => setLightboxIndex(null)}
-                >
-                    <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-
-                    {/* Navigation Arrows */}
-                    {images.length > 1 && (
-                        <>
-                            <button
-                                onClick={(e) => { e.stopPropagation(); goPrev() }}
-                                className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                            </button>
-                            <button
-                                onClick={(e) => { e.stopPropagation(); goNext() }}
-                                className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                            </button>
-                        </>
-                    )}
-
-                    {/* Content Wrapper */}
-                    <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
-                        {(() => {
-                            const activeImg = images[lightboxIndex]
-                            const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
-                            const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
-
-                            if (album.type === 'video') {
-                                return (
-                                    <div className="flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
-                                        <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={true} />
-                                    </div>
-                                )
-                            }
-
-                            return (
-                                <>
-                                    <div className="flex-1 min-h-0 flex items-center justify-center w-full">
-                                        <img
-                                            src={activeRawUrl}
-                                            alt="Full size preview"
-                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
-                                        />
-                                    </div>
-
-                                    {/* EXIF Data Overlay */}
-                                    {!isLegacyOrDemo && activeImg.exif && (
-                                        <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
-                                            {activeImg.exif.model && (
-                                                <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
-                                                    {activeImg.exif.model}
-                                                </p>
-                                            )}
-                                            {activeImg.exif.lens && (
-                                                <p className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
-                                                    {activeImg.exif.lens}
-                                                </p>
-                                            )}
-                                            <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
-                                                {activeImg.exif.focalLength && <span>{activeImg.exif.focalLength}</span>}
-                                                {activeImg.exif.focalRatio && <span>{activeImg.exif.focalRatio}</span>}
-                                                {activeImg.exif.shutterSpeed && <span>{activeImg.exif.shutterSpeed}</span>}
-                                                {activeImg.exif.iso && <span>{activeImg.exif.iso}</span>}
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            )
-                        })()}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="shrink-0 mt-6 flex flex-col items-center gap-3 z-10" onClick={(e) => e.stopPropagation()}>
-                        {images.length > 1 && (
-                            <span className="text-white/70 text-sm font-medium drop-shadow-md">
-                                {lightboxIndex + 1} / {images.length}
-                            </span>
-                        )}
-                        <button
-                            onClick={downloadImage}
-                            className="bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white px-6 py-2.5 rounded-full flex items-center gap-2 text-sm font-medium transition-colors shadow-lg cursor-pointer"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            <AnimatePresence>
+                {lightboxIndex !== null && images[lightboxIndex] && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12"
+                        onClick={() => setLightboxIndex(null)}
+                    >
+                        <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
-                            Download Original File
                         </button>
-                    </div>
-                </div>
-            )}
-        </div>
+
+                        {/* Navigation Arrows */}
+                        {images.length > 1 && (
+                            <>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); goPrev() }}
+                                    className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                >
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); goNext() }}
+                                    className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                >
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                                </button>
+                            </>
+                        )}
+
+                        {/* Content Wrapper */}
+                        <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
+                            {(() => {
+                                const activeImg = images[lightboxIndex]
+                                const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
+                                const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+
+                                if (album.type === 'video') {
+                                    return (
+                                        <div className="flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
+                                            <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={true} />
+                                        </div>
+                                    )
+                                }
+
+                                return (
+                                    <>
+                                        <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+                                            <motion.img
+                                                layoutId={`shared-${activeImg.rawKey || lightboxIndex}`}
+                                                src={activeRawUrl}
+                                                alt="Full size preview"
+                                                className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl"
+                                            />
+                                        </div>
+
+                                        {/* EXIF Data Overlay */}
+                                        {!isLegacyOrDemo && activeImg.exif && (
+                                            <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
+                                                {activeImg.exif.model && (
+                                                    <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
+                                                        {activeImg.exif.model}
+                                                    </p>
+                                                )}
+                                                {activeImg.exif.lens && (
+                                                    <p className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
+                                                        {activeImg.exif.lens}
+                                                    </p>
+                                                )}
+                                                <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
+                                                    {activeImg.exif.focalLength && <span>{activeImg.exif.focalLength}</span>}
+                                                    {activeImg.exif.focalRatio && <span>{activeImg.exif.focalRatio}</span>}
+                                                    {activeImg.exif.shutterSpeed && <span>{activeImg.exif.shutterSpeed}</span>}
+                                                    {activeImg.exif.iso && <span>{activeImg.exif.iso}</span>}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                )
+                            })()}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="shrink-0 mt-6 flex flex-col items-center gap-3 z-10" onClick={(e) => e.stopPropagation()}>
+                            {images.length > 1 && (
+                                <span className="text-white/70 text-sm font-medium drop-shadow-md">
+                                    {lightboxIndex + 1} / {images.length}
+                                </span>
+                            )}
+                            <button
+                                onClick={downloadImage}
+                                className="bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white px-6 py-2.5 rounded-full flex items-center gap-2 text-sm font-medium transition-colors shadow-lg cursor-pointer"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                Download Original File
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
     )
 }

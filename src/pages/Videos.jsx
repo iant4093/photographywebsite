@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
+import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbums } from '../utils/api'
 
 // Placeholder videos used when the backend isn't connected yet
@@ -91,8 +94,40 @@ function Videos() {
         return { groupedVideoAlbums: grouped, videoCategories: sorted };
     }, [videoAlbums]);
 
+    // Page transition animation variants
+    const pageVariants = {
+        initial: { opacity: 0, y: 15 },
+        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
+        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
+    }
+
+    if (loading) {
+        return (
+            <motion.div
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="max-w-7xl mx-auto px-6 py-12"
+            >
+                <div className="mb-12">
+                    <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">Latest Videos</h1>
+                    <p className="text-lg text-warm-gray max-w-2xl">
+                        A collection of my recent video work and visual stories.
+                    </p>
+                </div>
+                <SkeletonGrid count={6} type="video" />
+            </motion.div>
+        )
+    }
+
     return (
-        <div>
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+        >
             {/* Hero section with parallax */}
             <section className="relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
@@ -129,12 +164,6 @@ function Videos() {
                         </h2>
                     </div>
 
-                    {loading && (
-                        <div className="flex justify-center py-20">
-                            <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
-                        </div>
-                    )}
-
                     {error && (
                         <div className="text-center py-12 text-warm-gray">
                             <p>{error}</p>
@@ -167,7 +196,7 @@ function Videos() {
                     )}
                 </div>
             </section>
-        </div>
+        </motion.div>
     )
 }
 

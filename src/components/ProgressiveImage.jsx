@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { Blurhash } from 'react-blurhash'
+import { motion } from 'framer-motion'
 
 export default function ProgressiveImage({
     src,
     blurhash,
     alt,
-    className = ""
+    className = "",
+    layoutId = null
 }) {
     const [isLoaded, setIsLoaded] = useState(false)
     const [shouldLoad, setShouldLoad] = useState(false)
@@ -72,7 +74,8 @@ export default function ProgressiveImage({
 
             {/* Actual Image */}
             {shouldLoad && (
-                <img
+                <motion.img
+                    layoutId={layoutId}
                     src={src}
                     alt={alt}
                     className={`absolute inset-0 w-full h-full object-cover transition-all duration-700 ease-in-out z-0

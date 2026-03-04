@@ -3,8 +3,10 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { fetchAlbumsFiltered, fetchAlbum } from '../utils/api'
 import JSZip from 'jszip'
+import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import ScrollRow from '../components/ScrollRow'
+import SkeletonGrid from '../components/SkeletonGrid'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -252,8 +254,15 @@ function UserDashboard() {
     }
 
     return (
-        <div className="max-w-5xl mx-auto px-6 py-12">
-            <div className="animate-slide-up">
+        <motion.div
+            variants={pageVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="flex-1 bg-cream animate-fade-in"
+        >
+            {/* Header section with User Info */}
+            <div className="max-w-5xl mx-auto px-6 py-12">
                 {/* Albums grid or selected album view */}
                 {selectedAlbum ? (
                     /* Album detail view */
@@ -314,6 +323,7 @@ function UserDashboard() {
                                             onClick={() => setLightboxIndex(index)}
                                         >
                                             <ProgressiveImage
+                                                layoutId={`user-${img.rawKey || index}`}
                                                 src={thumbUrl}
                                                 blurhash={img.blurhash}
                                                 alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
@@ -329,8 +339,8 @@ function UserDashboard() {
                     /* Albums grid */
                     <>
                         {loading ? (
-                            <div className="flex justify-center py-20">
-                                <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
+                            <div className="py-20">
+                                <SkeletonGrid count={6} type="photo" />
                             </div>
                         ) : albums.length === 0 ? (
                             <div className="text-center py-20">
@@ -377,99 +387,105 @@ function UserDashboard() {
                 )}
             </div>
 
-            {/* Lightbox with prev/next arrows */}
-            {lightboxIndex !== null && images[lightboxIndex] && (
-                <div
-                    className="fixed inset-0 z-[100] bg-charcoal/90 backdrop-blur-sm flex flex-col items-center justify-center p-4 pt-16 pb-8 animate-fade-in"
-                    onClick={() => setLightboxIndex(null)}
-                >
-                    {/* Close button */}
-                    <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-
-                    {/* Previous arrow */}
-                    <button
-                        onClick={(e) => { e.stopPropagation(); goPrev() }}
-                        className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+            {/* Lightbox Overlay */}
+            <AnimatePresence>
+                {lightboxIndex !== null && images[lightboxIndex] && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12"
+                        onClick={() => setLightboxIndex(null)}
                     >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                        </svg>
-                    </button>
-
-                    {/* Next arrow */}
-                    <button
-                        onClick={(e) => { e.stopPropagation(); goNext() }}
-                        className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                    >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                    </button>
-
-                    {/* Image Wrapper & Info */}
-                    <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
-                        {(() => {
-                            const activeImg = images[lightboxIndex]
-                            const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
-                            const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
-                            return (
-                                <>
-                                    <div className="flex-1 min-h-0 flex items-center justify-center w-full">
-                                        <img
-                                            src={activeRawUrl}
-                                            alt="Full size preview"
-                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl animate-scale-in"
-                                        />
-                                    </div>
-
-                                    {/* EXIF Data Overlay */}
-                                    {activeImg && activeImg.exif && (
-                                        <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
-                                            {activeImg.exif.model && (
-                                                <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
-                                                    {activeImg.exif.model}
-                                                </p>
-                                            )}
-                                            {activeImg.exif.lens && (
-                                                <p className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
-                                                    {activeImg.exif.lens}
-                                                </p>
-                                            )}
-                                            <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
-                                                {activeImg.exif.focalLength && <span>{activeImg.exif.focalLength}</span>}
-                                                {activeImg.exif.focalRatio && <span>{activeImg.exif.focalRatio}</span>}
-                                                {activeImg.exif.shutterSpeed && <span>{activeImg.exif.shutterSpeed}</span>}
-                                                {activeImg.exif.iso && <span>{activeImg.exif.iso}</span>}
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            )
-                        })()}
-                    </div>
-
-                    {/* Download & Image counter */}
-                    <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>
-                        <button
-                            onClick={downloadImage}
-                            className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
-                            title="Download Photo"
-                        >
-                            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </button>
-                        <span className="text-white/70 text-sm font-medium drop-shadow-md">
-                            {lightboxIndex + 1} / {images.length}
-                        </span>
-                    </div>
-                </div>
-            )}
-        </div>
+
+                        {/* Previous arrow */}
+                        <button
+                            onClick={(e) => { e.stopPropagation(); goPrev() }}
+                            className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                        </button>
+
+                        {/* Next arrow */}
+                        <button
+                            onClick={(e) => { e.stopPropagation(); goNext() }}
+                            className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                        </button>
+
+                        {/* Image Wrapper & Info */}
+                        <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
+                            {(() => {
+                                const activeImg = images[lightboxIndex]
+                                const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
+                                const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+                                return (
+                                    <>
+                                        <div className="flex-1 min-h-0 flex items-center justify-center w-full">
+                                            <motion.img
+                                                layoutId={`user-${activeImg.rawKey || lightboxIndex}`}
+                                                src={activeRawUrl}
+                                                alt="Full size preview"
+                                                className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl"
+                                            />
+                                        </div>
+
+                                        {/* EXIF Data Overlay */}
+                                        {activeImg && activeImg.exif && (
+                                            <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
+                                                {activeImg.exif.model && (
+                                                    <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
+                                                        {activeImg.exif.model}
+                                                    </p>
+                                                )}
+                                                {activeImg.exif.lens && (
+                                                    <p className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
+                                                        {activeImg.exif.lens}
+                                                    </p>
+                                                )}
+                                                <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
+                                                    {activeImg.exif.focalLength && <span>{activeImg.exif.focalLength}</span>}
+                                                    {activeImg.exif.focalRatio && <span>{activeImg.exif.focalRatio}</span>}
+                                                    {activeImg.exif.shutterSpeed && <span>{activeImg.exif.shutterSpeed}</span>}
+                                                    {activeImg.exif.iso && <span>{activeImg.exif.iso}</span>}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                )
+                            })()}
+                        </div>
+
+                        {/* Download & Image counter */}
+                        <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>
+                            <button
+                                onClick={downloadImage}
+                                className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
+                                title="Download Photo"
+                            >
+                                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            </button>
+                            <span className="text-white/70 text-sm font-medium drop-shadow-md">
+                                {lightboxIndex + 1} / {images.length}
+                            </span>
+                        </div>
+                    </motion.div>
+                )
+                }
+            </AnimatePresence >
+        </motion.div >
     )
 }
 
