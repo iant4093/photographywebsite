@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/authContext'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
+import { processVideo } from '../utils/mediaUtils'
 
 // Helper component for picking a thumbnail time for a video
 function VideoThumbnailScrubber({ file, time, onTimeChange }) {
@@ -124,94 +125,7 @@ export default function UploadVideo() {
         })
     }
 
-    // Process video: extracts thumbnail frame to blob and calculates blurhash
-    async function processVideo(file, time) {
-        return new Promise((resolve, reject) => {
-            const video = document.createElement('video')
-            video.muted = true
-            video.playsInline = true
-            video.preload = "auto" // Ensure it buffers enough to seek
-            // IMPORTANT: Do NOT use display:none — browsers won't decode frames
-            // for hidden elements, resulting in black canvas captures.
-            video.style.position = 'fixed'
-            video.style.top = '-9999px'
-            video.style.left = '-9999px'
-            video.style.width = '1px'
-            video.style.height = '1px'
-            video.style.opacity = '0'
-            video.style.pointerEvents = 'none'
-            document.body.appendChild(video)
 
-            const url = URL.createObjectURL(file)
-
-            const cleanup = () => {
-                video.onloadedmetadata = null
-                video.onseeked = null
-                video.onerror = null
-                if (document.body.contains(video)) {
-                    document.body.removeChild(video)
-                }
-            }
-
-            video.onloadedmetadata = () => {
-                // Force a tiny offset if 0 to guarantee a seeked event fires and skip black fade-ins
-                video.currentTime = Math.max(0.1, time)
-            }
-
-            video.onseeked = () => {
-                const extractFrame = () => {
-                    const canvas = document.createElement('canvas')
-                    const MAX_SIZE = 800
-                    let width = video.videoWidth
-                    let height = video.videoHeight
-
-                    if (width > height && width > MAX_SIZE) {
-                        height *= MAX_SIZE / width
-                        width = MAX_SIZE
-                    } else if (height > width && height > MAX_SIZE) {
-                        width *= MAX_SIZE / height
-                        height = MAX_SIZE
-                    }
-
-                    width = Math.round(width)
-                    height = Math.round(height)
-
-                    canvas.width = width
-                    canvas.height = height
-                    const ctx = canvas.getContext('2d')
-                    ctx.drawImage(video, 0, 0, width, height)
-
-                    // Blurhash computation
-                    const hashCanvas = document.createElement('canvas')
-                    const hashSize = 32
-                    hashCanvas.width = hashSize
-                    hashCanvas.height = Math.round(hashSize * (height / width))
-                    const hashCtx = hashCanvas.getContext('2d')
-                    hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
-                    const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
-
-                    const componentX = 4
-                    const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
-                    const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
-
-                    canvas.toBlob((blob) => {
-                        URL.revokeObjectURL(url)
-                        cleanup()
-                        resolve({ thumbnail: blob, blurhash, width: video.videoWidth, height: video.videoHeight })
-                    }, 'image/jpeg', 0.85)
-                }
-
-                // Wait a tiny bit for the browser to decode the frame after a seek
-                setTimeout(extractFrame, 200);
-            }
-
-            video.onerror = (e) => {
-                cleanup()
-                reject(e)
-            }
-            video.src = url
-        })
-    }
 
     async function handleSubmit(e) {
         e.preventDefault()

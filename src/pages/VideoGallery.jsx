@@ -136,7 +136,7 @@ export default function VideoGallery() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="max-w-7xl mx-auto px-6 py-12"
+            className="max-w-7xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]"
         >
             {/* Gallery View Header */}
             <button

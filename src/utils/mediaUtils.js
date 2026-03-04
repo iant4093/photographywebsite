@@ -63,7 +63,15 @@ export async function processVideo(file, time) {
         video.muted = true
         video.playsInline = true
         video.preload = "auto"
-        video.style.display = "none"
+        // IMPORTANT: Do NOT use display:none — browsers won't decode frames
+        // for hidden elements, resulting in black canvas captures.
+        video.style.position = 'fixed'
+        video.style.top = '-9999px'
+        video.style.left = '-9999px'
+        video.style.width = '1px'
+        video.style.height = '1px'
+        video.style.opacity = '0'
+        video.style.pointerEvents = 'none'
         document.body.appendChild(video)
 
         const url = URL.createObjectURL(file)
