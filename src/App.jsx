@@ -23,7 +23,7 @@ import NotFound from './pages/NotFound'
 import VideoGallery from './pages/VideoGallery'
 import Videos from './pages/Videos'
 
-// Set scroll restoration to manual globally to prevent browser interference with animations
+// Set scroll restoration to manual globally
 if (typeof window !== 'undefined') {
   window.history.scrollRestoration = 'manual'
 }
@@ -32,27 +32,12 @@ if (typeof window !== 'undefined') {
 function App() {
   const location = useLocation()
   const navType = useNavigationType()
-  const scrollPositions = useRef(new Map())
 
-  // Save scroll position on every scroll
-  useEffect(() => {
-    const handleScroll = () => {
-      scrollPositions.current.set(window.location.pathname, window.scrollY)
-    }
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
-  // Execute scroll adjustment only after the outgoing page has completely faded out
+  // Reset to top ONLY for new navigations (PUSH/REPLACE).
+  // We do this in onExitComplete to ensure the old page has faded out,
+  // preventing a visible jump on the outgoing content.
   const handleExitComplete = () => {
-    if (navType === 'POP') {
-      const savedPosition = scrollPositions.current.get(location.pathname)
-      if (savedPosition !== undefined) {
-        window.scrollTo({ top: savedPosition, left: 0, behavior: 'instant' })
-      } else {
-        window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-      }
-    } else {
+    if (navType !== 'POP') {
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
     }
   }

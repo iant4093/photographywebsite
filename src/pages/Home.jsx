@@ -6,10 +6,18 @@ import ScrollRow from '../components/ScrollRow'
 import { fetchAlbums } from '../utils/api'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { useAuth } from '../context/authContext'
+import { useScrollRestoration } from '../utils/scroll'
+import { useLocation } from 'react-router-dom'
 
 // Home page with hero section and album grid
 function Home() {
     const { publicAlbums, setPublicAlbums } = useAuth()
+    const navType = useNavigationType()
+    const location = useLocation()
+
+    // Manage scroll memory for this page
+    useScrollRestoration(location.pathname, navType === 'POP')
+
     const [albums, setAlbums] = useState(publicAlbums || [])
     const [loading, setLoading] = useState(publicAlbums.length === 0)
     const [error, setError] = useState(null)

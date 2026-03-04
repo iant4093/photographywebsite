@@ -6,6 +6,8 @@ import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbums } from '../utils/api'
 import { useAuth } from '../context/authContext'
+import { useScrollRestoration } from '../utils/scroll'
+import { useLocation } from 'react-router-dom'
 
 // Placeholder videos used when the backend isn't connected yet
 const PLACEHOLDER_VIDEOS = [
@@ -21,6 +23,12 @@ const PLACEHOLDER_VIDEOS = [
 
 function Videos() {
     const { publicAlbums, setPublicAlbums } = useAuth()
+    const navType = useNavigationType()
+    const location = useLocation()
+
+    // Manage scroll memory for this page
+    useScrollRestoration(location.pathname, navType === 'POP')
+
     const [albums, setAlbums] = useState(publicAlbums || [])
     const [loading, setLoading] = useState(publicAlbums.length === 0)
     const [error, setError] = useState(null)

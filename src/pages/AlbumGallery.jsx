@@ -6,6 +6,8 @@ import JSZip from 'jszip'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
+import { useScrollRestoration } from '../utils/scroll'
+import { useLocation } from 'react-router-dom'
 
 
 
@@ -13,6 +15,12 @@ import SkeletonGrid from '../components/SkeletonGrid'
 function AlbumGallery() {
     const { albumId } = useParams()
     const navigate = useNavigate()
+    const navType = useNavigationType()
+    const location = useLocation()
+
+    // Manage scroll memory for this page (saves position for when user returns from a photo or deep link)
+    useScrollRestoration(location.pathname, navType === 'POP')
+
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
     const [loading, setLoading] = useState(true)
