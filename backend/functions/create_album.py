@@ -169,6 +169,15 @@ def handler(event, context):
                     if 'EXIF LensModel' in tags:
                         exif_data['lens'] = str(tags['EXIF LensModel']).strip()
                         
+                    if 'EXIF FocalLength' in tags:
+                        val = tags['EXIF FocalLength'].values[0]
+                        if val.den != 0:
+                            focal_length = val.num / val.den
+                            if focal_length.is_integer():
+                                exif_data['focalLength'] = f"{int(focal_length)}mm"
+                            else:
+                                exif_data['focalLength'] = f"{focal_length:g}mm"
+
                     if 'EXIF FNumber' in tags:
                         val = tags['EXIF FNumber'].values[0]
                         if val.den != 0:

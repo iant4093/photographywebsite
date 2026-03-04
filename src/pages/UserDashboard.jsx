@@ -430,6 +430,7 @@ function UserDashboard() {
                                                 </p>
                                             )}
                                             <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
+                                                {activeImg.exif.focalLength && <span>{activeImg.exif.focalLength}</span>}
                                                 {activeImg.exif.focalRatio && <span>{activeImg.exif.focalRatio}</span>}
                                                 {activeImg.exif.shutterSpeed && <span>{activeImg.exif.shutterSpeed}</span>}
                                                 {activeImg.exif.iso && <span>{activeImg.exif.iso}</span>}
