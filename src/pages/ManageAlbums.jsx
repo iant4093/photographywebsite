@@ -110,6 +110,7 @@ function VideoThumbnailFromUrl({ videoUrl, time, onTimeChange, onVideoRef }) {
                     onLoadedMetadata={handleLoadedMetadata}
                     onError={(e) => console.error('VideoThumbnailFromUrl load error:', e.target.error)}
                     className="w-full h-full object-contain"
+                    crossOrigin="anonymous"
                     muted
                     playsInline
                 />
