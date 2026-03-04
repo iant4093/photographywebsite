@@ -208,7 +208,7 @@ function Videos() {
                                     <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
                                     <div className="h-px bg-warm-border flex-1"></div>
                                 </div>
-                                <ScrollRow>
+                                <ScrollRow scrollKey={`videos-${cat}`}>
                                     {groupedVideoAlbums[cat].map((album) => (
                                         <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
                                             <AlbumCard album={album} />

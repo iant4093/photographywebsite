@@ -220,7 +220,7 @@ function Home() {
                                 <h3 className="font-serif text-2xl font-medium text-charcoal w-fit">{cat}</h3>
                                 <div className="h-px bg-warm-border flex-1"></div>
                             </div>
-                            <ScrollRow>
+                            <ScrollRow scrollKey={`home-photo-${cat}`}>
                                 {groupedPhotoAlbums[cat].map((album) => (
                                     <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
                                         <AlbumCard album={album} />

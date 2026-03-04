@@ -200,7 +200,7 @@ function UserDashboard() {
                     <h3 className="font-serif text-2xl font-medium text-charcoal">{category}</h3>
                     <div className="h-px bg-warm-border flex-1"></div>
                 </div>
-                <ScrollRow>
+                <ScrollRow scrollKey={`user-${category}`}>
                     {items.map((album) => (
                         <motion.div
                             key={album.albumId}

@@ -18,6 +18,20 @@ export const markAsRevealed = (id) => {
 }
 
 /**
+ * Save horizontal scroll position for a keyed scroll container.
+ */
+export const saveHorizontalScroll = (key, value) => {
+    if (key) scrollPositions.set(`h:${key}`, value)
+}
+
+/**
+ * Retrieve saved horizontal scroll position for a keyed scroll container.
+ */
+export const getHorizontalScroll = (key) => {
+    return key ? scrollPositions.get(`h:${key}`) : undefined
+}
+
+/**
  * Hook to save and restore scroll position for a specific page.
  * @param {string} pathname The current route path
  * @param {boolean} isPOP Whether the current navigation is a POP (back/forward)

@@ -1,7 +1,8 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
+import { saveHorizontalScroll, getHorizontalScroll } from '../utils/scroll'
 
 // Horizontal scroll row with left/right arrow buttons on desktop
-export default function ScrollRow({ children, className = '' }) {
+export default function ScrollRow({ children, className = '', scrollKey }) {
     const scrollRef = useRef(null)
     const [canScrollLeft, setCanScrollLeft] = useState(false)
     const [canScrollRight, setCanScrollRight] = useState(false)
@@ -14,23 +15,41 @@ export default function ScrollRow({ children, className = '' }) {
         setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 2)
     }, [])
 
+    // Restore horizontal scroll position on mount
+    useLayoutEffect(() => {
+        if (!scrollKey) return
+        const el = scrollRef.current
+        if (!el) return
+        const saved = getHorizontalScroll(scrollKey)
+        if (saved !== undefined) {
+            el.scrollLeft = saved
+        }
+    }, [scrollKey])
+
     useEffect(() => {
         const el = scrollRef.current
         if (!el) return
 
         checkScroll()
-        el.addEventListener('scroll', checkScroll, { passive: true })
+
+        // Save horizontal scroll position on scroll
+        const handleScroll = () => {
+            checkScroll()
+            if (scrollKey) saveHorizontalScroll(scrollKey, el.scrollLeft)
+        }
+
+        el.addEventListener('scroll', handleScroll, { passive: true })
         window.addEventListener('resize', checkScroll)
 
         // Re-check after images/content may have loaded
         const timer = setTimeout(checkScroll, 500)
 
         return () => {
-            el.removeEventListener('scroll', checkScroll)
+            el.removeEventListener('scroll', handleScroll)
             window.removeEventListener('resize', checkScroll)
             clearTimeout(timer)
         }
-    }, [checkScroll, children])
+    }, [checkScroll, children, scrollKey])
 
     const scroll = (direction) => {
         const el = scrollRef.current
