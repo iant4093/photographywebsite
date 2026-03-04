@@ -520,7 +520,11 @@ function ManageAlbums() {
     // Change the thumbnail of an already-uploaded video using the scrubber's video element
     async function handleChangeVideoThumbnail(img) {
         const rawKey = img.rawKey || img.key
-        const thumbKey = img.thumbKey || `${rawKey}.thumb.jpg`
+
+        // Generate a unique thumbKey so CloudFront serves the new file (CachingOptimized ignores query strings)
+        const baseName = rawKey.split('/').slice(0, -1).join('/')
+        const fileName = rawKey.split('/').pop()
+        const thumbKey = `${baseName}/thumb_${fileName}_${Date.now()}.jpg`
 
         if (!scrubberVideoRef.current) {
             setActionError('Video not loaded yet — try again in a moment')
@@ -533,7 +537,7 @@ function ManageAlbums() {
             // 1. Extract frame from the already-loaded scrubber video element
             const { thumbnail, blurhash } = await extractFrameFromVideoElement(scrubberVideoRef.current)
 
-            // 2. Upload the new thumbnail to S3
+            // 2. Upload the new thumbnail to S3 with the unique key
             const token = await getIdToken()
             const { uploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
             await uploadFileToS3(uploadUrl, thumbnail)
@@ -541,12 +545,9 @@ function ManageAlbums() {
             // 3. Persist the new thumbKey + blurhash to DynamoDB
             await updateImageThumbnail(token, expandedAlbumId, rawKey, { thumbKey, blurhash })
 
-            // 4. Refresh local state with cache-bust for the updated thumbnail
+            // 4. Refresh local state
             const data = await fetchAlbum(expandedAlbumId, token)
-            const now = Date.now()
-            setAlbumImages((data.images || []).map(i =>
-                (i.rawKey || i.key) === rawKey ? { ...i, _cacheBust: now } : i
-            ))
+            setAlbumImages(data.images || [])
 
             setEditingThumbKey(null)
             setActionSuccess('Thumbnail updated!')
@@ -932,7 +933,7 @@ function ManageAlbums() {
                                                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
                                                                 {albumImages.map((img, idx) => {
                                                                     const isLegacy = !img.thumbKey
-                                                                    const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}${img._cacheBust ? `?v=${img._cacheBust}` : ''}`
+                                                                    const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
                                                                     const imgKey = img.rawKey || img.key || `fallback-${idx}`
                                                                     const isEditingThisThumb = editingThumbKey === imgKey
 
