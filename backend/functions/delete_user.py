@@ -21,9 +21,8 @@ def handler(event, context):
         email = event['pathParameters']['email']
 
         # 1. Find all private albums owned by this user
-        response = table.query(
-            IndexName='ownerEmail-index',
-            KeyConditionExpression=boto3.dynamodb.conditions.Key('ownerEmail').eq(email)
+        response = table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr('ownerEmail').eq(email)
         )
         albums = [
             a for a in response.get('Items', [])

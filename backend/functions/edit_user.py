@@ -39,9 +39,8 @@ def handler(event, context):
             )
 
             # Migrate all private albums from old email to new email
-            response = table.query(
-                IndexName='ownerEmail-index',
-                KeyConditionExpression=Key('ownerEmail').eq(old_email)
+            response = table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr('ownerEmail').eq(old_email)
             )
             albums = [
                 a for a in response.get('Items', [])

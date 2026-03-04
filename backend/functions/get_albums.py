@@ -24,28 +24,20 @@ def handler(event, context):
         visibility = params.get('visibility', 'public')
         owner_email = params.get('ownerEmail', '')
 
-        # Filter by visibility or ownerEmail using GSI
+        # Filter by visibility or ownerEmail using table scan
         if owner_email:
-            response = table.query(
-                IndexName='ownerEmail-index',
-                KeyConditionExpression=boto3.dynamodb.conditions.Key('ownerEmail').eq(owner_email)
+            response = table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr('ownerEmail').eq(owner_email)
             )
-            # Since owner can be public or private albums they own, we might still need to filter by visibility
-            # if specific visibility was passed, though usually user requests all their own albums.
             albums = response.get('Items', [])
-            if visibility and visibility != 'all': # 'all' means no visibility filter
+            if visibility and visibility != 'all':
                 albums = [item for item in albums if item.get('visibility') == visibility]
         elif visibility == 'all':
-            # If 'all' visibility is requested without owner_email, we still need to scan or query all.
-            # For now, let's do a full scan if 'all' is requested and no owner_email.
-            # In a real-world scenario, you might have an 'all-albums-index' or handle admin access differently.
             response = table.scan()
             albums = response.get('Items', [])
         else:
-            # Query by visibility index directly (e.g., 'public' or 'unlisted')
-            response = table.query(
-                IndexName='visibility-index',
-                KeyConditionExpression=boto3.dynamodb.conditions.Key('visibility').eq(visibility)
+            response = table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr('visibility').eq(visibility)
             )
             albums = response.get('Items', [])
 
