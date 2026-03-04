@@ -91,25 +91,17 @@ function Home() {
         exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
     }
 
-    if (loading) {
-        return (
-            <motion.div
-                variants={pageVariants}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                className="max-w-7xl mx-auto px-6 py-12"
-            >
-                <div className="mb-8">
-                    <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">Latest Work</h1>
-                    <p className="text-lg text-warm-gray max-w-2xl">
-                        A collection of my recent photography sessions and personal projects.
-                    </p>
-                </div>
-                <SkeletonGrid count={6} type="photo" />
-            </motion.div>
-        )
-    }
+    const renderLoading = () => (
+        <div className="max-w-7xl mx-auto px-6 py-12">
+            <div className="mb-8">
+                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">Latest Work</h1>
+                <p className="text-lg text-warm-gray max-w-2xl">
+                    A collection of my recent photography sessions and personal projects.
+                </p>
+            </div>
+            <SkeletonGrid count={6} type="photo" />
+        </div>
+    )
 
     return (
         <motion.div
