@@ -5,7 +5,7 @@ import boto3
 import exifread
 from datetime import datetime
 from botocore.exceptions import ClientError
-from auth_helpers import require_admin, get_email_from_token
+from auth_helpers import require_admin
 from media_helpers import format_fraction, extract_exif_data, start_mediaconvert_job
 
 # DynamoDB and S3 resources
