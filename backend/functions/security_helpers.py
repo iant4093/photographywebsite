@@ -28,8 +28,8 @@ def verify_turnstile(token, ip_address=None):
         'secret': TURNSTILE_SECRET,
         'response': token
     }
-    if ip:
-        data['remoteip'] = ip
+    if ip_address:
+        data['remoteip'] = ip_address
 
     try:
         url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
