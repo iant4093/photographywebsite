@@ -103,8 +103,8 @@ function VideoThumbnailFromUrl({ videoUrl, time, onTimeChange }) {
                     ref={videoRef}
                     src={videoUrl}
                     onLoadedMetadata={handleLoadedMetadata}
+                    onError={(e) => console.error('VideoThumbnailFromUrl load error:', e.target.error)}
                     className="w-full h-full object-contain"
-                    crossOrigin="anonymous"
                     muted
                     playsInline
                 />
@@ -460,58 +460,84 @@ function ManageAlbums() {
             video.preload = 'auto'
             video.crossOrigin = 'anonymous'
 
-            video.onloadedmetadata = () => {
-                video.currentTime = Math.max(0.1, time)
-            }
+            let settled = false
+            const settle = (fn) => { if (!settled) { settled = true; fn() } }
 
-            video.onseeked = () => {
+            const tryExtract = () => {
                 const extractFrame = () => {
-                    const canvas = document.createElement('canvas')
-                    const MAX_SIZE = 800
-                    let width = video.videoWidth
-                    let height = video.videoHeight
+                    try {
+                        const canvas = document.createElement('canvas')
+                        const MAX_SIZE = 800
+                        let width = video.videoWidth
+                        let height = video.videoHeight
 
-                    if (width > height && width > MAX_SIZE) {
-                        height *= MAX_SIZE / width
-                        width = MAX_SIZE
-                    } else if (height > width && height > MAX_SIZE) {
-                        width *= MAX_SIZE / height
-                        height = MAX_SIZE
+                        if (width > height && width > MAX_SIZE) {
+                            height *= MAX_SIZE / width
+                            width = MAX_SIZE
+                        } else if (height > width && height > MAX_SIZE) {
+                            width *= MAX_SIZE / height
+                            height = MAX_SIZE
+                        }
+
+                        width = Math.round(width)
+                        height = Math.round(height)
+
+                        canvas.width = width
+                        canvas.height = height
+                        const ctx = canvas.getContext('2d')
+                        ctx.drawImage(video, 0, 0, width, height)
+
+                        // Attempt blurhash (may fail on tainted canvas)
+                        let blurhash = null
+                        try {
+                            const hashCanvas = document.createElement('canvas')
+                            const hashSize = 32
+                            hashCanvas.width = hashSize
+                            hashCanvas.height = Math.round(hashSize * (height / width))
+                            const hashCtx = hashCanvas.getContext('2d')
+                            hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
+                            const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
+                            const componentX = 4
+                            const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
+                            blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
+                        } catch (e) {
+                            console.warn('Blurhash extraction failed (tainted canvas), using existing blurhash')
+                        }
+
+                        canvas.toBlob((blob) => {
+                            if (blob) {
+                                settle(() => resolve({ thumbnail: blob, blurhash }))
+                            } else {
+                                settle(() => reject(new Error('canvas.toBlob returned null')))
+                            }
+                        }, 'image/jpeg', 0.85)
+                    } catch (err) {
+                        settle(() => reject(err))
                     }
-
-                    width = Math.round(width)
-                    height = Math.round(height)
-
-                    canvas.width = width
-                    canvas.height = height
-                    const ctx = canvas.getContext('2d')
-                    ctx.drawImage(video, 0, 0, width, height)
-
-                    const hashCanvas = document.createElement('canvas')
-                    const hashSize = 32
-                    hashCanvas.width = hashSize
-                    hashCanvas.height = Math.round(hashSize * (height / width))
-                    const hashCtx = hashCanvas.getContext('2d')
-                    hashCtx.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
-                    const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
-
-                    const componentX = 4
-                    const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
-                    const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
-
-                    canvas.toBlob((blob) => {
-                        resolve({ thumbnail: blob, blurhash })
-                    }, 'image/jpeg', 0.85)
                 }
 
                 if ('requestVideoFrameCallback' in video) {
                     video.requestVideoFrameCallback(extractFrame)
                 } else {
-                    setTimeout(extractFrame, 150)
+                    setTimeout(extractFrame, 200)
                 }
             }
 
-            video.onerror = (e) => reject(new Error('Failed to load video for thumbnail extraction'))
+            video.onloadedmetadata = () => {
+                video.currentTime = Math.max(0.1, time)
+            }
+            video.onseeked = tryExtract
+            video.onerror = (e) => {
+                console.error('processVideoFromUrl: video load error', video.error)
+                // Retry once without crossOrigin
+                if (video.crossOrigin) {
+                    console.log('Retrying without crossOrigin...')
+                    video.crossOrigin = null
+                    video.src = videoUrl
+                } else {
+                    settle(() => reject(new Error('Failed to load video for thumbnail extraction')))
+                }
+            }
             video.src = videoUrl
         })
     }
