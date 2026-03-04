@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Blurhash } from 'react-blurhash'
 
 export default function ProgressiveImage({
