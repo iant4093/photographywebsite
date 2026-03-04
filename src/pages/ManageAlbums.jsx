@@ -541,9 +541,12 @@ function ManageAlbums() {
             // 3. Persist the new thumbKey + blurhash to DynamoDB
             await updateImageThumbnail(token, expandedAlbumId, rawKey, { thumbKey, blurhash })
 
-            // 4. Refresh local state
+            // 4. Refresh local state with cache-bust for the updated thumbnail
             const data = await fetchAlbum(expandedAlbumId, token)
-            setAlbumImages(data.images || [])
+            const now = Date.now()
+            setAlbumImages((data.images || []).map(i =>
+                (i.rawKey || i.key) === rawKey ? { ...i, _cacheBust: now } : i
+            ))
 
             setEditingThumbKey(null)
             setActionSuccess('Thumbnail updated!')
@@ -929,7 +932,7 @@ function ManageAlbums() {
                                                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
                                                                 {albumImages.map((img, idx) => {
                                                                     const isLegacy = !img.thumbKey
-                                                                    const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                                                                    const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}${img._cacheBust ? `?v=${img._cacheBust}` : ''}`
                                                                     const imgKey = img.rawKey || img.key || `fallback-${idx}`
                                                                     const isEditingThisThumb = editingThumbKey === imgKey
 
