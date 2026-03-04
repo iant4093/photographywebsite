@@ -13,7 +13,7 @@ dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
 s3 = boto3.client('s3')
 
-from auth_helpers import get_caller_email
+from auth_helpers import get_caller_email, require_admin
 from email_helpers import send_email
 from media_helpers import format_fraction, extract_exif_data, start_mediaconvert_job
 
@@ -34,6 +34,10 @@ def get_image_dimensions_and_exif(bucket, key):
 def handler(event, context):
     """POST /albums — creates a new album record in DynamoDB (admin-only)."""
     # Verify the caller is an admin
+    denied = require_admin(event)
+    if denied:
+        return denied
+
     owner_email = get_caller_email(event)
     if not owner_email:
         return {
@@ -54,17 +58,6 @@ def handler(event, context):
             }
 
         visibility = body.get('visibility', 'public')
-
-        # Only admins can create public albums
-        if visibility == 'public' and owner_email != os.environ.get('ADMIN_EMAIL', ''):
-            return {
-                'statusCode': 403,
-                'headers': {
-                    'Access-Control-Allow-Origin': '*',
-                    'Content-Type': 'application/json'
-                },
-                'body': json.dumps({'error': 'Only admins can create public albums'})
-            }
 
         album_type = body.get('type', 'photo')
         images = body.get('images', [])
