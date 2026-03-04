@@ -179,7 +179,7 @@ export default function SharedAlbum() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
                 <h1 className="font-serif text-3xl font-semibold text-charcoal mb-4">View Shared Album</h1>
-                <p className="text-warm-gray mb-8">Enter the unique access code provided to you by the photographer.</p>
+                <p className="text-warm-gray mb-8">Enter the unique access code provided to you.</p>
 
                 <form onSubmit={handleManualSubmit} className="flex flex-col gap-3">
                     <input
