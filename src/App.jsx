@@ -1,8 +1,25 @@
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation, useNavigationType } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
+import { useEffect } from 'react'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
+
+// Component to handle scroll restoration logic
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  const navType = useNavigationType()
+
+  useEffect(() => {
+    // Scroll to top on PUSH or REPLACE (new navigation)
+    // Do NOT scroll on POP (back/forward) to allow browser to restore scroll position
+    if (navType !== 'POP') {
+      window.scrollTo(0, 0)
+    }
+  }, [pathname, navType])
+
+  return null
+}
 import Home from './pages/Home'
 import AlbumGallery from './pages/AlbumGallery'
 import SharedAlbum from './pages/SharedAlbum'

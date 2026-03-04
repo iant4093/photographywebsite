@@ -5,6 +5,7 @@ import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import { fetchAlbums } from '../utils/api'
 import SkeletonGrid from '../components/SkeletonGrid'
+import { useAuth } from '../context/authContext'
 
 // Home page with hero section and album grid
 function Home() {
