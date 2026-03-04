@@ -1,7 +1,7 @@
 import os
 import json
 import boto3
-from security_helpers import validate_turnstile, check_rate_limit
+from security_helpers import verify_turnstile, check_rate_limit
 
 cognito = boto3.client('cognito-idp')
 USER_POOL_ID = os.environ['COGNITO_USER_POOL_ID']
@@ -22,7 +22,7 @@ def handler(event, context):
             }
 
         # 1. Validate Turnstile
-        if not validate_turnstile(turnstile_token, ip):
+        if not verify_turnstile(turnstile_token, ip):
             return {
                 'statusCode': 403,
                 'body': json.dumps({'error': 'Invalid CAPTCHA security token. Are you a robot?'})
