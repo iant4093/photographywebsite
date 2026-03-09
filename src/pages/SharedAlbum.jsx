@@ -114,15 +114,25 @@ export default function SharedAlbum() {
         if (!images.length || !album || !code) return
         setDownloading(true)
         try {
-            const { url } = await requestSharedAlbumZip(code)
-            if (url) {
-                // The backend returned a presigned S3 URL
-                const a = document.createElement('a')
-                a.href = url
-                a.download = `${album.title || 'album'}.zip`
-                document.body.appendChild(a)
-                a.click()
-                document.body.removeChild(a)
+            // Polling loop
+            while (true) {
+                const { status, url } = await requestSharedAlbumZip(code)
+
+                if (status === 'ready' && url) {
+                    // The backend returned a presigned S3 URL
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `${album.title || 'album'}.zip`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    break; // Exit polling loop
+                } else if (status === 'processing') {
+                    // Wait 5 seconds before polling again
+                    await new Promise(resolve => setTimeout(resolve, 5000))
+                } else {
+                    throw new Error("Unexpected ZIP status: " + status)
+                }
             }
         } catch (err) {
             console.error('ZIP Download failed:', err)

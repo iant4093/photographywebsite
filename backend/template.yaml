@@ -495,8 +495,13 @@ Resources:
               Action:
                 - dynamodb:Query
               Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTable}/index/ShareCodeIndex'
-        - S3CrudPolicy:
+        - S3ReadPolicy:
             BucketName: !Ref ImagesBucket
+        - LambdaInvokePolicy:
+            FunctionName: !Ref WorkerZipFunction
+      Environment:
+        Variables:
+          WORKER_FUNCTION_NAME: !Ref WorkerZipFunction
       Events:
         CreateZipAlbum:
           Type: HttpApi
@@ -514,6 +519,25 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
+
+  # Async Background Worker: Does the actual 60+ second zipping
+  WorkerZipFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: worker_zip.handler
+      Timeout: 900
+      MemorySize: 1024
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTable}/index/ShareCodeIndex'
+        - S3CrudPolicy:
+            BucketName: !Ref ImagesBucket
 
   # Protected: delete specific images from album
   DeleteImagesFunction:
