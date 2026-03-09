@@ -141,7 +141,11 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
                                 }
                             }
                         ],
-                        "NameModifier": "_1080p5m"
+                        "NameModifier": "_1080p5m",
+                        "ContainerSettings": {
+                            "Container": "M3U8",
+                            "M3u8Settings": {}
+                        }
                     }
                 ]
             }
