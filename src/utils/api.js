@@ -60,6 +60,20 @@ export function fetchAlbum(albumId, token = null) {
 }
 
 /**
+ * Request the backend to generate a ZIP file for a standard album.
+ * @param {string} albumId - The ID of the album to zip.
+ * @param {string|null} token - Optional auth token for private albums.
+ * @returns {Promise<Object>} The presigned URL to download the zip.
+ */
+export function requestAlbumZip(albumId, token = null) {
+    const options = {
+        method: 'POST',
+        ...(token ? { headers: authHeaders(token) } : {})
+    }
+    return apiFetch(`/albums/${albumId}/zip`, options)
+}
+
+/**
  * Fetch a shared album by its unique code (no auth required).
  * @param {string} shareCode - The unique share code.
  * @param {string} turnstileToken - Cloudflare Turnstile token for verification.
@@ -68,6 +82,17 @@ export function fetchAlbum(albumId, token = null) {
 export function fetchSharedAlbum(shareCode, turnstileToken) {
     return apiFetch(`/shared/${shareCode}`, {
         headers: { 'X-Turnstile-Token': turnstileToken || '' }
+    })
+}
+
+/**
+ * Request the backend to generate a ZIP file for a shared album.
+ * @param {string} shareCode - The unique share code.
+ * @returns {Promise<Object>} The presigned URL to download the zip.
+ */
+export function requestSharedAlbumZip(shareCode) {
+    return apiFetch(`/shared/${shareCode}/zip`, {
+        method: 'POST'
     })
 }
 

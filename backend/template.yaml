@@ -87,6 +87,12 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteTempZips
+            Status: Enabled
+            ExpirationInDays: 1
+            Prefix: temp-zips/
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ['*']
@@ -472,6 +478,42 @@ Resources:
             ApiId: !Ref Api
             Path: /albums/{albumId}/images
             Method: POST
+
+  # Public/Protected: Generate Async ZIP for download
+  CreateZipFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/
+      Handler: create_zip.handler
+      Timeout: 900
+      MemorySize: 1024
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTable}/index/ShareCodeIndex'
+        - S3CrudPolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        CreateZipAlbum:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}/zip
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        CreateZipShared:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /shared/{shareCode}/zip
+            Method: POST
+            Auth:
+              Authorizer: NONE
 
   # Protected: delete specific images from album
   DeleteImagesFunction:

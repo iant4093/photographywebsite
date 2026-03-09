@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, Link, useNavigate, useNavigationType } from 'react-router-dom'
-import { fetchAlbum } from '../utils/api'
+import { fetchAlbum, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/authContext'
-import JSZip from 'jszip'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
+import VideoPlayer from '../components/VideoPlayer'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
 import { useLocation } from 'react-router-dom'
@@ -113,63 +113,25 @@ function AlbumGallery() {
         }
     }
 
-    // Download all photos in the album as a ZIP file
+    // Download all photos in the album as a ZIP file (Using Backend Generator)
     async function downloadAll() {
         if (!images.length || !album) return
-
-        // Mobile browsers have strict RAM limits (~500MB) which causes JSZip to crash and reload
-        // the page if it downloads massive albums completely into memory.
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
-        if (isMobile && images.length > 20) {
-            alert("This album is too large to ZIP on a mobile device. To prevent your browser from crashing, please download photos individually or use a desktop computer.");
-            return;
-        }
-
         setDownloading(true)
         try {
-            const zip = new JSZip()
-            const folderName = album?.title || 'album'
-            const folder = zip.folder(folderName)
-
-            // Process images in batches to prevent memory exhaustion during fetch
-            const BATCH_SIZE = 5;
-            for (let i = 0; i < images.length; i += BATCH_SIZE) {
-                const batch = images.slice(i, i + BATCH_SIZE);
-                const fetchPromises = batch.map(async (img, indexInBatch) => {
-                    const index = i + indexInBatch;
-                    try {
-                        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-                        const rawUrl = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
-                        const urlObj = new URL(rawUrl)
-                        urlObj.searchParams.set('dl', '1')
-
-                        const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
-                        if (!response.ok) throw new Error(`HTTP error ${response.status}`)
-                        const blob = await response.blob()
-                        // Handle objects vs raw strings for demo images
-                        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
-                        const fileName = keyString ? keyString.split('/').pop() : `photo-${index + 1}.jpg`
-                        folder.file(fileName, blob)
-                    } catch (err) {
-                        console.error('Failed to fetch image for zip:', err)
-                    }
-                })
-
-                // Wait for the current batch to finish before starting the next
-                await Promise.all(fetchPromises)
+            const token = await getIdToken()
+            const { url } = await requestAlbumZip(albumId, token)
+            if (url) {
+                // The backend returned a presigned S3 URL
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `${album.title || 'album'}.zip`
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
             }
-
-            const zipBlob = await zip.generateAsync({ type: 'blob' })
-            const url = URL.createObjectURL(zipBlob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `${folderName}.zip`
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(url)
         } catch (err) {
             console.error('ZIP Download failed:', err)
+            alert('Failed to generate ZIP. The album might be too large or the server is busy. Please try again later.')
         } finally {
             setDownloading(false)
         }
