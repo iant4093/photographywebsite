@@ -1,5 +1,6 @@
 import json
 import os
+import urllib.parse
 import boto3
 from botocore.exceptions import ClientError
 
@@ -21,10 +22,14 @@ def get_album_record(album_id=None, share_code=None):
         return items[0] if items else None
     return None
 
-def create_presigned_url(bucket_name, object_name, expiration=3600):
+def create_presigned_url(bucket_name, object_name, expiration=3600, download_filename=None):
+    params = {'Bucket': bucket_name, 'Key': object_name}
+    if download_filename:
+        encoded_filename = urllib.parse.quote(download_filename)
+        params['ResponseContentDisposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
     try:
         return s3.generate_presigned_url('get_object',
-                                        Params={'Bucket': bucket_name, 'Key': object_name},
+                                        Params=params,
                                         ExpiresIn=expiration)
     except Exception as e:
         print(e)
@@ -46,12 +51,13 @@ def handler(event, context):
         bucket = os.environ.get('IMAGES_BUCKET')
         zip_filename = f"album_{album.get('albumId')}.zip"
         zip_key = f"temp-zips/{zip_filename}"
+        download_filename = f"{album.get('title', 'album')}.zip"
 
         # 1. Check if the zip already exists in S3
         try:
             s3.head_object(Bucket=bucket, Key=zip_key)
             # If it exists, return ready status with the pre-signed URL
-            url = create_presigned_url(bucket, zip_key)
+            url = create_presigned_url(bucket, zip_key, download_filename=download_filename)
             return {
                 'statusCode': 200, 
                 'headers': {'Content-Type': 'application/json'}, 
