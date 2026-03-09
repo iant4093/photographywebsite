@@ -1,0 +1,20 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="brand-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a08c7b" />
+      <stop offset="100%" stop-color="#8b7565" />
+    </linearGradient>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&amp;display=swap');
+      .it-text {
+        font-family: 'Playfair Display', serif;
+        font-weight: 700;
+        font-size: 260px;
+        fill: #faf8f5;
+        letter-spacing: -8px;
+      }
+    </style>
+  </defs>
+  <rect width="512" height="512" rx="150" ry="150" fill="url(#brand-gradient)" />
+  <text x="50%" y="53%" dominant-baseline="middle" text-anchor="middle" class="it-text">IT</text>
+</svg>
