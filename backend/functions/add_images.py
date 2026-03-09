@@ -61,12 +61,12 @@ def handler(event, context):
                 if album_type == 'video':
                     s3_input_uri = f"s3://{bucket}/{raw_key}"
                     base_name = raw_key.rsplit('.', 1)[0]
-                    s3_output_prefix = f"s3://{bucket}/albums/{album_id}/{base_name}_hls/"
+                    s3_output_prefix = f"s3://{bucket}/{base_name}_hls/"
                     
                     try:
                         job_id = start_mediaconvert_job(s3_input_uri, s3_output_prefix)
                         filename = raw_key.split('/')[-1].rsplit('.', 1)[0]
-                        img['hlsUrl'] = f"albums/{album_id}/{base_name}_hls/{filename}.m3u8"
+                        img['hlsUrl'] = f"{base_name}_hls/{filename}.m3u8"
                         img['mediaConvertJobId'] = job_id
                     except Exception as e:
                         print(f"Failed to start MediaConvert for {raw_key}: {e}")
