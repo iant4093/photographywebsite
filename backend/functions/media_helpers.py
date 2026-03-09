@@ -53,13 +53,14 @@ def format_fraction(value):
 
 def extract_exif_data(bucket, key):
     """
-    Downloads an image from S3, extracts its EXIF data using exifread,
+    Downloads the first 64KB of an image from S3, extracts its EXIF data using exifread,
     formats it, and returns a dictionary.
     """
+    import io
     s3_client = get_s3_client()
     try:
-        response = s3_client.get_object(Bucket=bucket, Key=key)
-        file_stream = response['Body']
+        response = s3_client.get_object(Bucket=bucket, Key=key, Range='bytes=0-65535')
+        file_stream = io.BytesIO(response['Body'].read())
         tags = exifread.process_file(file_stream, details=False)
 
         exif_info = {}

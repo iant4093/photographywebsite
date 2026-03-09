@@ -8,6 +8,7 @@ import exifread
 import decimal
 from datetime import datetime
 from botocore.exceptions import ClientError
+import concurrent.futures
 
 # DynamoDB and S3 resources
 dynamodb = boto3.resource('dynamodb')
@@ -63,18 +64,20 @@ def handler(event, context):
         album_type = body.get('type', 'photo')
         images = body.get('images', [])
 
-        # Extract EXIF data from first 64KB of S3 object dynamically
+        # Extract EXIF data from first 64KB of S3 object dynamically using threads
         if 'IMAGES_BUCKET' in os.environ:
-            for img in images:
+            def _extract_for_img(img):
                 raw_key = img.get('rawKey')
-                if not raw_key: continue
+                if not raw_key: return
                 try:
-                    # Use the helper function for EXIF extraction
                     extracted_data = get_image_dimensions_and_exif(os.environ['IMAGES_BUCKET'], raw_key)
                     if extracted_data.get('exif'):
                         img['exif'] = extracted_data['exif']
                 except Exception as e:
                     print(f"EXIF extraction error for {raw_key}: {e}")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                executor.map(_extract_for_img, images)
 
         # If it's a video album, kick off MediaConvert jobs
         if album_type == 'video' and 'IMAGES_BUCKET' in os.environ:

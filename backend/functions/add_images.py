@@ -5,6 +5,7 @@ import boto3
 import exifread
 from datetime import datetime
 from botocore.exceptions import ClientError
+import concurrent.futures
 from auth_helpers import require_admin
 from media_helpers import format_fraction, extract_exif_data, start_mediaconvert_job
 
@@ -52,15 +53,14 @@ def handler(event, context):
         # EXIF for photos / MediaConvert for videos
         if 'IMAGES_BUCKET' in os.environ:
             bucket = os.environ['IMAGES_BUCKET']
-            for img in new_images:
+            
+            def _process_img(img):
                 raw_key = img.get('rawKey')
-                if not raw_key: continue
+                if not raw_key: return
 
                 if album_type == 'video':
-                    # S3 input URI format: s3://bucket/key
                     s3_input_uri = f"s3://{bucket}/{raw_key}"
                     base_name = raw_key.rsplit('.', 1)[0]
-                    # The destination prefix for MediaConvert outputs should be unique per album/video
                     s3_output_prefix = f"s3://{bucket}/albums/{album_id}/{base_name}_hls/"
                     
                     try:
@@ -71,13 +71,15 @@ def handler(event, context):
                     except Exception as e:
                         print(f"Failed to start MediaConvert for {raw_key}: {e}")
                 else:
-                    # Photo EXIF extraction
                     try:
                         exif_data = extract_exif_data(bucket, raw_key)
                         if exif_data:
                             img['exif'] = exif_data
                     except Exception as e:
                         print(f"EXIF extraction error for {raw_key}: {e}")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                executor.map(_process_img, new_images)
 
         # Append images to existing album in DynamoDB
         response = table.update_item(
