@@ -113,6 +113,15 @@ export default function SharedAlbum() {
     // Download all photos in the album as a ZIP file
     async function downloadAll() {
         if (!images.length) return
+
+        // Mobile browsers have strict RAM limits (~500MB) which causes JSZip to crash and reload
+        // the page if it downloads massive albums completely into memory.
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+        if (isMobile && images.length > 20) {
+            alert("This album is too large to ZIP on a mobile device. To prevent your browser from crashing, please download photos individually or use a desktop computer.");
+            return;
+        }
+
         setDownloading(true)
         try {
             const zip = new JSZip()
