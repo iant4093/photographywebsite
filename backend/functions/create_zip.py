@@ -2,11 +2,40 @@ import json
 import os
 import urllib.parse
 import boto3
+import jwt
+from jwt import PyJWKClient
 from botocore.exceptions import ClientError
 
 s3 = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 lambda_client = boto3.client('lambda')
+
+USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID', '')
+REGION = os.environ.get('AWS_REGION', 'us-west-2')
+jwks_url = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json"
+jwks_client = PyJWKClient(jwks_url) if USER_POOL_ID else None
+
+def get_email_from_token(event):
+    """Extract and cryptographically verify email and groups from the Bearer token."""
+    headers = event.get('headers', {})
+    auth_header = headers.get('authorization') or headers.get('Authorization', '')
+    if not auth_header.lower().startswith('bearer '):
+        return '', []
+    
+    token = auth_header.split(' ')[1]
+    try:
+        if not jwks_client: return '', []
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        claims = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            options={"verify_aud": False}
+        )
+        return claims.get('email', ''), claims.get('cognito:groups', [])
+    except Exception as e:
+        print(f"Token validation error: {e}")
+        return '', []
 
 def get_album_record(album_id=None, share_code=None):
     if not os.environ.get('ALBUMS_TABLE'): return None
@@ -47,6 +76,16 @@ def handler(event, context):
         album = get_album_record(album_id=album_id, share_code=share_code)
         if not album:
             return {'statusCode': 404, 'body': json.dumps({'error': 'Album not found'})}
+
+        # Security Check: If accessed via albumId and it's private, verify token
+        if not share_code and album.get('visibility') == 'private':
+            caller_email, groups = get_email_from_token(event)
+            owner = album.get('ownerEmail', '')
+            if caller_email != owner and 'Admins' not in groups:
+                return {
+                    'statusCode': 403,
+                    'body': json.dumps({'error': 'Access denied — this album is private'})
+                }
 
         bucket = os.environ.get('IMAGES_BUCKET')
         zip_filename = f"album_{album.get('albumId')}.zip"
