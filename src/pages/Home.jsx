@@ -152,7 +152,7 @@ function Home() {
 
                 {/* Hero content */}
                 <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
-                    <div className="max-w-2xl animate-fade-in">
+                    <div className="max-w-xs sm:max-w-sm md:max-w-md lg:max-w-[35%] animate-fade-in">
                         <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight">
                             Ian Truong
                         </h1>
