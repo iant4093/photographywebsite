@@ -30,9 +30,24 @@ def get_mediaconvert_client():
 
 def format_fraction(value):
     """
-    Helper to cleanly format exifread Ratio objects.
-    Produces things like '1/60s' or 'f/2.8'
+    Helper to cleanly format exifread Ratio objects or IfdTags containing Ratios.
+    Produces things like '1/60s', 'f/2.8', or '1.4'.
     """
+    # If the value is an IfdTag (has 'values' attribute), extract its first item
+    if hasattr(value, 'values') and isinstance(value.values, list) and len(value.values) > 0:
+        val = value.values[0]
+        if hasattr(val, 'num') and hasattr(val, 'den'):
+            if val.den == 0:
+                return str(val.num)
+            if val.num == 0:
+                return "0"
+            if val.num == 1:
+                return f"1/{val.den}"
+            if val.num % val.den == 0:
+                return str(val.num // val.den)
+            return str(round(val.num / val.den, 1))
+
+    # Existing logic for direct ratio objects
     if hasattr(value, 'num') and hasattr(value, 'den'):
         if value.den == 0:
             return str(value.num)
