@@ -230,7 +230,7 @@ function AlbumGallery() {
                                 <SkeletonGrid count={6} type="photo" />
                             ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {images.slice(0, 100).map((img, index) => {
+                                    {images.map((img, index) => {
                                         const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
                                         const thumbUrl = isLegacyOrDemo
                                             ? (img.url || img)
