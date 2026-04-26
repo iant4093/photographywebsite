@@ -118,7 +118,12 @@ function AlbumGallery() {
         if (!images.length || !album) return
         setDownloading(true)
         try {
-            const token = await getIdToken()
+            let token = null
+            try {
+                token = await getIdToken()
+            } catch (e) {
+                // Not logged in, token stays null — ZIP endpoint doesn't require auth
+            }
 
             // Polling loop with max 2 minute timeout (24 polls × 5s)
             const MAX_POLLS = 24
