@@ -495,7 +495,7 @@ Resources:
               Action:
                 - dynamodb:Query
               Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTable}/index/ShareCodeIndex'
-        - S3ReadPolicy:
+        - S3CrudPolicy:
             BucketName: !Ref ImagesBucket
         - LambdaInvokePolicy:
             FunctionName: !Ref WorkerZipFunction
