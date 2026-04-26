@@ -91,6 +91,7 @@ def handler(event, context):
 
         zip_filename = f"album_{album.get('albumId')}.zip"
         zip_key = f"temp-zips/{zip_filename}"
+        lock_key = f"temp-zips/album_{album.get('albumId')}.lock"
 
         print(f"Worker generating ZIP for {len(images)} images to {zip_key}")
         s3_stream = StreamToS3(bucket, zip_key)
@@ -111,10 +112,23 @@ def handler(event, context):
         except Exception as zip_err:
             print(f"Zip execution failed: {zip_err}")
             s3_stream.cancel()
+            # Clean up lock so the user can retry
+            try:
+                s3.delete_object(Bucket=bucket, Key=lock_key)
+                print(f"Cleaned up lock after failure: {lock_key}")
+            except Exception:
+                pass
             return
             
         s3_stream.close()
         print(f"Worker finished generating {zip_key}")
+
+        # Clean up lock marker — the ZIP is now available
+        try:
+            s3.delete_object(Bucket=bucket, Key=lock_key)
+            print(f"Cleaned up lock: {lock_key}")
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"Worker fatal error: {e}")

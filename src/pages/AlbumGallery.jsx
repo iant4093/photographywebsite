@@ -120,8 +120,9 @@ function AlbumGallery() {
         try {
             const token = await getIdToken()
 
-            // Polling loop
-            while (true) {
+            // Polling loop with max 2 minute timeout (24 polls × 5s)
+            const MAX_POLLS = 24
+            for (let poll = 0; poll < MAX_POLLS; poll++) {
                 const { status, url } = await requestAlbumZip(albumId, token)
 
                 if (status === 'ready' && url) {
@@ -132,7 +133,7 @@ function AlbumGallery() {
                     document.body.appendChild(a)
                     a.click()
                     document.body.removeChild(a)
-                    break; // Exit polling loop
+                    return // Exit function
                 } else if (status === 'processing') {
                     // Wait 5 seconds before polling again
                     await new Promise(resolve => setTimeout(resolve, 5000))
@@ -140,6 +141,7 @@ function AlbumGallery() {
                     throw new Error("Unexpected ZIP status: " + status)
                 }
             }
+            throw new Error("ZIP generation timed out after 2 minutes")
         } catch (err) {
             console.error('ZIP Download failed:', err)
             alert('Failed to generate ZIP. The album might be too large or the server is busy. Please try again later.')

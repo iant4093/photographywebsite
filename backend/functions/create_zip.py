@@ -109,23 +109,45 @@ def handler(event, context):
             # File doesn't exist yet, we need to generate it.
             pass
 
-        # 2. File doesn't exist, asynchronously trigger the worker to build it.
-        worker_func = os.environ.get('WORKER_FUNCTION_NAME')
-        if worker_func:
-            payload = {
-                'albumId': album_id,
-                'shareCode': share_code
-            }
-            lambda_client.invoke(
-                FunctionName=worker_func,
-                InvocationType='Event', # Asynchronous invocation
-                Payload=json.dumps(payload)
-            )
-            print(f"Triggered async worker for album {album.get('albumId')}")
+        # 2. Check if a worker is already running via a lock marker
+        lock_key = f"temp-zips/album_{album.get('albumId')}.lock"
+        worker_already_running = False
+        try:
+            lock_obj = s3.head_object(Bucket=bucket, Key=lock_key)
+            # Lock exists — check if it's recent (< 10 minutes old)
+            import datetime
+            lock_age = (datetime.datetime.now(datetime.timezone.utc) - lock_obj['LastModified']).total_seconds()
+            if lock_age < 600:
+                worker_already_running = True
+                print(f"Lock exists ({int(lock_age)}s old) — worker already running for album {album.get('albumId')}")
+            else:
+                print(f"Stale lock ({int(lock_age)}s old) — will re-trigger worker for album {album.get('albumId')}")
+        except ClientError:
+            # No lock exists
+            pass
 
-        # 3. Inform the frontend that the zip is being processed
+        # 3. Only invoke a new worker if one isn't already running
+        if not worker_already_running:
+            # Create lock marker before invoking worker
+            s3.put_object(Bucket=bucket, Key=lock_key, Body=b'locked')
+            print(f"Created lock for album {album.get('albumId')}")
+
+            worker_func = os.environ.get('WORKER_FUNCTION_NAME')
+            if worker_func:
+                payload = {
+                    'albumId': album_id,
+                    'shareCode': share_code
+                }
+                lambda_client.invoke(
+                    FunctionName=worker_func,
+                    InvocationType='Event',  # Asynchronous invocation
+                    Payload=json.dumps(payload)
+                )
+                print(f"Triggered async worker for album {album.get('albumId')}")
+
+        # 4. Inform the frontend that the zip is being processed
         return {
-            'statusCode': 202, # 202 Accepted implies background long-running task
+            'statusCode': 202,  # 202 Accepted implies background long-running task
             'headers': {'Content-Type': 'application/json'}, 
             'body': json.dumps({
                 'status': 'processing'
