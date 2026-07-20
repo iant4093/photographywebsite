@@ -225,6 +225,10 @@ export function readCachedAlbumsPage(params = {}) {
 }
 
 export function fetchAlbumsPage(params = {}, options = {}) {
+    if (options.signal?.aborted) {
+        return Promise.reject(options.signal.reason || new DOMException('Request aborted', 'AbortError'))
+    }
+
     const normalized = normalizeCatalogParams(params)
     const isPublic = !options.token
     const key = `${isPublic ? 'public' : `auth:${normalized.ownerEmail || 'admin'}`}:${catalogKey(normalized)}`
@@ -234,7 +238,12 @@ export function fetchAlbumsPage(params = {}, options = {}) {
     }
 
     const existing = catalogRequests.get(key)
-    if (!options.force && existing) return subscribeToCatalogRequest(existing, options.signal)
+    if (!options.force && existing && !existing.controller.signal.aborted) {
+        return subscribeToCatalogRequest(existing, options.signal)
+    }
+    if (existing?.controller.signal.aborted && catalogRequests.get(key) === existing) {
+        catalogRequests.delete(key)
+    }
 
     const controller = new AbortController()
     const query = new URLSearchParams(normalized).toString()
@@ -246,6 +255,11 @@ export function fetchAlbumsPage(params = {}, options = {}) {
         const page = Array.isArray(payload)
             ? normalizeLegacyCatalogPage(payload, normalized)
             : normalizePage(payload)
+        if (!isSafeCursor(page.nextCursor)) {
+            throw new ApiError('The service returned an invalid pagination cursor.', {
+                code: 'BAD_CURSOR',
+            })
+        }
         page.items = page.items.map(annotateMediaExpiry)
         if (isPublic) {
             catalogCache.set(key, { value: page, expiresAt: Date.now() + PUBLIC_CATALOG_TTL_MS })

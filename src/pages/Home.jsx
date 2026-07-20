@@ -4,8 +4,13 @@ import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbumsPage } from '../utils/api'
-import { mergeUniqueById } from '../utils/apiResponse'
-import { getCatalogSnapshot, setCatalogSnapshot } from '../utils/catalogState'
+import {
+    CatalogPaginationError,
+    deleteCatalogSnapshot,
+    getCatalogSnapshot,
+    loadCompleteCatalog,
+    setCatalogSnapshot,
+} from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 
 const CATALOG_KEY = 'public-photos'
@@ -19,36 +24,60 @@ function Home() {
     const navigationType = useNavigationType()
     const location = useLocation()
     const [initialSnapshot] = useState(() => getCatalogSnapshot(CATALOG_KEY))
+    const catalogSnapshotRef = useRef(initialSnapshot)
     const pageRef = useRef(null)
     const heroRef = useRef(null)
 
     useScrollRestoration(location.pathname, navigationType === 'POP')
 
     const [albums, setAlbums] = useState(initialSnapshot?.items || [])
-    const [nextCursor, setNextCursor] = useState(initialSnapshot?.nextCursor || null)
     const [loading, setLoading] = useState(!initialSnapshot)
-    const [loadingMore, setLoadingMore] = useState(false)
     const [error, setError] = useState(null)
+    const [loadAttempt, setLoadAttempt] = useState(0)
 
     const savePage = useCallback((items, cursor) => {
+        catalogSnapshotRef.current = { items, nextCursor: cursor }
         setAlbums(items)
-        setNextCursor(cursor)
         setCatalogSnapshot(CATALOG_KEY, { items, nextCursor: cursor })
     }, [])
 
     useEffect(() => {
-        if (initialSnapshot) return undefined
         const controller = new AbortController()
-        fetchAlbumsPage({ visibility: 'public', type: 'photo', limit: PAGE_SIZE }, { signal: controller.signal })
-            .then((page) => savePage(page.items, page.nextCursor))
+        const snapshot = catalogSnapshotRef.current
+
+        loadCompleteCatalog({
+            fetchPage: (cursor) => fetchAlbumsPage({
+                visibility: 'public',
+                type: 'photo',
+                limit: PAGE_SIZE,
+                cursor,
+            }, { signal: controller.signal }),
+            initialItems: snapshot?.items,
+            initialCursor: snapshot?.nextCursor,
+            hasInitialPage: Boolean(snapshot),
+            signal: controller.signal,
+            onPage: ({ items, nextCursor: cursor }) => {
+                if (controller.signal.aborted) return
+                savePage(items, cursor)
+                setLoading(false)
+            },
+        })
             .catch((requestError) => {
-                if (requestError.name !== 'AbortError') setError(requestError.message || 'Photos could not be loaded.')
+                if (requestError.name === 'AbortError') return
+                if (
+                    requestError instanceof CatalogPaginationError
+                    || ['BAD_CURSOR', 'REPEATED_CURSOR'].includes(requestError.code)
+                ) {
+                    catalogSnapshotRef.current = null
+                    deleteCatalogSnapshot(CATALOG_KEY)
+                }
+                setError(requestError.message || 'Photos could not be loaded.')
             })
             .finally(() => {
                 if (!controller.signal.aborted) setLoading(false)
             })
         return () => controller.abort()
-    }, [initialSnapshot, savePage])
+    }, [loadAttempt, savePage])
 
     useEffect(() => {
         const hero = heroRef.current
@@ -106,25 +135,6 @@ function Home() {
         return { groupedPhotoAlbums: grouped, photoCategories: categories }
     }, [photoAlbums])
 
-    const loadMore = async () => {
-        if (!nextCursor || loadingMore) return
-        setLoadingMore(true)
-        setError(null)
-        try {
-            const page = await fetchAlbumsPage({
-                visibility: 'public',
-                type: 'photo',
-                limit: PAGE_SIZE,
-                cursor: nextCursor,
-            })
-            savePage(mergeUniqueById(albums, page.items), page.nextCursor)
-        } catch (requestError) {
-            setError(requestError.message || 'More photos could not be loaded.')
-        } finally {
-            setLoadingMore(false)
-        }
-    }
-
     return (
         <div ref={pageRef} className="animate-fade-in">
             <section className="relative overflow-hidden">
@@ -181,7 +191,22 @@ function Home() {
                 </div>
 
                 {loading && <SkeletonGrid count={6} type="photo" />}
-                {error && <div className="text-center py-8 text-red-700" role="alert"><p>{error}</p></div>}
+                {error && (
+                    <div className="text-center py-8 text-red-700" role="alert">
+                        <p>{error}</p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setError(null)
+                                setLoading(albums.length === 0)
+                                setLoadAttempt((attempt) => attempt + 1)
+                            }}
+                            className="mt-4 px-5 py-2 rounded-xl border border-red-700 hover:bg-red-50 transition-colors"
+                        >
+                            Try again
+                        </button>
+                    </div>
+                )}
 
                 {!loading && photoCategories.map((category, categoryIndex) => {
                     const sectionId = `photo-cat-${category.toLowerCase().replace(/\s+/g, '-')}`
@@ -209,13 +234,6 @@ function Home() {
 
                 {!loading && photoAlbums.length === 0 && !error && (
                     <div className="text-center py-12 text-warm-gray"><p>No photo albums found.</p></div>
-                )}
-                {nextCursor && (
-                    <div className="flex justify-center pt-2">
-                        <button type="button" onClick={loadMore} disabled={loadingMore} className="px-6 py-3 rounded-xl bg-charcoal text-white hover:bg-charcoal-light transition-colors disabled:opacity-60">
-                            {loadingMore ? 'Loading…' : 'Load more albums'}
-                        </button>
-                    </div>
                 )}
             </section>
         </div>
