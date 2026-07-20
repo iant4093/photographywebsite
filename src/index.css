@@ -204,8 +204,39 @@ body {
 
 /* Parallax hero background */
 .parallax-hero {
-  will-change: transform;
   transition: transform 0.1s linear;
+}
+
+.catalog-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 520px;
+}
+
+.skeleton-shimmer {
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.42) 50%, transparent 100%);
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .parallax-hero {
+    transform: none !important;
+  }
 }
 
 /* Grid item scroll-triggered animation */

@@ -1,50 +1,154 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Ian Truong Photography Portfolio — Serverless Backend
+Description: Ian Truong Photography Portfolio - hardened serverless backend
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedPattern: '^[a-z0-9-]+$'
+  FrontendUrl:
+    Type: String
+    Default: https://iantruongphotography.com
+    AllowedPattern: '^https://[^/]+$'
+    Description: Exact browser origin allowed by API Gateway and S3 CORS (no trailing slash).
+  FrontendHostname:
+    Type: String
+    Default: iantruongphotography.com
+    AllowedPattern: '^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$'
+    Description: Exact Turnstile hostname, without scheme, port, path, or trailing dot.
+  ResendApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Transitional legacy value. Prefer ResendApiKeySecretArn and clear this after migration.
+  TurnstileSecretKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Transitional legacy value. Prefer TurnstileSecretArn and clear this after migration.
+  ResendApiKeySecretArn:
+    Type: String
+    Default: ''
+    Description: Optional Secrets Manager ARN containing the Resend API key.
+  TurnstileSecretArn:
+    Type: String
+    Default: ''
+    Description: Optional Secrets Manager ARN containing the Turnstile secret.
+  GoogleOAuthSecretArn:
+    Type: String
+    Default: ''
+    Description: Optional Secrets Manager ARN containing the Google OAuth authorized-user JSON.
+  ApplicationSecretsKmsKeyArn:
+    Type: String
+    Default: ''
+    Description: Optional customer-managed KMS key ARN used by the application secrets.
+  GoogleDriveFolderId:
+    Type: String
+    Default: ''
+  AlbumIndexDeploymentPhase:
+    Type: String
+    Default: none
+    AllowedValues:
+      - none
+      - visibility
+      - both
+    Description: >-
+      Guarded existing-table migration. Deploy visibility first, wait for ACTIVE and backfill,
+      then deploy both. DynamoDB permits only one GSI creation per UpdateTable call.
+  EnforcePrivateMediaCloudFrontDeny:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'false'
+      - 'true'
+    Description: >-
+      Guarded rollout switch. Enable only after object tags are complete, caches are invalidated,
+      and private HLS has an authorized segment-delivery design.
+  ApiThrottleBurstLimit:
+    Type: Number
+    Default: 50
+    MinValue: 10
+    MaxValue: 500
+  ApiThrottleRateLimit:
+    Type: Number
+    Default: 25
+    MinValue: 5
+    MaxValue: 250
+  ApiAccessLogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 120, 180, 365]
+  MediaAccessLogRetentionDays:
+    Type: Number
+    Default: 90
+    AllowedValues: [30, 60, 90, 120, 180, 365, 400]
+
+Conditions:
+  HasVisibilityIndex: !Not [!Equals [!Ref AlbumIndexDeploymentPhase, none]]
+  HasOwnerIndex: !Equals [!Ref AlbumIndexDeploymentPhase, both]
+  HasResendSecret: !Not [!Equals [!Ref ResendApiKeySecretArn, '']]
+  HasTurnstileSecret: !Not [!Equals [!Ref TurnstileSecretArn, '']]
+  HasGoogleOAuthSecret: !Not [!Equals [!Ref GoogleOAuthSecretArn, '']]
+  HasApplicationSecretsKmsKey: !Not [!Equals [!Ref ApplicationSecretsKmsKeyArn, '']]
+  EnforcePrivateMediaDeny: !Equals [!Ref EnforcePrivateMediaCloudFrontDeny, 'true']
 
 Globals:
   Function:
     Runtime: python3.12
     Timeout: 25
     MemorySize: 256
+    # Public Cognito identifiers are required for defense-in-depth JWT claim
+    # validation inside protected and optionally authenticated handlers.
     Environment:
       Variables:
-        ALBUMS_TABLE: !Ref AlbumsTable
-        IMAGES_BUCKET: !Ref ImagesBucket
-        CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
-        RESEND_API_KEY: !Ref ResendApiKey
-        TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
-        RATE_LIMIT_TABLE: !Ref RateLimitTable
         COGNITO_USER_POOL_ID: !Ref UserPool
         COGNITO_CLIENT_ID: !Ref UserPoolClient
-        GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
-
-Parameters:
-  Stage:
-    Type: String
-    Default: prod
-  FrontendUrl:
-    Type: String
-    Default: https://iantruongphotography.com
-  ResendApiKey:
-    Type: String
-  TurnstileSecretKey:
-    Type: String
-  GoogleDriveFolderId:
-    Type: String
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+      ApplicationLogLevel: INFO
+      SystemLogLevel: WARN
+    Tags:
+      Application: IanTruongPhotography
+      Stage: !Ref Stage
 
 Resources:
-  # ─── DynamoDB ───
+  # DynamoDB: retain album data, protect deletion, and enable point-in-time recovery.
   AlbumsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'GoldenHour-Albums-${Stage}'
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      # DynamoDB encrypts every table at rest with an AWS-owned key by default.
+      # Do not declare SSESpecification on this existing table: adding/removing
+      # that redundant property is treated as an encryption-mode change and can
+      # exhaust DynamoDB's guarded update quota during a rollback.
       AttributeDefinitions:
         - AttributeName: albumId
           AttributeType: S
         - AttributeName: shareCode
           AttributeType: S
+        - !If
+          - HasVisibilityIndex
+          - AttributeName: visibility
+            AttributeType: S
+          - !Ref AWS::NoValue
+        - !If
+          - HasVisibilityIndex
+          - AttributeName: createdAt
+            AttributeType: S
+          - !Ref AWS::NoValue
+        - !If
+          - HasOwnerIndex
+          - AttributeName: ownerSub
+            AttributeType: S
+          - !Ref AWS::NoValue
       KeySchema:
         - AttributeName: albumId
           KeyType: HASH
@@ -55,12 +159,43 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
+        - !If
+          - HasVisibilityIndex
+          - IndexName: VisibilityCreatedAtIndex
+            KeySchema:
+              - AttributeName: visibility
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          - !Ref AWS::NoValue
+        - !If
+          - HasOwnerIndex
+          - IndexName: OwnerSubCreatedAtIndex
+            KeySchema:
+              - AttributeName: ownerSub
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          - !Ref AWS::NoValue
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: PrivateCustomerData
 
   RateLimitTable:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub 'GoldenHour-RateLimits-${Stage}'
       BillingMode: PAY_PER_REQUEST
+      # At-rest encryption is mandatory in DynamoDB and uses an AWS-owned key
+      # when no customer-managed key is configured.
       AttributeDefinitions:
         - AttributeName: identifier
           AttributeType: S
@@ -70,18 +205,49 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
-      KeySchema:
-        - AttributeName: identifier
-          KeyType: HASH
-      TimeToLiveSpecification:
-        AttributeName: ttl
-        Enabled: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: SecurityTelemetry
 
-  # ─── S3 Image Bucket ───
+  # Per-stack random key used to HMAC privacy-sensitive rate-limit identifiers.
+  RateLimitHashSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub 'HMAC key for privacy-preserving rate limits (${Stage})'
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: SecuritySecret
+
+  # Private S3 origin. Versioning and retained resources support recovery.
   ImagesBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub 'goldenhour-images-${AWS::AccountId}-${Stage}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -89,16 +255,61 @@ Resources:
         RestrictPublicBuckets: true
       LifecycleConfiguration:
         Rules:
-          - Id: DeleteTempZips
+          - Id: DeleteTemporaryZipObjects
             Status: Enabled
-            ExpirationInDays: 1
             Prefix: temp-zips/
+            ExpirationInDays: 1
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          - Id: ExpireNoncurrentMediaVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: ExpireAbandonedPendingUploads
+            Status: Enabled
+            Prefix: albums/
+            TagFilters:
+              - Key: visibility
+                Value: pending
+            ExpirationInDays: 7
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 7
+          # S3 does not allow AbortIncompleteMultipartUpload on a lifecycle
+          # rule that also filters by object tags, so keep this as a separate
+          # prefix-scoped recovery rule.
+          - Id: AbortAbandonedAlbumMultipartUploads
+            Status: Enabled
+            Prefix: albums/
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
       CorsConfiguration:
         CorsRules:
-          - AllowedHeaders: ['*']
-            AllowedMethods: [GET, PUT]
-            AllowedOrigins: ['*']
-            MaxAge: 3600
+          - AllowedHeaders:
+              - Content-Type
+              - Range
+              - x-amz-tagging
+            AllowedMethods:
+              - GET
+              - HEAD
+              - PUT
+            AllowedOrigins:
+              - !Ref FrontendUrl
+            ExposedHeaders:
+              - ETag
+              - Content-Length
+              - Content-Range
+            MaxAge: 600
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: MixedPublicAndPrivateMedia
 
   ImagesBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -107,22 +318,170 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: AllowCloudFrontServicePrincipalReadOnly
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt ImagesBucket.Arn
+              - !Sub '${ImagesBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: AllowThisCloudFrontDistributionReadOnly
             Effect: Allow
             Principal:
               Service: cloudfront.amazonaws.com
-            Action: 's3:GetObject'
-            Resource: !Sub 'arn:aws:s3:::${ImagesBucket}/*'
+            Action: s3:GetObject
+            Resource: !Sub '${ImagesBucket.Arn}/*'
             Condition:
               StringEquals:
-                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+          - Sid: DenyCloudFrontTemporaryZipReads
+            Effect: Deny
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${ImagesBucket.Arn}/temp-zips/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+          - !If
+            - EnforcePrivateMediaDeny
+            - Sid: DenyCloudFrontNonPublicTaggedObjects
+              Effect: Deny
+              Principal:
+                Service: cloudfront.amazonaws.com
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/*'
+              Condition:
+                StringEquals:
+                  AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+                StringNotEquals:
+                  s3:ExistingObjectTag/visibility: public
+            - !Ref AWS::NoValue
 
-  # ─── CloudFront CDN ───
+  MediaResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub 'GoldenHour-Media-Headers-${Stage}'
+        Comment: Exact-origin media CORS and browser hardening
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items:
+              - Content-Type
+              - Range
+          AccessControlAllowMethods:
+            Items:
+              - GET
+              - HEAD
+              - OPTIONS
+          AccessControlAllowOrigins:
+            Items:
+              - !Ref FrontendUrl
+          AccessControlExposeHeaders:
+            Items:
+              - Accept-Ranges
+              - Content-Length
+              - Content-Range
+              - ETag
+          AccessControlMaxAgeSec: 600
+          OriginOverride: true
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Cache-Control
+              Value: public, max-age=86400
+              Override: true
+
+  MediaAccessLogsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3045 # CloudFront standard logging v1 requires the log-delivery ACL.
+    Properties:
+      BucketName: !Sub 'goldenhour-access-logs-${AWS::AccountId}-${Stage}'
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: RetainAccessLogsForAuditWindow
+            Status: Enabled
+            ExpirationInDays: !Ref MediaAccessLogRetentionDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: SecurityLogs
+
+  MediaAccessLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MediaAccessLogsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt MediaAccessLogsBucket.Arn
+              - !Sub '${MediaAccessLogsBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  ImagesOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'ImagesOAC-${Stage}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
   ImagesCloudFront:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
+        IPV6Enabled: true
+        HttpVersion: http2and3
         Comment: !Sub 'GoldenHour Images CDN - ${Stage}'
         Origins:
           - Id: S3Origin
@@ -135,22 +494,21 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           AllowedMethods: [GET, HEAD, OPTIONS]
           CachedMethods: [GET, HEAD, OPTIONS]
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
-          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf # Managed-CORS-S3Origin
-          ResponseHeadersPolicyId: 5cc3b908-e619-4b99-88e5-2cf7f45965bd # Managed-CORS-With-Preflight
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+          ResponseHeadersPolicyId: !Ref MediaResponseHeadersPolicy
           Compress: true
+        Logging:
+          Bucket: !GetAtt MediaAccessLogsBucket.DomainName
+          IncludeCookies: false
+          Prefix: media/
         PriceClass: PriceClass_100
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
 
-  ImagesOriginAccessControl:
-    Type: AWS::CloudFront::OriginAccessControl
-    Properties:
-      OriginAccessControlConfig:
-        Name: !Sub 'ImagesOAC-${Stage}'
-        OriginAccessControlOriginType: s3
-        SigningBehavior: always
-        SigningProtocol: sigv4
-
-  # ─── MediaConvert Role ───
   MediaConvertRole:
     Type: AWS::IAM::Role
     Properties:
@@ -162,39 +520,68 @@ Resources:
               Service: mediaconvert.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: MediaConvertS3Access
+        - PolicyName: MediaConvertAlbumObjectsOnly
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                Resource: !Sub 'arn:aws:s3:::${ImagesBucket}/*'
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                Resource: !GetAtt ImagesBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - albums/*
               - Effect: Allow
                 Action:
-                  - execute-api:Invoke
-                Resource: arn:aws:execute-api:*:*:*
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                  - s3:ListMultipartUploadParts
+                Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
 
-  # ─── Cognito ───
+  # Cognito: proxy-only password authentication, refresh support, optional TOTP MFA.
   UserPool:
     Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       UserPoolName: !Sub 'GoldenHour-Users-${Stage}'
-      LambdaConfig: {}
+      DeletionProtection: ACTIVE
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
       AutoVerifiedAttributes:
         - email
       UsernameAttributes:
         - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
       Policies:
         PasswordPolicy:
-          MinimumLength: 8
+          MinimumLength: 12
           RequireUppercase: true
           RequireLowercase: true
           RequireNumbers: true
-          RequireSymbols: false
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 3
+      UserPoolTags:
+        Application: IanTruongPhotography
+        Stage: !Ref Stage
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -202,13 +589,20 @@ Resources:
       ClientName: !Sub 'GoldenHour-WebClient-${Stage}'
       UserPoolId: !Ref UserPool
       ExplicitAuthFlows:
-        - ALLOW_USER_SRP_AUTH
-        - ALLOW_USER_PASSWORD_AUTH
-        - ALLOW_REFRESH_TOKEN_AUTH
         - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
       GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AuthSessionValidity: 3
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
 
-  # Admin group — users in this group have write access
   AdminsGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
@@ -216,15 +610,38 @@ Resources:
       UserPoolId: !Ref UserPool
       Description: Admin users with write access
 
-  # ─── API Gateway ───
+  # API access logs intentionally omit request/response bodies, tokens, email, and query strings.
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/ian-photography-${Stage}'
+      RetentionInDays: !Ref ApiAccessLogRetentionDays
+
   Api:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Stage
+      FailOnWarnings: true
+      PropagateTags: true
       CorsConfiguration:
-        AllowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
-        AllowHeaders: ['Content-Type', 'Authorization', 'X-Turnstile-Token']
-        AllowOrigins: ['*']
+        AllowMethods: [GET, POST, PUT, DELETE, PATCH, OPTIONS]
+        AllowHeaders: [Content-Type, Authorization, X-Turnstile-Token]
+        AllowOrigins:
+          - !Ref FrontendUrl
+        MaxAge: 600
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+        ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
+        ThrottlingRateLimit: !Ref ApiThrottleRateLimit
+      Tags:
+        Application: IanTruongPhotography
+        Stage: !Ref Stage
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
@@ -235,19 +652,50 @@ Resources:
               audience:
                 - !Ref UserPoolClient
 
-  # ─── Lambda Functions ───
+  AsyncFailureQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-async-failures-${Stage}'
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: OperationalFailurePayloads
 
-  # Public: list all albums
+  # Public: list public albums. Backend must ignore client attempts to widen visibility.
   GetAlbumsFunction:
     Type: AWS::Serverless::Function
+    Metadata: &SafePythonBuild
+      BuildMethod: makefile
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: get_albums.handler
+      ReservedConcurrentExecutions: 20
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+          OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
+          ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
-        - S3ReadPolicy:
-            BucketName: !Ref ImagesBucket
+        - Statement:
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
       Events:
         GetAlbums:
           Type: HttpApi
@@ -258,17 +706,33 @@ Resources:
             Auth:
               Authorizer: NONE
 
-  # Public: get single album with images
   GetAlbumFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: get_album.handler
+      ReservedConcurrentExecutions: 20
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
-        - S3ReadPolicy:
-            BucketName: !Ref ImagesBucket
+        - Statement:
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
       Events:
         GetAlbum:
           Type: HttpApi
@@ -279,24 +743,51 @@ Resources:
             Auth:
               Authorizer: NONE
 
-  # Public: get shared album by unique code
   GetSharedAlbumFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: get_shared_album.handler
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
+          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref AlbumsTable
         - Statement:
             - Effect: Allow
-              Action:
-                - dynamodb:Query
-              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTable}/index/ShareCodeIndex'
-        - S3ReadPolicy:
-            BucketName: !Ref ImagesBucket
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RateLimitTable
+              Action: dynamodb:Query
+              Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref RateLimitHashSecret
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+        - !If
+          - HasTurnstileSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref TurnstileSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
       Events:
         GetSharedAlbum:
           Type: HttpApi
@@ -307,20 +798,48 @@ Resources:
             Auth:
               Authorizer: NONE
 
-  # Public: login endpoint
   LoginFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: login.handler
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+          TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
+          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RateLimitTable
         - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref RateLimitHashSecret
             - Effect: Allow
               Action:
                 - cognito-idp:AdminInitiateAuth
               Resource: !GetAtt UserPool.Arn
+        - !If
+          - HasTurnstileSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref TurnstileSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
       Events:
         Login:
           Type: HttpApi
@@ -331,15 +850,102 @@ Resources:
             Auth:
               Authorizer: NONE
 
-  # Public: contact form endpoint
+  CompleteChallengeFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: complete_challenge.handler
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+          TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
+          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref RateLimitHashSecret
+            - Effect: Allow
+              Action: cognito-idp:AdminRespondToAuthChallenge
+              Resource: !GetAtt UserPool.Arn
+        - !If
+          - HasTurnstileSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref TurnstileSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
+      Events:
+        LoginChallenge:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /login/challenge
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
   ContactFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: contact.handler
+      ReservedConcurrentExecutions: 3
+      Environment:
+        Variables:
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
+          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
+          RESEND_API_KEY: !Ref ResendApiKey
+          RESEND_API_KEY_SECRET_ARN: !Ref ResendApiKeySecretArn
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref RateLimitTable
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref RateLimitHashSecret
+        - !If
+          - HasTurnstileSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref TurnstileSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasResendSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ResendApiKeySecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
       Events:
         ContactForm:
           Type: HttpApi
@@ -350,52 +956,121 @@ Resources:
             Auth:
               Authorizer: NONE
 
-  # Admin: get all albums (internal)o pre-auth trigger for CAPTCHA validation
-# PreAuthenticationFunction is removed in favor of LoginFunction proxy approach
-
-  # Async: Backup files to Google Drive
   GoogleDriveBackupFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: google_drive_sync.handler
       Timeout: 900
       MemorySize: 512
+      EphemeralStorage:
+        Size: 2048
+      ReservedConcurrentExecutions: 1
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt AsyncFailureQueue.Arn
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
+          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
       Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref ImagesBucket
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AsyncFailureQueue.Arn
+        - !If
+          - HasGoogleOAuthSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref GoogleOAuthSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
 
-  # Protected: create album
   CreateAlbumFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: create_album.handler
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          FRONTEND_URL: !Ref FrontendUrl
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
+          GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
+          RESEND_API_KEY: !Ref ResendApiKey
+          RESEND_API_KEY_SECRET_ARN: !Ref ResendApiKeySecretArn
+          VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+          OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
-        - S3ReadPolicy:
-            BucketName: !Ref ImagesBucket
         - Statement:
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: cognito-idp:ListUsers
+              Resource: !GetAtt UserPool.Arn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectTagging
+                - s3:PutObjectTagging
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action:
                 - mediaconvert:DescribeEndpoints
                 - mediaconvert:CreateJob
-              Resource: "*"
-        - Statement:
+              Resource: '*'
             - Effect: Allow
-              Action:
-                - iam:PassRole
+              Action: iam:PassRole
               Resource: !GetAtt MediaConvertRole.Arn
-        - Statement:
+              Condition:
+                StringEquals:
+                  iam:PassedToService: mediaconvert.amazonaws.com
             - Effect: Allow
-              Action:
-                - lambda:InvokeFunction
+              Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
-      Environment:
-        Variables:
-          MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
-          GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
+        - !If
+          - HasResendSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ResendApiKeySecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
       Events:
         CreateAlbum:
           Type: HttpApi
@@ -404,15 +1079,38 @@ Resources:
             Path: /albums
             Method: POST
 
-  # Protected: update album
   UpdateAlbumFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: update_album.handler
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectTagging
+                - s3:PutObjectTagging
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
       Events:
         UpdateAlbum:
           Type: HttpApi
@@ -421,17 +1119,40 @@ Resources:
             Path: /albums/{albumId}
             Method: PUT
 
-  # Protected: delete album
   DeleteAlbumFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: delete_album.handler
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
-        - S3CrudPolicy:
-            BucketName: !Ref ImagesBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:ListBucketVersions
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - albums/*
+                    - temp-zips/*
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/albums/*'
+                - !Sub '${ImagesBucket.Arn}/temp-zips/*'
       Events:
         DeleteAlbum:
           Type: HttpApi
@@ -440,37 +1161,53 @@ Resources:
             Path: /albums/{albumId}
             Method: DELETE
 
-  # Protected: add images to existing album
   AddImagesFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: add_images.handler
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
+          GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
-        - S3ReadPolicy:
-            BucketName: !Ref ImagesBucket
         - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectTagging
+                - s3:PutObjectTagging
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
             - Effect: Allow
               Action:
                 - mediaconvert:DescribeEndpoints
                 - mediaconvert:CreateJob
-              Resource: "*"
-        - Statement:
+              Resource: '*'
             - Effect: Allow
-              Action:
-                - iam:PassRole
+              Action: iam:PassRole
               Resource: !GetAtt MediaConvertRole.Arn
-        - Statement:
+              Condition:
+                StringEquals:
+                  iam:PassedToService: mediaconvert.amazonaws.com
             - Effect: Allow
-              Action:
-                - lambda:InvokeFunction
+              Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
-      Environment:
-        Variables:
-          MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
-          GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Events:
         AddImages:
           Type: HttpApi
@@ -479,29 +1216,53 @@ Resources:
             Path: /albums/{albumId}/images
             Method: POST
 
-  # Public/Protected: Generate Async ZIP for download
   CreateZipFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: create_zip.handler
-      Timeout: 900
-      MemorySize: 1024
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref AlbumsTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:Query
-              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTable}/index/ShareCodeIndex'
-        - S3CrudPolicy:
-            BucketName: !Ref ImagesBucket
-        - LambdaInvokePolicy:
-            FunctionName: !Ref WorkerZipFunction
+      Timeout: 60
+      MemorySize: 512
+      ReservedConcurrentExecutions: 5
       Environment:
         Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
           WORKER_FUNCTION_NAME: !Ref WorkerZipFunction
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref RateLimitHashSecret
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub '${ImagesBucket.Arn}/temp-zips/*'
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt WorkerZipFunction.Arn
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
       Events:
         CreateZipAlbum:
           Type: HttpApi
@@ -520,36 +1281,79 @@ Resources:
             Auth:
               Authorizer: NONE
 
-  # Async Background Worker: Does the actual 60+ second zipping
   WorkerZipFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: worker_zip.handler
       Timeout: 900
       MemorySize: 1024
+      EphemeralStorage:
+        Size: 2048
+      ReservedConcurrentExecutions: 2
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt AsyncFailureQueue.Arn
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:GetObjectTagging
+                - s3:PutObjectTagging
+                - s3:AbortMultipartUpload
+                - s3:ListMultipartUploadParts
+              Resource: !Sub '${ImagesBucket.Arn}/temp-zips/*'
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AsyncFailureQueue.Arn
+
+  DeleteImagesFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: delete_images.handler
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+      Policies:
         - Statement:
             - Effect: Allow
               Action:
-                - dynamodb:Query
-              Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTable}/index/ShareCodeIndex'
-        - S3CrudPolicy:
-            BucketName: !Ref ImagesBucket
-
-  # Protected: delete specific images from album
-  DeleteImagesFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/
-      Handler: delete_images.handler
-      Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref ImagesBucket
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:ListBucketVersions
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
       Events:
         DeleteImages:
           Type: HttpApi
@@ -558,15 +1362,135 @@ Resources:
             Path: /albums/{albumId}/delete-images
             Method: POST
 
-  # Protected: update a single image's thumbKey/blurhash within an album
+  TagMediaObjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: tag_media_object.handler
+      Timeout: 60
+      ReservedConcurrentExecutions: 5
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt AsyncFailureQueue.Arn
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          # Avoid a SAM-generated S3 notification cycle; the physical name is deterministic.
+          IMAGES_BUCKET: !Sub 'goldenhour-images-${AWS::AccountId}-${Stage}'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObjectTagging
+                - s3:PutObjectTagging
+              Resource: !Sub 'arn:${AWS::Partition}:s3:::goldenhour-images-${AWS::AccountId}-${Stage}/albums/*'
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AsyncFailureQueue.Arn
+      Events:
+        CreatedAlbumObject:
+          Type: S3
+          Properties:
+            Bucket: !Ref ImagesBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: albums/
+
+  GetDownloadUrlFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_download_url.handler
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref RateLimitHashSecret
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
+      Events:
+        AlbumDownloadUrl:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}/download-url
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        SharedDownloadUrl:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /shared/{shareCode}/download-url
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
   UpdateImageFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: update_image.handler
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:ListBucketVersions
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+                - s3:GetObjectTagging
+                - s3:PutObjectTagging
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
       Events:
         UpdateImage:
           Type: HttpApi
@@ -575,15 +1499,24 @@ Resources:
             Path: /albums/{albumId}/images
             Method: PATCH
 
-  # Protected: request presigned upload URL
   GetUploadUrlFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: get_upload_url.handler
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref ImagesBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectTagging
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/albums/*'
       Events:
         GetUploadUrl:
           Type: HttpApi
@@ -592,18 +1525,21 @@ Resources:
             Path: /upload-url
             Method: POST
 
-  # Protected: create user (admin)
   CreateUserFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: create_user.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          FRONTEND_URL: !Ref FrontendUrl
       Policies:
         - Statement:
             - Effect: Allow
               Action:
                 - cognito-idp:AdminCreateUser
-                - cognito-idp:AdminSetUserPassword
               Resource: !GetAtt UserPool.Arn
       Events:
         CreateUser:
@@ -613,17 +1549,19 @@ Resources:
             Path: /users
             Method: POST
 
-  # Protected: list users (admin)
   ListUsersFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: list_users.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
       Policies:
         - Statement:
             - Effect: Allow
-              Action:
-                - cognito-idp:ListUsers
+              Action: cognito-idp:ListUsers
               Resource: !GetAtt UserPool.Arn
       Events:
         ListUsers:
@@ -633,21 +1571,52 @@ Resources:
             Path: /users
             Method: GET
 
-  # Protected: delete user + cascade delete albums (admin)
   DeleteUserFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: delete_user.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
+          ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
-        - S3CrudPolicy:
-            BucketName: !Ref ImagesBucket
         - Statement:
             - Effect: Allow
               Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:DeleteItem
+              Resource:
+                - !GetAtt AlbumsTable.Arn
+                - !Sub '${AlbumsTable.Arn}/index/OwnerSubCreatedAtIndex'
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:ListBucketVersions
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - albums/*
+                    - temp-zips/*
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/albums/*'
+                - !Sub '${ImagesBucket.Arn}/temp-zips/*'
+            - Effect: Allow
+              Action:
                 - cognito-idp:AdminDeleteUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminListGroupsForUser
               Resource: !GetAtt UserPool.Arn
       Events:
         DeleteUser:
@@ -657,20 +1626,34 @@ Resources:
             Path: /users/{email}
             Method: DELETE
 
-  # Protected: edit user email/password + migrate albums (admin)
   EditUserFunction:
     Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
-      CodeUri: functions/
+      CodeUri: ./
       Handler: edit_user.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          ALBUMS_TABLE: !Ref AlbumsTable
+          OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
+          ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlbumsTable
         - Statement:
             - Effect: Allow
               Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource:
+                - !GetAtt AlbumsTable.Arn
+                - !Sub '${AlbumsTable.Arn}/index/OwnerSubCreatedAtIndex'
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminListGroupsForUser
                 - cognito-idp:AdminUpdateUserAttributes
-                - cognito-idp:AdminSetUserPassword
               Resource: !GetAtt UserPool.Arn
       Events:
         EditUser:
@@ -680,16 +1663,121 @@ Resources:
             Path: /users/{email}
             Method: PUT
 
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'ian-photography-alarms-${Stage}'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  ApiServerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: API Gateway has at least five server errors in five minutes.
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref Api
+        - Name: Stage
+          Value: !Ref Stage
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  ApiLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: API p95 integration latency exceeds five seconds for two periods.
+      Namespace: AWS/ApiGateway
+      MetricName: IntegrationLatency
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref Api
+        - Name: Stage
+          Value: !Ref Stage
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 5000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  AsyncFailureQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: An asynchronous Lambda invocation reached the failure queue.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AsyncFailureQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  LoginThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Login Lambda is being throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref LoginFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
     Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
   UserPoolId:
-    Description: Cognito User Pool ID
+    Description: Cognito user pool ID (public client configuration, not a secret)
     Value: !Ref UserPool
   UserPoolClientId:
-    Description: Cognito User Pool Client ID
+    Description: Cognito app client ID (public client configuration, not a secret)
     Value: !Ref UserPoolClient
   ImagesBucketName:
-    Description: S3 bucket for images
+    Description: Private media bucket
     Value: !Ref ImagesBucket
+  ImagesDistributionId:
+    Description: Media CloudFront distribution ID used by guarded invalidation tooling
+    Value: !Ref ImagesCloudFront
+  MediaAccessLogsBucketDomain:
+    Description: S3 domain usable for frontend CloudFront standard logging after explicit opt-in
+    Value: !GetAtt MediaAccessLogsBucket.DomainName
+  AlarmTopicArn:
+    Description: Subscribe an operational destination after deployment; the template adds no public subscription.
+    Value: !Ref AlarmTopic
+  AlbumIndexDeploymentPhase:
+    Description: Current conditional GSI rollout phase
+    Value: !Ref AlbumIndexDeploymentPhase
+  PrivateMediaCloudFrontDenyEnforced:
+    Description: Guard state for non-public object-tag enforcement at the media CDN origin
+    Value: !Ref EnforcePrivateMediaCloudFrontDeny

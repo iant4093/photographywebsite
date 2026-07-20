@@ -1,5 +1,5 @@
 import { Navigate } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 
 // Wraps routes that require authentication
 // If adminOnly is true, also checks for Admins group membership

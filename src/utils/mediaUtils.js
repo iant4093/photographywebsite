@@ -198,7 +198,7 @@ export function extractFrameFromVideoElement(video) {
                 const componentX = 4
                 const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
                 blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
-            } catch (e) {
+            } catch {
                 console.warn('Blurhash extraction failed (tainted canvas), using existing')
             }
 

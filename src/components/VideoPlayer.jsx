@@ -1,103 +1,88 @@
-import React, { useEffect, useRef, useState } from 'react'
-import Hls from 'hls.js'
+import { useEffect, useRef, useState } from 'react'
+import { mediaDisplayUrl, mediaHlsUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
 
-export default function VideoPlayer({ videoInfo, autoplay = true, controls = true }) {
+export default function VideoPlayer({ videoInfo, autoplay = true, controls = true, onMediaError }) {
     const videoRef = useRef(null)
-    const [hlsFailed, setHlsFailed] = useState(false)
-
-    const hasHlsUrl = !!videoInfo.hlsUrl;
-    const isHls = hasHlsUrl && !hlsFailed;
-    const posterUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${videoInfo.thumbKey}`;
-    const rawUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${videoInfo.rawKey}`;
-
-    // Build the HLS URL
-    let hlsVideoUrl = videoInfo.hlsUrl || '';
-    if (hlsVideoUrl && hlsVideoUrl.endsWith('/master.m3u8')) {
-        const parts = hlsVideoUrl.split('/');
-        const prefix = parts[parts.length - 2];
-        if (prefix && prefix.endsWith('_hls')) {
-            const baseName = prefix.slice(0, -4);
-            parts[parts.length - 1] = `${baseName}.m3u8`;
-            hlsVideoUrl = parts.join('/');
-        }
-    }
-    const hlsFinalUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${hlsVideoUrl}`;
+    const [failedHlsUrl, setFailedHlsUrl] = useState('')
+    const rawUrl = mediaDisplayUrl(videoInfo)
+    const posterUrl = mediaThumbnailUrl(videoInfo)
+    const hlsUrl = mediaHlsUrl(videoInfo)
+    const hlsFailed = Boolean(hlsUrl && failedHlsUrl === hlsUrl)
+    const useHls = Boolean(hlsUrl && !hlsFailed)
 
     useEffect(() => {
-        if (!videoRef.current) return;
+        const video = videoRef.current
+        if (!video || (!rawUrl && !hlsUrl)) return undefined
+        let hls = null
+        let disposed = false
 
-        // If not using HLS, play the raw video directly
-        if (!isHls) {
-            const video = videoRef.current;
-            video.src = rawUrl;
-            video.load();
-            if (autoplay) {
-                // Try muted autoplay first (browsers allow this), then unmute
-                video.muted = true;
-                video.play().then(() => {
-                    video.muted = false;
-                }).catch(e => console.warn("Autoplay blocked:", e));
-            }
-            return;
+        const tryPlay = () => {
+            if (!autoplay || disposed) return
+            video.muted = true
+            video.play().catch(() => {})
+        }
+        const fallbackToRaw = () => {
+            if (!rawUrl || disposed) return
+            setFailedHlsUrl(hlsUrl)
+        }
+        const reportRawError = () => {
+            if (!disposed) onMediaError?.()
         }
 
-        // HLS playback path
-        let hls;
+        if (!useHls) {
+            video.src = rawUrl
+            video.addEventListener('error', reportRawError)
+            video.load()
+            tryPlay()
+            return () => {
+                disposed = true
+                video.removeEventListener('error', reportRawError)
+                video.pause()
+                video.removeAttribute('src')
+                video.load()
+            }
+        }
 
-        if (Hls.isSupported()) {
-            hls = new Hls({
-                debug: false,
-                xhrSetup: function (xhr, url) {
-                    xhr.withCredentials = false;
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = hlsUrl
+            video.addEventListener('loadedmetadata', tryPlay)
+            video.addEventListener('error', fallbackToRaw)
+        } else {
+            import('hls.js').then(({ default: Hls }) => {
+                if (disposed) return
+                if (!Hls.isSupported()) {
+                    fallbackToRaw()
+                    return
                 }
-            });
-            hls.loadSource(hlsFinalUrl);
-            hls.attachMedia(videoRef.current);
-            hls.on(Hls.Events.MANIFEST_PARSED, function () {
-                if (autoplay && videoRef.current) {
-                    videoRef.current.muted = true;
-                    videoRef.current.play().then(() => {
-                        videoRef.current.muted = false;
-                    }).catch(e => console.warn("Autoplay blocked:", e));
-                }
-            });
-            hls.on(Hls.Events.ERROR, function (event, data) {
-                if (data.fatal) {
-                    console.warn("HLS fatal error, falling back to direct playback:", data.type);
-                    hls.destroy();
-                    setHlsFailed(true);
-                }
-            });
-        } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-            // Safari native HLS support
-            videoRef.current.src = hlsFinalUrl;
-            videoRef.current.addEventListener('loadedmetadata', function () {
-                if (autoplay && videoRef.current) {
-                    videoRef.current.muted = true;
-                    videoRef.current.play().then(() => {
-                        videoRef.current.muted = false;
-                    }).catch(e => console.warn("Autoplay blocked:", e));
-                }
-            });
-            videoRef.current.addEventListener('error', function () {
-                console.warn("Native HLS failed, falling back to direct playback");
-                setHlsFailed(true);
-            });
+                hls = new Hls({ debug: false })
+                hls.loadSource(hlsUrl)
+                hls.attachMedia(video)
+                hls.on(Hls.Events.MANIFEST_PARSED, tryPlay)
+                hls.on(Hls.Events.ERROR, (_event, data) => {
+                    if (data.fatal) fallbackToRaw()
+                })
+            }).catch(fallbackToRaw)
         }
 
         return () => {
-            if (hls) hls.destroy();
-        };
-    }, [isHls, hlsFinalUrl, rawUrl, autoplay]);
+            disposed = true
+            video.removeEventListener('loadedmetadata', tryPlay)
+            video.removeEventListener('error', fallbackToRaw)
+            hls?.destroy()
+            video.pause()
+            video.removeAttribute('src')
+            video.load()
+        }
+    }, [autoplay, hlsUrl, onMediaError, rawUrl, useHls])
 
-    // Single native <video> element for both paths
     return (
         <video
             ref={videoRef}
             controls={controls}
             playsInline
+            preload="metadata"
             poster={posterUrl}
             className="w-full h-full outline-none"
         />
-    );
+    )
 }

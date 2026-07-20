@@ -1,3 +1,2 @@
-boto3
-resend
-ExifRead
+boto3==1.43.51
+-r functions/requirements.txt

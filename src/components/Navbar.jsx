@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
+import { useAuth } from '../context/auth'
 
 // Navigation bar with role-based links
 function Navbar() {
@@ -8,34 +8,33 @@ function Navbar() {
 
     const [isMenuOpen, setIsMenuOpen] = useState(false)
     const [isVisible, setIsVisible] = useState(true)
-    const [lastScrollY, setLastScrollY] = useState(0)
-    const location = useLocation()
+    const lastScrollY = useRef(0)
+    const visibleRef = useRef(true)
 
     // Smart Navbar scroll logic
     useEffect(() => {
-        const handleScroll = () => {
+        let frame = null
+        const update = () => {
+            frame = null
             const currentScrollY = window.scrollY
-
-            // Show navbar at the very top, or when scrolling UP
-            if (currentScrollY < 10 || currentScrollY < lastScrollY) {
-                setIsVisible(true)
+            const nextVisible = currentScrollY < 10 || currentScrollY < lastScrollY.current
+                ? true
+                : !(currentScrollY > 50 && currentScrollY > lastScrollY.current)
+            if (nextVisible !== visibleRef.current) {
+                visibleRef.current = nextVisible
+                setIsVisible(nextVisible)
             }
-            // Hide navbar when scrolling DOWN (past a threshold)
-            else if (currentScrollY > 50 && currentScrollY > lastScrollY) {
-                setIsVisible(false)
-            }
-
-            setLastScrollY(currentScrollY)
+            lastScrollY.current = currentScrollY
         }
-
+        const handleScroll = () => {
+            if (frame === null) frame = window.requestAnimationFrame(update)
+        }
         window.addEventListener('scroll', handleScroll, { passive: true })
-        return () => window.removeEventListener('scroll', handleScroll)
-    }, [lastScrollY])
-
-    // Close menu when route changes
-    useEffect(() => {
-        setIsMenuOpen(false)
-    }, [location])
+        return () => {
+            window.removeEventListener('scroll', handleScroll)
+            if (frame !== null) window.cancelAnimationFrame(frame)
+        }
+    }, [])
 
     // Lock body scroll when menu is open
     useEffect(() => {
@@ -53,7 +52,7 @@ function Navbar() {
             <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
-                    <Link to="/" className="flex items-center gap-3 group z-50 relative">
+                    <Link to="/" onClick={() => setIsMenuOpen(false)} className="flex items-center gap-3 group z-50 relative">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
                             <span className="text-cream font-serif font-bold text-sm tracking-tight">IT</span>
                         </div>
@@ -104,6 +103,7 @@ function Navbar() {
                         <>
                             <Link
                                 to={isAdmin ? '/admin' : '/dashboard'}
+                                onClick={() => setIsMenuOpen(false)}
                                 className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300"
                             >
                                 Dashboard
@@ -118,6 +118,7 @@ function Navbar() {
                     ) : (
                         <Link
                             to="/login"
+                            onClick={() => setIsMenuOpen(false)}
                             className="mt-8 font-sans text-lg font-medium px-8 py-3 rounded-xl bg-amber text-cream hover:bg-amber-dark transition-colors duration-300 shadow-warm-sm hover:shadow-warm"
                         >
                             Log In

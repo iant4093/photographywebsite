@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Explicit Route 53 DNSSEC signing stack. Deploy in us-east-1 only after the
+  documented TTL, monitoring, cost, rollback, and registrar DS-record review.
+
+Parameters:
+  HostedZoneId:
+    Type: String
+    AllowedPattern: '^[A-Z0-9]+$'
+  KeySigningKeyName:
+    Type: String
+    Default: ian_truong_photography_ksk
+    AllowedPattern: '^[A-Za-z0-9_]{3,128}$'
+
+Resources:
+  DnssecSigningKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Route 53 DNSSEC signing key for iantruongphotography.com
+      Enabled: true
+      EnableKeyRotation: false
+      KeySpec: ECC_NIST_P256
+      KeyUsage: SIGN_VERIFY
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowRoute53DnssecSigning
+            Effect: Allow
+            Principal:
+              Service: dnssec-route53.amazonaws.com
+            Action:
+              - kms:DescribeKey
+              - kms:GetPublicKey
+              - kms:Sign
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:route53:::hostedzone/${HostedZoneId}'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: CostAcknowledgement
+          Value: ExplicitDnssecKmsKey
+
+  DnssecSigningKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/ian-truong-photography-dnssec
+      TargetKeyId: !Ref DnssecSigningKey
+
+  KeySigningKey:
+    Type: AWS::Route53::KeySigningKey
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      KeyManagementServiceArn: !GetAtt DnssecSigningKey.Arn
+      Name: !Ref KeySigningKeyName
+      Status: ACTIVE
+
+  HostedZoneDnssec:
+    Type: AWS::Route53::DNSSEC
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    DependsOn: KeySigningKey
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+
+Outputs:
+  KeyArn:
+    Value: !GetAtt DnssecSigningKey.Arn
+  RegistrarNextStep:
+    Value: >-
+      After signing is INSYNC and the monitoring wait completes, retrieve the DS
+      record with route53 get-dnssec and add it at the registrar to establish trust.

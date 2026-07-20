@@ -1,178 +1,255 @@
-import json
-import os
-import uuid
-import io
-import secrets
-import boto3
-import exifread
-import decimal
-from datetime import datetime
-from botocore.exceptions import ClientError
+"""Validated, admin-only album creation with pending-to-visible media tagging."""
+
 import concurrent.futures
+import decimal
+import html
+import json
+import logging
+import os
+import secrets
 
-# DynamoDB and S3 resources
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
-s3 = boto3.client('s3')
+import boto3
+from botocore.exceptions import ClientError
 
-from auth_helpers import get_caller_email, require_admin
+from album_mutation_helpers import resolve_owner as _resolve_owner
+from album_mutation_helpers import validate_created_at as _validate_created_at
+from auth_helpers import get_caller_claims, require_admin
+from dynamodb_helpers import ensure_album_item_budget
 from email_helpers import send_email
-from media_helpers import format_fraction, extract_exif_data, start_mediaconvert_job
+from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
+from media_helpers import extract_exif_data, start_mediaconvert_job
+from response_helpers import error_response, internal_error, json_response
+from validation_helpers import (
+    ValidationError,
+    optional_string,
+    parse_json_body,
+    require_string,
+    validate_album_type,
+    validate_bool,
+    validate_list,
+    validate_uuid,
+    validate_visibility,
+)
 
 
-def get_image_dimensions_and_exif(bucket, key):
-    """
-    Wrapper to extract EXIF data
-    """
-    exif_data = extract_exif_data(bucket, key)
-    # The frontend already handled dimensions and sent them in the payload.
-    return {
-        "width": None,
-        "height": None,
-        "exif": exif_data
-    }
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
+logger = logging.getLogger("photography_api.album_write")
+def _normalize_images(value, album_id, album_type, *, album=None):
+    maximum = 50 if album_type == "video" else 500
+    images = validate_list(value, "images", maximum=maximum, required=True)
+    normalized = []
+    prefix = f"albums/{album_id}/"
+    for index, image in enumerate(images):
+        if not isinstance(image, dict):
+            raise ValidationError(f"images[{index}] must be an object")
+        key_scope = {"album": album} if album is not None else {"album_id": album_id}
+        raw_key = validate_album_media_key(image.get("rawKey") or image.get("key"), **key_scope)
+        thumb_key = image.get("thumbKey")
+        if thumb_key:
+            thumb_key = validate_album_media_key(thumb_key, **key_scope)
+        item = {"rawKey": raw_key}
+        if thumb_key:
+            item["thumbKey"] = thumb_key
+        for dimension in ("width", "height"):
+            if image.get(dimension) is not None:
+                try:
+                    number = int(image[dimension])
+                except (TypeError, ValueError):
+                    raise ValidationError(f"images[{index}].{dimension} must be an integer") from None
+                if number < 1 or number > 100000:
+                    raise ValidationError(f"images[{index}].{dimension} is out of range")
+                item[dimension] = number
+        if image.get("blurhash"):
+            item["blurhash"] = require_string(image["blurhash"], f"images[{index}].blurhash", maximum=200)
+        if album_type == "video":
+            base_name = raw_key.rsplit(".", 1)[0]
+            filename = raw_key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            # Matches MediaConvert's configured `_1080p5m` NameModifier.
+            item["hlsUrl"] = f"{base_name}_hls/{filename}_1080p5m.m3u8"
+            if image.get("thumbnailTime") is not None:
+                try:
+                    numeric_time = max(0, min(float(image["thumbnailTime"]), 86400))
+                    item["thumbnailTime"] = decimal.Decimal(str(numeric_time))
+                except (TypeError, ValueError):
+                    raise ValidationError(f"images[{index}].thumbnailTime must be numeric") from None
+        normalized.append(item)
+    return normalized
+
+
+def _extract_exif(images):
+    bucket = os.environ["IMAGES_BUCKET"]
+
+    def extract(image):
+        try:
+            result = extract_exif_data(bucket, image["rawKey"])
+            if result:
+                image["exif"] = result
+        except Exception:
+            # EXIF is optional; never log the client object key.
+            return
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(images))) as executor:
+        list(executor.map(extract, images))
+
+
+def _start_video_jobs(images):
+    bucket = os.environ["IMAGES_BUCKET"]
+    for image in images:
+        raw_key = image["rawKey"]
+        output_prefix = raw_key.rsplit(".", 1)[0] + "_hls/"
+        try:
+            image["mediaConvertJobId"] = start_mediaconvert_job(
+                f"s3://{bucket}/{raw_key}",
+                f"s3://{bucket}/{output_prefix}",
+            )
+        except Exception:
+            # Keep the raw protected video usable if transcoding is unavailable.
+            image.pop("hlsUrl", None)
 
 
 def handler(event, context):
-    """POST /albums — creates a new album record in DynamoDB (admin-only)."""
-    # Verify the caller is an admin
     denied = require_admin(event)
     if denied:
         return denied
-
-    owner_email = get_caller_email(event)
-    if not owner_email:
-        return {
-            'statusCode': 401,
-            'body': json.dumps({'error': 'Unauthorized'})
-        }
-
     try:
-        body = json.loads(event.get('body', '{}'), parse_float=decimal.Decimal)
+        claims = get_caller_claims(event)
+        body = parse_json_body(event)
+        album_id = validate_uuid(body.get("albumId"))
+        album_type = validate_album_type(body.get("type"))
+        visibility = validate_visibility(body.get("visibility"), default="public")
+        title = require_string(body.get("title"), "title", maximum=200)
+        description = optional_string(body.get("description"), "description", maximum=5000)
+        category = optional_string(body.get("category"), "category", maximum=100, default="Uncategorized") or "Uncategorized"
+        created_at = _validate_created_at(body.get("createdAt"))
+        images = _normalize_images(body.get("images"), album_id, album_type)
+        backup_to_drive = validate_bool(body.get("backupToGoogleDrive"), "backupToGoogleDrive")
 
-        # Validate required fields
-        required = ['albumId', 'title', 's3Prefix', 'createdAt']
-        missing = [f for f in required if f not in body]
-        if missing:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': f'Missing fields: {", ".join(missing)}'}),
-            }
+        owner_email = owner_sub = ""
+        if visibility == "private":
+            owner_email, owner_sub = _resolve_owner(body)
+        is_shared = visibility == "unlisted" and validate_bool(body.get("isShared"), "isShared", default=True)
 
-        visibility = body.get('visibility', 'public')
+        if album_type == "photo":
+            _extract_exif(images)
 
-        album_type = body.get('type', 'photo')
-        images = body.get('images', [])
-
-        # Extract EXIF data from first 64KB of S3 object dynamically using threads
-        if 'IMAGES_BUCKET' in os.environ:
-            def _extract_for_img(img):
-                raw_key = img.get('rawKey')
-                if not raw_key: return
-                try:
-                    extracted_data = get_image_dimensions_and_exif(os.environ['IMAGES_BUCKET'], raw_key)
-                    if extracted_data.get('exif'):
-                        img['exif'] = extracted_data['exif']
-                except Exception as e:
-                    print(f"EXIF extraction error for {raw_key}: {e}")
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                executor.map(_extract_for_img, images)
-
-        # If it's a video album, kick off MediaConvert jobs
-        if album_type == 'video' and 'IMAGES_BUCKET' in os.environ:
-            bucket = os.environ['IMAGES_BUCKET']
-            for img in images:
-                raw_key = img.get('rawKey')
-                if not raw_key: continue
-                # S3 input URI format: s3://bucket/key
-                s3_input_uri = f"s3://{bucket}/{raw_key}"
-                
-                # S3 output prefix format: s3://bucket/albums/..../hls/
-                # We'll save the output to an 'hls/' subdirectory next to the raw video
-                base_name = raw_key.rsplit('.', 1)[0]
-                s3_output_prefix = f"s3://{bucket}/{base_name}_hls/"
-                
-                # Start MediaConvert job asynchronously
-                try:
-                    start_mediaconvert_job(s3_input_uri, s3_output_prefix)
-                    # The frontend will be looking for the .m3u8 file
-                    # MediaConvert defaults the master playlist to the input base name
-                    filename = raw_key.split('/')[-1].rsplit('.', 1)[0]
-                    img['hlsUrl'] = f"{base_name}_hls/{filename}.m3u8"
-                except Exception as e:
-                    print(f"Failed to start MediaConvert for {raw_key}: {e}")
-
-        is_shared = body.get('isShared', False)
-        share_code = secrets.token_urlsafe(6) if is_shared else ''
-
-        # Write the album record with visibility and ownerEmail
+        prefix = f"albums/{album_id}/"
+        cover_key = body.get("coverImageUrl") or images[0]["rawKey"]
+        cover_key = validate_album_media_key(cover_key, album_id=album_id)
+        cover_thumb = body.get("coverThumbKey") or images[0].get("thumbKey", "")
+        if cover_thumb:
+            cover_thumb = validate_album_media_key(cover_thumb, album_id=album_id)
         item = {
-            'albumId': body['albumId'],
-            'type': album_type,
-            'title': body['title'],
-            'description': body.get('description', ''),
-            'category': body.get('category', 'Uncategorized'),
-            'coverImageUrl': body.get('coverImageUrl', ''),
-            'coverThumbKey': body.get('coverThumbKey', ''),
-            'coverBlurhash': body.get('coverBlurhash', ''),
-            'images': images,
-            's3Prefix': body['s3Prefix'],
-            'createdAt': body['createdAt'],
-            'visibility': body.get('visibility', 'public'),
-            'ownerEmail': body.get('ownerEmail', ''),
-            'isShared': is_shared,
+            "albumId": album_id,
+            "type": album_type,
+            "title": title,
+            "description": description,
+            "category": category,
+            "coverImageUrl": cover_key,
+            "coverThumbKey": cover_thumb,
+            "coverBlurhash": optional_string(body.get("coverBlurhash"), "coverBlurhash", maximum=200),
+            "images": images,
+            "imageCount": len(images),
+            "s3Prefix": prefix,
+            "createdAt": created_at,
+            "visibility": visibility,
+            "ownerEmail": owner_email,
+            "ownerSub": owner_sub,
+            "isShared": is_shared,
+            "backupToGoogleDrive": backup_to_drive,
+            "status": "pending",
+            "createdBySub": claims["sub"],
         }
-        
-        # Sparse Indexing: Only include shareCode if the album is shared.
-        # DynamoDB GSI keys cannot be empty strings.
         if is_shared:
-            item['shareCode'] = share_code
+            item["shareCode"] = secrets.token_urlsafe(24)
 
-        table.put_item(Item=item)
+        ensure_album_item_budget(item)
 
-        if item.get('visibility') == 'private' and item.get('ownerEmail'):
-            portal_url = os.environ.get('FRONTEND_URL', 'https://iantruongphotography.com')
-            subject = f"Your New Photos Are Ready: {item['title']}"
-            html = f"""
-            <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
-                <h2 style="color: #4a4a4a;">Your gallery is ready!</h2>
-                <p>I've just uploaded a new private album for you: <strong>{item['title']}</strong>.</p>
-                <p>You can view and download your photos by logging into your client portal here:</p>
-                <p style="margin: 20px 0;">
-                    <a href="{portal_url}/login" style="background-color: #d1bfae; color: #333; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">View Album</a>
-                </p>
-            </div>
-            """
-            send_email(item['ownerEmail'], subject, html)
+        try:
+            table.put_item(Item=item, ConditionExpression="attribute_not_exists(albumId)")
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise
+            existing = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+            if (
+                not existing
+                or existing.get("status") not in {"pending", "active"}
+                or existing.get("createdBySub") != claims["sub"]
+            ):
+                return error_response(409, "Album already exists", code="conflict")
+            item = existing
+            images = item.get("images", [])
 
-        # Trigger Google Drive sync if requested
-        backup_to_drive = body.get('backupToGoogleDrive', False)
-        if backup_to_drive and 'GOOGLE_DRIVE_SYNC_FUNCTION_NAME' in os.environ:
+        if album_type == "video" and not any(image.get("mediaConvertJobId") for image in images):
+            _start_video_jobs(images)
+            table.update_item(
+                Key={"albumId": album_id},
+                UpdateExpression="SET images = :images, imageCount = :count",
+                ExpressionAttributeValues={":images": images, ":count": len(images)},
+            )
+            item["images"] = images
+
+        # Releasing media to anonymous CDN access happens only after an active
+        # album record exists. Restrictive visibilities are tagged first. Both
+        # orders fail unavailable rather than accidentally public.
+        if visibility == "public" and item.get("status") == "pending":
+            table.update_item(
+                Key={"albumId": album_id},
+                UpdateExpression="SET #status = :active",
+                ConditionExpression="#status = :pending AND createdBySub = :creator",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={":active": "active", ":pending": "pending", ":creator": claims["sub"]},
+            )
+            item["status"] = "active"
+        tag_album_visibility(item, visibility, include_derivatives=False)
+        table.update_item(
+            Key={"albumId": album_id},
+            UpdateExpression="SET #status = :active REMOVE createdBySub",
+            ConditionExpression="createdBySub = :creator AND (#status = :pending OR #status = :active)",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":active": "active", ":pending": "pending", ":creator": claims["sub"]},
+        )
+        item["status"] = "active"
+        item.pop("createdBySub", None)
+
+        if visibility == "private" and owner_email:
+            portal_url = html.escape(os.environ.get("FRONTEND_URL", "https://iantruongphotography.com"), quote=True)
+            safe_title = html.escape(title, quote=True)
             try:
-                sync_payload = {
-                    "albumType": album_type,
-                    "albumTitle": body['title'],
-                    "bucket": os.environ.get('IMAGES_BUCKET'),
-                    "keys": [img['rawKey'] for img in images if 'rawKey' in img]
-                }
-                lambda_client = boto3.client('lambda')
-                lambda_client.invoke(
-                    FunctionName=os.environ['GOOGLE_DRIVE_SYNC_FUNCTION_NAME'],
-                    InvocationType='Event',
-                    Payload=json.dumps(sync_payload)
+                send_email(
+                    owner_email,
+                    f"Your New Photos Are Ready: {title.replace(chr(13), ' ').replace(chr(10), ' ')}",
+                    (
+                        '<div style="font-family:sans-serif;max-width:600px;margin:auto">'
+                        '<h2 style="color:#4a4a4a">Your gallery is ready!</h2>'
+                        f"<p>A new private album is ready: <strong>{safe_title}</strong>.</p>"
+                        f'<p><a href="{portal_url}/login">View Album</a></p></div>'
+                    ),
                 )
-                print(f"Triggered Drive Sync for album {body['title']}")
-            except Exception as e:
-                print(f"Failed to trigger Google Drive sync: {e}")
+            except Exception as error:
+                # The album is already committed. Do not turn an auxiliary
+                # notification outage into an unsafe, non-idempotent retry.
+                logger.error("album_notification_failed error_type=%s", type(error).__name__)
 
-        return {
-            'statusCode': 201,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps(item),
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)}),
-        }
+        if backup_to_drive and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
+            payload = {
+                "albumId": album_id,
+                "albumType": album_type,
+                "albumTitle": title,
+                "bucket": os.environ["IMAGES_BUCKET"],
+                "keys": [image["rawKey"] for image in images],
+            }
+            try:
+                boto3.client("lambda").invoke(
+                    FunctionName=os.environ["GOOGLE_DRIVE_SYNC_FUNCTION_NAME"],
+                    InvocationType="Event",
+                    Payload=json.dumps(payload),
+                )
+            except Exception as error:
+                logger.error("drive_backup_dispatch_failed error_type=%s", type(error).__name__)
+
+        return json_response(201, serialize_album_summary(item, include_admin=True))
+    except ValidationError as error:
+        return error_response(400, str(error), code="invalid_album")
+    except Exception as error:
+        return internal_error(context, error, "create_album")

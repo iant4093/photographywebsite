@@ -7,8 +7,13 @@ s3_prefix = "ian-website"
 region = "us-west-2"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "Stage=\"prod\""
+parameter_overrides = "Stage=\"prod\" FrontendUrl=\"https://iantruongphotography.com\" FrontendHostname=\"iantruongphotography.com\""
 image_repositories = []
+tags = "Application=\"IanTruongPhotography\" Stage=\"prod\" ManagedBy=\"SAM\""
+
+[default.build.parameters]
+cached = true
+parallel = false
 
 [default.global.parameters]
 region = "us-west-2"

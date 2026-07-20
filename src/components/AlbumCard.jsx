@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import ProgressiveImage from './ProgressiveImage'
+import { albumCoverUrl } from '../utils/mediaUrls'
 
 // Album card displaying cover image, title, and a subtle hover effect
 function AlbumCard({ album }) {
@@ -16,11 +17,14 @@ function AlbumCard({ album }) {
         >
             {/* Cover image with warm overlay on hover */}
             <div className="relative aspect-[4/3] overflow-hidden bg-cream-dark">
-                {album.coverImageUrl ? (
+                {albumCoverUrl(album) ? (
                     <ProgressiveImage
-                        src={album.coverThumbKey ? `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverThumbKey}` : album.coverImageUrl}
+                        src={albumCoverUrl(album)}
                         blurhash={album.coverBlurhash}
                         alt={album.title}
+                        width={album.coverWidth || 4}
+                        height={album.coverHeight || 3}
+                        sizes="(min-width: 768px) 360px, (min-width: 640px) 320px, 280px"
                         className="w-full h-full group-hover:scale-[1.08] transition-transform duration-700 ease-out"
                     />
                 ) : (

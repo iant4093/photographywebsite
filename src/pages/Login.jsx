@@ -1,17 +1,21 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 import { Turnstile } from '@marsidev/react-turnstile'
-import { motion } from 'framer-motion'
+import { motion as Motion } from 'framer-motion'
 
 // Login page — email + password only, no sign-up
 function Login() {
-    const { login, user, isAdmin } = useAuth()
+    const { login, completeNewPassword, completeMfa, user, isAdmin } = useAuth()
     const navigate = useNavigate()
     const turnstileRef = useRef()
 
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    const [newPassword, setNewPassword] = useState('')
+    const [confirmPassword, setConfirmPassword] = useState('')
+    const [mfaCode, setMfaCode] = useState('')
+    const [challenge, setChallenge] = useState(null)
     const [error, setError] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [turnstileToken, setTurnstileToken] = useState(null)
@@ -27,24 +31,70 @@ function Login() {
         setError('')
 
         if (!turnstileToken) {
-            setError('Please verify you are human before logging in.')
+            setError('Please verify you are human before continuing.')
+            return
+        }
+
+        if (challenge?.challengeName === 'NEW_PASSWORD_REQUIRED' && newPassword !== confirmPassword) {
+            setError('The new passwords do not match.')
+            return
+        }
+        if (challenge?.challengeName === 'NEW_PASSWORD_REQUIRED' && (
+            newPassword.length < 12
+            || newPassword.length > 128
+            || !/[A-Z]/.test(newPassword)
+            || !/[a-z]/.test(newPassword)
+            || !/\d/.test(newPassword)
+            || !/[^A-Za-z0-9]/.test(newPassword)
+            || /\s/.test(newPassword)
+        )) {
+            setError('Use 12–128 characters with uppercase, lowercase, a number, and a symbol, with no spaces.')
+            return
+        }
+        if (challenge?.challengeName === 'SOFTWARE_TOKEN_MFA' && !/^\d{6}$/.test(mfaCode)) {
+            setError('Enter the 6-digit code from your authenticator app.')
             return
         }
 
         setSubmitting(true)
 
         try {
-            await login(email, password, turnstileToken)
-            // useEffect will handle role-based redirect
-        } catch (err) {
-            if (err.code === 'NewPasswordRequired') {
-                setError('A new password is required. Please contact the administrator.')
-            } else if (err.code === 'NotAuthorizedException') {
-                setError('Incorrect email or password.')
-            } else if (err.code === 'UserNotFoundException') {
-                setError('No account found with that email.')
+            if (challenge?.challengeName === 'NEW_PASSWORD_REQUIRED') {
+                const result = await completeNewPassword({
+                    email,
+                    newPassword,
+                    challengeSession: challenge.challengeSession,
+                    turnstileToken,
+                })
+                if (result?.challengeName) {
+                    setChallenge(result)
+                    setNewPassword('')
+                    setConfirmPassword('')
+                    setTurnstileToken(null)
+                    turnstileRef.current?.reset()
+                }
+            } else if (challenge?.challengeName === 'SOFTWARE_TOKEN_MFA') {
+                await completeMfa({
+                    email,
+                    code: mfaCode,
+                    challengeSession: challenge.challengeSession,
+                    turnstileToken,
+                })
             } else {
-                setError(err.message || 'An error occurred. Please try again.')
+                const result = await login(email, password, turnstileToken)
+                if (result?.challengeName) {
+                    setChallenge(result)
+                    setPassword('')
+                    setMfaCode('')
+                    setTurnstileToken(null)
+                    turnstileRef.current?.reset()
+                }
+            }
+        } catch (err) {
+            if (err.code === 'NotAuthorizedException') {
+                setError('Incorrect email or password.')
+            } else {
+                setError(err.message || 'Sign in could not be completed. Please try again.')
             }
             // Reset Turnstile on error so a new token can be generated
             turnstileRef.current?.reset()
@@ -61,7 +111,7 @@ function Login() {
     }
 
     return (
-        <motion.div
+        <Motion.div
             variants={pageVariants}
             initial="initial"
             animate="animate"
@@ -77,10 +127,18 @@ function Login() {
                         </svg>
                     </div>
                     <h1 className="font-serif text-3xl font-semibold text-charcoal">
-                        Welcome Back
+                        {challenge?.challengeName === 'NEW_PASSWORD_REQUIRED'
+                            ? 'Choose a New Password'
+                            : challenge?.challengeName === 'SOFTWARE_TOKEN_MFA'
+                                ? 'Verify Your Sign-In'
+                                : 'Welcome Back'}
                     </h1>
                     <p className="mt-2 text-warm-gray">
-                        Sign in to access your account.
+                        {challenge?.challengeName === 'NEW_PASSWORD_REQUIRED'
+                            ? 'Finish setting up your account to continue.'
+                            : challenge?.challengeName === 'SOFTWARE_TOKEN_MFA'
+                                ? 'Enter the code from your authenticator app.'
+                                : 'Sign in to access your account.'}
                     </p>
                 </div>
 
@@ -105,6 +163,7 @@ function Login() {
                             onChange={(e) => setEmail(e.target.value)}
                             required
                             autoComplete="email"
+                            disabled={Boolean(challenge)}
                             className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-transparent focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
                             placeholder="Email"
                         />
@@ -116,8 +175,7 @@ function Login() {
                         </label>
                     </div>
 
-                    {/* Password field */}
-                    <div className="relative mb-6">
+                    {!challenge && <div className="relative mb-6">
                         <input
                             id="password"
                             type="password"
@@ -134,14 +192,69 @@ function Login() {
                         >
                             Password
                         </label>
-                    </div>
+                    </div>}
+
+                    {challenge?.challengeName === 'NEW_PASSWORD_REQUIRED' && (
+                        <div className="space-y-5 mb-6">
+                            <div>
+                                <label htmlFor="newPassword" className="block text-sm font-medium text-charcoal mb-2">New password</label>
+                                <input
+                                    id="newPassword"
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={(event) => setNewPassword(event.target.value)}
+                                    required
+                                    minLength={12}
+                                    maxLength={128}
+                                    autoComplete="new-password"
+                                    className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber"
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="confirmPassword" className="block text-sm font-medium text-charcoal mb-2">Confirm new password</label>
+                                <input
+                                    id="confirmPassword"
+                                    type="password"
+                                    value={confirmPassword}
+                                    onChange={(event) => setConfirmPassword(event.target.value)}
+                                    required
+                                    minLength={12}
+                                    maxLength={128}
+                                    autoComplete="new-password"
+                                    className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber"
+                                />
+                                <p className="mt-2 text-xs text-warm-gray">Use 12–128 characters with uppercase, lowercase, a number, and a symbol. Spaces are not allowed.</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {challenge?.challengeName === 'SOFTWARE_TOKEN_MFA' && (
+                        <div className="mb-6">
+                            <label htmlFor="mfaCode" className="block text-sm font-medium text-charcoal mb-2">
+                                Authenticator code
+                            </label>
+                            <input
+                                id="mfaCode"
+                                type="text"
+                                value={mfaCode}
+                                onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                                required
+                                inputMode="numeric"
+                                pattern="[0-9]{6}"
+                                autoComplete="one-time-code"
+                                maxLength={6}
+                                autoFocus
+                                className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal text-center text-2xl tracking-[0.4em] focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber"
+                            />
+                        </div>
+                    )}
 
                     <div className="mb-6 flex justify-center">
                         <Turnstile
                             ref={turnstileRef}
                             siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                             onSuccess={(token) => setTurnstileToken(token)}
-                            options={{ theme: 'light' }}
+                            options={{ theme: 'light', action: 'login' }}
                         />
                     </div>
 
@@ -154,15 +267,23 @@ function Login() {
                         {submitting ? (
                             <span className="flex items-center justify-center gap-2">
                                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                Signing in…
+                                {challenge?.challengeName === 'NEW_PASSWORD_REQUIRED'
+                                    ? 'Saving password…'
+                                    : challenge?.challengeName === 'SOFTWARE_TOKEN_MFA'
+                                        ? 'Verifying…'
+                                        : 'Signing in…'}
                             </span>
                         ) : (
-                            'Log In'
+                            challenge?.challengeName === 'NEW_PASSWORD_REQUIRED'
+                                ? 'Set Password and Continue'
+                                : challenge?.challengeName === 'SOFTWARE_TOKEN_MFA'
+                                    ? 'Verify and Continue'
+                                    : 'Log In'
                         )}
                     </button>
                 </form>
             </div>
-        </motion.div>
+        </Motion.div>
     )
 }
 

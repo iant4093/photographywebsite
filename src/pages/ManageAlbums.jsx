@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { encode } from 'blurhash'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 import { processImage, processVideo, extractFrameFromVideoElement } from '../utils/mediaUtils'
 import {
     fetchAlbumsFiltered,
@@ -15,18 +14,38 @@ import {
     addImagesToAlbum,
     updateImageThumbnail,
 } from '../utils/api'
+import { mediaDisplayUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
+import { mapWithConcurrency } from '../utils/concurrency'
+
+function urlPathMatchesKey(value, key) {
+    if (!value || !key) return false
+    if (value === key) return true
+    try {
+        const path = decodeURIComponent(new URL(value, window.location.origin).pathname).replace(/^\/+/, '')
+        return path === key || path.endsWith(`/${key}`)
+    } catch {
+        return false
+    }
+}
+
+function isCurrentAlbumCover(album, image) {
+    if (!album || !image) return false
+    const rawKey = image.rawKey || image.key || ''
+    const thumbKey = image.thumbKey || ''
+    return urlPathMatchesKey(album.coverImageUrl, rawKey)
+        || urlPathMatchesKey(album.coverThumbnailUrl, thumbKey)
+        || album.coverThumbKey === thumbKey
+}
 
 // Helper component for picking a thumbnail time for a video
 function VideoThumbnailScrubber({ file, time, onTimeChange }) {
     const videoRef = useRef(null)
     const [duration, setDuration] = useState(0)
-    const [url, setUrl] = useState('')
+    const url = useMemo(() => URL.createObjectURL(file), [file])
 
     useEffect(() => {
-        const objectUrl = URL.createObjectURL(file)
-        setUrl(objectUrl)
-        return () => URL.revokeObjectURL(objectUrl)
-    }, [file])
+        return () => URL.revokeObjectURL(url)
+    }, [url])
 
     const handleLoadedMetadata = () => {
         if (videoRef.current) {
@@ -187,40 +206,47 @@ function ManageAlbums() {
             }
         }
         load()
-    }, [])
-
-    // Load albums when scope changes
-    useEffect(() => {
-        loadAlbums()
-    }, [scope])
+    }, [getIdToken])
 
     // Fetch albums for the current scope
-    async function loadAlbums() {
+    const loadAlbums = useCallback(async () => {
         setLoading(true)
         setExpandedAlbumId(null)
         setAlbumImages([])
         try {
-            let params = {}
+            let params = { type: typeFilter }
             if (scope === 'public') {
-                params = { visibility: 'public' }
+                params = { ...params, visibility: 'public' }
             } else if (scope === 'unlisted') {
-                params = { visibility: 'unlisted' }
+                params = { ...params, visibility: 'unlisted' }
             } else {
-                params = { visibility: 'private', ownerEmail: scope }
+                params = { ...params, visibility: 'private', ownerEmail: scope }
             }
-            const data = await fetchAlbumsFiltered(params)
-            // Filter by type if specified
-            const filteredData = typeFilter === 'video'
-                ? data.filter(a => a.type === 'video')
-                : data.filter(a => a.type !== 'video')
-            setAlbums(filteredData)
+            const token = await getIdToken()
+            const data = await fetchAlbumsFiltered(params, token)
+            // Retain a client check for compatibility with the legacy endpoint.
+            const typeMatched = data.filter((album) => (
+                typeFilter === 'video' ? album.type === 'video' : album.type !== 'video'
+            ))
+            const scopeMatched = scope !== 'public' && scope !== 'unlisted'
+                ? typeMatched.filter((album) => (
+                    String(album.ownerEmail || '').trim().toLowerCase() === scope.trim().toLowerCase()
+                ))
+                : typeMatched
+            setAlbums(scopeMatched)
         } catch (err) {
             console.error('Failed to load albums:', err)
             setAlbums([])
         } finally {
             setLoading(false)
         }
-    }
+    }, [getIdToken, scope, typeFilter])
+
+    // Load albums when the owner scope or media type changes.
+    useEffect(() => {
+        const timeout = window.setTimeout(loadAlbums, 0)
+        return () => window.clearTimeout(timeout)
+    }, [loadAlbums])
     async function toggleAlbumImages(album) {
         if (expandedAlbumId === album.albumId) {
             // Collapse
@@ -304,13 +330,25 @@ function ManageAlbums() {
 
 
     // Remove specific image
-    async function handleRemoveImage(key) {
-        if (!confirm('Remove this image?')) return
+    async function handleRemoveImage(img) {
+        const key = img.rawKey || img.key
+        const expandedAlbum = albums.find((album) => album.albumId === expandedAlbumId)
+        const deletingCover = isCurrentAlbumCover(expandedAlbum, img)
+        const message = deletingCover
+            ? 'This is the current album cover. Removing it will automatically use another remaining item as the cover, or clear the cover if the album becomes empty. Continue?'
+            : 'Remove this item?'
+        if (!confirm(message)) return
+        setActionError('')
         try {
             const token = await getIdToken()
             await deleteImages(token, expandedAlbumId, [key])
-            setAlbumImages((prev) => prev.filter((img) => (img.rawKey || img.key) !== key))
-            setActionSuccess('Image removed!')
+            const data = await fetchAlbum(expandedAlbumId, token)
+            const refreshedAlbum = data.album || data
+            setAlbumImages(data.images || [])
+            setAlbums((previous) => previous.map((album) => (
+                album.albumId === expandedAlbumId ? { ...album, ...refreshedAlbum } : album
+            )))
+            setActionSuccess(deletingCover ? 'Item removed and album cover refreshed!' : 'Item removed!')
             setTimeout(() => setActionSuccess(''), 3000)
         } catch (err) {
             setActionError(err.message)
@@ -343,11 +381,6 @@ function ManageAlbums() {
     async function handleChangeVideoThumbnail(img) {
         const rawKey = img.rawKey || img.key
 
-        // Generate a unique thumbKey so CloudFront serves the new file (CachingOptimized ignores query strings)
-        const baseName = rawKey.split('/').slice(0, -1).join('/')
-        const fileName = rawKey.split('/').pop()
-        const thumbKey = `${baseName}/thumb_${fileName}_${Date.now()}.jpg`
-
         if (!scrubberVideoRef.current) {
             setActionError('Video not loaded yet — try again in a moment')
             return
@@ -359,13 +392,25 @@ function ManageAlbums() {
             // 1. Extract frame from the already-loaded scrubber video element
             const { thumbnail, blurhash } = await extractFrameFromVideoElement(scrubberVideoRef.current)
 
+            // A content-derived suffix also avoids stale legacy CloudFront cache entries.
+            const baseName = rawKey.split('/').slice(0, -1).join('/')
+            const fileName = rawKey.split('/').pop()
+            const contentSuffix = (blurhash || String(thumbnail.size)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 16)
+            const thumbKey = `${baseName}/thumb_${fileName}_${contentSuffix}.jpg`
+
             // 2. Upload the new thumbnail to S3 with the unique key
             const token = await getIdToken()
-            const { uploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
-            await uploadFileToS3(uploadUrl, thumbnail)
+            const thumbUpload = await requestUploadUrl(
+                token, expandedAlbumId, thumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'
+            )
+            await uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
+            const persistedThumbKey = thumbUpload.key || thumbKey
 
             // 3. Persist the new thumbKey + blurhash to DynamoDB
-            await updateImageThumbnail(token, expandedAlbumId, rawKey, { thumbKey, blurhash })
+            await updateImageThumbnail(token, expandedAlbumId, rawKey, {
+                thumbKey: persistedThumbKey,
+                blurhash,
+            })
 
             // 4. Refresh local state
             const data = await fetchAlbum(expandedAlbumId, token)
@@ -395,63 +440,69 @@ function ManageAlbums() {
             const token = await getIdToken()
             const s3Prefix = expandedAlbum?.s3Prefix || `albums/${expandedAlbumId}/`
 
-            const finalItems = []
-
-            if (isVideo) {
-                for (const vf of addingVideoFiles) {
+            const finalItems = isVideo
+                ? await mapWithConcurrency(addingVideoFiles, 2, async (vf) => {
                     const { file, time } = vf
                     // 1. Process local thumbnail/hash
                     const { thumbnail, blurhash, width, height } = await processVideo(file, time)
 
                     // 2. Request both Pre-signed URLs
-                    const rawKey = `${s3Prefix}${file.name}`
-                    const thumbKey = `${s3Prefix}thumb_${file.name}.jpg`
+                    const legacyRawKey = `${s3Prefix}${file.name}`
+                    const legacyThumbKey = `${s3Prefix}thumb_${file.name}.jpg`
 
-                    const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
-                    const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+                    const [rawUpload, thumbUpload] = await Promise.all([
+                        requestUploadUrl(token, expandedAlbumId, legacyRawKey, file.type, file.size, 'original'),
+                        requestUploadUrl(token, expandedAlbumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
+                    ])
 
                     // 3. Upload both to S3
                     await Promise.all([
-                        uploadFileToS3(rawUploadUrl, file),
-                        uploadFileToS3(thumbUploadUrl, thumbnail)
+                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
+                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
                     ])
 
-                    finalItems.push({
+                    const rawKey = rawUpload.key || legacyRawKey
+                    const thumbKey = thumbUpload.key || legacyThumbKey
+
+                    return {
                         rawKey,
                         thumbKey,
                         blurhash,
                         width,
                         height,
-                        thumbnailTime: time
-                    })
-                }
-            } else {
-                for (const file of addingFiles) {
+                        thumbnailTime: time,
+                    }
+                })
+                : await mapWithConcurrency(addingFiles, 2, async (file) => {
                     // 1. Process local thumbnail/hash
                     const { thumbnail, blurhash, width, height } = await processImage(file)
 
                     // 2. Request both Pre-signed URLs
-                    const rawKey = `${s3Prefix}${file.name}`
-                    const thumbKey = `${s3Prefix}thumb_${file.name}`
+                    const legacyRawKey = `${s3Prefix}${file.name}`
+                    const legacyThumbKey = `${s3Prefix}thumb_${file.name}`
 
-                    const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
-                    const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+                    const [rawUpload, thumbUpload] = await Promise.all([
+                        requestUploadUrl(token, expandedAlbumId, legacyRawKey, file.type, file.size, 'original'),
+                        requestUploadUrl(token, expandedAlbumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
+                    ])
 
                     // 3. Upload both to S3
                     await Promise.all([
-                        uploadFileToS3(rawUploadUrl, file),
-                        uploadFileToS3(thumbUploadUrl, thumbnail)
+                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
+                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
                     ])
 
-                    finalItems.push({
+                    const rawKey = rawUpload.key || legacyRawKey
+                    const thumbKey = thumbUpload.key || legacyThumbKey
+
+                    return {
                         rawKey,
                         thumbKey,
                         blurhash,
                         width,
-                        height
-                    })
-                }
-            }
+                        height,
+                    }
+                })
 
             // Append to database
             await addImagesToAlbum(token, expandedAlbumId, finalItems)
@@ -762,14 +813,21 @@ function ManageAlbums() {
                                                         <>
                                                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 border border-warm-border/50 p-3 rounded-xl bg-white/50">
                                                                 {albumImages.map((img, idx) => {
-                                                                    const isLegacy = !img.thumbKey
-                                                                    const thumbUrl = isLegacy ? img.url : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
-                                                                    const imgKey = img.rawKey || img.key || `fallback-${idx}`
+                                                                    const thumbUrl = mediaThumbnailUrl(img)
+                                                                    const imgKey = img.rawKey || img.key || img.id || `fallback-${idx}`
                                                                     const isEditingThisThumb = editingThumbKey === imgKey
 
                                                                     return (
                                                                         <div key={imgKey} className="group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30">
-                                                                            <img src={thumbUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                                                            <img
+                                                                                src={thumbUrl}
+                                                                                alt=""
+                                                                                width={img.width}
+                                                                                height={img.height}
+                                                                                className="w-full h-full object-cover"
+                                                                                loading="lazy"
+                                                                                decoding="async"
+                                                                            />
                                                                             {/* Set as cover button (top-left) */}
                                                                             <button
                                                                                 onClick={() => handleSetCover(img)}
@@ -782,7 +840,7 @@ function ManageAlbums() {
                                                                             </button>
                                                                             {/* Remove button (top-right) */}
                                                                             <button
-                                                                                onClick={() => handleRemoveImage(imgKey)}
+                                                                                onClick={() => handleRemoveImage(img)}
                                                                                 title="Remove"
                                                                                 className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/80 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                                                                             >
@@ -836,14 +894,14 @@ function ManageAlbums() {
                                                                         </button>
                                                                     </div>
                                                                     <VideoThumbnailFromUrl
-                                                                        videoUrl={`https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${editingThumbKey}`}
+                                                                        videoUrl={mediaDisplayUrl(albumImages.find(i => (i.rawKey || i.key || i.id) === editingThumbKey))}
                                                                         time={editingThumbTime}
                                                                         onTimeChange={setEditingThumbTime}
                                                                         onVideoRef={(el) => { scrubberVideoRef.current = el }}
                                                                     />
                                                                     <div className="mt-3 flex gap-2">
                                                                         <button
-                                                                            onClick={() => handleChangeVideoThumbnail(albumImages.find(i => (i.rawKey || i.key) === editingThumbKey))}
+                                                                            onClick={() => handleChangeVideoThumbnail(albumImages.find(i => (i.rawKey || i.key || i.id) === editingThumbKey))}
                                                                             disabled={updatingThumb}
                                                                             className="px-4 py-2 rounded-lg bg-amber text-white text-sm font-medium cursor-pointer hover:bg-amber-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                                                         >

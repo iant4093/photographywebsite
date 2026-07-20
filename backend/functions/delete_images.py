@@ -1,95 +1,122 @@
-import json
+"""Admin-only, manifest-authorized media deletion."""
+
 import os
+
 import boto3
 
-# S3 and DynamoDB clients
-s3 = boto3.client('s3')
-dynamodb = boto3.resource('dynamodb')
-
-BUCKET = os.environ['IMAGES_BUCKET']
-TABLE_NAME = os.environ['ALBUMS_TABLE']
-table = dynamodb.Table(TABLE_NAME)
-
 from auth_helpers import require_admin
+from deletion_helpers import (
+    DeletionTooLargeError,
+    delete_keys_all_versions,
+    delete_prefix_all_versions,
+    preflight_deletion,
+)
+from media_access import validate_album_media_key
+from response_helpers import error_response, internal_error, json_response
+from validation_helpers import ValidationError, parse_json_body, require_string, validate_list, validate_uuid
+
+
+table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
+
+
+def _raw_key(image):
+    return image.get("rawKey") or image.get("key") if isinstance(image, dict) else ""
+
+
+def _cover_fields(image):
+    if not isinstance(image, dict):
+        return _raw_key(image), "", ""
+    return _raw_key(image), image.get("thumbKey", ""), image.get("blurhash", "")
 
 
 def handler(event, context):
-    """POST /albums/{albumId}/delete-images — deletes specific images from S3 and DynamoDB."""
     denied = require_admin(event)
     if denied:
         return denied
     try:
-        album_id = event['pathParameters']['albumId']
-        body = json.loads(event.get('body', '{}'))
-        keys = body.get('keys', [])  # These are the rawKey/key values to delete
-
-        if not keys:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'keys array is required'}),
-            }
-
-        album = table.get_item(Key={'albumId': album_id}).get('Item')
+        album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
+        body = parse_json_body(event, max_bytes=64 * 1024)
+        requested = {
+            require_string(key, "keys[]", maximum=1024)
+            for key in validate_list(body.get("keys"), "keys", maximum=250, required=True)
+        }
+        album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
         if not album:
-            return {'statusCode': 404, 'body': json.dumps({'error': 'Album not found'})}
+            return error_response(404, "Album not found", code="not_found")
 
-        images = album.get('images', [])
-        
-        objects_to_delete = []
-        new_images = []
-        
-        for img in images:
-            img_key = img.get('rawKey') or img.get('key')
-            if img_key in keys:
-                objects_to_delete.append({'Key': img_key})
-                if 'thumbKey' in img and img['thumbKey']:
-                    objects_to_delete.append({'Key': img['thumbKey']})
+        images = album.get("images", []) if isinstance(album.get("images", []), list) else []
+        removed = []
+        retained = []
+        exact_keys = set()
+        hls_prefixes = set()
+        for image in images:
+            raw_key = _raw_key(image)
+            if raw_key in requested:
+                raw_key = validate_album_media_key(raw_key, album=album)
+                removed.append(image)
+                exact_keys.add(raw_key)
+                if isinstance(image, dict) and image.get("thumbKey"):
+                    exact_keys.add(validate_album_media_key(image["thumbKey"], album=album))
+                if "." in raw_key:
+                    hls_prefixes.add(
+                        validate_album_media_key(raw_key.rsplit(".", 1)[0] + "_hls/", album=album).rstrip("/") + "/"
+                    )
             else:
-                new_images.append(img)
-                
-        # Update DynamoDB if any images were removed
-        if len(new_images) != len(images):
-            table.update_item(
-                Key={'albumId': album_id},
-                UpdateExpression='SET images = :images',
-                ExpressionAttributeValues={':images': new_images}
+                retained.append(image)
+
+        if not removed:
+            return error_response(404, "Requested media was not found in this album", code="not_found")
+        if requested - {_raw_key(image) for image in removed}:
+            return error_response(400, "One or more media keys are not in this album", code="invalid_media")
+
+        cover_raw = album.get("coverImageUrl", "")
+        cover_thumb = album.get("coverThumbKey", "")
+        removed_raw_keys = {_raw_key(image) for image in removed}
+        cover_needs_replacement = cover_raw in removed_raw_keys or cover_thumb in exact_keys
+        if cover_needs_replacement:
+            cover_source = next(
+                (image for image in retained if _raw_key(image) == cover_raw),
+                retained[0] if retained else None,
             )
+            cover_raw, cover_thumb, cover_blurhash = _cover_fields(cover_source)
+        else:
+            cover_blurhash = album.get("coverBlurhash", "")
 
-        if objects_to_delete:
-            # Also check for HLS prefixes for each video being deleted
-            hls_objects = []
-            for obj in objects_to_delete:
-                key = obj['Key']
-                # If it's a raw video (not a thumb), check for its HLS folder
-                if not key.endswith('.jpg') and '.' in key:
-                    base_name = key.rsplit('.', 1)[0]
-                    hls_prefix = f"{base_name}_hls/"
-                    
-                    # List all objects in the HLS folder
-                    paginator = s3.get_paginator('list_objects_v2')
-                    for page in paginator.paginate(Bucket=BUCKET, Prefix=hls_prefix):
-                        if 'Contents' in page:
-                            for item in page['Contents']:
-                                hls_objects.append({'Key': item['Key']})
-            
-            # Combine all objects to delete
-            all_to_delete = objects_to_delete + hls_objects
-            
-            # S3 delete_objects has a limit of 1000 keys per call
-            for i in range(0, len(all_to_delete), 1000):
-                chunk = all_to_delete[i:i + 1000]
-                s3.delete_objects(
-                    Bucket=BUCKET,
-                    Delete={'Objects': chunk},
-                )
+        # Enumerate and bound every affected object version before the first
+        # mutation. If S3 then fails, the manifest remains intact and retryable.
+        preflight_deletion(keys=exact_keys, prefixes=hls_prefixes)
+        deleted_versions = delete_keys_all_versions(exact_keys)
+        for hls_prefix in hls_prefixes:
+            deleted_versions += delete_prefix_all_versions(hls_prefix)
 
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'message': f'Deleted {len(keys)} image(s)'}),
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)}),
-        }
+        table.update_item(
+            Key={"albumId": album_id},
+            UpdateExpression=(
+                "SET images = :images, imageCount = :count, coverImageUrl = :cover, "
+                "coverThumbKey = :coverThumb, coverBlurhash = :coverBlurhash"
+            ),
+            ConditionExpression="attribute_exists(albumId)",
+            ExpressionAttributeValues={
+                ":images": retained,
+                ":count": len(retained),
+                ":cover": cover_raw,
+                ":coverThumb": cover_thumb,
+                ":coverBlurhash": cover_blurhash,
+            },
+        )
+        return json_response(
+            200,
+            {"message": "Media deleted", "deletedCount": len(removed), "deletedObjectVersions": deleted_versions},
+        )
+    except DeletionTooLargeError:
+        return error_response(
+            413,
+            "Media deletion is too large for synchronous processing; use the maintenance deletion workflow",
+            code="deletion_too_large",
+        )
+    except ValidationError as error:
+        return error_response(400, str(error), code="invalid_request")
+    except table.meta.client.exceptions.ConditionalCheckFailedException:
+        return error_response(409, "Album changed while media was being deleted", code="conflict")
+    except Exception as error:
+        return internal_error(context, error, "delete_images")

@@ -1,85 +1,66 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Blurhash } from 'react-blurhash'
-import { motion } from 'framer-motion'
 
 export default function ProgressiveImage({
     src,
+    srcSet,
+    sizes,
     blurhash,
     alt,
-    className = "",
-    layoutId = null
+    width,
+    height,
+    eager = false,
+    className = '',
+    onError,
 }) {
-    const [isLoaded, setIsLoaded] = useState(false)
-    const [shouldLoad, setShouldLoad] = useState(false)
+    const [visibleSrc, setVisibleSrc] = useState(eager ? src : null)
+    const [loadedSrc, setLoadedSrc] = useState(null)
     const containerRef = useRef(null)
+    const shouldLoad = eager || visibleSrc === src
+    const isLoaded = loadedSrc === src
 
     useEffect(() => {
-        if (!src) return
+        if (!src || eager || visibleSrc === src) return undefined
+        const element = containerRef.current
+        if (!element || typeof IntersectionObserver === 'undefined') {
+            setVisibleSrc(src)
+            return undefined
+        }
 
-        setIsLoaded(false)
-        setShouldLoad(false)
-
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                if (entry.isIntersecting) {
-                    setShouldLoad(true)
-                    observer.disconnect()
-                }
-            },
-            {
-                rootMargin: '200px', // Load slightly before it comes into view
-                threshold: 0.01
+        const observer = new IntersectionObserver(([entry]) => {
+            if (entry.isIntersecting) {
+                setVisibleSrc(src)
+                observer.disconnect()
             }
-        )
-
-        if (containerRef.current) {
-            observer.observe(containerRef.current)
-        }
-
-        return () => {
-            observer.disconnect()
-        }
-    }, [src])
-
-    useEffect(() => {
-        if (!src || !shouldLoad) return
-
-        const img = new Image()
-        img.onload = () => setIsLoaded(true)
-        img.src = src
-
-        return () => {
-            img.onload = null
-        }
-    }, [src, shouldLoad])
+        }, { rootMargin: '240px', threshold: 0.01 })
+        observer.observe(element)
+        return () => observer.disconnect()
+    }, [eager, src, visibleSrc])
 
     return (
         <div ref={containerRef} className={`relative overflow-hidden ${className}`}>
-            {/* Blurhash Placeholder */}
-            {blurhash && (
-                <div
-                    className={`absolute inset-0 transition-opacity duration-700 ease-in-out z-10 
-                    ${isLoaded ? 'opacity-0' : 'opacity-100'}`}
-                >
-                    <Blurhash
-                        hash={blurhash}
-                        width="100%"
-                        height="100%"
-                        resolutionX={32}
-                        resolutionY={32}
-                        punch={1}
-                    />
+            {shouldLoad && blurhash && (
+                <div className={`absolute inset-0 z-10 transition-opacity duration-500 ${isLoaded ? 'opacity-0' : 'opacity-100'}`} aria-hidden="true">
+                    <Blurhash hash={blurhash} width="100%" height="100%" resolutionX={24} resolutionY={24} punch={1} />
                 </div>
             )}
-
-            {/* Actual Image */}
             {shouldLoad && (
-                <motion.img
-                    layoutId={layoutId}
+                <img
                     src={src}
+                    srcSet={srcSet}
+                    sizes={sizes}
                     alt={alt}
-                    className={`absolute inset-0 w-full h-full object-cover transition-all duration-700 ease-in-out z-0
-                        ${isLoaded ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}`}
+                    width={width}
+                    height={height}
+                    loading={eager ? 'eager' : 'lazy'}
+                    fetchPriority={eager ? 'high' : 'low'}
+                    decoding="async"
+                    onLoad={() => setLoadedSrc(src)}
+                    onError={(event) => {
+                        setLoadedSrc(src)
+                        onError?.(event)
+                    }}
+                    className={`absolute inset-0 z-0 h-full w-full object-cover transition-all duration-500 ease-out ${isLoaded ? 'scale-100 opacity-100' : 'scale-[1.02] opacity-0'}`}
                 />
             )}
         </div>

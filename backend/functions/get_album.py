@@ -1,106 +1,77 @@
-import json
+"""Default-deny album detail endpoint with protected media URLs."""
+
 import os
+
 import boto3
-import jwt
-from jwt import PyJWKClient
 
-from decimal import Decimal
-class DecimalEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return int(obj) if obj % 1 == 0 else float(obj)
-        return super(DecimalEncoder, self).default(obj)
+from album_access import authorize_album
+from auth_helpers import AuthError, auth_error_response, get_verified_claims
+from media_access import album_media_prefixes, bucket_name, serialize_album_detail, serialize_images
+from response_helpers import error_response, internal_error, json_response
+from validation_helpers import ValidationError, validate_uuid
 
-# DynamoDB resource for fetching the album record
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
-BUCKET = os.environ['IMAGES_BUCKET']
-s3 = boto3.client('s3')
 
-USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID', '')
-REGION = os.environ.get('AWS_REGION', 'us-west-2')
-jwks_url = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json"
-jwks_client = PyJWKClient(jwks_url)
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
+s3 = boto3.client("s3")
 
-def get_email_from_token(event):
-    """Extract and cryptographically verify email and groups from the Bearer token."""
-    headers = event.get('headers', {})
-    auth_header = headers.get('authorization') or headers.get('Authorization', '')
-    if not auth_header.lower().startswith('bearer '):
-        return '', []
-    
-    token = auth_header.split(' ')[1]
-    try:
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-        claims = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            options={"verify_aud": False}
-        )
-        return claims.get('email', ''), claims.get('cognito:groups', [])
-    except Exception as e:
-        print(f"Token validation error: {e}")
-        return '', []
+
+def _legacy_images(album):
+    images = []
+    paginator = s3.get_paginator("list_objects_v2")
+    remaining = 1000
+    seen = set()
+    for prefix in album_media_prefixes(album):
+        if remaining <= 0:
+            break
+        for page in paginator.paginate(
+            Bucket=bucket_name(),
+            Prefix=prefix,
+            PaginationConfig={"MaxItems": remaining},
+        ):
+            for obj in page.get("Contents", []):
+                key = obj.get("Key", "")
+                basename = key.rsplit("/", 1)[-1]
+                if (
+                    not key
+                    or key in seen
+                    or key.endswith("/")
+                    or "_hls/" in key
+                    or "/thumbnail/" in key
+                    or basename.startswith("thumb_")
+                ):
+                    continue
+                seen.add(key)
+                images.append({"rawKey": key})
+            remaining = 1000 - len(images)
+            if remaining <= 0:
+                break
+    return images
+
 
 def handler(event, context):
-    """GET /albums/{albumId} — returns album metadata and lists S3 images."""
     try:
-        album_id = event['pathParameters']['albumId']
-
-        # Fetch album metadata from DynamoDB
-        response = table.get_item(Key={'albumId': album_id})
-        album = response.get('Item')
-
+        album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
+        response = table.get_item(Key={"albumId": album_id})
+        album = response.get("Item")
         if not album:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Album not found'}),
-            }
+            return error_response(404, "Album not found", code="not_found")
 
-        # Private album check — require matching owner or admin
-        if album.get('visibility') == 'private':
-            # API Gateway Authorizer is NONE, so we manually decode the token
-            caller_email, groups = get_email_from_token(event)
-            owner = album.get('ownerEmail', '')
-            if caller_email != owner and 'Admins' not in groups:
-                return {
-                    'statusCode': 403,
-                    'body': json.dumps({'error': 'Access denied — this album is private'}),
-                }
+        claims = get_verified_claims(event, required=False)
+        access_mode = authorize_album(album, claims=claims)
+        if not album.get("images"):
+            album = {**album, "images": _legacy_images(album)}
 
-        cf_domain = os.environ.get('CLOUDFRONT_DOMAIN', f'{BUCKET}.s3.amazonaws.com')
-        # Convert coverImageUrl from S3 key to full public URL
-        cover = album.get('coverImageUrl', '')
-        if cover and not cover.startswith('http'):
-            album['coverImageUrl'] = f'https://{cf_domain}/{cover}'
-
-        # If the album already has the new image manifest (with thumbKeys/blurhashes), use it
-        # This completely skips the slow S3 list_objects_v2 API call!
-        images = album.get('images')
-        
-        if not images:
-            # Fallback for old albums: List all objects in the S3 prefix
-            s3_prefix = album.get('s3Prefix', f'albums/{album_id}/')
-            s3_response = s3.list_objects_v2(Bucket=BUCKET, Prefix=s3_prefix)
-            objects = s3_response.get('Contents', [])
-
-            # Build image URLs sorted alphabetically by key (chronological order)
-            images = []
-            for obj in sorted(objects, key=lambda o: o['Key']):
-                # Skip folder markers
-                if obj['Key'].endswith('/'):
-                    continue
-                url = f'https://{cf_domain}/{obj["Key"]}'
-                images.append({'key': obj['Key'], 'url': url})
-
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'album': album, 'images': images}, cls=DecimalEncoder),
+        include_admin = access_mode == "admin"
+        body = {
+            "album": serialize_album_detail(album, include_admin=include_admin),
+            "images": serialize_images(album, include_internal=include_admin),
         }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)}),
-        }
+        cache_control = "public, max-age=60, s-maxage=300" if access_mode == "public" else "no-store"
+        return json_response(200, body, cache_control=cache_control)
+    except AuthError as error:
+        return auth_error_response(error)
+    except ValidationError as error:
+        return error_response(400, str(error), code="invalid_request")
+    except Exception as error:
+        return internal_error(context, error, "get_album")

@@ -1,159 +1,112 @@
-import json
+"""Authorized, rate-limited asynchronous ZIP request/status endpoint."""
+
 import os
-import urllib.parse
+import re
+import json
+
 import boto3
-import jwt
-from jwt import PyJWKClient
 from botocore.exceptions import ClientError
 
-s3 = boto3.client('s3')
-dynamodb = boto3.resource('dynamodb')
-lambda_client = boto3.client('lambda')
+from album_access import authorize_album
+from auth_helpers import AuthError, auth_error_response, get_verified_claims
+from media_access import bucket_name, presigned_get_url
+from response_helpers import error_response, internal_error, json_response
+from security_helpers import check_rate_limit
+from validation_helpers import ValidationError, validate_uuid
+from zip_helpers import get_album_record, raw_image_keys, zip_keys
 
-USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID', '')
-REGION = os.environ.get('AWS_REGION', 'us-west-2')
-jwks_url = f"https://cognito-idp.{REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json"
-jwks_client = PyJWKClient(jwks_url) if USER_POOL_ID else None
 
-def get_email_from_token(event):
-    """Extract and cryptographically verify email and groups from the Bearer token."""
-    headers = event.get('headers', {})
-    auth_header = headers.get('authorization') or headers.get('Authorization', '')
-    if not auth_header.lower().startswith('bearer '):
-        return '', []
-    
-    token = auth_header.split(' ')[1]
-    try:
-        if not jwks_client: return '', []
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-        claims = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            options={"verify_aud": False}
-        )
-        return claims.get('email', ''), claims.get('cognito:groups', [])
-    except Exception as e:
-        print(f"Token validation error: {e}")
-        return '', []
+s3 = boto3.client("s3")
+lambda_client = boto3.client("lambda")
+SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
-def get_album_record(album_id=None, share_code=None):
-    if not os.environ.get('ALBUMS_TABLE'): return None
-    table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
-    if album_id:
-        return table.get_item(Key={'albumId': album_id}).get('Item')
-    if share_code:
-        resp = table.query(
-            IndexName='ShareCodeIndex',
-            KeyConditionExpression=boto3.dynamodb.conditions.Key('shareCode').eq(share_code)
-        )
-        items = resp.get('Items', [])
-        return items[0] if items else None
-    return None
 
-def create_presigned_url(bucket_name, object_name, expiration=3600, download_filename=None):
-    params = {'Bucket': bucket_name, 'Key': object_name}
-    if download_filename:
-        encoded_filename = urllib.parse.quote(download_filename)
-        params['ResponseContentDisposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
-    try:
-        return s3.generate_presigned_url('get_object',
-                                        Params=params,
-                                        ExpiresIn=expiration)
-    except Exception as e:
-        print(e)
-        return None
+def _not_found():
+    return error_response(404, "Album not found", code="not_found")
+
 
 def handler(event, context):
     try:
-        path_params = event.get('pathParameters', {})
-        album_id = path_params.get('albumId')
-        share_code = path_params.get('shareCode')
-        
-        if not album_id and not share_code:
-            return {'statusCode': 400, 'body': json.dumps({'error': 'Missing identifier'})}
-            
-        album = get_album_record(album_id=album_id, share_code=share_code)
-        if not album:
-            return {'statusCode': 404, 'body': json.dumps({'error': 'Album not found'})}
+        path = (event or {}).get("pathParameters") or {}
+        album_id = path.get("albumId")
+        share_code = path.get("shareCode")
+        claims = None
+        if album_id:
+            album_id = validate_uuid(album_id)
+            claims = get_verified_claims(event, required=False)
+            album = get_album_record(album_id=album_id)
+            if not album:
+                return _not_found()
+            authorize_album(album, claims=claims)
+        elif share_code and SHARE_CODE_PATTERN.fullmatch(share_code):
+            album = get_album_record(share_code=share_code)
+            if not album:
+                return _not_found()
+            authorize_album(album, share_code=share_code)
+        else:
+            return _not_found()
 
-        # Security Check: If accessed via albumId and it's private, verify token
-        if not share_code and album.get('visibility') == 'private':
-            caller_email, groups = get_email_from_token(event)
-            owner = album.get('ownerEmail', '')
-            if caller_email != owner and 'Admins' not in groups:
-                return {
-                    'statusCode': 403,
-                    'body': json.dumps({'error': 'Access denied — this album is private'})
-                }
+        if album.get("type", "photo") != "photo":
+            return error_response(400, "ZIP downloads are available for photo albums", code="unsupported")
+        image_keys = raw_image_keys(album)
+        max_objects = max(1, min(int(os.environ.get("ZIP_MAX_OBJECTS", "1000")), 5000))
+        if not image_keys:
+            return error_response(400, "Album has no downloadable photos", code="empty_album")
+        if len(image_keys) > max_objects:
+            return error_response(413, "Album is too large for ZIP download", code="zip_too_large")
 
-        bucket = os.environ.get('IMAGES_BUCKET')
-        zip_filename = f"album_{album.get('albumId')}.zip"
-        zip_key = f"temp-zips/{zip_filename}"
-        download_filename = f"{album.get('title', 'album')}.zip"
+        ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
+        rate_identifier = f"{ip}:{album['albumId']}"
+        if not check_rate_limit(rate_identifier, "zip_status", 30, 300, fail_closed=True):
+            return error_response(429, "Too many ZIP requests. Please try again later.", code="rate_limited")
 
-        # 1. Check if the zip already exists in S3
+        zip_key, lock_key = zip_keys(album)
+        bucket = bucket_name()
         try:
             s3.head_object(Bucket=bucket, Key=zip_key)
-            # If it exists, return ready status with the pre-signed URL
-            url = create_presigned_url(bucket, zip_key, download_filename=download_filename)
-            return {
-                'statusCode': 200, 
-                'headers': {'Content-Type': 'application/json'}, 
-                'body': json.dumps({
-                    'status': 'ready',
-                    'url': url
-                })
-            }
-        except ClientError:
-            # File doesn't exist yet, we need to generate it.
-            pass
+            return json_response(
+                200,
+                {
+                    "status": "ready",
+                    "url": presigned_get_url(zip_key, download_filename=f"{album.get('title', 'album')}.zip", expiration=600),
+                },
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
+                raise
 
-        # 2. Check if a worker is already running via a lock marker
-        lock_key = f"temp-zips/album_{album.get('albumId')}.lock"
-        worker_already_running = False
+        worker_running = False
         try:
-            lock_obj = s3.head_object(Bucket=bucket, Key=lock_key)
-            # Lock exists — check if it's recent (< 10 minutes old)
+            lock = s3.head_object(Bucket=bucket, Key=lock_key)
             import datetime
-            lock_age = (datetime.datetime.now(datetime.timezone.utc) - lock_obj['LastModified']).total_seconds()
-            if lock_age < 600:
-                worker_already_running = True
-                print(f"Lock exists ({int(lock_age)}s old) — worker already running for album {album.get('albumId')}")
-            else:
-                print(f"Stale lock ({int(lock_age)}s old) — will re-trigger worker for album {album.get('albumId')}")
-        except ClientError:
-            # No lock exists
-            pass
 
-        # 3. Only invoke a new worker if one isn't already running
-        if not worker_already_running:
-            # Create lock marker before invoking worker
-            s3.put_object(Bucket=bucket, Key=lock_key, Body=b'locked')
-            print(f"Created lock for album {album.get('albumId')}")
+            age = (datetime.datetime.now(datetime.timezone.utc) - lock["LastModified"]).total_seconds()
+            worker_running = age < 900
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
+                raise
 
-            worker_func = os.environ.get('WORKER_FUNCTION_NAME')
-            if worker_func:
-                payload = {
-                    'albumId': album_id,
-                    'shareCode': share_code
-                }
-                lambda_client.invoke(
-                    FunctionName=worker_func,
-                    InvocationType='Event',  # Asynchronous invocation
-                    Payload=json.dumps(payload)
-                )
-                print(f"Triggered async worker for album {album.get('albumId')}")
-
-        # 4. Inform the frontend that the zip is being processed
-        return {
-            'statusCode': 202,  # 202 Accepted implies background long-running task
-            'headers': {'Content-Type': 'application/json'}, 
-            'body': json.dumps({
-                'status': 'processing'
-            })
-        }
-
-    except Exception as e:
-        print(e)
-        return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
+        if not worker_running:
+            s3.put_object(
+                Bucket=bucket,
+                Key=lock_key,
+                Body=b"locked",
+                Tagging="visibility=pending",
+                ContentType="application/octet-stream",
+            )
+            lambda_client.invoke(
+                FunctionName=os.environ["WORKER_FUNCTION_NAME"],
+                InvocationType="Event",
+                Payload=json.dumps({"albumId": album_id, "shareCode": share_code}),
+            )
+        return json_response(
+            202,
+            {"status": "processing", "retryAfterSeconds": 3},
+            headers={"Retry-After": "3"},
+        )
+    except AuthError as error:
+        return auth_error_response(error)
+    except ValidationError as error:
+        return error_response(400, str(error), code="invalid_request")
+    except Exception as error:
+        return internal_error(context, error, "create_zip")

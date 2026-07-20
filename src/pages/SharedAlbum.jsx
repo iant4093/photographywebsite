@@ -1,10 +1,20 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { fetchSharedAlbum, requestSharedAlbumZip } from '../utils/api'
+import { fetchSharedAlbum, requestSharedAlbumZip, requestSharedMediaDownload } from '../utils/api'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Turnstile } from '@marsidev/react-turnstile'
+import {
+    mediaDisplayUrl,
+    mediaFileName,
+    mediaId,
+    mediaThumbnailUrl,
+    resolveMediaDownloadUrl,
+    startBrowserDownload,
+} from '../utils/mediaUrls'
+import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
+import { pollZipJob } from '../utils/zipDownload'
 
 export default function SharedAlbum() {
     const { code } = useParams()
@@ -12,39 +22,64 @@ export default function SharedAlbum() {
 
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
-    const [loading, setLoading] = useState(false)
+    const [loading, setLoading] = useState(Boolean(code))
     const [downloading, setDownloading] = useState(false)
     const [error, setError] = useState(null)
     const [inputCode, setInputCode] = useState('')
     const [turnstileToken, setTurnstileToken] = useState(null)
+    const [accessMessage, setAccessMessage] = useState('')
+    const [zipError, setZipError] = useState('')
+    const [zipStatus, setZipStatus] = useState('')
+    const zipControllerRef = useRef(null)
 
     // Lightbox
     const [lightboxIndex, setLightboxIndex] = useState(null)
 
     // Attempt to load album if code is present in URL
     useEffect(() => {
-        if (!code) {
-            setLoading(false)
-            return
+        if (!code || !turnstileToken) {
+            return undefined
         }
 
-        setLoading(true)
-        setError(null)
-
-        fetchSharedAlbum(code, turnstileToken).then(data => {
-            setAlbum(data)
+        const controller = new AbortController()
+        Promise.resolve().then(() => {
+            if (controller.signal.aborted) return null
+            setLoading(true)
+            setError(null)
+            return fetchSharedAlbum(code, turnstileToken, { signal: controller.signal })
+        }).then(data => {
+            if (!data) return
+            setAlbum(data.album || data)
             setImages(data.images || [])
+            setAccessMessage('')
             setLoading(false)
         }).catch(err => {
-            setError(err.message || 'The gallery could not be loaded. Please check your connection or try again later.')
-            setLoading(false)
+            if (err?.name !== 'AbortError') {
+                setError(err.message || 'The gallery could not be loaded. Please check your connection or try again later.')
+                setLoading(false)
+            }
         })
-    }, [code]) // Only depend on code now, not turnstileToken
+        return () => controller.abort()
+    }, [code, turnstileToken])
+
+    useEffect(() => () => zipControllerRef.current?.abort(), [])
+
+    const requireFreshVerification = useCallback(() => {
+        setAccessMessage('The gallery session expired. Complete a new security check to refresh its protected media links.')
+        setTurnstileToken(null)
+        setAlbum(null)
+        setImages([])
+        setLightboxIndex(null)
+        setLoading(false)
+    }, [])
+    const requestMediaRefresh = useMediaExpiryRefresh(images, requireFreshVerification)
 
     const handleManualSubmit = (e) => {
         e.preventDefault()
         let val = inputCode.trim()
         if (val) {
+            setLoading(true)
+            setError(null)
             // Handle full URL pastes naturally
             const parts = val.split('/').filter(Boolean)
             if (parts.length > 0) {
@@ -81,66 +116,46 @@ export default function SharedAlbum() {
         const img = images[lightboxIndex]
         if (!img) return
 
-        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-        const urlToDownload = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
-        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
-        const fileName = keyString ? keyString.split('/').pop() : 'photo.jpg'
-
         try {
-            // Reverted back to cache: no-store instead of dynamic timestamps because iOS Safari 
-            // natively parses this correctly into a View/Download prompt, while dynamic urls throw CORS errors and get popup blocked.
-            const urlObj = new URL(urlToDownload)
-            urlObj.searchParams.set('dl', '1')
-            const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
-            const blob = await response.blob()
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = fileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            setTimeout(() => URL.revokeObjectURL(url), 100)
+            const downloadUrl = await resolveMediaDownloadUrl(
+                () => requestSharedMediaDownload(code, mediaId(img)),
+                img,
+            )
+            startBrowserDownload(downloadUrl, mediaFileName(img, 'photo.jpg'))
         } catch (err) {
-            console.error('Download failed, opening directly:', err)
-            // window.open() inside an async catch block is heavily blocked by iOS Safari popup blockers.
-            // Using window.location.assign gracefully navigates the user directly to the image where they can save it.
-            window.location.assign(urlToDownload)
+            console.error('Download failed:', err)
+            alert('The file could not be downloaded. Please try again.')
         }
     }
 
     // Download all photos in the album as a ZIP file (Using Backend Generator)
     async function downloadAll() {
-        if (!images.length || !album || !code) return
+        if (!images.length || !album || !code || album.type === 'video') return
+        zipControllerRef.current?.abort()
+        const controller = new AbortController()
+        zipControllerRef.current = controller
         setDownloading(true)
+        setZipError('')
+        setZipStatus('starting')
         try {
-            // Polling loop with max 2 minute timeout (24 polls × 5s)
-            const MAX_POLLS = 24
-            for (let poll = 0; poll < MAX_POLLS; poll++) {
-                const { status, url } = await requestSharedAlbumZip(code)
-
-                if (status === 'ready' && url) {
-                    // The backend returned a presigned S3 URL
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `${album.title || 'album'}.zip`
-                    document.body.appendChild(a)
-                    a.click()
-                    document.body.removeChild(a)
-                    return // Exit function
-                } else if (status === 'processing') {
-                    // Wait 5 seconds before polling again
-                    await new Promise(resolve => setTimeout(resolve, 5000))
-                } else {
-                    throw new Error("Unexpected ZIP status: " + status)
-                }
-            }
-            throw new Error("ZIP generation timed out after 2 minutes")
+            const url = await pollZipJob({
+                jobKey: `shared:${code}`,
+                request: ({ signal }) => requestSharedAlbumZip(code, { signal }),
+                signal: controller.signal,
+                onStatus: setZipStatus,
+            })
+            startBrowserDownload(url, `${album.title || 'album'}.zip`)
         } catch (err) {
-            console.error('ZIP Download failed:', err)
-            alert('Failed to generate ZIP. The album might be too large or the server is busy. Please try again later.')
+            if (err?.name !== 'AbortError') {
+                console.error('ZIP Download failed:', err)
+                setZipError(err?.message || 'The ZIP could not be generated. Please try again later.')
+            }
         } finally {
-            setDownloading(false)
+            if (zipControllerRef.current === controller) {
+                zipControllerRef.current = null
+                setDownloading(false)
+                setZipStatus('')
+            }
         }
     }
 
@@ -182,7 +197,35 @@ export default function SharedAlbum() {
                     <Turnstile
                         siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                         onSuccess={(token) => setTurnstileToken(token)}
-                        options={{ theme: 'light' }}
+                        onExpire={() => setTurnstileToken(null)}
+                        onError={() => setTurnstileToken(null)}
+                        options={{ theme: 'light', action: 'shared_album' }}
+                    />
+                </div>
+            </motion.div>
+        )
+    }
+
+    // A pasted/bookmarked share URL must obtain its own purpose-bound token
+    // before the album request is made.
+    if (code && !turnstileToken && !error) {
+        return (
+            <motion.div
+                variants={pageVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="max-w-md mx-auto px-6 py-24 text-center pt-[88px] md:pt-[104px]"
+            >
+                <h1 className="font-serif text-3xl font-semibold text-charcoal mb-4">Verify Access</h1>
+                <p className="text-warm-gray mb-8">{accessMessage || 'Complete the security check to open this shared gallery.'}</p>
+                <div className="flex justify-center">
+                    <Turnstile
+                        siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                        onSuccess={(token) => setTurnstileToken(token)}
+                        onExpire={() => setTurnstileToken(null)}
+                        onError={() => setError('The security check could not be loaded. Please try again.')}
+                        options={{ theme: 'light', action: 'shared_album' }}
                     />
                 </div>
             </motion.div>
@@ -205,7 +248,11 @@ export default function SharedAlbum() {
                 <h1 className="font-serif text-2xl font-semibold text-charcoal mb-3">Link Invalid</h1>
                 <p className="text-warm-gray mb-8">{error}</p>
                 <button
-                    onClick={() => navigate('/sharedalbum')}
+                    onClick={() => {
+                        setTurnstileToken(null)
+                        setError(null)
+                        navigate('/sharedalbum')
+                    }}
                     className="inline-flex items-center gap-2 px-6 py-2.5 bg-white border border-warm-border rounded-xl text-charcoal font-medium hover:bg-cream-dark transition-colors"
                 >
                     Try another code
@@ -261,7 +308,7 @@ export default function SharedAlbum() {
                     </div>
 
                     {/* Download All Button */}
-                    {images.length > 0 && (
+                    {images.length > 0 && album.type !== 'video' && (
                         <button
                             onClick={downloadAll}
                             disabled={downloading}
@@ -270,7 +317,7 @@ export default function SharedAlbum() {
                             {downloading ? (
                                 <>
                                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    Zipping...
+                                    {zipStatus === 'rate_limited' ? 'Waiting...' : 'Preparing...'}
                                 </>
                             ) : (
                                 <>
@@ -284,17 +331,20 @@ export default function SharedAlbum() {
                     )}
                 </div>
 
+                {zipError && (
+                    <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {zipError}
+                    </div>
+                )}
+
                 {/* Image grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {images.map((img, index) => {
-                        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-                        const thumbUrl = isLegacyOrDemo
-                            ? (img.url || img)
-                            : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                        const thumbUrl = mediaThumbnailUrl(img)
 
                         return (
                             <div
-                                key={img.key || img.rawKey || index}
+                                key={mediaId(img) || index}
                                 className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative"
                                 onClick={() => setLightboxIndex(index)}
                             >
@@ -304,7 +354,11 @@ export default function SharedAlbum() {
                                     <ProgressiveImage
                                         src={thumbUrl}
                                         blurhash={img.blurhash}
+                                        width={img.width}
+                                        height={img.height}
+                                        sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                         alt={`Item ${index + 1} from ${album.title}`}
+                                        onError={() => requestMediaRefresh('media-error')}
                                         className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                                     />
                                 </div>
@@ -369,16 +423,18 @@ export default function SharedAlbum() {
                         <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0" onClick={(e) => e.stopPropagation()}>
                             {(() => {
                                 const activeImg = images[lightboxIndex]
-                                const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
-                                const thumbUrl = isLegacyOrDemo
-                                    ? (activeImg.url || activeImg)
-                                    : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.thumbKey}`
-                                const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+                                const thumbUrl = mediaThumbnailUrl(activeImg)
+                                const activeRawUrl = mediaDisplayUrl(activeImg)
 
                                 if (album.type === 'video') {
                                     return (
                                         <div className="flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
-                                            <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={true} />
+                                            <VideoPlayer
+                                                videoInfo={images[lightboxIndex]}
+                                                autoplay={true}
+                                                controls={true}
+                                                onMediaError={requestMediaRefresh}
+                                            />
                                         </div>
                                     )
                                 }
@@ -390,9 +446,13 @@ export default function SharedAlbum() {
                                         >
                                             {/* High-res image with faded-in loading */}
                                             <motion.img
-                                                key={`high-${activeImg.rawKey || lightboxIndex}`}
+                                                key={`high-${mediaId(activeImg) || lightboxIndex}`}
                                                 src={activeRawUrl}
                                                 alt="Full size preview"
+                                                onError={() => requestMediaRefresh('media-error')}
+                                                width={activeImg.width}
+                                                height={activeImg.height}
+                                                decoding="async"
                                                 initial={{ opacity: 0 }}
                                                 animate={{ opacity: 1 }}
                                                 exit={{ opacity: 0 }}
@@ -410,7 +470,7 @@ export default function SharedAlbum() {
                                         </div>
 
                                         {/* EXIF Data Overlay */}
-                                        {!isLegacyOrDemo && activeImg.exif && (
+                                        {typeof activeImg !== 'string' && activeImg.exif && (
                                             <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
                                                 {activeImg.exif.model && (
                                                     <p className="text-white font-medium text-sm md:text-base drop-shadow-md">

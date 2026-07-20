@@ -1,13 +1,22 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useParams, Link, useNavigate, useNavigationType } from 'react-router-dom'
-import { fetchAlbum, requestAlbumZip } from '../utils/api'
-import { useAuth } from '../context/authContext'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useParams, useNavigate, useNavigationType } from 'react-router-dom'
+import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
+import { useAuth } from '../context/auth'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
-import VideoPlayer from '../components/VideoPlayer'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
 import { useLocation } from 'react-router-dom'
+import {
+    mediaDisplayUrl,
+    mediaFileName,
+    mediaId,
+    mediaThumbnailUrl,
+    resolveMediaDownloadUrl,
+    startBrowserDownload,
+} from '../utils/mediaUrls'
+import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
+import { pollZipJob } from '../utils/zipDownload'
 
 
 
@@ -25,6 +34,11 @@ function AlbumGallery() {
     const [images, setImages] = useState([])
     const [loading, setLoading] = useState(true)
     const [downloading, setDownloading] = useState(false)
+    const [loadError, setLoadError] = useState('')
+    const [mediaError, setMediaError] = useState('')
+    const [zipError, setZipError] = useState('')
+    const [zipStatus, setZipStatus] = useState('')
+    const zipControllerRef = useRef(null)
     const { getIdToken } = useAuth()
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -36,27 +50,58 @@ function AlbumGallery() {
         exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
     }
 
-    // Fetch album data on mount
-    useEffect(() => {
-        const load = async () => {
+    const loadAlbum = useCallback(async ({ signal, background = false } = {}) => {
+        if (!background) setLoading(true)
+        try {
             let token = null
             try {
                 token = await getIdToken()
-            } catch (e) {
+            } catch {
                 // Not logged in, token stays null
             }
-            try {
-                const data = await fetchAlbum(albumId, token)
-                setAlbum(data.album || data)
-                setImages(data.images || [])
-            } catch (err) {
+            const data = await fetchAlbum(albumId, token, { signal })
+            setAlbum(data.album || data)
+            setImages(data.images || [])
+            setLoadError('')
+            setMediaError('')
+            return data
+        } catch (err) {
+            if (err?.name !== 'AbortError') {
                 console.error("Failed to load album:", err)
-            } finally {
-                setLoading(false)
+                const message = background
+                    ? 'Some photo links expired and could not be refreshed. Check your connection and try again.'
+                    : 'This album could not be loaded. It may not exist or you may not have access.'
+                if (background) setMediaError(message)
+                else setLoadError(message)
             }
+            throw err
+        } finally {
+            if (!background && !signal?.aborted) setLoading(false)
         }
-        load()
     }, [albumId, getIdToken])
+
+    // Fetch album data on mount and clear stale content when the route changes.
+    useEffect(() => {
+        const controller = new AbortController()
+        Promise.resolve().then(() => {
+            if (controller.signal.aborted) return
+            setAlbum(null)
+            setImages([])
+            setLightboxIndex(null)
+            setLoadError('')
+            setMediaError('')
+            return loadAlbum({ signal: controller.signal })
+        }).catch(() => {})
+        return () => controller.abort()
+    }, [albumId, loadAlbum])
+
+    useEffect(() => () => zipControllerRef.current?.abort(), [])
+
+    const refreshMedia = useCallback(
+        () => loadAlbum({ background: true }),
+        [loadAlbum],
+    )
+    const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)
 
     // Lightbox navigation — wraps around at ends
     const goNext = useCallback(() => {
@@ -85,73 +130,55 @@ function AlbumGallery() {
         const img = images[lightboxIndex]
         if (!img) return
 
-        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-        const urlToDownload = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
-        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
-        const fileName = keyString ? keyString.split('/').pop() : 'photo.jpg'
-
         try {
-            // Reverted back to cache: no-store instead of dynamic timestamps because iOS Safari 
-            // natively parses this correctly into a View/Download prompt, while dynamic urls throw CORS errors and get popup blocked.
-            const urlObj = new URL(urlToDownload)
-            urlObj.searchParams.set('dl', '1')
-            const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
-            const blob = await response.blob()
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = fileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            setTimeout(() => URL.revokeObjectURL(url), 100)
+            let token = null
+            try { token = await getIdToken() } catch { /* public album */ }
+            const downloadUrl = await resolveMediaDownloadUrl(
+                () => requestAlbumMediaDownload(albumId, mediaId(img), token),
+                img,
+            )
+            startBrowserDownload(downloadUrl, mediaFileName(img, 'photo.jpg'))
         } catch (err) {
-            console.error('Download failed, falling back to direct navigation:', err)
-            // window.open() inside an async catch block is heavily blocked by iOS Safari popup blockers.
-            // Using window.location.assign gracefully navigates the user directly to the image where they can save it.
-            window.location.assign(urlToDownload)
+            console.error('Download failed:', err)
+            alert('The photo could not be downloaded. Please try again.')
         }
     }
 
     // Download all photos in the album as a ZIP file (Using Backend Generator)
     async function downloadAll() {
         if (!images.length || !album) return
+        zipControllerRef.current?.abort()
+        const controller = new AbortController()
+        zipControllerRef.current = controller
         setDownloading(true)
+        setZipError('')
+        setZipStatus('starting')
         try {
             let token = null
             try {
                 token = await getIdToken()
-            } catch (e) {
+            } catch {
                 // Not logged in, token stays null — ZIP endpoint doesn't require auth
             }
 
-            // Polling loop with max 2 minute timeout (24 polls × 5s)
-            const MAX_POLLS = 24
-            for (let poll = 0; poll < MAX_POLLS; poll++) {
-                const { status, url } = await requestAlbumZip(albumId, token)
-
-                if (status === 'ready' && url) {
-                    // The backend returned a presigned S3 URL
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `${album.title || 'album'}.zip`
-                    document.body.appendChild(a)
-                    a.click()
-                    document.body.removeChild(a)
-                    return // Exit function
-                } else if (status === 'processing') {
-                    // Wait 5 seconds before polling again
-                    await new Promise(resolve => setTimeout(resolve, 5000))
-                } else {
-                    throw new Error("Unexpected ZIP status: " + status)
-                }
-            }
-            throw new Error("ZIP generation timed out after 2 minutes")
+            const url = await pollZipJob({
+                jobKey: `album:${albumId}`,
+                request: ({ signal }) => requestAlbumZip(albumId, token, { signal }),
+                signal: controller.signal,
+                onStatus: setZipStatus,
+            })
+            startBrowserDownload(url, `${album.title || 'album'}.zip`)
         } catch (err) {
-            console.error('ZIP Download failed:', err)
-            alert('Failed to generate ZIP. The album might be too large or the server is busy. Please try again later.')
+            if (err?.name !== 'AbortError') {
+                console.error('ZIP Download failed:', err)
+                setZipError(err?.message || 'The ZIP could not be generated. Please try again later.')
+            }
         } finally {
-            setDownloading(false)
+            if (zipControllerRef.current === controller) {
+                zipControllerRef.current = null
+                setDownloading(false)
+                setZipStatus('')
+            }
         }
     }
 
@@ -181,6 +208,13 @@ function AlbumGallery() {
                 {loading && (
                     <div className="flex justify-center py-32">
                         <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
+                    </div>
+                )}
+
+                {!loading && !album && (
+                    <div className="py-24 text-center">
+                        <p className="text-warm-gray">{loadError || 'This album could not be loaded.'}</p>
+                        <button onClick={() => navigate(-1)} className="mt-4 text-amber hover:underline">Go Back</button>
                     </div>
                 )}
 
@@ -217,7 +251,7 @@ function AlbumGallery() {
                                     {downloading ? (
                                         <>
                                             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                            Zipping...
+                                            {zipStatus === 'rate_limited' ? 'Waiting...' : 'Preparing...'}
                                         </>
                                     ) : (
                                         <>
@@ -231,6 +265,12 @@ function AlbumGallery() {
                             )}
                         </div>
 
+                        {(mediaError || zipError) && (
+                            <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                                {mediaError || zipError}
+                            </div>
+                        )}
+
                         {/* Image grid */}
                         <div className="mb-12">
                             {loading ? (
@@ -238,17 +278,14 @@ function AlbumGallery() {
                             ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {images.map((img, index) => {
-                                        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-                                        const thumbUrl = isLegacyOrDemo
-                                            ? (img.url || img)
-                                            : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                                        const thumbUrl = mediaThumbnailUrl(img)
 
                                         const photoId = `photo-${album.albumId}-${index}`
                                         const hasBeenRevealed = isRevealed(photoId)
 
                                         return (
                                             <motion.div
-                                                key={img.key || img.rawKey || index}
+                                                key={mediaId(img) || index}
                                                 initial={hasBeenRevealed ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 20 }}
                                                 whileInView={hasBeenRevealed ? {} : { opacity: 1, scale: 1, y: 0 }}
                                                 onViewportEnter={() => !hasBeenRevealed && markAsRevealed(photoId)}
@@ -262,7 +299,11 @@ function AlbumGallery() {
                                                     <ProgressiveImage
                                                         src={thumbUrl}
                                                         blurhash={img.blurhash}
+                                                        width={img.width}
+                                                        height={img.height}
+                                                        sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                                         alt={`Item ${index + 1} from ${album.title}`}
+                                                        onError={() => requestMediaRefresh('media-error')}
                                                         className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                                                     />
                                                     {/* Warm overlay on hover */}
@@ -327,20 +368,22 @@ function AlbumGallery() {
                                     >
                                         {(() => {
                                             const activeImg = images[lightboxIndex]
-                                            const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
-                                            const thumbUrl = isLegacyOrDemo
-                                                ? (activeImg.url || activeImg)
-                                                : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.thumbKey}`
-                                            const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+                                            const isLegacyOrDemo = typeof activeImg === 'string'
+                                            const thumbUrl = mediaThumbnailUrl(activeImg)
+                                            const activeRawUrl = mediaDisplayUrl(activeImg)
 
                                             return (
                                                 <>
                                                     <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                                                         {/* High-res image with faded-in loading */}
                                                         <motion.img
-                                                            key={`high-${activeImg.rawKey || lightboxIndex}`}
+                                                            key={`high-${mediaId(activeImg) || lightboxIndex}`}
                                                             src={activeRawUrl}
                                                             alt="Full size preview"
+                                                            onError={() => requestMediaRefresh('media-error')}
+                                                            width={activeImg.width}
+                                                            height={activeImg.height}
+                                                            decoding="async"
                                                             initial={{ opacity: 0 }}
                                                             animate={{ opacity: 1 }}
                                                             exit={{ opacity: 0 }}

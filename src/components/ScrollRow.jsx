@@ -11,8 +11,10 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
         const el = scrollRef.current
         if (!el) return
         const { scrollLeft, scrollWidth, clientWidth } = el
-        setCanScrollLeft(scrollLeft > 2)
-        setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 2)
+        const nextLeft = scrollLeft > 2
+        const nextRight = scrollLeft + clientWidth < scrollWidth - 2
+        setCanScrollLeft((current) => current === nextLeft ? current : nextLeft)
+        setCanScrollRight((current) => current === nextRight ? current : nextRight)
     }, [])
 
     // Restore horizontal scroll position on mount
@@ -32,24 +34,33 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
 
         checkScroll()
 
-        // Save horizontal scroll position on scroll
+        let frame = null
         const handleScroll = () => {
-            checkScroll()
             if (scrollKey) saveHorizontalScroll(scrollKey, el.scrollLeft)
+            if (frame === null) {
+                frame = window.requestAnimationFrame(() => {
+                    frame = null
+                    checkScroll()
+                })
+            }
         }
 
         el.addEventListener('scroll', handleScroll, { passive: true })
-        window.addEventListener('resize', checkScroll)
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(checkScroll)
+        resizeObserver?.observe(el)
+        if (!resizeObserver) window.addEventListener('resize', checkScroll)
 
         // Re-check after images/content may have loaded
         const timer = setTimeout(checkScroll, 500)
 
         return () => {
             el.removeEventListener('scroll', handleScroll)
-            window.removeEventListener('resize', checkScroll)
+            resizeObserver?.disconnect()
+            if (!resizeObserver) window.removeEventListener('resize', checkScroll)
+            if (frame !== null) window.cancelAnimationFrame(frame)
             clearTimeout(timer)
         }
-    }, [checkScroll, children, scrollKey])
+    }, [checkScroll, scrollKey])
 
     const scroll = (direction) => {
         const el = scrollRef.current

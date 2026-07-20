@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 // Simple footer with warm styling
 function Footer() {
     return (
@@ -7,6 +9,12 @@ function Footer() {
                     &copy; {new Date().getFullYear()} Ian Truong
                 </p>
                 <div className="flex items-center gap-6">
+                    <Link
+                        to="/privacy"
+                        className="text-sm text-warm-gray hover:text-amber-dark transition-colors duration-300"
+                    >
+                        Privacy
+                    </Link>
                     <a
                         href="https://www.instagram.com/iant4093/"
                         target="_blank"

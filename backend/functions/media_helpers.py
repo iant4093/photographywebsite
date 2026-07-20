@@ -1,4 +1,5 @@
 import os
+import logging
 import urllib.parse
 import uuid
 import boto3
@@ -8,6 +9,7 @@ from decimal import Decimal
 # Initialize AWS clients lazily
 s3 = None
 mediaconvert = None
+logger = logging.getLogger("photography_api.media")
 
 def get_s3_client():
     global s3
@@ -24,8 +26,8 @@ def get_mediaconvert_client():
             mediaconvert = boto3.client('mediaconvert',
                                      region_name=os.environ['AWS_REGION'],
                                      endpoint_url=endpoints['Endpoints'][0]['Url'])
-        except Exception as e:
-            print(f"Error describing MediaConvert endpoints: {e}")
+        except Exception as error:
+            logger.error("mediaconvert_endpoint_lookup_failed error_type=%s", type(error).__name__)
     return mediaconvert
 
 def format_fraction(value):
@@ -94,8 +96,10 @@ def extract_exif_data(bucket, key):
             exif_info['iso'] = f"ISO {tags['EXIF ISOSpeedRatings']}"
 
         return exif_info
-    except Exception as e:
-        print(f"Error extracting EXIF from {key}: {e}")
+    except Exception as error:
+        # Object names can contain personal information; never include them or
+        # provider error text in production logs.
+        logger.warning("exif_extraction_failed error_type=%s", type(error).__name__)
         return None
 
 def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
@@ -177,6 +181,6 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
             Queue="Default"
         )
         return response['Job']['Id']
-    except Exception as e:
-        print(f"Error starting MediaConvert job: {e}")
+    except Exception as error:
+        logger.error("mediaconvert_job_failed error_type=%s", type(error).__name__)
         raise

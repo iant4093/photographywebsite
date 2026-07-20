@@ -1,274 +1,509 @@
-// API base URL
+import { isSafeCursor, normalizePage } from './apiResponse'
+import { annotateMediaExpiry } from './mediaUrls'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://your-api-id.execute-api.us-west-2.amazonaws.com'
+const DEFAULT_TIMEOUT_MS = 15_000
+const PUBLIC_CATALOG_TTL_MS = 5 * 60_000
+const catalogCache = new Map()
+const catalogRequests = new Map()
 
-// Generic fetch wrapper with optional auth header
-async function apiFetch(path, options = {}) {
-    const url = `${API_BASE}${path}`
-    try {
-        const res = await fetch(url, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers,
-            },
-        })
-        if (!res.ok) {
-            const body = await res.text()
-            throw new Error(`API error ${res.status}: ${body}`)
-        }
-        return res.json()
-    } catch (err) {
-        console.error(`[API] ${options.method || 'GET'} ${url} failed:`, err)
-        throw err
+export class ApiError extends Error {
+    constructor(message, { status = 0, code = 'API_ERROR', retryAfterMs = 0 } = {}) {
+        super(message)
+        this.name = 'ApiError'
+        this.status = status
+        this.code = code
+        this.retryAfterMs = retryAfterMs
     }
 }
 
-// Auth header helper
+function retryAfterMilliseconds(value) {
+    if (!value) return 0
+    const seconds = Number(value)
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+    const timestamp = Date.parse(value)
+    return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : 0
+}
+
 function authHeaders(token) {
-    return { Authorization: `Bearer ${token}` }
+    return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-// ─── Public Endpoints ───
-
-/**
- * Fetch all public albums for the home page.
- * @returns {Promise<Array>} Array of public albums.
- */
-export function fetchAlbums() {
-    return apiFetch('/albums')
+function userMessageForStatus(status, fallback) {
+    if (status === 400) return fallback || 'The request was not valid. Please review it and try again.'
+    if (status === 401) return 'Your session has expired. Please sign in again.'
+    if (status === 403) return 'You do not have permission to do that.'
+    if (status === 404) return fallback || 'The requested item was not found.'
+    if (status === 409) return fallback || 'That change conflicts with existing data.'
+    if (status === 413) return 'The request is too large.'
+    if (status === 429) return 'Too many requests. Please wait and try again.'
+    return 'The service is temporarily unavailable. Please try again.'
 }
 
-/**
- * Fetch albums with filters (admin use).
- * @param {Object} params - Query parameters (e.g., visibility, limit).
- * @returns {Promise<Array>} Array of filtered albums.
- */
-export function fetchAlbumsFiltered(params = {}) {
-    const query = new URLSearchParams(params).toString()
-    return apiFetch(`/albums?${query}`)
-}
+function combineSignals(...signals) {
+    const activeSignals = signals.filter(Boolean)
+    if (activeSignals.length === 0) return undefined
+    if (activeSignals.length === 1) return activeSignals[0]
+    if (typeof AbortSignal.any === 'function') return AbortSignal.any(activeSignals)
 
-/**
- * Fetch a single album's metadata and image list.
- * @param {string} albumId - The ID of the album to fetch.
- * @param {string|null} token - Optional auth token for private albums.
- * @returns {Promise<Object>} Album metadata and images.
- */
-export function fetchAlbum(albumId, token = null) {
-    const options = token ? { headers: authHeaders(token) } : {}
-    return apiFetch(`/albums/${albumId}`, options)
-}
-
-/**
- * Request the backend to generate a ZIP file for a standard album.
- * @param {string} albumId - The ID of the album to zip.
- * @param {string|null} token - Optional auth token for private albums.
- * @returns {Promise<Object>} The presigned URL to download the zip.
- */
-export function requestAlbumZip(albumId, token = null) {
-    const options = {
-        method: 'POST',
-        ...(token ? { headers: authHeaders(token) } : {})
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    for (const signal of activeSignals) {
+        if (signal.aborted) {
+            controller.abort()
+            break
+        }
+        signal.addEventListener('abort', abort, { once: true })
     }
-    return apiFetch(`/albums/${albumId}/zip`, options)
+    return controller.signal
 }
 
-/**
- * Fetch a shared album by its unique code (no auth required).
- * @param {string} shareCode - The unique share code.
- * @param {string} turnstileToken - Cloudflare Turnstile token for verification.
- * @returns {Promise<Object>} Shared album metadata and images.
- */
-export function fetchSharedAlbum(shareCode, turnstileToken) {
-    return apiFetch(`/shared/${shareCode}`, {
-        headers: { 'X-Turnstile-Token': turnstileToken || '' }
+function wait(delayMs, signal) {
+    return new Promise((resolve, reject) => {
+        const timer = window.setTimeout(resolve, delayMs)
+        signal?.addEventListener('abort', () => {
+            window.clearTimeout(timer)
+            reject(new DOMException('Request aborted', 'AbortError'))
+        }, { once: true })
     })
 }
 
-/**
- * Request the backend to generate a ZIP file for a shared album.
- * @param {string} shareCode - The unique share code.
- * @returns {Promise<Object>} The presigned URL to download the zip.
- */
-export function requestSharedAlbumZip(shareCode) {
-    return apiFetch(`/shared/${shareCode}/zip`, {
-        method: 'POST'
+async function readErrorMessage(response) {
+    if (response.status >= 500) return null
+    try {
+        const contentType = response.headers.get('content-type') || ''
+        if (!contentType.includes('application/json')) return null
+        const body = await response.json()
+        const candidate = body?.message || body?.error
+        return typeof candidate === 'string' && candidate.length <= 200 ? candidate : null
+    } catch {
+        return null
+    }
+}
+
+async function apiFetch(path, options = {}, config = {}) {
+    const {
+        timeoutMs = DEFAULT_TIMEOUT_MS,
+        retries = options.method && options.method !== 'GET' ? 0 : 1,
+    } = config
+    const url = `${API_BASE}${path}`
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const timeoutController = new AbortController()
+        const timeout = timeoutMs > 0
+            ? window.setTimeout(() => timeoutController.abort(), timeoutMs)
+            : null
+        const signal = combineSignals(options.signal, timeoutController.signal)
+
+        try {
+            const hasBody = options.body !== undefined && options.body !== null
+            const response = await fetch(url, {
+                ...options,
+                signal,
+                headers: {
+                    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+                    ...options.headers,
+                },
+            })
+
+            if (!response.ok) {
+                const retryable = [408, 425, 429, 500, 502, 503, 504].includes(response.status)
+                if (retryable && attempt < retries) {
+                    await response.text().catch(() => '')
+                    await wait(250 * (2 ** attempt) + Math.random() * 150, options.signal)
+                    continue
+                }
+                const safeDetail = await readErrorMessage(response)
+                throw new ApiError(userMessageForStatus(response.status, safeDetail), {
+                    status: response.status,
+                    code: `HTTP_${response.status}`,
+                    retryAfterMs: retryAfterMilliseconds(response.headers.get('retry-after')),
+                })
+            }
+            if (response.status === 204) return null
+            return response.json()
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                if (options.signal?.aborted) throw error
+                throw new ApiError('The request timed out. Please check your connection and try again.', {
+                    code: 'TIMEOUT',
+                })
+            }
+            const retryableNetworkError = !(error instanceof ApiError)
+            if (retryableNetworkError && attempt < retries) {
+                await wait(250 * (2 ** attempt) + Math.random() * 150, options.signal)
+                continue
+            }
+            if (error instanceof ApiError) throw error
+            throw new ApiError('Unable to reach the service. Please check your connection and try again.', {
+                code: 'NETWORK_ERROR',
+            })
+        } finally {
+            if (timeout !== null) window.clearTimeout(timeout)
+        }
+    }
+
+    throw new ApiError('The request could not be completed.')
+}
+
+function normalizeCatalogParams(params = {}) {
+    const normalized = {}
+    for (const key of ['visibility', 'ownerEmail', 'type', 'limit', 'cursor']) {
+        const value = params[key]
+        if (value !== undefined && value !== null && value !== '') normalized[key] = String(value)
+    }
+    if (!isSafeCursor(normalized.cursor)) throw new ApiError('The pagination cursor was invalid.', { code: 'BAD_CURSOR' })
+    return normalized
+}
+
+function catalogKey(params) {
+    return new URLSearchParams(Object.entries(params).sort(([a], [b]) => a.localeCompare(b))).toString()
+}
+
+function normalizeLegacyCatalogPage(payload, params) {
+    let items = payload
+    if (params.visibility && params.visibility !== 'all') {
+        items = items.filter((album) => album?.visibility === params.visibility)
+    }
+    if (params.ownerEmail) items = items.filter((album) => album?.ownerEmail === params.ownerEmail)
+    if (params.type) {
+        items = items.filter((album) => (
+            params.type === 'video' ? album?.type === 'video' : album?.type !== 'video'
+        ))
+    }
+
+    const offset = params.cursor?.startsWith('legacy:')
+        ? Number.parseInt(params.cursor.slice('legacy:'.length), 10) || 0
+        : 0
+    const limit = Math.max(1, Math.min(Number.parseInt(params.limit, 10) || items.length, 100))
+    const pageItems = items.slice(offset, offset + limit)
+    const nextOffset = offset + pageItems.length
+    return {
+        items: pageItems,
+        nextCursor: nextOffset < items.length ? `legacy:${nextOffset}` : null,
+    }
+}
+
+function subscribeToCatalogRequest(record, signal) {
+    record.subscribers += 1
+    return new Promise((resolve, reject) => {
+        let settled = false
+        const finish = (callback, value) => {
+            if (settled) return
+            settled = true
+            signal?.removeEventListener('abort', onAbort)
+            record.subscribers -= 1
+            callback(value)
+        }
+        const onAbort = () => {
+            finish(reject, new DOMException('Request aborted', 'AbortError'))
+            if (record.subscribers === 0) record.controller.abort()
+        }
+
+        if (signal?.aborted) {
+            onAbort()
+            return
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+        record.promise.then(
+            (value) => finish(resolve, value),
+            (error) => finish(reject, error),
+        )
     })
 }
 
-// ─── Protected Endpoints ───
+export function clearApiCache() {
+    catalogCache.clear()
+    for (const record of catalogRequests.values()) record.controller.abort()
+    catalogRequests.clear()
+}
 
-/**
- * Request presigned upload URLs for files.
- * @param {string} token - Auth token.
- * @param {string} filename - Name of the file.
- * @param {string} contentType - MIME type of the file.
- * @returns {Promise<Object>} Presigned URL data.
- */
-export function requestUploadUrl(token, filename, contentType) {
+export function readCachedAlbumsPage(params = {}) {
+    const normalized = normalizeCatalogParams(params)
+    const cached = catalogCache.get(`public:${catalogKey(normalized)}`)
+    return cached && cached.expiresAt > Date.now() ? cached.value : null
+}
+
+export function fetchAlbumsPage(params = {}, options = {}) {
+    const normalized = normalizeCatalogParams(params)
+    const isPublic = !options.token
+    const key = `${isPublic ? 'public' : `auth:${normalized.ownerEmail || 'admin'}`}:${catalogKey(normalized)}`
+    const cached = catalogCache.get(key)
+    if (!options.force && isPublic && cached?.expiresAt > Date.now()) {
+        return Promise.resolve(cached.value)
+    }
+
+    const existing = catalogRequests.get(key)
+    if (!options.force && existing) return subscribeToCatalogRequest(existing, options.signal)
+
+    const controller = new AbortController()
+    const query = new URLSearchParams(normalized).toString()
+    const record = { controller, subscribers: 0, promise: null }
+    record.promise = apiFetch(`/albums${query ? `?${query}` : ''}`, {
+        headers: authHeaders(options.token),
+        signal: controller.signal,
+    }).then((payload) => {
+        const page = Array.isArray(payload)
+            ? normalizeLegacyCatalogPage(payload, normalized)
+            : normalizePage(payload)
+        page.items = page.items.map(annotateMediaExpiry)
+        if (isPublic) {
+            catalogCache.set(key, { value: page, expiresAt: Date.now() + PUBLIC_CATALOG_TTL_MS })
+        }
+        return page
+    }).finally(() => {
+        if (catalogRequests.get(key) === record) catalogRequests.delete(key)
+    })
+    record.promise.catch(() => {})
+    catalogRequests.set(key, record)
+    return subscribeToCatalogRequest(record, options.signal)
+}
+
+export async function fetchAllAlbums(params = {}, options = {}) {
+    const allItems = []
+    const seenCursors = new Set()
+    let cursor = null
+    do {
+        const page = await fetchAlbumsPage({ ...params, cursor }, options)
+        allItems.push(...page.items)
+        cursor = page.nextCursor
+        if (cursor && seenCursors.has(cursor)) {
+            throw new ApiError('The service returned an invalid pagination sequence.', {
+                code: 'REPEATED_CURSOR',
+            })
+        }
+        if (cursor) seenCursors.add(cursor)
+    } while (cursor)
+    return allItems
+}
+
+export function fetchAlbums(options = {}) {
+    return fetchAllAlbums({ visibility: 'public' }, options)
+}
+
+export function fetchAlbumsFiltered(params = {}, token = null, options = {}) {
+    return fetchAllAlbums(params, { ...options, token })
+}
+
+export function fetchAlbum(albumId, token = null, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }).then((data) => {
+        if (!data || Array.isArray(data)) return data
+        const mediaItems = Array.isArray(data.images)
+            ? data.images
+            : Array.isArray(data.media)
+                ? data.media
+                : data.media?.items
+        return Array.isArray(mediaItems)
+            ? { ...data, images: mediaItems.map(annotateMediaExpiry) }
+            : data
+    })
+}
+
+export function requestAlbumZip(albumId, token = null, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}/zip`, {
+        method: 'POST',
+        headers: authHeaders(token),
+        signal: options.signal,
+    })
+}
+
+export function fetchSharedAlbum(shareCode, turnstileToken, options = {}) {
+    return apiFetch(`/shared/${encodeURIComponent(shareCode)}`, {
+        headers: { 'X-Turnstile-Token': turnstileToken || '' },
+        signal: options.signal,
+    }).then((data) => (
+        data && Array.isArray(data.images)
+            ? { ...data, images: data.images.map(annotateMediaExpiry) }
+            : data
+    ))
+}
+
+export function sendContactMessage(data, options = {}) {
+    return apiFetch('/contact', {
+        method: 'POST',
+        body: JSON.stringify(data),
+        signal: options.signal,
+    })
+}
+
+export function requestSharedAlbumZip(shareCode, options = {}) {
+    return apiFetch(`/shared/${encodeURIComponent(shareCode)}/zip`, {
+        method: 'POST',
+        signal: options.signal,
+    })
+}
+
+export function requestAlbumMediaDownload(albumId, mediaId, token = null, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}/download-url`, {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({ mediaId }),
+        signal: options.signal,
+    })
+}
+
+export function requestSharedMediaDownload(shareCode, mediaId, options = {}) {
+    return apiFetch(`/shared/${encodeURIComponent(shareCode)}/download-url`, {
+        method: 'POST',
+        body: JSON.stringify({ mediaId }),
+        signal: options.signal,
+    })
+}
+
+export function requestUploadUrl(token, albumId, filename, contentType, size, kind, options = {}) {
     return apiFetch('/upload-url', {
         method: 'POST',
         headers: authHeaders(token),
-        body: JSON.stringify({ filename, contentType }),
+        body: JSON.stringify({ albumId, filename, contentType, size, kind }),
+        signal: options.signal,
     })
 }
 
-/**
- * Upload a file directly to S3 using a presigned URL.
- * @param {string} presignedUrl - The S3 presigned URL.
- * @param {File} file - The file object to upload.
- * @returns {Promise<Response>} Fetch response.
- */
-export async function uploadFileToS3(presignedUrl, file) {
-    const res = await fetch(presignedUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-    })
-    if (!res.ok) throw new Error(`S3 upload failed: ${res.status}`)
-    return res
+export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, options = {}) {
+    const uploadHeaders = Object.keys(requiredHeaders).length > 0
+        ? requiredHeaders
+        : { 'Content-Type': file.type }
+    const retries = Math.max(0, Math.min(options.retries ?? 1, 2))
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        let response
+        try {
+            response = await fetch(presignedUrl, {
+                method: 'PUT',
+                headers: uploadHeaders,
+                body: file,
+                signal: options.signal,
+            })
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error
+            if (attempt < retries) {
+                await wait(400 * (2 ** attempt) + Math.random() * 200, options.signal)
+                continue
+            }
+            throw new ApiError('The upload was interrupted. Please try again.', { code: 'UPLOAD_NETWORK_ERROR' })
+        }
+
+        const retryable = [408, 425, 429, 500, 502, 503, 504].includes(response.status)
+        if (retryable && attempt < retries) {
+            await response.text().catch(() => '')
+            await wait(400 * (2 ** attempt) + Math.random() * 200, options.signal)
+            continue
+        }
+        if (!response.ok) throw new ApiError('The upload could not be completed. Please try again.', {
+            status: response.status,
+            code: 'UPLOAD_FAILED',
+        })
+        return response
+    }
+
+    throw new ApiError('The upload could not be completed. Please try again.', { code: 'UPLOAD_FAILED' })
 }
 
-/**
- * Create a new album record in DynamoDB.
- * @param {string} token - Auth token.
- * @param {Object} albumData - Data for the new album.
- * @returns {Promise<Object>} Created album data.
- */
-export function createAlbum(token, albumData) {
+export function createAlbum(token, albumData, options = {}) {
     return apiFetch('/albums', {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify(albumData),
-    })
+        signal: options.signal,
+    }, { timeoutMs: 60_000 })
 }
 
-/**
- * Update album title, description, or visibility.
- * @param {string} token - Auth token.
- * @param {string} albumId - ID of the album to update.
- * @param {Object} data - Updated album data.
- * @returns {Promise<Object>} Updated album data.
- */
-export function updateAlbum(token, albumId, data) {
-    return apiFetch(`/albums/${albumId}`, {
+export function updateAlbum(token, albumId, data, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
         method: 'PUT',
         headers: authHeaders(token),
         body: JSON.stringify(data),
+        signal: options.signal,
     })
 }
 
-/**
- * Add new images to an existing album.
- * @param {string} token - Auth token.
- * @param {string} albumId - ID of the album.
- * @param {Array} images - Array of image objects to add.
- * @returns {Promise<Object>} Updated album data.
- */
-export function addImagesToAlbum(token, albumId, images) {
-    return apiFetch(`/albums/${albumId}/images`, {
+export function addImagesToAlbum(token, albumId, images, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify({ images }),
-    })
+        signal: options.signal,
+    }, { timeoutMs: 60_000 })
 }
 
-/**
- * Delete an album and all its associated images.
- * @param {string} token - Auth token.
- * @param {string} albumId - ID of the album to delete.
- * @returns {Promise<Object>} Deletion confirmation.
- */
-export function deleteAlbum(token, albumId) {
-    return apiFetch(`/albums/${albumId}`, {
+export function deleteAlbum(token, albumId, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
         method: 'DELETE',
         headers: authHeaders(token),
-    })
+        signal: options.signal,
+    }, { timeoutMs: 60_000 })
 }
 
-/**
- * Delete specific images from an album.
- * @param {string} token - Auth token.
- * @param {string} albumId - ID of the album.
- * @param {Array<string>} keys - Array of S3 keys of images to delete.
- * @returns {Promise<Object>} Deletion confirmation.
- */
-export function deleteImages(token, albumId, keys) {
-    return apiFetch(`/albums/${albumId}/delete-images`, {
+export function deleteImages(token, albumId, keys, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}/delete-images`, {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify({ keys }),
-    })
+        signal: options.signal,
+    }, { timeoutMs: 60_000 })
 }
 
-/**
- * Update an individual image's thumbKey and blurhash (for video thumbnail re-generation).
- * @param {string} token - Auth token.
- * @param {string} albumId - ID of the album.
- * @param {string} rawKey - The raw S3 key of the image/video.
- * @param {Object} data - New thumbnail data (thumbKey, blurhash).
- * @returns {Promise<Object>} Update confirmation.
- */
-export function updateImageThumbnail(token, albumId, rawKey, data) {
-    return apiFetch(`/albums/${albumId}/images`, {
+export function updateImageThumbnail(token, albumId, rawKey, data, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
         method: 'PATCH',
         headers: authHeaders(token),
         body: JSON.stringify({ rawKey, ...data }),
+        signal: options.signal,
     })
 }
 
-/**
- * Create a new Cognito user (admin only).
- * @param {string} token - Auth token.
- * @param {string} email - New user email.
- * @param {string} password - New user password.
- * @returns {Promise<Object>} Created user data.
- */
-export function createUser(token, email, password) {
+export function createUser(token, email, options = {}) {
     return apiFetch('/users', {
         method: 'POST',
         headers: authHeaders(token),
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email }),
+        signal: options.signal,
     })
 }
 
-/**
- * List all Cognito users (admin only).
- * @param {string} token - Auth token.
- * @returns {Promise<Array>} Array of users.
- */
-export async function listUsers(token) {
-    const data = await apiFetch('/users', {
-        method: 'GET',
-        headers: authHeaders(token),
-    })
-    return data.users || data
+export async function listUsers(token, options = {}) {
+    const users = []
+    const seenCursors = new Set()
+    let cursor = null
+    do {
+        const query = cursor ? `?paginationToken=${encodeURIComponent(cursor)}` : ''
+        const payload = await apiFetch(`/users${query}`, {
+            headers: authHeaders(token),
+            signal: options.signal,
+        })
+        if (Array.isArray(payload)) {
+            users.push(...payload)
+            cursor = null
+        } else {
+            users.push(...(payload?.users || []))
+            cursor = payload?.paginationToken || payload?.nextCursor || null
+            if (cursor && seenCursors.has(cursor)) {
+                throw new ApiError('The service returned an invalid pagination sequence.', {
+                    code: 'REPEATED_CURSOR',
+                })
+            }
+            if (cursor) seenCursors.add(cursor)
+        }
+    } while (cursor)
+    return users
 }
 
-/**
- * Delete a user and cascade delete their albums and photos (admin only).
- * @param {string} token - Auth token.
- * @param {string} email - Email of the user to delete.
- * @returns {Promise<Object>} Deletion confirmation.
- */
-export function deleteUser(token, email) {
+export function deleteUser(token, email, options = {}) {
     return apiFetch(`/users/${encodeURIComponent(email)}`, {
         method: 'DELETE',
         headers: authHeaders(token),
-    })
+        signal: options.signal,
+    }, { timeoutMs: 60_000 })
 }
 
-/**
- * Edit a user's email and/or password (admin only).
- * @param {string} token - Auth token.
- * @param {string} email - Current email of the user.
- * @param {Object} data - Updated user data (newEmail, newPassword).
- * @returns {Promise<Object>} Update confirmation.
- */
-export function editUser(token, email, data) {
+export function editUser(token, email, data, options = {}) {
     return apiFetch(`/users/${encodeURIComponent(email)}`, {
         method: 'PUT',
         headers: authHeaders(token),
         body: JSON.stringify(data),
+        signal: options.signal,
     })
 }

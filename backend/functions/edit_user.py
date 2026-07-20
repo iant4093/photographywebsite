@@ -1,79 +1,62 @@
-import json
+"""Admin email update that preserves stable subject-based album ownership."""
+
 import os
+
 import boto3
 
-# Cognito and DynamoDB for updating user credentials and album ownership
-cognito = boto3.client('cognito-idp')
-dynamodb = boto3.resource('dynamodb')
-USER_POOL_ID = os.environ['COGNITO_USER_POOL_ID']
-table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
-from auth_helpers import require_admin
+from auth_helpers import AuthError, auth_error_response, require_admin
+from owner_helpers import assert_admin_target_mutable, albums_owned_by, cognito_identity, table
+from response_helpers import error_response, internal_error, json_response
+from validation_helpers import ValidationError, parse_json_body, validate_email
+
+
+cognito = boto3.client("cognito-idp")
+USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 
 
 def handler(event, context):
-    """PUT /users/{email} — updates a Cognito user's email and/or password, migrates albums."""
     denied = require_admin(event)
     if denied:
         return denied
     try:
-        old_email = event['pathParameters']['email']
-        body = json.loads(event.get('body', '{}'))
-        new_email = body.get('email', '').strip()
-        new_password = body.get('password', '').strip()
-
-        if not new_email and not new_password:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Provide email and/or password to update'}),
-            }
-
-        # Update email if changed
-        if new_email and new_email != old_email:
+        old_email = validate_email(((event or {}).get("pathParameters") or {}).get("email"))
+        body = parse_json_body(event, max_bytes=16 * 1024)
+        if "password" in body or "newPassword" in body:
+            return error_response(
+                400,
+                "Administrators cannot set user passwords; use Cognito account recovery",
+                code="password_not_allowed",
+            )
+        new_email = validate_email(body.get("email"))
+        username, subject, _ = cognito_identity(cognito, USER_POOL_ID, old_email)
+        if not subject:
+            raise RuntimeError("Cognito user has no stable subject")
+        assert_admin_target_mutable(event, cognito, USER_POOL_ID, username, subject)
+        if new_email != old_email:
             cognito.admin_update_user_attributes(
                 UserPoolId=USER_POOL_ID,
-                Username=old_email,
+                Username=username,
                 UserAttributes=[
-                    {'Name': 'email', 'Value': new_email},
-                    {'Name': 'email_verified', 'Value': 'true'},
+                    {"Name": "email", "Value": new_email},
+                    {"Name": "email_verified", "Value": "true"},
                 ],
             )
-
-            # Migrate all private albums from old email to new email
-            response = table.scan(
-                FilterExpression=boto3.dynamodb.conditions.Attr('ownerEmail').eq(old_email)
+        updated = 0
+        for album in albums_owned_by(subject, old_email):
+            table.update_item(
+                Key={"albumId": album["albumId"]},
+                UpdateExpression="SET ownerEmail = :newEmail, ownerSub = :ownerSub",
+                ExpressionAttributeValues={":newEmail": new_email, ":ownerSub": subject},
             )
-            albums = [
-                a for a in response.get('Items', [])
-                if a.get('visibility') == 'private'
-            ]
-            for album in albums:
-                table.update_item(
-                    Key={'albumId': album['albumId']},
-                    UpdateExpression='SET ownerEmail = :email',
-                    ExpressionAttributeValues={':email': new_email},
-                )
-
-        # Update password if provided
-        if new_password:
-            cognito.admin_set_user_password(
-                UserPoolId=USER_POOL_ID,
-                Username=new_email or old_email,
-                Password=new_password,
-                Permanent=True,
-            )
-
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'message': f'User updated successfully'}),
-        }
+            updated += 1
+        return json_response(200, {"message": "User email updated", "albumsUpdated": updated})
+    except AuthError as error:
+        return auth_error_response(error)
+    except ValidationError as error:
+        return error_response(400, str(error), code="invalid_request")
     except cognito.exceptions.UserNotFoundException:
-        return {
-            'statusCode': 404,
-            'body': json.dumps({'error': 'User not found'}),
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)}),
-        }
+        return error_response(404, "User not found", code="not_found")
+    except (cognito.exceptions.AliasExistsException, cognito.exceptions.UsernameExistsException):
+        return error_response(409, "That email address is already in use", code="conflict")
+    except Exception as error:
+        return internal_error(context, error, "edit_user")

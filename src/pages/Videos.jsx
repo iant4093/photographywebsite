@@ -1,215 +1,174 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigationType } from 'react-router-dom'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { fetchAlbums } from '../utils/api'
-import { useAuth } from '../context/authContext'
-import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
-import { useLocation, useNavigationType } from 'react-router-dom'
+import { fetchAlbumsPage } from '../utils/api'
+import { mergeUniqueById } from '../utils/apiResponse'
+import { getCatalogSnapshot, setCatalogSnapshot } from '../utils/catalogState'
+import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 
-// Placeholder videos used when the backend isn't connected yet
-const PLACEHOLDER_VIDEOS = [
-    {
-        albumId: 'demo-vid-1',
-        type: 'video',
-        title: 'Cinematic Wedding',
-        description: 'A beautiful wedding day captured in 4K.',
-        coverImageUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=800&q=80',
-        createdAt: '2026-01-15T18:30:00Z',
-    },
-]
+const CATALOG_KEY = 'public-videos'
+const PAGE_SIZE = 24
+const HERO_WIDTHS = [640, 960, 1280, 1920]
+const heroSet = (format) => HERO_WIDTHS
+    .map((width) => `/images/heroes/video-${width}.${format} ${width}w`)
+    .join(', ')
 
-function Videos() {
-    const { publicAlbums, setPublicAlbums } = useAuth()
-    const navType = useNavigationType()
+export default function Videos() {
+    const navigationType = useNavigationType()
     const location = useLocation()
-
-    // Manage scroll memory for this page
-    useScrollRestoration(location.pathname, navType === 'POP')
-
-    const [albums, setAlbums] = useState(publicAlbums || [])
-    const [loading, setLoading] = useState(publicAlbums.length === 0)
-    const [error, setError] = useState(null)
+    const [initialSnapshot] = useState(() => getCatalogSnapshot(CATALOG_KEY))
+    const pageRef = useRef(null)
     const heroRef = useRef(null)
-    const sectionRefs = useRef([])
+    useScrollRestoration(location.pathname, navigationType === 'POP')
+
+    const [albums, setAlbums] = useState(initialSnapshot?.items || [])
+    const [nextCursor, setNextCursor] = useState(initialSnapshot?.nextCursor || null)
+    const [loading, setLoading] = useState(!initialSnapshot)
+    const [loadingMore, setLoadingMore] = useState(false)
+    const [error, setError] = useState(null)
+
+    const savePage = useCallback((items, cursor) => {
+        setAlbums(items)
+        setNextCursor(cursor)
+        setCatalogSnapshot(CATALOG_KEY, { items, nextCursor: cursor })
+    }, [])
 
     useEffect(() => {
-        fetchAlbums()
-            .then((data) => {
-                setAlbums(data)
-                setPublicAlbums(data)
+        if (initialSnapshot) return undefined
+        const controller = new AbortController()
+        fetchAlbumsPage({ visibility: 'public', type: 'video', limit: PAGE_SIZE }, { signal: controller.signal })
+            .then((page) => savePage(page.items, page.nextCursor))
+            .catch((requestError) => {
+                if (requestError.name !== 'AbortError') setError(requestError.message || 'Videos could not be loaded.')
             })
-            .catch(() => {
-                if (albums.length === 0) setAlbums(PLACEHOLDER_VIDEOS)
-                setError(null)
+            .finally(() => {
+                if (!controller.signal.aborted) setLoading(false)
             })
-            .finally(() => setLoading(false))
-    }, [setPublicAlbums])
+        return () => controller.abort()
+    }, [initialSnapshot, savePage])
 
-    // Hero parallax on scroll
     useEffect(() => {
-        const handleScroll = () => {
-            if (heroRef.current) {
-                // Prevent negative scroll value during macOS overscroll bounce
-                const scrollY = Math.max(0, window.scrollY)
-                // Limit shift to keep within the 10% extra image height (e.g. ~60-80px)
-                const maxShift = 60
-                const shift = Math.min(scrollY * 0.15, maxShift)
-                heroRef.current.style.transform = `translateY(${shift}px)`
-            }
+        const hero = heroRef.current
+        if (!hero || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
+        let frame = null
+        const update = () => {
+            frame = null
+            hero.style.transform = `translateY(${Math.min(Math.max(0, window.scrollY) * 0.15, 60)}px)`
         }
-        window.addEventListener('scroll', handleScroll, { passive: true })
-        return () => window.removeEventListener('scroll', handleScroll)
-    }, [])
-
-    // Scroll-triggered animations via Intersection Observer
-    const observeRef = useCallback((el) => {
-        if (!el) return
-        if (!sectionRefs.current.includes(el)) sectionRefs.current.push(el)
+        const onScroll = () => {
+            if (frame === null) frame = window.requestAnimationFrame(update)
+        }
+        window.addEventListener('scroll', onScroll, { passive: true })
+        return () => {
+            window.removeEventListener('scroll', onScroll)
+            if (frame !== null) window.cancelAnimationFrame(frame)
+        }
     }, [])
 
     useEffect(() => {
-        // Handle elements already revealed in the session
-        sectionRefs.current.forEach((el) => {
-            if (el && isRevealed(el.id)) {
-                el.classList.add('is-visible')
-                el.classList.add('no-stagger')
+        const elements = pageRef.current?.querySelectorAll('[data-reveal-id]') || []
+        const observer = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue
+                entry.target.classList.add('is-visible')
+                markAsRevealed(entry.target.dataset.revealId)
+                observer.unobserve(entry.target)
             }
-        })
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                entries.forEach((entry) => {
-                    if (entry.isIntersecting) {
-                        entry.target.classList.add('is-visible')
-                        markAsRevealed(entry.target.id)
-                        observer.unobserve(entry.target)
-                    }
-                })
-            },
-            { rootMargin: '0px 0px -60px 0px', threshold: 0.1 }
-        )
-
-        sectionRefs.current.forEach((el) => {
-            if (el && !isRevealed(el.id)) {
-                observer.observe(el)
-            }
-        })
+        }, { rootMargin: '0px 0px -60px 0px', threshold: 0.1 })
+        for (const element of elements) {
+            if (isRevealed(element.dataset.revealId)) element.classList.add('is-visible', 'no-stagger')
+            else observer.observe(element)
+        }
         return () => observer.disconnect()
-    }, [loading, albums])
+    }, [albums])
 
-    const videoAlbums = albums.filter(a => a.type === 'video');
-
-    // Group albums by category natively, memoized
+    const videoAlbums = useMemo(() => albums.filter((album) => album.type === 'video'), [albums])
     const { groupedVideoAlbums, videoCategories } = useMemo(() => {
-        const grouped = videoAlbums.reduce((acc, album) => {
-            const cat = album.category || 'Uncategorized';
-            if (!acc[cat]) acc[cat] = [];
-            acc[cat].push(album);
-            return acc;
-        }, {});
+        const grouped = videoAlbums.reduce((result, album) => {
+            const category = album.category || 'Uncategorized'
+            if (!result[category]) result[category] = []
+            result[category].push(album)
+            return result
+        }, {})
+        const categories = Object.keys(grouped).sort((a, b) => {
+            if (a === 'Uncategorized') return 1
+            if (b === 'Uncategorized') return -1
+            return a.localeCompare(b)
+        })
+        return { groupedVideoAlbums: grouped, videoCategories: categories }
+    }, [videoAlbums])
 
-        const sorted = Object.keys(grouped).sort((a, b) => {
-            if (a === 'Uncategorized') return 1;
-            if (b === 'Uncategorized') return -1;
-            return a.localeCompare(b);
-        });
-
-        return { groupedVideoAlbums: grouped, videoCategories: sorted };
-    }, [videoAlbums]);
-
-    // Page transition animation variants
-    const pageVariants = {
-        initial: { opacity: 0 },
-        animate: { opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
+    const loadMore = async () => {
+        if (!nextCursor || loadingMore) return
+        setLoadingMore(true)
+        setError(null)
+        try {
+            const page = await fetchAlbumsPage({ visibility: 'public', type: 'video', limit: PAGE_SIZE, cursor: nextCursor })
+            savePage(mergeUniqueById(albums, page.items), page.nextCursor)
+        } catch (requestError) {
+            setError(requestError.message || 'More videos could not be loaded.')
+        } finally {
+            setLoadingMore(false)
+        }
     }
 
-    const renderLoading = () => (
-        <div className="max-w-7xl mx-auto px-6 py-12">
-            <div className="mb-12">
-                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">Latest Videos</h1>
-                <p className="text-lg text-warm-gray max-w-2xl">
-                    A collection of my recent video work and visual stories.
-                </p>
-            </div>
-            <SkeletonGrid count={6} type="video" />
-        </div>
-    )
-
     return (
-        <motion.div
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-        >
-            {/* Hero section with parallax */}
+        <div ref={pageRef} className="animate-fade-in">
             <section className="relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
-                    <img
-                        ref={heroRef}
-                        src="https://d1twwtwfz1yeo4.cloudfront.net/main-image/video.jpeg"
-                        alt="Cinematography"
-                        className="w-full h-[110%] object-cover object-center parallax-hero"
-                    />
+                    <picture>
+                        <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
+                        <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
+                        <img
+                            ref={heroRef}
+                            src="/images/heroes/video-1280.jpg"
+                            srcSet={heroSet('jpg')}
+                            sizes="100vw"
+                            width="6177"
+                            height="4118"
+                            alt="Cinematography"
+                            fetchPriority="high"
+                            loading="eager"
+                            decoding="async"
+                            className="w-full h-[110%] object-cover object-center parallax-hero"
+                        />
+                    </picture>
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/60 via-charcoal/40 to-cream" />
                 </div>
-
                 <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="max-w-2xl animate-fade-in">
-                        <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight w-fit">
-                            Videography
-                        </h1>
-                        <p className="mt-6 text-lg md:text-xl text-white/90 font-light leading-relaxed">
-                            Explore some of my video work!
-                        </p>
+                        <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight w-fit">Videography</h1>
+                        <p className="mt-6 text-lg md:text-xl text-white/90 font-light leading-relaxed">Explore some of my video work!</p>
                     </div>
                 </div>
             </section>
 
-            {/* Videos grid */}
             <section className="bg-white">
                 <div className="max-w-7xl mx-auto px-6 py-16 md:py-24">
-                    <div
-                        id="video-projects-header"
-                        ref={observeRef}
-                        className={`text-center mb-12 animate-slide-up ${isRevealed('video-projects-header') ? 'no-stagger' : ''}`}
-                    >
+                    <div data-reveal-id="video-projects-header" className="text-center mb-12 scroll-animate">
                         <h2 className="font-serif text-3xl md:text-4xl font-semibold text-charcoal flex items-center justify-center gap-3">
-                            <svg className="w-8 h-8 md:w-10 md:h-10 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-8 h-8 md:w-10 md:h-10 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                             </svg>
                             Video Projects
                         </h2>
                     </div>
 
-                    {error && (
-                        <div className="text-center py-12 text-warm-gray">
-                            <p>{error}</p>
-                        </div>
-                    )}
+                    {loading && <SkeletonGrid count={6} type="video" />}
+                    {error && <div className="text-center py-8 text-red-700" role="alert"><p>{error}</p></div>}
 
-                    {!loading && videoAlbums.length > 0 && videoCategories.map((cat, catIndex) => {
-                        const sectionId = `video-cat-${cat.toLowerCase().replace(/\s+/g, '-')}`
-                        const alreadyRevealed = isRevealed(sectionId)
-
+                    {!loading && videoCategories.map((category, categoryIndex) => {
+                        const sectionId = `video-cat-${category.toLowerCase().replace(/\s+/g, '-')}`
                         return (
-                            <div
-                                key={`video-${cat}`}
-                                id={sectionId}
-                                ref={observeRef}
-                                className={`mb-16 scroll-animate ${alreadyRevealed ? 'is-visible no-stagger' : ''}`}
-                                style={{ transitionDelay: alreadyRevealed ? '0ms' : `${catIndex * 100}ms` }}
-                            >
+                            <div key={category} data-reveal-id={sectionId} className="mb-16 scroll-animate catalog-section" style={{ transitionDelay: `${Math.min(categoryIndex, 4) * 80}ms` }}>
                                 <div className="flex items-center gap-4 mb-8">
-                                    <h3 className="font-serif text-2xl font-medium text-charcoal">{cat}</h3>
-                                    <div className="h-px bg-warm-border flex-1"></div>
+                                    <h3 className="font-serif text-2xl font-medium text-charcoal">{category}</h3>
+                                    <div className="h-px bg-warm-border flex-1" />
                                 </div>
-                                <ScrollRow scrollKey={`videos-${cat}`}>
-                                    {groupedVideoAlbums[cat].map((album) => (
+                                <ScrollRow scrollKey={`videos-${category}`}>
+                                    {groupedVideoAlbums[category].map((album) => (
                                         <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
                                             <AlbumCard album={album} />
                                         </div>
@@ -219,13 +178,18 @@ function Videos() {
                         )
                     })}
 
-                    {!loading && videoAlbums.length === 0 && (
+                    {!loading && videoAlbums.length === 0 && !error && (
                         <div className="text-center py-12 text-warm-gray"><p>No video projects found.</p></div>
+                    )}
+                    {nextCursor && (
+                        <div className="flex justify-center pt-2">
+                            <button type="button" onClick={loadMore} disabled={loadingMore} className="px-6 py-3 rounded-xl bg-charcoal text-white hover:bg-charcoal-light transition-colors disabled:opacity-60">
+                                {loadingMore ? 'Loading…' : 'Load more videos'}
+                            </button>
+                        </div>
                     )}
                 </div>
             </section>
-        </motion.div>
+        </div>
     )
 }
-
-export default Videos

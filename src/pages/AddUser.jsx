@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 import { createUser } from '../utils/api'
 
 // Add user page — admin creates new viewer accounts
@@ -8,7 +8,6 @@ function AddUser() {
     const { getIdToken } = useAuth()
 
     const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [success, setSuccess] = useState('')
     const [error, setError] = useState('')
@@ -22,10 +21,9 @@ function AddUser() {
 
         try {
             const token = await getIdToken()
-            await createUser(token, email, password)
-            setSuccess(`User ${email} created successfully! They can now log in.`)
+            await createUser(token, email)
+            setSuccess(`Invitation sent to ${email}. They will choose a new password when they first sign in.`)
             setEmail('')
-            setPassword('')
         } catch (err) {
             setError(err.message || 'Failed to create user.')
         } finally {
@@ -47,7 +45,8 @@ function AddUser() {
                 <div className="mb-10">
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">Add User</h1>
                     <p className="mt-2 text-warm-gray">
-                        Create a viewer account. New users can only view their assigned photos — they cannot upload or manage albums.
+                        Invite a viewer to access assigned private galleries. Cognito will send a temporary sign-in credential;
+                        you will never need to know or send the client's permanent password.
                     </p>
                 </div>
 
@@ -80,24 +79,6 @@ function AddUser() {
                         />
                     </div>
 
-                    {/* Password */}
-                    <div className="mb-8">
-                        <label htmlFor="userPassword" className="block text-sm font-medium text-charcoal mb-2">Password *</label>
-                        <input
-                            id="userPassword"
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                            minLength={8}
-                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
-                            placeholder="Min 8 chars, uppercase, lowercase, number"
-                        />
-                        <p className="mt-2 text-xs text-warm-gray">
-                            Must be 8+ characters with uppercase, lowercase, and a number.
-                        </p>
-                    </div>
-
                     <button
                         type="submit"
                         disabled={submitting}
@@ -109,7 +90,7 @@ function AddUser() {
                                 Creating…
                             </span>
                         ) : (
-                            'Create User'
+                            'Send Invitation'
                         )}
                     </button>
                 </form>

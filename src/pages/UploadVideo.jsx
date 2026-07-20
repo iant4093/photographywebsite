@@ -1,22 +1,20 @@
-import { useState, useRef, useEffect } from 'react'
-import { encode } from 'blurhash'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { processVideo } from '../utils/mediaUtils'
+import { mapWithConcurrency } from '../utils/concurrency'
 
 // Helper component for picking a thumbnail time for a video
 function VideoThumbnailScrubber({ file, time, onTimeChange }) {
     const videoRef = useRef(null)
     const [duration, setDuration] = useState(0)
-    const [url, setUrl] = useState('')
+    const url = useMemo(() => URL.createObjectURL(file), [file])
 
     useEffect(() => {
-        const objectUrl = URL.createObjectURL(file)
-        setUrl(objectUrl)
-        return () => URL.revokeObjectURL(objectUrl)
-    }, [file])
+        return () => URL.revokeObjectURL(url)
+    }, [url])
 
     const handleLoadedMetadata = () => {
         if (videoRef.current) {
@@ -89,11 +87,7 @@ export default function UploadVideo() {
     const [success, setSuccess] = useState(false)
     const [error, setError] = useState('')
 
-    useEffect(() => {
-        loadInitialData()
-    }, [visibility])
-
-    async function loadInitialData() {
+    const loadInitialData = useCallback(async () => {
         if (!usersLoaded && visibility === 'private') {
             try {
                 const token = await getIdToken()
@@ -109,8 +103,15 @@ export default function UploadVideo() {
             const albums = await fetchAlbums()
             const uniqueCategories = [...new Set(albums.map(a => a.category).filter(Boolean))]
             setExistingCategories(uniqueCategories)
-        } catch (err) { }
-    }
+        } catch (err) {
+            console.error('Failed to load categories:', err)
+        }
+    }, [getIdToken, usersLoaded, visibility])
+
+    useEffect(() => {
+        const timeout = window.setTimeout(loadInitialData, 0)
+        return () => window.clearTimeout(timeout)
+    }, [loadInitialData])
 
     const handleFileChange = (e) => {
         const files = Array.from(e.target.files)
@@ -141,51 +142,48 @@ export default function UploadVideo() {
 
             setProgress({ current: 0, total: videoFiles.length, status: 'Processing thumbnails...' })
 
-            const finalImages = []
             let coverThumbUrlPublic = ''
             let coverBlurhash = ''
 
-            for (let i = 0; i < videoFiles.length; i++) {
-                const { file, time } = videoFiles[i]
+            let completedUploads = 0
+            const finalImages = await mapWithConcurrency(videoFiles, 2, async ({ file, time }, i) => {
 
                 // Add a tiny extra delay for the first video to ensure the browser's 
                 // media subsystem is fully ready for off-screen drawing
                 if (i === 0) await new Promise(r => setTimeout(r, 200));
 
                 // 1. Extract thumbnail
-                setProgress({ current: i, total: videoFiles.length, status: `Processing ${file.name}...` })
+                setProgress({ current: completedUploads, total: videoFiles.length, status: `Processing ${file.name}...` })
                 const { thumbnail, blurhash, width, height } = await processVideo(file, time)
 
                 // 2. Request urls
-                setProgress({ current: i, total: videoFiles.length, status: `Uploading ${file.name}...` })
-                const rawKey = `${s3Prefix}${file.name}`
-                const thumbKey = `${s3Prefix}thumb_${file.name}.jpg`
+                setProgress({ current: completedUploads, total: videoFiles.length, status: `Uploading ${file.name}...` })
+                const legacyRawKey = `${s3Prefix}${file.name}`
+                const legacyThumbKey = `${s3Prefix}thumb_${file.name}.jpg`
 
-                const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
-                const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+                const [rawUpload, thumbUpload] = await Promise.all([
+                    requestUploadUrl(token, albumId, legacyRawKey, file.type, file.size, 'original'),
+                    requestUploadUrl(token, albumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
+                ])
 
                 // 3. Upload raw video & thumbnail
                 await Promise.all([
-                    uploadFileToS3(rawUploadUrl, file),
-                    uploadFileToS3(thumbUploadUrl, thumbnail)
+                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
+                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
                 ])
 
-                finalImages.push({
-                    rawKey,
-                    thumbKey,
-                    blurhash,
-                    width,
-                    height,
-                    thumbnailTime: time
-                })
+                const rawKey = rawUpload.key || legacyRawKey
+                const thumbKey = thumbUpload.key || legacyThumbKey
 
                 if (i === 0) {
                     coverThumbUrlPublic = thumbKey
                     coverBlurhash = blurhash
                 }
 
-                setProgress({ current: i + 1, total: videoFiles.length, status: 'Uploaded' })
-            }
+                completedUploads += 1
+                setProgress({ current: completedUploads, total: videoFiles.length, status: 'Uploaded' })
+                return { rawKey, thumbKey, blurhash, width, height, thumbnailTime: time }
+            })
 
             setProgress({ current: videoFiles.length, total: videoFiles.length, status: 'Creating Album Record & Kicking off Transcoding...' })
 

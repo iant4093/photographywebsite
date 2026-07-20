@@ -1,0 +1,5 @@
+Contact: mailto:iant4093@gmail.com
+Canonical: https://iantruongphotography.com/.well-known/security.txt
+Policy: https://iantruongphotography.com/privacy
+Preferred-Languages: en
+Expires: 2027-07-20T23:59:59Z

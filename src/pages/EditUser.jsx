@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 import { listUsers, editUser } from '../utils/api'
 
-// Edit User page — list users with search, change email and password
+// Edit User page — list users with search and change email
 function EditUser() {
     const { getIdToken } = useAuth()
 
@@ -14,17 +14,11 @@ function EditUser() {
     // Editing state
     const [editingUser, setEditingUser] = useState(null)
     const [newEmail, setNewEmail] = useState('')
-    const [newPassword, setNewPassword] = useState('')
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
 
-    // Load users on mount
-    useEffect(() => {
-        loadUsers()
-    }, [])
-
-    async function loadUsers() {
+    const loadUsers = useCallback(async () => {
         try {
             const token = await getIdToken()
             const data = await listUsers(token)
@@ -34,13 +28,18 @@ function EditUser() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [getIdToken])
+
+    // Load users on mount
+    useEffect(() => {
+        const timeout = window.setTimeout(loadUsers, 0)
+        return () => window.clearTimeout(timeout)
+    }, [loadUsers])
 
     // Start editing a user
     function startEdit(user) {
         setEditingUser(user)
         setNewEmail(user.email)
-        setNewPassword('')
         setError('')
         setSuccess('')
     }
@@ -52,10 +51,7 @@ function EditUser() {
         setError('')
         try {
             const token = await getIdToken()
-            await editUser(token, editingUser.email, {
-                email: newEmail,
-                password: newPassword || undefined,
-            })
+            await editUser(token, editingUser.email, { email: newEmail })
             setSuccess(`User updated successfully! ${newEmail !== editingUser.email ? 'Albums have been migrated to the new email.' : ''}`)
             setEditingUser(null)
             loadUsers()
@@ -86,7 +82,8 @@ function EditUser() {
                 <div className="mb-10">
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">Edit User</h1>
                     <p className="mt-2 text-warm-gray">
-                        Update a user's email or password. Changing the email will automatically migrate their albums.
+                        Update a user's email. Changing it will automatically migrate their assigned albums. Passwords are set
+                        and recovered by the user through Cognito, never by an administrator.
                     </p>
                 </div>
 
@@ -126,21 +123,7 @@ function EditUser() {
                                 )}
                             </div>
 
-                            {/* New password */}
-                            <div className="mb-8">
-                                <label className="block text-sm font-medium text-charcoal mb-2">
-                                    New Password <span className="text-warm-gray font-normal">(leave blank to keep current)</span>
-                                </label>
-                                <input
-                                    type="password"
-                                    value={newPassword}
-                                    onChange={(e) => setNewPassword(e.target.value)}
-                                    placeholder="Enter new password…"
-                                    className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
-                                />
-                            </div>
-
-                            <div className="flex gap-3">
+                            <div className="flex gap-3 mt-8">
                                 <button
                                     onClick={() => setEditingUser(null)}
                                     className="flex-1 py-3 rounded-xl bg-cream text-warm-gray font-medium hover:bg-cream-dark transition-colors cursor-pointer"

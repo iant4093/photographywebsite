@@ -1,12 +1,23 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
-import { fetchAlbumsFiltered, fetchAlbum, requestAlbumZip } from '../utils/api'
+import { useAuth } from '../context/auth'
+import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { useScrollRestoration, saveVerticalScroll, getSavedScroll, isRevealed, markAsRevealed } from '../utils/scroll'
+import {
+    albumCoverUrl,
+    mediaDisplayUrl,
+    mediaFileName,
+    mediaId,
+    mediaThumbnailUrl,
+    resolveMediaDownloadUrl,
+    startBrowserDownload,
+} from '../utils/mediaUrls'
+import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
+import { pollZipJob } from '../utils/zipDownload'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -19,12 +30,17 @@ function UserDashboard() {
     useScrollRestoration(location.pathname, navType === 'POP')
     const [albums, setAlbums] = useState([])
     const [loading, setLoading] = useState(true)
+    const [loadError, setLoadError] = useState('')
+    const [mediaError, setMediaError] = useState('')
 
     // Selected album for viewing images
     const [selectedAlbum, setSelectedAlbum] = useState(null)
     const [images, setImages] = useState([])
     const [loadingImages, setLoadingImages] = useState(false)
     const [downloading, setDownloading] = useState(false)
+    const [zipError, setZipError] = useState('')
+    const [zipStatus, setZipStatus] = useState('')
+    const zipControllerRef = useRef(null)
 
     // Lightbox state — store index instead of URL for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -32,14 +48,57 @@ function UserDashboard() {
     // Save scroll position before entering an album detail view
     const savedScrollY = useRef(0)
 
-    // Fetch user's albums on mount
+    const loadAlbums = useCallback(async ({ signal, background = false } = {}) => {
+        if (!userEmail) return []
+        await Promise.resolve()
+        if (!background) setLoading(true)
+        try {
+            const token = await getIdToken()
+            const data = await fetchAlbumsFiltered(
+                { visibility: 'private' },
+                token,
+                { signal }
+            )
+            const owner = userEmail.trim().toLowerCase()
+            const ownedAlbums = data.filter(
+                album => !album.ownerEmail
+                    || String(album.ownerEmail).trim().toLowerCase() === owner,
+            )
+            setAlbums(ownedAlbums)
+            setLoadError('')
+            setMediaError('')
+            return ownedAlbums
+        } catch (error) {
+            if (error?.name !== 'AbortError') {
+                if (background) setMediaError('Album covers expired and could not be refreshed. Check your connection and try again.')
+                else {
+                    setAlbums([])
+                    setLoadError('Your albums could not be loaded. Please try again.')
+                }
+            }
+            throw error
+        } finally {
+            if (!background && !signal?.aborted) setLoading(false)
+        }
+    }, [getIdToken, userEmail])
+
+    // Fetch user's albums on mount.
     useEffect(() => {
-        if (!userEmail) return
-        fetchAlbumsFiltered({ visibility: 'private', ownerEmail: userEmail })
-            .then(setAlbums)
-            .catch(() => setAlbums([]))
-            .finally(() => setLoading(false))
-    }, [userEmail])
+        if (!userEmail) return undefined
+        const controller = new AbortController()
+        Promise.resolve()
+            .then(() => loadAlbums({ signal: controller.signal }))
+            .catch(() => {})
+        return () => controller.abort()
+    }, [loadAlbums, userEmail])
+
+    useEffect(() => () => zipControllerRef.current?.abort(), [])
+
+    const refreshAlbumCovers = useCallback(
+        () => loadAlbums({ background: true }),
+        [loadAlbums],
+    )
+    const requestCoverRefresh = useMediaExpiryRefresh(albums, refreshAlbumCovers)
 
     // Restore scroll position after data loads on POP navigation
     useEffect(() => {
@@ -51,14 +110,45 @@ function UserDashboard() {
                 })
             }
         }
-    }, [loading])
+    }, [loading, location.pathname, navType])
 
     // Reset to albums list when navigating to this page (e.g. clicking Dashboard in nav)
     useEffect(() => {
-        setSelectedAlbum(null)
-        setImages([])
-        setLightboxIndex(null)
+        const frame = requestAnimationFrame(() => {
+            setSelectedAlbum(null)
+            setImages([])
+            setLightboxIndex(null)
+        })
+        return () => cancelAnimationFrame(frame)
     }, [location.key])
+
+    const loadSelectedImages = useCallback(async (album, { background = false } = {}) => {
+        if (!album) return []
+        if (!background) setLoadingImages(true)
+        try {
+            const token = await getIdToken()
+            const data = await fetchAlbum(album.albumId, token)
+            setImages(data.images || [])
+            setMediaError('')
+            return data.images || []
+        } catch (err) {
+            if (err?.name !== 'AbortError') {
+                console.error('Failed to load images:', err)
+                setMediaError(background
+                    ? 'Some photo links expired and could not be refreshed. Check your connection and try again.'
+                    : 'The photos in this album could not be loaded. Please try again.')
+            }
+            throw err
+        } finally {
+            if (!background) setLoadingImages(false)
+        }
+    }, [getIdToken])
+
+    const refreshSelectedMedia = useCallback(
+        () => selectedAlbum ? loadSelectedImages(selectedAlbum, { background: true }) : Promise.resolve(),
+        [loadSelectedImages, selectedAlbum],
+    )
+    const requestSelectedRefresh = useMediaExpiryRefresh(images, refreshSelectedMedia)
 
     // Open photo album to view images inline
     async function openAlbum(album) {
@@ -71,54 +161,41 @@ function UserDashboard() {
             return
         }
 
-        savedScrollY.current = window.scrollY
-        setLoadingImages(true)
         setSelectedAlbum(album)
-        try {
-            const token = await getIdToken()
-            const data = await fetchAlbum(album.albumId, token)
-            setImages(data.images || [])
-        } catch (err) {
-            console.error('Failed to load images:', err)
-        } finally {
-            setLoadingImages(false)
-        }
+        setImages([])
+        setMediaError('')
+        await loadSelectedImages(album).catch(() => {})
     }
 
     // Download all photos in the album as a ZIP file (Using Backend Generator)
     async function downloadAll() {
         if (!images.length || !selectedAlbum) return
+        zipControllerRef.current?.abort()
+        const controller = new AbortController()
+        zipControllerRef.current = controller
         setDownloading(true)
+        setZipError('')
+        setZipStatus('starting')
         try {
             const token = await getIdToken()
-
-            // Polling loop with max 2 minute timeout (24 polls × 5s)
-            const MAX_POLLS = 24
-            for (let poll = 0; poll < MAX_POLLS; poll++) {
-                const { status, url } = await requestAlbumZip(selectedAlbum.albumId, token)
-
-                if (status === 'ready' && url) {
-                    // The backend returned a presigned S3 URL
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = `${selectedAlbum.title || 'album'}.zip`
-                    document.body.appendChild(a)
-                    a.click()
-                    document.body.removeChild(a)
-                    return // Exit function
-                } else if (status === 'processing') {
-                    // Wait 5 seconds before polling again
-                    await new Promise(resolve => setTimeout(resolve, 5000))
-                } else {
-                    throw new Error("Unexpected ZIP status: " + status)
-                }
-            }
-            throw new Error("ZIP generation timed out after 2 minutes")
+            const url = await pollZipJob({
+                jobKey: `album:${selectedAlbum.albumId}`,
+                request: ({ signal }) => requestAlbumZip(selectedAlbum.albumId, token, { signal }),
+                signal: controller.signal,
+                onStatus: setZipStatus,
+            })
+            startBrowserDownload(url, `${selectedAlbum.title || 'album'}.zip`)
         } catch (err) {
-            console.error('ZIP Download failed:', err)
-            alert('Failed to generate ZIP. The album might be too large or the server is busy. Please try again later.')
+            if (err?.name !== 'AbortError') {
+                console.error('ZIP Download failed:', err)
+                setZipError(err?.message || 'The ZIP could not be generated. Please try again later.')
+            }
         } finally {
-            setDownloading(false)
+            if (zipControllerRef.current === controller) {
+                zipControllerRef.current = null
+                setDownloading(false)
+                setZipStatus('')
+            }
         }
     }
 
@@ -149,27 +226,20 @@ function UserDashboard() {
         const img = images[lightboxIndex]
         if (!img) return
 
-        const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-        const urlToDownload = isLegacyOrDemo ? (img.url || img) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.rawKey}`
-        const keyString = isLegacyOrDemo ? (typeof img === 'string' ? img : img.key) : img.rawKey
-        const fileName = keyString ? keyString.split('/').pop() : 'photo.jpg'
-
         try {
-            const urlObj = new URL(urlToDownload)
-            urlObj.searchParams.set('dl', '1')
-            const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
-            const blob = await response.blob()
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = fileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            setTimeout(() => URL.revokeObjectURL(url), 100)
+            const token = await getIdToken()
+            const downloadUrl = await resolveMediaDownloadUrl(
+                () => requestAlbumMediaDownload(
+                    selectedAlbum.albumId,
+                    mediaId(img),
+                    token,
+                ),
+                img,
+            )
+            startBrowserDownload(downloadUrl, mediaFileName(img, 'photo.jpg'))
         } catch (err) {
-            console.error('Download failed, falling back to direct navigation:', err)
-            window.location.assign(urlToDownload)
+            console.error('Download failed:', err)
+            alert('The photo could not be downloaded. Please try again.')
         }
     }
 
@@ -220,11 +290,12 @@ function UserDashboard() {
                         >
                             {/* Cover image */}
                             <div className="aspect-[4/3] overflow-hidden relative">
-                                {album.coverImageUrl ? (
+                                {albumCoverUrl(album) ? (
                                     <ProgressiveImage
-                                        src={album.coverThumbKey ? `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverThumbKey}` : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${album.coverImageUrl}`}
+                                        src={albumCoverUrl(album)}
                                         blurhash={album.coverBlurhash}
                                         alt={album.title}
+                                        onError={() => requestCoverRefresh('media-error')}
                                         className="w-full h-full group-hover:scale-105 transition-transform duration-700 ease-out"
                                     />
                                 ) : (
@@ -303,7 +374,7 @@ function UserDashboard() {
                                 {downloading ? (
                                     <>
                                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        Downloading…
+                                        {zipStatus === 'rate_limited' ? 'Waiting…' : 'Preparing…'}
                                     </>
                                 ) : (
                                     <>
@@ -316,6 +387,12 @@ function UserDashboard() {
                             </button>
                         </div>
 
+                        {(mediaError || zipError) && (
+                            <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                                {mediaError || zipError}
+                            </div>
+                        )}
+
                         {/* Images */}
                         {loadingImages ? (
                             <div className="flex justify-center py-20">
@@ -324,14 +401,11 @@ function UserDashboard() {
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {images.map((img, index) => {
-                                    const isLegacyOrDemo = typeof img === 'string' || !img.thumbKey
-                                    const thumbUrl = isLegacyOrDemo
-                                        ? (img.url || img)
-                                        : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                                    const thumbUrl = mediaThumbnailUrl(img)
 
                                     return (
                                         <div
-                                            key={img.key || img.rawKey || index}
+                                            key={mediaId(img) || index}
                                             className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
                                             onClick={() => setLightboxIndex(index)}
                                         >
@@ -339,7 +413,11 @@ function UserDashboard() {
                                                 <ProgressiveImage
                                                     src={thumbUrl}
                                                     blurhash={img.blurhash}
+                                                    width={img.width}
+                                                    height={img.height}
+                                                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                                     alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
+                                                    onError={() => requestSelectedRefresh('media-error')}
                                                     className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                                                 />
                                                 {/* Warm overlay on hover */}
@@ -363,8 +441,8 @@ function UserDashboard() {
                                 <svg className="w-16 h-16 mx-auto text-warm-gray/30 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
-                                <p className="text-warm-gray text-lg">No photos or videos available yet.</p>
-                                <p className="text-warm-gray/70 text-sm mt-1">Check back soon!</p>
+                                <p className="text-warm-gray text-lg">{loadError || 'No photos or videos available yet.'}</p>
+                                {!loadError && <p className="text-warm-gray/70 text-sm mt-1">Check back soon!</p>}
                             </div>
                         ) : (
                             <div className="flex flex-col gap-16">
@@ -447,20 +525,21 @@ function UserDashboard() {
                         >
                             {(() => {
                                 const activeImg = images[lightboxIndex]
-                                const isLegacyOrDemo = typeof activeImg === 'string' || !activeImg.thumbKey
-                                const thumbUrl = isLegacyOrDemo
-                                    ? (activeImg.url || activeImg)
-                                    : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.thumbKey}`
-                                const activeRawUrl = isLegacyOrDemo ? (activeImg.url || activeImg) : `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${activeImg.rawKey}`
+                                const thumbUrl = mediaThumbnailUrl(activeImg)
+                                const activeRawUrl = mediaDisplayUrl(activeImg)
 
                                 return (
                                     <>
                                         <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                                             {/* High-res image with faded-in loading */}
                                             <motion.img
-                                                key={`high-${activeImg.rawKey || lightboxIndex}`}
+                                                key={`high-${mediaId(activeImg) || lightboxIndex}`}
                                                 src={activeRawUrl}
                                                 alt="Full size preview"
+                                                onError={() => requestSelectedRefresh('media-error')}
+                                                width={activeImg.width}
+                                                height={activeImg.height}
+                                                decoding="async"
                                                 initial={{ opacity: 0 }}
                                                 animate={{ opacity: 1 }}
                                                 exit={{ opacity: 0 }}

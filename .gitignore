@@ -45,3 +45,6 @@ cf-etag.txt
 debug/
 
 scripts/
+
+# Local website audit artifacts
+/website_review/

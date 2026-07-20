@@ -1,77 +1,44 @@
-import json
+"""Admin user invitation using Cognito-generated temporary credentials."""
+
 import os
+
 import boto3
 
-# Cognito client for user management
-cognito = boto3.client('cognito-idp')
-USER_POOL_ID = os.environ['COGNITO_USER_POOL_ID']
-
 from auth_helpers import require_admin
-from email_helpers import send_email
+from response_helpers import error_response, internal_error, json_response
+from validation_helpers import ValidationError, parse_json_body, validate_email
+
+
+cognito = boto3.client("cognito-idp")
+USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 
 
 def handler(event, context):
-    """POST /users — admin creates a new non-admin Cognito user."""
     denied = require_admin(event)
     if denied:
         return denied
     try:
-        body = json.loads(event.get('body', '{}'))
-        email = body.get('email')
-        password = body.get('password')
-
-        if not email or not password:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'email and password are required'}),
-            }
-
-        # Create user in Cognito
+        body = parse_json_body(event, max_bytes=16 * 1024)
+        email = validate_email(body.get("email"))
+        # Deliberately ignore any legacy client `password` field. Cognito creates
+        # and delivers a short-lived temporary credential, and the user must
+        # complete NEW_PASSWORD_REQUIRED before receiving a normal session.
         cognito.admin_create_user(
             UserPoolId=USER_POOL_ID,
             Username=email,
             UserAttributes=[
-                {'Name': 'email', 'Value': email},
-                {'Name': 'email_verified', 'Value': 'true'},
+                {"Name": "email", "Value": email},
+                {"Name": "email_verified", "Value": "true"},
             ],
-            TemporaryPassword=password,
-            MessageAction='SUPPRESS',
+            DesiredDeliveryMediums=["EMAIL"],
         )
-        # Set the permanent password immediately
-        cognito.admin_set_user_password(
-            UserPoolId=USER_POOL_ID,
-            Username=email,
-            Password=password,
-            Permanent=True,
+        return json_response(
+            201,
+            {"message": "User invitation created", "challenge": "NEW_PASSWORD_REQUIRED"},
         )
-
-        portal_url = os.environ.get('FRONTEND_URL', 'https://iantruongphotography.com')
-        subject = "Welcome to Ian Truong Photography"
-        html = f"""
-        <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
-            <h2 style="color: #4a4a4a;">Welcome!</h2>
-            <p>An account has been created for you to access your private photography galleries.</p>
-            <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-                <p style="margin: 0 0 10px;"><strong>Login Portal:</strong> <a href="{portal_url}/login">{portal_url}/login</a></p>
-                <p style="margin: 0 0 10px;"><strong>Email:</strong> {email}</p>
-                <p style="margin: 0;"><strong>Password:</strong> {password}</p>
-            </div>
-        </div>
-        """
-        send_email(email, subject, html)
-
-        return {
-            'statusCode': 201,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'message': f'User {email} created successfully'}),
-        }
+    except ValidationError as error:
+        return error_response(400, str(error), code="invalid_user")
     except cognito.exceptions.UsernameExistsException:
-        return {
-            'statusCode': 409,
-            'body': json.dumps({'error': 'A user with that email already exists'}),
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)}),
-        }
+        return error_response(409, "A user with that email already exists", code="conflict")
+    except Exception as error:
+        return internal_error(context, error, "create_user")

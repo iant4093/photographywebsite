@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { fetchAlbum } from '../utils/api'
-import { useAuth } from '../context/authContext'
+import { fetchAlbum, requestAlbumMediaDownload } from '../utils/api'
+import { useAuth } from '../context/auth'
 import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
+import {
+    mediaFileName,
+    mediaId,
+    mediaThumbnailUrl,
+    resolveMediaDownloadUrl,
+    startBrowserDownload,
+} from '../utils/mediaUrls'
+import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 
 export default function VideoGallery() {
     const { albumId } = useParams()
@@ -13,37 +21,69 @@ export default function VideoGallery() {
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
     const [loading, setLoading] = useState(true)
+    const [loadError, setLoadError] = useState('')
+    const [mediaError, setMediaError] = useState('')
     const { getIdToken } = useAuth()
+    const autoPlayFirst = searchParams.get('play') === '1'
 
     // Lightbox state — null means gallery view, a number is the index in the player
     const [lightboxIndex, setLightboxIndex] = useState(null)
 
-    useEffect(() => {
-        const load = async () => {
+    const loadAlbum = useCallback(async ({ signal, background = false } = {}) => {
+        if (!background) setLoading(true)
+        try {
             let token = null
             try {
                 token = await getIdToken()
-            } catch (e) { }
-
-            try {
-                const data = await fetchAlbum(albumId, token)
-                const fetchedAlbum = data.album || data
-                const fetchedImages = data.images || []
-
-                setAlbum(fetchedAlbum)
-                setImages(fetchedImages)
-
-                if (searchParams.get('play') === '1' && fetchedImages.length > 0) {
-                    setLightboxIndex(0)
-                }
-            } catch (err) {
-                console.error("Failed to load video album:", err)
-            } finally {
-                setLoading(false)
+            } catch {
+                // Public albums do not require a user token.
             }
+
+            const data = await fetchAlbum(albumId, token, { signal })
+            const fetchedAlbum = data.album || data
+            const fetchedImages = data.images || []
+            setAlbum(fetchedAlbum)
+            setImages(fetchedImages)
+            setLoadError('')
+            setMediaError('')
+            if (!background && autoPlayFirst && fetchedImages.length > 0) {
+                setLightboxIndex(0)
+            }
+            return data
+        } catch (err) {
+            if (err?.name !== 'AbortError') {
+                console.error("Failed to load video album:", err)
+                const message = background
+                    ? 'The video link expired and could not be refreshed. Check your connection and try again.'
+                    : 'Failed to load video album. It may not exist or be private.'
+                if (background) setMediaError(message)
+                else setLoadError(message)
+            }
+            throw err
+        } finally {
+            if (!background && !signal?.aborted) setLoading(false)
         }
-        load()
-    }, [albumId, getIdToken])
+    }, [albumId, autoPlayFirst, getIdToken])
+
+    useEffect(() => {
+        const controller = new AbortController()
+        Promise.resolve().then(() => {
+            if (controller.signal.aborted) return
+            setAlbum(null)
+            setImages([])
+            setLightboxIndex(null)
+            setLoadError('')
+            setMediaError('')
+            return loadAlbum({ signal: controller.signal })
+        }).catch(() => {})
+        return () => controller.abort()
+    }, [albumId, loadAlbum])
+
+    const refreshMedia = useCallback(
+        () => loadAlbum({ background: true }),
+        [loadAlbum],
+    )
+    const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)
 
     const goNext = useCallback(() => {
         setLightboxIndex((i) => (i + 1) % images.length)
@@ -71,27 +111,19 @@ export default function VideoGallery() {
     const downloadOriginal = async (e) => {
         e.stopPropagation()
         const video = images[lightboxIndex]
-        if (!video || !video.rawKey) return
-
-        const rawUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${video.rawKey}`
-        const fileName = video.rawKey.split('/').pop() || 'video.mp4'
+        if (!video) return
 
         try {
-            const urlObj = new URL(rawUrl)
-            urlObj.searchParams.set('dl', '1')
-            const response = await fetch(urlObj.toString(), { mode: 'cors', cache: 'no-store' })
-            const blob = await response.blob()
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = fileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            setTimeout(() => URL.revokeObjectURL(url), 100)
+            let token = null
+            try { token = await getIdToken() } catch { /* public album */ }
+            const downloadUrl = await resolveMediaDownloadUrl(
+                () => requestAlbumMediaDownload(albumId, mediaId(video), token),
+                video,
+            )
+            startBrowserDownload(downloadUrl, mediaFileName(video, 'video.mp4'))
         } catch (err) {
-            console.error('Download failed, falling back:', err)
-            window.location.assign(rawUrl)
+            console.error('Download failed:', err)
+            alert('The video could not be downloaded. Please try again.')
         }
     }
 
@@ -124,7 +156,7 @@ export default function VideoGallery() {
                 exit="exit"
                 className="max-w-7xl mx-auto px-6 py-12 text-center text-warm-gray"
             >
-                <p>Failed to load video album. It may not exist or be private.</p>
+                <p>{loadError || 'Failed to load video album. It may not exist or be private.'}</p>
                 <button onClick={handleBack} className="mt-4 text-amber hover:underline">Go Back</button>
             </motion.div>
         )
@@ -160,20 +192,30 @@ export default function VideoGallery() {
                 )}
             </div>
 
+            {mediaError && (
+                <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {mediaError}
+                </div>
+            )}
+
             {/* Thumbnail Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {images.map((img, index) => {
-                    const thumbUrl = `https://${import.meta.env.VITE_CLOUDFRONT_DOMAIN}/${img.thumbKey}`
+                    const thumbUrl = mediaThumbnailUrl(img)
                     return (
                         <div
-                            key={img.rawKey || index}
+                            key={mediaId(img) || index}
                             className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-video relative"
                             onClick={() => setLightboxIndex(index)}
                         >
                             <ProgressiveImage
                                 src={thumbUrl}
                                 blurhash={img.blurhash}
+                                width={img.width}
+                                height={img.height}
+                                sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                 alt={`Video ${index + 1}`}
+                                onError={() => requestMediaRefresh('media-error')}
                                 className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-700 ease-out"
                             />
                             {/* Play Button Overlay */}
@@ -229,7 +271,12 @@ export default function VideoGallery() {
 
                     {/* React Player Container */}
                     <div className="flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
-                        <VideoPlayer videoInfo={images[lightboxIndex]} autoplay={true} controls={true} />
+                        <VideoPlayer
+                            videoInfo={images[lightboxIndex]}
+                            autoplay={true}
+                            controls={true}
+                            onMediaError={requestMediaRefresh}
+                        />
                     </div>
 
                     {/* Download & Counter */}

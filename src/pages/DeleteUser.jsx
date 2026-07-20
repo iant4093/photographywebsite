@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 import { listUsers, deleteUser } from '../utils/api'
 
 // Delete User page — select a user, type "confirm" to delete them + all their data
@@ -18,12 +18,7 @@ function DeleteUser() {
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
 
-    // Load users on mount
-    useEffect(() => {
-        loadUsers()
-    }, [])
-
-    async function loadUsers() {
+    const loadUsers = useCallback(async () => {
         try {
             const token = await getIdToken()
             const data = await listUsers(token)
@@ -34,7 +29,13 @@ function DeleteUser() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [getIdToken])
+
+    // Load users on mount
+    useEffect(() => {
+        const timeout = window.setTimeout(loadUsers, 0)
+        return () => window.clearTimeout(timeout)
+    }, [loadUsers])
 
     // Handle deletion
     async function handleDelete() {

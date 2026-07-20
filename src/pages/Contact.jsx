@@ -1,14 +1,21 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Turnstile } from '@marsidev/react-turnstile'
-import { motion } from 'framer-motion'
+import { Link } from 'react-router-dom'
+import { sendContactMessage } from '../utils/api'
 
 export default function Contact() {
+    const turnstileRef = useRef(null)
     const [name, setName] = useState('')
     const [email, setEmail] = useState('')
     const [message, setMessage] = useState('')
     const [turnstileToken, setTurnstileToken] = useState(null)
     const [status, setStatus] = useState({ type: '', message: '' })
     const [submitting, setSubmitting] = useState(false)
+
+    const resetSecurityCheck = () => {
+        setTurnstileToken(null)
+        turnstileRef.current?.reset()
+    }
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -22,41 +29,21 @@ export default function Contact() {
         setStatus({ type: '', message: '' })
 
         try {
-            const API_BASE = import.meta.env.VITE_API_BASE_URL
-            const response = await fetch(`${API_BASE}/contact`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email, message, turnstileToken })
-            })
-            const data = await response.json()
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to send message.')
-            }
-            setStatus({ type: 'success', message: data.message })
+            await sendContactMessage({ name, email, message, turnstileToken })
+            setStatus({ type: 'success', message: 'Thanks—your message was sent.' })
             setName('')
             setEmail('')
             setMessage('')
         } catch (err) {
-            setStatus({ type: 'error', message: err.message })
+            setStatus({ type: 'error', message: err.message || 'Your message could not be sent. Please try again.' })
         } finally {
+            resetSecurityCheck()
             setSubmitting(false)
         }
     }
 
-    const pageVariants = {
-        initial: { opacity: 0, y: 15 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
-    }
-
     return (
-        <motion.div
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="max-w-3xl mx-auto px-6 py-20 pt-[88px] md:pt-[104px] flex-1 w-full"
-        >
+        <div className="max-w-3xl mx-auto px-6 py-20 pt-[88px] md:pt-[104px] flex-1 w-full animate-fade-in">
             <div className="text-center mb-16">
                 <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">Get In Touch</h1>
                 <p className="text-warm-gray text-lg max-w-xl mx-auto">
@@ -128,11 +115,25 @@ export default function Contact() {
 
                 <div className="mb-8 flex justify-center">
                     <Turnstile
+                        ref={turnstileRef}
                         siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
                         onSuccess={(token) => setTurnstileToken(token)}
-                        options={{ theme: 'light' }}
+                        onExpire={() => {
+                            setTurnstileToken(null)
+                            setStatus({ type: 'error', message: 'The security check expired. Please complete it again.' })
+                        }}
+                        onError={() => {
+                            setTurnstileToken(null)
+                            setStatus({ type: 'error', message: 'The security check could not be loaded. Please try again.' })
+                        }}
+                        options={{ theme: 'light', action: 'contact' }}
                     />
                 </div>
+
+                <p className="mb-6 text-xs leading-relaxed text-warm-gray">
+                    Your name, email, and message are used only to respond to this inquiry and operate the site. Turnstile also
+                    processes limited device and network information to prevent abuse. See the <Link to="/privacy" className="underline underline-offset-2 hover:text-amber-dark">privacy notice</Link>.
+                </p>
 
                 <button
                     type="submit"
@@ -142,6 +143,6 @@ export default function Contact() {
                     {submitting ? 'Sending...' : 'Send Message'}
                 </button>
             </form>
-        </motion.div>
+        </div>
     )
 }

@@ -1,75 +1,52 @@
-import json
+"""Admin-only album deletion with canonical, version-aware S3 cleanup."""
+
 import os
+
 import boto3
 
-# DynamoDB and S3 for deleting albums and their images
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ['ALBUMS_TABLE'])
-s3 = boto3.client('s3')
-BUCKET = os.environ['IMAGES_BUCKET']
-
 from auth_helpers import require_admin
+from deletion_helpers import DeletionTooLargeError, delete_prefix_all_versions, preflight_deletion
+from media_access import album_media_prefixes
+from response_helpers import error_response, internal_error, json_response
+from validation_helpers import ValidationError, validate_uuid
+
+
+table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
 
 
 def handler(event, context):
-    """DELETE /albums/{albumId} — deletes album record and all S3 images (admin-only)."""
     denied = require_admin(event)
     if denied:
         return denied
     try:
-        album_id = event['pathParameters']['albumId']
-
-        # Get album to find S3 prefix
-        response = table.get_item(Key={'albumId': album_id})
-        album = response.get('Item')
-
+        album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
+        album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
         if not album:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Album not found'}),
-            }
+            return error_response(404, "Album not found", code="not_found")
 
-        # Delete all S3 objects under the album's prefix
-        # Use pagination for S3 deletion to handle >1000 objects
-        if 'IMAGES_BUCKET' in os.environ:
-            bucket = os.environ['IMAGES_BUCKET']
-            prefix = album.get('s3Prefix', f'albums/{album_id}/') # Use album's s3Prefix if available
-            
-            paginator = s3.get_paginator('list_objects_v2')
-            pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
-            
-            objects_to_delete = []
-            for page in pages:
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        objects_to_delete.append({'Key': obj['Key']})
-                        
-                    # Delete in batches of 1000
-                    # S3 DeleteObjects API can take up to 1000 objects
-                    if len(objects_to_delete) >= 1000:
-                        s3.delete_objects(
-                            Bucket=bucket,
-                            Delete={'Objects': objects_to_delete}
-                        )
-                        objects_to_delete = []
-            
-            # Delete any remaining objects
-            if objects_to_delete:
-                s3.delete_objects(
-                    Bucket=bucket,
-                    Delete={'Objects': objects_to_delete}
-                )
-
-        # Delete the DynamoDB record
-        table.delete_item(Key={'albumId': album_id})
-
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'message': f'Album {album_id} deleted'}),
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)}),
-        }
+        album["albumId"] = album_id
+        prefixes = (*album_media_prefixes(album), f"temp-zips/{album_id}/")
+        preflight_deletion(prefixes=prefixes)
+        deleted_versions = 0
+        for prefix in prefixes:
+            deleted_versions += delete_prefix_all_versions(prefix)
+        table.delete_item(
+            Key={"albumId": album_id},
+            ConditionExpression="attribute_exists(albumId)",
+        )
+        return json_response(
+            200,
+            {"message": "Album deleted", "deletedObjectVersions": deleted_versions},
+        )
+    except DeletionTooLargeError:
+        return error_response(
+            409,
+            "Album is too large for synchronous deletion; use the maintenance deletion workflow",
+            code="deletion_too_large",
+        )
+    except ValidationError as error:
+        return error_response(400, str(error), code="invalid_request")
+    except table.meta.client.exceptions.ConditionalCheckFailedException:
+        return error_response(404, "Album not found", code="not_found")
+    except Exception as error:
+        return internal_error(context, error, "delete_album")

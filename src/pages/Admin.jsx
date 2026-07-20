@@ -3,8 +3,9 @@ import { motion } from 'framer-motion'
 import { encode } from 'blurhash'
 import { v4 as uuidv4 } from 'uuid'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../context/authContext'
+import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
+import { mapWithConcurrency } from '../utils/concurrency'
 
 // Upload page — create album for main gallery or specific user
 function Upload() {
@@ -141,47 +142,45 @@ function Upload() {
 
             setProgress({ current: 0, total: photoFiles.length })
 
-            const finalImages = []
+            let coverImageUrlPublic = ''
             let coverThumbUrlPublic = ''
             let coverBlurhash = ''
 
-            // Upload each file
-            for (let i = 0; i < photoFiles.length; i++) {
-                const file = photoFiles[i]
+            let completedUploads = 0
+            const finalImages = await mapWithConcurrency(photoFiles, 2, async (file, i) => {
 
                 // 1. Process local thumbnail/hash
                 const { thumbnail, blurhash, width, height } = await processImage(file)
                 const isCover = i === 0
 
                 // 2. Request both Pre-signed URLs
-                const rawKey = `${s3Prefix}${file.name}`
-                const thumbKey = `${s3Prefix}thumb_${file.name}`
+                const legacyRawKey = `${s3Prefix}${file.name}`
+                const legacyThumbKey = `${s3Prefix}thumb_${file.name}`
 
-                const { uploadUrl: rawUploadUrl } = await requestUploadUrl(token, rawKey, file.type)
-                const { uploadUrl: thumbUploadUrl } = await requestUploadUrl(token, thumbKey, 'image/jpeg')
+                const [rawUpload, thumbUpload] = await Promise.all([
+                    requestUploadUrl(token, albumId, legacyRawKey, file.type, file.size, 'original'),
+                    requestUploadUrl(token, albumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
+                ])
 
                 // 3. Upload both to S3
                 await Promise.all([
-                    uploadFileToS3(rawUploadUrl, file),
-                    uploadFileToS3(thumbUploadUrl, thumbnail)
+                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
+                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
                 ])
 
-                // Track the payload metadata
-                finalImages.push({
-                    rawKey,
-                    thumbKey,
-                    blurhash,
-                    width,
-                    height
-                })
+                const rawKey = rawUpload.key || legacyRawKey
+                const thumbKey = thumbUpload.key || legacyThumbKey
 
                 if (isCover) {
+                    coverImageUrlPublic = rawKey
                     coverThumbUrlPublic = thumbKey
                     coverBlurhash = blurhash
                 }
 
-                setProgress({ current: i + 1, total: photoFiles.length })
-            }
+                completedUploads += 1
+                setProgress({ current: completedUploads, total: photoFiles.length })
+                return { rawKey, thumbKey, blurhash, width, height }
+            })
 
             // Create album — cover is auto-set to first image by backend
             const createdAlbum = await createAlbum(token, {
@@ -189,7 +188,7 @@ function Upload() {
                 title,
                 description,
                 category: category || 'Uncategorized',
-                coverImageUrl: `${s3Prefix}${photoFiles[0]?.name || ''}`,
+                coverImageUrl: coverImageUrlPublic,
                 coverThumbKey: coverThumbUrlPublic,
                 coverBlurhash: coverBlurhash,
                 images: finalImages, // Persist specific processed manifest
