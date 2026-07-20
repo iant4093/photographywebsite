@@ -27,10 +27,22 @@ def _index_enabled(kind):
     return phase == "both" and bool(os.environ.get("OWNER_SUB_CREATED_AT_INDEX"))
 
 
+def _type_filter(album_type):
+    if not album_type:
+        return None
+    expression = Attr("type").eq(album_type)
+    # Albums created before the type field was introduced were always photos.
+    # Keep that established default when a caller explicitly requests photos.
+    if album_type == "photo":
+        expression |= Attr("type").not_exists()
+    return expression
+
+
 def _filter_for(visibility, album_type=None, *, owner_sub=None, owner_email=None):
     expression = Attr("visibility").eq(visibility)
-    if album_type:
-        expression &= Attr("type").eq(album_type)
+    type_filter = _type_filter(album_type)
+    if type_filter is not None:
+        expression &= type_filter
     if owner_sub and owner_email:
         expression &= (
             Attr("ownerSub").eq(owner_sub)
@@ -78,7 +90,7 @@ def _fetch_page(
                     "KeyConditionExpression": Key("visibility").eq(visibility),
                     "ScanIndexForward": False,
                 }
-                filter_expression = Attr("type").eq(album_type) if album_type else None
+                filter_expression = _type_filter(album_type)
                 if admin_owner_email:
                     owner_filter = Attr("ownerEmail").eq(admin_owner_email)
                     filter_expression = owner_filter if filter_expression is None else filter_expression & owner_filter
@@ -87,7 +99,7 @@ def _fetch_page(
                 response = table.query(**params)
             else:
                 if admin_all:
-                    filter_expression = Attr("type").eq(album_type) if album_type else None
+                    filter_expression = _type_filter(album_type)
                     if admin_owner_email:
                         owner_filter = Attr("ownerEmail").eq(admin_owner_email)
                         filter_expression = owner_filter if filter_expression is None else filter_expression & owner_filter

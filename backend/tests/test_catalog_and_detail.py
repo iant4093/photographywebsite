@@ -2,6 +2,8 @@ import unittest
 from decimal import Decimal
 from unittest.mock import patch
 
+from boto3.dynamodb.conditions import ConditionExpressionBuilder
+
 from test_support import claims, gateway_event, response_body
 
 import get_album
@@ -33,6 +35,19 @@ def album(visibility="public", **overrides):
 
 
 class CatalogTests(unittest.TestCase):
+    def test_photo_filter_includes_legacy_records_without_type(self):
+        built = ConditionExpressionBuilder().build_expression(get_albums._type_filter("photo"))
+
+        self.assertIn("attribute_not_exists", built.condition_expression)
+        self.assertEqual(set(built.attribute_name_placeholders.values()), {"type"})
+        self.assertEqual(set(built.attribute_value_placeholders.values()), {"photo"})
+
+    def test_video_filter_does_not_include_records_without_type(self):
+        built = ConditionExpressionBuilder().build_expression(get_albums._type_filter("video"))
+
+        self.assertNotIn("attribute_not_exists", built.condition_expression)
+        self.assertEqual(set(built.attribute_value_placeholders.values()), {"video"})
+
     def test_anonymous_private_query_is_forced_public(self):
         captured = {}
 
