@@ -1,0 +1,950 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Retained GitHub Actions OIDC roles and encrypted release storage for the
+  Ian Truong Photography production pipeline. Deploy as a separately protected
+  stack with termination protection; this template never changes GitHub settings.
+
+Parameters:
+  GitHubOidcProviderMode:
+    Type: String
+    Default: use-existing
+    AllowedValues: [create, use-existing]
+    Description: Create the account singleton or reference an already-inventoried provider.
+  ExistingGitHubOidcProviderArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:(aws|aws-us-gov|aws-cn):iam::[0-9]{12}:oidc-provider/token\.actions\.githubusercontent\.com)$'
+    Description: Required only in use-existing mode; must be the provider in this account.
+  DefaultBranch:
+    Type: String
+    Default: main
+    AllowedValues: [main]
+    Description: Documented branch allowed by all three protected GitHub environments.
+  ApplicationStackName:
+    Type: String
+    Default: ian-website
+    AllowedValues: [ian-website]
+  ApplicationApiDomainName:
+    Type: String
+    Default: origin-api.iantruongphotography.com
+    AllowedValues: [origin-api.iantruongphotography.com]
+    Description: Exact retained regional API custom domain managed by the application stack.
+  ApplicationHostedZoneId:
+    Type: String
+    Default: Z0915663I4P8Y0MEDWH
+    AllowedValues: [Z0915663I4P8Y0MEDWH]
+    Description: Exact existing Route53 hosted zone in which front-door records may change.
+  FrontendBucketName:
+    Type: String
+    Default: iantruong-photography
+    AllowedValues: [iantruong-photography]
+  FrontendDistributionId:
+    Type: String
+    Default: EIOCCNR8XGQ1B
+    AllowedValues: [EIOCCNR8XGQ1B]
+  ReleaseArtifactNoncurrentRetentionDays:
+    Type: Number
+    Default: 180
+    MinValue: 90
+    MaxValue: 3650
+
+Rules:
+  MustDeployInApplicationRegion:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, us-west-2]
+        AssertDescription: The CI bootstrap must be deployed in us-west-2.
+  ExistingProviderRequiredOnlyInUseMode:
+    RuleCondition: !Equals [!Ref GitHubOidcProviderMode, use-existing]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingGitHubOidcProviderArn, '']]
+        AssertDescription: ExistingGitHubOidcProviderArn is required in use-existing mode.
+  ExistingProviderMustBeEmptyInCreateMode:
+    RuleCondition: !Equals [!Ref GitHubOidcProviderMode, create]
+    Assertions:
+      - Assert: !Equals [!Ref ExistingGitHubOidcProviderArn, '']
+        AssertDescription: Do not supply an existing provider ARN in create mode.
+
+Conditions:
+  CreateGitHubOidcProvider: !Equals [!Ref GitHubOidcProviderMode, create]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateGitHubOidcProvider
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: ManagedBy
+          Value: CloudFormationCiBootstrap
+
+  ReleaseArtifactKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: GitHub Actions immutable release artifact encryption
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableAccountIamPolicies
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: DataClassification
+          Value: ReleaseArtifacts
+        - Key: ManagedBy
+          Value: CloudFormationCiBootstrap
+
+  ReleaseArtifactKeyAlias:
+    Type: AWS::KMS::Alias
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AliasName: alias/ian-photography-ci-releases
+      TargetKeyId: !Ref ReleaseArtifactKey
+
+  ReleaseArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt ReleaseArtifactKey.Arn
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: RetireNoncurrentReleaseVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref ReleaseArtifactNoncurrentRetentionDays
+            ExpiredObjectDeleteMarker: false
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: DataClassification
+          Value: ReleaseArtifacts
+        - Key: ManagedBy
+          Value: CloudFormationCiBootstrap
+
+  ReleaseArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket: !Ref ReleaseArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt ReleaseArtifactBucket.Arn
+              - !Sub '${ReleaseArtifactBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+          - Sid: DenyUnencryptedTransportHeader
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${ReleaseArtifactBucket.Arn}/*'
+            Condition:
+              'Null':
+                s3:x-amz-server-side-encryption: 'false'
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyWrongKmsKeyWhenHeaderPresent
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${ReleaseArtifactBucket.Arn}/*'
+            Condition:
+              'Null':
+                s3:x-amz-server-side-encryption-aws-kms-key-id: 'false'
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt ReleaseArtifactKey.Arn
+
+  PlanRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: ian-photography-github-production-plan
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateGitHubOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingGitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production-plan
+      Policies:
+        - PolicyName: ExactStackPlanOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadAndPlanExactStack
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DetectStackDrift
+                  - cloudformation:GetTemplate
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:changeSet/gha-*/*'
+              - Sid: PollDriftDetection
+                Effect: Allow
+                Action: cloudformation:DescribeStackDriftDetectionStatus
+                Resource: '*'
+              - Sid: PassOnlyExecutionRoleToCloudFormation
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt CloudFormationExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: cloudformation.amazonaws.com
+              - Sid: ExplicitlyDenyExecutionAndDirectMutation
+                Effect: Deny
+                Action:
+                  - cloudformation:ContinueUpdateRollback
+                  - cloudformation:DeleteStack
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:RollbackStack
+                  - cloudformation:UpdateStack
+                Resource: '*'
+        - PolicyName: ReleasePrefixPublisher
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadReleaseBucketConfiguration
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:GetBucketVersioning
+                  - s3:GetEncryptionConfiguration
+                Resource: !GetAtt ReleaseArtifactBucket.Arn
+              - Sid: ListOnlyReleasePrefix
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt ReleaseArtifactBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - releases/*
+              - Sid: InspectReleaseMultipartUploads
+                Effect: Allow
+                Action: s3:ListBucketMultipartUploads
+                Resource: !GetAtt ReleaseArtifactBucket.Arn
+              - Sid: PublishOnlyReleaseObjects
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListMultipartUploadParts
+                  - s3:PutObject
+                Resource: !Sub '${ReleaseArtifactBucket.Arn}/releases/*'
+              - Sid: UseReleaseKeyOnlyThroughRegionalS3
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:ReEncryptFrom
+                  - kms:ReEncryptTo
+                Resource: !GetAtt ReleaseArtifactKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 's3.us-west-2.${AWS::URLSuffix}'
+                  StringLike:
+                    kms:EncryptionContext:aws:s3:arn:
+                      - !GetAtt ReleaseArtifactBucket.Arn
+                      - !Sub '${ReleaseArtifactBucket.Arn}/*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: CiBoundary
+          Value: Plan
+
+  ExecuteRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: ian-photography-github-production-execute
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateGitHubOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingGitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production
+      Policies:
+        - PolicyName: ExecuteExistingGuardedChangeSet
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExecuteAndObserveExactStack
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ExecuteChangeSet
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:changeSet/gha-*/*'
+              - Sid: DenyPlanningAndDirectStackMutation
+                Effect: Deny
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteStack
+                  - cloudformation:UpdateStack
+                Resource: '*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: CiBoundary
+          Value: Execute
+
+  FrontendRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: ian-photography-github-production-frontend
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateGitHubOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingGitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production
+      Policies:
+        - PolicyName: ExactFrontendUploadAndInvalidation
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VerifyExactFrontendBucketPosture
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:GetBucketPublicAccessBlock
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FrontendBucketName}'
+              - Sid: UploadAndVerifyWithoutDeletion
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListMultipartUploadParts
+                  - s3:PutObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FrontendBucketName}/*'
+              - Sid: InspectAndInvalidateExactDistribution
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetInvalidation
+                Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistributionId}'
+              - Sid: DenyFrontendControlPlaneAndDeletion
+                Effect: Deny
+                Action:
+                  - cloudfront:DeleteDistribution
+                  - cloudfront:UpdateDistribution
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                  - s3:DeleteBucket
+                  - s3:PutBucketAcl
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                Resource: '*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: CiBoundary
+          Value: Frontend
+
+  AuditRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: ian-photography-github-production-audit
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateGitHubOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingGitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production-audit
+      Policies:
+        - PolicyName: ExactStackDriftReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DetectExactStackDrift
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStackResourceDrifts
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DetectStackDrift
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'
+              - Sid: PollDriftOnly
+                Effect: Allow
+                Action: cloudformation:DescribeStackDriftDetectionStatus
+                Resource: '*'
+              - Sid: DenyAllCloudFormationMutation
+                Effect: Deny
+                Action:
+                  - cloudformation:CancelUpdateStack
+                  - cloudformation:ContinueUpdateRollback
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DeleteStack
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:RollbackStack
+                  - cloudformation:UpdateStack
+                Resource: '*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: CiBoundary
+          Value: Audit
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: ian-photography-cloudformation-execution
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ApplicationIdentityAndCompute
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ManageStackIamRoles
+                Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:DeleteRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListRolePolicies
+                  - iam:PutRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:UpdateRoleDescription
+                Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
+              - Sid: PassStackRolesOnlyToRuntimeServices
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
+                Condition:
+                  StringEquals:
+                    iam:PassedToService:
+                      - lambda.amazonaws.com
+                      - mediaconvert.amazonaws.com
+              - Sid: ManageStackManagedPolicyVersions
+                Effect: Allow
+                Action:
+                  - iam:CreatePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:ListEntitiesForPolicy
+                  - iam:ListPolicyVersions
+                  - iam:SetDefaultPolicyVersion
+                Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ApplicationStackName}-*'
+              - Sid: ManageStackLambdaFunctions
+                Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:CreateFunction
+                  - lambda:DeleteFunction
+                  - lambda:DeleteFunctionConcurrency
+                  - lambda:GetFunction
+                  - lambda:GetFunctionCodeSigningConfig
+                  - lambda:GetFunctionConcurrency
+                  - lambda:GetFunctionConfiguration
+                  - lambda:GetFunctionEventInvokeConfig
+                  - lambda:GetPolicy
+                  - lambda:ListTags
+                  - lambda:ListVersionsByFunction
+                  - lambda:PutFunctionConcurrency
+                  - lambda:RemovePermission
+                  - lambda:TagResource
+                  - lambda:UntagResource
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                Resource: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-*'
+              - Sid: CreateStackEventSourceMappings
+                Effect: Allow
+                Action: lambda:CreateEventSourceMapping
+                Resource: '*'
+                Condition:
+                  ArnLike:
+                    lambda:FunctionArn: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-*'
+              - Sid: ManageStackEventSourceMappings
+                Effect: Allow
+                Action:
+                  - lambda:DeleteEventSourceMapping
+                  - lambda:GetEventSourceMapping
+                  - lambda:UpdateEventSourceMapping
+                Resource: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:event-source-mapping:*'
+              - Sid: ListEventSourceMappings
+                Effect: Allow
+                Action: lambda:ListEventSourceMappings
+                Resource: '*'
+        - PolicyName: ApplicationDataAndMessaging
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ManageApplicationBuckets
+                Effect: Allow
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucketPolicy
+                  - s3:GetAccelerateConfiguration
+                  - s3:GetBucketAcl
+                  - s3:GetBucketCors
+                  - s3:GetBucketLocation
+                  - s3:GetBucketLogging
+                  - s3:GetBucketNotification
+                  - s3:GetBucketOwnershipControls
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketTagging
+                  - s3:GetBucketVersioning
+                  - s3:GetEncryptionConfiguration
+                  - s3:GetLifecycleConfiguration
+                  - s3:ListBucket
+                  - s3:PutBucketAcl
+                  - s3:PutBucketCors
+                  - s3:PutBucketLogging
+                  - s3:PutBucketNotification
+                  - s3:PutBucketOwnershipControls
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketTagging
+                  - s3:PutBucketVersioning
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutLifecycleConfiguration
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::goldenhour-*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::goldenhour-*/*'
+              - Sid: ReadReleasePackages
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource:
+                  - !GetAtt ReleaseArtifactBucket.Arn
+                  - !Sub '${ReleaseArtifactBucket.Arn}/releases/*'
+              - Sid: DecryptReleasePackagesThroughS3
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !GetAtt ReleaseArtifactKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 's3.us-west-2.${AWS::URLSuffix}'
+              - Sid: ManageApplicationTables
+                Effect: Allow
+                Action:
+                  - dynamodb:CreateTable
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:DescribeTable
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:TagResource
+                  - dynamodb:UntagResource
+                  - dynamodb:UpdateContinuousBackups
+                  - dynamodb:UpdateTable
+                  - dynamodb:UpdateTimeToLive
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:us-west-2:${AWS::AccountId}:table/GoldenHour-*'
+              - Sid: ManageApplicationQueuesAndTopics
+                Effect: Allow
+                Action:
+                  - sqs:AddPermission
+                  - sqs:CreateQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:ListQueueTags
+                  - sqs:RemovePermission
+                  - sqs:SetQueueAttributes
+                  - sqs:TagQueue
+                  - sqs:UntagQueue
+                  - sns:CreateTopic
+                  - sns:GetTopicAttributes
+                  - sns:SetTopicAttributes
+                  - sns:TagResource
+                  - sns:UntagResource
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-*'
+                  - !Sub 'arn:${AWS::Partition}:sns:us-west-2:${AWS::AccountId}:ian-photography-*'
+              - Sid: ManageApplicationSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:PutResourcePolicy
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:RemoveRegionsFromReplication
+                  - secretsmanager:ReplicateSecretToRegions
+                  - secretsmanager:RotateSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:UntagResource
+                  - secretsmanager:UpdateSecret
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:${ApplicationStackName}-*'
+                  - !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:ian-photography/front-door/*'
+              - Sid: GenerateApplicationSecretValues
+                Effect: Allow
+                Action: secretsmanager:GetRandomPassword
+                Resource: '*'
+        - PolicyName: ApplicationEdgeAndIdentity
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ManageRegionalHttpApi
+                Effect: Allow
+                Action:
+                  - apigateway:DELETE
+                  - apigateway:GET
+                  - apigateway:PATCH
+                  - apigateway:POST
+                  - apigateway:PUT
+                Resource: !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/apis*'
+              - Sid: CreateExactRegionalApiDomain
+                Effect: Allow
+                Action:
+                  - apigateway:AddCertificateToDomain
+                  - apigateway:POST
+                Resource: !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/domainnames'
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Application: IanTruongPhotography
+                  ForAllValues:StringEquals:
+                    apigateway:Request/EndpointType:
+                      - REGIONAL
+                    apigateway:Request/SecurityPolicy:
+                      - TLS_1_2
+              - Sid: ManageExactRegionalApiDomainAndMappings
+                Effect: Allow
+                Action:
+                  - apigateway:AddCertificateToDomain
+                  - apigateway:DELETE
+                  - apigateway:GET
+                  - apigateway:PATCH
+                  - apigateway:POST
+                  - apigateway:PUT
+                  - apigateway:RemoveCertificateFromDomain
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/domainnames/${ApplicationApiDomainName}'
+                  - !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/domainnames/${ApplicationApiDomainName}/apimappings'
+                  - !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/domainnames/${ApplicationApiDomainName}/apimappings/*'
+              - Sid: TagExactRegionalApiDomain
+                Effect: Allow
+                Action:
+                  - apigateway:DELETE
+                  - apigateway:GET
+                  - apigateway:POST
+                  - apigateway:PUT
+                Resource: !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/tags/arn%3A${AWS::Partition}%3Aapigateway%3Aus-west-2%3A%3A%2Fdomainnames%2F${ApplicationApiDomainName}'
+              - Sid: RequestExactRegionalApiCertificate
+                Effect: Allow
+                Action: acm:RequestCertificate
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    acm:ValidationMethod: DNS
+                    aws:RequestedRegion: us-west-2
+                    aws:RequestTag/Application: IanTruongPhotography
+                  ForAllValues:StringEquals:
+                    acm:DomainNames:
+                      - !Ref ApplicationApiDomainName
+              - Sid: ManageTaggedRegionalApiCertificates
+                Effect: Allow
+                Action:
+                  - acm:AddTagsToCertificate
+                  - acm:DescribeCertificate
+                  - acm:ListTagsForCertificate
+                  - acm:RemoveTagsFromCertificate
+                Resource: !Sub 'arn:${AWS::Partition}:acm:us-west-2:${AWS::AccountId}:certificate/*'
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/Application: IanTruongPhotography
+              - Sid: ReadExactApplicationHostedZone
+                Effect: Allow
+                Action:
+                  - route53:GetHostedZone
+                  - route53:ListResourceRecordSets
+                  - route53:ListTagsForResource
+                Resource: !Sub 'arn:${AWS::Partition}:route53:::hostedzone/${ApplicationHostedZoneId}'
+              - Sid: ChangeExactFrontDoorRecords
+                Effect: Allow
+                Action: route53:ChangeResourceRecordSets
+                Resource: !Sub 'arn:${AWS::Partition}:route53:::hostedzone/${ApplicationHostedZoneId}'
+                Condition:
+                  ForAllValues:StringEquals:
+                    route53:ChangeResourceRecordSetsActions:
+                      - CREATE
+                      - DELETE
+                      - UPSERT
+                    route53:ChangeResourceRecordSetsRecordTypes:
+                      - A
+                      - CNAME
+                  ForAllValues:StringLike:
+                    route53:ChangeResourceRecordSetsNormalizedRecordNames:
+                      - !Sub '${ApplicationApiDomainName}.'
+                      - !Sub '*.${ApplicationApiDomainName}.'
+              - Sid: ReadApplicationDnsChangeStatus
+                Effect: Allow
+                Action: route53:GetChange
+                Resource: !Sub 'arn:${AWS::Partition}:route53:::change/*'
+              - Sid: ManageApplicationUserPool
+                Effect: Allow
+                Action:
+                  - cognito-idp:AddCustomAttributes
+                  - cognito-idp:CreateGroup
+                  - cognito-idp:CreateUserPool
+                  - cognito-idp:CreateUserPoolClient
+                  - cognito-idp:DescribeUserPool
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:GetGroup
+                  - cognito-idp:ListGroups
+                  - cognito-idp:ListTagsForResource
+                  - cognito-idp:SetUserPoolMfaConfig
+                  - cognito-idp:TagResource
+                  - cognito-idp:UntagResource
+                  - cognito-idp:UpdateGroup
+                  - cognito-idp:UpdateUserPool
+                  - cognito-idp:UpdateUserPoolClient
+                Resource: !Sub 'arn:${AWS::Partition}:cognito-idp:us-west-2:${AWS::AccountId}:userpool/*'
+              - Sid: CreateTaggedUserPool
+                Effect: Allow
+                Action: cognito-idp:CreateUserPool
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Application: IanTruongPhotography
+              - Sid: ManageApplicationCloudFront
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateCachePolicy
+                  - cloudfront:CreateDistribution
+                  - cloudfront:CreateOriginAccessControl
+                  - cloudfront:CreateResponseHeadersPolicy
+                  - cloudfront:GetCachePolicy
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:GetOriginAccessControl
+                  - cloudfront:GetResponseHeadersPolicy
+                  - cloudfront:ListTagsForResource
+                  - cloudfront:TagResource
+                  - cloudfront:UntagResource
+                  - cloudfront:UpdateCachePolicy
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:UpdateOriginAccessControl
+                  - cloudfront:UpdateResponseHeadersPolicy
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:cache-policy/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:response-headers-policy/*'
+              - Sid: CreateCloudFrontResources
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateCachePolicy
+                  - cloudfront:CreateDistribution
+                  - cloudfront:CreateOriginAccessControl
+                  - cloudfront:CreateResponseHeadersPolicy
+                Resource: '*'
+        - PolicyName: ApplicationEncryptionAndObservability
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CreateTaggedApplicationKey
+                Effect: Allow
+                Action: kms:CreateKey
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Application: IanTruongPhotography
+              - Sid: ManageApplicationKeysAndAliases
+                Effect: Allow
+                Action:
+                  - kms:CreateAlias
+                  - kms:DescribeKey
+                  - kms:EnableKeyRotation
+                  - kms:GetKeyPolicy
+                  - kms:GetKeyRotationStatus
+                  - kms:ListResourceTags
+                  - kms:PutKeyPolicy
+                  - kms:TagResource
+                  - kms:UntagResource
+                  - kms:UpdateAlias
+                  - kms:UpdateKeyDescription
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*'
+                  - !Sub 'arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:alias/ian-photography-*'
+              - Sid: ManageApplicationLogsMetricsAndAlarms
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DeleteMetricFilter
+                  - logs:DescribeMetricFilters
+                  - logs:ListTagsForResource
+                  - logs:PutMetricFilter
+                  - logs:PutRetentionPolicy
+                  - logs:TagResource
+                  - logs:UntagResource
+                  - cloudwatch:DeleteAlarms
+                  - cloudwatch:ListTagsForResource
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:TagResource
+                  - cloudwatch:UntagResource
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/apigateway/ian-photography-*'
+                  - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/ian-photography/application/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:${ApplicationStackName}-*'
+              - Sid: ReadGlobalObservabilityInventories
+                Effect: Allow
+                Action:
+                  - cloudwatch:DescribeAlarms
+                  - logs:DescribeLogGroups
+                Resource: '*'
+              - Sid: ProtectRetainedApplicationData
+                Effect: Deny
+                Action:
+                  - cloudfront:DeleteDistribution
+                  - cognito-idp:DeleteUserPool
+                  - dynamodb:DeleteTable
+                  - kms:DisableKey
+                  - kms:ScheduleKeyDeletion
+                  - s3:DeleteBucket
+                  - secretsmanager:DeleteSecret
+                Resource: '*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: CiBoundary
+          Value: CloudFormationExecution
+
+Outputs:
+  GitHubOidcProviderArn:
+    Description: Existing or newly created GitHub Actions OIDC provider ARN.
+    Value: !If
+      - CreateGitHubOidcProvider
+      - !Ref GitHubOidcProvider
+      - !Ref ExistingGitHubOidcProviderArn
+  ReleaseArtifactBucketName:
+    Value: !Ref ReleaseArtifactBucket
+  ReleaseArtifactKeyArn:
+    Value: !GetAtt ReleaseArtifactKey.Arn
+  PlanRoleArn:
+    Value: !GetAtt PlanRole.Arn
+  ExecuteRoleArn:
+    Value: !GetAtt ExecuteRole.Arn
+  FrontendRoleArn:
+    Value: !GetAtt FrontendRole.Arn
+  AuditRoleArn:
+    Value: !GetAtt AuditRole.Arn
+  CloudFormationExecutionRoleArn:
+    Value: !GetAtt CloudFormationExecutionRole.Arn
+  RequiredGitHubRepository:
+    Value: iant4093/photographywebsite
+  RequiredDefaultBranch:
+    Value: !Ref DefaultBranch
+  RequiredGitHubEnvironments:
+    Value: production-plan,production,production-audit

@@ -11,6 +11,8 @@ import os
 import time
 from typing import Any
 
+from audit_helpers import actor_context, emit_audit_event
+
 class AuthError(Exception):
     """An authentication/authorization error safe to map to an HTTP response."""
 
@@ -172,8 +174,29 @@ def require_admin(event):
     try:
         claims = get_verified_claims(event, required=True)
     except AuthError as error:
+        emit_audit_event(
+            event_name="authorization.admin_access",
+            outcome="denied",
+            action="authorization.admin.require",
+            resource_type="authorization",
+            reason_code="authentication_required" if error.status_code == 401 else "authentication_unavailable",
+            event=event,
+            actor_type="anonymous",
+            auth_method="none",
+        )
         return auth_error_response(error)
     if not is_admin(claims):
+        actor_type, auth_method = actor_context(event)
+        emit_audit_event(
+            event_name="authorization.admin_access",
+            outcome="denied",
+            action="authorization.admin.require",
+            resource_type="authorization",
+            reason_code="admin_group_required",
+            event=event,
+            actor_type=actor_type,
+            auth_method=auth_method,
+        )
         return auth_error_response(AuthError("Forbidden — admin access required", 403))
     return None
 

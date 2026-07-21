@@ -6,11 +6,12 @@ import os
 import posixpath
 import re
 import urllib.parse
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from validation_helpers import ALLOWED_VISIBILITIES, ValidationError, validate_uuid
 
@@ -20,8 +21,12 @@ PENDING_VISIBILITY = "pending"
 ALLOWED_TAG_VALUES = ALLOWED_VISIBILITIES | {PENDING_VISIBILITY}
 PROTECTED_VISIBILITIES = {"private", "unlisted", PENDING_VISIBILITY}
 LEGACY_PREFIX_SEGMENT = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?$")
+PREVIEW_VERSION = 2
+PREVIEW_WIDTHS = (640, 1280)
 
 _s3 = None
+_dynamodb = None
+logger = logging.getLogger("photography_api.media_access")
 
 
 def get_s3_client():
@@ -37,6 +42,13 @@ def get_s3_client():
             ),
         )
     return _s3
+
+
+def get_dynamodb_resource():
+    global _dynamodb
+    if _dynamodb is None:
+        _dynamodb = boto3.resource("dynamodb")
+    return _dynamodb
 
 
 def bucket_name():
@@ -165,6 +177,123 @@ def media_id_for_key(key):
     return hashlib.sha256(normalize_object_key(key).encode("utf-8")).hexdigest()[:24]
 
 
+def expected_preview_keys(album_id, raw_key):
+    media_id = media_id_for_key(raw_key)
+    prefix = f"{canonical_album_prefix(album_id)}preview/v{PREVIEW_VERSION}/"
+    return {str(width): f"{prefix}{media_id}-w{width}.webp" for width in PREVIEW_WIDTHS}
+
+
+def validated_preview_keys(image, album, metadata=None, *, allow_pending=False):
+    """Return only a complete deterministic v2 derivative set.
+
+    Stored preview metadata is optional. Any partial, cross-album, or
+    non-deterministic value is ignored so callers retain the legacy thumbnail
+    instead of leaking or selecting an untrusted object.
+    """
+    if not isinstance(image, dict) or not isinstance(album, dict) or not isinstance(metadata, dict):
+        return {}
+    valid_statuses = {"ready", "pending"} if allow_pending else {"ready"}
+    if metadata.get("status") not in valid_statuses or metadata.get("previewVersion") != PREVIEW_VERSION:
+        return {}
+    raw_key = _raw_key(image)
+    media_id = media_id_for_key(raw_key) if raw_key else ""
+    if metadata.get("albumId") != album.get("albumId") or metadata.get("mediaId") != media_id:
+        return {}
+    preview_keys = metadata.get("previewKeys")
+    if not isinstance(preview_keys, dict) or set(preview_keys) != {str(width) for width in PREVIEW_WIDTHS}:
+        return {}
+    try:
+        raw_key = validate_album_media_key(_raw_key(image), album=album)
+        expected = expected_preview_keys(album.get("albumId"), raw_key)
+        validated = {
+            str(width): validate_album_media_key(preview_keys[str(width)], album=album)
+            for width in PREVIEW_WIDTHS
+        }
+    except (KeyError, ValidationError):
+        return {}
+    return validated if validated == expected else {}
+
+
+def load_preview_metadata(album, images=None, *, strict=False):
+    """Batch-read external derivative state for exact manifest media IDs."""
+    table_name = os.environ.get("PREVIEW_METADATA_TABLE", "").strip()
+    if not table_name or not isinstance(album, dict):
+        return {}
+    sources = images if images is not None else album.get("images", [])
+    media_ids = []
+    seen_media_ids = set()
+    for image in sources if isinstance(sources, list) else []:
+        try:
+            raw_key = validate_album_media_key(_raw_key(image), album=album)
+            media_id = media_id_for_key(raw_key)
+            if media_id not in seen_media_ids:
+                seen_media_ids.add(media_id)
+                media_ids.append(media_id)
+        except ValidationError:
+            continue
+    if not media_ids:
+        return {}
+
+    results = {}
+    resource = get_dynamodb_resource()
+    try:
+        for offset in range(0, len(media_ids), 100):
+            request = {
+                table_name: {
+                    "Keys": [
+                        {"albumId": album.get("albumId"), "mediaId": media_id}
+                        for media_id in media_ids[offset:offset + 100]
+                    ],
+                    "ConsistentRead": False,
+                }
+            }
+            for _attempt in range(3):
+                response = resource.batch_get_item(RequestItems=request)
+                for item in response.get("Responses", {}).get(table_name, []):
+                    if isinstance(item, dict) and isinstance(item.get("mediaId"), str):
+                        results[item["mediaId"]] = item
+                unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", [])
+                if not unprocessed:
+                    break
+                request = {table_name: {"Keys": unprocessed, "ConsistentRead": False}}
+            else:
+                if strict:
+                    raise RuntimeError("Preview metadata read remained unprocessed")
+    except (BotoCoreError, ClientError) as error:
+        # V1 thumbnails are the availability-safe fallback during rollout.
+        if strict:
+            raise
+        logger.error("preview_metadata_read_failed error_type=%s", type(error).__name__)
+        return {}
+    return results
+
+
+def delete_preview_metadata(album_id, media_ids):
+    table_name = os.environ.get("PREVIEW_METADATA_TABLE", "").strip()
+    if not table_name:
+        return 0
+    unique_ids = sorted(set(media_ids))
+    table = get_dynamodb_resource().Table(table_name)
+    with table.batch_writer(overwrite_by_pkeys=["albumId", "mediaId"]) as batch:
+        for media_id in unique_ids:
+            batch.delete_item(Key={"albumId": album_id, "mediaId": media_id})
+    return len(unique_ids)
+
+
+def preview_known_keys(album, *, strict=True):
+    metadata_by_id = load_preview_metadata(album, strict=strict)
+    keys = []
+    for image in album.get("images", []) if isinstance(album.get("images", []), list) else []:
+        try:
+            raw_key = validate_album_media_key(_raw_key(image), album=album)
+            media_id = media_id_for_key(raw_key)
+        except ValidationError:
+            continue
+        metadata = metadata_by_id.get(media_id, {})
+        keys.extend(validated_preview_keys(image, album, metadata, allow_pending=True).values())
+    return keys
+
+
 def _raw_key(image):
     if isinstance(image, str):
         return image
@@ -183,7 +312,7 @@ def find_image_by_media_id(album, media_id):
     return None
 
 
-def serialize_image(image, visibility, *, include_internal=False):
+def serialize_image(image, visibility, *, include_internal=False, album=None, preview_metadata=None):
     key = normalize_object_key(_raw_key(image))
     source = image if isinstance(image, dict) else {}
     thumb_key = source.get("thumbKey") or ""
@@ -193,6 +322,12 @@ def serialize_image(image, visibility, *, include_internal=False):
         "url": media_url(key, visibility),
         "thumbnailUrl": media_url(thumb_key, visibility) if thumb_key else media_url(key, visibility),
     }
+    preview_keys = validated_preview_keys(source, album, preview_metadata) if album else {}
+    if preview_keys:
+        result["previewSrcSet"] = [
+            {"width": width, "url": media_url(preview_keys[str(width)], visibility)}
+            for width in PREVIEW_WIDTHS
+        ]
     if visibility == "public":
         result["downloadUrl"] = public_url(key)
     else:
@@ -209,6 +344,8 @@ def serialize_image(image, visibility, *, include_internal=False):
         result["hlsUrl"] = media_url(hls_key, visibility)
     if include_internal:
         result.update({"rawKey": key, "thumbKey": thumb_key, "hlsKey": hls_key})
+        if preview_keys:
+            result.update({"previewVersion": PREVIEW_VERSION, "previewKeys": preview_keys})
         if "mediaConvertJobId" in source:
             result["mediaConvertJobId"] = source["mediaConvertJobId"]
     return result
@@ -219,6 +356,7 @@ def serialize_images(album, *, include_internal=False):
     if visibility not in ALLOWED_VISIBILITIES:
         raise ValidationError("Album has an invalid visibility")
     results = []
+    validated_images = []
     for image in album.get("images", []):
         try:
             source = image if isinstance(image, dict) else {"rawKey": image}
@@ -235,10 +373,20 @@ def serialize_images(album, *, include_internal=False):
                         source[field],
                         album=album,
                     )
-            results.append(serialize_image(validated, visibility, include_internal=include_internal))
+            validated_images.append(validated)
         except ValidationError:
             # A malformed stored key must not cause an out-of-namespace URL leak.
             continue
+    metadata_by_id = load_preview_metadata(album, validated_images)
+    for validated in validated_images:
+        media_id = media_id_for_key(validated["rawKey"])
+        results.append(serialize_image(
+            validated,
+            visibility,
+            include_internal=include_internal,
+            album=album,
+            preview_metadata=metadata_by_id.get(media_id),
+        ))
     return results
 
 
@@ -357,7 +505,11 @@ def album_known_keys(album):
             validated.append(validate_album_media_key(key, album=album))
         except ValidationError:
             continue
-    return validated
+    return [*validated, *preview_known_keys(album)]
+
+
+def tag_preview_visibility(album, visibility):
+    return tag_keys_visibility(preview_known_keys(album), visibility)
 
 
 def _hls_prefixes(album):

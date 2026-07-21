@@ -1,20 +1,44 @@
 {
-  "version": 1,
+  "version": 2,
   "allowed_origin_stages": ["s3-website", "s3-rest-oac"],
   "canonical_alias": "iantruongphotography.com",
   "optional_www_alias": "www.iantruongphotography.com",
+  "api_origin_domain": "origin-api.iantruongphotography.com",
+  "api_front_door": {
+    "origin_id": "ian-photography-regional-api-v1",
+    "origin_domain": "origin-api.iantruongphotography.com",
+    "verification_header": "X-Origin-Verify",
+    "public_path_pattern": "/api/public/*",
+    "private_path_pattern": "/api/*",
+    "public_query_strings": ["cursor", "limit", "type"],
+    "public_forward_headers": ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
+    "private_forward_headers": ["Authorization", "Content-Type", "Origin", "X-Turnstile-Token", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
+    "public_cache_policy_name": "IanTruong-API-Public-Catalog-v1",
+    "public_origin_request_policy_name": "IanTruong-API-Public-Origin-v1",
+    "private_origin_request_policy_name": "IanTruong-API-Private-Origin-v1",
+    "response_policy_name": "IanTruong-API-Security-v1",
+    "short_error_codes": [400, 401, 403, 404, 405, 429, 500, 502, 503, 504],
+    "error_caching_min_ttl": 1
+  },
   "cache_policies": {
     "html": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+    "static": "658327ea-f89d-4fab-a63d-7e88639e58f6",
     "immutable": "658327ea-f89d-4fab-a63d-7e88639e58f6"
   },
   "response_policy_names": {
     "html": "IanTruong-Frontend-HTML-Security-v1",
+    "static": "IanTruong-Frontend-Static-Security-v1",
     "immutable": "IanTruong-Frontend-Immutable-Security-v1"
   },
-  "content_security_policy_template": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: {media_origin} {s3_origins}; media-src 'self' blob: {media_origin} {s3_origins}; connect-src 'self' {api_origin} {cognito_origin} {media_origin} {s3_origins} https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests",
+  "content_security_policy_template": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: {media_origin} {s3_origins}; media-src 'self' blob: {media_origin} {s3_origins}; connect-src 'self' {cognito_origin} {media_origin} {s3_origins} https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests",
   "permissions_policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
   "html_cache_control": "no-cache, max-age=0, must-revalidate",
+  "static_cache_control": "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
   "immutable_cache_control": "public, max-age=31536000, immutable",
+  "static_path_patterns": [
+    "images/heroes/*",
+    "favicon.svg"
+  ],
   "immutable_path_patterns": [
     "assets/*"
   ]

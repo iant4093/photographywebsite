@@ -14,10 +14,16 @@ export default function ProgressiveImage({
     onError,
 }) {
     const [visibleSrc, setVisibleSrc] = useState(eager ? src : null)
-    const [loadedSrc, setLoadedSrc] = useState(null)
+    const [loadedIdentity, setLoadedIdentity] = useState(null)
+    const [failedResponsiveIdentity, setFailedResponsiveIdentity] = useState(null)
     const containerRef = useRef(null)
     const shouldLoad = eager || visibleSrc === src
-    const isLoaded = loadedSrc === src
+    const responsiveIdentity = srcSet ? `${src}\n${srcSet}` : ''
+    const effectiveSrcSet = responsiveIdentity && failedResponsiveIdentity !== responsiveIdentity
+        ? srcSet
+        : undefined
+    const imageIdentity = effectiveSrcSet ? `responsive:${responsiveIdentity}` : `fallback:${src}`
+    const isLoaded = loadedIdentity === imageIdentity
 
     useEffect(() => {
         if (!src || eager || visibleSrc === src) return undefined
@@ -46,8 +52,9 @@ export default function ProgressiveImage({
             )}
             {shouldLoad && (
                 <img
+                    key={imageIdentity}
                     src={src}
-                    srcSet={srcSet}
+                    srcSet={effectiveSrcSet}
                     sizes={sizes}
                     alt={alt}
                     width={width}
@@ -55,9 +62,13 @@ export default function ProgressiveImage({
                     loading={eager ? 'eager' : 'lazy'}
                     fetchPriority={eager ? 'high' : 'low'}
                     decoding="async"
-                    onLoad={() => setLoadedSrc(src)}
+                    onLoad={() => setLoadedIdentity(imageIdentity)}
                     onError={(event) => {
-                        setLoadedSrc(src)
+                        if (effectiveSrcSet) {
+                            setFailedResponsiveIdentity(responsiveIdentity)
+                            return
+                        }
+                        setLoadedIdentity(imageIdentity)
                         onError?.(event)
                     }}
                     className={`absolute inset-0 z-0 h-full w-full object-cover transition-all duration-500 ease-out ${isLoaded ? 'scale-100 opacity-100' : 'scale-[1.02] opacity-0'}`}

@@ -1,0 +1,24 @@
+[run]
+branch = True
+source =
+    ops
+relative_files = True
+omit =
+    ops/tests/*
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+skip_empty = True
+fail_under = 80
+
+[html]
+directory = coverage/ops/html
+
+[xml]
+output = coverage/ops/coverage.xml
+
+[json]
+output = coverage/ops/coverage.json
+pretty_print = True

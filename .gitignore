@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .env
 .env.*
+!.env.example
 voice-assistant-*.json
 google_client_secret.json
 google_oauth_token.json
@@ -35,7 +36,16 @@ __pycache__/
 *$py.class
 venv/
 env/
+.venv*/
 .pytest_cache/
+.coverage
+.coverage.*
+/coverage/
+/evidence/
+htmlcov/
+coverage.xml
+coverage.json
+lcov.info
 cf-config*.json
 cf-etag.txt
 

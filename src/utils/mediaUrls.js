@@ -8,6 +8,42 @@ const DISPLAY_URL_FIELDS = [
     'coverThumbnailUrl',
 ]
 
+const PREVIEW_WIDTHS = [640, 1280]
+
+function safePreviewUrl(value) {
+    if (typeof value !== 'string' || value.length > 4096 || /[\s,]/.test(value)) return ''
+    try {
+        const parsed = new URL(value)
+        return parsed.protocol === 'https:' ? value : ''
+    } catch {
+        return ''
+    }
+}
+
+export function mediaPreviewCandidates(media) {
+    if (!media || typeof media !== 'object' || !Array.isArray(media.previewSrcSet)) return []
+    if (media.previewSrcSet.length !== PREVIEW_WIDTHS.length) return []
+
+    const candidates = media.previewSrcSet
+        .map((candidate) => ({
+            width: Number(candidate?.width),
+            url: safePreviewUrl(candidate?.url),
+        }))
+        .sort((left, right) => left.width - right.width)
+
+    const complete = candidates.every((candidate, index) => (
+        candidate.width === PREVIEW_WIDTHS[index] && candidate.url
+    ))
+    return complete ? candidates : []
+}
+
+export function mediaPreviewSrcSet(media) {
+    const candidates = mediaPreviewCandidates(media)
+    return candidates.length === PREVIEW_WIDTHS.length
+        ? candidates.map(({ width, url }) => `${url} ${width}w`).join(', ')
+        : ''
+}
+
 function parseAwsDate(value) {
     const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value || '')
     if (!match) return null
@@ -42,15 +78,18 @@ export function mediaExpiresAt(media) {
 
     const explicitValue = media.mediaExpiresAt || media.expiresAt
     const numericExpiry = Number(explicitValue)
+    let explicitExpiry = null
     if (Number.isFinite(numericExpiry) && numericExpiry > 0) {
-        return numericExpiry < 1_000_000_000_000 ? numericExpiry * 1000 : numericExpiry
+        explicitExpiry = numericExpiry < 1_000_000_000_000 ? numericExpiry * 1000 : numericExpiry
     }
     const datedExpiry = typeof explicitValue === 'string' ? Date.parse(explicitValue) : Number.NaN
-    if (Number.isFinite(datedExpiry) && datedExpiry > 0) return datedExpiry
+    if (Number.isFinite(datedExpiry) && datedExpiry > 0) explicitExpiry = datedExpiry
 
-    const expiries = DISPLAY_URL_FIELDS
-        .map((field) => signedUrlExpiresAt(media[field]))
+    const candidateUrls = mediaPreviewCandidates(media).map(({ url }) => url)
+    const expiries = [...DISPLAY_URL_FIELDS.map((field) => media[field]), ...candidateUrls]
+        .map(signedUrlExpiresAt)
         .filter(Number.isFinite)
+    if (explicitExpiry) expiries.push(explicitExpiry)
     return expiries.length > 0 ? Math.min(...expiries) : null
 }
 

@@ -1,0 +1,47 @@
+name: Scheduled security and drift audit
+
+on:
+  schedule:
+    - cron: '23 9 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: scheduled-security
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    uses: ./.github/workflows/_quality.yml
+    permissions:
+      contents: read
+      security-events: write
+
+  production-drift:
+    name: Read-only production drift check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production-audit
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_AUDIT_ROLE_ARN }}
+          role-session-name: audit-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+      - name: Detect but never remediate drift
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          STACK_NAME: ${{ vars.AWS_STACK_NAME }}
+        run: |
+          detection_id="$(aws cloudformation detect-stack-drift --region "$AWS_REGION" --stack-name "$STACK_NAME" --query StackDriftDetectionId --output text)"
+          DRIFT_DETECTION_ID="$detection_id" ./ops/ci/wait_for_drift.sh

@@ -6,6 +6,7 @@ import uuid
 
 import boto3
 
+from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from media_access import PENDING_VISIBILITY, bucket_name
 from response_helpers import error_response, internal_error, json_response
@@ -25,6 +26,21 @@ TYPE_POLICY = {
     "video/webm": ({".webm"}, 5 * 1024 * 1024 * 1024),
     "video/x-m4v": ({".m4v"}, 5 * 1024 * 1024 * 1024),
 }
+
+
+def _audit(event, context, outcome, reason_code):
+    actor_type, auth_method = actor_context(event)
+    emit_audit_event(
+        event_name="admin.upload_authorized",
+        outcome=outcome,
+        action="media.upload.authorize",
+        resource_type="media",
+        reason_code=reason_code,
+        event=event,
+        context=context,
+        actor_type=actor_type,
+        auth_method=auth_method,
+    )
 
 
 def _validate_upload_intent(body):
@@ -63,7 +79,13 @@ def _validate_upload_intent(body):
     return album_id, content_type, kind, extension, size, max_bytes
 
 
+from front_door import verify_front_door_request
+
+
 def handler(event, context):
+    front_door_denied = verify_front_door_request(event, context)
+    if front_door_denied:
+        return front_door_denied
     denied = require_admin(event)
     if denied:
         return denied
@@ -84,6 +106,7 @@ def handler(event, context):
             },
             ExpiresIn=expires_in,
         )
+        _audit(event, context, "success", "upload_authorized")
         return json_response(
             200,
             {
@@ -98,6 +121,8 @@ def handler(event, context):
             },
         )
     except ValidationError as error:
+        _audit(event, context, "denied", "invalid_upload")
         return error_response(400, str(error), code="invalid_upload")
     except Exception as error:
+        _audit(event, context, "failure", "unexpected_error")
         return internal_error(context, error, "create_upload_url")

@@ -80,6 +80,78 @@ class MediaAccessTests(unittest.TestCase):
         self.assertIn("expiresAt", result)
         self.assertGreaterEqual(result["expiresIn"], 60)
 
+    def test_external_preview_metadata_adds_complete_public_srcset(self):
+        album = {"albumId": ALBUM_ID, "visibility": "public", "images": [self.image]}
+        media_id = media_access.media_id_for_key(self.image["rawKey"])
+        keys = media_access.expected_preview_keys(ALBUM_ID, self.image["rawKey"])
+        metadata = {
+            "albumId": ALBUM_ID,
+            "mediaId": media_id,
+            "status": "ready",
+            "previewVersion": 2,
+            "previewKeys": keys,
+        }
+        with patch.object(media_access, "load_preview_metadata", return_value={media_id: metadata}):
+            result = media_access.serialize_images(album, include_internal=True)[0]
+        self.assertEqual([item["width"] for item in result["previewSrcSet"]], [640, 1280])
+        self.assertTrue(all(item["url"].startswith("https://media.example.test/") for item in result["previewSrcSet"]))
+        self.assertEqual(result["previewVersion"], 2)
+        self.assertEqual(result["previewKeys"], keys)
+
+    def test_partial_or_non_deterministic_preview_metadata_is_ignored(self):
+        album = {"albumId": ALBUM_ID, "visibility": "public", "images": [self.image]}
+        media_id = media_access.media_id_for_key(self.image["rawKey"])
+        malformed = {
+            "albumId": ALBUM_ID,
+            "mediaId": media_id,
+            "status": "ready",
+            "previewVersion": 2,
+            "previewKeys": {"640": f"albums/{ALBUM_ID}/preview/v2/wrong-w640.webp"},
+        }
+        with patch.object(media_access, "load_preview_metadata", return_value={media_id: malformed}):
+            result = media_access.serialize_images(album)[0]
+        self.assertNotIn("previewSrcSet", result)
+        self.assertIn("thumbnailUrl", result)
+
+    def test_pending_preview_keys_are_known_for_visibility_tagging(self):
+        album = {"albumId": ALBUM_ID, "visibility": "private", "images": [self.image]}
+        media_id = media_access.media_id_for_key(self.image["rawKey"])
+        keys = media_access.expected_preview_keys(ALBUM_ID, self.image["rawKey"])
+        metadata = {
+            "albumId": ALBUM_ID,
+            "mediaId": media_id,
+            "status": "pending",
+            "previewVersion": 2,
+            "previewKeys": keys,
+        }
+        with patch.object(media_access, "load_preview_metadata", return_value={media_id: metadata}):
+            self.assertEqual(set(media_access.preview_known_keys(album)), set(keys.values()))
+
+    def test_preview_metadata_batch_get_deduplicates_manifest_media_ids(self):
+        album = {"albumId": ALBUM_ID, "images": [self.image, dict(self.image)]}
+        resource = Mock()
+        resource.batch_get_item.return_value = {"Responses": {"preview-test": []}}
+        with patch.dict(os.environ, {"PREVIEW_METADATA_TABLE": "preview-test"}), patch.object(
+            media_access, "get_dynamodb_resource", return_value=resource
+        ):
+            self.assertEqual(media_access.load_preview_metadata(album), {})
+        keys = resource.batch_get_item.call_args.kwargs["RequestItems"]["preview-test"]["Keys"]
+        self.assertEqual(len(keys), 1)
+
+    def test_strict_preview_metadata_read_propagates_provider_failure(self):
+        album = {"albumId": ALBUM_ID, "images": [self.image]}
+        resource = Mock()
+        resource.batch_get_item.side_effect = ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException"}},
+            "BatchGetItem",
+        )
+        with patch.dict(os.environ, {"PREVIEW_METADATA_TABLE": "preview-test"}), patch.object(
+            media_access, "get_dynamodb_resource", return_value=resource
+        ):
+            self.assertEqual(media_access.load_preview_metadata(album), {})
+            with self.assertRaises(ClientError):
+                media_access.load_preview_metadata(album, strict=True)
+
     def test_public_summary_minimizes_owner_and_share_data(self):
         album = {
             "albumId": ALBUM_ID,

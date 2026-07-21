@@ -6,7 +6,13 @@ import react from 'eslint-plugin-react'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores([
+    'dist/**',
+    'coverage/**',
+    '**/.venv*/**',
+    'backend/.aws-sam/**',
+    'website_review/**',
+  ]),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

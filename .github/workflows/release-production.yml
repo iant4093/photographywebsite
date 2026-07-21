@@ -1,0 +1,240 @@
+name: Release production
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: iantruongphotography-production
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    uses: ./.github/workflows/_quality.yml
+    with:
+      publish_release_artifacts: true
+    permissions:
+      contents: read
+      security-events: write
+
+  attest:
+    name: Verify and attest exact artifacts
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-frontend
+          path: release/frontend
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-backend
+          path: release/backend
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-sbom
+          path: release/sbom
+      - name: Verify artifact checksums before attestation
+        run: |
+          python3 ops/ci/release_guard.py verify-manifest release/frontend/dist release/frontend/manifest.json
+          python3 ops/ci/release_guard.py verify-manifest release/backend release/backend/manifest.json --allow-sibling-manifest
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: release/frontend/manifest.json
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: release/backend/backend-build.tar.gz
+      - uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2.4.0
+        with:
+          subject-path: release/frontend/manifest.json
+          sbom-path: release/sbom/frontend.cdx.json
+      - uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2.4.0
+        with:
+          subject-path: release/backend/backend-build.tar.gz
+          sbom-path: release/sbom/backend.cdx.json
+      - uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2.4.0
+        if: hashFiles('release/sbom/preview-worker.cdx.json') != ''
+        with:
+          subject-path: release/backend/backend-build.tar.gz
+          sbom-path: release/sbom/preview-worker.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: attested-release
+          path: release
+          if-no-files-found: error
+          retention-days: 90
+
+  backend-plan:
+    name: Plan and guard backend
+    needs: attest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production-plan
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    outputs:
+      change_set_id: ${{ steps.plan.outputs.change_set_id }}
+      noop: ${{ steps.plan.outputs.noop }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: attested-release
+          path: release
+      - name: Verify and extract tested SAM build
+        run: |
+          python3 ops/ci/release_guard.py verify-manifest release/backend release/backend/manifest.json --allow-sibling-manifest
+          python3 ops/ci/release_guard.py verify-tar release/backend/backend-build.tar.gz
+          mkdir -p release/backend/.aws-sam
+          tar -xzf release/backend/backend-build.tar.gz -C release/backend
+      - uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
+        with:
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+      - name: Create non-executing guarded change set
+        id: plan
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          STACK_NAME: ${{ vars.AWS_STACK_NAME }}
+          ARTIFACT_BUCKET: ${{ vars.AWS_RELEASE_ARTIFACT_BUCKET }}
+          CLOUDFORMATION_EXECUTION_ROLE_ARN: ${{ vars.AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN }}
+        run: ./ops/ci/backend_plan.sh
+
+  backend-deploy:
+    name: Execute guarded backend change set
+    needs: backend-plan
+    if: needs.backend-plan.outputs.noop != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_EXECUTE_ROLE_ARN }}
+          role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+      - env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          STACK_NAME: ${{ vars.AWS_STACK_NAME }}
+          CHANGE_SET_ID: ${{ needs.backend-plan.outputs.change_set_id }}
+          EXPECTED_RELEASE_SHA: ${{ github.sha }}
+        run: ./ops/ci/backend_execute.sh
+
+  backend-smoke:
+    name: Public backend smoke test
+    needs: [backend-plan, backend-deploy]
+    if: always() && needs.backend-plan.result == 'success' && (needs.backend-deploy.result == 'success' || needs.backend-deploy.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: ./ops/ci/public_smoke.sh
+
+  frontend-deploy:
+    name: Deploy exact frontend artifact
+    needs: [attest, backend-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: attested-release
+          path: release
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_FRONTEND_ROLE_ARN }}
+          role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+      - env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          FRONTEND_BUCKET: ${{ vars.FRONTEND_BUCKET }}
+          FRONTEND_DISTRIBUTION_ID: ${{ vars.FRONTEND_DISTRIBUTION_ID }}
+        run: ./ops/ci/frontend_deploy.sh
+      - env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: ./ops/ci/public_smoke.sh
+
+  release-record:
+    name: Publish sanitized release record
+    needs: [quality, attest, backend-plan, backend-deploy, backend-smoke, frontend-deploy]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Write audit-safe release summary
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = {name: value['result'] for name, value in json.loads(os.environ['RESULTS']).items()}
+          lines = [
+              '# Production release record',
+              '',
+              f"- Commit: `{os.environ['RELEASE_SHA']}`",
+              f"- Workflow run: `{os.environ['RUN_ID']}` attempt `{os.environ['RUN_ATTEMPT']}`",
+              '- Job results:',
+          ]
+          lines.extend(f"  - `{name}`: `{result}`" for name, result in sorted(results.items()))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('\n'.join(lines) + '\n')
+          if results.get('frontend-deploy') != 'success':
+              raise SystemExit('Production release did not complete.')
+          PY

@@ -9,7 +9,9 @@ import { getCatalogSnapshot, setCatalogSnapshot } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 
 const CATALOG_KEY = 'public-videos'
-const PAGE_SIZE = 24
+// The API enforces 100 as its maximum, which keeps today's video catalog to a
+// single request without removing the existing cursor safety net.
+const PAGE_SIZE = 100
 const HERO_WIDTHS = [640, 960, 1280, 1920]
 const heroSet = (format) => HERO_WIDTHS
     .map((width) => `/images/heroes/video-${width}.${format} ${width}w`)

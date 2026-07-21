@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Guarded account and regional security services. Every singleton defaults to
+  skip and may be created only after read-only inventory proves it is absent.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    MinLength: 1
+    MaxLength: 20
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
+  SecurityAuditBucketName:
+    Type: String
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Exact bucket name output by the audit foundation stack.
+  ConfigDeploymentMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-absent]
+  GuardDutyDeploymentMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-absent]
+  SecurityHubDeploymentMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-absent]
+  AccessAnalyzerDeploymentMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-absent]
+  GlobalResourceRecordingMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, record-confirmed-home-region]
+    Description: Record IAM and CloudFront resources only in the designated home region.
+
+Conditions:
+  CreateConfig: !Equals [!Ref ConfigDeploymentMode, create-confirmed-absent]
+  CreateGuardDuty: !Equals [!Ref GuardDutyDeploymentMode, create-confirmed-absent]
+  CreateSecurityHub: !Equals [!Ref SecurityHubDeploymentMode, create-confirmed-absent]
+  CreateAccessAnalyzer: !Equals [!Ref AccessAnalyzerDeploymentMode, create-confirmed-absent]
+  RecordGlobalResources: !Equals [!Ref GlobalResourceRecordingMode, record-confirmed-home-region]
+
+Resources:
+  AccountExternalAccessAnalyzer:
+    Type: AWS::AccessAnalyzer::Analyzer
+    Condition: CreateAccessAnalyzer
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      AnalyzerName: !Sub 'ian-photography-external-access-${Stage}'
+      Type: ACCOUNT
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  GuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Condition: CreateGuardDuty
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Enable: true
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+      Features:
+        - Name: S3_DATA_EVENTS
+          Status: ENABLED
+        - Name: EKS_AUDIT_LOGS
+          Status: DISABLED
+        - Name: EBS_MALWARE_PROTECTION
+          Status: DISABLED
+        - Name: RDS_LOGIN_EVENTS
+          Status: DISABLED
+        - Name: LAMBDA_NETWORK_LOGS
+          Status: ENABLED
+        - Name: RUNTIME_MONITORING
+          Status: DISABLED
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecurityHub:
+    Type: AWS::SecurityHub::Hub
+    Condition: CreateSecurityHub
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      EnableDefaultStandards: true
+      ControlFindingGenerator: SECURITY_CONTROL
+      Tags:
+        Application: IanTruongPhotography
+        Stage: !Ref Stage
+
+  ConfigRole:
+    Type: AWS::IAM::Role
+    Condition: CreateConfig
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:*'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWS_ConfigRole'
+      Policies:
+        - PolicyName: DeliverConfigurationHistory
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketAcl
+                  - s3:ListBucket
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${SecurityAuditBucketName}'
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${SecurityAuditBucketName}/AWSLogs/${AWS::AccountId}/Config/*'
+                Condition:
+                  StringEquals:
+                    s3:x-amz-acl: bucket-owner-full-control
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Condition: CreateConfig
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub 'ian-photography-${Stage}'
+      RoleARN: !GetAtt ConfigRole.Arn
+      RecordingGroup:
+        AllSupported: false
+        ResourceTypes:
+          - AWS::S3::Bucket
+          - AWS::DynamoDB::Table
+          - AWS::Lambda::Function
+          - AWS::CloudTrail::Trail
+          - AWS::ApiGatewayV2::Api
+          - AWS::Cognito::UserPool
+          - AWS::SNS::Topic
+          - AWS::SQS::Queue
+          - AWS::KMS::Key
+          - !If [RecordGlobalResources, 'AWS::IAM::User', !Ref AWS::NoValue]
+          - !If [RecordGlobalResources, 'AWS::IAM::Role', !Ref AWS::NoValue]
+          - !If [RecordGlobalResources, 'AWS::IAM::Policy', !Ref AWS::NoValue]
+          - !If [RecordGlobalResources, 'AWS::CloudFront::Distribution', !Ref AWS::NoValue]
+
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Condition: CreateConfig
+    DependsOn: ConfigRecorder
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub 'ian-photography-${Stage}'
+      S3BucketName: !Ref SecurityAuditBucketName
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: TwentyFour_Hours
+
+  ConfigCloudTrailEnabled:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-cloudtrail-enabled-${Stage}'
+      Source:
+        Owner: AWS
+        SourceIdentifier: CLOUD_TRAIL_ENABLED
+
+  ConfigS3PublicReadProhibited:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-s3-public-read-prohibited-${Stage}'
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_PUBLIC_READ_PROHIBITED
+
+  ConfigS3SslOnly:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-s3-ssl-only-${Stage}'
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_SSL_REQUESTS_ONLY
+
+  ConfigDynamoDbPitr:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-dynamodb-pitr-${Stage}'
+      Source:
+        Owner: AWS
+        SourceIdentifier: DYNAMODB_PITR_ENABLED
+
+  ConfigRootAccessKey:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-root-access-key-${Stage}'
+      MaximumExecutionFrequency: TwentyFour_Hours
+      Source:
+        Owner: AWS
+        SourceIdentifier: IAM_ROOT_ACCESS_KEY_CHECK
+
+Outputs:
+  ConfigWasCreated:
+    Value: !If [CreateConfig, 'true', 'false']
+  GuardDutyDetectorId:
+    Condition: CreateGuardDuty
+    Value: !Ref GuardDutyDetector
+  SecurityHubArn:
+    Condition: CreateSecurityHub
+    Value: !Ref SecurityHub
+  AccessAnalyzerArn:
+    Condition: CreateAccessAnalyzer
+    Value: !GetAtt AccountExternalAccessAnalyzer.Arn

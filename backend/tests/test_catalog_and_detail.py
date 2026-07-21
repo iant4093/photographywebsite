@@ -1,8 +1,10 @@
 import unittest
+import os
 from decimal import Decimal
 from unittest.mock import patch
 
 from boto3.dynamodb.conditions import ConditionExpressionBuilder
+from botocore.exceptions import ClientError
 
 from test_support import claims, gateway_event, response_body
 
@@ -35,6 +37,132 @@ def album(visibility="public", **overrides):
 
 
 class CatalogTests(unittest.TestCase):
+    def test_public_summary_query_uses_additive_include_index(self):
+        projected = album()
+        projected.pop("images")
+        projected["imageCount"] = Decimal("12")
+        with patch.dict(
+            os.environ,
+            {
+                "ALBUM_INDEX_DEPLOYMENT_PHASE": "both",
+                "PUBLIC_SUMMARY_INDEX": "VisibilityCreatedAtSummaryIndex",
+                "VISIBILITY_CREATED_AT_INDEX": "VisibilityCreatedAtIndex",
+            },
+        ), patch.object(
+            get_albums.table,
+            "query",
+            return_value={"Items": [projected]},
+        ) as query:
+            records, cursor = get_albums._fetch_page(
+                visibility="public",
+                album_type="photo",
+                limit=10,
+                start_key=None,
+                public_summary_only=True,
+            )
+
+        self.assertEqual(records, [projected])
+        self.assertIsNone(cursor)
+        params = query.call_args.kwargs
+        self.assertEqual(params["IndexName"], "VisibilityCreatedAtSummaryIndex")
+        self.assertFalse(params["ScanIndexForward"])
+        built = ConditionExpressionBuilder().build_expression(params["FilterExpression"])
+        self.assertIn("attribute_not_exists", built.condition_expression)
+
+    def test_missing_summary_index_falls_back_to_existing_visibility_index(self):
+        unavailable = ClientError(
+            {"Error": {"Code": "ResourceNotFoundException", "Message": "not active"}},
+            "Query",
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "ALBUM_INDEX_DEPLOYMENT_PHASE": "both",
+                "PUBLIC_SUMMARY_INDEX": "VisibilityCreatedAtSummaryIndex",
+                "VISIBILITY_CREATED_AT_INDEX": "VisibilityCreatedAtIndex",
+            },
+        ), patch.object(
+            get_albums.table,
+            "query",
+            side_effect=[unavailable, {"Items": [album()]}],
+        ) as query:
+            records, _ = get_albums._fetch_page(
+                visibility="public",
+                album_type=None,
+                limit=10,
+                start_key={"albumId": "cursor", "visibility": "public", "createdAt": "now"},
+                public_summary_only=True,
+            )
+
+        self.assertEqual(records, [album()])
+        self.assertEqual(query.call_args_list[0].kwargs["IndexName"], "VisibilityCreatedAtSummaryIndex")
+        self.assertEqual(query.call_args_list[1].kwargs["IndexName"], "VisibilityCreatedAtIndex")
+        self.assertNotIn("ExclusiveStartKey", query.call_args_list[1].kwargs)
+
+    def test_legacy_missing_image_count_falls_back_without_count_regression(self):
+        projected_legacy = album()
+        projected_legacy.pop("images")
+        full_legacy = album(images=[
+            {"rawKey": f"albums/{ALBUM_ID}/original/{index}.jpg"}
+            for index in range(3)
+        ])
+        with patch.dict(
+            os.environ,
+            {
+                "ALBUM_INDEX_DEPLOYMENT_PHASE": "both",
+                "PUBLIC_SUMMARY_INDEX": "VisibilityCreatedAtSummaryIndex",
+                "VISIBILITY_CREATED_AT_INDEX": "VisibilityCreatedAtIndex",
+            },
+        ), patch.object(
+            get_albums.table,
+            "query",
+            side_effect=[{"Items": [projected_legacy]}, {"Items": [full_legacy]}],
+        ) as query:
+            records, _ = get_albums._fetch_page(
+                visibility="public",
+                album_type="photo",
+                limit=10,
+                start_key=None,
+                public_summary_only=True,
+            )
+
+        self.assertEqual(records, [full_legacy])
+        self.assertEqual(query.call_args_list[0].kwargs["IndexName"], "VisibilityCreatedAtSummaryIndex")
+        self.assertEqual(query.call_args_list[1].kwargs["IndexName"], "VisibilityCreatedAtIndex")
+
+    def test_projected_image_count_preserves_public_response_without_manifest(self):
+        projected = album()
+        projected.pop("images")
+        projected["imageCount"] = Decimal("37")
+        captured = {}
+
+        def fetch(**kwargs):
+            captured.update(kwargs)
+            return [projected], None
+
+        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
+            get_albums, "_fetch_page", side_effect=fetch
+        ):
+            response = get_albums.handler({"queryStringParameters": {"limit": "10", "type": "photo"}}, None)
+
+        self.assertTrue(captured["public_summary_only"])
+        self.assertEqual(response_body(response)["items"][0]["imageCount"], 37)
+
+    def test_admin_public_query_keeps_full_visibility_index_path(self):
+        captured = {}
+
+        def fetch(**kwargs):
+            captured.update(kwargs)
+            return [album()], None
+
+        event = {"queryStringParameters": {"visibility": "public", "limit": "10"}}
+        with patch.object(get_albums, "get_verified_claims", return_value=claims(groups=["Admins"])), patch.object(
+            get_albums, "_fetch_page", side_effect=fetch
+        ):
+            response = get_albums.handler(event, None)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertFalse(captured["public_summary_only"])
+
     def test_photo_filter_includes_legacy_records_without_type(self):
         built = ConditionExpressionBuilder().build_expression(get_albums._type_filter("photo"))
 

@@ -1,11 +1,11 @@
 import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { encode } from 'blurhash'
 import { v4 as uuidv4 } from 'uuid'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { mapWithConcurrency } from '../utils/concurrency'
+import { processImage } from '../utils/mediaUtils'
 
 // Upload page — create album for main gallery or specific user
 function Upload() {
@@ -54,67 +54,6 @@ function Upload() {
         } catch (err) {
             console.error('Failed to load categories', err)
         }
-    }
-
-    // Generate thumbnail and blurhash from file
-    async function processImage(file) {
-        return new Promise((resolve, reject) => {
-            const img = new Image()
-            const url = URL.createObjectURL(file)
-
-            img.onload = () => {
-                // Calculate dimensions (max 800px on longest side for thumb)
-                const MAX_SIZE = 800
-                let width = img.width
-                let height = img.height
-
-                if (width > height && width > MAX_SIZE) {
-                    height *= MAX_SIZE / width
-                    width = MAX_SIZE
-                } else if (height > width && height > MAX_SIZE) {
-                    width *= MAX_SIZE / height
-                    height = MAX_SIZE
-                }
-
-                width = Math.round(width)
-                height = Math.round(height)
-
-                const canvas = document.createElement('canvas')
-                canvas.width = width
-                canvas.height = height
-                const ctx = canvas.getContext('2d')
-
-                // Draw high quality downscaled image
-                ctx.drawImage(img, 0, 0, width, height)
-
-                // Get image data for Blurhash (usually compute using 32x32 to be fast)
-                const hashCanvas = document.createElement('canvas')
-                const hashSize = 32
-                hashCanvas.width = hashSize
-                hashCanvas.height = Math.round(hashSize * (height / width))
-                const hashCtx = hashCanvas.getContext('2d')
-                hashCtx.drawImage(img, 0, 0, hashCanvas.width, hashCanvas.height)
-                const imageData = hashCtx.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
-
-                // Component X/Y up to 9 depending on aspect ratio
-                const componentX = 4
-                const componentY = Math.max(1, Math.min(4, Math.round(componentX * (height / width))))
-                const blurhash = encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
-
-                // Get thumbnail blob
-                canvas.toBlob((blob) => {
-                    URL.revokeObjectURL(url)
-                    resolve({
-                        thumbnail: blob,
-                        blurhash,
-                        width: img.width,
-                        height: img.height
-                    })
-                }, 'image/jpeg', 0.85) // 85% quality JPEG
-            }
-            img.onerror = () => reject(new Error('Failed to load image for processing'))
-            img.src = url
-        })
     }
 
     // Toggle handler

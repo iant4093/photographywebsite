@@ -4,6 +4,7 @@ import os
 
 import boto3
 
+from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from deletion_helpers import (
     DeletionTooLargeError,
@@ -11,12 +12,39 @@ from deletion_helpers import (
     delete_prefix_all_versions,
     preflight_deletion,
 )
-from media_access import validate_album_media_key
+from media_access import (
+    delete_preview_metadata,
+    load_preview_metadata,
+    media_id_for_key,
+    validate_album_media_key,
+    validated_preview_keys,
+)
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_list, validate_uuid
 
 
 table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
+
+
+def _audit(event, context, outcome, reason_code, *, deleted_count=None, deleted_version_count=None):
+    actor_type, auth_method = actor_context(event)
+    details = {}
+    if deleted_count is not None:
+        details["deleted_count"] = deleted_count
+    if deleted_version_count is not None:
+        details["deleted_version_count"] = deleted_version_count
+    emit_audit_event(
+        event_name="admin.media_deleted",
+        outcome=outcome,
+        action="album.media.delete",
+        resource_type="media",
+        reason_code=reason_code,
+        event=event,
+        context=context,
+        actor_type=actor_type,
+        auth_method=auth_method,
+        details=details or None,
+    )
 
 
 def _raw_key(image):
@@ -29,7 +57,13 @@ def _cover_fields(image):
     return _raw_key(image), image.get("thumbKey", ""), image.get("blurhash", "")
 
 
+from front_door import verify_front_door_request
+
+
 def handler(event, context):
+    front_door_denied = verify_front_door_request(event, context)
+    if front_door_denied:
+        return front_door_denied
     denied = require_admin(event)
     if denied:
         return denied
@@ -42,12 +76,15 @@ def handler(event, context):
         }
         album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
         if not album:
+            _audit(event, context, "denied", "album_not_found")
             return error_response(404, "Album not found", code="not_found")
 
         images = album.get("images", []) if isinstance(album.get("images", []), list) else []
         removed = []
         retained = []
         exact_keys = set()
+        removed_media_ids = set()
+        preview_metadata = load_preview_metadata(album, strict=True)
         hls_prefixes = set()
         for image in images:
             raw_key = _raw_key(image)
@@ -55,8 +92,17 @@ def handler(event, context):
                 raw_key = validate_album_media_key(raw_key, album=album)
                 removed.append(image)
                 exact_keys.add(raw_key)
+                media_id = media_id_for_key(raw_key)
+                removed_media_ids.add(media_id)
                 if isinstance(image, dict) and image.get("thumbKey"):
                     exact_keys.add(validate_album_media_key(image["thumbKey"], album=album))
+                if isinstance(image, dict):
+                    exact_keys.update(validated_preview_keys(
+                        image,
+                        album,
+                        preview_metadata.get(media_id),
+                        allow_pending=True,
+                    ).values())
                 if "." in raw_key:
                     hls_prefixes.add(
                         validate_album_media_key(raw_key.rsplit(".", 1)[0] + "_hls/", album=album).rstrip("/") + "/"
@@ -65,8 +111,10 @@ def handler(event, context):
                 retained.append(image)
 
         if not removed:
+            _audit(event, context, "denied", "media_not_found")
             return error_response(404, "Requested media was not found in this album", code="not_found")
         if requested - {_raw_key(image) for image in removed}:
+            _audit(event, context, "denied", "media_not_in_album")
             return error_response(400, "One or more media keys are not in this album", code="invalid_media")
 
         cover_raw = album.get("coverImageUrl", "")
@@ -89,6 +137,7 @@ def handler(event, context):
         for hls_prefix in hls_prefixes:
             deleted_versions += delete_prefix_all_versions(hls_prefix)
 
+        delete_preview_metadata(album_id, removed_media_ids)
         table.update_item(
             Key={"albumId": album_id},
             UpdateExpression=(
@@ -104,19 +153,31 @@ def handler(event, context):
                 ":coverBlurhash": cover_blurhash,
             },
         )
+        _audit(
+            event,
+            context,
+            "success",
+            "media_deleted",
+            deleted_count=len(removed),
+            deleted_version_count=deleted_versions,
+        )
         return json_response(
             200,
             {"message": "Media deleted", "deletedCount": len(removed), "deletedObjectVersions": deleted_versions},
         )
     except DeletionTooLargeError:
+        _audit(event, context, "denied", "deletion_too_large")
         return error_response(
             413,
             "Media deletion is too large for synchronous processing; use the maintenance deletion workflow",
             code="deletion_too_large",
         )
     except ValidationError as error:
+        _audit(event, context, "denied", "invalid_request")
         return error_response(400, str(error), code="invalid_request")
     except table.meta.client.exceptions.ConditionalCheckFailedException:
+        _audit(event, context, "denied", "album_conflict")
         return error_response(409, "Album changed while media was being deleted", code="conflict")
     except Exception as error:
+        _audit(event, context, "failure", "unexpected_error")
         return internal_error(context, error, "delete_images")

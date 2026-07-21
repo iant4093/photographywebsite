@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Guarded scheduled DynamoDB and S3 backup plan. The vault starts unlocked so a
+  restore can be proven before an operator explicitly enables governance Vault Lock.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    MinLength: 1
+    MaxLength: 20
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
+  AlbumsTableName:
+    Type: String
+    MinLength: 3
+    MaxLength: 255
+    AllowedPattern: '^[A-Za-z0-9_.-]+$'
+    Description: Exact table name output by the application stack; ARN is constructed in this account and region.
+  PreviewMetadataTableName:
+    Type: String
+    MinLength: 3
+    MaxLength: 255
+    AllowedPattern: '^[A-Za-z0-9_.-]+$'
+    Description: Exact preview metadata table name output by the application stack.
+  ImagesBucketName:
+    Type: String
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$'
+    Description: Exact protected media bucket name output by the application stack.
+  ReplicaBackupVaultArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:(aws|aws-us-gov):backup:us-east-2:[0-9]{12}:backup-vault:[A-Za-z0-9_.-]{2,50})$'
+    Description: Optional retained us-east-2 destination vault ARN deployed from the replica template.
+  BackupDeploymentMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-no-conflict]
+  VaultLockMode:
+    Type: String
+    Default: unlocked
+    AllowedValues: [unlocked, governance-confirmed-after-restore-test]
+
+Conditions:
+  CreateBackup: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
+  HasReplicaVault: !Not [!Equals [!Ref ReplicaBackupVaultArn, '']]
+  EnableGovernanceLock: !And
+    - !Condition CreateBackup
+    - !Equals [!Ref VaultLockMode, governance-confirmed-after-restore-test]
+
+Resources:
+  BackupVaultKey:
+    Type: AWS::KMS::Key
+    Condition: CreateBackup
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Encrypts retained IanTruongPhotography AWS Backup recovery points.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowBackupVaultCryptographicUse
+            Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey*
+              - kms:ReEncrypt*
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+                kms:ViaService: !Sub 'backup.${AWS::Region}.${AWS::URLSuffix}'
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
+          - Sid: AllowBackupServiceGrants
+            Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: kms:CreateGrant
+            Resource: '*'
+            Condition:
+              Bool:
+                kms:GrantIsForAWSResource: true
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  BackupVaultKeyAlias:
+    Type: AWS::KMS::Alias
+    Condition: CreateBackup
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      AliasName: !Sub 'alias/ian-photography-backup-${Stage}'
+      TargetKeyId: !Ref BackupVaultKey
+
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Condition: CreateBackup
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      BackupVaultName: !Sub 'ian-photography-protected-${Stage}'
+      EncryptionKeyArn: !GetAtt BackupVaultKey.Arn
+      LockConfiguration: !If
+        - EnableGovernanceLock
+        - MinRetentionDays: 35
+          MaxRetentionDays: 365
+        - !Ref AWS::NoValue
+      BackupVaultTags:
+        Application: IanTruongPhotography
+        Stage: !Ref Stage
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Condition: CreateBackup
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AWSBackupServiceRolePolicyForS3Backup'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  ProtectedDataBackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Condition: CreateBackup
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub 'ian-photography-protected-data-${Stage}'
+        BackupPlanRule:
+          - RuleName: DailyProtectedMetadata
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: cron(0 8 * * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 180
+            Lifecycle:
+              DeleteAfterDays: 35
+            CopyActions: !If
+              - HasReplicaVault
+              - - DestinationBackupVaultArn: !Ref ReplicaBackupVaultArn
+                  Lifecycle:
+                    DeleteAfterDays: 35
+              - !Ref AWS::NoValue
+      BackupPlanTags:
+        Application: IanTruongPhotography
+        Stage: !Ref Stage
+
+  ProtectedDataBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Condition: CreateBackup
+    Properties:
+      BackupPlanId: !Ref ProtectedDataBackupPlan
+      BackupSelection:
+        SelectionName: !Sub 'ian-photography-albums-${Stage}'
+        IamRoleArn: !GetAtt BackupRole.Arn
+        Resources:
+          - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTableName}'
+          - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PreviewMetadataTableName}'
+          - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucketName}'
+
+Outputs:
+  BackupWasCreated:
+    Value: !If [CreateBackup, 'true', 'false']
+  BackupVaultName:
+    Condition: CreateBackup
+    Value: !Ref BackupVault
+  AlbumsBackupPlanId:
+    Condition: CreateBackup
+    Value: !Ref ProtectedDataBackupPlan
+  ReplicaBackupVaultArn:
+    Condition: HasReplicaVault
+    Value: !Ref ReplicaBackupVaultArn
+  BackupVaultKeyArn:
+    Condition: CreateBackup
+    Value: !GetAtt BackupVaultKey.Arn

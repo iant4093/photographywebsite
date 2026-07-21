@@ -4,17 +4,45 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-python3 -m py_compile \
-  ops/backfill_album_owner_sub.py \
-  ops/check_album_indexes.py \
-  ops/cloudfront_frontend.py \
-  ops/dns_hardening.py \
-  ops/invalidate_media_cache.py \
-  ops/migrate_frontend_origin.py \
-  ops/set_lambda_log_retention.py \
-  ops/tag_existing_media.py \
-  update-cf.py
+python3 -m compileall -q ops backend/functions
 python3 -m unittest discover -s ops/tests -p 'test_*.py' -v
+
+if command -v cfn-lint >/dev/null 2>&1; then
+  cfn-lint \
+    backend/template.yaml \
+    ops/ci_bootstrap_template.yaml \
+    ops/dnssec-key-template.yaml \
+    ops/security_audit_foundation_template.yaml \
+    ops/security_notifications_template.yaml \
+    ops/security_managed_services_template.yaml \
+    ops/security_backup_template.yaml \
+    ops/security_backup_replica_template.yaml \
+    ops/observability_template.yaml \
+    ops/waf_front_door_template.yaml
+else
+  for template in \
+    backend/template.yaml \
+    ops/ci_bootstrap_template.yaml \
+    ops/dnssec-key-template.yaml \
+    ops/security_audit_foundation_template.yaml \
+    ops/security_notifications_template.yaml \
+    ops/security_managed_services_template.yaml \
+    ops/security_backup_template.yaml \
+    ops/security_backup_replica_template.yaml \
+    ops/observability_template.yaml \
+    ops/waf_front_door_template.yaml; do
+    sam validate --lint --template-file "$template"
+  done
+fi
+
+(
+  cd backend
+  sam validate --lint
+)
+
+if [[ -f backend/preview_worker/contract.test.mjs ]]; then
+  node --test backend/preview_worker/*.test.mjs
+fi
 
 if [[ "${1:-}" == "--build" ]]; then
   (

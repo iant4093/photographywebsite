@@ -1,7 +1,9 @@
 import { isSafeCursor, normalizePage } from './apiResponse'
 import { annotateMediaExpiry } from './mediaUrls'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://your-api-id.execute-api.us-west-2.amazonaws.com'
+// Production uses the single CloudFront front door. An explicit absolute URL
+// remains available for local/staged rollback while the migration is canaried.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const DEFAULT_TIMEOUT_MS = 15_000
 const PUBLIC_CATALOG_TTL_MS = 5 * 60_000
 const catalogCache = new Map()
@@ -246,9 +248,17 @@ export function fetchAlbumsPage(params = {}, options = {}) {
     }
 
     const controller = new AbortController()
-    const query = new URLSearchParams(normalized).toString()
+    // The anonymous route has an intentionally narrow cache key and never
+    // receives visibility/owner selectors, even if a caller supplies them.
+    const wireParams = isPublic
+        ? Object.fromEntries(
+            Object.entries(normalized).filter(([name]) => ['type', 'limit', 'cursor'].includes(name)),
+        )
+        : normalized
+    const query = new URLSearchParams(wireParams).toString()
     const record = { controller, subscribers: 0, promise: null }
-    record.promise = apiFetch(`/albums${query ? `?${query}` : ''}`, {
+    const catalogPath = isPublic ? '/public/albums' : '/albums'
+    record.promise = apiFetch(`${catalogPath}${query ? `?${query}` : ''}`, {
         headers: authHeaders(options.token),
         signal: controller.signal,
     }).then((payload) => {
@@ -300,7 +310,8 @@ export function fetchAlbumsFiltered(params = {}, token = null, options = {}) {
 }
 
 export function fetchAlbum(albumId, token = null, options = {}) {
-    return apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
+    const albumPath = token ? '/albums' : '/public/albums'
+    return apiFetch(`${albumPath}/${encodeURIComponent(albumId)}`, {
         headers: authHeaders(token),
         signal: options.signal,
     }).then((data) => {

@@ -11,6 +11,7 @@ import secrets
 import boto3
 from botocore.exceptions import ClientError
 
+from audit_helpers import actor_context, emit_audit_event
 from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import get_caller_claims, require_admin
@@ -18,6 +19,7 @@ from dynamodb_helpers import ensure_album_item_budget
 from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
 from media_helpers import extract_exif_data, start_mediaconvert_job
+from preview_jobs import enqueue_preview_jobs
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import (
     ValidationError,
@@ -35,6 +37,29 @@ from validation_helpers import (
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
 logger = logging.getLogger("photography_api.album_write")
+
+
+def _audit(event, context, outcome, reason_code, *, media_count=None, visibility=None):
+    actor_type, auth_method = actor_context(event)
+    details = {}
+    if media_count is not None:
+        details["media_count"] = media_count
+    if visibility is not None:
+        details["visibility"] = visibility if visibility in {"public", "private", "unlisted"} else "unknown"
+    emit_audit_event(
+        event_name="admin.album_created",
+        outcome=outcome,
+        action="album.create",
+        resource_type="album",
+        reason_code=reason_code,
+        event=event,
+        context=context,
+        actor_type=actor_type,
+        auth_method=auth_method,
+        details=details or None,
+    )
+
+
 def _normalize_images(value, album_id, album_type, *, album=None):
     maximum = 50 if album_type == "video" else 500
     images = validate_list(value, "images", maximum=maximum, required=True)
@@ -108,7 +133,13 @@ def _start_video_jobs(images):
             image.pop("hlsUrl", None)
 
 
+from front_door import verify_front_door_request
+
+
 def handler(event, context):
+    front_door_denied = verify_front_door_request(event, context)
+    if front_door_denied:
+        return front_door_denied
     denied = require_admin(event)
     if denied:
         return denied
@@ -176,6 +207,7 @@ def handler(event, context):
                 or existing.get("status") not in {"pending", "active"}
                 or existing.get("createdBySub") != claims["sub"]
             ):
+                _audit(event, context, "denied", "album_conflict")
                 return error_response(409, "Album already exists", code="conflict")
             item = existing
             images = item.get("images", [])
@@ -212,6 +244,14 @@ def handler(event, context):
         item["status"] = "active"
         item.pop("createdBySub", None)
 
+        if album_type == "photo":
+            try:
+                enqueue_preview_jobs(album_id, images)
+            except Exception as error:
+                # V1 JPEG thumbnails remain authoritative until asynchronous
+                # V2 generation succeeds, so queue outages cannot break upload.
+                logger.error("preview_dispatch_failed error_type=%s", type(error).__name__)
+
         if visibility == "private" and owner_email:
             portal_url = html.escape(os.environ.get("FRONTEND_URL", "https://iantruongphotography.com"), quote=True)
             safe_title = html.escape(title, quote=True)
@@ -230,6 +270,11 @@ def handler(event, context):
                 # The album is already committed. Do not turn an auxiliary
                 # notification outage into an unsafe, non-idempotent retry.
                 logger.error("album_notification_failed error_type=%s", type(error).__name__)
+                emit_audit_event(
+                    event_name="provider.email", outcome="failure", action="provider.email.dispatch",
+                    resource_type="provider", reason_code="album_notification_failed", event=event,
+                    context=context, actor_type="service", auth_method="service",
+                )
 
         if backup_to_drive and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
             payload = {
@@ -247,9 +292,17 @@ def handler(event, context):
                 )
             except Exception as error:
                 logger.error("drive_backup_dispatch_failed error_type=%s", type(error).__name__)
+                emit_audit_event(
+                    event_name="provider.drive_backup", outcome="failure", action="provider.backup.dispatch",
+                    resource_type="provider", reason_code="dispatch_failed", event=event,
+                    context=context, actor_type="service", auth_method="service",
+                )
 
+        _audit(event, context, "success", "album_created", media_count=len(images), visibility=visibility)
         return json_response(201, serialize_album_summary(item, include_admin=True))
     except ValidationError as error:
+        _audit(event, context, "denied", "invalid_album")
         return error_response(400, str(error), code="invalid_album")
     except Exception as error:
+        _audit(event, context, "failure", "unexpected_error")
         return internal_error(context, error, "create_album")

@@ -12,6 +12,7 @@ from aws_stack import aws_json, stack_resource
 EXPECTED_INDEXES = {
     "ShareCodeIndex": ("shareCode", None),
     "VisibilityCreatedAtIndex": ("visibility", "createdAt"),
+    "VisibilityCreatedAtSummaryIndex": ("visibility", "createdAt"),
     "OwnerSubCreatedAtIndex": ("ownerSub", "createdAt"),
 }
 
@@ -54,9 +55,12 @@ def main() -> int:
         invalid = invalid or not schema_matches
 
     visibility_ready = status["VisibilityCreatedAtIndex"].get("ready", False)
+    summary_ready = status["VisibilityCreatedAtSummaryIndex"].get("ready", False)
     owner_ready = status["OwnerSubCreatedAtIndex"].get("ready", False)
     if owner_ready:
         suggested_phase = "both"
+    elif summary_ready:
+        suggested_phase = "summary"
     elif visibility_ready:
         suggested_phase = "visibility"
     else:

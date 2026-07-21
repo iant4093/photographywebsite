@@ -1,0 +1,370 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Encrypted security notification routing and audit alarms. This stack creates
+  no subscription; attach only an owner-approved monitored destination later.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    MinLength: 1
+    MaxLength: 20
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
+    ConstraintDescription: Use 1-20 lowercase letters, digits, or internal hyphens.
+  SecurityAuditLogGroupName:
+    Type: String
+    MinLength: 1
+    MaxLength: 512
+    AllowedPattern: '^/[A-Za-z0-9._/#-]+$'
+    Description: Exact CloudWatch log group name output by the audit foundation stack.
+
+Resources:
+  SecurityNotificationKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Encrypts the IanTruongPhotography security notification topic.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowEventBridgeAndCloudWatchPublishers
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+                - cloudwatch.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: '*'
+          - Sid: AllowSnsUseForThisTopic
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: '*'
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:aws:sns:topicArn: !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
+                kms:ViaService: !Sub 'sns.${AWS::Region}.${AWS::URLSuffix}'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecurityNotificationKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/ian-photography-security-${Stage}'
+      TargetKeyId: !Ref SecurityNotificationKey
+
+  SecurityNotifications:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'ian-photography-security-${Stage}'
+      KmsMasterKeyId: !GetAtt SecurityNotificationKey.Arn
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecurityNotificationsPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SecurityNotifications
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # EventBridge does not support conditions in SNS topic policies. The
+          # publisher is limited to the EventBridge service and this exact topic.
+          - Sid: AllowEventBridgeSecurityFindings
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SecurityNotifications
+          - Sid: AllowExactCloudWatchAlarms
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SecurityNotifications
+            Condition:
+              StringEquals:
+                AWS:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                AWS:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-root-activity-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-cloudtrail-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-iam-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-kms-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-routing-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-${Stage}'
+
+  SecurityEventDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-security-events-${Stage}-dlq'
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecurityEventDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SecurityEventDlq
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowExactSecurityRules
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt SecurityEventDlq.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-high-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-high-${Stage}'
+
+  GuardDutyFindingRule:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - SecurityNotificationsPolicy
+      - SecurityEventDlqPolicy
+    Properties:
+      Name: !Sub 'ian-photography-guardduty-high-${Stage}'
+      EventPattern:
+        source: [aws.guardduty]
+        detail-type: [GuardDuty Finding]
+        detail:
+          severity:
+            - numeric: ['>=', 7]
+      State: ENABLED
+      Targets:
+        - Id: SecurityNotifications
+          Arn: !Ref SecurityNotifications
+          DeadLetterConfig:
+            Arn: !GetAtt SecurityEventDlq.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  SecurityHubFindingRule:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - SecurityNotificationsPolicy
+      - SecurityEventDlqPolicy
+    Properties:
+      Name: !Sub 'ian-photography-securityhub-high-${Stage}'
+      EventPattern:
+        source: [aws.securityhub]
+        detail-type: [Security Hub Findings - Imported]
+        detail:
+          findings:
+            Severity:
+              Label: [HIGH, CRITICAL]
+            Workflow:
+              Status: [NEW, NOTIFIED]
+      State: ENABLED
+      Targets:
+        - Id: SecurityNotifications
+          Arn: !Ref SecurityNotifications
+          DeadLetterConfig:
+            Arn: !GetAtt SecurityEventDlq.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  RootActivityMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-root-activity-${Stage}'
+      FilterPattern: '{ ($.userIdentity.type = "Root") && ($.eventType != "AwsServiceEvent") }'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: RootActivity
+          MetricValue: '1'
+          DefaultValue: 0
+
+  CloudTrailChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-cloudtrail-change-${Stage}'
+      FilterPattern: >-
+        { ($.eventSource = "cloudtrail.amazonaws.com") && (($.eventName = "StopLogging") || ($.eventName = "DeleteTrail") || ($.eventName = "UpdateTrail") || ($.eventName = "PutEventSelectors")) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: CloudTrailConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  IamChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-iam-change-${Stage}'
+      FilterPattern: >-
+        { ($.eventSource = "iam.amazonaws.com") && (($.eventName = "CreateAccessKey") || ($.eventName = "DeleteAccessKey") || ($.eventName = "AttachUserPolicy") || ($.eventName = "AttachRolePolicy") || ($.eventName = "PutUserPolicy") || ($.eventName = "PutRolePolicy") || ($.eventName = "UpdateAssumeRolePolicy")) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: IamConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  KmsChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-kms-change-${Stage}'
+      FilterPattern: >-
+        { ($.eventSource = "kms.amazonaws.com") && (($.eventName = "DisableKey") || ($.eventName = "ScheduleKeyDeletion") || ($.eventName = "PutKeyPolicy") || ($.eventName = "DeleteAlias")) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: KmsSecurityConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  SecurityRoutingChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-security-routing-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "sns.amazonaws.com") && (($.eventName = "DeleteTopic") || ($.eventName = "SetTopicAttributes") || ($.eventName = "Unsubscribe"))) || (($.eventSource = "events.amazonaws.com") && (($.eventName = "DeleteRule") || ($.eventName = "DisableRule") || ($.eventName = "RemoveTargets") || ($.eventName = "PutTargets"))) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: SecurityRoutingConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  RootActivityAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-root-activity-${Stage}'
+      AlarmDescription: Root identity performed an AWS API action.
+      Namespace: IanTruongPhotography/Security
+      MetricName: RootActivity
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+  CloudTrailChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-cloudtrail-change-${Stage}'
+      AlarmDescription: CloudTrail configuration or logging was changed.
+      Namespace: IanTruongPhotography/Security
+      MetricName: CloudTrailConfigurationChange
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+  IamChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-iam-change-${Stage}'
+      AlarmDescription: A high-impact IAM configuration action occurred.
+      Namespace: IanTruongPhotography/Security
+      MetricName: IamConfigurationChange
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+  KmsChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-kms-change-${Stage}'
+      AlarmDescription: A KMS key or alias security setting was changed.
+      Namespace: IanTruongPhotography/Security
+      MetricName: KmsSecurityConfigurationChange
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+  SecurityRoutingChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-security-routing-change-${Stage}'
+      AlarmDescription: Security notification routing was changed.
+      Namespace: IanTruongPhotography/Security
+      MetricName: SecurityRoutingConfigurationChange
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+  SecurityEventDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'
+      AlarmDescription: EventBridge could not deliver one or more security findings.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt SecurityEventDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+Outputs:
+  SecurityNotificationTopicArn:
+    Value: !Ref SecurityNotifications
+    Description: Attach only an owner-approved monitored subscriber after deployment.
+  SecurityNotificationKeyArn:
+    Value: !GetAtt SecurityNotificationKey.Arn
+  SecurityEventDeadLetterQueueArn:
+    Value: !GetAtt SecurityEventDlq.Arn

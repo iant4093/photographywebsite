@@ -136,7 +136,7 @@ export function AuthProvider({ children }) {
 
     const login = useCallback(async (email, password, turnstileToken) => {
         if (!isCognitoConfigured) throw new Error('Authentication is not configured.')
-        const apiBase = import.meta.env.VITE_API_BASE_URL
+        const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
         const response = await fetch(`${apiBase}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -161,7 +161,7 @@ export function AuthProvider({ children }) {
     }, [establishSession])
 
     const completeNewPassword = useCallback(async ({ email, newPassword, challengeSession, turnstileToken }) => {
-        const apiBase = import.meta.env.VITE_API_BASE_URL
+        const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
         const response = await fetch(`${apiBase}/login/challenge`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -185,7 +185,7 @@ export function AuthProvider({ children }) {
     }, [establishSession])
 
     const completeMfa = useCallback(async ({ email, code, challengeSession, turnstileToken }) => {
-        const apiBase = import.meta.env.VITE_API_BASE_URL
+        const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
         const response = await fetch(`${apiBase}/login/challenge`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

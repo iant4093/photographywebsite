@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Retained us-east-2 destination vault for cross-Region copies of Ian Truong
+  Photography backups. Deploy and restore-test before enabling governance lock.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    MinLength: 1
+    MaxLength: 20
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
+  ReplicaDeploymentMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-no-conflict]
+  VaultLockMode:
+    Type: String
+    Default: unlocked
+    AllowedValues: [unlocked, governance-confirmed-after-restore-test]
+
+Rules:
+  MustDeployInReplicaRegion:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, us-east-2]
+        AssertDescription: The replica vault stack must be deployed in us-east-2.
+
+Conditions:
+  CreateReplica: !Equals [!Ref ReplicaDeploymentMode, create-confirmed-no-conflict]
+  EnableGovernanceLock: !And
+    - !Condition CreateReplica
+    - !Equals [!Ref VaultLockMode, governance-confirmed-after-restore-test]
+
+Resources:
+  ReplicaVaultKey:
+    Type: AWS::KMS::Key
+    Condition: CreateReplica
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Encrypts cross-Region IanTruongPhotography backup copies.
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowBackupCryptographicUse
+            Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey*
+              - kms:ReEncrypt*
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+                kms:ViaService: !Sub 'backup.${AWS::Region}.${AWS::URLSuffix}'
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:*:${AWS::AccountId}:*'
+          - Sid: AllowBackupServiceGrants
+            Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: kms:CreateGrant
+            Resource: '*'
+            Condition:
+              Bool:
+                kms:GrantIsForAWSResource: true
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:*:${AWS::AccountId}:*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: RecoveryCopies
+
+  ReplicaVaultKeyAlias:
+    Type: AWS::KMS::Alias
+    Condition: CreateReplica
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      AliasName: !Sub 'alias/ian-photography-backup-replica-${Stage}'
+      TargetKeyId: !Ref ReplicaVaultKey
+
+  ReplicaBackupVault:
+    Type: AWS::Backup::BackupVault
+    Condition: CreateReplica
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      BackupVaultName: !Sub 'ian-photography-replica-${Stage}'
+      EncryptionKeyArn: !GetAtt ReplicaVaultKey.Arn
+      LockConfiguration: !If
+        - EnableGovernanceLock
+        - MinRetentionDays: 35
+          MaxRetentionDays: 365
+        - !Ref AWS::NoValue
+      BackupVaultTags:
+        Application: IanTruongPhotography
+        Stage: !Ref Stage
+        DataClassification: RecoveryCopies
+
+Outputs:
+  ReplicaWasCreated:
+    Value: !If [CreateReplica, 'true', 'false']
+  ReplicaBackupVaultName:
+    Condition: CreateReplica
+    Value: !Ref ReplicaBackupVault
+  ReplicaBackupVaultArn:
+    Condition: CreateReplica
+    Value: !GetAtt ReplicaBackupVault.BackupVaultArn
+  ReplicaBackupVaultKeyArn:
+    Condition: CreateReplica
+    Value: !GetAtt ReplicaVaultKey.Arn

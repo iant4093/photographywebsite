@@ -1,5 +1,9 @@
 # Production infrastructure runbook
 
+The tracked GitHub Actions release system and its one-time OIDC/environment
+configuration are documented in [`ops/CI_CD.md`](CI_CD.md). The local procedures
+below remain the recovery reference and must continue to match those guards.
+
 The files in this directory implement the security, privacy, reliability, and
 performance baseline for `iantruongphotography.com`. All mutating helper scripts
 are **dry-run by default** and require multiple exact production guards to apply.
@@ -18,14 +22,106 @@ are **dry-run by default** and require multiple exact production guards to apply
 - `dns_hardening.py` manages CAA and `www` alias records after CloudFront is
   ready for `www`.
 - `dnssec-key-template.yaml` is a deliberately separate, explicit DNSSEC stack.
+- The staged account-security templates, singleton inventory, Inspector guard,
+  restore gate, and retained audit dependency chain are documented in
+  [`SECURITY_ACCOUNT_BASELINE.md`](SECURITY_ACCOUNT_BASELINE.md). The unsafe
+  all-in-one security template was removed.
 - Migration helpers cover existing album ownership, GSIs, media visibility
   tags, media-cache invalidation, and Lambda log retention.
+- `SECURITY_OBSERVABILITY.md` defines the structured audit contract, centralized
+  Lambda log group, alert ownership, privacy rules, triage, and rollback steps.
+- `observability_template.yaml`, `observability_preflight.py`, and
+  [`OBSERVABILITY.md`](OBSERVABILITY.md) define the retained, privacy-controlled
+  RUM, paid CloudFront metric, public Synthetics, dashboard, and alarm rollout.
 
 The scripts discover physical table, bucket, user-pool, API, distribution, and
 hosted-zone IDs from a caller-supplied CloudFormation stack name or canonical
 domain. Account IDs and current ETags are deliberately runtime guard values and
 are never committed. `us-west-2` is the application-region default; the DNSSEC
 KMS stack must be deployed in `us-east-1`.
+
+## Responsive preview V2 rollout
+
+`backend/template.yaml` owns the online path for versioned responsive previews:
+
+- a retained, deletion-protected, point-in-time-recoverable
+  `PreviewMetadataTable` encrypted with the dedicated rotating `PreviewDataKey`;
+- a KMS-encrypted `PreviewQueue` and 14-day dead-letter queue;
+- a Node.js 22 worker with reserved/event-source concurrency of two and partial
+  SQS batch failure reporting; and
+- a preview-only CloudFront behavior that rechecks the S3 visibility tag at the
+  origin for every uncached browser request. The versioned WebP response remains
+  immutable in the browser, while the edge cannot continue serving an object
+  after a public-to-private transition without re-evaluating the bucket policy.
+
+The worker is an independent locked Node package under
+`backend/preview_worker/`. The SAM make build installs exact Linux x86_64 native
+Sharp binaries into the ZIP artifact, even when a developer builds on macOS.
+Building requires npm registry access; it does not modify the root frontend
+package or lockfile. Run its dependency and contract checks explicitly:
+
+```bash
+cd backend/preview_worker
+npm ci
+npm test
+cd ../..
+sam build --template-file backend/template.yaml
+```
+
+The deployed table initially contains no derivative state. New photo album
+creates/appends enqueue V2 work only after the existing JPEG fallback is
+committed and tagged. An absent, delayed, or failed V2 never removes or modifies
+the raw image or current 800px JPEG.
+
+Existing media backfill is **dry-run by default**. The script resolves the
+albums table, preview metadata table, media bucket, and PreviewQueue directly
+from the named CloudFormation stack. Operators may run the aggregate-only
+source/plan audit after the online stack is deployed:
+
+```bash
+python3 ops/backfill_preview_v2.py --stack-name STACK_NAME
+```
+
+Review the printed aggregate counts and plan digest. To dispatch that exact
+plan, rerun with every independent guard copied from the dry-run output:
+
+```bash
+python3 ops/backfill_preview_v2.py \
+  --stack-name STACK_NAME \
+  --expected-account-id AWS_ACCOUNT_ID \
+  --expected-record-count ALBUM_RECORD_COUNT \
+  --expected-preview-record-count PREVIEW_METADATA_RECORD_COUNT \
+  --expected-job-count PLANNED_JOB_COUNT \
+  --expected-plan-digest PLAN_DIGEST \
+  --confirm-stack-name STACK_NAME \
+  --confirm backfill-preview-v2 \
+  --apply
+```
+
+Apply performs the same scans and source-object HEAD validation again before
+checking the account, both record counts, final job count, digest, stack name,
+confirmation phrase, metadata conflicts, and source validation failures. It
+then sends the deterministic, duplicate-free in-memory plan directly to the
+stack's KMS-encrypted PreviewQueue using `SendMessageBatch` requests of at most
+10 entries. It creates no manifest and does not mutate album manifests, source
+objects, or DynamoDB records. Any SQS failed entry or incomplete acknowledgement
+stops the run immediately; some earlier batches may already be queued, so
+inspect the queue/DLQ and worker alarms before deciding whether to rerun. The
+worker's metadata contract makes already-ready jobs safe to receive again.
+The AWS identity running apply must have `sqs:SendMessage` on that exact queue
+and the KMS permissions required to produce messages for its customer-managed
+key; the script does not broaden the deployed Lambda roles or key policy.
+
+This bounded backfill does not require an operations bucket or Step Functions.
+If future scale requires an orchestrated backfill, introduce and test that path
+as a separate reviewed change rather than accepting ad-hoc bucket or state
+machine ARNs in this script.
+
+For rollback of the online path, disable the preview SQS event source and stop
+producer dispatch first. Keep the retained metadata table, KMS key, queues, V2
+objects, raw media, and V1 thumbnails intact for investigation. The API and
+frontend automatically continue using the existing JPEG fallback whenever a
+complete ready V2 record is unavailable.
 
 ## Preflight and recovery point
 
@@ -51,6 +147,11 @@ python3 ops/tag_existing_media.py --stack-name STACK_NAME
 python3 ops/backfill_legacy_media_prefix.py --stack-name STACK_NAME
 python3 ops/backfill_album_owner_sub.py --stack-name STACK_NAME
 python3 ops/invalidate_media_cache.py --stack-name STACK_NAME
+python3 ops/observability_preflight.py \
+  --deployment-mode create \
+  --frontend-distribution-id FRONTEND_DISTRIBUTION_ID \
+  --media-distribution-id MEDIA_DISTRIBUTION_ID \
+  --expected-account-id AWS_ACCOUNT_ID
 ```
 
 Before the first hardened stack deployment, create an on-demand DynamoDB backup
@@ -173,14 +274,25 @@ DynamoDB permits only one GSI creation per table update. Preserve this order:
    ```
 
 5. Exercise public album listing and compare results/order against the predeploy
-   snapshot. Then deploy with `AlbumIndexDeploymentPhase=both`.
-6. Wait for `OwnerSubCreatedAtIndex` to be ready. Exercise admin/user album
+   snapshot. Deploy with `AlbumIndexDeploymentPhase=summary`, then wait for
+   `VisibilityCreatedAtSummaryIndex` to be `ACTIVE` and `Backfilling=false`.
+   Re-run the public catalog comparison; the response/count/order/cursors must
+   match while the index projection excludes full media manifests and private
+   owner/share fields.
+6. Deploy with `AlbumIndexDeploymentPhase=both`, then wait for
+   `OwnerSubCreatedAtIndex` to be ready. Exercise admin/user album
    lists, user edits, user deletion preflight, and private album authorization.
 
 Every `sam deploy --parameter-overrides` invocation must include the production
 values from the secrets step, plus the new phase. Do not rely on shell history to
 reconstruct them. Use a protected deployment system or a local permission-0600
 parameter file outside the repository.
+
+Deployments must also pass `ReleaseSha` as the exact tested Git revision and
+preserve the approved `ApplicationLogRetentionDays`. Use `ReleaseSha=unknown`
+only for a documented legacy/manual release; never place credentials or user
+input in either parameter. Follow `SECURITY_OBSERVABILITY.md` to test synthetic
+audit delivery and alarm routing after the change set completes.
 
 ## Media privacy migration and deny switch
 

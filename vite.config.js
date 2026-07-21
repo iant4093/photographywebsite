@@ -31,4 +31,22 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    include: ['src/**/*.test.{js,jsx}'],
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{js,jsx}'],
+      exclude: ['src/**/*.test.{js,jsx}', 'src/test/**'],
+      reporter: ['text', 'json-summary', 'lcov', 'html'],
+      reportsDirectory: 'coverage/frontend',
+      thresholds: {
+        lines: 80,
+        statements: 80,
+        functions: 80,
+        branches: 80,
+      },
+    },
+  },
 })

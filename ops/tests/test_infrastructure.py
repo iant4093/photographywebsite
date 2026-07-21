@@ -54,16 +54,43 @@ class TemplateValidationTests(unittest.TestCase):
     def test_handlers_exist(self) -> None:
         handlers = re.findall(r"^\s+Handler:\s+([a-zA-Z0-9_]+)\.handler\s*$", TEMPLATE, re.MULTILINE)
         self.assertGreaterEqual(len(handlers), 20)
-        missing = [name for name in handlers if not (ROOT / "backend" / "functions" / f"{name}.py").is_file()]
+        missing = [
+            name
+            for name in handlers
+            if not (
+                (name == "index" and (ROOT / "backend" / "preview_worker" / "index.mjs").is_file())
+                or (ROOT / "backend" / "functions" / f"{name}.py").is_file()
+            )
+        ]
         self.assertEqual(missing, [])
 
 
 class DataProtectionTests(unittest.TestCase):
     def test_new_fixed_name_log_resources_do_not_orphan_on_initial_rollback(self) -> None:
-        for logical_id in ("MediaAccessLogsBucket", "ApiAccessLogGroup"):
+        for logical_id in ("MediaAccessLogsBucket", "ApiAccessLogGroup", "ApplicationLogGroup"):
             block = resource_block(logical_id)
             self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
+
+    def test_application_audit_logs_are_centralized_retained_and_alarmable(self) -> None:
+        group = resource_block("ApplicationLogGroup")
+        self.assertIn("RetentionInDays: !Ref ApplicationLogRetentionDays", group)
+        self.assertIn("DataClassification", group)
+        globals_block = TEMPLATE.split("Globals:", 1)[1].split("Resources:", 1)[0]
+        self.assertIn("LogGroup: !Ref ApplicationLogGroup", globals_block)
+        self.assertIn("APPLICATION_STAGE: !Ref Stage", globals_block)
+        self.assertIn("RELEASE_SHA: !Ref ReleaseSha", globals_block)
+        for logical_id in (
+            "AuditDeniedMetricFilter",
+            "AuditFailureMetricFilter",
+            "LoginDeniedMetricFilter",
+            "ApiAuthorizationDeniedMetricFilter",
+        ):
+            self.assertIn("AWS::Logs::MetricFilter", resource_block(logical_id))
+        for logical_id in ("AuditFailureAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"):
+            block = resource_block(logical_id)
+            self.assertIn("IanTruongPhotography/Security", block)
+            self.assertIn("AlarmActions:\n        - !Ref AlarmTopic", block)
 
     def test_album_table_is_recoverable_and_protected(self) -> None:
         block = resource_block("AlbumsTable")
@@ -273,11 +300,29 @@ class BrowserBoundaryTests(unittest.TestCase):
 
 
 class IdentityAndSecretTests(unittest.TestCase):
-    def test_global_environment_contains_only_public_cognito_ids(self) -> None:
+    def test_global_environment_contains_only_identifiers_and_rollout_controls(self) -> None:
         globals_section = TEMPLATE.split("Globals:", 1)[1].split("Resources:", 1)[0]
         self.assertIn("COGNITO_USER_POOL_ID: !Ref UserPool", globals_section)
         self.assertIn("COGNITO_CLIENT_ID: !Ref UserPoolClient", globals_section)
-        for forbidden in ("SECRET", "API_KEY", "IMAGES_BUCKET", "ALBUMS_TABLE"):
+        self.assertIn("FRONT_DOOR_CONFIG_ARN: !Ref FrontDoorOriginSecret", globals_section)
+        self.assertIn(
+            "FRONT_DOOR_ENFORCEMENT_ENABLED: !Ref FrontDoorEnforcementEnabled",
+            globals_section,
+        )
+        self.assertIn(
+            "FRONT_DOOR_SECRET_CACHE_TTL_SECONDS: !Ref FrontDoorSecretCacheTtlSeconds",
+            globals_section,
+        )
+        for forbidden in (
+            "API_KEY",
+            "IMAGES_BUCKET",
+            "ALBUMS_TABLE",
+            "RATE_LIMIT_HASH_SECRET",
+            "RESEND_API_KEY",
+            "TURNSTILE_SECRET",
+            "GOOGLE_OAUTH_SECRET",
+            "FRONT_DOOR_ORIGIN_VALUE",
+        ):
             self.assertNotIn(forbidden, globals_section)
 
     def test_legacy_secret_parameters_are_hidden(self) -> None:
@@ -442,12 +487,47 @@ class MigrationAndPackagingTests(unittest.TestCase):
 
     def test_gsi_rollout_is_explicit_and_sequential(self) -> None:
         self.assertIn("AlbumIndexDeploymentPhase", TEMPLATE)
-        self.assertIn("AllowedValues:\n      - none\n      - visibility\n      - both", TEMPLATE)
+        self.assertIn("AllowedValues:\n      - none\n      - visibility\n      - summary\n      - both", TEMPLATE)
         self.assertIn("VisibilityCreatedAtIndex", resource_block("AlbumsTable"))
+        self.assertIn("VisibilityCreatedAtSummaryIndex", resource_block("AlbumsTable"))
         self.assertIn("OwnerSubCreatedAtIndex", resource_block("AlbumsTable"))
 
-    def test_build_only_copies_python_and_pins_runtime_dependencies(self) -> None:
-        self.assertIn('cp functions/*.py "$(ARTIFACTS_DIR)/"', MAKEFILE)
+    def test_public_summary_index_excludes_manifests_and_private_fields(self) -> None:
+        table = resource_block("AlbumsTable")
+        summary = table.split("IndexName: VisibilityCreatedAtSummaryIndex", 1)[1].split(
+            "- HasOwnerIndex", 1
+        )[0]
+        self.assertIn("ProjectionType: INCLUDE", summary)
+        for required in (
+            "status",
+            "type",
+            "title",
+            "description",
+            "category",
+            "imageCount",
+            "coverImageUrl",
+            "coverThumbKey",
+            "coverBlurhash",
+            "legacyS3Prefix",
+        ):
+            self.assertRegex(summary, rf"(?m)^\s+- {required}$")
+        for forbidden in (
+            "images",
+            "ownerEmail",
+            "ownerSub",
+            "shareCode",
+            "isShared",
+            "backupToGoogleDrive",
+            "s3Prefix",
+        ):
+            self.assertNotRegex(summary, rf"(?m)^\s+- {forbidden}$")
+
+    def test_build_uses_explicit_python_allowlists_and_pins_runtime_dependencies(self) -> None:
+        self.assertNotIn("cp functions/*.py", MAKEFILE)
+        self.assertIn("SOURCES_GetAlbumsFunction :=", MAKEFILE)
+        self.assertIn("SOURCES_EditUserFunction :=", MAKEFILE)
+        self.assertIn("no explicit Python source allowlist exists", MAKEFILE)
+        self.assertIn('cp "functions/$$source" "$(ARTIFACTS_DIR)/"', MAKEFILE)
         self.assertNotIn("cp functions/*.json", MAKEFILE)
         for dependency in (
             "PyJWT==2.13.0",

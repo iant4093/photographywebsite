@@ -1,7 +1,40 @@
-import { describe, expect, it } from 'vitest'
-import { loadCompleteCatalog } from './catalogState'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+    clearCatalogSnapshots,
+    deleteCatalogSnapshot,
+    getCatalogSnapshot,
+    loadCompleteCatalog,
+    setCatalogSnapshot,
+} from './catalogState'
 
 describe('loadCompleteCatalog', () => {
+    afterEach(() => {
+        clearCatalogSnapshots()
+        vi.useRealTimers()
+    })
+
+    it('stores, expires, deletes, and clears catalog snapshots', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+        setCatalogSnapshot('one', { items: [{ albumId: 'one' }], nextCursor: null })
+        expect(getCatalogSnapshot('one')).toMatchObject({ items: [{ albumId: 'one' }], savedAt: Date.now() })
+        deleteCatalogSnapshot('one')
+        expect(getCatalogSnapshot('one')).toBeNull()
+        setCatalogSnapshot('old', { items: [] })
+        vi.advanceTimersByTime(5 * 60_000 + 1)
+        expect(getCatalogSnapshot('old')).toBeNull()
+        setCatalogSnapshot('clear', { items: [] })
+        clearCatalogSnapshots()
+        expect(getCatalogSnapshot('clear')).toBeNull()
+    })
+
+    it('requires a page loader and honors a signal aborted before the first request', async () => {
+        await expect(loadCompleteCatalog({})).rejects.toThrow('fetchPage must be a function')
+        const controller = new AbortController()
+        controller.abort()
+        await expect(loadCompleteCatalog({ fetchPage: vi.fn(), signal: controller.signal }))
+            .rejects.toMatchObject({ name: 'AbortError' })
+    })
     it('automatically exhausts every page and deduplicates albums', async () => {
         const fetchPage = async (cursor) => {
             if (cursor === null) {
@@ -108,5 +141,13 @@ describe('loadCompleteCatalog', () => {
         })
 
         await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+    })
+
+    it('stops catalogs that exceed the 100-page safety limit', async () => {
+        let page = 0
+        await expect(loadCompleteCatalog({
+            fetchPage: async () => ({ items: [], nextCursor: `page-${++page}` }),
+        })).rejects.toMatchObject({ code: 'PAGE_LIMIT' })
+        expect(page).toBe(100)
     })
 })

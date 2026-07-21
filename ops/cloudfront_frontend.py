@@ -25,6 +25,7 @@ from aws_stack import discover_distribution_by_alias, stack_resource  # noqa: E4
 
 DEFAULT_BASELINE = HERE / "frontend_cloudfront_baseline.json"
 WWW_REDIRECT_SOURCE = HERE / "cloudfront_www_redirect.js"
+FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
 
 
 def aws_json(arguments: list[str], *, profile: str | None = None) -> dict[str, Any]:
@@ -305,8 +306,276 @@ def ensure_response_policy(
     return policy_id, "updated"
 
 
+def _custom_policy_listing(kind: str, profile: str | None) -> list[dict[str, Any]]:
+    response = aws_json(["cloudfront", f"list-{kind}-policies", "--type", "custom"], profile=profile)
+    key = "CachePolicyList" if kind == "cache" else "OriginRequestPolicyList"
+    return response.get(key, {}).get("Items", []) or []
+
+
+def ensure_cache_policy(
+    desired: dict[str, Any], *, apply: bool, profile: str | None
+) -> tuple[str | None, str]:
+    matches = [
+        item["CachePolicy"]
+        for item in _custom_policy_listing("cache", profile)
+        if item["CachePolicy"]["CachePolicyConfig"]["Name"] == desired["Name"]
+    ]
+    if len(matches) > 1:
+        raise RuntimeError("Multiple custom cache policies have the managed front-door name")
+    if not matches:
+        if not apply:
+            return None, "create"
+        created = aws_with_json_file(
+            ["cloudfront", "create-cache-policy", "--cache-policy-config", "file://{json_file}"],
+            desired,
+            profile=profile,
+        )
+        return created["CachePolicy"]["Id"], "created"
+    policy_id = matches[0]["Id"]
+    current = aws_json(["cloudfront", "get-cache-policy-config", "--id", policy_id], profile=profile)
+    if normalize(current["CachePolicyConfig"]) == normalize(desired):
+        return policy_id, "unchanged"
+    if not apply:
+        return policy_id, "update"
+    aws_with_json_file(
+        [
+            "cloudfront", "update-cache-policy", "--id", policy_id, "--if-match", current["ETag"],
+            "--cache-policy-config", "file://{json_file}",
+        ],
+        desired,
+        profile=profile,
+    )
+    return policy_id, "updated"
+
+
+def ensure_origin_request_policy(
+    desired: dict[str, Any], *, apply: bool, profile: str | None
+) -> tuple[str | None, str]:
+    matches = [
+        item["OriginRequestPolicy"]
+        for item in _custom_policy_listing("origin-request", profile)
+        if item["OriginRequestPolicy"]["OriginRequestPolicyConfig"]["Name"] == desired["Name"]
+    ]
+    if len(matches) > 1:
+        raise RuntimeError("Multiple origin request policies have the managed front-door name")
+    if not matches:
+        if not apply:
+            return None, "create"
+        created = aws_with_json_file(
+            [
+                "cloudfront", "create-origin-request-policy", "--origin-request-policy-config",
+                "file://{json_file}",
+            ],
+            desired,
+            profile=profile,
+        )
+        return created["OriginRequestPolicy"]["Id"], "created"
+    policy_id = matches[0]["Id"]
+    current = aws_json(
+        ["cloudfront", "get-origin-request-policy-config", "--id", policy_id], profile=profile
+    )
+    if normalize(current["OriginRequestPolicyConfig"]) == normalize(desired):
+        return policy_id, "unchanged"
+    if not apply:
+        return policy_id, "update"
+    aws_with_json_file(
+        [
+            "cloudfront", "update-origin-request-policy", "--id", policy_id, "--if-match",
+            current["ETag"], "--origin-request-policy-config", "file://{json_file}",
+        ],
+        desired,
+        profile=profile,
+    )
+    return policy_id, "updated"
+
+
+def public_api_cache_policy_config(settings: dict[str, Any]) -> dict[str, Any]:
+    query_items = settings["public_query_strings"]
+    return {
+        "Name": settings["public_cache_policy_name"],
+        "Comment": "Anonymous allowlisted public catalog only; managed in source control",
+        "DefaultTTL": 60,
+        "MaxTTL": 300,
+        "MinTTL": 0,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+            "EnableAcceptEncodingGzip": True,
+            "EnableAcceptEncodingBrotli": True,
+            "CookiesConfig": {"CookieBehavior": "none"},
+            "HeadersConfig": {"HeaderBehavior": "none"},
+            "QueryStringsConfig": {
+                "QueryStringBehavior": "whitelist",
+                "QueryStrings": {"Quantity": len(query_items), "Items": query_items},
+            },
+        },
+    }
+
+
+def api_origin_request_policy_config(settings: dict[str, Any], *, public: bool) -> dict[str, Any]:
+    headers = settings["public_forward_headers"] if public else settings["private_forward_headers"]
+    query_config: dict[str, Any] = {"QueryStringBehavior": "all"}
+    if public:
+        query_items = settings["public_query_strings"]
+        query_config = {
+            "QueryStringBehavior": "whitelist",
+            "QueryStrings": {"Quantity": len(query_items), "Items": query_items},
+        }
+    return {
+        "Name": settings["public_origin_request_policy_name"] if public else settings["private_origin_request_policy_name"],
+        "Comment": "Same-origin API forwarding; never forwards viewer cookies or host",
+        "CookiesConfig": {"CookieBehavior": "none"},
+        "HeadersConfig": {
+            "HeaderBehavior": "whitelist",
+            "Headers": {"Quantity": len(headers), "Items": headers},
+        },
+        "QueryStringsConfig": query_config,
+    }
+
+
+def api_response_policy_config(settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "Name": settings["response_policy_name"],
+        "Comment": "Security headers for same-origin API responses; cache directives remain origin-owned",
+        "SecurityHeadersConfig": {
+            "ContentTypeOptions": {"Override": True},
+            "FrameOptions": {"FrameOption": "DENY", "Override": True},
+            "ReferrerPolicy": {"ReferrerPolicy": "no-referrer", "Override": True},
+            "StrictTransportSecurity": {
+                "AccessControlMaxAgeSec": 31536000,
+                "IncludeSubdomains": False,
+                "Preload": False,
+                "Override": True,
+            },
+        },
+    }
+
+
+def _arn_account(arn: str) -> str:
+    parts = arn.split(":")
+    return parts[4] if len(parts) > 5 else ""
+
+
+def validate_front_door_resources(
+    *, domain: str, certificate_arn: str, secret_arn: str, web_acl_arn: str,
+    account: str, region: str, profile: str | None,
+) -> None:
+    if _arn_account(certificate_arn) != account or _arn_account(secret_arn) != account or _arn_account(web_acl_arn) != account:
+        raise SystemExit("Refusing front door: certificate, secret, and WAF must belong to the active account")
+    if certificate_arn.split(":")[3] != region or secret_arn.split(":")[3] != region:
+        raise SystemExit("Refusing front door: API certificate and origin secret must be regional with the API")
+    if web_acl_arn.split(":")[3] != "us-east-1" or ":global/webacl/" not in web_acl_arn:
+        raise SystemExit("Refusing front door: CloudFront WAF must be a global web ACL in us-east-1")
+
+    certificate = aws_json(
+        ["acm", "describe-certificate", "--certificate-arn", certificate_arn, "--region", region],
+        profile=profile,
+    )["Certificate"]
+    certificate_names = [
+        certificate.get("DomainName", ""), *(certificate.get("SubjectAlternativeNames", []) or [])
+    ]
+    if certificate.get("Status") != "ISSUED" or not certificate_covers(domain, certificate_names):
+        raise SystemExit("Refusing front door: issued regional certificate does not cover the API origin domain")
+
+    secret = aws_json(
+        ["secretsmanager", "describe-secret", "--secret-id", secret_arn, "--region", region],
+        profile=profile,
+    )
+    if secret.get("ARN") != secret_arn:
+        raise SystemExit("Refusing front door: origin secret metadata did not match the exact ARN")
+
+    resource = web_acl_arn.split(":", 5)[5]
+    _, _, name, identifier = resource.split("/", 3)
+    web_acl = aws_json(
+        [
+            "wafv2", "get-web-acl", "--scope", "CLOUDFRONT", "--name", name, "--id",
+            identifier, "--region", "us-east-1",
+        ],
+        profile=profile,
+    )["WebACL"]
+    if web_acl.get("ARN") != web_acl_arn:
+        raise SystemExit("Refusing front door: WAF metadata did not match the exact ARN")
+    if "Allow" not in web_acl.get("DefaultAction", {}):
+        raise SystemExit("Refusing front door: WAF default action must remain allow during count-first rollout")
+    if any(
+        "Count" not in rule.get("Action", {}) and "Count" not in rule.get("OverrideAction", {})
+        for rule in web_acl.get("Rules", [])
+    ):
+        raise SystemExit("Refusing front door: every initial WAF rule must remain in count mode")
+
+    api_domain = aws_json(
+        ["apigatewayv2", "get-domain-name", "--domain-name", domain, "--region", region],
+        profile=profile,
+    )
+    configurations = api_domain.get("DomainNameConfigurations", []) or []
+    if api_domain.get("DomainName") != domain or not any(
+        item.get("CertificateArn") == certificate_arn
+        and item.get("EndpointType") == "REGIONAL"
+        and item.get("SecurityPolicy") == "TLS_1_2"
+        for item in configurations
+    ):
+        raise SystemExit("Refusing front door: regional API custom domain/certificate contract differs")
+
+
+def validate_front_door_apply_guards(
+    *, apply: bool, confirmation: str | None, expected_frontend_origin_id: str | None,
+    frontend_origin_id: str, expected_frontend_origin_domain: str | None,
+    frontend_origin_domain: str, expected_api_domain: str | None, api_domain: str,
+    expected_certificate_arn: str | None, certificate_arn: str,
+    expected_secret_arn: str | None, secret_arn: str,
+    expected_web_acl_arn: str | None, web_acl_arn: str,
+) -> None:
+    if not apply:
+        return
+    checks = (
+        (expected_frontend_origin_id, frontend_origin_id),
+        (expected_frontend_origin_domain, frontend_origin_domain),
+        (expected_api_domain, api_domain),
+        (expected_certificate_arn, certificate_arn),
+        (expected_secret_arn, secret_arn),
+        (expected_web_acl_arn, web_acl_arn),
+    )
+    if any(expected != actual for expected, actual in checks):
+        raise SystemExit("Refusing front-door apply: every expected origin/resource guard must match exactly")
+    if confirmation != FRONT_DOOR_CONFIRMATION:
+        raise SystemExit(f"Refusing front-door apply: --confirm-front-door must equal {FRONT_DOOR_CONFIRMATION}")
+
+
+def load_origin_verification_value(secret_arn: str, *, region: str, profile: str | None) -> str:
+    response = aws_json(
+        ["secretsmanager", "get-secret-value", "--secret-id", secret_arn, "--region", region],
+        profile=profile,
+    )
+    try:
+        contract = json.loads(response["SecretString"])
+        current = contract["current"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        raise SystemExit("Refusing front door: origin secret does not satisfy the current/previous JSON contract") from None
+    if (
+        not isinstance(current, str)
+        or not 32 <= len(current) <= 512
+        or not current.isascii()
+        or "\r" in current
+        or "\n" in current
+    ):
+        raise SystemExit("Refusing front door: origin secret current value is invalid")
+    previous = contract.get("previous")
+    if previous not in (None, "") and (
+        not isinstance(previous, str)
+        or not 32 <= len(previous) <= 512
+        or not previous.isascii()
+        or "\r" in previous
+        or "\n" in previous
+    ):
+        raise SystemExit("Refusing front door: origin secret previous value is invalid")
+    return current
+
+
 def cache_behavior(
-    current_default: dict[str, Any], path_pattern: str, policy_id: str, baseline: dict[str, Any]
+    current_default: dict[str, Any],
+    path_pattern: str,
+    policy_id: str,
+    baseline: dict[str, Any],
+    *,
+    cache_policy: str = "immutable",
 ) -> dict[str, Any]:
     behavior = {
         key: copy.deepcopy(value)
@@ -324,11 +593,93 @@ def cache_behavior(
             "PathPattern": path_pattern,
             "ViewerProtocolPolicy": "redirect-to-https",
             "Compress": True,
-            "CachePolicyId": baseline["cache_policies"]["immutable"],
+            "CachePolicyId": baseline["cache_policies"][cache_policy],
             "ResponseHeadersPolicyId": policy_id,
         }
     )
     return behavior
+
+
+def api_origin(settings: dict[str, Any], verification_value: str) -> dict[str, Any]:
+    return {
+        "Id": settings["origin_id"],
+        "DomainName": settings["origin_domain"],
+        "OriginPath": "",
+        "CustomHeaders": {
+            "Quantity": 1,
+            "Items": [{
+                "HeaderName": settings["verification_header"],
+                "HeaderValue": verification_value,
+            }],
+        },
+        "CustomOriginConfig": {
+            "HTTPPort": 80,
+            "HTTPSPort": 443,
+            "OriginProtocolPolicy": "https-only",
+            "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
+            "OriginReadTimeout": 30,
+            "OriginKeepaliveTimeout": 5,
+        },
+        "ConnectionAttempts": 3,
+        "ConnectionTimeout": 10,
+        "OriginShield": {"Enabled": False},
+    }
+
+
+def upsert_exact_api_origin(
+    config: dict[str, Any], settings: dict[str, Any], verification_value: str
+) -> None:
+    origins = config.get("Origins", {}).get("Items", []) or []
+    origin_id = settings["origin_id"]
+    matches = [item for item in origins if item.get("Id") == origin_id]
+    if len(matches) > 1:
+        raise RuntimeError("Multiple origins use the managed API origin ID")
+    if matches and matches[0].get("DomainName") != settings["origin_domain"]:
+        raise RuntimeError("Managed API origin ID is already bound to another domain")
+    retained = [item for item in origins if item.get("Id") != origin_id]
+    retained.append(api_origin(settings, verification_value))
+    config["Origins"] = {"Quantity": len(retained), "Items": retained}
+
+
+def api_cache_behavior(
+    default: dict[str, Any], *, settings: dict[str, Any], path_pattern: str,
+    cache_policy_id: str, origin_request_policy_id: str, response_policy_id: str,
+    public: bool,
+) -> dict[str, Any]:
+    behavior = {
+        key: copy.deepcopy(value)
+        for key, value in default.items()
+        if key not in {"ForwardedValues", "MinTTL", "DefaultTTL", "MaxTTL"}
+    }
+    allowed_methods = ["GET", "HEAD", "OPTIONS"] if public else [
+        "GET", "HEAD", "OPTIONS", "PUT", "PATCH", "POST", "DELETE"
+    ]
+    behavior.update({
+        "PathPattern": path_pattern,
+        "TargetOriginId": settings["origin_id"],
+        "ViewerProtocolPolicy": "https-only",
+        "AllowedMethods": {
+            "Quantity": len(allowed_methods),
+            "Items": allowed_methods,
+            "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]},
+        },
+        "Compress": True,
+        "CachePolicyId": cache_policy_id,
+        "OriginRequestPolicyId": origin_request_policy_id,
+        "ResponseHeadersPolicyId": response_policy_id,
+    })
+    return behavior
+
+
+def apply_short_error_ttls(config: dict[str, Any], error_codes: list[int], ttl: int) -> None:
+    existing = config.get("CustomErrorResponses", {}).get("Items", []) or []
+    by_code = {item.get("ErrorCode"): copy.deepcopy(item) for item in existing}
+    for code in error_codes:
+        response = by_code.get(code, {"ErrorCode": code})
+        response["ErrorCachingMinTTL"] = min(int(response.get("ErrorCachingMinTTL", ttl)), ttl)
+        by_code[code] = response
+    items = [by_code[code] for code in sorted(by_code) if code]
+    config["CustomErrorResponses"] = {"Quantity": len(items), "Items": items}
 
 
 def main() -> int:
@@ -340,6 +691,17 @@ def main() -> int:
     parser.add_argument("--expected-etag")
     parser.add_argument("--expected-account-id")
     parser.add_argument("--include-www", action="store_true")
+    parser.add_argument("--include-api-front-door", action="store_true")
+    parser.add_argument("--api-certificate-arn")
+    parser.add_argument("--origin-secret-arn")
+    parser.add_argument("--web-acl-arn")
+    parser.add_argument("--expected-frontend-origin-id")
+    parser.add_argument("--expected-frontend-origin-domain")
+    parser.add_argument("--expected-api-origin-domain")
+    parser.add_argument("--expected-api-certificate-arn")
+    parser.add_argument("--expected-origin-secret-arn")
+    parser.add_argument("--expected-web-acl-arn")
+    parser.add_argument("--confirm-front-door")
     parser.add_argument("--logging-bucket-domain", help="Opt-in standard-log S3 domain; never inferred")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
@@ -388,6 +750,12 @@ def main() -> int:
     if not website_origin and not private_rest_origin:
         raise SystemExit("Refusing to continue: frontend origin is neither the staged S3 website nor REST/OAC form.")
 
+    frontend_origin_id = config["DefaultCacheBehavior"].get("TargetOriginId", "")
+    frontend_origin_matches = [origin for origin in origins if origin.get("Id") == frontend_origin_id]
+    if len(frontend_origin_matches) != 1:
+        raise SystemExit("Refusing to continue: the default frontend origin is missing or ambiguous")
+    frontend_origin_domain = frontend_origin_matches[0].get("DomainName", "")
+
     account = aws_json(["sts", "get-caller-identity"], profile=args.profile).get("Account")
     validate_apply_guards(
         apply=args.apply,
@@ -397,6 +765,63 @@ def main() -> int:
         account=account,
     )
     validate_cache_policy_ids(baseline, args.profile)
+
+    api_settings = baseline.get("api_front_door", {})
+    public_api_cache_id = public_api_origin_request_id = private_api_origin_request_id = None
+    api_response_id = None
+    api_policy_actions = {"publicCache": "disabled", "publicOrigin": "disabled", "privateOrigin": "disabled", "response": "disabled"}
+    if args.include_api_front_door:
+        required = {
+            "--api-certificate-arn": args.api_certificate_arn,
+            "--origin-secret-arn": args.origin_secret_arn,
+            "--web-acl-arn": args.web_acl_arn,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise SystemExit(f"Refusing front door: required arguments missing: {', '.join(missing)}")
+        if api_settings.get("origin_domain") != baseline.get("api_origin_domain"):
+            raise SystemExit("Refusing front door: baseline API origin domain declarations differ")
+        validate_front_door_resources(
+            domain=api_settings["origin_domain"],
+            certificate_arn=args.api_certificate_arn,
+            secret_arn=args.origin_secret_arn,
+            web_acl_arn=args.web_acl_arn,
+            account=account,
+            region=args.region,
+            profile=args.profile,
+        )
+        validate_front_door_apply_guards(
+            apply=args.apply,
+            confirmation=args.confirm_front_door,
+            expected_frontend_origin_id=args.expected_frontend_origin_id,
+            frontend_origin_id=frontend_origin_id,
+            expected_frontend_origin_domain=args.expected_frontend_origin_domain,
+            frontend_origin_domain=frontend_origin_domain,
+            expected_api_domain=args.expected_api_origin_domain,
+            api_domain=api_settings["origin_domain"],
+            expected_certificate_arn=args.expected_api_certificate_arn,
+            certificate_arn=args.api_certificate_arn,
+            expected_secret_arn=args.expected_origin_secret_arn,
+            secret_arn=args.origin_secret_arn,
+            expected_web_acl_arn=args.expected_web_acl_arn,
+            web_acl_arn=args.web_acl_arn,
+        )
+        public_api_cache_id, api_policy_actions["publicCache"] = ensure_cache_policy(
+            public_api_cache_policy_config(api_settings), apply=args.apply, profile=args.profile
+        )
+        public_api_origin_request_id, api_policy_actions["publicOrigin"] = ensure_origin_request_policy(
+            api_origin_request_policy_config(api_settings, public=True),
+            apply=args.apply,
+            profile=args.profile,
+        )
+        private_api_origin_request_id, api_policy_actions["privateOrigin"] = ensure_origin_request_policy(
+            api_origin_request_policy_config(api_settings, public=False),
+            apply=args.apply,
+            profile=args.profile,
+        )
+        api_response_id, api_policy_actions["response"] = ensure_response_policy(
+            api_response_policy_config(api_settings), apply=args.apply, profile=args.profile
+        )
 
     redirect_name = f"{baseline['canonical_alias'].replace('.', '-')}-www-redirect-v1"
     redirect_arn: str | None = None
@@ -433,10 +858,14 @@ def main() -> int:
 
     names = baseline["response_policy_names"]
     html_desired = policy_config(names["html"], baseline, baseline["html_cache_control"])
+    static_desired = policy_config(names["static"], baseline, baseline["static_cache_control"])
     immutable_desired = policy_config(
         names["immutable"], baseline, baseline["immutable_cache_control"]
     )
     html_id, html_action = ensure_response_policy(html_desired, apply=args.apply, profile=args.profile)
+    static_id, static_action = ensure_response_policy(
+        static_desired, apply=args.apply, profile=args.profile
+    )
     immutable_id, immutable_action = ensure_response_policy(
         immutable_desired, apply=args.apply, profile=args.profile
     )
@@ -447,14 +876,24 @@ def main() -> int:
         "stack": args.stack_name,
         "distributionId": distribution_id,
         "currentETag": etag,
-        "responsePolicies": {"html": html_action, "immutable": immutable_action},
+        "responsePolicies": {
+            "html": html_action,
+            "static": static_action,
+            "immutable": immutable_action,
+        },
         "wwwRedirect": redirect_action,
+        "apiFrontDoor": {
+            "enabled": args.include_api_front_door,
+            "originDomain": api_settings.get("origin_domain") if args.include_api_front_door else None,
+            "policies": api_policy_actions,
+            "secretValueRead": bool(args.apply and args.include_api_front_door),
+        },
     }, indent=2))
     if not args.apply:
         print("Dry run only. Re-run with --apply, --expected-etag, and --expected-account-id after review.")
         return 0
 
-    assert html_id and immutable_id
+    assert html_id and static_id and immutable_id
     desired_distribution = copy.deepcopy(config)
     default = desired_distribution["DefaultCacheBehavior"]
     for legacy_key in ("ForwardedValues", "MinTTL", "DefaultTTL", "MaxTTL"):
@@ -476,13 +915,66 @@ def main() -> int:
         aliases.append(baseline["optional_www_alias"])
     desired_distribution["Aliases"] = {"Quantity": len(aliases), "Items": aliases}
 
+    origin_verification_value = None
+    if args.include_api_front_door:
+        origin_verification_value = load_origin_verification_value(
+            args.origin_secret_arn, region=args.region, profile=args.profile
+        )
+        upsert_exact_api_origin(desired_distribution, api_settings, origin_verification_value)
+        desired_distribution["WebACLId"] = args.web_acl_arn
+        apply_short_error_ttls(
+            desired_distribution,
+            api_settings["short_error_codes"],
+            api_settings["error_caching_min_ttl"],
+        )
+
     existing_behaviors = desired_distribution.get("CacheBehaviors", {}).get("Items", []) or []
     managed_patterns = set(baseline["immutable_path_patterns"])
+    managed_patterns.update(baseline.get("static_path_patterns", []))
+    if args.include_api_front_door:
+        managed_patterns.update({api_settings["public_path_pattern"], api_settings["private_path_pattern"]})
     preserved = [item for item in existing_behaviors if item.get("PathPattern") not in managed_patterns]
-    managed = [
+    immutable = [
         cache_behavior(default, pattern, immutable_id, baseline)
         for pattern in baseline["immutable_path_patterns"]
     ]
+    static = [
+        cache_behavior(
+            default,
+            pattern,
+            static_id,
+            baseline,
+            cache_policy="static",
+        )
+        for pattern in baseline.get("static_path_patterns", [])
+    ]
+    api_behaviors = []
+    if args.include_api_front_door:
+        assert public_api_cache_id and public_api_origin_request_id
+        assert private_api_origin_request_id and api_response_id
+        api_behaviors = [
+            api_cache_behavior(
+                default,
+                settings=api_settings,
+                path_pattern=api_settings["public_path_pattern"],
+                cache_policy_id=public_api_cache_id,
+                origin_request_policy_id=public_api_origin_request_id,
+                response_policy_id=api_response_id,
+                public=True,
+            ),
+            api_cache_behavior(
+                default,
+                settings=api_settings,
+                path_pattern=api_settings["private_path_pattern"],
+                cache_policy_id=baseline["cache_policies"]["html"],
+                origin_request_policy_id=private_api_origin_request_id,
+                response_policy_id=api_response_id,
+                public=False,
+            ),
+        ]
+    # CloudFront selects the first matching ordered behavior, so the narrow
+    # public cache path must precede the cache-disabled catch-all API path.
+    managed = api_behaviors + immutable + static
     if args.include_www:
         for behavior in preserved:
             associate_viewer_request(behavior, redirect_arn)

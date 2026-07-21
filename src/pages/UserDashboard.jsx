@@ -12,6 +12,7 @@ import {
     mediaDisplayUrl,
     mediaFileName,
     mediaId,
+    mediaPreviewSrcSet,
     mediaThumbnailUrl,
     resolveMediaDownloadUrl,
     startBrowserDownload,
@@ -412,6 +413,7 @@ function UserDashboard() {
                                             <div className="relative w-full h-full">
                                                 <ProgressiveImage
                                                     src={thumbUrl}
+                                                    srcSet={mediaPreviewSrcSet(img) || undefined}
                                                     blurhash={img.blurhash}
                                                     width={img.width}
                                                     height={img.height}

@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Retained us-east-1 CloudFront-scope WAF for the photography website single front door.
+  Every managed and rate rule starts in COUNT mode.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedPattern: '^[a-z0-9-]+$'
+  RateLimitPerFiveMinutes:
+    Type: Number
+    Default: 1000
+    MinValue: 100
+    MaxValue: 20000000
+    Description: Per-IP five-minute request threshold; the rule remains COUNT until separately promoted.
+  WafLogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 120, 180, 365]
+  AlarmTopicArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:[A-Za-z0-9-]+:sns:[A-Za-z0-9-]+:[0-9]{12}:[A-Za-z0-9_.:/+=,@-]+)$'
+    Description: Optional pre-created notification topic; no public subscription is created here.
+  LogsKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:[A-Za-z0-9-]+:kms:[A-Za-z0-9-]+:[0-9]{12}:key/[A-Fa-f0-9-]+)$'
+    Description: Optional existing KMS key whose policy already permits CloudWatch Logs in us-east-1.
+
+Conditions:
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
+  HasLogsKmsKey: !Not [!Equals [!Ref LogsKmsKeyArn, '']]
+
+Resources:
+  FrontDoorWebAcl:
+    Type: AWS::WAFv2::WebACL
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub 'IanPhotography-FrontDoor-${Stage}'
+      Description: Count-first protection for the canonical frontend and same-origin API
+      Scope: CLOUDFRONT
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub 'IanPhotographyFrontDoor-${Stage}'
+        SampledRequestsEnabled: false
+      Rules:
+        - Name: AWSManagedCommon
+          Priority: 10
+          OverrideAction:
+            Count: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedCommonCount
+            SampledRequestsEnabled: false
+        - Name: AWSManagedKnownBadInputs
+          Priority: 20
+          OverrideAction:
+            Count: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedKnownBadInputsCount
+            SampledRequestsEnabled: false
+        - Name: AWSManagedAmazonIpReputation
+          Priority: 30
+          OverrideAction:
+            Count: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAmazonIpReputationList
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedAmazonIpReputationCount
+            SampledRequestsEnabled: false
+        - Name: PerIpRateObservation
+          Priority: 40
+          Action:
+            Count: {}
+          Statement:
+            RateBasedStatement:
+              AggregateKeyType: IP
+              Limit: !Ref RateLimitPerFiveMinutes
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: PerIpRateObservationCount
+            SampledRequestsEnabled: false
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DeploymentMode
+          Value: CountFirst
+
+  WafLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub 'aws-waf-logs-ian-photography-front-door-${Stage}'
+      RetentionInDays: !Ref WafLogRetentionDays
+      KmsKeyId: !If [HasLogsKmsKey, !Ref LogsKmsKeyArn, !Ref AWS::NoValue]
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: SecurityTelemetry
+
+  WafLoggingConfiguration:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties:
+      ResourceArn: !GetAtt FrontDoorWebAcl.Arn
+      LogDestinationConfigs:
+        - !GetAtt WafLogGroup.Arn
+      RedactedFields:
+        - SingleHeader:
+            Name: authorization
+        - SingleHeader:
+            Name: cookie
+        - SingleHeader:
+            Name: x-origin-verify
+        - QueryString: {}
+      LoggingFilter:
+        DefaultBehavior: DROP
+        Filters:
+          - Behavior: KEEP
+            Requirement: MEETS_ANY
+            Conditions:
+              - ActionCondition:
+                  Action: BLOCK
+              - ActionCondition:
+                  Action: COUNT
+
+  WafBlockedRequestAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Front-door WAF emitted one or more terminating block actions.
+      Namespace: AWS/WAFV2
+      MetricName: BlockedRequests
+      Dimensions:
+        - Name: WebACL
+          Value: !Sub 'IanPhotography-FrontDoor-${Stage}'
+        - Name: Region
+          Value: Global
+        - Name: Rule
+          Value: ALL
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlarmTopic, !Ref AlarmTopicArn, !Ref AWS::NoValue]
+
+  WafRateObservationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Count-mode rate rule observed a sustained per-IP request surge.
+      Namespace: AWS/WAFV2
+      MetricName: CountedRequests
+      Dimensions:
+        - Name: WebACL
+          Value: !Sub 'IanPhotography-FrontDoor-${Stage}'
+        - Name: Region
+          Value: Global
+        - Name: Rule
+          Value: PerIpRateObservation
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 100
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlarmTopic, !Ref AlarmTopicArn, !Ref AWS::NoValue]
+
+  WafManagedObservationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Count-mode AWS managed rules observed a sudden request anomaly.
+      Namespace: AWS/WAFV2
+      MetricName: CountedRequests
+      Dimensions:
+        - Name: WebACL
+          Value: !Sub 'IanPhotography-FrontDoor-${Stage}'
+        - Name: Region
+          Value: Global
+        - Name: Rule
+          Value: AWSManagedCommon
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 50
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlarmTopic, !Ref AlarmTopicArn, !Ref AWS::NoValue]
+
+Outputs:
+  WebAclArn:
+    Description: Associate this exact ARN through the guarded frontend CloudFront tool.
+    Value: !GetAtt FrontDoorWebAcl.Arn
+  WebAclId:
+    Value: !GetAtt FrontDoorWebAcl.Id
+  WafLogGroupName:
+    Description: Privacy-filtered COUNT/BLOCK security telemetry with no request sampling.
+    Value: !Ref WafLogGroup
+  WafDeploymentMode:
+    Description: All rules are intentionally non-blocking until evidence supports individual promotion.
+    Value: COUNT

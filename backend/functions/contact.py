@@ -2,13 +2,20 @@
 
 import os
 
+from audit_helpers import emit_audit_event
 from email_helpers import send_email
 from response_helpers import error_response, internal_error, json_response
 from security_helpers import check_rate_limit, sanitize_text, verify_turnstile
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_email
 
 
+from front_door import verify_front_door_request
+
+
 def handler(event, context):
+    denied = verify_front_door_request(event, context)
+    if denied:
+        return denied
     try:
         body = parse_json_body(event, max_bytes=16 * 1024)
         name = require_string(body.get("name"), "name", maximum=120)
@@ -18,8 +25,16 @@ def handler(event, context):
         ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
 
         if not verify_turnstile(token, ip, expected_action="contact"):
+            emit_audit_event(
+                event_name="contact.submit", outcome="denied", action="contact.message.submit",
+                resource_type="contact", reason_code="captcha_failed", event=event, context=context,
+            )
             return error_response(403, "Security verification failed", code="captcha_failed")
         if not check_rate_limit(ip, "contact", max_requests=3, window_seconds=600, fail_closed=True):
+            emit_audit_event(
+                event_name="contact.submit", outcome="denied", action="contact.message.submit",
+                resource_type="contact", reason_code="rate_limited", event=event, context=context,
+            )
             return error_response(429, "Too many contact requests. Please try again later.", code="rate_limited")
 
         safe_name = sanitize_text(name, maximum=120)
@@ -36,8 +51,20 @@ def handler(event, context):
         """
         recipient = os.environ.get("CONTACT_RECIPIENT", "iant4093@gmail.com")
         send_email(recipient, f"Portfolio Contact Form: {name}", html_body)
+        emit_audit_event(
+            event_name="contact.submit", outcome="success", action="contact.message.submit",
+            resource_type="contact", reason_code="delivered", event=event, context=context,
+        )
         return json_response(200, {"message": "Thank you! Your message has been sent."})
     except ValidationError as error:
+        emit_audit_event(
+            event_name="contact.submit", outcome="denied", action="contact.message.submit",
+            resource_type="contact", reason_code="invalid_request", event=event, context=context,
+        )
         return error_response(400, str(error), code="invalid_contact")
     except Exception as error:
+        emit_audit_event(
+            event_name="contact.submit", outcome="failure", action="contact.message.submit",
+            resource_type="contact", reason_code="delivery_failed", event=event, context=context,
+        )
         return internal_error(context, error, "contact")

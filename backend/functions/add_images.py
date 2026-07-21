@@ -6,9 +6,11 @@ import os
 
 import boto3
 
+from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from create_album import _extract_exif, _normalize_images, _start_video_jobs
 from media_access import album_known_keys, tag_keys_visibility
+from preview_jobs import enqueue_preview_jobs
 from response_helpers import error_response, internal_error, json_response
 from dynamodb_helpers import ensure_album_item_budget
 from validation_helpers import ValidationError, parse_json_body, validate_uuid
@@ -19,7 +21,29 @@ table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
 logger = logging.getLogger("photography_api.album_write")
 
 
+def _audit(event, context, outcome, reason_code, *, media_count=None):
+    actor_type, auth_method = actor_context(event)
+    emit_audit_event(
+        event_name="admin.media_added",
+        outcome=outcome,
+        action="album.media.add",
+        resource_type="media",
+        reason_code=reason_code,
+        event=event,
+        context=context,
+        actor_type=actor_type,
+        auth_method=auth_method,
+        details={"media_count": media_count} if media_count is not None else None,
+    )
+
+
+from front_door import verify_front_door_request
+
+
 def handler(event, context):
+    front_door_denied = verify_front_door_request(event, context)
+    if front_door_denied:
+        return front_door_denied
     denied = require_admin(event)
     if denied:
         return denied
@@ -28,6 +52,7 @@ def handler(event, context):
         body = parse_json_body(event)
         album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
         if not album or album.get("status", "active") != "active":
+            _audit(event, context, "denied", "album_not_found")
             return error_response(404, "Album not found", code="not_found")
         album_type = album.get("type", "photo")
         images = _normalize_images(body.get("images"), album_id, album_type, album=album)
@@ -77,6 +102,12 @@ def handler(event, context):
         }
         tag_keys_visibility(album_known_keys(requested_key_holder), album["visibility"])
 
+        if album_type == "photo" and fresh_images:
+            try:
+                enqueue_preview_jobs(album_id, fresh_images)
+            except Exception as error:
+                logger.error("preview_dispatch_failed error_type=%s", type(error).__name__)
+
         # The durable album setting is authoritative. A per-request value must
         # neither disable required backup nor opt an album into backup.
         backup_to_drive = album.get("backupToGoogleDrive") is True
@@ -97,8 +128,16 @@ def handler(event, context):
                 )
             except Exception as error:
                 logger.error("drive_backup_dispatch_failed error_type=%s", type(error).__name__)
+                emit_audit_event(
+                    event_name="provider.drive_backup", outcome="failure", action="provider.backup.dispatch",
+                    resource_type="provider", reason_code="dispatch_failed", event=event,
+                    context=context, actor_type="service", auth_method="service",
+                )
+        _audit(event, context, "success", "media_added", media_count=len(fresh_images))
         return json_response(200, {"message": "Images appended successfully", "added": len(fresh_images)})
     except ValidationError as error:
+        _audit(event, context, "denied", "invalid_media")
         return error_response(400, str(error), code="invalid_images")
     except Exception as error:
+        _audit(event, context, "failure", "unexpected_error")
         return internal_error(context, error, "add_images")

@@ -8,6 +8,8 @@ import {
     mediaFileName,
     mediaHlsUrl,
     mediaId,
+    mediaPreviewCandidates,
+    mediaPreviewSrcSet,
     mediaThumbnailUrl,
     resolveMediaDownloadUrl,
     signedUrlExpiresAt,
@@ -59,6 +61,35 @@ describe('media URL compatibility', () => {
         expect(mediaExpiresAt({ expiresAt: '2026-07-20T12:34:56Z' }))
             .toBe(Date.parse('2026-07-20T12:34:56Z'))
         expect(mediaExpiresAt({ expiresAt: 1_800_000_000 })).toBe(1_800_000_000_000)
+    })
+
+    it('uses only a complete validated 640w and 1280w preview pair', () => {
+        const candidates = [
+            { width: 1280, url: 'https://media.example.test/photo-1280.webp' },
+            { width: 640, url: 'https://media.example.test/photo-640.webp' },
+        ]
+        expect(mediaPreviewCandidates({ previewSrcSet: candidates })).toEqual([
+            { width: 640, url: 'https://media.example.test/photo-640.webp' },
+            { width: 1280, url: 'https://media.example.test/photo-1280.webp' },
+        ])
+        expect(mediaPreviewSrcSet({ previewSrcSet: candidates })).toBe(
+            'https://media.example.test/photo-640.webp 640w, https://media.example.test/photo-1280.webp 1280w',
+        )
+        expect(mediaPreviewSrcSet({ previewSrcSet: [candidates[0]] })).toBe('')
+        expect(mediaPreviewSrcSet({ previewSrcSet: [candidates[1], candidates[1]] })).toBe('')
+        expect(mediaPreviewSrcSet({ previewSrcSet: [
+            candidates[1],
+            { width: 1280, url: 'javascript:alert(1)' },
+        ] })).toBe('')
+    })
+
+    it('refreshes protected media before the earliest preview candidate expires', () => {
+        const early = 'https://bucket.example/640.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=300'
+        const late = 'https://bucket.example/1280.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=600'
+        expect(mediaExpiresAt({
+            url: late,
+            previewSrcSet: [{ width: 640, url: early }, { width: 1280, url: late }],
+        })).toBe(Date.UTC(2026, 6, 20, 12, 5, 0))
     })
 
     it('uses an already-authorized legacy URL only when the new endpoint is absent', async () => {

@@ -14,7 +14,9 @@ import {
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 
 const CATALOG_KEY = 'public-photos'
-const PAGE_SIZE = 24
+// Fetch the complete current public catalog in one compressed response while
+// retaining cursor pagination once the catalog grows beyond the API's cap.
+const PAGE_SIZE = 100
 const HERO_WIDTHS = [640, 960, 1280, 1920]
 const heroSet = (format) => HERO_WIDTHS
     .map((width) => `/images/heroes/photo-${width}.${format} ${width}w`)

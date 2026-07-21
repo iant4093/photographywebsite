@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "frontend": {
+    "totalUncompressedBytes": 5000000,
+    "totalGzipBytes": 4100000,
+    "entryJavaScriptBytes": 320000,
+    "entryJavaScriptGzipBytes": 110000,
+    "entryCssBytes": 75000,
+    "entryCssGzipBytes": 15000,
+    "largestChunkBytes": 550000,
+    "largestChunkGzipBytes": 180000
+  },
+  "sam": {
+    "default": {
+      "uncompressedBytes": 20000000,
+      "fileCount": 350
+    },
+    "overrides": {
+      "GoogleDriveBackupFunction": {
+        "uncompressedBytes": 140000000,
+        "fileCount": 2000
+      },
+      "PreviewWorkerFunction": {
+        "uncompressedBytes": 60000000,
+        "fileCount": 5000
+      }
+    }
+  }
+}

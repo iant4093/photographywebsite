@@ -13,7 +13,13 @@ cognito = boto3.client("cognito-idp")
 USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 
 
+from front_door import verify_front_door_request
+
+
 def handler(event, context):
+    front_door_denied = verify_front_door_request(event, context)
+    if front_door_denied:
+        return front_door_denied
     denied = require_admin(event)
     if denied:
         return denied

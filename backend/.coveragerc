@@ -1,0 +1,22 @@
+[run]
+branch = True
+source =
+    functions
+relative_files = True
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+skip_empty = True
+fail_under = 80
+
+[html]
+directory = coverage/backend/html
+
+[xml]
+output = coverage/backend/coverage.xml
+
+[json]
+output = coverage/backend/coverage.json
+pretty_print = True

@@ -52,10 +52,12 @@ Parameters:
     AllowedValues:
       - none
       - visibility
+      - summary
       - both
     Description: >-
-      Guarded existing-table migration. Deploy visibility first, wait for ACTIVE and backfill,
-      then deploy both. DynamoDB permits only one GSI creation per UpdateTable call.
+      Guarded existing-table migration. Deploy visibility first, then summary, then both,
+      waiting for each new index to become ACTIVE. DynamoDB permits only one GSI creation
+      per UpdateTable call.
   EnforcePrivateMediaCloudFrontDeny:
     Type: String
     Default: 'false'
@@ -83,15 +85,79 @@ Parameters:
     Type: Number
     Default: 90
     AllowedValues: [30, 60, 90, 120, 180, 365, 400]
+  ApplicationLogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 120, 180, 365, 400]
+    Description: Retention for the centralized structured Lambda application log group.
+  ReleaseSha:
+    Type: String
+    Default: unknown
+    AllowedPattern: '^(unknown|[A-Fa-f0-9]{7,64})$'
+    Description: Immutable source revision included in privacy-safe application audit events.
+  ProvisionApiFrontDoor:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: >-
+      Staged switch that creates the retained regional API custom domain, mapping, certificate,
+      and Route53 alias. Keep false until the hosted-zone parameter is reviewed.
+  ApiFrontDoorDomainName:
+    Type: String
+    Default: origin-api.iantruongphotography.com
+    AllowedPattern: '^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$'
+    Description: Dedicated regional API origin hostname; never expose it as the browser API base.
+  ApiFrontDoorHostedZoneId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|Z[A-Z0-9]{1,31})$'
+    Description: Exact public Route53 hosted-zone ID required only when ProvisionApiFrontDoor is true.
+  FrontDoorEnforcementEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: >-
+      Fail-closed origin-header enforcement. Enable only after CloudFront /api canaries pass and
+      direct custom-domain and execute-api negative tests succeed.
+  FrontDoorSecretCacheTtlSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 5
+    MaxValue: 3600
+    Description: Maximum Lambda process-local cache time for the current/previous origin values.
+  DisableExecuteApiEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: Final rollout switch; keep false until same-origin CloudFront API tests pass.
+
+Rules:
+  ApiFrontDoorProvisioningRequiresHostedZone:
+    RuleCondition: !Equals [!Ref ProvisionApiFrontDoor, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ApiFrontDoorHostedZoneId, '']]
+        AssertDescription: ApiFrontDoorHostedZoneId is required when provisioning the custom domain.
+  FrontDoorEnforcementRequiresClosedBypass:
+    RuleCondition: !Equals [!Ref FrontDoorEnforcementEnabled, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref ProvisionApiFrontDoor, 'true']
+        AssertDescription: The retained API custom domain must be provisioned before enforcement.
+      - Assert: !Equals [!Ref DisableExecuteApiEndpoint, 'true']
+        AssertDescription: The default execute-api endpoint must be disabled when enforcement is enabled.
 
 Conditions:
   HasVisibilityIndex: !Not [!Equals [!Ref AlbumIndexDeploymentPhase, none]]
+  HasSummaryIndex: !Or
+    - !Equals [!Ref AlbumIndexDeploymentPhase, summary]
+    - !Equals [!Ref AlbumIndexDeploymentPhase, both]
   HasOwnerIndex: !Equals [!Ref AlbumIndexDeploymentPhase, both]
   HasResendSecret: !Not [!Equals [!Ref ResendApiKeySecretArn, '']]
   HasTurnstileSecret: !Not [!Equals [!Ref TurnstileSecretArn, '']]
   HasGoogleOAuthSecret: !Not [!Equals [!Ref GoogleOAuthSecretArn, '']]
   HasApplicationSecretsKmsKey: !Not [!Equals [!Ref ApplicationSecretsKmsKeyArn, '']]
   EnforcePrivateMediaDeny: !Equals [!Ref EnforcePrivateMediaCloudFrontDeny, 'true']
+  ProvisionApiFrontDoorResources: !Equals [!Ref ProvisionApiFrontDoor, 'true']
+  DisableDefaultApiEndpoint: !Equals [!Ref DisableExecuteApiEndpoint, 'true']
 
 Globals:
   Function:
@@ -104,11 +170,17 @@ Globals:
       Variables:
         COGNITO_USER_POOL_ID: !Ref UserPool
         COGNITO_CLIENT_ID: !Ref UserPoolClient
+        APPLICATION_STAGE: !Ref Stage
+        RELEASE_SHA: !Ref ReleaseSha
+        FRONT_DOOR_CONFIG_ARN: !Ref FrontDoorOriginSecret
+        FRONT_DOOR_ENFORCEMENT_ENABLED: !Ref FrontDoorEnforcementEnabled
+        FRONT_DOOR_SECRET_CACHE_TTL_SECONDS: !Ref FrontDoorSecretCacheTtlSeconds
     Tracing: Active
     LoggingConfig:
       LogFormat: JSON
       ApplicationLogLevel: INFO
       SystemLogLevel: WARN
+      LogGroup: !Ref ApplicationLogGroup
     Tags:
       Application: IanTruongPhotography
       Stage: !Ref Stage
@@ -171,6 +243,28 @@ Resources:
               ProjectionType: ALL
           - !Ref AWS::NoValue
         - !If
+          - HasSummaryIndex
+          - IndexName: VisibilityCreatedAtSummaryIndex
+            KeySchema:
+              - AttributeName: visibility
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: INCLUDE
+              NonKeyAttributes:
+                - status
+                - type
+                - title
+                - description
+                - category
+                - imageCount
+                - coverImageUrl
+                - coverThumbKey
+                - coverBlurhash
+                - legacyS3Prefix
+          - !Ref AWS::NoValue
+        - !If
           - HasOwnerIndex
           - IndexName: OwnerSubCreatedAtIndex
             KeySchema:
@@ -181,6 +275,69 @@ Resources:
             Projection:
               ProjectionType: ALL
           - !Ref AWS::NoValue
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: PrivateCustomerData
+
+  PreviewDataKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub 'Responsive preview metadata and queue encryption (${Stage})'
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableAccountIAMPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: PrivateCustomerData
+
+  PreviewDataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/ian-photography-preview-${Stage}'
+      TargetKeyId: !Ref PreviewDataKey
+
+  PreviewMetadataTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'GoldenHour-PreviewMetadata-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt PreviewDataKey.Arn
+      AttributeDefinitions:
+        - AttributeName: albumId
+          AttributeType: S
+        - AttributeName: mediaId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: albumId
+          KeyType: HASH
+        - AttributeName: mediaId
+          KeyType: RANGE
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -231,6 +388,104 @@ Resources:
         - Key: DataClassification
           Value: SecuritySecret
 
+  # Generated JSON contract: {"current":"<generated>","previous":""}.
+  # Rotation first moves the old current value into previous, then changes
+  # current.  Remove previous only after CloudFront and every Lambda cache have
+  # used the new current value for longer than the configured cache TTL.
+  FrontDoorOriginSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub 'ian-photography/front-door/${Stage}'
+      Description: !Sub 'CloudFront to HTTP API origin verification (${Stage})'
+      GenerateSecretString:
+        SecretStringTemplate: '{"previous":""}'
+        GenerateStringKey: current
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: SecuritySecret
+
+  FrontDoorOriginSecretReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Read-only access to the exact generated CloudFront origin-verification secret
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadExactFrontDoorOriginSecret
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref FrontDoorOriginSecret
+
+  ApiFrontDoorCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: ProvisionApiFrontDoorResources
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DomainName: !Ref ApiFrontDoorDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref ApiFrontDoorDomainName
+          HostedZoneId: !Ref ApiFrontDoorHostedZoneId
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  ApiFrontDoorDomain:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: ProvisionApiFrontDoorResources
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DomainName: !Ref ApiFrontDoorDomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref ApiFrontDoorCertificate
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+      Tags:
+        Application: IanTruongPhotography
+        Stage: !Ref Stage
+
+  ApiFrontDoorMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: ProvisionApiFrontDoorResources
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    DependsOn:
+      - ApiFrontDoorDomain
+      - ApiStage
+    Properties:
+      ApiId: !Ref Api
+      DomainName: !Ref ApiFrontDoorDomainName
+      Stage: !Ref Stage
+      ApiMappingKey: api
+
+  ApiFrontDoorAlias:
+    Type: AWS::Route53::RecordSet
+    Condition: ProvisionApiFrontDoorResources
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      HostedZoneId: !Ref ApiFrontDoorHostedZoneId
+      Name: !Ref ApiFrontDoorDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiFrontDoorDomain.RegionalDomainName
+        HostedZoneId: !GetAtt ApiFrontDoorDomain.RegionalHostedZoneId
+        EvaluateTargetHealth: false
+
   # Private S3 origin. Versioning and retained resources support recovery.
   ImagesBucket:
     Type: AWS::S3::Bucket
@@ -253,6 +508,12 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      LoggingConfiguration:
+        DestinationBucketName: !Ref MediaAccessLogsBucket
+        LogFilePrefix: s3-media/
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
       LifecycleConfiguration:
         Rules:
           - Id: DeleteTemporaryZipObjects
@@ -346,6 +607,20 @@ Resources:
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+          # Preview V2 is always tag-enforced, independently of the guarded
+          # legacy-media rollout switch. Its zero-TTL edge policy makes every
+          # uncached browser request re-evaluate this origin authorization.
+          - Sid: DenyCloudFrontNonPublicPreviewV2
+            Effect: Deny
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${ImagesBucket.Arn}/albums/*/preview/v2/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              StringNotEquals:
+                s3:ExistingObjectTag/visibility: public
           - !If
             - EnforcePrivateMediaDeny
             - Sid: DenyCloudFrontNonPublicTaggedObjects
@@ -360,6 +635,73 @@ Resources:
                 StringNotEquals:
                   s3:ExistingObjectTag/visibility: public
             - !Ref AWS::NoValue
+
+  PreviewMediaCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'GoldenHour-PreviewV2-OriginAuth-${Stage}'
+        Comment: Recheck S3 visibility tags while browsers retain immutable versioned previews
+        DefaultTTL: 0
+        MaxTTL: 0
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  PreviewMediaResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub 'GoldenHour-PreviewV2-Headers-${Stage}'
+        Comment: Exact-origin CORS, hardening, and immutable browser caching for versioned previews
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items:
+              - Content-Type
+              - Range
+          AccessControlAllowMethods:
+            Items:
+              - GET
+              - HEAD
+              - OPTIONS
+          AccessControlAllowOrigins:
+            Items:
+              - !Ref FrontendUrl
+          AccessControlExposeHeaders:
+            Items:
+              - Accept-Ranges
+              - Content-Length
+              - Content-Range
+              - ETag
+          AccessControlMaxAgeSec: 600
+          OriginOverride: true
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Cache-Control
+              Value: public, max-age=31536000, immutable
+              Override: true
 
   MediaResponseHeadersPolicy:
     Type: AWS::CloudFront::ResponseHeadersPolicy
@@ -465,6 +807,17 @@ Resources:
             Condition:
               Bool:
                 aws:SecureTransport: false
+          - Sid: AllowImagesBucketServerAccessLogs
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${MediaAccessLogsBucket.Arn}/s3-media/*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !GetAtt ImagesBucket.Arn
 
   ImagesOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -498,6 +851,16 @@ Resources:
           OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
           ResponseHeadersPolicyId: !Ref MediaResponseHeadersPolicy
           Compress: true
+        CacheBehaviors:
+          - PathPattern: 'albums/*/preview/v2/*'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: !Ref PreviewMediaCachePolicy
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+            ResponseHeadersPolicyId: !Ref PreviewMediaResponseHeadersPolicy
+            Compress: false
         Logging:
           Bucket: !GetAtt MediaAccessLogsBucket.DomainName
           IncludeCookies: false
@@ -619,10 +982,29 @@ Resources:
       LogGroupName: !Sub '/aws/apigateway/ian-photography-${Stage}'
       RetentionInDays: !Ref ApiAccessLogRetentionDays
 
+  # One retained group keeps Lambda application/audit events queryable and lets
+  # every handler share the same redaction filters, metrics, and retention rule.
+  # Existing per-function groups are intentionally left untouched for rollback.
+  ApplicationLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/ian-photography/application/${Stage}'
+      RetentionInDays: !Ref ApplicationLogRetentionDays
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: SecurityTelemetry
+
   Api:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Stage
+      DisableExecuteApiEndpoint: !If [DisableDefaultApiEndpoint, true, false]
       FailOnWarnings: true
       PropagateTags: true
       CorsConfiguration:
@@ -666,11 +1048,115 @@ Resources:
         - Key: DataClassification
           Value: OperationalFailurePayloads
 
-  # Public: list public albums. Backend must ignore client attempts to widen visibility.
-  GetAlbumsFunction:
+  PreviewDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-preview-dlq-${Stage}'
+      KmsMasterKeyId: !GetAtt PreviewDataKey.Arn
+      KmsDataKeyReusePeriodSeconds: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: OperationalFailurePayloads
+
+  PreviewQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-preview-${Stage}'
+      KmsMasterKeyId: !GetAtt PreviewDataKey.Arn
+      KmsDataKeyReusePeriodSeconds: 300
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 1080
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PreviewDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: OperationalWorkPayloads
+
+  # Anonymous-only catalog routes contain no JWT dependency or protected-data
+  # branch and are safe to place behind a shared CloudFront cache behavior.
+  GetPublicAlbumsFunction:
     Type: AWS::Serverless::Function
     Metadata: &SafePythonBuild
       BuildMethod: makefile
+    Properties:
+      CodeUri: ./
+      Handler: get_public_albums.handler
+      ReservedConcurrentExecutions: 20
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+          PUBLIC_SUMMARY_INDEX: VisibilityCreatedAtSummaryIndex
+          ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+      Events:
+        GetPublicAlbums:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /public/albums
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  GetPublicAlbumFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_public_album.handler
+      ReservedConcurrentExecutions: 20
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+      Events:
+        GetPublicAlbum:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /public/albums/{albumId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  # Compatibility route: supports public, owner, and admin catalog views.
+  GetAlbumsFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
     Properties:
       CodeUri: ./
       Handler: get_albums.handler
@@ -681,9 +1167,11 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+          PUBLIC_SUMMARY_INDEX: VisibilityCreatedAtSummaryIndex
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
           ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
         - Statement:
@@ -716,14 +1204,19 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
         - Statement:
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
@@ -753,6 +1246,7 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           RATE_LIMIT_TABLE: !Ref RateLimitTable
           RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
@@ -761,10 +1255,14 @@ Resources:
           TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: dynamodb:Query
               Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
@@ -815,6 +1313,7 @@ Resources:
           TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: dynamodb:UpdateItem
@@ -867,6 +1366,7 @@ Resources:
           TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: dynamodb:UpdateItem
@@ -918,6 +1418,7 @@ Resources:
           RESEND_API_KEY: !Ref ResendApiKey
           RESEND_API_KEY_SECRET_ARN: !Ref ResendApiKeySecretArn
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: dynamodb:UpdateItem
@@ -1013,6 +1514,8 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
+          PREVIEW_QUEUE_URL: !Ref PreviewQueue
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           FRONTEND_URL: !Ref FrontendUrl
@@ -1024,10 +1527,22 @@ Resources:
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: dynamodb:PutItem
               Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt PreviewQueue.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action: cognito-idp:ListUsers
               Resource: !GetAtt UserPool.Arn
@@ -1090,15 +1605,20 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
@@ -1128,14 +1648,21 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:DeleteItem
               Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket
@@ -1172,16 +1699,30 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
+          PREVIEW_QUEUE_URL: !Ref PreviewQueue
           IMAGES_BUCKET: !Ref ImagesBucket
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt PreviewQueue.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -1216,6 +1757,67 @@ Resources:
             Path: /albums/{albumId}/images
             Method: POST
 
+  PreviewWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ./
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Architectures:
+        - x86_64
+      Timeout: 180
+      MemorySize: 3072
+      EphemeralStorage:
+        Size: 1024
+      ReservedConcurrentExecutions: 2
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          MAX_PREVIEW_SOURCE_BYTES: '104857600'
+          MAX_PREVIEW_OUTPUT_BYTES: '20971520'
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt PreviewQueue.QueueName
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectVersion
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObjectTagging
+                - s3:PutObjectTagging
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*/preview/v2/*'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt PreviewDataKey.Arn
+      Events:
+        PreviewJobs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt PreviewQueue.Arn
+            BatchSize: 2
+            MaximumBatchingWindowInSeconds: 0
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+            ScalingConfig:
+              MaximumConcurrency: 2
+
   CreateZipFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -1235,6 +1837,7 @@ Resources:
           RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
           WORKER_FUNCTION_NAME: !Ref WorkerZipFunction
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: dynamodb:GetItem
@@ -1333,14 +1936,21 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket
@@ -1419,6 +2029,7 @@ Resources:
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: dynamodb:GetItem
@@ -1471,6 +2082,7 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
@@ -1510,6 +2122,7 @@ Resources:
         Variables:
           IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
@@ -1536,6 +2149,7 @@ Resources:
           COGNITO_USER_POOL_ID: !Ref UserPool
           FRONTEND_URL: !Ref FrontendUrl
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
@@ -1559,6 +2173,7 @@ Resources:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action: cognito-idp:ListUsers
@@ -1585,6 +2200,7 @@ Resources:
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
           ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
@@ -1639,6 +2255,7 @@ Resources:
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
           ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
               Action:
@@ -1672,6 +2289,83 @@ Resources:
           Value: IanTruongPhotography
         - Key: Stage
           Value: !Ref Stage
+
+  AuditDeniedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: '"security_audit" "denied"'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: AuditDenied
+          MetricValue: '1'
+          DefaultValue: 0
+
+  AuditFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: '"security_audit" "failure"'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: AuditFailure
+          MetricValue: '1'
+          DefaultValue: 0
+
+  PreviewJobFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: '"preview_job_failed"'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/PreviewV2
+          MetricName: PreviewJobFailure
+          MetricValue: '1'
+          DefaultValue: 0
+
+  PreviewJobCompletedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: '"preview_job_completed"'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/PreviewV2
+          MetricName: PreviewJobCompleted
+          MetricValue: '1'
+          DefaultValue: 0
+
+  LoginDeniedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: '"security_audit" "auth.login" "denied"'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: LoginDenied
+          MetricValue: '1'
+          DefaultValue: 0
+
+  ApiAuthorizationDeniedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApiAccessLogGroup
+      FilterPattern: '{ ($.status = "401") || ($.status = "403") || ($.status = "429") }'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: ApiAuthorizationDenied
+          MetricValue: '1'
+          DefaultValue: 0
+
+  FrontDoorDeniedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref ApplicationLogGroup
+      FilterPattern: '"front_door_request_denied"'
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: FrontDoorDenied
+          MetricValue: '1'
+          DefaultValue: 0
 
   ApiServerErrorAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -1715,6 +2409,22 @@ Resources:
       AlarmActions:
         - !Ref AlarmTopic
 
+  FrontDoorDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A request reached an API Lambda without valid CloudFront origin verification.
+      Namespace: IanTruongPhotography/Security
+      MetricName: FrontDoorDenied
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
   AsyncFailureQueueAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -1726,6 +2436,174 @@ Resources:
           Value: !GetAtt AsyncFailureQueue.QueueName
       Statistic: Maximum
       Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewDeadLetterQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A responsive-preview job exhausted its bounded retry budget.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt PreviewDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Responsive-preview processing is more than ten minutes behind.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt PreviewQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 600
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Responsive-preview queue depth remains above the initial processing envelope.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt PreviewQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewWorkerFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A responsive-preview job logged a privacy-safe failure event.
+      Namespace: IanTruongPhotography/PreviewV2
+      MetricName: PreviewJobFailure
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewWorkerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Responsive-preview worker returned a native Lambda error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PreviewWorkerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewWorkerDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Responsive-preview worker p95 duration exceeds 150 seconds.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PreviewWorkerFunction
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 150000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewWorkerThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Responsive-preview worker concurrency was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PreviewWorkerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewMetadataSystemErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: DynamoDB reported a system error for responsive-preview metadata.
+      Namespace: AWS/DynamoDB
+      MetricName: SystemErrors
+      Dimensions:
+        - Name: TableName
+          Value: !Ref PreviewMetadataTable
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  PreviewMetadataThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Responsive-preview metadata requests were throttled.
+      Namespace: AWS/DynamoDB
+      MetricName: ThrottledRequests
+      Dimensions:
+        - Name: TableName
+          Value: !Ref PreviewMetadataTable
+      Statistic: Sum
+      Period: 300
       EvaluationPeriods: 1
       DatapointsToAlarm: 1
       Threshold: 1
@@ -1753,10 +2631,75 @@ Resources:
       AlarmActions:
         - !Ref AlarmTopic
 
+  AuditFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A security-sensitive application operation recorded a failure outcome.
+      Namespace: IanTruongPhotography/Security
+      MetricName: AuditFailure
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  LoginDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Ten or more redacted login denials were recorded in five minutes.
+      Namespace: IanTruongPhotography/Security
+      MetricName: LoginDenied
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  ApiAuthorizationDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: API authentication, authorization, or rate-limit denials exceeded the initial threshold.
+      Namespace: IanTruongPhotography/Security
+      MetricName: ApiAuthorizationDenied
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 25
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
 Outputs:
   ApiUrl:
-    Description: API Gateway endpoint URL
+    Description: Transitional API Gateway endpoint URL; unavailable after DisableExecuteApiEndpoint is true.
     Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+  ApiFrontDoorUrl:
+    Condition: ProvisionApiFrontDoorResources
+    Description: Same-origin CloudFront origin path target (hostname is not a browser API base).
+    Value: !Sub 'https://${ApiFrontDoorDomainName}/api'
+  ApiFrontDoorCertificateArn:
+    Condition: ProvisionApiFrontDoorResources
+    Description: Regional ACM certificate ARN used by guarded CloudFront preflight checks.
+    Value: !Ref ApiFrontDoorCertificate
+  FrontDoorOriginSecretArn:
+    Description: Secrets Manager identifier only; this output never contains the verification value.
+    Value: !Ref FrontDoorOriginSecret
+  FrontDoorEnforcementEnabled:
+    Description: Current staged origin-verification enforcement state.
+    Value: !Ref FrontDoorEnforcementEnabled
+  ExecuteApiEndpointDisabled:
+    Description: Current staged default API endpoint state.
+    Value: !Ref DisableExecuteApiEndpoint
   UserPoolId:
     Description: Cognito user pool ID (public client configuration, not a secret)
     Value: !Ref UserPool
@@ -1775,6 +2718,18 @@ Outputs:
   AlarmTopicArn:
     Description: Subscribe an operational destination after deployment; the template adds no public subscription.
     Value: !Ref AlarmTopic
+  ApplicationLogGroupName:
+    Description: Centralized structured Lambda application and security-audit log group.
+    Value: !Ref ApplicationLogGroup
+  ApplicationLogRetentionDays:
+    Description: Configured centralized Lambda application-log retention period.
+    Value: !Ref ApplicationLogRetentionDays
+  SecurityMetricNamespace:
+    Description: Namespace containing privacy-safe application security metrics.
+    Value: IanTruongPhotography/Security
+  ReleaseSha:
+    Description: Source revision included in application audit events.
+    Value: !Ref ReleaseSha
   AlbumIndexDeploymentPhase:
     Description: Current conditional GSI rollout phase
     Value: !Ref AlbumIndexDeploymentPhase

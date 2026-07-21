@@ -3,6 +3,7 @@
 import logging
 import os
 import hashlib
+from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -23,7 +24,9 @@ table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
 def _index_enabled(kind):
     phase = os.environ.get("ALBUM_INDEX_DEPLOYMENT_PHASE", "none").lower()
     if kind == "visibility":
-        return phase in {"visibility", "both"} and bool(os.environ.get("VISIBILITY_CREATED_AT_INDEX"))
+        return phase in {"visibility", "summary", "both"} and bool(os.environ.get("VISIBILITY_CREATED_AT_INDEX"))
+    if kind == "public_summary":
+        return phase in {"summary", "both"} and bool(os.environ.get("PUBLIC_SUMMARY_INDEX"))
     return phase == "both" and bool(os.environ.get("OWNER_SUB_CREATED_AT_INDEX"))
 
 
@@ -36,6 +39,14 @@ def _type_filter(album_type):
     if album_type == "photo":
         expression |= Attr("type").not_exists()
     return expression
+
+
+def _valid_image_count(value):
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value >= 0
+    return isinstance(value, Decimal) and value >= 0 and value == value.to_integral_value()
 
 
 def _filter_for(visibility, album_type=None, *, owner_sub=None, owner_email=None):
@@ -57,11 +68,13 @@ def _filter_for(visibility, album_type=None, *, owner_sub=None, owner_email=None
 
 def _fetch_page(
     *, visibility, album_type, limit, start_key, owner_sub=None, owner_email=None,
-    admin_all=False, admin_owner_email=None
+    admin_all=False, admin_owner_email=None, public_summary_only=False,
 ):
     """Use a configured index, falling back to a security-equivalent filtered scan."""
     query_kind = None
-    if not admin_all and owner_sub and _index_enabled("owner"):
+    if public_summary_only and visibility == "public" and _index_enabled("public_summary"):
+        query_kind = "public_summary"
+    elif not admin_all and owner_sub and _index_enabled("owner"):
         query_kind = "owner"
     elif not admin_all and not owner_sub and _index_enabled("visibility"):
         query_kind = "visibility"
@@ -83,10 +96,14 @@ def _fetch_page(
                     "FilterExpression": _filter_for(visibility, album_type),
                 }
                 response = table.query(**params)
-            elif query_kind == "visibility":
+            elif query_kind in {"visibility", "public_summary"}:
                 params = {
                     **common,
-                    "IndexName": os.environ["VISIBILITY_CREATED_AT_INDEX"],
+                    "IndexName": (
+                        os.environ["PUBLIC_SUMMARY_INDEX"]
+                        if query_kind == "public_summary"
+                        else os.environ["VISIBILITY_CREATED_AT_INDEX"]
+                    ),
                     "KeyConditionExpression": Key("visibility").eq(visibility),
                     "ScanIndexForward": False,
                 }
@@ -120,20 +137,46 @@ def _fetch_page(
             code = error.response.get("Error", {}).get("Code", "")
             if query_kind and code in {"ValidationException", "ResourceNotFoundException"}:
                 logger.warning("album_index_unavailable kind=%s", query_kind)
-                query_kind = None
+                # A summary index rollout can fall back to the existing ALL
+                # visibility index before using the bounded filtered scan.
+                query_kind = (
+                    "visibility"
+                    if query_kind == "public_summary" and _index_enabled("visibility")
+                    else None
+                )
                 cursor_key = None
                 items = []
+                loops = 0
                 continue
             raise
 
-        items.extend(response.get("Items", []))
+        page_items = response.get("Items", [])
+        if query_kind == "public_summary" and any(
+            not _valid_image_count(item.get("imageCount")) for item in page_items
+        ):
+            # Existing legacy records may predate the aggregate. Until they are
+            # backfilled, use the established ALL index so counts never regress.
+            logger.warning("album_summary_index_incomplete field=image_count")
+            query_kind = "visibility" if _index_enabled("visibility") else None
+            cursor_key = None
+            items = []
+            loops = 0
+            continue
+
+        items.extend(page_items)
         cursor_key = response.get("LastEvaluatedKey")
         if not cursor_key:
             break
     return items[:limit], cursor_key
 
 
+from front_door import verify_front_door_request
+
+
 def handler(event, context):
+    denied = verify_front_door_request(event, context)
+    if denied:
+        return denied
     try:
         params = (event or {}).get("queryStringParameters") or {}
         claims = get_verified_claims(event, required=False)
@@ -143,7 +186,9 @@ def handler(event, context):
             raise AuthError("Forbidden", 403)
         requested_visibility = params.get("visibility", "all" if admin_owner_email else "public")
         album_type = validate_album_type(params.get("type"), default=None) if params.get("type") else None
-        limit = validate_limit(params.get("limit"))
+        # Catalog summaries are intentionally small and the public inventory is
+        # currently below 100, so one bounded query avoids sequential page RTTs.
+        limit = validate_limit(params.get("limit"), maximum=100)
 
         if not claims:
             # Anonymous query parameters never elevate or select protected data.
@@ -187,6 +232,7 @@ def handler(event, context):
             owner_email=owner_email,
             admin_all=admin_all,
             admin_owner_email=admin_owner_email,
+            public_summary_only=not admin and visibility == "public",
         )
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
@@ -198,7 +244,14 @@ def handler(event, context):
             if not admin_all and record.get("visibility") != visibility:
                 continue
             try:
-                items.append(serialize_album_summary(record, include_admin=admin))
+                summary = serialize_album_summary(record, include_admin=admin)
+                # The summary-only GSI intentionally excludes the media
+                # manifest. Preserve the established count from the dedicated
+                # aggregate attribute instead of hydrating `images`.
+                image_count = record.get("imageCount")
+                if "images" not in record and _valid_image_count(image_count):
+                    summary["imageCount"] = max(0, int(image_count))
+                items.append(summary)
             except ValidationError:
                 continue
 

@@ -1,9 +1,9 @@
 """Album-level access policy shared by detail, share, ZIP, and download routes."""
 
-import base64
-import json
-
 from auth_helpers import AuthError, is_admin
+from cursor_helpers import decode_cursor, encode_cursor
+# ValidationError remains re-exported for compatibility with callers/tests that
+# historically imported the cursor exception from this module.
 from validation_helpers import ALLOWED_VISIBILITIES, ValidationError
 
 
@@ -49,30 +49,3 @@ def authorize_album(album, *, claims=None, share_code=None):
     ):
         return "share"
     raise AuthError("Access denied", 403)
-
-
-def encode_cursor(last_evaluated_key, scope):
-    if not last_evaluated_key:
-        return None
-    raw = json.dumps({"v": 1, "scope": scope, "key": last_evaluated_key}, separators=(",", ":"), default=str)
-    return base64.urlsafe_b64encode(raw.encode("utf-8")).rstrip(b"=").decode("ascii")
-
-
-def decode_cursor(cursor, expected_scope):
-    if not cursor:
-        return None
-    if not isinstance(cursor, str) or len(cursor) > 4096:
-        raise ValidationError("Invalid cursor")
-    try:
-        padded = cursor + "=" * (-len(cursor) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
-    except (ValueError, UnicodeError, json.JSONDecodeError):
-        raise ValidationError("Invalid cursor") from None
-    if payload.get("v") != 1 or payload.get("scope") != expected_scope:
-        raise ValidationError("Invalid cursor")
-    key = payload.get("key")
-    if not isinstance(key, dict) or not key or len(key) > 6:
-        raise ValidationError("Invalid cursor")
-    if any(not isinstance(name, str) or not isinstance(value, (str, int, float)) for name, value in key.items()):
-        raise ValidationError("Invalid cursor")
-    return key

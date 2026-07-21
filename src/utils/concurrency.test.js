@@ -20,4 +20,10 @@ describe('mapWithConcurrency', () => {
     it('handles empty input', async () => {
         expect(await mapWithConcurrency([], 3, () => null)).toEqual([])
     })
+
+    it('clamps invalid, fractional, and oversized concurrency limits', async () => {
+        const mapper = (value, index) => `${index}:${value}`
+        expect(await mapWithConcurrency(new Set(['a', 'b']), 0, mapper)).toEqual(['0:a', '1:b'])
+        expect(await mapWithConcurrency(['a', 'b'], 99.9, mapper)).toEqual(['0:a', '1:b'])
+    })
 })

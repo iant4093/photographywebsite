@@ -1,0 +1,10 @@
+/.github/ @iant4093
+/backend/template.yaml @iant4093
+/backend/Makefile @iant4093
+/backend/functions/ @iant4093
+/backend/preview_worker/ @iant4093
+/ops/ @iant4093
+/package.json @iant4093
+/package-lock.json @iant4093
+/src/context/ @iant4093
+/src/utils/api.js @iant4093
