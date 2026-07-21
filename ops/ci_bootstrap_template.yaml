@@ -787,16 +787,6 @@ Resources:
             Effect: Allow
             Action: acm:AddTagsToCertificate
             Resource: !Sub 'arn:${AWS::Partition}:acm:us-west-2:${AWS::AccountId}:certificate/*'
-            Condition:
-              StringEquals:
-                aws:RequestedRegion: us-west-2
-              ForAllValues:StringLike:
-                aws:TagKeys:
-                  - Application
-                  - Stage
-                  - 'aws:cloudformation:*'
-              'Null':
-                aws:TagKeys: 'false'
           - Sid: ManageTaggedRegionalApiCertificates
             Effect: Allow
             Action:

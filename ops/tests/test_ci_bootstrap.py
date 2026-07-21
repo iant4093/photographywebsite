@@ -254,11 +254,12 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertNotIn("aws:RequestTag/Application", request)
         initial_tags = statement_block(execution, "AddInitialApplicationCertificateTags")
         self.assertIn("acm:AddTagsToCertificate", initial_tags)
-        self.assertIn("aws:RequestedRegion: us-west-2", initial_tags)
-        self.assertIn("aws:TagKeys:", initial_tags)
-        self.assertIn("'aws:cloudformation:*'", initial_tags)
+        self.assertIn(
+            "arn:${AWS::Partition}:acm:us-west-2:${AWS::AccountId}:certificate/*",
+            initial_tags,
+        )
         self.assertNotIn("aws:RequestTag/Application", initial_tags)
-        self.assertIn("aws:TagKeys: 'false'", initial_tags)
+        self.assertNotIn("Condition:", initial_tags)
         certificate = statement_block(execution, "ManageTaggedRegionalApiCertificates")
         for action in (
             "acm:AddTagsToCertificate",
