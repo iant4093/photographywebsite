@@ -42,6 +42,11 @@ KMS stack must be deployed in `us-east-1`.
 
 ## Responsive preview V2 rollout
 
+The exact canary, dispatch, reconciliation, monitoring, and rollback sequence is
+documented in [`PREVIEW_V2.md`](PREVIEW_V2.md). Preserve its stable eligible
+inventory digest across canary and full reconciliation; do not use a sorted
+`--max-jobs` slice as the production canary.
+
 `backend/template.yaml` owns the online path for versioned responsive previews:
 
 - a retained, deletion-protected, point-in-time-recoverable
@@ -82,8 +87,10 @@ source/plan audit after the online stack is deployed:
 python3 ops/backfill_preview_v2.py --stack-name STACK_NAME
 ```
 
-Review the printed aggregate counts and plan digest. To dispatch that exact
-plan, rerun with every independent guard copied from the dry-run output:
+Review the printed aggregate counts, pending plan digest, and stable eligible
+inventory digest. First run the five-case representative dry run and follow the
+digest-bound canary procedure in `PREVIEW_V2.md`. To dispatch a reviewed full
+pending plan, rerun with every independent guard copied from its dry-run output:
 
 ```bash
 python3 ops/backfill_preview_v2.py \
@@ -111,6 +118,23 @@ worker's metadata contract makes already-ready jobs safe to receive again.
 The AWS identity running apply must have `sqs:SendMessage` on that exact queue
 and the KMS permissions required to produce messages for its customer-managed
 key; the script does not broaden the deployed Lambda roles or key policy.
+
+After the complete queue drains, run the read-only aggregate reconciler with
+the original eligible inventory count and digest:
+
+```bash
+python3 ops/reconcile_preview_v2.py \
+  --stack-name STACK_NAME \
+  --expected-account-id AWS_ACCOUNT_ID \
+  --expected-inventory-count ELIGIBLE_INVENTORY_COUNT \
+  --expected-inventory-digest ELIGIBLE_INVENTORY_DIGEST
+```
+
+The reconciler checks metadata, actual WebP dimensions, checksum evidence,
+object metadata/tags/cache/content type/encryption, bucket access controls, and
+public-versus-protected CloudFront behavior. It prints only aggregate counts and
+fixed failure categories. Canary review and full success are defined precisely
+in `PREVIEW_V2.md`.
 
 This bounded backfill does not require an operations bucket or Step Functions.
 If future scale requires an orchestrated backfill, introduce and test that path

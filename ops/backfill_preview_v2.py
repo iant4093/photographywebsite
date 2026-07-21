@@ -28,6 +28,7 @@ ALLOWED_VISIBILITIES = {"public", "private", "unlisted"}
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 LEGACY_PREFIX_PATTERN = re.compile(r"^albums/[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?/$")
+REPRESENTATIVE_CANARY_CASES = ("public", "private", "protected", "portrait", "largeSource")
 
 
 def decode(value: Any) -> Any:
@@ -239,14 +240,47 @@ def plan_digest(jobs: list[dict[str, Any]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def validate_source_heads(
+def selection_facts(
+    raw_albums: list[dict[str, Any]],
+    jobs: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Return private, in-memory facts used only to choose a representative canary."""
+    wanted = {(job["albumId"], job["rawKey"]) for job in jobs}
+    facts: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw_album in raw_albums:
+        album = decoded_item(raw_album)
+        album_id = normalized_uuid(album.get("albumId"))
+        visibility = album.get("visibility")
+        if not album_id or visibility not in ALLOWED_VISIBILITIES:
+            continue
+        for image in album.get("images", []):
+            if not isinstance(image, dict):
+                continue
+            raw_key = normalized_key(image.get("rawKey") or image.get("key"))
+            key = (album_id, raw_key)
+            if raw_key is None or key not in wanted or key in facts:
+                continue
+            try:
+                width = int(image.get("width"))
+                height = int(image.get("height"))
+            except (TypeError, ValueError):
+                width = height = 0
+            facts[key] = {
+                "visibility": visibility,
+                "portrait": width > 0 and height > width,
+            }
+    return facts
+
+
+def inspect_source_heads(
     jobs: list[dict[str, Any]],
     bucket: str,
     profile: str | None,
     region: str | None,
     maximum_bytes: int,
-) -> tuple[list[dict[str, Any]], int]:
-    def valid(job: dict[str, Any]) -> bool:
+) -> tuple[list[dict[str, Any]], int, dict[tuple[str, str], int]]:
+    """Validate source objects and retain byte sizes without emitting identifiers."""
+    def inspect(job: dict[str, Any]) -> int | None:
         try:
             head = aws_json(
                 ["s3api", "head-object", "--bucket", bucket, "--key", job["rawKey"]],
@@ -255,13 +289,123 @@ def validate_source_heads(
             )
             length = int(head.get("ContentLength", 0))
             content_type = str(head.get("ContentType", "")).lower()
-            return 0 < length <= maximum_bytes and content_type in ALLOWED_CONTENT_TYPES
+            return length if 0 < length <= maximum_bytes and content_type in ALLOWED_CONTENT_TYPES else None
         except (RuntimeError, subprocess.CalledProcessError, TypeError, ValueError):
-            return False
+            return None
 
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(jobs)))) as executor:
-        validity = list(executor.map(valid, jobs))
-    return [job for job, is_valid in zip(jobs, validity) if is_valid], validity.count(False)
+        inspected = list(executor.map(inspect, jobs))
+    valid_jobs = [job for job, length in zip(jobs, inspected) if length is not None]
+    sizes = {
+        (job["albumId"], job["rawKey"]): int(length)
+        for job, length in zip(jobs, inspected)
+        if length is not None
+    }
+    return valid_jobs, inspected.count(None), sizes
+
+
+def validate_source_heads(
+    jobs: list[dict[str, Any]],
+    bucket: str,
+    profile: str | None,
+    region: str | None,
+    maximum_bytes: int,
+) -> tuple[list[dict[str, Any]], int]:
+    valid_jobs, failure_count, _ = inspect_source_heads(
+        jobs, bucket, profile, region, maximum_bytes
+    )
+    return valid_jobs, failure_count
+
+
+def representative_canary(
+    jobs: list[dict[str, Any]],
+    facts: dict[tuple[str, str], dict[str, Any]],
+    source_sizes: dict[tuple[str, str], int],
+    large_source_bytes: int,
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, str]]:
+    """Choose five distinct deterministic jobs that satisfy the required cases.
+
+    `protected` deliberately means unlisted/share-gated here. Private media has
+    its own distinct case. No selected identifier or derived per-item token is
+    returned for display.
+    """
+    if large_source_bytes < 1:
+        raise ValueError("large_source_bytes must be positive")
+
+    def rank(job: dict[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps(job, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    ordered = sorted(jobs, key=lambda job: (rank(job), job["albumId"], job["rawKey"]))
+    predicates = {
+        "public": lambda fact, _size: fact.get("visibility") == "public",
+        "private": lambda fact, _size: fact.get("visibility") == "private",
+        "protected": lambda fact, _size: fact.get("visibility") == "unlisted",
+        "portrait": lambda fact, _size: fact.get("portrait") is True,
+        "largeSource": lambda _fact, size: size >= large_source_bytes,
+    }
+    candidates = {
+        case: [
+            job for job in ordered
+            if predicates[case](
+                facts.get((job["albumId"], job["rawKey"]), {}),
+                source_sizes.get((job["albumId"], job["rawKey"]), 0),
+            )
+        ]
+        for case in REPRESENTATIVE_CANARY_CASES
+    }
+    missing = next((case for case, values in candidates.items() if not values), None)
+    if missing:
+        raise ValueError(f"no distinct eligible job satisfies representative case {missing}")
+
+    assigned_jobs: dict[str, dict[str, Any]] = {}
+    search_cases = sorted(
+        REPRESENTATIVE_CANARY_CASES,
+        key=lambda case: (len(candidates[case]), REPRESENTATIVE_CANARY_CASES.index(case)),
+    )
+
+    def assign(case_index: int, used: set[tuple[str, str]]) -> bool:
+        if case_index == len(search_cases):
+            return True
+        case = search_cases[case_index]
+        for job in candidates[case]:
+            key = (job["albumId"], job["rawKey"])
+            if key in used:
+                continue
+            assigned_jobs[case] = job
+            if assign(case_index + 1, used | {key}):
+                return True
+        assigned_jobs.pop(case, None)
+        return False
+
+    if not assign(0, set()):
+        raise ValueError("eligible cases cannot be satisfied by five distinct jobs")
+
+    selected = list(assigned_jobs.values())
+    assignments = {case: rank(assigned_jobs[case]) for case in REPRESENTATIVE_CANARY_CASES}
+
+    selected.sort(key=lambda item: (item["albumId"], item["rawKey"]))
+    coverage = {case: 1 for case in REPRESENTATIVE_CANARY_CASES}
+    return selected, coverage, assignments
+
+
+def representative_canary_digest(
+    full_plan_digest: str,
+    selected_jobs: list[dict[str, Any]],
+    assignments: dict[str, str],
+    large_source_bytes: int,
+) -> str:
+    payload = {
+        "algorithm": "representative-preview-v2-canary-v1",
+        "assignments": assignments,
+        "fullPlanDigest": full_plan_digest,
+        "largeSourceBytes": large_source_bytes,
+        "selectedJobs": selected_jobs,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def validate_apply_guards(args: argparse.Namespace, account: str, counts: dict[str, int], digest: str) -> None:
@@ -279,9 +423,26 @@ def validate_apply_guards(args: argparse.Namespace, account: str, counts: dict[s
         (counts["conflictingMetadataCount"] == 0, "conflicting preview metadata exists"),
         (counts.get("sourceValidationFailureCount", 0) == 0, "source HEAD validation failed"),
     ]
+    if getattr(args, "representative_canary", False):
+        checks.extend([
+            (
+                args.expected_full_plan_digest == getattr(args, "actual_full_plan_digest", None),
+                "--expected-full-plan-digest does not match",
+            ),
+            (
+                args.expected_canary_digest == getattr(args, "actual_canary_digest", None),
+                "--expected-canary-digest does not match",
+            ),
+            (
+                counts["plannedJobCount"] == len(REPRESENTATIVE_CANARY_CASES),
+                "representative canary does not contain every distinct required case",
+            ),
+        ])
     for passed, message in checks:
         if not passed:
             raise SystemExit(f"Refusing apply: {message}.")
+
+
 def dispatch_jobs(
     jobs: list[dict[str, Any]],
     queue_url: str,
@@ -347,16 +508,25 @@ def main() -> int:
     parser.add_argument("--region", default="us-west-2")
     parser.add_argument("--profile")
     parser.add_argument("--max-source-bytes", type=int, default=100 * 1024 * 1024)
-    parser.add_argument(
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--max-jobs",
         type=int,
         help="Deterministic sorted canary size; omit to plan the complete backfill.",
     )
+    selection.add_argument(
+        "--representative-canary",
+        action="store_true",
+        help="Select five distinct digest-bound public/private/unlisted/portrait/large-source jobs.",
+    )
+    parser.add_argument("--canary-large-source-bytes", type=int, default=25 * 1024 * 1024)
     parser.add_argument("--expected-account-id")
     parser.add_argument("--expected-record-count", type=int)
     parser.add_argument("--expected-preview-record-count", type=int)
     parser.add_argument("--expected-job-count", type=int)
     parser.add_argument("--expected-plan-digest")
+    parser.add_argument("--expected-full-plan-digest")
+    parser.add_argument("--expected-canary-digest")
     parser.add_argument("--confirm-stack-name")
     parser.add_argument("--confirm")
     parser.add_argument("--apply", action="store_true")
@@ -381,15 +551,49 @@ def main() -> int:
         args.region,
         {"#status": "status"},
     )
+    inventory_jobs, _ = build_backfill_plan(albums, [])
+    inventory_digest = plan_digest(inventory_jobs)
     jobs, counts = build_backfill_plan(albums, metadata)
     if args.max_jobs is not None and args.max_jobs < 1:
         raise SystemExit("--max-jobs must be a positive integer")
+    if args.canary_large_source_bytes < 1:
+        raise SystemExit("--canary-large-source-bytes must be a positive integer")
     total_planned_jobs = len(jobs)
-    if args.max_jobs is not None:
-        jobs = jobs[:args.max_jobs]
-    jobs, head_failures = validate_source_heads(
-        jobs, images_bucket, args.profile, args.region, args.max_source_bytes
-    )
+    canary_summary = None
+    if args.representative_canary:
+        facts = selection_facts(albums, jobs)
+        jobs, head_failures, source_sizes = inspect_source_heads(
+            jobs, images_bucket, args.profile, args.region, args.max_source_bytes
+        )
+        if head_failures:
+            raise SystemExit(
+                f"Refusing representative canary: source HEAD validation failed for {head_failures} job(s)."
+            )
+        full_plan_digest = plan_digest(jobs)
+        try:
+            jobs, coverage, assignments = representative_canary(
+                jobs, facts, source_sizes, args.canary_large_source_bytes
+            )
+        except ValueError as error:
+            raise SystemExit(f"Refusing representative canary: {error}.") from None
+        canary_digest = representative_canary_digest(
+            full_plan_digest, jobs, assignments, args.canary_large_source_bytes
+        )
+        args.actual_full_plan_digest = full_plan_digest
+        args.actual_canary_digest = canary_digest
+        canary_summary = {
+            "caseCount": len(REPRESENTATIVE_CANARY_CASES),
+            "coverage": coverage,
+            "fullPlanDigest": full_plan_digest,
+            "largeSourceMinimumBytes": args.canary_large_source_bytes,
+            "selectionDigest": canary_digest,
+        }
+    else:
+        if args.max_jobs is not None:
+            jobs = jobs[:args.max_jobs]
+        jobs, head_failures = validate_source_heads(
+            jobs, images_bucket, args.profile, args.region, args.max_source_bytes
+        )
     counts["sourceValidationFailureCount"] = head_failures
     counts["plannedJobCount"] = len(jobs)
     digest = plan_digest(jobs)
@@ -399,7 +603,10 @@ def main() -> int:
         "stack": args.stack_name,
         "previewVersion": PREVIEW_VERSION,
         "planDigest": digest,
+        "eligibleInventoryCount": len(inventory_jobs),
+        "eligibleInventoryDigest": inventory_digest,
         "requestedMaxJobs": args.max_jobs,
+        "representativeCanary": canary_summary,
         "totalEligiblePlannedJobCount": total_planned_jobs,
         **counts,
     }, indent=2, sort_keys=True))

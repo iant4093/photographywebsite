@@ -34,6 +34,135 @@ def record(**values):
 
 
 class PreviewBackfillTests(unittest.TestCase):
+    def test_representative_canary_is_distinct_deterministic_and_complete(self):
+        album_ids = [
+            f"{index:08d}-1111-4111-8111-111111111111"
+            for index in range(1, 7)
+        ]
+        jobs = [
+            {
+                "albumId": album_id,
+                "rawKey": f"albums/{album_id}/original/photo.jpg",
+                "previewVersion": 2,
+            }
+            for album_id in album_ids
+        ]
+        facts = {
+            (jobs[0]["albumId"], jobs[0]["rawKey"]): {"visibility": "public", "portrait": False},
+            (jobs[1]["albumId"], jobs[1]["rawKey"]): {"visibility": "private", "portrait": False},
+            (jobs[2]["albumId"], jobs[2]["rawKey"]): {"visibility": "unlisted", "portrait": False},
+            (jobs[3]["albumId"], jobs[3]["rawKey"]): {"visibility": "public", "portrait": True},
+            (jobs[4]["albumId"], jobs[4]["rawKey"]): {"visibility": "public", "portrait": False},
+            (jobs[5]["albumId"], jobs[5]["rawKey"]): {"visibility": "public", "portrait": False},
+        }
+        source_sizes = {
+            (job["albumId"], job["rawKey"]): 30_000_000 if job == jobs[4] else 10_000_000
+            for job in jobs
+        }
+
+        first, coverage, assignments = backfill_preview_v2.representative_canary(
+            jobs, facts, source_sizes, 25_000_000
+        )
+        second, second_coverage, second_assignments = backfill_preview_v2.representative_canary(
+            list(reversed(jobs)), facts, source_sizes, 25_000_000
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(coverage, {case: 1 for case in backfill_preview_v2.REPRESENTATIVE_CANARY_CASES})
+        self.assertEqual(second_coverage, coverage)
+        self.assertEqual(second_assignments, assignments)
+        self.assertEqual(len(first), 5)
+        self.assertEqual(len({(job["albumId"], job["rawKey"]) for job in first}), 5)
+
+    def test_representative_canary_fails_closed_when_a_case_is_missing(self):
+        job = {"albumId": ALBUM_ID, "rawKey": RAW_KEY, "previewVersion": 2}
+        facts = {(ALBUM_ID, RAW_KEY): {"visibility": "public", "portrait": True}}
+        sizes = {(ALBUM_ID, RAW_KEY): 50_000_000}
+
+        with self.assertRaisesRegex(ValueError, "private"):
+            backfill_preview_v2.representative_canary([job], facts, sizes, 25_000_000)
+
+    def test_representative_canary_uses_only_currently_pending_jobs(self):
+        album_ids = [f"{index:08d}-1111-4111-8111-111111111111" for index in range(1, 8)]
+        visibilities = ["public", "public", "private", "unlisted", "public", "public", "public"]
+        albums = [
+            record(
+                albumId=album_id,
+                type="photo",
+                status="active",
+                visibility=visibility,
+                images=[{
+                    "rawKey": f"albums/{album_id}/original/photo.jpg",
+                    "width": 3000,
+                    "height": 4000 if index == 4 else 2000,
+                }],
+            )
+            for index, (album_id, visibility) in enumerate(zip(album_ids, visibilities))
+        ]
+        ready_key = f"albums/{album_ids[0]}/original/photo.jpg"
+        ready = record(
+            albumId=album_ids[0],
+            mediaId=backfill_preview_v2.media_id_for_key(ready_key),
+            status="ready",
+            previewVersion=2,
+            previewKeys=backfill_preview_v2.expected_preview_keys(album_ids[0], ready_key),
+        )
+        jobs, _ = backfill_preview_v2.build_backfill_plan(albums, [ready])
+        facts = backfill_preview_v2.selection_facts(albums, jobs)
+        sizes = {
+            (job["albumId"], job["rawKey"]): 30_000_000 if job["albumId"] == album_ids[5] else 1_000_000
+            for job in jobs
+        }
+
+        selected, _, _ = backfill_preview_v2.representative_canary(
+            jobs, facts, sizes, 25_000_000
+        )
+
+        self.assertNotIn(ready_key, {job["rawKey"] for job in selected})
+
+    def test_canary_digest_binds_full_plan_selection_assignments_and_threshold(self):
+        job = {"albumId": ALBUM_ID, "rawKey": RAW_KEY, "previewVersion": 2}
+        base = backfill_preview_v2.representative_canary_digest(
+            "a" * 64, [job], {"public": "b" * 64}, 25_000_000
+        )
+        self.assertNotEqual(base, backfill_preview_v2.representative_canary_digest(
+            "c" * 64, [job], {"public": "b" * 64}, 25_000_000
+        ))
+        self.assertNotEqual(base, backfill_preview_v2.representative_canary_digest(
+            "a" * 64, [job], {"public": "d" * 64}, 25_000_000
+        ))
+        self.assertNotEqual(base, backfill_preview_v2.representative_canary_digest(
+            "a" * 64, [job], {"public": "b" * 64}, 30_000_000
+        ))
+
+    def test_representative_apply_requires_both_additional_digests(self):
+        counts = {
+            "albumRecordCount": 10,
+            "previewMetadataRecordCount": 0,
+            "plannedJobCount": 5,
+            "conflictingMetadataCount": 0,
+            "sourceValidationFailureCount": 0,
+        }
+        args = argparse.Namespace(
+            stack_name="photo-stack",
+            expected_account_id="123",
+            expected_record_count=10,
+            expected_preview_record_count=0,
+            expected_job_count=5,
+            expected_plan_digest="selected",
+            confirm_stack_name="photo-stack",
+            confirm="backfill-preview-v2",
+            representative_canary=True,
+            expected_full_plan_digest="wrong",
+            expected_canary_digest="canary",
+            actual_full_plan_digest="full",
+            actual_canary_digest="canary",
+        )
+        with self.assertRaisesRegex(SystemExit, "expected-full-plan-digest"):
+            backfill_preview_v2.validate_apply_guards(args, "123", counts, "selected")
+        args.expected_full_plan_digest = "full"
+        backfill_preview_v2.validate_apply_guards(args, "123", counts, "selected")
+
     def test_main_supports_a_deterministic_bounded_canary(self):
         jobs = [
             {
