@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Retained us-east-1 CloudFront-scope WAF for the photography website single front door.
-  Every managed and rate rule starts in COUNT mode.
+  Common rules remain observable while high-confidence managed and rate rules block.
 
 Parameters:
   Stage:
@@ -23,6 +23,11 @@ Parameters:
     Default: ''
     AllowedPattern: '^(|arn:[A-Za-z0-9-]+:sns:[A-Za-z0-9-]+:[0-9]{12}:[A-Za-z0-9_.:/+=,@-]+)$'
     Description: Optional pre-created notification topic; no public subscription is created here.
+  SecurityEventBusArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:[A-Za-z0-9-]+:events:us-west-2:[0-9]{12}:event-bus/default)$'
+    Description: Optional same-account us-west-2 default event bus for privacy-safe WAF alarm forwarding.
   LogsKmsKeyArn:
     Type: String
     Default: ''
@@ -31,6 +36,7 @@ Parameters:
 
 Conditions:
   HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
+  HasSecurityEventBus: !Not [!Equals [!Ref SecurityEventBusArn, '']]
   HasLogsKmsKey: !Not [!Equals [!Ref LogsKmsKeyArn, '']]
 
 Resources:
@@ -64,7 +70,7 @@ Resources:
         - Name: AWSManagedKnownBadInputs
           Priority: 20
           OverrideAction:
-            Count: {}
+            None: {}
           Statement:
             ManagedRuleGroupStatement:
               VendorName: AWS
@@ -76,7 +82,7 @@ Resources:
         - Name: AWSManagedAmazonIpReputation
           Priority: 30
           OverrideAction:
-            Count: {}
+            None: {}
           Statement:
             ManagedRuleGroupStatement:
               VendorName: AWS
@@ -85,17 +91,17 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedAmazonIpReputationCount
             SampledRequestsEnabled: false
-        - Name: PerIpRateObservation
+        - Name: PerIpRateLimit
           Priority: 40
           Action:
-            Count: {}
+            Block: {}
           Statement:
             RateBasedStatement:
               AggregateKeyType: IP
               Limit: !Ref RateLimitPerFiveMinutes
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
-            MetricName: PerIpRateObservationCount
+            MetricName: PerIpRateLimit
             SampledRequestsEnabled: false
       Tags:
         - Key: Application
@@ -103,7 +109,7 @@ Resources:
         - Key: Stage
           Value: !Ref Stage
         - Key: DeploymentMode
-          Value: CountFirst
+          Value: SelectiveBlock
 
   WafLogGroup:
     Type: AWS::Logs::LogGroup
@@ -149,6 +155,7 @@ Resources:
   WafBlockedRequestAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      AlarmName: !Sub 'ian-photography-waf-blocked-${Stage}'
       AlarmDescription: Front-door WAF emitted one or more terminating block actions.
       Namespace: AWS/WAFV2
       MetricName: BlockedRequests
@@ -172,21 +179,22 @@ Resources:
   WafRateObservationAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: Count-mode rate rule observed a sustained per-IP request surge.
+      AlarmName: !Sub 'ian-photography-waf-rate-${Stage}'
+      AlarmDescription: Per-IP rate protection blocked a sustained request surge.
       Namespace: AWS/WAFV2
-      MetricName: CountedRequests
+      MetricName: BlockedRequests
       Dimensions:
         - Name: WebACL
           Value: !Sub 'IanPhotography-FrontDoor-${Stage}'
         - Name: Region
           Value: Global
         - Name: Rule
-          Value: PerIpRateObservation
+          Value: PerIpRateLimit
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
       DatapointsToAlarm: 1
-      Threshold: 100
+      Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
@@ -195,6 +203,7 @@ Resources:
   WafManagedObservationAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
+      AlarmName: !Sub 'ian-photography-waf-managed-${Stage}'
       AlarmDescription: Count-mode AWS managed rules observed a sudden request anomaly.
       Namespace: AWS/WAFV2
       MetricName: CountedRequests
@@ -215,6 +224,48 @@ Resources:
       AlarmActions:
         - !If [HasAlarmTopic, !Ref AlarmTopicArn, !Ref AWS::NoValue]
 
+  WafAlarmForwardRole:
+    Type: AWS::IAM::Role
+    Condition: HasSecurityEventBus
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ForwardExactWafAlarmEvents
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: events:PutEvents
+                Resource: !Ref SecurityEventBusArn
+
+  WafAlarmCrossRegionRule:
+    Type: AWS::Events::Rule
+    Condition: HasSecurityEventBus
+    Properties:
+      Name: !Sub 'ian-photography-waf-cross-region-${Stage}'
+      Description: Forwards exact WAF alarm state changes to the home-region security event bus.
+      EventPattern:
+        source: [aws.cloudwatch]
+        detail-type: [CloudWatch Alarm State Change]
+        resources:
+          - prefix: !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-waf-'
+        detail:
+          alarmName:
+            - !Sub 'ian-photography-waf-blocked-${Stage}'
+            - !Sub 'ian-photography-waf-rate-${Stage}'
+            - !Sub 'ian-photography-waf-managed-${Stage}'
+      State: ENABLED
+      Targets:
+        - Id: HomeRegionSecurityBus
+          Arn: !Ref SecurityEventBusArn
+          RoleArn: !GetAtt WafAlarmForwardRole.Arn
+
 Outputs:
   WebAclArn:
     Description: Associate this exact ARN through the guarded frontend CloudFront tool.
@@ -225,5 +276,8 @@ Outputs:
     Description: Privacy-filtered COUNT/BLOCK security telemetry with no request sampling.
     Value: !Ref WafLogGroup
   WafDeploymentMode:
-    Description: All rules are intentionally non-blocking until evidence supports individual promotion.
-    Value: COUNT
+    Description: Common rules count; known-bad input, IP reputation, and per-IP rate rules block.
+    Value: SELECTIVE_BLOCK
+  WafAlarmCrossRegionRouting:
+    Description: Whether exact WAF alarm transitions are forwarded to the home-region security bus.
+    Value: !If [HasSecurityEventBus, ENABLED, DISABLED]

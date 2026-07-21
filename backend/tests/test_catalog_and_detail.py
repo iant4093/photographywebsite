@@ -97,7 +97,10 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(records, [album()])
         self.assertEqual(query.call_args_list[0].kwargs["IndexName"], "VisibilityCreatedAtSummaryIndex")
         self.assertEqual(query.call_args_list[1].kwargs["IndexName"], "VisibilityCreatedAtIndex")
-        self.assertNotIn("ExclusiveStartKey", query.call_args_list[1].kwargs)
+        self.assertEqual(
+            query.call_args_list[1].kwargs["ExclusiveStartKey"],
+            {"albumId": "cursor", "visibility": "public", "createdAt": "now"},
+        )
 
     def test_legacy_missing_image_count_falls_back_without_count_regression(self):
         projected_legacy = album()
@@ -129,6 +132,59 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(records, [full_legacy])
         self.assertEqual(query.call_args_list[0].kwargs["IndexName"], "VisibilityCreatedAtSummaryIndex")
         self.assertEqual(query.call_args_list[1].kwargs["IndexName"], "VisibilityCreatedAtIndex")
+
+    def test_summary_fallback_keeps_prior_items_and_resumes_at_page_boundary(self):
+        first = album(
+            albumId="11111111-1111-4111-8111-111111111110",
+            createdAt="2026-03-01T00:00:00Z",
+            imageCount=Decimal("1"),
+        )
+        first.pop("images")
+        second = album(
+            albumId="11111111-1111-4111-8111-111111111109",
+            createdAt="2026-02-01T00:00:00Z",
+            imageCount=Decimal("1"),
+        )
+        second.pop("images")
+        incomplete = album(
+            albumId="11111111-1111-4111-8111-111111111108",
+            createdAt="2026-01-01T00:00:00Z",
+        )
+        incomplete.pop("images")
+        full = album(albumId=incomplete["albumId"], createdAt=incomplete["createdAt"])
+        resume_key = {
+            "albumId": second["albumId"],
+            "visibility": "public",
+            "createdAt": second["createdAt"],
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "ALBUM_INDEX_DEPLOYMENT_PHASE": "both",
+                "PUBLIC_SUMMARY_INDEX": "VisibilityCreatedAtSummaryIndex",
+                "VISIBILITY_CREATED_AT_INDEX": "VisibilityCreatedAtIndex",
+            },
+        ), patch.object(
+            get_albums.table,
+            "query",
+            side_effect=[
+                {"Items": [first, second], "LastEvaluatedKey": resume_key},
+                {"Items": [incomplete]},
+                {"Items": [full]},
+            ],
+        ) as query:
+            records, cursor = get_albums._fetch_page(
+                visibility="public",
+                album_type="photo",
+                limit=3,
+                start_key=None,
+                public_summary_only=True,
+            )
+
+        self.assertEqual(records, [first, second, full])
+        self.assertIsNone(cursor)
+        self.assertEqual(query.call_args_list[2].kwargs["IndexName"], "VisibilityCreatedAtIndex")
+        self.assertEqual(query.call_args_list[2].kwargs["ExclusiveStartKey"], resume_key)
 
     def test_projected_image_count_preserves_public_response_without_manifest(self):
         projected = album()

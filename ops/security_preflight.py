@@ -145,7 +145,7 @@ def inventory(
     target_plans = [
         item
         for item in plans
-        if item.get("BackupPlanName") == f"ian-photography-albums-{stage}"
+        if item.get("BackupPlanName") == f"ian-photography-protected-data-{stage}"
         and item.get("DeletionDate") is None
     ]
 

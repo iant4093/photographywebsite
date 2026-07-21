@@ -38,7 +38,6 @@ PROTECTED_LOGICAL_IDS = frozenset(
         "ApplicationLogGroup",
         "Api",
         "AsyncFailureQueue",
-        "AlarmTopic",
     }
 )
 PROTECTED_RESOURCE_TYPES = frozenset(
@@ -58,7 +57,8 @@ PROTECTED_RESOURCE_TYPES = frozenset(
         "AWS::Cognito::UserPoolGroup",
     }
 )
-ALLOWED_ACTIONS = frozenset({"Add", "Modify"})
+ALLOWED_ACTIONS = frozenset({"Add", "Modify", "Remove"})
+REMOVABLE_DEPRECATED_LOGICAL_IDS = frozenset({"AlarmTopic"})
 SAFE_REPLACEMENTS = frozenset({None, "False"})
 SAFE_RECREATION = frozenset({None, "Never"})
 INTENT_RULE_KEYS = frozenset(
@@ -113,8 +113,8 @@ def load_release_intent(
             raise GateError("release intent property paths must be unique and exact")
         if not isinstance(allow_no_details, bool):
             raise GateError("release intent detail policy is invalid")
-        if allow_no_details and action != "Add":
-            raise GateError("only an exact Add rule may allow missing change details")
+        if allow_no_details and action not in {"Add", "Remove"}:
+            raise GateError("only an exact Add or Remove rule may allow missing change details")
         if not property_paths and not allow_no_details:
             raise GateError("release intent must name at least one exact property path")
         key = (logical_id, resource_type, action)
@@ -195,7 +195,7 @@ def gate_change_set(
 ) -> dict[str, int]:
     """Validate every paginated resource change and return aggregate counts."""
 
-    counts = {"Add": 0, "Modify": 0}
+    counts = {"Add": 0, "Modify": 0, "Remove": 0}
     seen = 0
     for resource in _resource_changes(pages):
         seen += 1
@@ -209,6 +209,8 @@ def gate_change_set(
             raise GateError("resource change has no logical ID")
         if not isinstance(resource_type, str) or not resource_type:
             raise GateError("resource change has no resource type")
+        if action == "Remove" and logical_id not in REMOVABLE_DEPRECATED_LOGICAL_IDS:
+            raise GateError("resource removal is not an exact approved deprecation")
         if replacement not in SAFE_REPLACEMENTS:
             raise GateError("resource replacement or unknown replacement state is not allowed")
         details = resource.get("Details", [])

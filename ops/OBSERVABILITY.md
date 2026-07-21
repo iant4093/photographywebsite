@@ -83,9 +83,11 @@ aws cloudformation validate-template \
 
 ## Alarm ownership and triage
 
-When `AlarmTopicArn` is empty, alarms exist without actions. When supplied, it
-must be the exact pre-existing SNS topic ARN; this stack never creates an email
-endpoint or subscription. Test and document notification delivery separately.
+`AlarmTopicArn` must remain set in production to the exact encrypted central
+security topic ARN. This stack never creates an email endpoint or subscription.
+An empty value is useful only for an intentionally non-alerting initial stack
+creation and is not an acceptable production state. Test and document
+notification delivery separately.
 
 For a frontend or media 5xx alarm, compare the two distributions, origin
 latency, request volume, and cache-hit metrics before changing cache behavior.

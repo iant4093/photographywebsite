@@ -126,7 +126,7 @@ class AccountSecurityBaselineTests(unittest.TestCase):
             self.assertTrue(group["autoClose"])
         self.assertEqual(
             ALARM_REGISTRY["deliveryState"]["status"],
-            "blocked-no-confirmed-human-destinations",
+            "degraded-one-confirmed-human-destination",
         )
         self.assertEqual(
             ALARM_REGISTRY["deliveryState"]["requiredConfirmedDestinations"], 2

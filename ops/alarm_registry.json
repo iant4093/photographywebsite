@@ -2,9 +2,9 @@
   "version": 1,
   "privacyContract": "EventBridge security signals are fixed allowlisted JSON. Native CloudWatch and Budget notifications may contain stable AWS alarm or budget names, account scope, aggregate metrics or cost, and state reasons; no route may contain user data, request bodies, credentials, object keys, media identifiers, request URLs, raw findings, or raw Backup events.",
   "deliveryState": {
-    "status": "blocked-no-confirmed-human-destinations",
+    "status": "degraded-one-confirmed-human-destination",
     "requiredConfirmedDestinations": 2,
-    "primaryOwner": "UNASSIGNED",
+    "primaryOwner": "site-owner",
     "backupOwner": "UNASSIGNED",
     "lastEndToEndTestDate": null,
     "testIntervalDays": 90
@@ -14,7 +14,7 @@
       "id": "application-api-health",
       "logicalResourceIds": ["ApiServerErrorAlarm", "ApiLatencyAlarm"],
       "severity": "high",
-      "route": "application-alarm-topic",
+      "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-api-health",
       "autoClose": "CloudWatch metric state only"
     },
@@ -22,7 +22,7 @@
       "id": "front-door-denial",
       "logicalResourceIds": ["FrontDoorDeniedAlarm"],
       "severity": "critical",
-      "route": "application-alarm-topic",
+      "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#front-door-denial",
       "autoClose": "CloudWatch metric state only"
     },
@@ -30,7 +30,7 @@
       "id": "application-async-and-preview",
       "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewQueueDepthAlarm", "PreviewWorkerFailureAlarm", "PreviewWorkerErrorsAlarm", "PreviewWorkerDurationAlarm", "PreviewWorkerThrottleAlarm", "PreviewMetadataSystemErrorsAlarm", "PreviewMetadataThrottleAlarm"],
       "severity": "high",
-      "route": "application-alarm-topic",
+      "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
       "autoClose": "CloudWatch metric state only; messages are never automatically deleted or redriven"
     },
@@ -38,7 +38,7 @@
       "id": "authentication-and-authorization",
       "logicalResourceIds": ["LoginThrottleAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"],
       "severity": "high",
-      "route": "application-alarm-topic",
+      "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#authentication-and-authorization",
       "autoClose": "CloudWatch metric state only"
     },
@@ -46,7 +46,7 @@
       "id": "application-audit-failure",
       "logicalResourceIds": ["AuditFailureAlarm"],
       "severity": "critical",
-      "route": "application-alarm-topic",
+      "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-audit-failure",
       "autoClose": "CloudWatch metric state only; incident disposition remains open until logging is proven"
     },
@@ -150,15 +150,15 @@
       "id": "edge-health",
       "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm"],
       "severity": "high",
-      "route": "observability-topic-when-configured",
+      "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#edge-health",
       "autoClose": "CloudWatch metric state only"
     },
     {
       "id": "waf-observation",
-      "logicalResourceIds": ["WafBlockedRequestAlarm", "WafRateObservationAlarm", "WafManagedObservationAlarm"],
+      "logicalResourceIds": ["WafBlockedRequestAlarm", "WafRateObservationAlarm", "WafManagedObservationAlarm", "WafAlarmForwardRule"],
       "severity": "high",
-      "route": "us-east-1-observability-topic-when-configured",
+      "route": "security-notification-topic-via-cross-region-validated-signal-queue",
       "runbook": "ops/ALARM_REGISTRY.md#waf-observation",
       "autoClose": "CloudWatch metric state only; rule promotion or exclusions require review"
     }

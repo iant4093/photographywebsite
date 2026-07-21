@@ -233,7 +233,18 @@ class CloudFrontHelperTests(unittest.TestCase):
             "cache_policies": {"immutable": "immutable", "static": "static"},
         }
         desired = cloudfront_frontend.policy_config("policy", baseline, "max-age=1")
-        self.assertEqual(desired["CustomHeadersConfig"]["Quantity"], 2)
+        self.assertEqual(desired["CustomHeadersConfig"]["Quantity"], 3)
+        self.assertIn(
+            {
+                "Header": "Cross-Origin-Opener-Policy",
+                "Value": "same-origin",
+                "Override": True,
+            },
+            desired["CustomHeadersConfig"]["Items"],
+        )
+        hsts = desired["SecurityHeadersConfig"]["StrictTransportSecurity"]
+        self.assertTrue(hsts["IncludeSubdomains"])
+        self.assertTrue(hsts["Preload"])
         listing = {
             "ResponseHeadersPolicyList": {
                 "Items": [

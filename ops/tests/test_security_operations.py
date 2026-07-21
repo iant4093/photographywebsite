@@ -130,8 +130,8 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("AWS::KMS::Key", NOTIFICATIONS)
         self.assertIn("events.amazonaws.com", NOTIFICATIONS)
         self.assertIn("cloudwatch.amazonaws.com", NOTIFICATIONS)
-        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 4)
-        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 4)
+        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 5)
+        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 5)
         self.assertIn("SqsManagedSseEnabled: true", NOTIFICATIONS)
         self.assertIn("MetricName: ApproximateNumberOfMessagesVisible", NOTIFICATIONS)
         self.assertIn("AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'", NOTIFICATIONS)
@@ -166,6 +166,8 @@ class SecurityTemplateTests(unittest.TestCase):
             self.assertIn(f'eventName = "{event_name}"', NOTIFICATIONS)
         self.assertIn("Service: budgets.amazonaws.com", NOTIFICATIONS)
         self.assertIn("budget/ian-photography-monthly-${Stage}", NOTIFICATIONS)
+        self.assertIn("AllowAccountCloudWatchAlarms", NOTIFICATIONS)
+        self.assertIn("cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*", NOTIFICATIONS)
         self.assertIn('"eventName":"guardduty.finding.high"', NOTIFICATIONS)
         self.assertIn('"eventName":"securityhub.finding.high"', NOTIFICATIONS)
         for logical_id in (
@@ -187,6 +189,9 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("kms:ViaService", key)
         self.assertIn('"severity":"critical"', NOTIFICATIONS)
         self.assertIn("ArnEquals:\n                aws:SourceArn:", NOTIFICATIONS)
+        waf_forward = resource_block(NOTIFICATIONS, "WafAlarmForwardRule")
+        self.assertIn('"eventName":"waf.alarm"', waf_forward)
+        self.assertIn("region: [us-east-1]", waf_forward)
 
     def test_singletons_require_explicit_confirmed_absent_modes(self) -> None:
         self.assertEqual(MANAGED.count("Default: skip"), 5)
@@ -342,6 +347,14 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("us-east-2", BACKUP_REPLICA)
         self.assertIn("governance-confirmed-after-restore-test", BACKUP_REPLICA)
         self.assertNotIn("AlbumsTableArn", BACKUP)
+        self.assertIn(
+            "BackupPlanName: !Sub 'ian-photography-protected-data-${Stage}'",
+            BACKUP,
+        )
+        self.assertIn(
+            'f"ian-photography-protected-data-{stage}"',
+            (OPS / "security_preflight.py").read_text(encoding="utf-8"),
+        )
 
     def test_backup_failure_events_are_static_privacy_safe_and_reliably_routed(self) -> None:
         for logical_id, event_name, detail_type in (

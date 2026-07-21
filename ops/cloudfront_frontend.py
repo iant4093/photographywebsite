@@ -270,17 +270,22 @@ def policy_config(name: str, baseline: dict[str, Any], cache_control: str) -> di
             "StrictTransportSecurity": {
                 "Override": True,
                 "AccessControlMaxAgeSec": 31536000,
-                "IncludeSubdomains": False,
-                "Preload": False,
+                "IncludeSubdomains": True,
+                "Preload": True,
             },
         },
         "CustomHeadersConfig": {
-            "Quantity": 2,
+            "Quantity": 3,
             "Items": [
                 {"Header": "Cache-Control", "Value": cache_control, "Override": True},
                 {
                     "Header": "Permissions-Policy",
                     "Value": baseline["permissions_policy"],
+                    "Override": True,
+                },
+                {
+                    "Header": "Cross-Origin-Opener-Policy",
+                    "Value": "same-origin",
                     "Override": True,
                 },
             ],
@@ -483,10 +488,20 @@ def api_response_policy_config(settings: dict[str, Any]) -> dict[str, Any]:
             "ReferrerPolicy": {"ReferrerPolicy": "no-referrer", "Override": True},
             "StrictTransportSecurity": {
                 "AccessControlMaxAgeSec": 31536000,
-                "IncludeSubdomains": False,
-                "Preload": False,
+                "IncludeSubdomains": True,
+                "Preload": True,
                 "Override": True,
             },
+        },
+        "CustomHeadersConfig": {
+            "Quantity": 1,
+            "Items": [
+                {
+                    "Header": "Cross-Origin-Opener-Policy",
+                    "Value": "same-origin",
+                    "Override": True,
+                }
+            ],
         },
     }
 
@@ -536,12 +551,22 @@ def validate_front_door_resources(
     if web_acl.get("ARN") != web_acl_arn:
         raise SystemExit("Refusing front door: WAF metadata did not match the exact ARN")
     if "Allow" not in web_acl.get("DefaultAction", {}):
-        raise SystemExit("Refusing front door: WAF default action must remain allow during count-first rollout")
-    if any(
-        "Count" not in rule.get("Action", {}) and "Count" not in rule.get("OverrideAction", {})
-        for rule in web_acl.get("Rules", [])
+        raise SystemExit("Refusing front door: WAF default action must remain allow")
+    actual_rules = {
+        rule.get("Name"): rule for rule in web_acl.get("Rules", [])
+        if isinstance(rule, dict)
+    }
+    expected_actions = {
+        "AWSManagedCommon": ("OverrideAction", "Count"),
+        "AWSManagedKnownBadInputs": ("OverrideAction", "None"),
+        "AWSManagedAmazonIpReputation": ("OverrideAction", "None"),
+        "PerIpRateLimit": ("Action", "Block"),
+    }
+    if set(actual_rules) != set(expected_actions) or any(
+        action not in actual_rules[name].get(container, {})
+        for name, (container, action) in expected_actions.items()
     ):
-        raise SystemExit("Refusing front door: every initial WAF rule must remain in count mode")
+        raise SystemExit("Refusing front door: WAF selective-block rule contract differs")
 
     api_domain = aws_json(
         ["apigatewayv2", "get-domain-name", "--domain-name", domain, "--region", region],
@@ -969,6 +994,7 @@ def main() -> int:
         assert redirect_arn
         associate_viewer_request(default, redirect_arn)
     desired_distribution["HttpVersion"] = "http2and3"
+    desired_distribution["IsIPV6Enabled"] = True
     aliases = [baseline["canonical_alias"]]
     if args.include_www:
         aliases.append(baseline["optional_www_alias"])

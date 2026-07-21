@@ -363,6 +363,10 @@ class DnsHardeningTests(MainMixin, unittest.TestCase):
         report = json.loads(output.split("\nDry run", 1)[0])
         self.assertTrue(report["canonicalRedirectReady"])
         self.assertEqual(report["caaProviders"], ["amazon.com", "letsencrypt.org"])
+        self.assertEqual(
+            report["plannedRecordTypes"],
+            ["CAA", "apex AAAA alias", "www A alias", "www AAAA alias"],
+        )
 
     def test_preflight_guards_fail_closed(self):
         cases = (

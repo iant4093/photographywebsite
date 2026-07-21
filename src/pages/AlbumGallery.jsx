@@ -2,10 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useNavigationType } from 'react-router-dom'
 import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
-import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { useScrollRestoration, isRevealed, markAsRevealed } from '../utils/scroll'
+import { useScrollRestoration } from '../utils/scroll'
 import { useLocation } from 'react-router-dom'
 import {
     mediaDisplayUrl,
@@ -43,13 +42,6 @@ function AlbumGallery() {
     const { getIdToken } = useAuth()
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
-
-    // Page transition animation variants
-    const pageVariants = {
-        initial: { opacity: 0 },
-        animate: { opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
-        exit: { opacity: 0, transition: { duration: 0.3, ease: "easeIn" } }
-    }
 
     const loadAlbum = useCallback(async ({ signal, background = false } = {}) => {
         if (!background) setLoading(true)
@@ -186,13 +178,7 @@ function AlbumGallery() {
 
 
     return (
-        <motion.div
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1 bg-cream animate-fade-in pb-16 pt-[88px] md:pt-[104px]"
-        >
+        <div className="flex-1 bg-cream animate-fade-in pb-16 pt-[88px] md:pt-[104px]">
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}
                 <button
@@ -281,20 +267,13 @@ function AlbumGallery() {
                                     {images.map((img, index) => {
                                         const thumbUrl = mediaThumbnailUrl(img)
 
-                                        const photoId = `photo-${album.albumId}-${index}`
-                                        const hasBeenRevealed = isRevealed(photoId)
-
                                         return (
-                                            <motion.div
+                                            <button
+                                                type="button"
                                                 key={mediaId(img) || index}
-                                                initial={hasBeenRevealed ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.95, y: 20 }}
-                                                whileInView={hasBeenRevealed ? {} : { opacity: 1, scale: 1, y: 0 }}
-                                                onViewportEnter={() => !hasBeenRevealed && markAsRevealed(photoId)}
-                                                viewport={{ once: true, margin: "100px" }}
-                                                transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                                                style={{ willChange: "transform, opacity" }}
-                                                className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
+                                                className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                                                 onClick={() => setLightboxIndex(index)}
+                                                aria-label={`Open item ${index + 1} from ${album.title}`}
                                             >
                                                 <div className="relative w-full h-full">
                                                     <ProgressiveImage
@@ -311,7 +290,7 @@ function AlbumGallery() {
                                                     {/* Warm overlay on hover */}
                                                     <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                                                 </div>
-                                            </motion.div>
+                                            </button>
                                         )
                                     })}
                                 </div>
@@ -326,15 +305,13 @@ function AlbumGallery() {
                         </div>
 
                         {/* Lightbox Overlay */}
-                        <AnimatePresence>
-                            {lightboxIndex !== null && images[lightboxIndex] && (
-                                <motion.div
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0"
+                        {lightboxIndex !== null && images[lightboxIndex] && (
+                                <div
+                                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0 animate-fade-in"
                                     onClick={() => setLightboxIndex(null)}
+                                    role="dialog"
+                                    aria-modal="true"
+                                    aria-label="Photo viewer"
                                 >
                                     {/* Close button */}
                                     <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
@@ -378,7 +355,7 @@ function AlbumGallery() {
                                                 <>
                                                     <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                                                         {/* High-res image with faded-in loading */}
-                                                        <motion.img
+                                                        <img
                                                             key={`high-${mediaId(activeImg) || lightboxIndex}`}
                                                             src={activeRawUrl}
                                                             alt="Full size preview"
@@ -386,12 +363,7 @@ function AlbumGallery() {
                                                             width={activeImg.width}
                                                             height={activeImg.height}
                                                             decoding="async"
-                                                            initial={{ opacity: 0 }}
-                                                            animate={{ opacity: 1 }}
-                                                            exit={{ opacity: 0 }}
-                                                            transition={{ duration: 0.4, delay: 0.1 }}
-                                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl relative z-20"
-                                                            style={{ willChange: "opacity" }}
+                                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl relative z-20 animate-fade-in"
                                                         />
 
                                                         {/* Placeholder thumbnail for instant visual feedback */}
@@ -443,13 +415,12 @@ function AlbumGallery() {
                                             {lightboxIndex + 1} / {images.length}
                                         </span>
                                     </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
+                                </div>
+                        )}
                     </div>
                 )}
             </div>
-        </motion.div>
+        </div>
     )
 }
 

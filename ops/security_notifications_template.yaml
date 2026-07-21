@@ -103,7 +103,7 @@ Resources:
                 aws:SourceAccount: !Ref AWS::AccountId
               ArnEquals:
                 aws:SourceArn: !Sub 'arn:${AWS::Partition}:budgets::${AWS::AccountId}:budget/ian-photography-monthly-${Stage}'
-          - Sid: AllowExactCloudWatchAlarms
+          - Sid: AllowAccountCloudWatchAlarms
             Effect: Allow
             Principal:
               Service: cloudwatch.amazonaws.com
@@ -112,18 +112,8 @@ Resources:
             Condition:
               StringEquals:
                 AWS:SourceAccount: !Ref AWS::AccountId
-              ArnEquals:
-                AWS:SourceArn:
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-root-activity-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-cloudtrail-change-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-iam-change-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-kms-change-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-routing-change-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-service-change-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-data-protection-change-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-infrastructure-protection-change-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-backup-freshness-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-${Stage}'
+              ArnLike:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*'
 
   SecuritySignalQueue:
     Type: AWS::SQS::Queue
@@ -167,6 +157,7 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-restore-failed-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
 
   SecurityEventDlq:
     Type: AWS::SQS::Queue
@@ -206,6 +197,7 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-restore-failed-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
 
   SecuritySignalProcessorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -309,6 +301,7 @@ Resources:
               "backup.job.failed": ("high", "backup-job-failure"),
               "backup.copy.failed": ("high", "backup-copy-failure"),
               "backup.restore.failed": ("critical", "backup-restore-failure"),
+              "waf.alarm": ("high", "waf-observation"),
           }
           KEYS = {"schemaVersion", "eventName", "severity", "stage", "runbook"}
 
@@ -360,6 +353,38 @@ Resources:
       Enabled: true
       EventSourceArn: !GetAtt SecuritySignalQueue.Arn
       FunctionName: !Ref SecuritySignalProcessor
+
+  WafAlarmForwardRule:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - SecuritySignalQueuePolicy
+      - SecurityEventDlqPolicy
+    Properties:
+      Name: !Sub 'ian-photography-waf-alarm-${Stage}'
+      Description: Converts exact us-east-1 WAF alarm transitions into one privacy-safe security signal.
+      EventPattern:
+        source: [aws.cloudwatch]
+        detail-type: [CloudWatch Alarm State Change]
+        account: [!Ref AWS::AccountId]
+        region: [us-east-1]
+        detail:
+          alarmName:
+            - !Sub 'ian-photography-waf-blocked-${Stage}'
+            - !Sub 'ian-photography-waf-rate-${Stage}'
+            - !Sub 'ian-photography-waf-managed-${Stage}'
+          state:
+            value: [ALARM]
+      State: ENABLED
+      Targets:
+        - Id: SecuritySignalQueue
+          Arn: !GetAtt SecuritySignalQueue.Arn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"waf.alarm","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#waf-observation"}
+          DeadLetterConfig:
+            Arn: !GetAtt SecurityEventDlq.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
 
   GuardDutyFindingRule:
     Type: AWS::Events::Rule

@@ -197,7 +197,7 @@ class DataProtectionTests(unittest.TestCase):
         for logical_id in ("AuditFailureAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"):
             block = resource_block(logical_id)
             self.assertIn("IanTruongPhotography/Security", block)
-            self.assertIn("AlarmActions:\n        - !Ref AlarmTopic", block)
+            self.assertIn("ian-photography-security-${Stage}", block)
 
     def test_api_access_log_destination_uses_exact_log_group_arn(self) -> None:
         api = resource_block("Api")
@@ -348,6 +348,7 @@ class BrowserBoundaryTests(unittest.TestCase):
         self.assertIn('"ViewerProtocolPolicy": "redirect-to-https"', script)
         self.assertIn('"Compress": True', script)
         self.assertIn('desired_distribution["HttpVersion"] = "http2and3"', script)
+        self.assertIn('desired_distribution["IsIPV6Enabled"] = True', script)
         main_source = script.split("def main() -> int:", 1)[1]
         self.assertLess(
             main_source.index("validate_apply_guards("),

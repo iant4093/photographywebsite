@@ -196,7 +196,7 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
             "PreviewMetadataThrottleAlarm",
         ):
             block = resource_block(logical_id)
-            self.assertIn("AlarmActions:\n        - !Ref AlarmTopic", block)
+            self.assertIn("ian-photography-security-${Stage}", block)
             self.assertIn("TreatMissingData: notBreaching", block)
 
     def test_backfill_uses_guarded_direct_queue_dispatch(self) -> None:

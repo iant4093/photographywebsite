@@ -114,6 +114,20 @@ def main() -> int:
             },
         }
     ]
+    changes.append(
+        {
+            "Action": "UPSERT",
+            "ResourceRecordSet": {
+                "Name": f"{domain}.",
+                "Type": "AAAA",
+                "AliasTarget": {
+                    "HostedZoneId": cloudfront_zone_id,
+                    "DNSName": distribution_domain + ".",
+                    "EvaluateTargetHealth": False,
+                },
+            },
+        }
+    )
     for record_type in ("A", "AAAA"):
         changes.append(
             {
@@ -146,7 +160,7 @@ def main() -> int:
                 "cloudFrontWwwAliasReady": www_ready,
                 "canonicalRedirectReady": redirect_ready,
                 "distributionDeployed": distribution_deployed,
-                "plannedRecordTypes": ["CAA", "www A alias", "www AAAA alias"],
+                "plannedRecordTypes": ["CAA", "apex AAAA alias", "www A alias", "www AAAA alias"],
                 "caaProviders": sorted(set(providers)),
             },
             indent=2,

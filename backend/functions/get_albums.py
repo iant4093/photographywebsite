@@ -139,14 +139,15 @@ def _fetch_page(
                 logger.warning("album_index_unavailable kind=%s", query_kind)
                 # A summary index rollout can fall back to the existing ALL
                 # visibility index before using the bounded filtered scan.
-                query_kind = (
-                    "visibility"
-                    if query_kind == "public_summary" and _index_enabled("visibility")
-                    else None
-                )
-                cursor_key = None
-                items = []
-                loops = 0
+                # Those two indexes share an exact key schema, so retain the
+                # cursor and completed pages when switching between them.
+                if query_kind == "public_summary" and _index_enabled("visibility"):
+                    query_kind = "visibility"
+                else:
+                    query_kind = None
+                    cursor_key = None
+                    items = []
+                    loops = 0
                 continue
             raise
 
@@ -157,10 +158,13 @@ def _fetch_page(
             # Existing legacy records may predate the aggregate. Until they are
             # backfilled, use the established ALL index so counts never regress.
             logger.warning("album_summary_index_incomplete field=image_count")
-            query_kind = "visibility" if _index_enabled("visibility") else None
-            cursor_key = None
-            items = []
-            loops = 0
+            if _index_enabled("visibility"):
+                query_kind = "visibility"
+            else:
+                query_kind = None
+                cursor_key = None
+                items = []
+                loops = 0
             continue
 
         items.extend(page_items)

@@ -230,10 +230,10 @@ traffic, privacy, and cost after 30 days.
 
 - Route 53 DNSSEC is prepared but deferred until the registrar ceremony is
   scheduled. Its required customer-managed KMS key has ongoing key/request cost.
-- The retained CloudFront WAF rollout is source controlled in COUNT mode with
-  request sampling disabled and sensitive fields redacted. Moving an individual
-  rule to BLOCK remains deferred until representative traffic evidence and a
-  documented rollback threshold are reviewed.
+- The retained CloudFront WAF rollout keeps the common managed group in COUNT
+  and runs known-bad input, IP reputation, and per-IP rate rules in BLOCK, with
+  request sampling disabled and sensitive fields redacted. Return an individual
+  rule to COUNT only for a verified false positive with a documented rollback.
 - Guarded CloudTrail, Config, GuardDuty, Security Hub, Access Analyzer, Inspector,
   and AWS Backup controls are active and source controlled separately from the
   application stack. Use the home-Region singleton inventory, scheduled posture

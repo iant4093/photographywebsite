@@ -91,10 +91,18 @@ def _fetch_page(*, album_type, limit, start_key):
             code = error.response.get("Error", {}).get("Code", "")
             if query_kind and code in {"ValidationException", "ResourceNotFoundException"}:
                 logger.warning("public_catalog_index_unavailable kind=%s", query_kind)
-                query_kind = "visibility" if query_kind == "summary" and _index_enabled("visibility") else None
-                cursor_key = None
-                items = []
-                loops = 0
+                if query_kind == "summary" and _index_enabled("visibility"):
+                    # Both public indexes have the same visibility/createdAt
+                    # key schema. Resume from the exact failed page so a
+                    # rollout fallback cannot repeat earlier albums.
+                    query_kind = "visibility"
+                else:
+                    # A table scan has a different pagination contract, so it
+                    # must restart rather than reuse an index cursor.
+                    query_kind = None
+                    cursor_key = None
+                    items = []
+                    loops = 0
                 continue
             raise
 
@@ -104,10 +112,16 @@ def _fetch_page(*, album_type, limit, start_key):
         ):
             # Legacy aggregates must never cause albums or counts to disappear.
             logger.warning("public_catalog_summary_incomplete field=image_count")
-            query_kind = "visibility" if _index_enabled("visibility") else None
-            cursor_key = None
-            items = []
-            loops = 0
+            if _index_enabled("visibility"):
+                # The response has not been appended yet. Preserve both the
+                # caller's cursor and any prior complete pages, then re-read
+                # only this page from the full projection index.
+                query_kind = "visibility"
+            else:
+                query_kind = None
+                cursor_key = None
+                items = []
+                loops = 0
             continue
 
         items.extend(page_items)

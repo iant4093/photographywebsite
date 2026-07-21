@@ -494,11 +494,12 @@ present. HTTPS, SQS, and Lambda fan-out do not satisfy that ownership gate. The
 separate alarm-routing readiness contract still requires primary and backup
 responders with two tested destinations.
 
-The current checked-in alarm registry deliberately remains
-`blocked-no-confirmed-human-destinations`: primary owner, backup owner, and the
-last end-to-end test date are unassigned. These are human decisions, not safe
-repository defaults. Assign them and test sanitized delivery before calling any
-security, backup, observability, WAF, or budget alert operational.
+The current checked-in alarm registry is
+`degraded-one-confirmed-human-destination`: the site owner has one confirmed
+destination, while the backup owner, second destination, and last end-to-end
+test date remain unassigned. Those remaining items are human decisions, not safe
+repository defaults. Complete them and test sanitized delivery before calling
+the route fully redundant.
 
 ## Maintenance, cost, and evidence
 

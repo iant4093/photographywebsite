@@ -240,7 +240,7 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
         self.assertIn("MetricName: FrontDoorDenied", metric_filter)
         self.assertIn("Namespace: IanTruongPhotography/Security", alarm)
         self.assertIn("MetricName: FrontDoorDenied", alarm)
-        self.assertIn("AlarmActions:\n        - !Ref AlarmTopic", alarm)
+        self.assertIn("ian-photography-security-${Stage}", alarm)
 
 
 if __name__ == "__main__":

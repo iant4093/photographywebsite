@@ -2,9 +2,10 @@
 
 The machine-readable inventory is `ops/alarm_registry.json`. It is the source
 of truth for alarm-to-runbook coverage. Notification endpoints are deliberately
-not stored in Git. The current delivery state remains blocked until an owner
-assigns a primary responder and backup responder, attaches at least two
-confirmed destinations, and records a synthetic end-to-end delivery test.
+not stored in Git. One owner-controlled human destination is confirmed on the
+central topic. Delivery remains degraded until a backup responder is assigned,
+a second destination is confirmed, and a synthetic end-to-end delivery test is
+recorded.
 
 EventBridge findings and backup events pass through the exact-rule security
 signal queue and a strict allowlist validator, so only fixed signal names,
@@ -151,9 +152,11 @@ posture smoke test for release verification.
 
 ## WAF observation
 
-Use aggregate rule labels/actions and the redacted count/block log. Keep managed
-rules in count mode until benign and malicious fixtures plus measured production
-traffic support promotion. Any exclusion needs an owner, reason, and expiry.
+Use aggregate rule labels/actions and the redacted count/block log. The common
+managed group remains in count mode; known-bad inputs, Amazon IP reputation,
+and the per-IP rate limit block. Return only an affected high-confidence rule to
+count mode after a verified false positive. Any exclusion needs an owner,
+reason, expiry, regression fixture, and rollback record.
 
 ## Delivery test and review record
 

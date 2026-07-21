@@ -39,6 +39,34 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertNotIn("execute-api", csp)
         self.assertNotIn("legacy-api-id", csp)
 
+    def test_frontend_and_api_policies_apply_cross_origin_and_hsts_hardening(self) -> None:
+        rendered_baseline = {
+            **BASELINE,
+            "content_security_policy": cloudfront_frontend.render_csp(
+                BASELINE,
+                media_domain="media.example.test",
+                api_id="legacy-api-id",
+                region="us-west-2",
+                bucket="private-media",
+            ),
+        }
+        frontend = cloudfront_frontend.policy_config(
+            "frontend", rendered_baseline, BASELINE["html_cache_control"]
+        )
+        api = cloudfront_frontend.api_response_policy_config(SETTINGS)
+        for policy in (frontend, api):
+            hsts = policy["SecurityHeadersConfig"]["StrictTransportSecurity"]
+            self.assertTrue(hsts["IncludeSubdomains"])
+            self.assertTrue(hsts["Preload"])
+            self.assertIn(
+                {
+                    "Header": "Cross-Origin-Opener-Policy",
+                    "Value": "same-origin",
+                    "Override": True,
+                },
+                policy["CustomHeadersConfig"]["Items"],
+            )
+
     def test_public_cache_key_and_forwarding_are_narrow_and_anonymous(self) -> None:
         cache = cloudfront_frontend.public_api_cache_policy_config(SETTINGS)
         parameters = cache["ParametersInCacheKeyAndForwardedToOrigin"]
@@ -207,8 +235,10 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                     "ARN": web_acl_arn,
                     "DefaultAction": {"Allow": {}},
                     "Rules": [
-                        {"OverrideAction": {"Count": {}}},
-                        {"Action": {"Count": {}}},
+                        {"Name": "AWSManagedCommon", "OverrideAction": {"Count": {}}},
+                        {"Name": "AWSManagedKnownBadInputs", "OverrideAction": {"None": {}}},
+                        {"Name": "AWSManagedAmazonIpReputation", "OverrideAction": {"None": {}}},
+                        {"Name": "PerIpRateLimit", "Action": {"Block": {}}},
                     ],
                 }
             },
@@ -263,11 +293,14 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
 
 
 class WafAndPreflightTests(unittest.TestCase):
-    def test_waf_is_retained_global_count_first_and_privacy_safe(self) -> None:
+    def test_waf_is_retained_selectively_blocking_and_privacy_safe(self) -> None:
         self.assertIn("Scope: CLOUDFRONT", WAF_TEMPLATE)
         self.assertIn("DefaultAction:\n        Allow: {}", WAF_TEMPLATE)
         self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 5)
-        self.assertEqual(WAF_TEMPLATE.count("Count: {}"), 4)
+        self.assertEqual(WAF_TEMPLATE.count("Count: {}"), 1)
+        self.assertEqual(WAF_TEMPLATE.count("None: {}"), 2)
+        self.assertIn("Action:\n            Block: {}", WAF_TEMPLATE)
+        self.assertIn("Name: PerIpRateLimit", WAF_TEMPLATE)
         for managed_group in (
             "AWSManagedRulesCommonRuleSet",
             "AWSManagedRulesKnownBadInputsRuleSet",
@@ -280,6 +313,8 @@ class WafAndPreflightTests(unittest.TestCase):
         self.assertIn("Action: BLOCK", WAF_TEMPLATE)
         self.assertIn("Action: COUNT", WAF_TEMPLATE)
         self.assertIn("DeletionPolicy: Retain", WAF_TEMPLATE)
+        self.assertIn("WafAlarmCrossRegionRule", WAF_TEMPLATE)
+        self.assertIn("events:PutEvents", WAF_TEMPLATE)
 
     def test_preflight_never_reads_or_returns_secret_value(self) -> None:
         account = "000000000000"

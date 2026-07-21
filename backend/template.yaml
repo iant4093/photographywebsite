@@ -699,8 +699,8 @@ Resources:
             Override: true
           StrictTransportSecurity:
             AccessControlMaxAgeSec: 31536000
-            IncludeSubdomains: false
-            Preload: false
+            IncludeSubdomains: true
+            Preload: true
             Override: true
         CustomHeadersConfig:
           Items:
@@ -747,8 +747,8 @@ Resources:
             Override: true
           StrictTransportSecurity:
             AccessControlMaxAgeSec: 31536000
-            IncludeSubdomains: false
-            Preload: false
+            IncludeSubdomains: true
+            Preload: true
             Override: true
         CustomHeadersConfig:
           Items:
@@ -2321,16 +2321,6 @@ Resources:
             Path: /users/{email}
             Method: PUT
 
-  AlarmTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub 'ian-photography-alarms-${Stage}'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-
   AuditDeniedMetricFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
@@ -2427,7 +2417,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   ApiLatencyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2448,7 +2438,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   FrontDoorDeniedAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2464,7 +2454,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   AsyncFailureQueueAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2483,7 +2473,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewDeadLetterQueueAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2502,7 +2492,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewQueueAgeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2521,7 +2511,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewQueueDepthAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2540,7 +2530,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerFailureAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2556,7 +2546,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2575,7 +2565,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerDurationAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2594,7 +2584,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2613,7 +2603,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewMetadataSystemErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2632,7 +2622,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewMetadataThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2651,7 +2641,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   LoginThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2670,7 +2660,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   AuditFailureAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2686,7 +2676,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   LoginDeniedAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2702,7 +2692,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   ApiAuthorizationDeniedAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2718,7 +2708,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref AlarmTopic
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
 Outputs:
   ApiUrl:
@@ -2757,8 +2747,8 @@ Outputs:
     Description: S3 domain usable for frontend CloudFront standard logging after explicit opt-in
     Value: !GetAtt MediaAccessLogsBucket.DomainName
   AlarmTopicArn:
-    Description: Subscribe an operational destination after deployment; the template adds no public subscription.
-    Value: !Ref AlarmTopic
+    Description: Central encrypted security and operational notification topic.
+    Value: !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
   ApplicationLogGroupName:
     Description: Centralized structured Lambda application and security-audit log group.
     Value: !Ref ApplicationLogGroup

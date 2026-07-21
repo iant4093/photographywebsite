@@ -42,10 +42,12 @@ The stack owns privacy-safe metrics in `IanTruongPhotography/Security`:
 | `LoginDenied` | denied `auth.login` records | 10 in 5 minutes | Possible credential attack, CAPTCHA issue, or client regression. |
 | `ApiAuthorizationDenied` | API 401, 403, and 429 access logs | 25 in 5 minutes | JWT/authorization/rate-limit failures, including denials before Lambda. |
 
-All alarms publish to `AlarmTopic`. CloudFormation intentionally creates no SNS
-subscription: before production enablement, confirm a monitored destination and
-a backup responder. A topic ARN without a confirmed subscription is not an
-operational alert path.
+All application alarms publish to the encrypted central
+`ian-photography-security-<stage>` topic owned by the separate notification
+stack. The application stack does not create a second topic or subscription.
+One site-owner destination is confirmed; add a separately monitored backup
+destination and record quarterly delivery tests. A topic ARN without a confirmed
+subscription is not an operational alert path.
 
 Tune thresholds only from at least two representative traffic cycles. Record
 the old/new value, evidence, owner, review date, and rollback. Do not lower a
