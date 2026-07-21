@@ -34,15 +34,22 @@ jq -e '
   and (.regionalSecurityPosture.satelliteStackName
     | test("^[A-Za-z][A-Za-z0-9-]{0,127}$"))
   and ((.regionalSecurityPosture.cloudFormationExclusion | keys | sort)
-    == ["logicalResourceId", "region", "stackName"])
+    == ["logicalResourceId", "region", "stackName", "unsupportedLogicalResourceIds"])
   and (.regionalSecurityPosture.cloudFormationExclusion as $excluded |
     $excluded.region == .regionalSecurityPosture.homeRegion
     and ($excluded.stackName | test("^[A-Za-z][A-Za-z0-9-]{0,127}$"))
     and ($excluded.logicalResourceId | test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
+    and ($excluded.unsupportedLogicalResourceIds | type == "array" and length == 3)
+    and all($excluded.unsupportedLogicalResourceIds[];
+      type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
+    and (($excluded.unsupportedLogicalResourceIds | unique | length)
+      == ($excluded.unsupportedLogicalResourceIds | length))
     and ([.stacks[]
       | select(.region == $excluded.region and .name == $excluded.stackName)
-      | .excludedLogicalResourceIds[]?] == [$excluded.logicalResourceId])
-    and ([.stacks[] | .excludedLogicalResourceIds[]?] == [$excluded.logicalResourceId]))
+      | .excludedLogicalResourceIds[]?] | sort
+        == ([$excluded.logicalResourceId] + $excluded.unsupportedLogicalResourceIds | sort))
+    and ([.stacks[] | .excludedLogicalResourceIds[]?] | sort
+      == ([$excluded.logicalResourceId] + $excluded.unsupportedLogicalResourceIds | sort)))
 ' "$inventory" >/dev/null || { echo 'Drift inventory is invalid.' >&2; exit 2; }
 
 workspace="${RUNNER_TEMP:?RUNNER_TEMP is required}/stack-drift-audit"
@@ -52,17 +59,13 @@ detections="$workspace/detections.tsv"
 
 filtered_stacks=0
 excluded_resources=0
+resource_drift_checks=0
+stack_count=0
 while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv; do
-  detect_arguments=(
-    cloudformation detect-stack-drift
-    --region "$region"
-    --stack-name "$stack_name"
-    --query StackDriftDetectionId
-    --output text
-  )
+  stack_count=$((stack_count + 1))
+  logical_ids=()
   if [[ -n "$logical_ids_csv" ]]; then
     IFS=',' read -r -a logical_ids <<< "$logical_ids_csv"
-    detect_arguments+=(--logical-resource-ids "${logical_ids[@]}")
     filtered_stacks=$((filtered_stacks + 1))
   elif [[ -n "$excluded_ids_csv" ]]; then
     stack_resources="$(aws cloudformation list-stack-resources \
@@ -103,20 +106,45 @@ while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv; do
       echo 'Reviewed drift exclusions left an invalid resource set.' >&2
       exit 2
     }
-    detect_arguments+=(--logical-resource-ids "${logical_ids[@]}")
     filtered_stacks=$((filtered_stacks + 1))
     excluded_resources=$((excluded_resources + ${#excluded_ids[@]}))
   fi
-  detection_id="$(aws "${detect_arguments[@]}" 2>"$workspace/provider-error.log")" || {
-    : > "$workspace/provider-error.log"
-    echo 'CloudFormation drift detection could not be started.' >&2
-    exit 2
-  }
-  [[ "$detection_id" =~ ^[0-9a-fA-F-]{36}$ ]] || {
-    echo 'CloudFormation returned an invalid drift detection identifier.' >&2
-    exit 2
-  }
-  printf '%s\t%s\t%s\n' "$region" "$stack_name" "$detection_id" >> "$detections"
+  if [[ ${#logical_ids[@]} -gt 0 ]]; then
+    for logical_id in "${logical_ids[@]}"; do
+      resource_drift="$(aws cloudformation detect-stack-resource-drift \
+        --region "$region" \
+        --stack-name "$stack_name" \
+        --logical-resource-id "$logical_id" \
+        --query 'StackResourceDrift.{LogicalId:LogicalResourceId,Status:StackResourceDriftStatus}' \
+        --output json 2>"$workspace/provider-error.log")" || {
+          : > "$workspace/provider-error.log"
+          echo 'CloudFormation resource drift detection failed.' >&2
+          exit 2
+        }
+      jq -e --arg logical_id "$logical_id" '
+        .LogicalId == $logical_id and .Status == "IN_SYNC"
+      ' <<< "$resource_drift" >/dev/null || {
+        echo 'A filtered CloudFormation resource is drifted.' >&2
+        exit 2
+      }
+      resource_drift_checks=$((resource_drift_checks + 1))
+    done
+  else
+    detection_id="$(aws cloudformation detect-stack-drift \
+      --region "$region" \
+      --stack-name "$stack_name" \
+      --query StackDriftDetectionId \
+      --output text 2>"$workspace/provider-error.log")" || {
+        : > "$workspace/provider-error.log"
+        echo 'CloudFormation drift detection could not be started.' >&2
+        exit 2
+      }
+    [[ "$detection_id" =~ ^[0-9a-fA-F-]{36}$ ]] || {
+      echo 'CloudFormation returned an invalid drift detection identifier.' >&2
+      exit 2
+    }
+    printf '%s\t%s\t%s\n' "$region" "$stack_name" "$detection_id" >> "$detections"
+  fi
 done < <(jq -r '.stacks[] | [
   .region,
   .name,
@@ -125,6 +153,7 @@ done < <(jq -r '.stacks[] | [
 ] | join("|")' "$inventory")
 
 security_home_region="$(jq -r '.regionalSecurityPosture.homeRegion' "$inventory")"
+unsupported_resources="$(jq -r '.regionalSecurityPosture.cloudFormationExclusion.unsupportedLogicalResourceIds | length' "$inventory")"
 security_posture_path="$workspace/regional-security.json"
 python3 ops/ci/regional_security_posture.py \
   --home-region "$security_home_region" \
@@ -194,5 +223,10 @@ while IFS=$'\t' read -r region _stack_name detection_id; do
   checked=$((checked + 1))
 done < "$detections"
 
-printf '{"excludedResourceCount":%d,"filteredStackCount":%d,"frontendEdgeCheckCount":1,"guardDutyPostureCheckCount":%d,"metadataPostureCheckCount":1,"securityHubPostureCheckCount":%d,"stackCount":%d,"status":"IN_SYNC"}\n' \
-  "$excluded_resources" "$filtered_stacks" "$guardduty_checks" "$security_hub_checks" "$checked"
+[[ $((checked + filtered_stacks)) -eq "$stack_count" ]] || {
+  echo 'CloudFormation drift coverage was incomplete.' >&2
+  exit 2
+}
+
+printf '{"excludedResourceCount":%d,"filteredStackCount":%d,"frontendEdgeCheckCount":1,"guardDutyPostureCheckCount":%d,"metadataPostureCheckCount":1,"resourceDriftCheckCount":%d,"securityHubPostureCheckCount":%d,"stackCount":%d,"status":"IN_SYNC","unsupportedResourceCount":%d}\n' \
+  "$excluded_resources" "$filtered_stacks" "$guardduty_checks" "$resource_drift_checks" "$security_hub_checks" "$stack_count" "$unsupported_resources"

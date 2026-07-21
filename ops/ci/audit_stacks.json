@@ -10,7 +10,12 @@
     "cloudFormationExclusion": {
       "region": "us-west-2",
       "stackName": "ian-photography-security-managed",
-      "logicalResourceId": "GuardDutyDetector"
+      "logicalResourceId": "GuardDutyDetector",
+      "unsupportedLogicalResourceIds": [
+        "ConfigDeliveryBucketPolicy",
+        "ConfigDeliveryChannel",
+        "ConfigRecorder"
+      ]
     }
   },
   "stacks": [
@@ -21,7 +26,12 @@
     {
       "region": "us-west-2",
       "name": "ian-photography-security-managed",
-      "excludedLogicalResourceIds": ["GuardDutyDetector"]
+      "excludedLogicalResourceIds": [
+        "ConfigDeliveryBucketPolicy",
+        "ConfigDeliveryChannel",
+        "ConfigRecorder",
+        "GuardDutyDetector"
+      ]
     },
     {"region": "us-west-2", "name": "ian-photography-backup-primary"},
     {

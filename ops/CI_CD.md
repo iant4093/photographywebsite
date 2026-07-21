@@ -186,9 +186,15 @@ resource cannot silently escape review.
 
 The GuardDuty CloudFormation provider reports the six service-managed detector
 features as additions even though CloudFormation can configure only the other
-six features. `GuardDutyDetector` is therefore the one reviewed exclusion from
-the managed-security stack's provider drift request. The scheduled audit does
-not ignore the detector: `regional_security_posture.py` inventories every
+six features. `GuardDutyDetector` is therefore the one reviewed configuration
+exception from the managed-security provider drift request. Three other exact
+logical resources—the Config bucket policy, custom delivery channel, and
+configuration recorder—are explicitly counted as provider-unsupported because
+CloudFormation's resource-level drift API cannot evaluate them. The inventory
+requires that four-item set exactly, dynamically proves that every other live
+stack resource is checked, and fails if a new exclusion appears. Source tests
+continue to bind the unsupported resources to their least-privilege contracts.
+The scheduled audit does not ignore the detector: `regional_security_posture.py` inventories every
 enabled Region and requires exactly one enabled detector, the exact combined
 12-feature map, 15-minute publishing, and exact application/stage tags. It also
 requires one exact Security Hub per Region, two `READY` standards only in the

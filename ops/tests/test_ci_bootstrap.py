@@ -178,8 +178,24 @@ class CiBootstrapTemplateTests(unittest.TestCase):
                 "region": "us-west-2",
                 "stackName": "ian-photography-security-managed",
                 "logicalResourceId": "GuardDutyDetector",
+                "unsupportedLogicalResourceIds": [
+                    "ConfigDeliveryBucketPolicy",
+                    "ConfigDeliveryChannel",
+                    "ConfigRecorder",
+                ],
             },
         )
+        managed_source = (OPS / "security_managed_services_template.yaml").read_text()
+        for logical_id, resource_type in {
+            "ConfigDeliveryBucketPolicy": "AWS::S3::BucketPolicy",
+            "ConfigDeliveryChannel": "Custom::ConfigDeliveryChannel",
+            "ConfigRecorder": "AWS::Config::ConfigurationRecorder",
+            "GuardDutyDetector": "AWS::GuardDuty::Detector",
+        }.items():
+            self.assertRegex(
+                managed_source,
+                rf"(?m)^  {logical_id}:\n    Type: {re.escape(resource_type)}$",
+            )
         self.assertEqual(
             inventory["rumAppMonitor"],
             {"region": "us-west-2", "name": "ian-photography-web-prod"},
@@ -262,7 +278,9 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         drift_script = (OPS / "ci" / "audit_stack_drift.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn("--logical-resource-ids", drift_script)
+        self.assertIn("detect-stack-resource-drift", drift_script)
+        self.assertNotIn("--logical-resource-ids", drift_script)
+        self.assertIn('.Status == "IN_SYNC"', drift_script)
         self.assertIn("regional_security_posture.py", drift_script)
         self.assertNotIn("mapfile", drift_script)
         self.assertIn("rum get-app-monitor", drift_script)
@@ -340,12 +358,23 @@ class CiBootstrapTemplateTests(unittest.TestCase):
                 """#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' \"$*\" >> \"$AWS_CALL_LOG\"
-if [[ \"$1 $2\" == \"cloudformation detect-stack-drift\" ]]; then
+if [[ \"$1 $2\" == \"cloudformation detect-stack-resource-drift\" ]]; then
+  logical_id=''
+  while [[ $# -gt 0 ]]; do
+    if [[ \"$1\" == \"--logical-resource-id\" ]]; then
+      logical_id=\"$2\"
+      break
+    fi
+    shift
+  done
+  [[ -n \"$logical_id\" ]] || exit 64
+  printf '{\"LogicalId\":\"%s\",\"Status\":\"IN_SYNC\"}\\n' \"$logical_id\"
+elif [[ \"$1 $2\" == \"cloudformation detect-stack-drift\" ]]; then
   printf '00000000-0000-0000-0000-000000000000\\n'
 elif [[ \"$1 $2\" == \"cloudformation describe-stack-drift-detection-status\" ]]; then
   printf 'DETECTION_COMPLETE\\tIN_SYNC\\n'
 elif [[ \"$1 $2\" == \"cloudformation list-stack-resources\" ]]; then
-  printf '%s\\n' '[\"ConfigRecorder\",\"GuardDutyDetector\",\"SecurityHub\"]'
+  printf '%s\\n' '[\"ConfigDeliveryBucketPolicy\",\"ConfigDeliveryChannel\",\"ConfigRecorder\",\"ConfigRule\",\"GuardDutyDetector\",\"SecurityHub\"]'
 elif [[ \"$1 $2\" == \"rum get-app-monitor\" ]]; then
   printf '%s\\n' '{"AppMonitor":{"Name":"ian-photography-web-prod","Domain":"iantruongphotography.com","Platform":"Web","State":"CREATED","CustomEvents":{"Status":"DISABLED"},"DeobfuscationConfiguration":{"JavaScriptSourceMaps":{"Status":"DISABLED"}},"AppMonitorConfiguration":{"AllowCookies":false,"EnableXRay":false,"SessionSampleRate":0.1,"Telemetries":["performance","errors","http"],"ExcludedPages":["https://iantruongphotography.com/login*","https://iantruongphotography.com/admin*","https://iantruongphotography.com/dashboard*","https://iantruongphotography.com/sharedalbum*"],"GuestRoleArn":"synthetic-role","IdentityPoolId":"synthetic-pool"}}}'
 elif [[ \"$1 $2\" == \"cloudfront get-distribution\" ]]; then
@@ -402,30 +431,38 @@ fi
             self.assertEqual(
                 json.loads(completed.stdout),
                 {
-                    "excludedResourceCount": 1,
+                    "excludedResourceCount": 4,
                     "filteredStackCount": 2,
                     "guardDutyPostureCheckCount": 2,
                     "metadataPostureCheckCount": 1,
+                    "resourceDriftCheckCount": 17,
                     "frontendEdgeCheckCount": 1,
                     "securityHubPostureCheckCount": 2,
                     "stackCount": 9,
                     "status": "IN_SYNC",
+                    "unsupportedResourceCount": 3,
                 },
             )
             calls = call_log.read_text(encoding="utf-8").splitlines()
             detections = [
                 call for call in calls if call.startswith("cloudformation detect-stack-drift")
             ]
-            self.assertEqual(len(detections), 9)
-            filtered = [call for call in detections if "--logical-resource-ids" in call]
-            self.assertEqual(len(filtered), 2)
-            observability_filter = next(
-                call for call in filtered if "CanaryArtifactBucket" in call
-            )
-            managed_filter = next(call for call in filtered if "ConfigRecorder" in call)
-            self.assertNotIn("RumAppMonitor", observability_filter)
-            self.assertNotIn("GuardDutyDetector", managed_filter)
-            self.assertIn("SecurityHub", managed_filter)
+            self.assertEqual(len(detections), 7)
+            resource_detections = [
+                call
+                for call in calls
+                if call.startswith("cloudformation detect-stack-resource-drift")
+            ]
+            self.assertEqual(len(resource_detections), 17)
+            joined_resource_calls = "\n".join(resource_detections)
+            self.assertIn("CanaryArtifactBucket", joined_resource_calls)
+            self.assertIn("ConfigRule", joined_resource_calls)
+            self.assertIn("SecurityHub", joined_resource_calls)
+            self.assertNotIn("RumAppMonitor", joined_resource_calls)
+            self.assertNotIn("GuardDutyDetector", joined_resource_calls)
+            self.assertNotIn("ConfigDeliveryBucketPolicy", joined_resource_calls)
+            self.assertNotIn("ConfigDeliveryChannel", joined_resource_calls)
+            self.assertNotIn("--logical-resource-id ConfigRecorder", joined_resource_calls)
             self.assertEqual(
                 sum(call.startswith("rum get-app-monitor") for call in calls), 1
             )
@@ -455,6 +492,11 @@ fi
         unexpected_key = json.loads(json.dumps(source))
         unexpected_key["regionalSecurityPosture"]["bypass"] = True
         mutations.append(unexpected_key)
+        unsupported = json.loads(json.dumps(source))
+        unsupported["regionalSecurityPosture"]["cloudFormationExclusion"][
+            "unsupportedLogicalResourceIds"
+        ].append("UnexpectedResource")
+        mutations.append(unsupported)
 
         for inventory in mutations:
             with self.subTest(
