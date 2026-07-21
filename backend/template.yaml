@@ -699,8 +699,8 @@ Resources:
             Override: true
           StrictTransportSecurity:
             AccessControlMaxAgeSec: 31536000
-            IncludeSubdomains: true
-            Preload: true
+            IncludeSubdomains: false
+            Preload: false
             Override: true
         CustomHeadersConfig:
           Items:
@@ -747,8 +747,8 @@ Resources:
             Override: true
           StrictTransportSecurity:
             AccessControlMaxAgeSec: 31536000
-            IncludeSubdomains: true
-            Preload: true
+            IncludeSubdomains: false
+            Preload: false
             Override: true
         CustomHeadersConfig:
           Items:
