@@ -418,10 +418,15 @@ normal traffic cycle and test direct S3 website/REST URLs return access denied.
 
 For `www`, first ensure the ACM certificate attached to CloudFront covers
 `www.iantruongphotography.com`. `--include-www` verifies the issued certificate
-at apply time, creates/publishes a small viewer-request CloudFront Function, and
-associates it with every behavior so `www` returns a path/query-preserving 301 to
-the apex. It refuses to overwrite an unmanaged viewer-request association. Add
-the alias using a fresh ETag, wait for deployment, and only then apply DNS:
+at apply time. The frontend baseline creates/publishes a small viewer-request
+CloudFront Function and associates it with every behavior so `www` returns a
+path/query-preserving 301 to the apex. The same function rewrites only
+extensionless, non-API `GET`/`HEAD` navigation paths to `/index.html`; `/api` and
+`/api/*` always pass through unchanged. When the API front door is enabled the
+helper removes legacy distribution-wide 403/404 SPA substitutions so API errors
+retain their status and JSON body. It refuses to overwrite an unmanaged
+viewer-request association. Add the alias using a fresh ETag, wait for
+deployment, and only then apply DNS:
 
 ```bash
 python3 ops/dns_hardening.py

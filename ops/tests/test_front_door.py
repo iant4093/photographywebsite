@@ -137,28 +137,26 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             cloudfront_frontend.upsert_exact_api_origin(conflict, SETTINGS, runtime_value)
 
-    def test_short_error_ttls_preserve_spa_mappings(self) -> None:
+    def test_global_spa_errors_are_removed_before_api_routing(self) -> None:
         config = {
             "CustomErrorResponses": {
-                "Quantity": 1,
+                "Quantity": 2,
                 "Items": [
                     {
                         "ErrorCode": 404,
                         "ResponseCode": "200",
                         "ResponsePagePath": "/index.html",
                         "ErrorCachingMinTTL": 30,
-                    }
+                    },
+                    {"ErrorCode": 500, "ErrorCachingMinTTL": 1},
                 ],
             }
         }
-        cloudfront_frontend.apply_short_error_ttls(config, [403, 404, 500], 1)
-        by_code = {
-            item["ErrorCode"]: item for item in config["CustomErrorResponses"]["Items"]
-        }
-        self.assertEqual(by_code[404]["ResponsePagePath"], "/index.html")
-        self.assertEqual(by_code[404]["ResponseCode"], "200")
-        self.assertEqual(by_code[403]["ErrorCachingMinTTL"], 1)
-        self.assertEqual(by_code[500]["ErrorCachingMinTTL"], 1)
+        cloudfront_frontend.remove_legacy_spa_error_responses(config)
+        self.assertEqual(
+            config["CustomErrorResponses"],
+            {"Quantity": 1, "Items": [{"ErrorCode": 500, "ErrorCachingMinTTL": 1}]},
+        )
 
     def test_apply_requires_all_exact_guards_and_confirmation(self) -> None:
         common = {

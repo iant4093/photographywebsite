@@ -367,9 +367,12 @@ class BrowserBoundaryTests(unittest.TestCase):
 
     def test_www_redirect_source_and_association_guards(self) -> None:
         source = (ROOT / "ops" / "cloudfront_www_redirect.js").read_text(encoding="utf-8")
-        self.assertIn("host !== '__WWW_HOST__'", source)
+        self.assertIn("host === '__WWW_HOST__'", source)
         self.assertIn("https://__APEX_HOST__", source)
         self.assertIn("request.uri + suffix", source)
+        self.assertIn("request.uri === '/api'", source)
+        self.assertIn("request.uri.indexOf('/api/') === 0", source)
+        self.assertIn("request.uri = '/index.html'", source)
         self.assertIn(
             ':function/{redirect_name}',
             (ROOT / "ops" / "dns_hardening.py").read_text(encoding="utf-8"),
@@ -393,13 +396,82 @@ class BrowserBoundaryTests(unittest.TestCase):
                 {
                     "DefaultCacheBehavior": {
                         "FunctionAssociations": {
-                            "Items": [{"EventType": "viewer-request", "FunctionARN": "arn:function/foreign"}]
+                            "Items": [
+                                {
+                                    "EventType": "viewer-request",
+                                    "FunctionARN": "arn:function/foreign",
+                                }
+                            ]
                         }
                     }
                 },
                 "managed",
             )
 
+    def test_edge_request_router_preserves_api_and_rewrites_only_spa_navigation(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is required to execute the CloudFront Function regression")
+        source = (ROOT / "ops" / "cloudfront_www_redirect.js").read_text(encoding="utf-8")
+        source = source.replace("__APEX_HOST__", "example.test").replace(
+            "__WWW_HOST__", "www.example.test"
+        )
+        requests = [
+            {
+                "method": "GET",
+                "uri": "/album/public-id",
+                "headers": {"host": {"value": "example.test"}},
+                "querystring": {},
+            },
+            {
+                "method": "GET",
+                "uri": "/api/definitely-not-a-route",
+                "headers": {"host": {"value": "example.test"}},
+                "querystring": {},
+            },
+            {
+                "method": "GET",
+                "uri": "/api",
+                "headers": {"host": {"value": "example.test"}},
+                "querystring": {},
+            },
+            {
+                "method": "GET",
+                "uri": "/assets/app.js",
+                "headers": {"host": {"value": "example.test"}},
+                "querystring": {},
+            },
+            {
+                "method": "POST",
+                "uri": "/contact",
+                "headers": {"host": {"value": "example.test"}},
+                "querystring": {},
+            },
+            {
+                "method": "GET",
+                "uri": "/album/public-id",
+                "headers": {"host": {"value": "www.example.test"}},
+                "querystring": {
+                    "view": {"value": "grid"},
+                    "label": {"value": "golden%20hour"},
+                },
+            },
+        ]
+        runner = source + "\nprocess.stdout.write(JSON.stringify(" + json.dumps(requests) + ".map(function(request) { return handler({request: request}); })));"
+        completed = subprocess.run(
+            [node, "-e", runner], check=True, text=True, capture_output=True
+        )
+        results = json.loads(completed.stdout)
+        self.assertEqual(results[0]["uri"], "/index.html")
+        self.assertEqual(results[1]["uri"], "/api/definitely-not-a-route")
+        self.assertEqual(results[2]["uri"], "/api")
+        self.assertEqual(results[3]["uri"], "/assets/app.js")
+        self.assertEqual(results[4]["uri"], "/contact")
+        self.assertEqual(results[5]["statusCode"], 301)
+        self.assertEqual(
+            results[5]["headers"]["location"]["value"],
+            "https://example.test/album/public-id?view=grid&label=golden%20hour",
+        )
     def test_private_frontend_origin_migration_is_staged_and_guarded(self) -> None:
         script = (ROOT / "ops" / "migrate_frontend_origin.py").read_text(encoding="utf-8")
         for expected in (

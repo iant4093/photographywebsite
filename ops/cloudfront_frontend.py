@@ -26,6 +26,7 @@ from aws_stack import discover_distribution_by_alias, stack_resource  # noqa: E4
 DEFAULT_BASELINE = HERE / "frontend_cloudfront_baseline.json"
 WWW_REDIRECT_SOURCE = HERE / "cloudfront_www_redirect.js"
 FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
+LEGACY_SPA_ERROR_CODES = frozenset({403, 404})
 
 
 def aws_json(arguments: list[str], *, profile: str | None = None) -> dict[str, Any]:
@@ -59,6 +60,25 @@ def normalize(value: Any) -> Any:
         return {key: normalize(item) for key, item in sorted(value.items())}
     if isinstance(value, list):
         return [normalize(item) for item in value]
+    return value
+
+
+def normalize_policy(value: Any) -> Any:
+    """Canonicalize CloudFront's non-semantic policy response normalization."""
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in sorted(value.items()):
+            child = normalize_policy(item)
+            if key in {"ContentSecurityPolicy", "XSSProtection"} and child == {}:
+                continue
+            if key in {"Headers", "Cookies", "QueryStrings"} and isinstance(child, dict):
+                entries = child.get("Items")
+                if isinstance(entries, list) and all(isinstance(entry, str) for entry in entries):
+                    child = {**child, "Items": sorted(entries)}
+            normalized[key] = child
+        return normalized
+    if isinstance(value, list):
+        return [normalize_policy(item) for item in value]
     return value
 
 
@@ -105,6 +125,25 @@ def validate_apply_guards(
         )
     if not expected_account or expected_account != account:
         raise SystemExit("Refusing apply: --expected-account-id does not match the active AWS account.")
+
+
+def refresh_distribution_after_dependencies(
+    distribution_id: str,
+    expected_config: dict[str, Any],
+    *,
+    profile: str | None,
+) -> tuple[str, dict[str, Any]]:
+    """Refresh an ETag changed by dependency updates without masking real drift."""
+    current = aws_json(
+        ["cloudfront", "get-distribution-config", "--id", distribution_id],
+        profile=profile,
+    )
+    config = current["DistributionConfig"]
+    if normalize(config) != normalize(expected_config):
+        raise SystemExit(
+            "Refusing apply: distribution configuration changed while dependencies were updated."
+        )
+    return current["ETag"], config
 
 
 def validate_cache_policy_ids(baseline: dict[str, Any], profile: str | None) -> None:
@@ -166,7 +205,10 @@ def ensure_www_redirect_function(
         handle.write(source)
         handle.flush()
         config_argument = json.dumps(
-            {"Comment": "Canonical www to apex redirect", "Runtime": "cloudfront-js-1.0"},
+            {
+                "Comment": "Canonical www redirect and API-safe frontend SPA routing",
+                "Runtime": "cloudfront-js-1.0",
+            },
             separators=(",", ":"),
         )
         if matches:
@@ -285,7 +327,7 @@ def ensure_response_policy(
         ["cloudfront", "get-response-headers-policy-config", "--id", policy_id],
         profile=profile,
     )
-    if normalize(current["ResponseHeadersPolicyConfig"]) == normalize(desired):
+    if normalize_policy(current["ResponseHeadersPolicyConfig"]) == normalize_policy(desired):
         return policy_id, "unchanged"
     if not apply:
         return policy_id, "update"
@@ -333,7 +375,7 @@ def ensure_cache_policy(
         return created["CachePolicy"]["Id"], "created"
     policy_id = matches[0]["Id"]
     current = aws_json(["cloudfront", "get-cache-policy-config", "--id", policy_id], profile=profile)
-    if normalize(current["CachePolicyConfig"]) == normalize(desired):
+    if normalize_policy(current["CachePolicyConfig"]) == normalize_policy(desired):
         return policy_id, "unchanged"
     if not apply:
         return policy_id, "update"
@@ -374,7 +416,7 @@ def ensure_origin_request_policy(
     current = aws_json(
         ["cloudfront", "get-origin-request-policy-config", "--id", policy_id], profile=profile
     )
-    if normalize(current["OriginRequestPolicyConfig"]) == normalize(desired):
+    if normalize_policy(current["OriginRequestPolicyConfig"]) == normalize_policy(desired):
         return policy_id, "unchanged"
     if not apply:
         return policy_id, "update"
@@ -671,15 +713,22 @@ def api_cache_behavior(
     return behavior
 
 
-def apply_short_error_ttls(config: dict[str, Any], error_codes: list[int], ttl: int) -> None:
+def remove_legacy_spa_error_responses(config: dict[str, Any]) -> None:
+    """Remove only the global S3 SPA mappings that would corrupt API errors."""
     existing = config.get("CustomErrorResponses", {}).get("Items", []) or []
-    by_code = {item.get("ErrorCode"): copy.deepcopy(item) for item in existing}
-    for code in error_codes:
-        response = by_code.get(code, {"ErrorCode": code})
-        response["ErrorCachingMinTTL"] = min(int(response.get("ErrorCachingMinTTL", ttl)), ttl)
-        by_code[code] = response
-    items = [by_code[code] for code in sorted(by_code) if code]
-    config["CustomErrorResponses"] = {"Quantity": len(items), "Items": items}
+    retained = [
+        copy.deepcopy(item)
+        for item in existing
+        if not (
+            item.get("ErrorCode") in LEGACY_SPA_ERROR_CODES
+            and item.get("ResponsePagePath") == "/index.html"
+            and str(item.get("ResponseCode")) == "200"
+        )
+    ]
+    responses: dict[str, Any] = {"Quantity": len(retained)}
+    if retained:
+        responses["Items"] = retained
+    config["CustomErrorResponses"] = responses
 
 
 def main() -> int:
@@ -826,8 +875,10 @@ def main() -> int:
     redirect_name = f"{baseline['canonical_alias'].replace('.', '-')}-www-redirect-v1"
     redirect_arn: str | None = None
     redirect_action = "disabled"
-    if args.include_www:
+    request_router_enabled = args.include_www or args.include_api_front_door
+    if request_router_enabled:
         assert_no_foreign_viewer_request_function(config, redirect_name)
+    if args.include_www:
         certificate_arn = config.get("ViewerCertificate", {}).get("ACMCertificateArn")
         if not certificate_arn:
             raise SystemExit("Refusing www alias: distribution does not use an ACM certificate")
@@ -848,6 +899,7 @@ def main() -> int:
             baseline["optional_www_alias"], names
         ):
             raise SystemExit("Refusing www alias: the issued ACM certificate does not cover www")
+    if request_router_enabled:
         redirect_arn, redirect_action = ensure_www_redirect_function(
             name=redirect_name,
             apex=baseline["canonical_alias"],
@@ -894,6 +946,13 @@ def main() -> int:
         return 0
 
     assert html_id and static_id and immutable_id
+    # Updating an already-associated response policy can rotate the
+    # distribution ETag. Refresh only after proving that the distribution
+    # configuration itself is byte-for-byte equivalent after normalization;
+    # the final If-Match still protects the update race.
+    etag, config = refresh_distribution_after_dependencies(
+        distribution_id, config, profile=args.profile
+    )
     desired_distribution = copy.deepcopy(config)
     default = desired_distribution["DefaultCacheBehavior"]
     for legacy_key in ("ForwardedValues", "MinTTL", "DefaultTTL", "MaxTTL"):
@@ -906,7 +965,7 @@ def main() -> int:
             "ResponseHeadersPolicyId": html_id,
         }
     )
-    if args.include_www:
+    if request_router_enabled:
         assert redirect_arn
         associate_viewer_request(default, redirect_arn)
     desired_distribution["HttpVersion"] = "http2and3"
@@ -922,11 +981,7 @@ def main() -> int:
         )
         upsert_exact_api_origin(desired_distribution, api_settings, origin_verification_value)
         desired_distribution["WebACLId"] = args.web_acl_arn
-        apply_short_error_ttls(
-            desired_distribution,
-            api_settings["short_error_codes"],
-            api_settings["error_caching_min_ttl"],
-        )
+        remove_legacy_spa_error_responses(desired_distribution)
 
     existing_behaviors = desired_distribution.get("CacheBehaviors", {}).get("Items", []) or []
     managed_patterns = set(baseline["immutable_path_patterns"])
@@ -975,7 +1030,7 @@ def main() -> int:
     # CloudFront selects the first matching ordered behavior, so the narrow
     # public cache path must precede the cache-disabled catch-all API path.
     managed = api_behaviors + immutable + static
-    if args.include_www:
+    if request_router_enabled:
         for behavior in preserved:
             associate_viewer_request(behavior, redirect_arn)
     desired_distribution["CacheBehaviors"] = {
@@ -987,7 +1042,10 @@ def main() -> int:
         desired_distribution["Logging"] = {
             "Enabled": True,
             "IncludeCookies": False,
-            "Bucket": args.logging_bucket_domain.rstrip(".") + ".",
+            # CloudFront expects the S3 DNS name without a trailing root-label
+            # dot. Supplying a fully-qualified name with the final dot causes
+            # UpdateDistribution to reject an otherwise valid logging bucket.
+            "Bucket": args.logging_bucket_domain.rstrip("."),
             "Prefix": "frontend/",
         }
 

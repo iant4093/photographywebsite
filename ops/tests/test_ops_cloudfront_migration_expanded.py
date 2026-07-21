@@ -50,6 +50,28 @@ class CloudFrontHelperTests(unittest.TestCase):
         self.assertEqual(
             list(cloudfront_frontend.normalize({"b": [{"z": 1}], "a": 2})), ["a", "b"]
         )
+        provider_policy = {
+            "SecurityHeadersConfig": {
+                "ContentTypeOptions": {"Override": True},
+                "ContentSecurityPolicy": {},
+                "XSSProtection": {},
+            },
+            "HeadersConfig": {
+                "HeadersBehavior": "whitelist",
+                "Headers": {"Quantity": 2, "Items": ["Zeta", "Alpha"]},
+            },
+        }
+        source_policy = {
+            "SecurityHeadersConfig": {"ContentTypeOptions": {"Override": True}},
+            "HeadersConfig": {
+                "HeadersBehavior": "whitelist",
+                "Headers": {"Quantity": 2, "Items": ["Alpha", "Zeta"]},
+            },
+        }
+        self.assertEqual(
+            cloudfront_frontend.normalize_policy(provider_policy),
+            cloudfront_frontend.normalize_policy(source_policy),
+        )
         self.assertTrue(cloudfront_frontend.certificate_covers("WWW.Example.test.", ["www.example.test"]))
         self.assertTrue(cloudfront_frontend.certificate_covers("www.example.test", ["*.example.test"]))
         self.assertFalse(cloudfront_frontend.certificate_covers("deep.www.example.test", ["*.example.test"]))
@@ -74,6 +96,57 @@ class CloudFrontHelperTests(unittest.TestCase):
         cloudfront_frontend.associate_viewer_request(behavior, "new")
         self.assertEqual(behavior["FunctionAssociations"]["Quantity"], 2)
         self.assertEqual(behavior["FunctionAssociations"]["Items"][-1]["FunctionARN"], "new")
+
+    def test_legacy_spa_errors_are_removed_without_touching_other_errors(self):
+        config = {
+            "CustomErrorResponses": {
+                "Quantity": 3,
+                "Items": [
+                    {
+                        "ErrorCode": 403,
+                        "ResponsePagePath": "/index.html",
+                        "ResponseCode": "200",
+                        "ErrorCachingMinTTL": 0,
+                    },
+                    {
+                        "ErrorCode": 404,
+                        "ResponsePagePath": "/index.html",
+                        "ResponseCode": "200",
+                        "ErrorCachingMinTTL": 0,
+                    },
+                    {"ErrorCode": 503, "ErrorCachingMinTTL": 1},
+                ],
+            }
+        }
+        cloudfront_frontend.remove_legacy_spa_error_responses(config)
+        self.assertEqual(
+            config["CustomErrorResponses"],
+            {"Quantity": 1, "Items": [{"ErrorCode": 503, "ErrorCachingMinTTL": 1}]},
+        )
+        cloudfront_frontend.remove_legacy_spa_error_responses(
+            {"CustomErrorResponses": {"Quantity": 0}}
+        )
+
+    def test_dependency_refresh_accepts_etag_rotation_but_rejects_config_drift(self):
+        expected = {"Enabled": True, "Comment": "stable"}
+        refreshed = {"ETag": "new-etag", "DistributionConfig": expected}
+        with patch.object(cloudfront_frontend, "aws_json", return_value=refreshed):
+            self.assertEqual(
+                cloudfront_frontend.refresh_distribution_after_dependencies(
+                    "distribution", expected, profile=None
+                ),
+                ("new-etag", expected),
+            )
+        changed = {
+            "ETag": "foreign-etag",
+            "DistributionConfig": {**expected, "Comment": "changed"},
+        }
+        with patch.object(cloudfront_frontend, "aws_json", return_value=changed), self.assertRaisesRegex(
+            SystemExit, "configuration changed"
+        ):
+            cloudfront_frontend.refresh_distribution_after_dependencies(
+                "distribution", expected, profile=None
+            )
 
     def test_redirect_function_dry_run_duplicate_create_and_update(self):
         existing = {
@@ -339,7 +412,7 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(result, 0)
         desired = update.call_args.args[1]
         self.assertEqual(desired["Aliases"]["Items"], ["example.test", "www.example.test"])
-        self.assertEqual(desired["Logging"]["Bucket"], "logs.example.")
+        self.assertEqual(desired["Logging"]["Bucket"], "logs.example")
         self.assertEqual(desired["HttpVersion"], "http2and3")
         self.assertEqual(desired["CacheBehaviors"]["Quantity"], 3)
         self.assertIn("update submitted", output)
