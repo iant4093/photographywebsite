@@ -1223,6 +1223,26 @@ class WorkflowPolicyTests(unittest.TestCase):
             r"(?s)Validate and build SAM from scratch.*?AWS_EC2_METADATA_DISABLED: 'true'.*?AWS_DEFAULT_REGION: us-west-2.*?validate_infrastructure\.sh --build",
         )
 
+    def test_release_artifacts_preserve_manifested_hidden_public_files(self):
+        quality = (ROOT / ".github/workflows/_quality.yml").read_text(
+            encoding="utf-8"
+        )
+        release = (ROOT / ".github/workflows/release-production.yml").read_text(
+            encoding="utf-8"
+        )
+        manual = (ROOT / ".github/workflows/manual-release.yml").read_text(
+            encoding="utf-8"
+        )
+        for source, artifact_name in (
+            (quality, "release-frontend"),
+            (release, "attested-release"),
+            (manual, "verified-rollback-release"),
+        ):
+            self.assertRegex(
+                source,
+                rf"(?s)name: {artifact_name}\s+path: [^\n]+\s+include-hidden-files: true",
+            )
+
     def test_production_workflows_use_main_ref_without_github_environments(self):
         release = (ROOT / ".github/workflows/release-production.yml").read_text(
             encoding="utf-8"
