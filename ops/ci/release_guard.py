@@ -64,9 +64,15 @@ SAFE_RECREATION = frozenset({None, "Never"})
 INTENT_RULE_KEYS = frozenset(
     {"logicalId", "resourceType", "action", "propertyPaths", "allowNoDetails"}
 )
+DEPENDENCY_RULE_KEYS = frozenset(
+    {"logicalId", "resourceType", "propertyPath", "causingEntities"}
+)
 LOGICAL_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,254}$")
 RESOURCE_TYPE_RE = re.compile(r"^AWS::[A-Za-z0-9]+::[A-Za-z0-9]+$")
 PROPERTY_PATH_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.]{0,254}$")
+CAUSING_ENTITY_RE = re.compile(
+    r"^[A-Za-z][A-Za-z0-9]{0,254}\.[A-Za-z][A-Za-z0-9]{0,254}$"
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -120,6 +126,54 @@ def load_release_intent(
     return rules
 
 
+def load_release_dependencies(
+    document: Any,
+) -> dict[tuple[str, str, str], frozenset[str]]:
+    """Validate exact dynamic references CloudFormation may conservatively cascade.
+
+    A dependency rule never authorizes a direct property edit. It only explains
+    a ``Dynamic``/``ResourceAttribute`` detail whose causing entity is named
+    exactly, which lets ordinary Lambda releases pass without weakening the
+    protection around IAM, S3, CloudFront, or API resources.
+    """
+
+    if not isinstance(document, dict) or set(document) != {"version", "rules"}:
+        raise GateError("release dependencies must contain only version and rules")
+    if document.get("version") != 1 or not isinstance(document.get("rules"), list):
+        raise GateError("release dependency version or rules are invalid")
+    rules: dict[tuple[str, str, str], frozenset[str]] = {}
+    for raw in document["rules"]:
+        if not isinstance(raw, dict) or set(raw) != DEPENDENCY_RULE_KEYS:
+            raise GateError("release dependency rule shape is invalid")
+        logical_id = raw.get("logicalId")
+        resource_type = raw.get("resourceType")
+        property_path = raw.get("propertyPath")
+        causing_entities = raw.get("causingEntities")
+        if not isinstance(logical_id, str) or not LOGICAL_ID_RE.fullmatch(logical_id):
+            raise GateError("release dependency logical ID is invalid")
+        if not isinstance(resource_type, str) or not RESOURCE_TYPE_RE.fullmatch(resource_type):
+            raise GateError("release dependency resource type is invalid")
+        if not isinstance(property_path, str) or not PROPERTY_PATH_RE.fullmatch(property_path):
+            raise GateError("release dependency property path is invalid")
+        if (
+            not isinstance(causing_entities, list)
+            or not causing_entities
+            or not all(
+                isinstance(entity, str) and CAUSING_ENTITY_RE.fullmatch(entity)
+                for entity in causing_entities
+            )
+            or len(causing_entities) != len(set(causing_entities))
+        ):
+            raise GateError("release dependency causing entities are invalid")
+        key = (logical_id, resource_type, property_path)
+        if key in rules:
+            raise GateError("release dependencies contain a duplicate rule")
+        rules[key] = frozenset(causing_entities)
+    if not rules:
+        raise GateError("release dependencies must contain at least one exact rule")
+    return rules
+
+
 def _resource_changes(pages: Iterable[dict[str, Any]]) -> Iterable[dict[str, Any]]:
     for page in pages:
         changes = page.get("Changes")
@@ -137,6 +191,7 @@ def gate_change_set(
     *,
     protected_ids: frozenset[str] = PROTECTED_LOGICAL_IDS,
     release_intent: dict[tuple[str, str, str], tuple[frozenset[str], bool]] | None = None,
+    release_dependencies: dict[tuple[str, str, str], frozenset[str]] | None = None,
 ) -> dict[str, int]:
     """Validate every paginated resource change and return aggregate counts."""
 
@@ -154,8 +209,6 @@ def gate_change_set(
             raise GateError("resource change has no logical ID")
         if not isinstance(resource_type, str) or not resource_type:
             raise GateError("resource change has no resource type")
-        if logical_id in protected_ids or resource_type in PROTECTED_RESOURCE_TYPES:
-            raise GateError("protected resource change requires exceptional approval")
         if replacement not in SAFE_REPLACEMENTS:
             raise GateError("resource replacement or unknown replacement state is not allowed")
         details = resource.get("Details", [])
@@ -165,11 +218,11 @@ def gate_change_set(
         allow_no_details = False
         if release_intent is not None:
             rule = release_intent.get((logical_id, resource_type, action))
-            if rule is None:
-                raise GateError("resource change is outside the versioned release intent")
-            intended_properties, allow_no_details = rule
-            if not details and not allow_no_details:
+            if rule is not None:
+                intended_properties, allow_no_details = rule
+            if rule is not None and not details and not allow_no_details:
                 raise GateError("resource change has no property evidence for its release intent")
+        dynamic_details: list[bool] = []
         for detail in details:
             if not isinstance(detail, dict):
                 raise GateError("resource change detail is malformed")
@@ -178,15 +231,34 @@ def gate_change_set(
                 raise GateError("resource change target is malformed")
             if target.get("RequiresRecreation") not in SAFE_RECREATION:
                 raise GateError("resource property may require recreation")
+            attribute = target.get("Attribute")
+            name = target.get("Name")
+            dependency_causes = (
+                release_dependencies.get((logical_id, resource_type, name), frozenset())
+                if release_dependencies is not None and isinstance(name, str)
+                else frozenset()
+            )
+            is_reviewed_dynamic = (
+                attribute == "Properties"
+                and detail.get("Evaluation") == "Dynamic"
+                and detail.get("ChangeSource") == "ResourceAttribute"
+                and detail.get("CausingEntity") in dependency_causes
+            )
+            dynamic_details.append(is_reviewed_dynamic)
             if intended_properties is not None:
-                attribute = target.get("Attribute")
-                name = target.get("Name")
-                if (
-                    attribute != "Properties"
-                    or not isinstance(name, str)
-                    or name not in intended_properties
-                ):
+                property_allowed = (
+                    attribute == "Properties"
+                    and isinstance(name, str)
+                    and (name in intended_properties or is_reviewed_dynamic)
+                )
+                if not property_allowed:
                     raise GateError("resource property is outside the versioned release intent")
+        dependency_only = bool(details) and all(dynamic_details)
+        protected = logical_id in protected_ids or resource_type in PROTECTED_RESOURCE_TYPES
+        if protected and not dependency_only:
+            raise GateError("protected resource change requires exceptional approval")
+        if release_intent is not None and intended_properties is None and not dependency_only:
+            raise GateError("resource change is outside the versioned release intent")
         counts[action] += 1
     counts["Total"] = seen
     return counts
@@ -483,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
     change_set = subparsers.add_parser("gate-change-set")
     change_set.add_argument("pages_json")
     change_set.add_argument("--intent", required=True)
+    change_set.add_argument("--dependencies", required=True)
     preserved = subparsers.add_parser("preserved-parameters")
     preserved.add_argument("stack_json")
     preserved.add_argument("change_parameters_json")
@@ -516,8 +589,11 @@ def main(argv: list[str] | None = None) -> int:
             require_stack_invariants(_read_json(args.stack_json))
         elif args.command == "gate-change-set":
             intent = load_release_intent(_read_json(args.intent))
+            dependencies = load_release_dependencies(_read_json(args.dependencies))
             summary = gate_change_set(
-                _read_json(args.pages_json), release_intent=intent
+                _read_json(args.pages_json),
+                release_intent=intent,
+                release_dependencies=dependencies,
             )
             print(json.dumps(summary, sort_keys=True))
         elif args.command == "preserved-parameters":

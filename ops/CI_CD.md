@@ -47,8 +47,11 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   the guarded change set.
 - Backend planning detects CloudFormation drift, retains every current stack
   parameter through `UsePreviousValue`, creates a non-executing change set, and
-  rejects removals, replacements, recreation, protected-resource changes, and
-  migration/security invariant changes. Execution independently requires the
+  rejects removals, replacements, recreation, direct protected-resource
+  changes, and migration/security invariant changes. Conservative dependency
+  cascades on protected resources pass only when every detail is an exact
+  reviewed dynamic reference in `ops/ci/release_dependencies.json`. Execution
+  independently requires the
   change set to retain `UsePreviousValue` for every live parameter (including
   `NoEcho` parameters) while only `ReleaseSha` receives an exact new value, and
   rechecks security/migration invariants after the update. The versioned
@@ -444,6 +447,16 @@ Because CloudFormation exposes Lambda environment changes only at top-level
 `Environment`, `ops/ci/template_environment_policy.json` additionally pins the
 exact source and SAM-built Environment-block digests. Intentional variable
 changes must update that policy in the same reviewed pull request.
+
+CloudFormation also reports conservative dependency cascades when an unchanged
+protected resource refers to a Lambda or bucket that appears in the release.
+`ops/ci/release_dependencies.json` names those relationships exactly by logical
+ID, resource type, property, and causing attribute. A dependency rule is
+accepted only for a `Dynamic` `ResourceAttribute` detail; it cannot authorize a
+direct edit, replacement, recreation, removal, or an unlisted relationship.
+Keep this file narrow. Add a relationship only after reviewing a real
+non-executing change set and proving that the protected resource definition is
+unchanged.
 
 ## Artifact budget maintenance
 

@@ -9,6 +9,7 @@ set -euo pipefail
 : "${EXPECTED_STACK_PARAMETERS_PATH:?EXPECTED_STACK_PARAMETERS_PATH is required}"
 : "${CHANGE_PAGES_PATH:?CHANGE_PAGES_PATH is required}"
 : "${RELEASE_INTENT_PATH:=ops/ci/release_intent.json}"
+: "${RELEASE_DEPENDENCIES_PATH:=ops/ci/release_dependencies.json}"
 
 status="$(aws cloudformation describe-change-set \
   --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
@@ -74,4 +75,5 @@ while true; do
 done
 python3 ops/ci/release_guard.py gate-change-set \
   "$CHANGE_PAGES_PATH" \
-  --intent "$RELEASE_INTENT_PATH"
+  --intent "$RELEASE_INTENT_PATH" \
+  --dependencies "$RELEASE_DEPENDENCIES_PATH"

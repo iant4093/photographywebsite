@@ -264,6 +264,110 @@ class ReleaseIntentTests(unittest.TestCase):
             self.assertFalse(rule["allowNoDetails"])
 
 
+class ReleaseDependencyTests(unittest.TestCase):
+    @staticmethod
+    def document():
+        return {
+            "version": 1,
+            "rules": [
+                {
+                    "logicalId": "GeneratedRole",
+                    "resourceType": "AWS::IAM::Role",
+                    "propertyPath": "Policies",
+                    "causingEntities": ["OrdinaryFunction.Arn"],
+                }
+            ],
+        }
+
+    @staticmethod
+    def dynamic_change():
+        item = change(
+            logical_id="GeneratedRole",
+            resource_type="AWS::IAM::Role",
+            property_name="Policies",
+        )
+        item["ResourceChange"]["Details"][0].update(
+            {
+                "Evaluation": "Dynamic",
+                "ChangeSource": "ResourceAttribute",
+                "CausingEntity": "OrdinaryFunction.Arn",
+            }
+        )
+        return item
+
+    def test_exact_dynamic_dependency_allows_only_the_reviewed_cascade(self):
+        dependencies = release_guard.load_release_dependencies(self.document())
+        intent = release_guard.load_release_intent(ReleaseIntentTests.intent())
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": [self.dynamic_change()]}],
+                release_intent=intent,
+                release_dependencies=dependencies,
+            ),
+            {"Add": 0, "Modify": 1, "Total": 1},
+        )
+
+        for field, value in (
+            ("Evaluation", "Static"),
+            ("ChangeSource", "DirectModification"),
+            ("CausingEntity", "OtherFunction.Arn"),
+        ):
+            item = self.dynamic_change()
+            item["ResourceChange"]["Details"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set(
+                    [{"Changes": [item]}],
+                    release_intent=intent,
+                    release_dependencies=dependencies,
+                )
+
+    def test_dependency_never_authorizes_a_direct_protected_edit(self):
+        dependencies = release_guard.load_release_dependencies(self.document())
+        intent = release_guard.load_release_intent(ReleaseIntentTests.intent())
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set(
+                [
+                    {
+                        "Changes": [
+                            change(
+                                logical_id="GeneratedRole",
+                                resource_type="AWS::IAM::Role",
+                                property_name="Policies",
+                            )
+                        ]
+                    }
+                ],
+                release_intent=intent,
+                release_dependencies=dependencies,
+            )
+
+    def test_dependency_schema_is_exact_and_tracked_policy_is_valid(self):
+        document = json.loads(
+            (ROOT / "ops/ci/release_dependencies.json").read_text(encoding="utf-8")
+        )
+        rules = release_guard.load_release_dependencies(document)
+        self.assertEqual(len(rules), len(document["rules"]))
+        base = self.document()
+        cases = [
+            {},
+            {"version": 2, "rules": []},
+            {"version": 1, "rules": []},
+            base | {"unknown": True},
+            {"version": 1, "rules": [base["rules"][0], base["rules"][0]]},
+            {
+                "version": 1,
+                "rules": [base["rules"][0] | {"causingEntities": ["*"]}],
+            },
+            {
+                "version": 1,
+                "rules": [base["rules"][0] | {"unknown": True}],
+            },
+        ]
+        for candidate in cases:
+            with self.subTest(candidate=candidate), self.assertRaises(release_guard.GateError):
+                release_guard.load_release_dependencies(candidate)
+
+
 class StackGuardTests(unittest.TestCase):
     def test_previous_parameters_contains_keys_only(self):
         stack = {
@@ -1120,9 +1224,20 @@ class CliTests(unittest.TestCase):
             intent.write_text(
                 json.dumps(ReleaseIntentTests.intent()), encoding="utf-8"
             )
+            dependencies = root / "dependencies.json"
+            dependencies.write_text(
+                json.dumps(ReleaseDependencyTests.document()), encoding="utf-8"
+            )
             self.assertEqual(
                 release_guard.main(
-                    ["gate-change-set", str(pages), "--intent", str(intent)]
+                    [
+                        "gate-change-set",
+                        str(pages),
+                        "--intent",
+                        str(intent),
+                        "--dependencies",
+                        str(dependencies),
+                    ]
                 ),
                 0,
             )
@@ -1204,6 +1319,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("ReleaseSha", collect)
         self.assertIn("gate-change-set", collect)
         self.assertIn("release_intent.json", collect)
+        self.assertIn("release_dependencies.json", collect)
         self.assertIn("previous-parameters", plan)
         self.assertIn("EXPECTED_REQUESTED_PARAMETERS_PATH", plan)
         self.assertIn("--release-sha", plan)
