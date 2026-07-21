@@ -1,7 +1,7 @@
 -r requirements.txt
 
 # CI/test tooling is pinned so runner updates cannot silently change the gate.
-coverage==7.10.7
+coverage==7.15.1
 cfn-lint==1.53.1
-pip-audit==2.9.0
+pip-audit==2.10.1
 zizmor==1.27.0
