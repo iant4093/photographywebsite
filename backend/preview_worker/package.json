@@ -7,7 +7,7 @@
     "node": ">=22 <25"
   },
   "scripts": {
-    "test": "node --test contract.test.mjs workflow.test.mjs"
+    "test": "node --test contract.test.mjs telemetry.test.mjs workflow.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1091.0",

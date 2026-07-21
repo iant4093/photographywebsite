@@ -22,8 +22,13 @@ import {
     parsePositiveLimit,
     previewJobId,
     resolveManifestImage,
-    safePreviewFailureReason,
 } from './contract.mjs'
+import {
+    atPreviewStage,
+    classifyPreviewObjectFailure,
+    previewStageFailure,
+    safePreviewFailureTelemetry,
+} from './telemetry.mjs'
 import { validateReadyOrMarkPending } from './workflow.mjs'
 
 const s3 = new S3Client({})
@@ -43,27 +48,8 @@ function errorCode(error) {
     return error?.name || error?.Code || error?.code || ''
 }
 
-function isMissing(error) {
-    return ['NoSuchKey', 'NotFound', '404'].includes(errorCode(error)) || error?.$metadata?.httpStatusCode === 404
-}
-
 function isPreconditionFailure(error) {
     return errorCode(error) === 'PreconditionFailed' || error?.$metadata?.httpStatusCode === 412
-}
-
-function stageFailure(reasonCode) {
-    const error = new Error('Preview processing stage failed')
-    error.name = 'PreviewStageError'
-    error.reasonCode = reasonCode
-    return error
-}
-
-async function atStage(reasonCode, operation) {
-    try {
-        return await operation()
-    } catch {
-        throw stageFailure(reasonCode)
-    }
 }
 
 async function albumById(albumId) {
@@ -145,20 +131,13 @@ async function validateStoredPreview(key, expected, sourceDigest) {
 async function ensurePreviewObject(key, output, sourceDigest) {
     const bucket = requiredEnvironment('IMAGES_BUCKET')
     try {
-        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-        await validateStoredPreview(key, output, sourceDigest)
-        return
-    } catch (error) {
-        if (!isMissing(error)) throw error
-    }
-
-    try {
         await s3.send(new PutObjectCommand({
             Bucket: bucket,
             Key: key,
             Body: output.bytes,
             ContentType: 'image/webp',
             CacheControl: 'public, max-age=31536000, immutable',
+            ServerSideEncryption: 'AES256',
             IfNoneMatch: '*',
             Tagging: 'visibility=pending',
             Metadata: {
@@ -169,9 +148,21 @@ async function ensurePreviewObject(key, output, sourceDigest) {
             },
         }))
     } catch (error) {
-        if (!isPreconditionFailure(error)) throw error
+        if (!isPreconditionFailure(error)) {
+            throw previewStageFailure(
+                'preview_object_write_failed',
+                classifyPreviewObjectFailure(error, 'put'),
+            )
+        }
     }
-    await validateStoredPreview(key, output, sourceDigest)
+    try {
+        await validateStoredPreview(key, output, sourceDigest)
+    } catch (error) {
+        throw previewStageFailure(
+            'preview_object_write_failed',
+            classifyPreviewObjectFailure(error, 'validate'),
+        )
+    }
 }
 
 async function setVisibilityTag(key, visibility) {
@@ -285,19 +276,19 @@ async function tagUntilVisibilityStable(job, previewKeys) {
 }
 
 async function processJob(jobValue) {
-    const job = await atStage('job_contract_invalid', async () => parseJob(jobValue))
-    let resolved = await atStage(
+    const job = await atPreviewStage('job_contract_invalid', async () => parseJob(jobValue))
+    let resolved = await atPreviewStage(
         'job_contract_invalid',
         async () => resolveManifestImage(await albumById(job.albumId), job),
     )
     const mediaId = mediaIdForKey(job.rawKey)
-    const existingMetadata = await atStage(
+    const existingMetadata = await atPreviewStage(
         'metadata_read_failed',
         async () => previewMetadata(job.albumId, mediaId),
     )
     const jobId = previewJobId(job)
     if (existingMetadata?.status === 'ready') {
-        const accepted = await atStage('existing_preview_invalid', async () => {
+        const accepted = await atPreviewStage('existing_preview_invalid', async () => {
             if (!isCompletePreview(existingMetadata, resolved.previewKeys)) {
                 throw new Error('Preview metadata conflicts')
             }
@@ -311,7 +302,7 @@ async function processJob(jobValue) {
             })
         })
         if (accepted) {
-            await atStage(
+            await atPreviewStage(
                 'visibility_tag_failed',
                 async () => tagUntilVisibilityStable(job, resolved.previewKeys),
             )
@@ -319,18 +310,18 @@ async function processJob(jobValue) {
         }
     }
 
-    await atStage('metadata_pending_failed', async () => recordPendingMetadata(resolved, jobId))
-    const { bytes: sourceBytes, head } = await atStage(
+    await atPreviewStage('metadata_pending_failed', async () => recordPendingMetadata(resolved, jobId))
+    const { bytes: sourceBytes, head } = await atPreviewStage(
         'source_read_failed',
         async () => readObjectBounded(job.rawKey, MAX_SOURCE_BYTES),
     )
     if (head.ContentType && !SUPPORTED_SOURCE_TYPES.has(head.ContentType.toLowerCase())) {
-        throw stageFailure('source_type_invalid')
+        throw previewStageFailure('source_type_invalid')
     }
     const sourceDigest = createHash('sha256').update(sourceBytes).digest('hex')
-    const outputs = await atStage('source_transform_failed', async () => generateOutputs(sourceBytes))
+    const outputs = await atPreviewStage('source_transform_failed', async () => generateOutputs(sourceBytes))
     for (const width of PREVIEW_WIDTHS) {
-        await atStage(
+        await atPreviewStage(
             'preview_object_write_failed',
             async () => ensurePreviewObject(
                 resolved.previewKeys[String(width)],
@@ -344,11 +335,11 @@ async function processJob(jobValue) {
     // visibility mutation can discover these deterministic keys. Re-read after
     // each tag pass until album visibility is stable; update_album performs a
     // second preview-only tag pass after its album write for convergence.
-    resolved = await atStage(
+    resolved = await atPreviewStage(
         'visibility_tag_failed',
         async () => tagUntilVisibilityStable(job, resolved.previewKeys),
     )
-    await atStage(
+    await atPreviewStage(
         'metadata_commit_failed',
         async () => commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, outputs),
     )
@@ -383,11 +374,11 @@ export async function handler(event) {
                 requestId: entry.id,
             }))
         } catch (error) {
+            const telemetry = safePreviewFailureTelemetry(error)
             console.error(JSON.stringify({
                 event: 'preview_job_failed',
-                errorType: error?.name || 'Error',
-                reasonCode: safePreviewFailureReason(error),
-                requestId: entry.id || 'direct',
+                errorType: 'PreviewStageError',
+                ...telemetry,
             }))
             failures.push({ itemIdentifier: entry.id })
         }
