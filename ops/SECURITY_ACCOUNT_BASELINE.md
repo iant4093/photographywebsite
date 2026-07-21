@@ -467,8 +467,11 @@ and backup KMS alias are absent.
 
 The retained vault uses a retained, rotating customer KMS key and retained
 alias. Its key policy limits AWS Backup use to the active account and regional
-Backup source ARN. The scheduled role includes only the backup managed policy;
-it cannot restore.
+Backup source ARN. The scheduled role includes backup-only managed policies;
+it cannot restore. Its trust policy keeps `aws:SourceAccount` exact and accepts
+AWS Backup source ARNs only from the home Region and the fixed replica Region.
+Both entries are required because AWS Backup assumes the same role while
+creating the cross-Region copy; a wildcard Region is not used.
 
 Keep `VaultLockMode=unlocked` until a scheduled recovery point exists. Create a
 separate temporary least-privilege restore role, restore both tables under new

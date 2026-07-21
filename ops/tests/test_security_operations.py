@@ -308,6 +308,17 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("AWSBackupServiceRolePolicyForRestores", BACKUP)
         self.assertIn("AWSBackupServiceRolePolicyForBackup", BACKUP)
         self.assertIn("AWSBackupServiceRolePolicyForS3Backup", BACKUP)
+        backup_role = resource_block(BACKUP, "BackupRole")
+        self.assertIn("aws:SourceAccount: !Ref AWS::AccountId", backup_role)
+        self.assertIn(
+            "arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*",
+            backup_role,
+        )
+        self.assertIn(
+            "arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:*",
+            backup_role,
+        )
+        self.assertNotIn("arn:${AWS::Partition}:backup:*:${AWS::AccountId}:*", backup_role)
         self.assertIn("Default: skip", BACKUP)
         self.assertIn("governance-confirmed-after-restore-test", BACKUP)
         self.assertIn("AWS::KMS::Key", BACKUP)

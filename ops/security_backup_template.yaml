@@ -155,7 +155,9 @@ Resources:
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
               ArnLike:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
+                aws:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
+                  - !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:*'
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AWSBackupServiceRolePolicyForS3Backup'
