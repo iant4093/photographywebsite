@@ -594,7 +594,6 @@ Resources:
             Effect: Allow
             Action:
               - lambda:DeleteEventSourceMapping
-              - lambda:GetEventSourceMapping
               - lambda:ListTags
               - lambda:TagResource
               - lambda:UntagResource
@@ -602,7 +601,9 @@ Resources:
             Resource: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:event-source-mapping:*'
           - Sid: ListEventSourceMappings
             Effect: Allow
-            Action: lambda:ListEventSourceMappings
+            Action:
+              - lambda:GetEventSourceMapping
+              - lambda:ListEventSourceMappings
             Resource: '*'
   CloudFormationExecutionDataAndMessagingPolicy:
     Type: AWS::IAM::ManagedPolicy

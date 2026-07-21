@@ -317,7 +317,6 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         execution = execution_permissions()
         mappings = statement_block(execution, "ManageStackEventSourceMappings")
         for action in (
-            "lambda:GetEventSourceMapping",
             "lambda:ListTags",
             "lambda:TagResource",
             "lambda:UntagResource",
@@ -330,6 +329,20 @@ class CiBootstrapTemplateTests(unittest.TestCase):
             mappings,
         )
         self.assertNotIn("Resource: '*'", mappings)
+        self.assertNotIn("lambda:GetEventSourceMapping", mappings)
+
+        inventory = statement_block(execution, "ListEventSourceMappings")
+        self.assertIn("- lambda:GetEventSourceMapping", inventory)
+        self.assertIn("- lambda:ListEventSourceMappings", inventory)
+        self.assertIn("Resource: '*'", inventory)
+        for forbidden in (
+            "lambda:CreateEventSourceMapping",
+            "lambda:DeleteEventSourceMapping",
+            "lambda:TagResource",
+            "lambda:UntagResource",
+            "lambda:UpdateEventSourceMapping",
+        ):
+            self.assertNotIn(forbidden, inventory)
 
     def test_certificate_secret_and_managed_policy_lifecycles_are_narrow_and_complete(self):
         execution = execution_permissions()
