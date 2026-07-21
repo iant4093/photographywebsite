@@ -1210,6 +1210,18 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("audit_stack_drift.sh", scheduled)
         self.assertNotIn("cloudformation execute", scheduled.lower())
 
+    def test_quality_workflow_is_hermetic_for_frontend_and_sam_validation(self):
+        quality = (ROOT / ".github/workflows/_quality.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Run frontend tests with deterministic public configuration", quality)
+        self.assertIn("VITE_COGNITO_USER_POOL_ID: us-west-2_TESTPOOL", quality)
+        self.assertIn("VITE_COGNITO_CLIENT_ID: test-client-id", quality)
+        self.assertRegex(
+            quality,
+            r"(?s)Validate and build SAM from scratch.*?AWS_EC2_METADATA_DISABLED: 'true'.*?AWS_DEFAULT_REGION: us-west-2.*?validate_infrastructure\.sh --build",
+        )
+
     def test_production_workflows_use_main_ref_without_github_environments(self):
         release = (ROOT / ".github/workflows/release-production.yml").read_text(
             encoding="utf-8"

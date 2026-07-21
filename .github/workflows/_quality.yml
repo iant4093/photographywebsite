@@ -28,7 +28,12 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run lint
-      - run: npm run test:coverage
+      - name: Run frontend tests with deterministic public configuration
+        env:
+          VITE_API_BASE_URL: /api
+          VITE_COGNITO_USER_POOL_ID: us-west-2_TESTPOOL
+          VITE_COGNITO_CLIENT_ID: test-client-id
+        run: npm run test:coverage
       - name: Run preview worker contract tests
         run: |
           if [[ -f backend/preview_worker/package-lock.json ]]; then
@@ -181,6 +186,9 @@ jobs:
           python -m coverage xml --rcfile=ops/.coveragerc --fail-under=0
           python ops/ci/coverage_gate.py coverage/ops/coverage.json
       - name: Validate and build SAM from scratch
+        env:
+          AWS_EC2_METADATA_DISABLED: 'true'
+          AWS_DEFAULT_REGION: us-west-2
         run: ./ops/validate_infrastructure.sh --build
       - name: Enforce reviewed Lambda environment contract
         run: |
