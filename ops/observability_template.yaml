@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Privacy-controlled browser, edge, and public synthetic observability for Ian
-  Truong Photography. Deploy as a separate retained stack after the read-only
-  monitoring-subscription preflight; paid services are disabled or sampled by
-  default where the service supports staged activation.
+  Retained CloudFront edge observability for Ian Truong Photography. The stack
+  owns only each distribution's paid real-time metrics subscription, two 5xx
+  alarms, and a dashboard; it does not collect browser telemetry or run
+  synthetic browser probes.
 
 Parameters:
   Stage:
@@ -15,19 +15,6 @@ Parameters:
     Default: unknown
     AllowedPattern: '^(unknown|[0-9a-f]{40})$'
     Description: Exact tested Git revision; unknown is permitted only for initial manual staging.
-  SiteDomain:
-    Type: String
-    Default: iantruongphotography.com
-    AllowedPattern: '^(?=.{4,253}$)(?!.*\.\.)(?!-)[A-Za-z0-9.-]+(?<!-)$'
-  SiteUrl:
-    Type: String
-    Default: https://iantruongphotography.com
-    AllowedPattern: '^https://[A-Za-z0-9.-]+$'
-    Description: Canonical origin without a trailing slash, path, query, or fragment.
-  PublicApiBaseUrl:
-    Type: String
-    AllowedPattern: '^https://[A-Za-z0-9.-]+(?:/[A-Za-z0-9._~-]+)*$'
-    Description: Public API base URL without a trailing slash, query, or fragment.
   FrontendDistributionId:
     Type: String
     AllowedPattern: '^[A-Z0-9]{12,20}$'
@@ -39,20 +26,6 @@ Parameters:
     Default: ''
     AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256})$'
     Description: Optional exact, pre-existing SNS topic ARN for alarm and OK actions.
-  StartPublicCanary:
-    Type: String
-    Default: 'false'
-    AllowedValues: ['false', 'true']
-    Description: Keep false for creation; enable only after a successful manual start and privacy review.
-  CanaryScheduleExpression:
-    Type: String
-    Default: rate(15 minutes)
-    AllowedValues: [rate(15 minutes)]
-  CanaryArtifactRetentionDays:
-    Type: Number
-    Default: 31
-    MinValue: 7
-    MaxValue: 90
 
 Rules:
   MustDeployInApplicationRegion:
@@ -66,7 +39,6 @@ Rules:
 
 Conditions:
   HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
-  StartCanary: !Equals [!Ref StartPublicCanary, 'true']
 
 Resources:
   FrontendMonitoringSubscription:
@@ -88,417 +60,6 @@ Resources:
       MonitoringSubscription:
         RealtimeMetricsSubscriptionConfig:
           RealtimeMetricsSubscriptionStatus: Enabled
-
-  RumIdentityPool:
-    Type: AWS::Cognito::IdentityPool
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      AllowClassicFlow: true
-      AllowUnauthenticatedIdentities: true
-      IdentityPoolName: !Sub 'ian_photography_rum_${Stage}'
-
-  RumGuestRole:
-    Type: AWS::IAM::Role
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: Unauthenticated browser role restricted to one CloudWatch RUM app monitor.
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: cognito-identity.amazonaws.com
-            Action: sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                cognito-identity.amazonaws.com:aud: !Ref RumIdentityPool
-              ForAnyValue:StringLike:
-                cognito-identity.amazonaws.com:amr: unauthenticated
-      Policies:
-        - PolicyName: PutOnlyExactRumAppMonitor
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: PutOnlyExactRumAppMonitor
-                Effect: Allow
-                Action: rum:PutRumEvents
-                Resource: !Sub 'arn:${AWS::Partition}:rum:${AWS::Region}:${AWS::AccountId}:appmonitor/ian-photography-web-${Stage}'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: DataClassification
-          Value: AnonymousSampledTelemetry
-        - Key: ReleaseSha
-          Value: !Ref ReleaseSha
-
-  RumIdentityPoolRoleAttachment:
-    Type: AWS::Cognito::IdentityPoolRoleAttachment
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      IdentityPoolId: !Ref RumIdentityPool
-      Roles:
-        unauthenticated: !GetAtt RumGuestRole.Arn
-
-  RumAppMonitor:
-    Type: AWS::RUM::AppMonitor
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    DependsOn: RumIdentityPoolRoleAttachment
-    Properties:
-      Name: !Sub 'ian-photography-web-${Stage}'
-      Domain: !Ref SiteDomain
-      Platform: Web
-      CwLogEnabled: false
-      CustomEvents:
-        Status: DISABLED
-      AppMonitorConfiguration:
-        AllowCookies: false
-        EnableXRay: false
-        IdentityPoolId: !Ref RumIdentityPool
-        GuestRoleArn: !GetAtt RumGuestRole.Arn
-        SessionSampleRate: 0.1
-        Telemetries:
-          - errors
-          - performance
-          - http
-        ExcludedPages:
-          - !Sub '${SiteUrl}/admin*'
-          - !Sub '${SiteUrl}/login*'
-          - !Sub '${SiteUrl}/dashboard*'
-          - !Sub '${SiteUrl}/sharedalbum*'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Privacy
-          Value: CookiesOffXRayOffAllowlistedTelemetry
-        - Key: ReleaseSha
-          Value: !Ref ReleaseSha
-
-  CanaryArtifactBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      VersioningConfiguration:
-        Status: Enabled
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        IgnorePublicAcls: true
-        BlockPublicPolicy: true
-        RestrictPublicBuckets: true
-      LifecycleConfiguration:
-        Rules:
-          - Id: ExpireCanaryArtifacts
-            Status: Enabled
-            Prefix: canary/
-            ExpirationInDays: !Ref CanaryArtifactRetentionDays
-            NoncurrentVersionExpiration:
-              NoncurrentDays: !Ref CanaryArtifactRetentionDays
-          - Id: AbortIncompleteUploads
-            Status: Enabled
-            AbortIncompleteMultipartUpload:
-              DaysAfterInitiation: 7
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: DataClassification
-          Value: PublicSyntheticArtifacts
-        - Key: ReleaseSha
-          Value: !Ref ReleaseSha
-
-  CanaryArtifactBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      Bucket: !Ref CanaryArtifactBucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: '*'
-            Action: s3:*
-            Resource:
-              - !GetAtt CanaryArtifactBucket.Arn
-              - !Sub '${CanaryArtifactBucket.Arn}/*'
-            Condition:
-              Bool:
-                aws:SecureTransport: 'false'
-
-  PublicCanaryRole:
-    Type: AWS::IAM::Role
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: Write-only execution role for the public, credential-free Synthetics probe.
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: PublicCanaryArtifactsMetricsAndLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: WriteExactArtifactPrefix
-                Effect: Allow
-                Action: s3:PutObject
-                Resource: !Sub '${CanaryArtifactBucket.Arn}/canary/*'
-              - Sid: ReadArtifactBucketLocation
-                Effect: Allow
-                Action:
-                  - s3:GetBucketLocation
-                  - s3:ListAllMyBuckets
-                Resource: '*'
-              - Sid: WriteCanaryMetrics
-                Effect: Allow
-                Action: cloudwatch:PutMetricData
-                Resource: '*'
-                Condition:
-                  StringEquals:
-                    cloudwatch:namespace: CloudWatchSynthetics
-              - Sid: WriteOwnLambdaLogs
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/cwsyn-ian-photo-public-${Stage}-*'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: DataClassification
-          Value: PublicOnlySynthetic
-        - Key: ReleaseSha
-          Value: !Ref ReleaseSha
-
-  PublicCanary:
-    Type: AWS::Synthetics::Canary
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    DependsOn: CanaryArtifactBucketPolicy
-    Properties:
-      Name: !Sub 'ian-photo-public-${Stage}'
-      RuntimeVersion: syn-nodejs-puppeteer-16.1
-      ExecutionRoleArn: !GetAtt PublicCanaryRole.Arn
-      ArtifactS3Location: !Sub 's3://${CanaryArtifactBucket}/canary/'
-      ArtifactConfig:
-        S3Encryption:
-          EncryptionMode: SSE_S3
-      DryRunAndUpdate: true
-      StartCanaryAfterCreation: !If [StartCanary, true, false]
-      SuccessRetentionPeriod: 31
-      FailureRetentionPeriod: 31
-      RunConfig:
-        ActiveTracing: false
-        MemoryInMB: 960
-        TimeoutInSeconds: 60
-        EnvironmentVariables:
-          SITE_URL: !Ref SiteUrl
-          PUBLIC_API_BASE_URL: !Ref PublicApiBaseUrl
-          RELEASE_SHA: !Ref ReleaseSha
-      Schedule:
-        Expression: !Ref CanaryScheduleExpression
-        DurationInSeconds: 0
-      Code:
-        Handler: index.handler
-        Script: |
-          'use strict';
-
-          const synthetics = require('@aws/synthetics-puppeteer');
-          const https = require('https');
-
-          const SITE_URL = process.env.SITE_URL;
-          const API_BASE = process.env.PUBLIC_API_BASE_URL;
-          const MAX_JSON_BYTES = 2 * 1024 * 1024;
-          const MAX_PREVIEW_BYTES = 512 * 1024;
-
-          const request = (url, maximumBytes) => new Promise((resolve, reject) => {
-            const operation = https.get(url, {
-              headers: {
-                Accept: 'application/json,image/webp,image/jpeg,image/png;q=0.8',
-                DNT: '1',
-                'Sec-GPC': '1',
-              },
-              timeout: 15000,
-            }, (response) => {
-              const chunks = [];
-              let size = 0;
-              response.on('data', (chunk) => {
-                size += chunk.length;
-                if (size > maximumBytes) {
-                  operation.destroy(new Error('Public response exceeded its safe size limit'));
-                  return;
-                }
-                chunks.push(chunk);
-              });
-              response.on('end', () => resolve({
-                body: Buffer.concat(chunks),
-                contentType: String(response.headers['content-type'] || '').toLowerCase(),
-                statusCode: Number(response.statusCode || 0),
-              }));
-            });
-            operation.on('timeout', () => operation.destroy(new Error('Public request timed out')));
-            operation.on('error', () => reject(new Error('Public endpoint request failed')));
-          });
-
-          const jsonRequest = async (url) => {
-            const response = await request(url, MAX_JSON_BYTES);
-            if (response.statusCode !== 200 || !response.contentType.includes('application/json')) {
-              throw new Error('Public API returned an invalid response contract');
-            }
-            try {
-              return JSON.parse(response.body.toString('utf8'));
-            } catch {
-              throw new Error('Public API returned malformed JSON');
-            }
-          };
-
-          const configurePrivacy = () => {
-            synthetics.setLogLevel(2);
-            synthetics.getConfiguration().setConfig({
-              continueOnStepFailure: false,
-              includeRequestBody: false,
-              includeRequestHeaders: false,
-              includeResponseBody: false,
-              includeResponseHeaders: false,
-              screenshotOnStepFailure: false,
-              screenshotOnStepStart: false,
-              screenshotOnStepSuccess: false,
-            });
-          };
-
-          exports.handler = async () => {
-            configurePrivacy();
-            let selectedAlbumId = '';
-            let previewUrl = '';
-
-            await synthetics.executeStep('public-homepage', async () => {
-              const page = await synthetics.getPage();
-              await page.setExtraHTTPHeaders({ DNT: '1', 'Sec-GPC': '1' });
-              const response = await page.goto(SITE_URL, {
-                timeout: 30000,
-                waitUntil: 'domcontentloaded',
-              });
-              if (!response || response.status() !== 200) {
-                throw new Error('Public homepage did not return HTTP 200');
-              }
-              const heading = await page.$('h1');
-              if (!heading) throw new Error('Public homepage is missing its primary heading');
-            }, {
-              screenshotOnStepFailure: false,
-              screenshotOnStepStart: false,
-              screenshotOnStepSuccess: true,
-            });
-
-            await synthetics.executeStep('public-catalog-contract', async () => {
-              const catalog = await jsonRequest(API_BASE + '/public/albums?limit=1&type=photo');
-              if (!catalog || !Array.isArray(catalog.items) || catalog.items.length !== 1) {
-                throw new Error('Public catalog must return exactly one probe item');
-              }
-              const candidate = catalog.items[0];
-              if (
-                !candidate
-                || candidate.visibility !== 'public'
-                || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate.albumId)
-              ) {
-                throw new Error('Public catalog item failed its minimal schema contract');
-              }
-              selectedAlbumId = candidate.albumId;
-            });
-
-            await synthetics.executeStep('public-album-and-preview', async () => {
-              if (!selectedAlbumId) throw new Error('Public catalog did not select an album');
-              const detail = await jsonRequest(
-                API_BASE + '/public/albums/' + encodeURIComponent(selectedAlbumId)
-              );
-              if (
-                !detail
-                || !detail.album
-                || detail.album.albumId !== selectedAlbumId
-                || detail.album.visibility !== 'public'
-                || !Array.isArray(detail.images)
-              ) {
-                throw new Error('Public album detail failed its minimal schema contract');
-              }
-              for (const image of detail.images) {
-                const candidates = image && Array.isArray(image.previewSrcSet)
-                  ? image.previewSrcSet
-                  : [];
-                const small = candidates.find((item) => (
-                  item
-                  && Number(item.width) > 0
-                  && Number(item.width) <= 640
-                  && typeof item.url === 'string'
-                  && item.url.startsWith('https://')
-                ));
-                if (small) {
-                  previewUrl = small.url;
-                  break;
-                }
-              }
-              if (!previewUrl) throw new Error('Public album has no small responsive preview');
-              const preview = await request(previewUrl, MAX_PREVIEW_BYTES);
-              if (
-                preview.statusCode !== 200
-                || !/^image\/(webp|jpeg|png)/.test(preview.contentType)
-                || preview.body.length === 0
-              ) {
-                throw new Error('Public responsive preview failed its response contract');
-              }
-            });
-          };
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Privacy
-          Value: PublicEndpointsOnly
-        - Key: ReleaseSha
-          Value: !Ref ReleaseSha
-        - Key: Environment
-          Value: !Ref Stage
-        - Key: ManagedBy
-          Value: CloudFormation
-
-  PublicCanaryAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'Synthetics-Alarm-ian-photo-public-${Stage}-1'
-      AlarmDescription: Public homepage, catalog, album detail, or preview probe failed.
-      Namespace: CloudWatchSynthetics
-      MetricName: SuccessPercent
-      Dimensions:
-        - Name: CanaryName
-          Value: !Ref PublicCanary
-      Statistic: Average
-      Period: 900
-      EvaluationPeriods: 1
-      DatapointsToAlarm: 1
-      Threshold: 100
-      ComparisonOperator: LessThanThreshold
-      TreatMissingData: breaching
-      AlarmActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-      OKActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
 
   FrontendFiveXxAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -556,58 +117,6 @@ Resources:
         - [!Ref AlarmTopicArn]
         - !Ref AWS::NoValue
 
-  RumJavascriptErrorAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-rum-js-errors-${Stage}'
-      AlarmDescription: Sampled public browser JavaScript error volume increased.
-      Namespace: AWS/RUM
-      MetricName: JsErrorCount
-      Dimensions:
-        - Name: application_name
-          Value: !Ref RumAppMonitor
-      Statistic: Sum
-      Period: 900
-      EvaluationPeriods: 1
-      DatapointsToAlarm: 1
-      Threshold: 5
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-      OKActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-
-  RumLcpAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-rum-lcp-p75-${Stage}'
-      AlarmDescription: Sampled public browser p75 LCP exceeded 2.5 seconds.
-      Namespace: AWS/RUM
-      MetricName: WebVitalsLargestContentfulPaint
-      Dimensions:
-        - Name: application_name
-          Value: !Ref RumAppMonitor
-      ExtendedStatistic: p75
-      Period: 3600
-      EvaluationPeriods: 3
-      DatapointsToAlarm: 2
-      Threshold: 2500
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-      OKActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-
   ObservabilityDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -624,15 +133,15 @@ Resources:
               "width": 24,
               "height": 2,
               "properties": {
-                "markdown": "# Ian Truong Photography public observability\nRelease `${ReleaseSha}`. RUM is sampled at 10%, has cookies/X-Ray/custom events disabled, and excludes sensitive routes."
+                "markdown": "# Ian Truong Photography edge observability\nRelease `${ReleaseSha}`. Browser telemetry and synthetic browser probes are intentionally disabled."
               }
             },
             {
               "type": "metric",
               "x": 0,
               "y": 2,
-              "width": 12,
-              "height": 6,
+              "width": 24,
+              "height": 8,
               "properties": {
                 "title": "CloudFront edge health",
                 "region": "us-east-1",
@@ -646,78 +155,10 @@ Resources:
                   [".", "OriginLatency", ".", ".", ".", ".", {"label": "Media origin latency"}]
                 ]
               }
-            },
-            {
-              "type": "metric",
-              "x": 12,
-              "y": 2,
-              "width": 12,
-              "height": 6,
-              "properties": {
-                "title": "Public synthetic availability",
-                "region": "${AWS::Region}",
-                "stat": "Average",
-                "metrics": [
-                  ["CloudWatchSynthetics", "SuccessPercent", "CanaryName", "${PublicCanary}", {"label": "Success percent"}],
-                  [".", "Duration", ".", ".", {"label": "Duration"}]
-                ]
-              }
-            },
-            {
-              "type": "metric",
-              "x": 0,
-              "y": 8,
-              "width": 12,
-              "height": 6,
-              "properties": {
-                "title": "Sampled browser reliability",
-                "region": "${AWS::Region}",
-                "stat": "Sum",
-                "metrics": [
-                  ["AWS/RUM", "PageViewCount", "application_name", "${RumAppMonitor}"],
-                  [".", "JsErrorCount", ".", "."],
-                  [".", "HttpStatusCodeCount", ".", "."]
-                ]
-              }
-            },
-            {
-              "type": "metric",
-              "x": 12,
-              "y": 8,
-              "width": 12,
-              "height": 6,
-              "properties": {
-                "title": "Sampled browser Core Web Vitals",
-                "region": "${AWS::Region}",
-                "stat": "p75",
-                "metrics": [
-                  ["AWS/RUM", "WebVitalsLargestContentfulPaint", "application_name", "${RumAppMonitor}", {"label": "LCP p75"}],
-                  [".", "WebVitalsInteractionToNextPaint", ".", ".", {"label": "INP p75"}],
-                  [".", "WebVitalsCumulativeLayoutShift", ".", ".", {"label": "CLS p75"}]
-                ]
-              }
             }
           ]
         }
 
 Outputs:
-  RumApplicationId:
-    Description: Public CloudWatch RUM application ID for VITE_RUM_APPLICATION_ID.
-    Value: !GetAtt RumAppMonitor.Id
-  RumIdentityPoolId:
-    Description: Public unauthenticated identity pool ID for VITE_RUM_IDENTITY_POOL_ID.
-    Value: !Ref RumIdentityPool
-  RumGuestRoleArn:
-    Description: Public restricted role ARN for VITE_RUM_GUEST_ROLE_ARN.
-    Value: !GetAtt RumGuestRole.Arn
-  RumRegion:
-    Description: Public region for VITE_RUM_REGION.
-    Value: !Ref AWS::Region
-  RumAppMonitorName:
-    Value: !Ref RumAppMonitor
-  PublicCanaryName:
-    Value: !Ref PublicCanary
-  CanaryArtifactBucketName:
-    Value: !Ref CanaryArtifactBucket
   DashboardName:
     Value: !Ref ObservabilityDashboard

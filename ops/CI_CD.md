@@ -78,10 +78,10 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
 
 ## Required GitHub settings
 
-Create protected environments named `production-plan`, `production`, and
-`production-audit`. Limit all three to protected `main`; require maintainer
-approval for `production`, including manual redeploys. Configure these
-non-secret variables at repository or environment scope as appropriate:
+The production path has one deployment branch: every push to `main` runs the
+complete quality and security gate and, only after it passes, deploys the exact
+attested backend and frontend artifacts. GitHub Environments are deliberately
+not used. Configure all of these non-secret variables at repository scope:
 
 | Variable | Scope/purpose |
 |---|---|
@@ -107,28 +107,18 @@ non-secret variables at repository or environment scope as appropriate:
 | `VITE_COGNITO_USER_POOL_ID` | Public Cognito pool identifier. |
 | `VITE_COGNITO_CLIENT_ID` | Public Cognito app-client identifier. |
 | `VITE_TURNSTILE_SITE_KEY` | Public Turnstile site key, never the Turnstile secret. |
-| `VITE_RUM_APPLICATION_ID` | Optional public CloudWatch RUM app-monitor ID; configure only with the complete RUM set. |
-| `VITE_RUM_IDENTITY_POOL_ID` | Optional public RUM-only unauthenticated Cognito identity-pool ID. |
-| `VITE_RUM_GUEST_ROLE_ARN` | Optional public ARN of the guest role restricted to the exact app monitor. |
-| `VITE_RUM_REGION` | Optional public RUM region, currently `us-west-2`. |
 
 None of these variables is a credential. Do not add AWS access keys, Cognito
 tokens, Turnstile secrets, provider secrets, CloudFormation parameter values,
 or application data to GitHub.
 
-`SITE_URL`, `API_ORIGIN_URL`, `EXECUTE_API_URL`, `MEDIA_BUCKET_NAME`,
-`EXPECTED_PUBLIC_ALBUM_COUNT`, and all
-public Vite build variables must be repository-scoped because reusable quality
-and credential-free smoke jobs do not attach a GitHub environment. Role ARNs
-and release-storage identifiers should remain scoped to their matching
-environment.
+All variables above are repository-scoped so the reusable quality, deployment,
+and credential-free smoke jobs share one reviewed configuration. The AWS role
+ARNs still identify four independently least-privileged roles; removing GitHub
+Environment gates does not combine their permissions.
 
-The four RUM variables are an all-or-none optional set until the separately
-reviewed observability stack is deployed. Test and pre-deployment builds do not
-require them. The reusable quality workflow always injects the exact tested
-`github.sha` as `VITE_RELEASE_SHA`; do not create a mutable GitHub variable for
-the release SHA. See [`OBSERVABILITY.md`](OBSERVABILITY.md) for privacy, cost,
-activation, and rollback controls.
+The reusable quality workflow always injects the exact tested `github.sha` as
+`VITE_RELEASE_SHA`; do not create a mutable GitHub variable for the release SHA.
 
 The public posture helper paginates the complete anonymous catalog with a hard
 bound, requires its reviewed aggregate count, validates DTO allowlists and CDN-only media URLs, samples album details
@@ -136,27 +126,23 @@ and one ranged CDN object, proves direct S3 remains denied, requires the custom
 origin and execute-api bypasses to stay closed (including API Gateway's exact
 JSON 404 response for its disabled default endpoint), checks hostile-origin CORS and
 the protected-user 401 boundary, and checks sensitive SPA routes under DNT/GPC
-headers for security headers, cookies, and eager RUM references. It emits only
+headers for security headers and cookies. It emits only
 aggregate counts. The protected response must never show cache-hit evidence;
 when it carries a cache directive, that directive must be `private, no-store`.
-Source unit tests remain the authoritative proof that browser
-GPC/DNT and sensitive-route gates prevent RUM SDK initialization before a
-network import.
 
 ## OIDC trust and permissions
 
 The retained bootstrap source is `ops/ci_bootstrap_template.yaml`. It creates or
-references the GitHub OIDC provider with audience `sts.amazonaws.com`. Each role's
-trust policy must match both the exact repository and its exact environment
-subject, for example:
+references the GitHub OIDC provider with audience `sts.amazonaws.com`. Every
+role's trust policy must match the exact repository and the exact `main` ref
+subject:
 
 ```text
-repo:iant4093/photographywebsite:environment:production
+repo:iant4093/photographywebsite:ref:refs/heads/main
 ```
 
-Use separate subjects for `production-plan` and `production-audit`. Never use a
-repository, organization, branch, or tag wildcard. The production execution
-role must not create arbitrary change sets; the plan role must not execute one.
+Never use a repository, organization, branch, or tag wildcard. The production
+execution role must not create arbitrary change sets; the plan role must not execute one.
 The frontend role must not have `s3:DeleteObject`, bucket-policy, public-access,
 distribution-update, application-data, or secret-value permissions. The audit
 role has no `secretsmanager:GetSecretValue`, `s3:GetObject`, `s3:GetObjectAcl`,
@@ -175,17 +161,10 @@ generic provider's `kms:Decrypt` is still denied. The backup freshness
 these exceptions to the exact source properties and continue to forbid direct
 Lambda invocation, queue message reads, and KMS decryption.
 
-The CloudFormation RUM provider declares DynamoDB item and S3 object reads even
-when JavaScript source-map deobfuscation is disabled. `RumAppMonitor` is
-therefore excluded from the observability stack's exact logical-resource drift
-filter. The audit instead uses resource-scoped `rum:GetAppMonitor`—never
-`rum:GetAppMonitorData`—to verify its privacy, telemetry, source-map, and
-sensitive-route exclusion configuration. Tests require the inventory to split
-all observability template resources across the directly checked monitor, the
-provider-driftable resources, and the two explicitly counted resources that
-CloudFormation cannot evaluate (`CanaryArtifactBucketPolicy` and
-`RumIdentityPoolRoleAttachment`), so a new resource cannot silently escape
-review.
+The observability stack contains only CloudFront monitoring subscriptions,
+CloudWatch alarms, and a dashboard, so the scheduled audit can use ordinary
+whole-stack drift detection without a service-specific exclusion or posture
+bypass. Browser telemetry and synthetic probes are not part of the release.
 
 The GuardDuty CloudFormation provider reports the six service-managed detector
 features as additions even though CloudFormation can configure only the other
@@ -232,7 +211,7 @@ configuration-delivery function has no `KmsKeyArn`; the EventBridge handler's
 Likewise, the current S3 bucket handler does not declare `s3:GetBucketAcl`, and
 none of the exact buckets defines `AccessControl`, so that action is not granted.
 The remaining called-via list exactly matches the metadata handler union after
-those property-specific removals and the documented RUM filter.
+those property-specific removals.
 The non-CloudFormation frontend edge contract is
 `ops/ci/frontend_edge_contract.json`. Its hashes cover the complete distribution
 configuration and exact bucket public-access, encryption, ownership, versioning,
@@ -338,16 +317,11 @@ Copy the stack outputs into the matching GitHub variables:
 
 Set `AWS_ACCOUNT_ID`, `AWS_REGION=us-west-2`, `AWS_STACK_NAME=ian-website`,
 `FRONTEND_BUCKET=iantruong-photography`, and
-`FRONTEND_DISTRIBUTION_ID=EIOCCNR8XGQ1B` separately. CloudFormation cannot
-create or protect GitHub environments: create `production-plan`, `production`,
-and `production-audit` in `iant4093/photographywebsite`, restrict all three to
-`main`, and require approval for `production` before enabling release jobs.
-Environment-based OIDC subjects do not contain a branch ref, so this GitHub
-environment protection is the enforcement point for the default branch.
-The workflows also fail when `GITHUB_REF` is not `refs/heads/main`, but that is
-only defense in depth because untrusted workflow source could remove its own
-check. Do not push while a required environment is absent or permits arbitrary
-deployment branches.
+`FRONTEND_DISTRIBUTION_ID=EIOCCNR8XGQ1B` separately. No GitHub Environment
+setup is required. The OIDC subject itself restricts AWS access to
+`refs/heads/main`; scheduled and manual workflows additionally fail when their
+control revision is not running from that exact ref. A pull request ref cannot
+assume any production role.
 
 The execution identity policy deliberately has no `AdministratorAccess` and no
 wildcard actions. The release KMS key policy uses the standard account-root

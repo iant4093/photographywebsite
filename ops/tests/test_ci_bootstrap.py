@@ -78,24 +78,19 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("Url: https://token.actions.githubusercontent.com", provider)
         self.assertIn("- sts.amazonaws.com", provider)
 
-    def test_all_oidc_trusts_use_exact_repository_audience_and_environment_subject(self):
-        expected = {
-            "PlanRole": "production-plan",
-            "ExecuteRole": "production",
-            "FrontendRole": "production",
-            "AuditRole": "production-audit",
-        }
-        for logical_id, environment in expected.items():
+    def test_all_oidc_trusts_use_exact_repository_audience_and_main_ref_subject(self):
+        for logical_id in ("PlanRole", "ExecuteRole", "FrontendRole", "AuditRole"):
             with self.subTest(role=logical_id):
                 block = resource_block(logical_id)
                 self.assertIn("Action: sts:AssumeRoleWithWebIdentity", block)
                 self.assertIn("token.actions.githubusercontent.com:aud: sts.amazonaws.com", block)
                 self.assertIn(
-                    f"token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:{environment}",
+                    "token.actions.githubusercontent.com:sub: !Sub 'repo:iant4093/photographywebsite:ref:refs/heads/${DefaultBranch}'",
                     block,
                 )
                 self.assertNotIn("repo:iant4093/photographywebsite:*", block)
                 self.assertNotIn("refs/heads/*", block)
+                self.assertNotIn(":environment:", block)
 
     def test_plan_execute_frontend_and_audit_permissions_are_separated(self):
         plan = resource_block("PlanRole")
@@ -147,13 +142,9 @@ class CiBootstrapTemplateTests(unittest.TestCase):
             "wafv2:GetLoggingConfiguration",
         ):
             self.assertIn(required_metadata_read, audit_actions)
-        rum = statement_block(audit, "ReadExactRumConfigurationPosture")
-        self.assertIn("Action: rum:GetAppMonitor", rum)
-        self.assertIn(
-            "appmonitor/ian-photography-web-prod",
-            rum,
-        )
-        self.assertNotIn("rum:GetAppMonitorData", audit)
+        self.assertNotIn("rum:", audit)
+        self.assertNotIn("synthetics:", audit)
+        self.assertNotIn("cognito-identity:", audit)
         self.assertNotIn("logs:GetLogEvents", audit)
         self.assertNotIn("cloudformation:DescribeStackResourceDrifts", audit)
         edge = statement_block(audit, "ReadExactFrontendDistributionPosture")
@@ -166,7 +157,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
     def test_audit_role_drift_scope_matches_exact_versioned_multi_region_inventory(self):
         audit = resource_block("AuditRole")
         inventory = json.loads((OPS / "ci" / "audit_stacks.json").read_text(encoding="utf-8"))
-        self.assertEqual(inventory["version"], 2)
+        self.assertEqual(inventory["version"], 3)
         regional = inventory["regionalSecurityPosture"]
         self.assertEqual(regional["homeRegion"], "us-west-2")
         self.assertEqual(
@@ -196,10 +187,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
                 managed_source,
                 rf"(?m)^  {logical_id}:\n    Type: {re.escape(resource_type)}$",
             )
-        self.assertEqual(
-            inventory["rumAppMonitor"],
-            {"region": "us-west-2", "name": "ian-photography-web-prod"},
-        )
+        self.assertNotIn("rumAppMonitor", inventory)
         self.assertEqual(
             {(item["region"], item["name"]) for item in inventory["stacks"]},
             {
@@ -268,21 +256,9 @@ class CiBootstrapTemplateTests(unittest.TestCase):
             for item in inventory["stacks"]
             if item["name"] == "ian-photography-observability"
         )
-        source = (OPS / "observability_template.yaml").read_text(encoding="utf-8")
-        resources = source.split("\nResources:\n", 1)[1].split("\nOutputs:\n", 1)[0]
-        source_ids = set(re.findall(r"(?m)^  ([A-Za-z][A-Za-z0-9]+):\n    Type: ", resources))
         self.assertEqual(
-            set(observability["logicalResourceIds"])
-            | set(observability["directPostureLogicalResourceIds"])
-            | set(observability["unsupportedLogicalResourceIds"]),
-            source_ids,
-        )
-        self.assertEqual(
-            observability["directPostureLogicalResourceIds"], ["RumAppMonitor"]
-        )
-        self.assertEqual(
-            observability["unsupportedLogicalResourceIds"],
-            ["CanaryArtifactBucketPolicy", "RumIdentityPoolRoleAttachment"],
+            observability,
+            {"region": "us-west-2", "name": "ian-photography-observability"},
         )
         drift_script = (OPS / "ci" / "audit_stack_drift.sh").read_text(
             encoding="utf-8"
@@ -292,8 +268,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn('.Status == "IN_SYNC"', drift_script)
         self.assertIn("regional_security_posture.py", drift_script)
         self.assertNotIn("mapfile", drift_script)
-        self.assertIn("rum get-app-monitor", drift_script)
-        self.assertNotIn("get-app-monitor-data", drift_script)
+        self.assertNotIn("rum get-app-monitor", drift_script)
 
     def test_new_lambda_security_resources_remain_drifted_without_kms_data_access(self):
         inventory = json.loads((OPS / "ci" / "audit_stacks.json").read_text())
@@ -324,7 +299,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("lambda:GetPolicy", forwarded)
         self.assertNotIn("kms:Decrypt", audit)
 
-    def test_multi_stack_drift_script_filters_rum_and_emits_aggregate_only(self):
+    def test_multi_stack_drift_script_audits_edge_stack_and_emits_aggregate_only(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary = pathlib.Path(directory)
             fake_bin = temporary / "bin"
@@ -383,13 +358,7 @@ elif [[ \"$1 $2\" == \"cloudformation detect-stack-drift\" ]]; then
 elif [[ \"$1 $2\" == \"cloudformation describe-stack-drift-detection-status\" ]]; then
   printf 'DETECTION_COMPLETE\\tIN_SYNC\\n'
 elif [[ \"$1 $2\" == \"cloudformation list-stack-resources\" ]]; then
-  if [[ \"$*\" == *\"observability\"* ]]; then
-    printf '%s\\n' '[\"CanaryArtifactBucket\",\"CanaryArtifactBucketPolicy\",\"FrontendFiveXxAlarm\",\"FrontendMonitoringSubscription\",\"MediaFiveXxAlarm\",\"MediaMonitoringSubscription\",\"ObservabilityDashboard\",\"PublicCanary\",\"PublicCanaryAlarm\",\"PublicCanaryRole\",\"RumAppMonitor\",\"RumGuestRole\",\"RumIdentityPool\",\"RumIdentityPoolRoleAttachment\",\"RumJavascriptErrorAlarm\",\"RumLcpAlarm\"]'
-  else
-    printf '%s\\n' '[\"ConfigDeliveryBucketPolicy\",\"ConfigDeliveryChannel\",\"ConfigRecorder\",\"ConfigRule\",\"GuardDutyDetector\",\"SecurityHub\"]'
-  fi
-elif [[ \"$1 $2\" == \"rum get-app-monitor\" ]]; then
-  printf '%s\\n' '{"AppMonitor":{"Name":"ian-photography-web-prod","Domain":"iantruongphotography.com","Platform":"Web","State":"CREATED","CustomEvents":{"Status":"DISABLED"},"DeobfuscationConfiguration":{"JavaScriptSourceMaps":{"Status":"DISABLED"}},"AppMonitorConfiguration":{"AllowCookies":false,"EnableXRay":false,"SessionSampleRate":0.1,"Telemetries":["performance","errors","http"],"ExcludedPages":["https://iantruongphotography.com/login*","https://iantruongphotography.com/admin*","https://iantruongphotography.com/dashboard*","https://iantruongphotography.com/sharedalbum*"],"GuestRoleArn":"synthetic-role","IdentityPoolId":"synthetic-pool"}}}'
+  printf '%s\\n' '[\"ConfigDeliveryBucketPolicy\",\"ConfigDeliveryChannel\",\"ConfigRecorder\",\"ConfigRule\",\"GuardDutyDetector\",\"SecurityHub\"]'
 elif [[ \"$1 $2\" == \"cloudfront get-distribution\" ]]; then
   printf '%s\\n' '{"Distribution":{"ARN":"arn:aws:cloudfront::123456789012:distribution/EXAMPLE","Status":"Deployed","DistributionConfig":{"Enabled":true,"Origins":{"Items":[{"Id":"api","CustomHeaders":{"Items":[{"HeaderName":"X-Origin-Verify","HeaderValue":"test-secret"}]}}]}}}}'
 elif [[ \"$1 $2\" == \"s3api get-public-access-block\" ]]; then
@@ -444,50 +413,44 @@ fi
             self.assertEqual(
                 json.loads(completed.stdout),
                 {
-                    "directPostureResourceCount": 2,
-                    "excludedResourceCount": 7,
-                    "filteredStackCount": 2,
+                    "directPostureResourceCount": 1,
+                    "excludedResourceCount": 4,
+                    "filteredStackCount": 1,
                     "guardDutyPostureCheckCount": 2,
                     "metadataPostureCheckCount": 1,
-                    "resourceDriftCheckCount": 15,
+                    "resourceDriftCheckCount": 2,
                     "frontendEdgeCheckCount": 1,
                     "securityHubPostureCheckCount": 2,
                     "stackCount": 9,
                     "status": "IN_SYNC",
-                    "unsupportedResourceCount": 5,
+                    "unsupportedResourceCount": 3,
                 },
             )
             calls = call_log.read_text(encoding="utf-8").splitlines()
             detections = [
                 call for call in calls if call.startswith("cloudformation detect-stack-drift")
             ]
-            self.assertEqual(len(detections), 7)
+            self.assertEqual(len(detections), 8)
             resource_detections = [
                 call
                 for call in calls
                 if call.startswith("cloudformation detect-stack-resource-drift")
             ]
-            self.assertEqual(len(resource_detections), 15)
+            self.assertEqual(len(resource_detections), 2)
             joined_resource_calls = "\n".join(resource_detections)
-            self.assertIn("CanaryArtifactBucket", joined_resource_calls)
             self.assertIn("ConfigRule", joined_resource_calls)
             self.assertIn("SecurityHub", joined_resource_calls)
-            self.assertNotIn("RumAppMonitor", joined_resource_calls)
             self.assertNotIn("GuardDutyDetector", joined_resource_calls)
             self.assertNotIn("ConfigDeliveryBucketPolicy", joined_resource_calls)
             self.assertNotIn("ConfigDeliveryChannel", joined_resource_calls)
             self.assertNotIn("--logical-resource-id ConfigRecorder", joined_resource_calls)
-            self.assertNotIn("CanaryArtifactBucketPolicy", joined_resource_calls)
-            self.assertNotIn("RumIdentityPoolRoleAttachment", joined_resource_calls)
-            self.assertEqual(
-                sum(call.startswith("rum get-app-monitor") for call in calls), 1
-            )
+            self.assertFalse(any(call.startswith("rum ") for call in calls))
 
     def test_multi_stack_drift_inventory_rejects_unreviewed_exclusions(self):
         source = json.loads((OPS / "ci" / "audit_stacks.json").read_text())
         mutations = []
         legacy = json.loads(json.dumps(source))
-        legacy["version"] = 1
+        legacy["version"] = 2
         mutations.append(legacy)
         extra = json.loads(json.dumps(source))
         extra["stacks"][0]["excludedLogicalResourceIds"] = ["UnexpectedResource"]
@@ -1007,6 +970,11 @@ class CiBootstrapPreflightTests(unittest.TestCase):
             )
         self.assertEqual(result["selectedProviderArn"], arn)
         self.assertEqual(result["githubRepository"], "iant4093/photographywebsite")
+        self.assertEqual(
+            result["oidcSubject"],
+            "repo:iant4093/photographywebsite:ref:refs/heads/main",
+        )
+        self.assertNotIn("githubEnvironments", result)
 
     def test_preflight_fails_closed_on_account_conflict_provider_and_bad_provider_contract(self):
         base = dict(

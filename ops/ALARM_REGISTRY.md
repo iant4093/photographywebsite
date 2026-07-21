@@ -137,17 +137,12 @@ billing workflow. Cost pressure never authorizes disabling logging, detection,
 backup, WAF, evidence retention, or rollback access. Escalate an unexplained
 increase without copying billing exports or account identifiers into chat.
 
-## Public synthetics
+## Edge health
 
-Keep the canary stopped after any privacy, dependency, or route failure. Inspect
-only sanitized artifact metadata and the allowed public screenshot. It must not
-call authenticated, private, unlisted, admin, login, dashboard, or shared paths.
-
-## Edge and browser health
-
-Compare frontend/media 5xx, cache behavior, public canary, and aggregate RUM by
-release. RUM remains sampled, cookie-free, X-Ray-free, replay-free, and excluded
-from sensitive routes. Do not enable raw event logs as a shortcut.
+Compare frontend and media 5xx rates, request volume, origin latency, and cache
+behavior by release. The observability stack intentionally collects no browser
+telemetry and runs no synthetic browser probe; use the credential-free public
+posture smoke test for release verification.
 
 ## WAF observation
 

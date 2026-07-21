@@ -140,26 +140,18 @@
     },
     {
       "id": "account-cost-budget",
-      "logicalResourceIds": ["MonthlySecurityAndObservabilityBudget.Actual80Percent", "MonthlySecurityAndObservabilityBudget.Forecasted100Percent"],
+      "logicalResourceIds": ["MonthlySecurityAndObservabilityBudget.Actual50Percent", "MonthlySecurityAndObservabilityBudget.Actual80Percent", "MonthlySecurityAndObservabilityBudget.Forecasted100Percent"],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#account-cost-budget",
       "autoClose": "Budget state only; never disable a security control automatically"
     },
     {
-      "id": "public-synthetics",
-      "logicalResourceIds": ["PublicCanaryAlarm"],
+      "id": "edge-health",
+      "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm"],
       "severity": "high",
       "route": "observability-topic-when-configured",
-      "runbook": "ops/ALARM_REGISTRY.md#public-synthetics",
-      "autoClose": "CloudWatch state only; artifact privacy review remains manual"
-    },
-    {
-      "id": "edge-and-browser-health",
-      "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm", "RumJavascriptErrorAlarm", "RumLcpAlarm"],
-      "severity": "high",
-      "route": "observability-topic-when-configured",
-      "runbook": "ops/ALARM_REGISTRY.md#edge-and-browser-health",
+      "runbook": "ops/ALARM_REGISTRY.md#edge-health",
       "autoClose": "CloudWatch metric state only"
     },
     {

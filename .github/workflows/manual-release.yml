@@ -29,7 +29,6 @@ jobs:
     name: Verify selected known-good release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: production
     permissions:
       actions: read
       attestations: read
@@ -79,7 +78,6 @@ jobs:
     if: inputs.layers == 'backend' || inputs.layers == 'both'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: production-plan
     permissions:
       actions: read
       contents: read
@@ -128,7 +126,6 @@ jobs:
     if: needs.backend-plan.result == 'success' && needs.backend-plan.outputs.noop != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    environment: production
     permissions:
       contents: read
       id-token: write
@@ -158,7 +155,6 @@ jobs:
     if: always() && needs.prepare.result == 'success' && (inputs.layers == 'frontend' || ((inputs.layers == 'both') && (needs.backend-deploy.result == 'success' || (needs.backend-deploy.result == 'skipped' && needs.backend-plan.outputs.noop == 'true'))))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: production
     permissions:
       actions: read
       contents: read

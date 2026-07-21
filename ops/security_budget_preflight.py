@@ -124,7 +124,7 @@ def inventory(
     confirmed_name = confirmation == budget_name
     ready = (
         topic_exists
-        and len(confirmed_human_destinations) >= 2
+        and len(confirmed_human_destinations) >= 1
         and target_budget_count == 0
         and confirmed_name
     )
@@ -148,7 +148,7 @@ def inventory(
         "topicExists": topic_exists,
         "confirmedSubscriptionCount": len(confirmed_subscriptions),
         "confirmedHumanDestinationCount": len(confirmed_human_destinations),
-        "requiredConfirmedHumanDestinationCount": 2,
+        "requiredConfirmedHumanDestinationCount": 1,
         "inventoryDigest": digest,
         "recommendedParameters": {
             "BudgetDeploymentMode": "create-confirmed-absent" if ready else "skip",
@@ -159,8 +159,8 @@ def inventory(
             for blocked, reason in (
                 (not topic_exists, "exact-notification-topic-not-found"),
                 (
-                    len(confirmed_human_destinations) < 2,
-                    "two-confirmed-human-destinations-required",
+                    len(confirmed_human_destinations) < 1,
+                    "one-confirmed-human-destination-required",
                 ),
                 (target_budget_count > 0, "target-budget-already-exists-review-ownership"),
                 (not confirmed_name, "exact-budget-name-confirmation-required"),

@@ -54,7 +54,6 @@ jobs:
     name: Read-only multi-stack production drift check
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: production-audit
     permissions:
       contents: read
       id-token: write

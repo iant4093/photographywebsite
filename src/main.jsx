@@ -3,10 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from './context/authContext'
 import App from './App'
-import { initializeRum } from './utils/rum'
 import './index.css'
-
-void initializeRum()
 
 // Mount the app with BrowserRouter and AuthProvider wrapping the root
 createRoot(document.getElementById('root')).render(

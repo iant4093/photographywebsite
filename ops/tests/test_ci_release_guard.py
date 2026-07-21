@@ -1128,6 +1128,20 @@ class WorkflowPolicyTests(unittest.TestCase):
             self.assertEqual(len(problems), 4)
             self.assertEqual(workflow_policy.main([str(path)]), 1)
 
+    def test_rejects_github_environment_dependency(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "workflow.yml"
+            path.write_text(
+                "jobs:\n  deploy:\n    environment: production\n    runs-on: ubuntu-latest\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                workflow_policy.violations(path),
+                [
+                    "GitHub Environments are forbidden; AWS trust is bound to the exact main ref"
+                ],
+            )
+
     def test_deploy_helpers_preserve_release_safety_contract(self):
         helper_paths = [
             ROOT / "ops" / "ci" / name
@@ -1195,6 +1209,25 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("public_smoke.sh", scheduled)
         self.assertIn("audit_stack_drift.sh", scheduled)
         self.assertNotIn("cloudformation execute", scheduled.lower())
+
+    def test_production_workflows_use_main_ref_without_github_environments(self):
+        release = (ROOT / ".github/workflows/release-production.yml").read_text(
+            encoding="utf-8"
+        )
+        manual = (ROOT / ".github/workflows/manual-release.yml").read_text(
+            encoding="utf-8"
+        )
+        scheduled = (ROOT / ".github/workflows/scheduled-security.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("branches: [main]", release)
+        self.assertIn("./.github/workflows/_quality.yml", release)
+        self.assertIn("frontend_deploy.sh", release)
+        self.assertIn("backend_execute.sh", release)
+        for source in (release, manual, scheduled):
+            self.assertNotRegex(source, r"(?m)^\s+environment:\s*")
+        self.assertIn("refs/heads/main", manual)
+        self.assertIn("refs/heads/main", scheduled)
 
 
 if __name__ == "__main__":

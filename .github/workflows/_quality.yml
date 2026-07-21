@@ -50,10 +50,6 @@ jobs:
           USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
           CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
           TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
-          RUM_APPLICATION_ID: ${{ vars.VITE_RUM_APPLICATION_ID }}
-          RUM_GUEST_ROLE_ARN: ${{ vars.VITE_RUM_GUEST_ROLE_ARN }}
-          RUM_IDENTITY_POOL_ID: ${{ vars.VITE_RUM_IDENTITY_POOL_ID }}
-          RUM_REGION: ${{ vars.VITE_RUM_REGION }}
         run: |
           for name in API_URL API_ORIGIN_URL EXECUTE_API_URL MEDIA_DOMAIN MEDIA_BUCKET_NAME SITE_URL EXPECTED_PUBLIC_ALBUM_COUNT USER_POOL_ID CLIENT_ID TURNSTILE_SITE_KEY; do
             [[ -n "${!name:-}" ]] || { echo "Required public build variable is missing: $name" >&2; exit 2; }
@@ -72,15 +68,6 @@ jobs:
             echo 'Expected public album count must be a positive reviewed integer.' >&2
             exit 2
           }
-          rum_names=(RUM_APPLICATION_ID RUM_GUEST_ROLE_ARN RUM_IDENTITY_POOL_ID RUM_REGION)
-          rum_configured=0
-          for name in "${rum_names[@]}"; do
-            [[ -z "${!name:-}" ]] || rum_configured=$((rum_configured + 1))
-          done
-          if (( rum_configured != 0 && rum_configured != ${#rum_names[@]} )); then
-            echo 'CloudWatch RUM public variables must be configured as one complete set.' >&2
-            exit 2
-          fi
       - name: Build production bundle
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'https://api.example.invalid/prod' }}
@@ -89,10 +76,6 @@ jobs:
           VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID || 'example-client-id' }}
           VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA' }}
           VITE_RELEASE_SHA: ${{ github.sha }}
-          VITE_RUM_APPLICATION_ID: ${{ vars.VITE_RUM_APPLICATION_ID }}
-          VITE_RUM_GUEST_ROLE_ARN: ${{ vars.VITE_RUM_GUEST_ROLE_ARN }}
-          VITE_RUM_IDENTITY_POOL_ID: ${{ vars.VITE_RUM_IDENTITY_POOL_ID }}
-          VITE_RUM_REGION: ${{ vars.VITE_RUM_REGION }}
         run: npm run build
       - name: Create exact frontend artifact
         run: |

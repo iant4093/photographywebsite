@@ -1,9 +1,5 @@
 {
-  "version": 2,
-  "rumAppMonitor": {
-    "region": "us-west-2",
-    "name": "ian-photography-web-prod"
-  },
+  "version": 3,
   "regionalSecurityPosture": {
     "homeRegion": "us-west-2",
     "satelliteStackName": "ian-photography-security-regional",
@@ -34,30 +30,7 @@
       ]
     },
     {"region": "us-west-2", "name": "ian-photography-backup-primary"},
-    {
-      "region": "us-west-2",
-      "name": "ian-photography-observability",
-      "logicalResourceIds": [
-        "CanaryArtifactBucket",
-        "FrontendFiveXxAlarm",
-        "FrontendMonitoringSubscription",
-        "MediaFiveXxAlarm",
-        "MediaMonitoringSubscription",
-        "ObservabilityDashboard",
-        "PublicCanary",
-        "PublicCanaryAlarm",
-        "PublicCanaryRole",
-        "RumGuestRole",
-        "RumIdentityPool",
-        "RumJavascriptErrorAlarm",
-        "RumLcpAlarm"
-      ],
-      "directPostureLogicalResourceIds": ["RumAppMonitor"],
-      "unsupportedLogicalResourceIds": [
-        "CanaryArtifactBucketPolicy",
-        "RumIdentityPoolRoleAttachment"
-      ]
-    },
+    {"region": "us-west-2", "name": "ian-photography-observability"},
     {"region": "us-east-1", "name": "ian-photography-front-door-waf"},
     {"region": "us-east-2", "name": "ian-photography-backup-replica"}
   ]

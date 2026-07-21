@@ -19,7 +19,7 @@ Parameters:
     Type: String
     Default: main
     AllowedValues: [main]
-    Description: Documented branch allowed by all three protected GitHub environments.
+    Description: Exact branch allowed to assume every GitHub Actions OIDC role.
   ApplicationStackName:
     Type: String
     Default: ian-website
@@ -238,7 +238,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production-plan
+                token.actions.githubusercontent.com:sub: !Sub 'repo:iant4093/photographywebsite:ref:refs/heads/${DefaultBranch}'
       Policies:
         - PolicyName: ExactStackPlanOnly
           PolicyDocument:
@@ -354,7 +354,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production
+                token.actions.githubusercontent.com:sub: !Sub 'repo:iant4093/photographywebsite:ref:refs/heads/${DefaultBranch}'
       Policies:
         - PolicyName: ExecuteExistingGuardedChangeSet
           PolicyDocument:
@@ -404,7 +404,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production
+                token.actions.githubusercontent.com:sub: !Sub 'repo:iant4093/photographywebsite:ref:refs/heads/${DefaultBranch}'
       Policies:
         - PolicyName: ExactFrontendUploadAndInvalidation
           PolicyDocument:
@@ -470,7 +470,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:iant4093/photographywebsite:environment:production-audit
+                token.actions.githubusercontent.com:sub: !Sub 'repo:iant4093/photographywebsite:ref:refs/heads/${DefaultBranch}'
       Policies:
         - PolicyName: ExactStackDriftReadOnly
           PolicyDocument:
@@ -504,10 +504,6 @@ Resources:
                       - us-west-2
                       - us-east-1
                       - us-east-2
-              - Sid: ReadExactRumConfigurationPosture
-                Effect: Allow
-                Action: rum:GetAppMonitor
-                Resource: !Sub 'arn:${AWS::Partition}:rum:us-west-2:${AWS::AccountId}:appmonitor/ian-photography-web-prod'
               - Sid: InventoryEnabledRegions
                 Effect: Allow
                 Action: ec2:DescribeRegions
@@ -585,9 +581,6 @@ Resources:
                   - cloudwatch:DescribeAlarms
                   - cloudwatch:GetDashboard
                   - cloudwatch:ListTagsForResource
-                  - cognito-identity:DescribeIdentityPool
-                  - cognito-identity:GetIdentityPoolRoles
-                  - cognito-identity:ListTagsForResource
                   - config:DescribeComplianceByConfigRule
                   - config:DescribeConfigRules
                   - events:DescribeRule
@@ -654,9 +647,6 @@ Resources:
                   - sns:ListTagsForResource
                   - sqs:GetQueueAttributes
                   - sqs:ListQueueTags
-                  - synthetics:DescribeCanaries
-                  - synthetics:GetCanary
-                  - synthetics:ListTagsForResource
                   - wafv2:GetLoggingConfiguration
                   - wafv2:GetWebACL
                   - wafv2:ListTagsForResource
@@ -1230,5 +1220,3 @@ Outputs:
     Value: iant4093/photographywebsite
   RequiredDefaultBranch:
     Value: !Ref DefaultBranch
-  RequiredGitHubEnvironments:
-    Value: production-plan,production,production-audit

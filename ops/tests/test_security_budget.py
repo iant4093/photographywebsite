@@ -37,6 +37,9 @@ class SecurityBudgetTemplateTests(unittest.TestCase):
             "MonthlyLimitUsd",
             "NotificationType: ACTUAL",
             "NotificationType: FORECASTED",
+            "Threshold: 50",
+            "Threshold: 80",
+            "Threshold: 100",
             "SubscriptionType: SNS",
             "DeletionPolicy: RetainExceptOnCreate",
             "UpdateReplacePolicy: Retain",
@@ -67,7 +70,7 @@ class SecurityBudgetPreflightTests(unittest.TestCase):
     account = "123456789012"
     topic = "arn:aws:sns:us-west-2:123456789012:ian-photography-security-prod"
 
-    def caller(self, *, budget_exists=False, confirmed=2, topic_exists=True):
+    def caller(self, *, budget_exists=False, confirmed=1, topic_exists=True):
         def fake(arguments, profile, region):
             operation = tuple(arguments[:2])
             if operation == ("sts", "get-caller-identity"):
@@ -116,8 +119,9 @@ class SecurityBudgetPreflightTests(unittest.TestCase):
             report["recommendedParameters"]["BudgetDeploymentMode"],
             "create-confirmed-absent",
         )
-        self.assertEqual(report["confirmedSubscriptionCount"], 2)
-        self.assertEqual(report["confirmedHumanDestinationCount"], 2)
+        self.assertEqual(report["confirmedSubscriptionCount"], 1)
+        self.assertEqual(report["confirmedHumanDestinationCount"], 1)
+        self.assertEqual(report["requiredConfirmedHumanDestinationCount"], 1)
         serialized = json.dumps(report)
         self.assertNotIn("Endpoint", serialized)
         self.assertNotIn("example.invalid", serialized)
@@ -126,7 +130,7 @@ class SecurityBudgetPreflightTests(unittest.TestCase):
     def test_existing_budget_or_missing_responder_fails_closed(self) -> None:
         for kwargs, blocker in (
             ({"budget_exists": True}, "target-budget-already-exists-review-ownership"),
-            ({"confirmed": 1}, "two-confirmed-human-destinations-required"),
+            ({"confirmed": 0}, "one-confirmed-human-destination-required"),
             ({"topic_exists": False}, "exact-notification-topic-not-found"),
         ):
             with self.subTest(kwargs=kwargs):
@@ -135,7 +139,7 @@ class SecurityBudgetPreflightTests(unittest.TestCase):
                 self.assertEqual(report["recommendedParameters"]["BudgetDeploymentMode"], "skip")
                 self.assertIn(blocker, report["blockers"])
 
-    def test_nonhuman_or_duplicate_subscriptions_do_not_satisfy_responder_gate(self) -> None:
+    def test_duplicate_and_nonhuman_subscriptions_count_as_one_human_destination(self) -> None:
         def fake(arguments, profile, region):
             operation = tuple(arguments[:2])
             if operation == ("sts", "get-caller-identity"):
@@ -167,9 +171,13 @@ class SecurityBudgetPreflightTests(unittest.TestCase):
             raise AssertionError(arguments)
 
         report, blocked = self.run_inventory(fake)
-        self.assertTrue(blocked)
+        self.assertFalse(blocked)
         self.assertEqual(report["confirmedSubscriptionCount"], 3)
         self.assertEqual(report["confirmedHumanDestinationCount"], 1)
+        self.assertEqual(
+            report["recommendedParameters"]["BudgetDeploymentMode"],
+            "create-confirmed-absent",
+        )
         serialized = json.dumps(report)
         self.assertNotIn("same@example.invalid", serialized)
         self.assertNotIn("arn:aws:sqs", serialized)
@@ -200,7 +208,7 @@ class SecurityBudgetPreflightTests(unittest.TestCase):
         self.assertTrue(blocked)
         self.assertEqual(report["confirmedSubscriptionCount"], 2)
         self.assertEqual(report["confirmedHumanDestinationCount"], 0)
-        self.assertIn("two-confirmed-human-destinations-required", report["blockers"])
+        self.assertIn("one-confirmed-human-destination-required", report["blockers"])
         self.assertNotIn("example.invalid", json.dumps(report))
 
     def test_account_region_topic_limit_and_confirmation_guards(self) -> None:

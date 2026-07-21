@@ -85,6 +85,14 @@ Resources:
         - Notification:
             ComparisonOperator: GREATER_THAN
             NotificationType: ACTUAL
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref SecurityNotificationTopicArn
+              SubscriptionType: SNS
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
             Threshold: 80
             ThresholdType: PERCENTAGE
           Subscribers:

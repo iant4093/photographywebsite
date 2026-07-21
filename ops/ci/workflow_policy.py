@@ -22,6 +22,8 @@ def violations(path: Path) -> list[str]:
         problems.append("write-all permissions are forbidden")
     if re.search(r"(?m)^\s*persist-credentials\s*:\s*true\s*$", source):
         problems.append("checkout credentials must not persist")
+    if re.search(r"(?m)^\s+environment\s*:", source):
+        problems.append("GitHub Environments are forbidden; AWS trust is bound to the exact main ref")
     for use in USE_RE.findall(source):
         if use.startswith("./"):
             continue

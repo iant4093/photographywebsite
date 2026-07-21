@@ -1,61 +1,82 @@
-# Ian Truong Photography Portfolio & Client Portal
+# Ian Truong Photography
 
-My photography website! Includes a public portfolio and a private client portal for securely delivering high-resolution images and videos to clients. Built with React and Vite, the platform runs on a serverless AWS backend.
+Production source for [iantruongphotography.com](https://iantruongphotography.com): a public photography portfolio, private client galleries, and an administration portal. The frontend is React and Vite; the serverless backend and operational controls run on AWS.
 
-## High-Level Features
+## What the site provides
 
-* **Public Portfolio Gallery:** A responsive grid layout to display my photography work.
-* **Private Client Portals & Shared Albums:** Secure delivery of galleries to clients using unique share codes or accounts and email notifications.
-* **Admin Dashboard:** A custom administration zone to manage albums, users, and permissions. Allows for direct media uploads to S3.
-* **Smart Media Processing:** Automatic extraction of camera EXIF data for photos (lens, focal ratio, shutter speed, ISO).
-* **Video Capability:** Automated processing and transcoding of uploaded video content into streamable HLS formats using AWS MediaConvert.
-* **Google Drive Sync:** Automated backups of uploads to Google Drive.
+- Responsive public photo and video albums with progressive previews.
+- Private client accounts and shared albums with authorization enforced by the API.
+- Administrative album, media, and user management.
+- Direct media uploads, preview generation, EXIF extraction, ZIP downloads, and HLS video processing.
+- Contact protection, rate limiting, structured audit logging, backups, drift audits, and edge security controls.
 
-## Tech Stack Overview
-
-### Frontend
-* **Framework:** React + Vite
-* **Styling:** Tailwind CSS 
-* **Routing:** React Router v6
-* **State Management:** React Context API
-
-### Backend & Infrastructure (AWS)
-The backend runs on AWS resources, organized and defined as Infrastructure as Code using the AWS SAM.
-
-* **Amazon S3:** Serves as the origin for the compiled React frontend static files and the high-resolution photography/video assets.
-* **Amazon CloudFront:** A global CDN caching images at edge locations for gallery load times. Secures the custom domain with an ACM SSL/TLS certificate.
-* **Amazon API Gateway:** Exposes the RESTful HTTP API endpoints for the frontend to communicate with the AWS Lambda functions.
-* **AWS Lambda (Python 3.12):** Executes the core business logic (creating albums, extracting EXIF data, fetching metadata, generating presigned upload URLs, and managing users).
-* **Amazon DynamoDB:** A NoSQL database used to store album metadata, share codes, visibility settings, and application rate limits.
-* **Amazon Cognito:** Manages user authentication, signups, and access control. Issues RS256-signed JWTs for the admin dashboard and private client APIs.
-* **AWS Elemental MediaConvert:** Automatically transcodes uploaded videos into streamable HLS playlists for the frontend to consume.
-* **Resend:** Handles outgoing email notifications to clients when their albums are ready.
-* **Amazon Route 53:** Manages DNS routing connecting the custom apex domain to the CloudFront distribution.
-
-## Security Posture
-
-Security measures in place for handling private client data:
-* **Zero Hardcoded Secrets:** No API keys or sensitive credentials exist in the source code; they are injected dynamically during deployment using AWS SAM parameters.
-* **Robust Auth & Access Control:** Every private API endpoint verifies AWS Cognito JWTs to ensure only authorized users (or the admin) can read or modify data.
-* **Rate Limiting & Abuse Prevention:** Custom DynamoDB-backed rate limiters are deployed across sensitive endpoints (like Login, Contact, and Shared link fetching) to prevent spam and brute-force attacks.
-* **Bot Protection:** Cloudflare Turnstile CAPTCHA intercepts automated bots trying to abuse the contact form or login pages.
-* **Input Sanitization:** User-submitted text from form inputs is sanitized and escaped to prevent injection attacks.
-
----
-
-## Project Structure
+## Repository layout
 
 ```text
-├── src/
-│   ├── components/      # Reusable React UI components (Navigation, Cards, Lightbox)
-│   ├── context/         # React Context providers (Auth session management)
-│   ├── pages/           # High level route components (Home, AlbumGallery, Dashboards)
-│   └── utils/           # API fetch wrappers and helper modules
+├── .github/                 # Main-branch release, pull-request, rollback, and audit workflows
 ├── backend/
-│   ├── functions/       # Python AWS Lambda functions (create_album, login, contact, mediaconvert logic, etc.)
-│   └── template.yaml    # AWS SAM Infrastructure-as-Code template defining all AWS resources
-├── index.html           # Vite HTML entry point
-├── package.json         # Node.js dependencies and scripts
-├── tailwind.config.js   # Tailwind CSS theme configuration (custom colors, fonts)
-└── vite.config.js       # Vite bundler configuration
+│   ├── functions/           # Python Lambda handlers and shared security/business helpers
+│   ├── preview_worker/      # Node preview-generation worker and contract tests
+│   ├── tests/               # Backend unit and integration-style tests
+│   └── template.yaml        # AWS SAM application infrastructure
+├── ops/
+│   ├── ci/                  # Guarded deployment, audit, and release-policy tooling
+│   ├── tests/               # Infrastructure and operations tests
+│   ├── *.yaml               # Reviewed supporting CloudFormation templates
+│   └── README.md            # Production operations entry point
+├── public/                  # Static public assets and security contact metadata
+├── src/                     # React components, pages, contexts, utilities, and tests
+├── .env.example             # Public configuration contract; real .env files stay local
+└── package.json             # Frontend development and verification commands
 ```
+
+Local security and performance review evidence lives in the ignored `website_review/` directory and is intentionally not committed.
+
+## Technology
+
+- React 19, React Router 7, Vite 7, Tailwind CSS 4, and Vitest.
+- Python 3.12 Lambda functions managed with AWS SAM.
+- API Gateway, Cognito, DynamoDB, S3, CloudFront, MediaConvert, Route 53, WAF, AWS Backup, Config, GuardDuty, Security Hub, CloudWatch, KMS, and Secrets Manager.
+- Resend for transactional email and Cloudflare Turnstile for bot protection.
+
+## Local development
+
+Use the Node version declared in `.node-version` and copy only public development values from `.env.example` into a local `.env`.
+
+```bash
+npm ci
+npm run dev
+```
+
+Never commit `.env`, provider credential JSON, media, build output, or locally generated evidence.
+
+## Verification
+
+The same core checks run before a production release:
+
+```bash
+npm run verify:ci
+python3 -m pip install -r backend/requirements-dev.txt
+(cd backend && PYTHONPATH=functions python3 -m coverage run --rcfile=.coveragerc -m unittest discover -s tests -p 'test_*.py' -v)
+(cd backend && python3 -m coverage json --rcfile=.coveragerc && python3 ../ops/ci/coverage_gate.py coverage/backend/coverage.json)
+npm --prefix backend/preview_worker ci
+npm --prefix backend/preview_worker run test:coverage
+python3 -m coverage run --rcfile=ops/.coveragerc -m unittest discover -s ops/tests -p 'test_*.py' -v
+python3 -m coverage json --rcfile=ops/.coveragerc
+python3 ops/ci/coverage_gate.py coverage/ops/coverage.json
+bash ops/validate_infrastructure.sh --build
+```
+
+Additional workflow policy, credential-history, dependency, drift, public-posture, and deployment guards are documented in [`ops/CI_CD.md`](ops/CI_CD.md).
+
+## Deployment model
+
+`main` is the only deployment branch. Every push to `main` runs the full quality and security gate, builds immutable artifacts, plans the backend change set, deploys it only when the guarded plan is valid, deploys the frontend, and verifies public health. AWS access uses short-lived GitHub OIDC sessions restricted to the exact repository and `main` ref; no long-lived AWS credentials belong in GitHub.
+
+Manual release recovery and the scheduled read-only security audit remain available without introducing additional branches or environments. Operational runbooks begin at [`ops/README.md`](ops/README.md).
+
+## Security boundary
+
+Private APIs validate Cognito JWTs and ownership or administrator authorization server-side. Public and shared routes apply bounded input validation, abuse controls, and least-privilege media access. Secrets are loaded from managed AWS storage, client data remains in private storage, and deployment permissions are separated by function.
+
+For changes to authentication, storage, logging, backups, edge controls, or deployment policy, update the corresponding tests and runbooks in the same commit.

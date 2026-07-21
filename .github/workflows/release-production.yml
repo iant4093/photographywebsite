@@ -81,7 +81,6 @@ jobs:
     needs: attest
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: production-plan
     permissions:
       actions: read
       contents: read
@@ -132,7 +131,6 @@ jobs:
     if: needs.backend-plan.outputs.noop != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    environment: production
     permissions:
       contents: read
       id-token: write
@@ -185,7 +183,6 @@ jobs:
     needs: [attest, backend-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: production
     permissions:
       actions: read
       contents: read

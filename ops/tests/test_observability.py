@@ -69,131 +69,48 @@ class ObservabilityTemplateTests(unittest.TestCase):
         self.assertIn("observability_preflight.py", RUNBOOK)
         self.assertIn("paid singleton", RUNBOOK)
 
-    def test_rum_is_sampled_and_has_three_layers_of_privacy_controls(self):
-        app = resource_block("RumAppMonitor")
-        for control in (
-            "DeletionPolicy: Retain",
-            "AllowCookies: false",
-            "EnableXRay: false",
-            "SessionSampleRate: 0.1",
-            "CwLogEnabled: false",
-            "Status: DISABLED",
-            "- errors",
-            "- performance",
-            "- http",
-        ):
-            self.assertIn(control, app)
-        for route in ("admin*", "login*", "dashboard*", "sharedalbum*"):
-            self.assertIn(route, app)
-        telemetry = re.search(
-            r"(?ms)^\s{8}Telemetries:\n(?P<items>(?:\s{10}- [a-z]+\n)+)", app
-        )
-        self.assertIsNotNone(telemetry)
-        self.assertEqual(
-            re.findall(r"(?m)^\s+- ([a-z]+)$", telemetry.group("items")),
-            ["errors", "performance", "http"],
-        )
-        self.assertNotIn("replay", TEMPLATE.lower())
-
-        role = resource_block("RumGuestRole")
-        self.assertIn("cognito-identity.amazonaws.com:aud: !Ref RumIdentityPool", role)
-        self.assertIn("cognito-identity.amazonaws.com:amr: unauthenticated", role)
-        self.assertIn("Action: rum:PutRumEvents", role)
-        self.assertIn(
-            "appmonitor/ian-photography-web-${Stage}", role
-        )
-        self.assertNotIn("appmonitor/*", role)
-        attachment = resource_block("RumIdentityPoolRoleAttachment")
-        self.assertIn("unauthenticated: !GetAtt RumGuestRole.Arn", attachment)
-        self.assertNotRegex(attachment, r"(?m)^\s+authenticated:")
-
-    def test_canary_is_stopped_safe_updated_and_public_only(self):
-        canary = resource_block("PublicCanary")
-        for contract in (
-            "RuntimeVersion: syn-nodejs-puppeteer-16.1",
-            "DryRunAndUpdate: true",
-            "StartCanaryAfterCreation: !If [StartCanary, true, false]",
-            "ActiveTracing: false",
-            "includeRequestBody: false",
-            "includeRequestHeaders: false",
-            "includeResponseBody: false",
-            "includeResponseHeaders: false",
-            "screenshotOnStepSuccess: true",
-            "'/public/albums?limit=1&type=photo'",
-            "'/public/albums/' + encodeURIComponent(selectedAlbumId)",
-            "MAX_PREVIEW_BYTES = 512 * 1024",
-            """- Key: Environment
-          Value: !Ref Stage
-        - Key: ManagedBy
-          Value: CloudFormation""",
-        ):
-            self.assertIn(contract, canary)
-        self.assertIn("Default: 'false'", TEMPLATE)
-        for forbidden in (
-            "/albums?visibility=private",
-            "/sharedalbum",
-            "Authorization",
-            "document.cookie",
-            "process.env.ALBUM_ID",
-        ):
-            self.assertNotIn(forbidden, canary)
-        self.assertEqual(canary.count("screenshotOnStepSuccess: true"), 1)
-
-    def test_artifact_dependency_chain_is_private_encrypted_versioned_lifecycle_and_retained(self):
-        for logical_id in (
-            "CanaryArtifactBucket",
-            "CanaryArtifactBucketPolicy",
-            "PublicCanaryRole",
+    def test_unused_browser_and_synthetic_components_are_removed(self):
+        for removed in (
+            "AWS::RUM::",
+            "AWS::Synthetics::",
+            "AWS::Cognito::IdentityPool",
+            "AWS::IAM::Role",
+            "AWS::S3::Bucket",
+            "RumAppMonitor",
             "PublicCanary",
+            "CanaryArtifact",
         ):
-            block = resource_block(logical_id)
-            self.assertIn("DeletionPolicy: Retain", block)
-            self.assertIn("UpdateReplacePolicy: Retain", block)
-        bucket = resource_block("CanaryArtifactBucket")
-        for setting in (
-            "SSEAlgorithm: AES256",
-            "Status: Enabled",
-            "BlockPublicAcls: true",
-            "IgnorePublicAcls: true",
-            "BlockPublicPolicy: true",
-            "RestrictPublicBuckets: true",
-            "ExpirationInDays: !Ref CanaryArtifactRetentionDays",
-            "NoncurrentVersionExpiration:",
-            "AbortIncompleteMultipartUpload:",
-        ):
-            self.assertIn(setting, bucket)
-        self.assertIn("aws:SecureTransport: 'false'", resource_block("CanaryArtifactBucketPolicy"))
-        self.assertIn("EncryptionMode: SSE_S3", resource_block("PublicCanary"))
+            self.assertNotIn(removed, TEMPLATE)
+        self.assertNotIn("aws-rum-web", PACKAGE["dependencies"])
+        self.assertNotIn("@aws-rum/web-core", PACKAGE.get("overrides", {}))
+        self.assertFalse((ROOT / "src" / "utils" / "rum.js").exists())
+        self.assertFalse((ROOT / "src" / "utils" / "rum.test.js").exists())
+        self.assertNotIn("VITE_RUM_", WORKFLOW)
+        self.assertNotIn("initializeRum", (ROOT / "src" / "main.jsx").read_text())
 
-    def test_dashboard_alarms_optional_exact_topic_and_release_outputs_are_wired(self):
+    def test_dashboard_and_two_alarms_are_the_complete_edge_contract(self):
         self.assertIn("AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:", TEMPLATE)
-        self.assertEqual(TEMPLATE.count("AlarmActions: !If"), 5)
-        self.assertIn("AWS/CloudFront", resource_block("ObservabilityDashboard"))
-        self.assertIn("AWS/RUM", resource_block("ObservabilityDashboard"))
-        self.assertIn("CloudWatchSynthetics", resource_block("ObservabilityDashboard"))
-        for output in (
-            "RumApplicationId",
-            "RumIdentityPoolId",
-            "RumGuestRoleArn",
-            "RumRegion",
-        ):
-            self.assertIn(f"  {output}:", TEMPLATE)
-        self.assertIn("Value: !GetAtt RumAppMonitor.Id", TEMPLATE)
+        self.assertEqual(TEMPLATE.count("AlarmActions: !If"), 2)
+        resources = TEMPLATE.split("\nResources:\n", 1)[1].split("\nOutputs:\n", 1)[0]
+        self.assertEqual(
+            set(re.findall(r"(?m)^  ([A-Za-z][A-Za-z0-9]+):$", resources)),
+            {
+                "FrontendMonitoringSubscription",
+                "MediaMonitoringSubscription",
+                "FrontendFiveXxAlarm",
+                "MediaFiveXxAlarm",
+                "ObservabilityDashboard",
+            },
+        )
+        dashboard = resource_block("ObservabilityDashboard")
+        self.assertIn("AWS/CloudFront", dashboard)
+        self.assertNotIn("AWS/RUM", dashboard)
+        self.assertNotIn("CloudWatchSynthetics", dashboard)
+        self.assertIn("  DashboardName:", TEMPLATE)
         self.assertIn("ReleaseSha", TEMPLATE)
 
-    def test_frontend_dependency_ci_vars_and_validation_lists_are_complete(self):
-        self.assertEqual(PACKAGE["dependencies"]["aws-rum-web"], "3.1.0")
-        self.assertEqual(PACKAGE["overrides"]["@aws-rum/web-core"]["uuid"], "11.1.1")
-        for name in (
-            "VITE_RUM_APPLICATION_ID",
-            "VITE_RUM_GUEST_ROLE_ARN",
-            "VITE_RUM_IDENTITY_POOL_ID",
-            "VITE_RUM_REGION",
-            "VITE_RELEASE_SHA",
-        ):
-            self.assertIn(name, WORKFLOW)
+    def test_validation_lists_and_release_identity_remain_complete(self):
         self.assertIn("VITE_RELEASE_SHA: ${{ github.sha }}", WORKFLOW)
-        self.assertIn("rum_configured != 0", WORKFLOW)
         for source in (VALIDATOR, WORKFLOW):
             self.assertIn("ops/observability_template.yaml", source)
             self.assertIn("ops/waf_front_door_template.yaml", source)

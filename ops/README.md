@@ -1,6 +1,6 @@
 # Production infrastructure runbook
 
-The tracked GitHub Actions release system and its one-time OIDC/environment
+The tracked GitHub Actions release system and its one-time branch-bound OIDC
 configuration are documented in [`ops/CI_CD.md`](CI_CD.md). The local procedures
 below remain the recovery reference and must continue to match those guards.
 
@@ -47,7 +47,7 @@ are **dry-run by default** and require multiple exact production guards to apply
   missing human ownership explicit.
 - `observability_template.yaml`, `observability_preflight.py`, and
   [`OBSERVABILITY.md`](OBSERVABILITY.md) define the retained, privacy-controlled
-  RUM, paid CloudFront metric, public Synthetics, dashboard, and alarm rollout.
+  paid CloudFront metrics, dashboard, and edge-alarm rollout.
 
 The scripts discover physical table, bucket, user-pool, API, distribution, and
 hosted-zone IDs from a caller-supplied CloudFormation stack name or canonical
@@ -519,10 +519,6 @@ python3 ops/set_lambda_log_retention.py \
   --expected-account-id EXPECTED_ACCOUNT_ID \
   --confirm-stack-name STACK_NAME
 ```
-
-Use `--include-synthetics` only for the stack that owns a Synthetics canary. The
-helper discovers the exact stack-owned canary Lambda prefix and dormant
-stack-owned Lambda groups; it does not match arbitrary account log groups.
 
 The alarm registry currently records notification delivery as blocked: the
 primary owner, backup owner, and two confirmed human destinations are still

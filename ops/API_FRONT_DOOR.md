@@ -17,7 +17,7 @@ No script in this repository deploys this architecture by default. `cloudfront_f
 
 ## Staged deployment order
 
-Use protected environments, non-executing change sets, exact existing parameter values, drift checks, and the repository release guard. Never deploy from an unreviewed local template.
+Use the exact `main`-ref OIDC trust, non-executing change sets, exact existing parameter values, drift checks, and the repository release guard. Never deploy from an unreviewed local template.
 
 1. Validate source:
 

@@ -4,23 +4,17 @@ set -euo pipefail
 inventory="${AUDIT_STACKS_PATH:-ops/ci/audit_stacks.json}"
 [[ -f "$inventory" ]] || { echo 'Drift inventory is missing.' >&2; exit 2; }
 jq -e '
-  .version == 2
-  and ((keys | sort) == ["regionalSecurityPosture", "rumAppMonitor", "stacks", "version"])
-  and ((.rumAppMonitor | keys | sort) == ["name", "region"])
-  and (.rumAppMonitor.region | test("^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"))
-  and (.rumAppMonitor.name | test("^[A-Za-z0-9._#-]{1,255}$"))
+  .version == 3
+  and ((keys | sort) == ["regionalSecurityPosture", "stacks", "version"])
   and (.stacks | type == "array" and length > 0)
   and all(.stacks[];
     ((keys | sort) == ["name", "region"]
       or (keys | sort) == ["logicalResourceIds", "name", "region"]
-      or (keys | sort) == ["excludedLogicalResourceIds", "name", "region"]
-      or (keys | sort) == ["directPostureLogicalResourceIds", "logicalResourceIds", "name", "region", "unsupportedLogicalResourceIds"])
+      or (keys | sort) == ["excludedLogicalResourceIds", "name", "region"])
     and (.region | test("^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"))
     and (.name | test("^[A-Za-z][A-Za-z0-9-]{0,127}$"))
     and ((.logicalResourceIds // []) | type == "array")
     and ((.excludedLogicalResourceIds // []) | type == "array")
-    and ((.directPostureLogicalResourceIds // []) | type == "array")
-    and ((.unsupportedLogicalResourceIds // []) | type == "array")
     and all((.logicalResourceIds // [])[];
       type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
     and (((.logicalResourceIds // []) | unique | length)
@@ -28,15 +22,7 @@ jq -e '
     and all((.excludedLogicalResourceIds // [])[];
       type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
     and (((.excludedLogicalResourceIds // []) | unique | length)
-      == ((.excludedLogicalResourceIds // []) | length))
-    and all((.directPostureLogicalResourceIds // [])[];
-      type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
-    and (((.directPostureLogicalResourceIds // []) | unique | length)
-      == ((.directPostureLogicalResourceIds // []) | length))
-    and all((.unsupportedLogicalResourceIds // [])[];
-      type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
-    and (((.unsupportedLogicalResourceIds // []) | unique | length)
-      == ((.unsupportedLogicalResourceIds // []) | length)))
+      == ((.excludedLogicalResourceIds // []) | length)))
   and ((.stacks | map([.region, .name] | join(":")) | unique | length) == (.stacks | length))
   and ((.regionalSecurityPosture | keys | sort)
     == ["cloudFormationExclusion", "homeRegion", "satelliteStackName"])
@@ -61,9 +47,6 @@ jq -e '
         == ([$excluded.logicalResourceId] + $excluded.unsupportedLogicalResourceIds | sort))
     and ([.stacks[] | .excludedLogicalResourceIds[]?] | sort
       == ([$excluded.logicalResourceId] + $excluded.unsupportedLogicalResourceIds | sort)))
-  and ([.stacks[] | .directPostureLogicalResourceIds[]?] == ["RumAppMonitor"])
-  and ([.stacks[] | .unsupportedLogicalResourceIds[]?] | sort
-    == ["CanaryArtifactBucketPolicy", "RumIdentityPoolRoleAttachment"])
 ' "$inventory" >/dev/null || { echo 'Drift inventory is invalid.' >&2; exit 2; }
 
 workspace="${RUNNER_TEMP:?RUNNER_TEMP is required}/stack-drift-audit"
@@ -74,11 +57,10 @@ detections="$workspace/detections.tsv"
 filtered_stacks=0
 resource_drift_checks=0
 stack_count=0
-direct_posture_resources="$(jq '[.stacks[] | .directPostureLogicalResourceIds[]?] | length' "$inventory")"
-direct_posture_resources=$((direct_posture_resources + 1))
-unsupported_resources="$(jq '([.stacks[] | .unsupportedLogicalResourceIds[]?] | length) + (.regionalSecurityPosture.cloudFormationExclusion.unsupportedLogicalResourceIds | length)' "$inventory")"
+direct_posture_resources=1
+unsupported_resources="$(jq '.regionalSecurityPosture.cloudFormationExclusion.unsupportedLogicalResourceIds | length' "$inventory")"
 excluded_resources=$((direct_posture_resources + unsupported_resources))
-while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv direct_ids_csv unsupported_ids_csv; do
+while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv; do
   stack_count=$((stack_count + 1))
   logical_ids=()
   if [[ -n "$logical_ids_csv" ]]; then
@@ -92,7 +74,7 @@ while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv direct_
         echo 'CloudFormation filtered resource inventory failed.' >&2
         exit 2
       }
-    expected_csv="${logical_ids_csv},${direct_ids_csv},${unsupported_ids_csv}"
+    expected_csv="${logical_ids_csv}"
     jq -e --arg expected_csv "$expected_csv" '
       type == "array" and length > 0 and length <= 100
       and all(.[]; type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
@@ -185,8 +167,6 @@ done < <(jq -r '.stacks[] | [
   .name,
   ((.logicalResourceIds // []) | join(",")),
   ((.excludedLogicalResourceIds // []) | join(","))
-  ,((.directPostureLogicalResourceIds // []) | join(","))
-  ,((.unsupportedLogicalResourceIds // []) | join(","))
 ] | join("|")' "$inventory")
 
 security_home_region="$(jq -r '.regionalSecurityPosture.homeRegion' "$inventory")"
@@ -213,35 +193,6 @@ jq -e '
 }
 guardduty_checks="$(jq -r '.detectorCount' "$security_posture_path")"
 security_hub_checks="$(jq -r '.securityHubCount' "$security_posture_path")"
-
-rum_region="$(jq -r '.rumAppMonitor.region' "$inventory")"
-rum_name="$(jq -r '.rumAppMonitor.name' "$inventory")"
-rum_posture="$(aws rum get-app-monitor --region "$rum_region" --name "$rum_name" --output json)"
-jq -e --arg expected_name "$rum_name" '
-  .AppMonitor.Name == $expected_name
-  and .AppMonitor.Domain == "iantruongphotography.com"
-  and .AppMonitor.Platform == "Web"
-  and .AppMonitor.State == "CREATED"
-  and ((.AppMonitor.CwLogEnabled // false) == false)
-  and .AppMonitor.CustomEvents.Status == "DISABLED"
-  and .AppMonitor.DeobfuscationConfiguration.JavaScriptSourceMaps.Status == "DISABLED"
-  and .AppMonitor.AppMonitorConfiguration.AllowCookies == false
-  and .AppMonitor.AppMonitorConfiguration.EnableXRay == false
-  and .AppMonitor.AppMonitorConfiguration.SessionSampleRate == 0.1
-  and ((.AppMonitor.AppMonitorConfiguration.Telemetries | sort)
-    == ["errors", "http", "performance"])
-  and ((.AppMonitor.AppMonitorConfiguration.ExcludedPages | sort) == [
-    "https://iantruongphotography.com/admin*",
-    "https://iantruongphotography.com/dashboard*",
-    "https://iantruongphotography.com/login*",
-    "https://iantruongphotography.com/sharedalbum*"
-  ])
-  and (.AppMonitor.AppMonitorConfiguration.GuestRoleArn | type == "string" and length > 0)
-  and (.AppMonitor.AppMonitorConfiguration.IdentityPoolId | type == "string" and length > 0)
-' <<< "$rum_posture" >/dev/null || {
-  echo 'RUM configuration posture differs from the reviewed privacy contract.' >&2
-  exit 2
-}
 
 ./ops/ci/audit_frontend_edge.sh > "$workspace/frontend-edge.json"
 jq -e '.status == "IN_SYNC" and .metadataDocumentCount == 6' \

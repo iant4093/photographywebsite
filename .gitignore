@@ -7,9 +7,13 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+/node_modules/
+/backend/preview_worker/node_modules/
+/dist/
+/dist-ssr/
+/release/
+/playwright-report/
+/test-results/
 *.local
 .env
 .env.*
@@ -38,6 +42,10 @@ venv/
 env/
 .venv*/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
 .coverage
 .coverage.*
 /coverage/
@@ -52,9 +60,10 @@ cf-etag.txt
 # Agent artifacts
 .agent/
 
-debug/
+/debug/
+/backend/debug/
 
-scripts/
+/scripts/.venv/
 
 # Local website audit artifacts
 /website_review/

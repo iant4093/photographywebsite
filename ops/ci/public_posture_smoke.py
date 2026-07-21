@@ -237,8 +237,6 @@ def run_posture(
     config = validate_config(config)
     homepage = requester(config.site_url + "/", config.timeout, None, MAX_HTML_BYTES)
     _require_security_headers(homepage)
-    if b"aws-rum-web" in homepage.body.lower():
-        raise PostureError("RUM SDK must not be eagerly embedded in HTML")
 
     privacy_routes = 0
     for route in SENSITIVE_ROUTES:
@@ -249,8 +247,6 @@ def run_posture(
             MAX_HTML_BYTES,
         )
         _require_security_headers(response)
-        if b"aws-rum-web" in response.body.lower():
-            raise PostureError("sensitive route eagerly referenced the RUM SDK")
         privacy_routes += 1
 
     if config.expected_release_sha:

@@ -3,23 +3,23 @@
 `security_budget_template.yaml` owns one retained monthly account cost budget.
 It never creates an email address, SNS topic, endpoint, subscription, cost-cutoff
 action, or automatic security-service disablement. The owner must choose the
-monthly USD limit and confirm two responders on the existing encrypted security
+monthly USD limit and confirm the owner notification on the existing encrypted security
 topic before deployment.
 
 The budget measures the account's total monthly cost. This is intentionally
 broader than a tag filter: not every paid security service supports consistent
 cost-allocation tags, and a narrow filter could silently omit GuardDuty,
-Security Hub, Config, WAF, Backup, RUM, Synthetics, CloudWatch, or data-transfer
-charges. The actual-spend notification starts above 80% and the forecasted
-notification above 100% of the owner-approved limit. Neither notification
+Security Hub, Config, WAF, Backup, CloudWatch, or data-transfer
+charges. Actual-spend notifications start above 50% and 80%, and the forecasted
+notification starts above 100% of the owner-approved limit. Neither notification
 changes AWS resources.
 
 ## Prerequisites
 
 1. Deploy the reviewed notification-stack update that grants only the exact
    named budget permission to publish to the encrypted topic.
-2. Attach and confirm a primary and backup human destination outside this
-   repository. Record owners and a synthetic delivery test in
+2. Attach and confirm the owner email destination outside this repository.
+   Record its owner and a synthetic delivery test in
    `alarm_registry.json`; never commit endpoint addresses.
 3. Choose the monthly amount after reviewing current billing and the 24-hour,
    7-day, and 30-day paid-service cost observations. Do not treat a default or
@@ -31,7 +31,7 @@ The preflight lists budgets, verifies the exact same-account/same-Region topic,
 and counts unique confirmed human-compatible destinations (`email`,
 `email-json`, or `sms`) without printing endpoint addresses or subscription
 identifiers. Confirmed HTTPS, SQS, Lambda, and Firehose fan-out can be useful,
-but proves only a machine route and does not satisfy the two-human gate. It
+but proves only a machine route and does not satisfy the human-destination gate. It
 never calls a write API.
 
 ```bash
@@ -45,7 +45,7 @@ python3 ops/security_budget_preflight.py \
 ```
 
 Exit status `2` and `BudgetDeploymentMode=skip` are expected while the topic has
-fewer than two confirmed destinations, the exact budget already exists, or the
+no confirmed human destination, the exact budget already exists, or the
 name confirmation is absent. An existing budget requires an ownership/import
 review; never delete or replace it merely to satisfy the preflight.
 
