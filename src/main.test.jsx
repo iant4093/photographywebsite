@@ -9,9 +9,13 @@ vi.mock('./context/authContext', () => ({ AuthProvider: ({ children }) => childr
 
 describe('application entry point', () => {
   it('mounts the router and auth-wrapped app into #root', async () => {
+    const releaseSha = 'a'.repeat(40)
+    vi.stubEnv('VITE_RELEASE_SHA', releaseSha)
     document.body.innerHTML = '<div id="root"></div>'
     await import('./main')
     expect(createRoot).toHaveBeenCalledWith(document.getElementById('root'))
     expect(render).toHaveBeenCalledOnce()
+    expect(document.documentElement.dataset.releaseSha).toBe(releaseSha)
+    vi.unstubAllEnvs()
   })
 })
