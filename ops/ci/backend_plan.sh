@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-required=(AWS_REGION STACK_NAME ARTIFACT_BUCKET CLOUDFORMATION_EXECUTION_ROLE_ARN GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_OUTPUT)
+required=(AWS_REGION STACK_NAME ARTIFACT_BUCKET ARTIFACT_KMS_KEY_ARN CLOUDFORMATION_EXECUTION_ROLE_ARN GITHUB_RUN_ID GITHUB_RUN_ATTEMPT GITHUB_OUTPUT)
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then
     echo "Required release configuration is missing: ${name}" >&2
@@ -33,6 +33,7 @@ sam package \
   --region "$AWS_REGION" \
   --template-file release/backend/.aws-sam/build/template.yaml \
   --s3-bucket "$ARTIFACT_BUCKET" \
+  --kms-key-id "$ARTIFACT_KMS_KEY_ARN" \
   --s3-prefix "releases/${GITHUB_SHA:?GITHUB_SHA is required}/backend" \
   --output-template-file "$workspace/packaged.yaml"
 

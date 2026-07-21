@@ -110,6 +110,7 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
           STACK_NAME: ${{ vars.AWS_STACK_NAME }}
           ARTIFACT_BUCKET: ${{ vars.AWS_RELEASE_ARTIFACT_BUCKET }}
+          ARTIFACT_KMS_KEY_ARN: ${{ vars.AWS_RELEASE_ARTIFACT_KEY_ARN }}
           CLOUDFORMATION_EXECUTION_ROLE_ARN: ${{ vars.AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN }}
           GITHUB_SHA: ${{ inputs.source_sha }}
         run: ./ops/ci/backend_plan.sh

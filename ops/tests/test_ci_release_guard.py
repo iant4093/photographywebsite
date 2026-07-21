@@ -358,6 +358,8 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("gate-change-set", collect)
         self.assertIn("previous-parameters", plan)
         self.assertIn("--release-sha", plan)
+        self.assertIn("ARTIFACT_KMS_KEY_ARN", plan)
+        self.assertIn("--kms-key-id", plan)
         self.assertIn("collect_change_set.sh", plan)
         self.assertIn("CAPABILITY_NAMED_IAM", plan)
         self.assertIn("stack-update-complete", execute)

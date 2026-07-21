@@ -57,6 +57,7 @@ non-secret variables at repository or environment scope as appropriate:
 | `AWS_ACCOUNT_ID` | Exact allowed account for credential-action confused-deputy protection; the action masks it. |
 | `AWS_STACK_NAME` | Exact SAM/CloudFormation application stack. |
 | `AWS_RELEASE_ARTIFACT_BUCKET` | Encrypted, versioned release package bucket. |
+| `AWS_RELEASE_ARTIFACT_KEY_ARN` | Exact bootstrap KMS key ARN required for every SAM package upload. |
 | `AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN` | Exact CloudFormation service execution role passed by the plan role. |
 | `AWS_PLAN_ROLE_ARN` | OIDC role that may read/plan the exact stack and write only its release prefix. |
 | `AWS_EXECUTE_ROLE_ARN` | OIDC role that may execute and monitor an already-created change set. |
@@ -191,6 +192,7 @@ Copy the stack outputs into the matching GitHub variables:
 | Bootstrap output | GitHub variable |
 |---|---|
 | `ReleaseArtifactBucketName` | `AWS_RELEASE_ARTIFACT_BUCKET` |
+| `ReleaseArtifactKeyArn` | `AWS_RELEASE_ARTIFACT_KEY_ARN` |
 | `CloudFormationExecutionRoleArn` | `AWS_CLOUDFORMATION_EXECUTION_ROLE_ARN` |
 | `PlanRoleArn` | `AWS_PLAN_ROLE_ARN` |
 | `ExecuteRoleArn` | `AWS_EXECUTE_ROLE_ARN` |
