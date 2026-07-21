@@ -84,7 +84,7 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      change_set_id: ${{ steps.plan.outputs.change_set_id }}
+      change_set_name: ${{ steps.plan.outputs.change_set_name }}
       noop: ${{ steps.plan.outputs.noop }}
       template_sha256: ${{ steps.plan.outputs.template_sha256 }}
     steps:
@@ -145,7 +145,7 @@ jobs:
       - env:
           AWS_REGION: ${{ vars.AWS_REGION }}
           STACK_NAME: ${{ vars.AWS_STACK_NAME }}
-          CHANGE_SET_ID: ${{ needs.backend-plan.outputs.change_set_id }}
+          CHANGE_SET_NAME: ${{ needs.backend-plan.outputs.change_set_name }}
           EXPECTED_RELEASE_SHA: ${{ inputs.source_sha }}
           EXPECTED_TEMPLATE_SHA256: ${{ needs.backend-plan.outputs.template_sha256 }}
         run: ./ops/ci/backend_execute.sh

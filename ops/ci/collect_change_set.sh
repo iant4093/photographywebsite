@@ -2,7 +2,7 @@
 set -euo pipefail
 
 : "${AWS_REGION:?AWS_REGION is required}"
-: "${CHANGE_SET_ID:?CHANGE_SET_ID is required}"
+: "${CHANGE_SET_NAME:?CHANGE_SET_NAME is required}"
 : "${EXPECTED_STACK_NAME:?EXPECTED_STACK_NAME is required}"
 : "${EXPECTED_RELEASE_SHA:?EXPECTED_RELEASE_SHA is required}"
 : "${EXPECTED_TEMPLATE_SHA256:?EXPECTED_TEMPLATE_SHA256 is required}"
@@ -12,29 +12,29 @@ set -euo pipefail
 : "${RELEASE_DEPENDENCIES_PATH:=ops/ci/release_dependencies.json}"
 
 status="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
+  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query Status --output text)"
 execution_status="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
+  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query ExecutionStatus --output text)"
-actual_id="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
-  --query ChangeSetId --output text)"
+actual_name="$(aws cloudformation describe-change-set \
+  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+  --query ChangeSetName --output text)"
 actual_stack="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
+  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query StackName --output text)"
 description="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
+  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query Description --output text)"
 release_sha="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
+  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query 'Parameters[?ParameterKey==`ReleaseSha`].ParameterValue | [0]' --output text)"
 
 if [[ "$status" != "CREATE_COMPLETE" || "$execution_status" != "AVAILABLE" ]]; then
   echo "Change set is not complete and available." >&2
   exit 2
 fi
-if [[ "$actual_id" != "$CHANGE_SET_ID" || "$actual_stack" != "$EXPECTED_STACK_NAME" ]]; then
+if [[ "$actual_name" != "$CHANGE_SET_NAME" || "$actual_stack" != "$EXPECTED_STACK_NAME" ]]; then
   echo "Change set identity does not match the guarded release." >&2
   exit 2
 fi
@@ -47,7 +47,7 @@ fi
 
 parameters_path="$(dirname "$CHANGE_PAGES_PATH")/change-set-parameters.json"
 aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
+  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query Parameters --output json > "$parameters_path"
 if [[ -n "${EXPECTED_REQUESTED_PARAMETERS_PATH:-}" ]]; then
   python3 ops/ci/release_guard.py preserved-parameters \
@@ -62,7 +62,7 @@ mkdir -p "$(dirname "$CHANGE_PAGES_PATH")"
 echo '[]' > "$CHANGE_PAGES_PATH"
 token=""
 while true; do
-  args=(cloudformation describe-change-set --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" --no-paginate)
+  args=(cloudformation describe-change-set --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" --no-paginate)
   if [[ -n "$token" ]]; then
     args+=(--next-token "$token")
   fi

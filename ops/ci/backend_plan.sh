@@ -110,7 +110,7 @@ if ! aws cloudformation wait change-set-create-complete \
   exit 2
 fi
 
-CHANGE_SET_ID="$change_set_id" \
+CHANGE_SET_NAME="$change_set_name" \
 EXPECTED_STACK_NAME="$STACK_NAME" \
 EXPECTED_RELEASE_SHA="$GITHUB_SHA" \
 EXPECTED_TEMPLATE_SHA256="$packaged_template_sha" \
@@ -120,5 +120,5 @@ CHANGE_PAGES_PATH="$workspace/change-pages.json" \
   ./ops/ci/collect_change_set.sh
 
 echo "noop=false" >> "$GITHUB_OUTPUT"
-echo "change_set_id=$change_set_id" >> "$GITHUB_OUTPUT"
+echo "change_set_name=$change_set_name" >> "$GITHUB_OUTPUT"
 echo "template_sha256=$packaged_template_sha" >> "$GITHUB_OUTPUT"

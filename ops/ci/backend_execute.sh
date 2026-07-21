@@ -3,7 +3,7 @@ set -euo pipefail
 
 : "${AWS_REGION:?AWS_REGION is required}"
 : "${STACK_NAME:?STACK_NAME is required}"
-: "${CHANGE_SET_ID:?CHANGE_SET_ID is required}"
+: "${CHANGE_SET_NAME:?CHANGE_SET_NAME is required}"
 : "${EXPECTED_RELEASE_SHA:?EXPECTED_RELEASE_SHA is required}"
 : "${EXPECTED_TEMPLATE_SHA256:?EXPECTED_TEMPLATE_SHA256 is required}"
 
@@ -22,7 +22,8 @@ CHANGE_PAGES_PATH="$workspace/change-pages.json" \
 
 aws cloudformation execute-change-set \
   --region "$AWS_REGION" \
-  --change-set-name "$CHANGE_SET_ID"
+  --stack-name "$STACK_NAME" \
+  --change-set-name "$CHANGE_SET_NAME"
 aws cloudformation wait stack-update-complete \
   --region "$AWS_REGION" \
   --stack-name "$STACK_NAME"

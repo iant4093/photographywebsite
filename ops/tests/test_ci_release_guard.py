@@ -1320,6 +1320,11 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("gate-change-set", collect)
         self.assertIn("release_intent.json", collect)
         self.assertIn("release_dependencies.json", collect)
+        self.assertIn("ChangeSetName", collect)
+        self.assertIn('echo "change_set_name=$change_set_name"', plan)
+        self.assertNotIn('echo "change_set_id=', plan)
+        self.assertIn('CHANGE_SET_NAME="$change_set_name"', plan)
+        self.assertIn('CHANGE_SET_NAME:?CHANGE_SET_NAME is required', execute)
         self.assertIn("previous-parameters", plan)
         self.assertIn("EXPECTED_REQUESTED_PARAMETERS_PATH", plan)
         self.assertIn("--release-sha", plan)
@@ -1404,6 +1409,9 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("./.github/workflows/_quality.yml", release)
         self.assertIn("frontend_deploy.sh", release)
         self.assertIn("backend_execute.sh", release)
+        for source in (release, manual):
+            self.assertIn("change_set_name", source)
+            self.assertNotIn("change_set_id", source)
         for source in (release, manual, scheduled):
             self.assertNotRegex(source, r"(?m)^\s+environment:\s*")
         self.assertIn("refs/heads/main", manual)
