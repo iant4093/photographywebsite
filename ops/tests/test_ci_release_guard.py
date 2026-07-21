@@ -37,6 +37,12 @@ def access_key_id(prefix: str, suffix: str) -> str:
     return prefix + suffix
 
 
+def credentialed_url(
+    scheme: str, username: str, password: str, host: str, path: str = ""
+) -> bytes:
+    return f"{scheme}://{username}:{password}@{host}{path}".encode()
+
+
 def iam_credentials_discovery_document() -> dict[str, str]:
     return {
         "discoveryVersion": "v1",
@@ -649,9 +655,15 @@ class CredentialArtifactScanTests(unittest.TestCase):
 
     def test_real_credentialed_urls_are_detected_without_echoing_values(self):
         urls = (
-            b"https://alice:correct-horse-battery@production.example/api",
-            b"https://username:password@production.example/private",
-            b"http://deploy:supersecret123@10.0.0.5:8080/",
+            credentialed_url(
+                "https", "alice", "correct-horse-battery", "production.example", "/api"
+            ),
+            credentialed_url(
+                "https", "username", "password", "production.example", "/private"
+            ),
+            credentialed_url(
+                "http", "deploy", "supersecret123", "10.0.0.5:8080", "/"
+            ),
         )
         for payload in urls:
             with self.subTest(payload=payload):
@@ -844,7 +856,60 @@ class GitHistoryCredentialScanTests(unittest.TestCase):
             self.assertIn("github_token", report.finding_kinds)
             with patch("sys.stdout") as stdout:
                 self.assertEqual(git_history_credential_scan.main([str(repo)]), 1)
-            self.assertNotIn(token, "".join(str(call) for call in stdout.write.call_args_list))
+            self.assertNotIn(
+                token,
+                "".join(str(call) for call in stdout.write.call_args_list),
+            )
+
+    def test_only_exact_historical_scanner_url_fixture_is_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.git(repo, "init", "-q")
+            self.git(repo, "config", "user.name", "CI Test")
+            self.git(repo, "config", "user.email", "ci@example.invalid")
+            fixture = repo / git_history_credential_scan.SCANNER_SELF_TEST_PATH
+            fixture.parent.mkdir(parents=True)
+            reviewed = b"\n".join(
+                (
+                    credentialed_url(
+                        "https",
+                        "alice",
+                        "correct-horse-battery",
+                        "production.example",
+                        "/api",
+                    ),
+                    credentialed_url(
+                        "https",
+                        "username",
+                        "password",
+                        "production.example",
+                        "/private",
+                    ),
+                    credentialed_url(
+                        "http", "deploy", "supersecret123", "10.0.0.5:8080", "/"
+                    ),
+                )
+            )
+            fixture.write_bytes(reviewed)
+            self.git(repo, "add", git_history_credential_scan.SCANNER_SELF_TEST_PATH)
+            self.git(repo, "commit", "-qm", "reviewed scanner fixture")
+            self.assertEqual(
+                git_history_credential_scan.scan_history(repo).finding_kinds,
+                (),
+            )
+
+            fixture.write_bytes(
+                reviewed
+                + b"\n"
+                + credentialed_url(
+                    "https", "unexpected", "unreviewed-secret", "example.invalid"
+                )
+            )
+            self.git(repo, "commit", "-qam", "unreviewed fixture")
+            self.assertEqual(
+                git_history_credential_scan.scan_history(repo).finding_kinds,
+                ("credentialed_url",),
+            )
 
 
 class PublicPostureSmokeTests(unittest.TestCase):

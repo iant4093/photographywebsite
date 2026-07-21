@@ -26,6 +26,14 @@ MAX_BLOBS = 250_000
 MAX_BLOB_BYTES = 25_000_000
 MAX_TOTAL_BLOB_BYTES = 2_000_000_000
 OBJECT_BATCH_SIZE = 128
+SCANNER_SELF_TEST_PATH = "ops/tests/test_ci_release_guard.py"
+SCANNER_SELF_TEST_CREDENTIALS = frozenset(
+    {
+        (b"alice", b"correct-horse-battery", b"production.example"),
+        (b"username", b"password", b"production.example"),
+        (b"deploy", b"supersecret123", b"10.0.0.5"),
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -117,6 +125,34 @@ def _blob_payloads(repo: Path, object_ids: list[str]) -> dict[str, bytes]:
     return payloads
 
 
+def _is_exact_scanner_self_test(paths: set[str], payload: bytes) -> bool:
+    """Permit only the scanner's three reviewed synthetic URL fixtures.
+
+    The history gate scans the commit that introduced its own detector tests.
+    Skipping the test path wholesale would create a hiding place for real
+    credentials, so the exception requires the exact path and exact complete
+    component set. Any additional or changed credentialed URL still fails.
+    """
+    if paths != {SCANNER_SELF_TEST_PATH}:
+        return False
+    matches = [
+        match
+        for match in artifact_scan.CREDENTIALED_URL.finditer(payload)
+        if not artifact_scan._is_synthetic_credentialed_url(match)
+    ]
+    components = {
+        (
+            artifact_scan._normalized_example_token(match.group("username")),
+            artifact_scan._normalized_example_token(match.group("password")),
+            artifact_scan._normalized_example_token(
+                match.group("host").split(b":", 1)[0]
+            ),
+        )
+        for match in matches
+    }
+    return len(matches) == 3 and components == SCANNER_SELF_TEST_CREDENTIALS
+
+
 def scan_history(repo: Path) -> HistoryScanReport:
     if not repo.is_dir():
         raise HistoryScanError("repository is unavailable")
@@ -153,7 +189,12 @@ def scan_history(repo: Path) -> HistoryScanReport:
                 for match in artifact_scan.AWS_ACCESS_KEY_ID.finditer(payload)
             ):
                 finding_kinds.add("aws_access_key_id")
-            finding_kinds.update(artifact_scan._high_confidence_token_kinds(payload))
+            for kind in artifact_scan._high_confidence_token_kinds(payload):
+                if kind == "credentialed_url" and _is_exact_scanner_self_test(
+                    paths, payload
+                ):
+                    continue
+                finding_kinds.add(kind)
     return HistoryScanReport(commits, len(object_ids), tuple(sorted(finding_kinds)))
 
 
