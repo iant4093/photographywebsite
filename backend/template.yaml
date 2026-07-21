@@ -1138,6 +1138,9 @@ Resources:
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt PreviewDataKey.Arn
+            - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
               Condition:
@@ -1218,6 +1221,9 @@ Resources:
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt PreviewDataKey.Arn
+            - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
               Condition:
@@ -1263,6 +1269,9 @@ Resources:
             - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
@@ -1620,6 +1629,9 @@ Resources:
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt PreviewDataKey.Arn
+            - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
               Condition:
@@ -1663,6 +1675,9 @@ Resources:
                 - dynamodb:BatchGetItem
                 - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket
@@ -1951,6 +1966,9 @@ Resources:
                 - dynamodb:BatchGetItem
                 - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket

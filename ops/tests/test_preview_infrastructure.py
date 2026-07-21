@@ -100,6 +100,7 @@ class PreviewWorkerTests(unittest.TestCase):
 
     def test_exact_api_functions_receive_external_metadata_permissions(self) -> None:
         for logical_id in (
+            "GetPublicAlbumFunction",
             "GetAlbumFunction",
             "GetSharedAlbumFunction",
             "CreateAlbumFunction",
@@ -118,6 +119,38 @@ class PreviewWorkerTests(unittest.TestCase):
             self.assertIn("kms:GenerateDataKey", block)
         for logical_id in ("DeleteAlbumFunction", "DeleteImagesFunction"):
             self.assertIn("dynamodb:BatchWriteItem", resource_block(logical_id))
+
+    def test_every_preview_metadata_consumer_can_decrypt_the_exact_table_key(self) -> None:
+        expected_consumers = {
+            "GetPublicAlbumFunction",
+            "GetAlbumFunction",
+            "GetSharedAlbumFunction",
+            "CreateAlbumFunction",
+            "UpdateAlbumFunction",
+            "DeleteAlbumFunction",
+            "AddImagesFunction",
+            "PreviewWorkerFunction",
+            "DeleteImagesFunction",
+        }
+        actual_consumers = {
+            logical_id
+            for logical_id in re.findall(r"(?m)^  ([A-Za-z][A-Za-z0-9]+Function):$", TEMPLATE)
+            if "PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable"
+            in resource_block(logical_id)
+        }
+        self.assertEqual(expected_consumers, actual_consumers)
+
+        exact_key_decrypt = re.compile(
+            r"(?ms)Action:(?P<actions>.*?)"
+            r"^\s+Resource: !GetAtt PreviewDataKey\.Arn$"
+        )
+        for logical_id in sorted(expected_consumers):
+            with self.subTest(function=logical_id):
+                key_statements = exact_key_decrypt.findall(resource_block(logical_id))
+                self.assertTrue(
+                    any("kms:Decrypt" in actions for actions in key_statements),
+                    f"{logical_id} must decrypt PreviewDataKey",
+                )
 
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):
