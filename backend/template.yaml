@@ -351,6 +351,11 @@ Resources:
     Properties:
       TableName: !Sub 'GoldenHour-RateLimits-${Stage}'
       BillingMode: PAY_PER_REQUEST
+      # Keep the security telemetry recoverable and satisfy the account-wide
+      # DynamoDB PITR posture rule. TTL still bounds normal record lifetime;
+      # PITR is only for incident recovery from accidental or malicious writes.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       # At-rest encryption is mandatory in DynamoDB and uses an AWS-owned key
       # when no customer-managed key is configured.
       AttributeDefinitions:

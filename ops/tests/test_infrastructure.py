@@ -221,6 +221,13 @@ class DataProtectionTests(unittest.TestCase):
             self.assertIn(expected, block)
         self.assertNotRegex(block, r"(?m)^\s+SSESpecification:")
 
+    def test_rate_limit_security_telemetry_has_point_in_time_recovery(self) -> None:
+        block = resource_block("RateLimitTable")
+        self.assertIn("PointInTimeRecoverySpecification:", block)
+        self.assertIn("PointInTimeRecoveryEnabled: true", block)
+        self.assertIn("TimeToLiveSpecification:", block)
+        self.assertIn("DataClassification", block)
+
     def test_existing_tables_do_not_toggle_dynamodb_encryption_mode(self) -> None:
         # DynamoDB always encrypts tables at rest. Explicitly adding/removing an
         # AWS-owned-key SSESpecification on these existing resources needlessly

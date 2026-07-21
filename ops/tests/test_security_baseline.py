@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sys
 import unittest
 
@@ -22,11 +23,16 @@ SECURITY_TEMPLATES = "\n".join(
         "security_managed_services_template.yaml",
         "security_backup_template.yaml",
         "security_backup_replica_template.yaml",
+        "security_budget_template.yaml",
     )
 )
 FRONTEND_BASELINE = json.loads(
     (ROOT / "ops" / "frontend_cloudfront_baseline.json").read_text(encoding="utf-8")
 )
+ALARM_REGISTRY = json.loads(
+    (ROOT / "ops" / "alarm_registry.json").read_text(encoding="utf-8")
+)
+ALARM_RUNBOOK = (ROOT / "ops" / "ALARM_REGISTRY.md").read_text(encoding="utf-8")
 
 
 class AccountSecurityBaselineTests(unittest.TestCase):
@@ -64,6 +70,76 @@ class AccountSecurityBaselineTests(unittest.TestCase):
         self.assertNotIn("NotificationEmail", SECURITY_TEMPLATES)
         self.assertNotIn("@", SECURITY_TEMPLATES)
         self.assertIn("Attach only an owner-approved monitored subscriber", SECURITY_TEMPLATES)
+
+    def test_alarm_registry_covers_every_declared_signal_exactly_once(self):
+        template_paths = (
+            "backend/template.yaml",
+            "ops/security_notifications_template.yaml",
+            "ops/security_backup_template.yaml",
+            "ops/security_budget_template.yaml",
+            "ops/observability_template.yaml",
+            "ops/waf_front_door_template.yaml",
+        )
+        declared = set()
+        for path in template_paths:
+            source = (ROOT / path).read_text(encoding="utf-8")
+            resources = re.finditer(
+                r"(?ms)^  (?P<id>[A-Za-z][A-Za-z0-9]+):\n"
+                r"(?P<body>.*?)(?=^  [A-Za-z][A-Za-z0-9]+:\n|^Outputs:)",
+                source,
+            )
+            for resource in resources:
+                logical_id = resource.group("id")
+                body = resource.group("body")
+                type_match = re.search(r"(?m)^    Type: (?P<type>\S+)$", body)
+                resource_type = type_match.group("type") if type_match else ""
+                if resource_type == "AWS::CloudWatch::Alarm":
+                    declared.add(logical_id)
+                elif resource_type == "AWS::Events::Rule" and '"eventName"' in body:
+                    declared.add(logical_id)
+                elif resource_type == "AWS::Budgets::Budget":
+                    notifications = re.findall(
+                        r"(?m)^\s+NotificationType: (ACTUAL|FORECASTED)\n"
+                        r"\s+Threshold: ([0-9]+)$",
+                        body,
+                    )
+                    for notification_type, threshold in notifications:
+                        declared.add(
+                            f"{logical_id}.{notification_type.title()}{threshold}Percent"
+                        )
+        groups = ALARM_REGISTRY["groups"]
+        registered_list = [
+            logical_id
+            for group in groups
+            for logical_id in group["logicalResourceIds"]
+        ]
+        self.assertEqual(len(registered_list), len(set(registered_list)))
+        self.assertSetEqual(set(registered_list), declared)
+        self.assertEqual(len({group["id"] for group in groups}), len(groups))
+        for group in groups:
+            self.assertSetEqual(
+                set(group),
+                {"id", "logicalResourceIds", "severity", "route", "runbook", "autoClose"},
+            )
+            self.assertIn(group["severity"], {"low", "medium", "high", "critical"})
+            self.assertTrue(group["route"])
+            self.assertTrue(group["autoClose"])
+        self.assertEqual(
+            ALARM_REGISTRY["deliveryState"]["status"],
+            "blocked-no-confirmed-human-destinations",
+        )
+        self.assertEqual(
+            ALARM_REGISTRY["deliveryState"]["requiredConfirmedDestinations"], 2
+        )
+        runbook_headings = {
+            heading.replace("-", " ").lower()
+            for heading in re.findall(r"(?m)^## (.+)$", ALARM_RUNBOOK)
+        }
+        for group in groups:
+            self.assertIn(
+                group["runbook"].split("#", 1)[1].replace("-", " ").lower(),
+                runbook_headings,
+            )
 
 
 class FrontendStaticCachingTests(unittest.TestCase):

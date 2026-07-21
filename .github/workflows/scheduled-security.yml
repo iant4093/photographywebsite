@@ -18,15 +18,53 @@ jobs:
       contents: read
       security-events: write
 
-  production-drift:
-    name: Read-only production drift check
+  history-and-public-posture:
+    name: Full-history credentials and public posture
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Require trusted default-branch controls
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
+            echo 'Production audit controls must run from main.' >&2
+            exit 2
+          }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan every reachable Git blob without echoing findings
+        run: python3 ops/ci/git_history_credential_scan.py .
+      - name: Run credential-free public security and completeness checks
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          API_ORIGIN_URL: ${{ vars.API_ORIGIN_URL }}
+          EXECUTE_API_URL: ${{ vars.EXECUTE_API_URL }}
+          MEDIA_DOMAIN: ${{ vars.VITE_CLOUDFRONT_DOMAIN }}
+          MEDIA_BUCKET_NAME: ${{ vars.MEDIA_BUCKET_NAME }}
+          EXPECTED_PUBLIC_ALBUM_COUNT: ${{ vars.EXPECTED_PUBLIC_ALBUM_COUNT }}
+          EXPECTED_RELEASE_SHA: ${{ github.sha }}
+        run: ./ops/ci/public_smoke.sh
+
+  production-drift:
+    name: Read-only multi-stack production drift check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     environment: production-audit
     permissions:
       contents: read
       id-token: write
     steps:
+      - name: Require trusted default-branch controls
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
+            echo 'Production audit controls must run from main.' >&2
+            exit 2
+          }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.sha }}
@@ -38,10 +76,5 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           mask-aws-account-id: true
-      - name: Detect but never remediate drift
-        env:
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          STACK_NAME: ${{ vars.AWS_STACK_NAME }}
-        run: |
-          detection_id="$(aws cloudformation detect-stack-drift --region "$AWS_REGION" --stack-name "$STACK_NAME" --query StackDriftDetectionId --output text)"
-          DRIFT_DETECTION_ID="$detection_id" ./ops/ci/wait_for_drift.sh
+      - name: Detect but never remediate versioned stack inventory
+        run: ./ops/ci/audit_stack_drift.sh

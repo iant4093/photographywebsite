@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,10 @@ sys.path.insert(0, str(ROOT))
 from ops.ci import (  # noqa: E402
     coverage_gate,
     credential_artifact_scan,
+    bind_s3_versions,
+    frontend_edge_posture,
+    git_history_credential_scan,
+    public_posture_smoke,
     release_guard,
     workflow_policy,
 )
@@ -47,6 +53,7 @@ def change(
     replacement="False",
     recreation="Never",
     resource_type="AWS::Lambda::Function",
+    property_name="Environment",
 ):
     return {
         "ResourceChange": {
@@ -54,7 +61,15 @@ def change(
             "LogicalResourceId": logical_id,
             "ResourceType": resource_type,
             "Replacement": replacement,
-            "Details": [{"Target": {"RequiresRecreation": recreation}}],
+            "Details": [
+                {
+                    "Target": {
+                        "Attribute": "Properties",
+                        "Name": property_name,
+                        "RequiresRecreation": recreation,
+                    }
+                }
+            ],
         }
     }
 
@@ -113,6 +128,136 @@ class ChangeSetGateTests(unittest.TestCase):
                 release_guard.gate_change_set([page])
 
 
+class ReleaseIntentTests(unittest.TestCase):
+    @staticmethod
+    def intent(*, action="Modify", allow_no_details=False, property_paths=None):
+        return {
+            "version": 1,
+            "rules": [
+                {
+                    "logicalId": "OrdinaryFunction",
+                    "resourceType": "AWS::Lambda::Function",
+                    "action": action,
+                    "propertyPaths": (
+                        ["Code", "Environment"]
+                        if property_paths is None
+                        else property_paths
+                    ),
+                    "allowNoDetails": allow_no_details,
+                }
+            ],
+        }
+
+    def test_exact_resource_action_and_property_subset_is_required(self):
+        intent = release_guard.load_release_intent(self.intent())
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": [change(property_name="Environment"), change(property_name="Code")]}],
+                release_intent=intent,
+            ),
+            {"Add": 0, "Modify": 2, "Total": 2},
+        )
+        for item in (
+            change(logical_id="OtherFunction"),
+            change(resource_type="AWS::Lambda::Version"),
+            change(property_name="Tags"),
+        ):
+            with self.subTest(item=item), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set(
+                    [{"Changes": [item]}], release_intent=intent
+                )
+
+    def test_missing_details_fail_unless_explicitly_allowed_for_exact_rule(self):
+        item = change()
+        item["ResourceChange"]["Details"] = []
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set(
+                [{"Changes": [item]}],
+                release_intent=release_guard.load_release_intent(self.intent()),
+            )
+        add_item = change(action="Add", replacement=None)
+        add_item["ResourceChange"]["Details"] = []
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": [add_item]}],
+                release_intent=release_guard.load_release_intent(
+                    self.intent(
+                        action="Add", allow_no_details=True, property_paths=[]
+                    )
+                ),
+            )["Total"],
+            1,
+        )
+
+    def test_release_intent_cannot_bypass_protected_rate_limit_table(self):
+        intent = release_guard.load_release_intent(
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "logicalId": "RateLimitTable",
+                        "resourceType": "AWS::DynamoDB::Table",
+                        "action": "Modify",
+                        "propertyPaths": ["PointInTimeRecoverySpecification"],
+                        "allowNoDetails": False,
+                    }
+                ],
+            }
+        )
+        pitr_change = change(
+            logical_id="RateLimitTable",
+            resource_type="AWS::DynamoDB::Table",
+            property_name="PointInTimeRecoverySpecification",
+            replacement="False",
+            recreation="Never",
+        )
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set(
+                [{"Changes": [pitr_change]}], release_intent=intent
+            )
+
+    def test_intent_schema_rejects_wildcards_duplicates_unknowns_and_bad_shapes(self):
+        base = self.intent()
+        cases = [
+            {},
+            {"version": 2, "rules": []},
+            {"version": 1, "rules": []},
+            base | {"extra": True},
+            {"version": 1, "rules": [base["rules"][0] | {"propertyPaths": ["*"]}]},
+            {"version": 1, "rules": [base["rules"][0] | {"propertyPaths": []}]},
+            {
+                "version": 1,
+                "rules": [base["rules"][0] | {"allowNoDetails": True}],
+            },
+            {"version": 1, "rules": [base["rules"][0], base["rules"][0]]},
+            {"version": 1, "rules": [base["rules"][0] | {"unknown": True}]},
+        ]
+        for document in cases:
+            with self.subTest(document=document), self.assertRaises(release_guard.GateError):
+                release_guard.load_release_intent(document)
+
+    def test_tracked_intent_covers_only_current_lambda_code_and_environment(self):
+        document = json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        )
+        release_guard.load_release_intent(document)
+        template = (ROOT / "backend/template.yaml").read_text(encoding="utf-8")
+        logical_ids = set(
+            re.findall(
+                r"(?m)^  ([A-Za-z0-9]+):\n    Type: AWS::Serverless::Function$",
+                template,
+            )
+        )
+        self.assertEqual(
+            {rule["logicalId"] for rule in document["rules"]}, logical_ids
+        )
+        for rule in document["rules"]:
+            self.assertEqual(rule["resourceType"], "AWS::Lambda::Function")
+            self.assertEqual(rule["action"], "Modify")
+            self.assertEqual(rule["propertyPaths"], ["Code", "Environment"])
+            self.assertFalse(rule["allowNoDetails"])
+
+
 class StackGuardTests(unittest.TestCase):
     def test_previous_parameters_contains_keys_only(self):
         stack = {
@@ -165,6 +310,8 @@ class StackGuardTests(unittest.TestCase):
                 "Outputs": [
                     {"OutputKey": "AlbumIndexDeploymentPhase", "OutputValue": "both"},
                     {"OutputKey": "PrivateMediaCloudFrontDenyEnforced", "OutputValue": "true"},
+                    {"OutputKey": "FrontDoorEnforcementEnabled", "OutputValue": "true"},
+                    {"OutputKey": "ExecuteApiEndpointDisabled", "OutputValue": "true"},
                 ],
             }
         )
@@ -176,6 +323,8 @@ class StackGuardTests(unittest.TestCase):
             "Outputs": [
                 {"OutputKey": "AlbumIndexDeploymentPhase", "OutputValue": "both"},
                 {"OutputKey": "PrivateMediaCloudFrontDenyEnforced", "OutputValue": "true"},
+                {"OutputKey": "FrontDoorEnforcementEnabled", "OutputValue": "true"},
+                {"OutputKey": "ExecuteApiEndpointDisabled", "OutputValue": "true"},
             ],
         }
         cases = [
@@ -188,6 +337,45 @@ class StackGuardTests(unittest.TestCase):
         for stack in cases:
             with self.subTest(stack=stack), self.assertRaises(release_guard.GateError):
                 release_guard.require_stack_invariants(stack)
+
+    def test_change_set_parameters_use_previous_value_except_release_sha(self):
+        sha = "b" * 40
+        stack = {"Parameters": [
+            {"ParameterKey": "Stage", "ParameterValue": "prod"},
+            {"ParameterKey": "SecretArn", "ParameterValue": "masked-or-arn"},
+            {"ParameterKey": "ReleaseSha", "ParameterValue": "a" * 40},
+        ]}
+        planned = [
+            {"ParameterKey": "Stage", "UsePreviousValue": True},
+            {"ParameterKey": "SecretArn", "UsePreviousValue": True},
+            {"ParameterKey": "ReleaseSha", "ParameterValue": sha},
+        ]
+        release_guard.require_preserved_parameters(stack, planned, release_sha=sha)
+        for invalid in (
+            planned[:-1],
+            [*planned[:1], {"ParameterKey": "SecretArn", "ParameterValue": "changed"}, planned[-1]],
+            [*planned[:-1], {"ParameterKey": "ReleaseSha", "ParameterValue": "c" * 40}],
+            [*planned[:-1], {"ParameterKey": "ReleaseSha", "UsePreviousValue": True}],
+        ):
+            with self.assertRaises(release_guard.GateError):
+                release_guard.require_preserved_parameters(stack, invalid, release_sha=sha)
+
+    def test_tracked_source_and_built_environment_contracts_are_exact(self):
+        policy = json.loads((ROOT / "ops/ci/template_environment_policy.json").read_text())
+        release_guard.require_environment_contract(
+            (ROOT / "backend/template.yaml").read_text(), policy, template_kind="source"
+        )
+        built = ROOT / "backend/.aws-sam/build/template.yaml"
+        if built.is_file():
+            release_guard.require_environment_contract(
+                built.read_text(), policy, template_kind="built"
+            )
+        changed = (ROOT / "backend/template.yaml").read_text().replace(
+            "FRONT_DOOR_ENFORCEMENT_ENABLED: !Ref FrontDoorEnforcementEnabled",
+            "FRONT_DOOR_ENFORCEMENT_ENABLED: 'false'",
+        )
+        with self.assertRaises(release_guard.GateError):
+            release_guard.require_environment_contract(changed, policy, template_kind="source")
 
 
 class ArtifactTests(unittest.TestCase):
@@ -211,6 +399,81 @@ class ArtifactTests(unittest.TestCase):
             self.assertIn("max-age=300", plan[1]["cache_control"])
             self.assertIn("no-cache", plan[-1]["cache_control"])
             self.assertNotIn("delete", json.dumps(plan).lower())
+
+    def test_packaged_code_uris_are_bound_to_exact_object_versions(self):
+        source = """Resources:
+  Example:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://release-bucket/releases/sha/code.zip
+"""
+        bound, count = bind_s3_versions.bind_versions(
+            source,
+            expected_bucket="release-bucket",
+            expected_count=1,
+            resolve_version=lambda key: "version-1" if key.endswith("code.zip") else "",
+        )
+        self.assertEqual(count, 1)
+        self.assertIn('Bucket: "release-bucket"', bound)
+        self.assertIn('Key: "releases/sha/code.zip"', bound)
+        self.assertIn('Version: "version-1"', bound)
+        for wrong_bucket, wrong_count in (("other-bucket", 1), ("release-bucket", 2)):
+            with self.assertRaises(bind_s3_versions.BindingError):
+                bind_s3_versions.bind_versions(
+                    source,
+                    expected_bucket=wrong_bucket,
+                    expected_count=wrong_count,
+                    resolve_version=lambda _key: "version-1",
+                )
+
+    def test_frontend_edge_contract_redacts_secret_header_values_but_detects_drift(self):
+        distribution = {
+            "Distribution": {
+                "ARN": "arn:aws:cloudfront::123456789012:distribution/EXAMPLE",
+                "Status": "Deployed",
+                "DistributionConfig": {
+                    "Enabled": True,
+                    "Origins": {"Items": [{
+                        "Id": "api",
+                        "CustomHeaders": {"Items": [{
+                            "HeaderName": "X-Origin-Verify", "HeaderValue": "secret-one"
+                        }]},
+                    }]},
+                },
+            }
+        }
+        documents = {
+            "distribution": distribution,
+            "publicAccessBlock": {"safe": True},
+            "encryption": {"algorithm": "AES256"},
+            "ownership": {"owner": "enforced"},
+            "versioning": {},
+            "policyStatus": {"public": False},
+        }
+        digests = {
+            "distributionSha256": frontend_edge_posture._digest(
+                frontend_edge_posture.sanitized_distribution(distribution)
+            ),
+            "publicAccessBlockSha256": frontend_edge_posture._digest(documents["publicAccessBlock"]),
+            "encryptionSha256": frontend_edge_posture._digest(documents["encryption"]),
+            "ownershipSha256": frontend_edge_posture._digest(documents["ownership"]),
+            "versioningSha256": frontend_edge_posture._digest(documents["versioning"]),
+            "policyStatusSha256": frontend_edge_posture._digest(documents["policyStatus"]),
+        }
+        contract = {
+            "version": 1, "distributionId": "EXAMPLE", "bucketName": "bucket-name",
+            "region": "us-west-2", **digests,
+        }
+        self.assertEqual(frontend_edge_posture.verify(contract, documents)["status"], "IN_SYNC")
+        rotated = json.loads(json.dumps(distribution))
+        rotated["Distribution"]["DistributionConfig"]["Origins"]["Items"][0]["CustomHeaders"]["Items"][0]["HeaderValue"] = "secret-two"
+        self.assertEqual(
+            frontend_edge_posture._digest(frontend_edge_posture.sanitized_distribution(rotated)),
+            digests["distributionSha256"],
+        )
+        documents["distribution"]["Distribution"]["DistributionConfig"]["Enabled"] = False
+        with self.assertRaises(frontend_edge_posture.EdgePostureError):
+            frontend_edge_posture.verify(contract, documents)
 
     def test_manifest_rejects_missing_mismatch_traversal_absolute_duplicate_and_bad_shape(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -309,64 +572,14 @@ class CoverageGateTests(unittest.TestCase):
 
 
 class CredentialArtifactScanTests(unittest.TestCase):
-    def test_workflow_keeps_strict_source_scan_and_uses_artifact_scanner(self):
+    def test_workflow_scans_full_history_and_generated_artifacts(self):
         workflow = (ROOT / ".github/workflows/_quality.yml").read_text(encoding="utf-8")
         self.assertIn(
             "python3 ops/ci/credential_artifact_scan.py backend/.aws-sam/build",
             workflow,
         )
-        self.assertIn("if git grep -I -l -E -- 'BEGIN", workflow)
-        source_pattern = (
-            "BEGIN "
-            + "([A-Z0-9]+ )*"
-            + "PRIVATE KEY|"
-            + "A(KI|SI)A"
-            + "[0-9A-Z]{16}"
-        )
-        self.assertIn(source_pattern, workflow)
-
-        with tempfile.TemporaryDirectory() as directory:
-            fixture_root = Path(directory)
-            fixtures = {
-                "generic.pem": private_key_marker(),
-                "encrypted.pem": private_key_marker("ENCRYPTED"),
-                "dsa.pem": private_key_marker("DSA"),
-                "long-term.txt": access_key_id("AKIA", "1234567890ABCDEF"),
-                "temporary.txt": access_key_id("ASIA", "1234567890ABCDEF"),
-            }
-            for name, value in fixtures.items():
-                (fixture_root / name).write_text(value, encoding="utf-8")
-            fixture_scan = subprocess.run(
-                ["grep", "-E", "-l", "--", source_pattern, *sorted(fixtures)],
-                cwd=fixture_root,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(fixture_scan.returncode, 0, fixture_scan.stderr)
-            self.assertEqual(
-                set(fixture_scan.stdout.splitlines()),
-                set(fixtures),
-            )
-
-        completed = subprocess.run(
-            [
-                "git",
-                "grep",
-                "-I",
-                "-l",
-                "-E",
-                "--",
-                source_pattern,
-                ":!package-lock.json",
-            ],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(completed.returncode, 1, completed.stdout)
-        self.assertEqual(completed.stdout, "")
+        self.assertIn("python3 ops/ci/git_history_credential_scan.py .", workflow)
+        self.assertIn("fetch-depth: 0", workflow)
 
     def test_observed_dependency_vocabulary_is_not_credential_material(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -408,6 +621,59 @@ class CredentialArtifactScanTests(unittest.TestCase):
             self.assertEqual(report.files_scanned, len(fixtures))
             self.assertEqual(report.findings, ())
             self.assertEqual(credential_artifact_scan.main([str(root)]), 0)
+
+    def test_dependency_credential_url_placeholders_are_not_credentials(self):
+        placeholders = (
+            b"https://username:password@host.com:80/path",
+            b"https://username:password@endpoint/resource",
+            b"Use `https://(username:password@)domain` for the endpoint.",
+        )
+        for payload in placeholders:
+            with self.subTest(payload=payload):
+                self.assertFalse(
+                    credential_artifact_scan._contains_credentialed_url(payload)
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "url.py").write_bytes(placeholders[0])
+            (root / "container.v1.json").write_text(
+                json.dumps({"description": placeholders[1].decode()}),
+                encoding="utf-8",
+            )
+            (root / "gkeonprem.v1.json").write_text(
+                json.dumps({"description": placeholders[2].decode()}),
+                encoding="utf-8",
+            )
+            self.assertEqual(credential_artifact_scan.scan(root).findings, ())
+
+    def test_real_credentialed_urls_are_detected_without_echoing_values(self):
+        urls = (
+            b"https://alice:correct-horse-battery@production.example/api",
+            b"https://username:password@production.example/private",
+            b"http://deploy:supersecret123@10.0.0.5:8080/",
+        )
+        for payload in urls:
+            with self.subTest(payload=payload):
+                self.assertTrue(
+                    credential_artifact_scan._contains_credentialed_url(payload)
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret = urls[0].decode()
+            (root / "bundle.js").write_text(secret, encoding="utf-8")
+            report = credential_artifact_scan.scan(root)
+            self.assertEqual(
+                [finding.kind for finding in report.findings],
+                ["credentialed_url"],
+            )
+            with patch("sys.stdout") as stdout:
+                self.assertEqual(credential_artifact_scan.main([str(root)]), 1)
+            self.assertNotIn(
+                secret,
+                "".join(str(call) for call in stdout.write.call_args_list),
+            )
 
     def test_real_material_and_forbidden_filename_fail_without_echoing_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -513,6 +779,237 @@ class CredentialArtifactScanTests(unittest.TestCase):
             self.assertNotIn(str(root), "".join(str(call) for call in stderr.write.call_args_list))
 
 
+class GitHistoryCredentialScanTests(unittest.TestCase):
+    @staticmethod
+    def git(repo: Path, *arguments: str) -> None:
+        subprocess.run(
+            ["git", *arguments],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_deleted_historical_credentials_are_detected_without_echoing_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.git(repo, "init", "-q")
+            self.git(repo, "config", "user.name", "CI Test")
+            self.git(repo, "config", "user.email", "ci@example.invalid")
+            tracked = repo / "safe.txt"
+            tracked.write_text("safe\n", encoding="utf-8")
+            self.git(repo, "add", "safe.txt")
+            self.git(repo, "commit", "-qm", "safe")
+            secret = access_key_id("ASIA", "1234567890ABCDEF")
+            tracked.write_text(secret + "\n", encoding="utf-8")
+            self.git(repo, "commit", "-qam", "historical fixture")
+            tracked.write_text("safe again\n", encoding="utf-8")
+            self.git(repo, "commit", "-qam", "remove fixture")
+
+            report = git_history_credential_scan.scan_history(repo)
+            self.assertEqual(report.commits_scanned, 3)
+            self.assertEqual(report.finding_kinds, ("aws_access_key_id",))
+            with patch("sys.stdout") as stdout:
+                self.assertEqual(git_history_credential_scan.main([str(repo)]), 1)
+            self.assertNotIn(secret, "".join(str(call) for call in stdout.write.call_args_list))
+
+    def test_clean_history_passes_and_unavailable_repository_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.git(repo, "init", "-q")
+            self.git(repo, "config", "user.name", "CI Test")
+            self.git(repo, "config", "user.email", "ci@example.invalid")
+            (repo / "safe.txt").write_text("safe\n", encoding="utf-8")
+            self.git(repo, "add", "safe.txt")
+            self.git(repo, "commit", "-qm", "safe")
+            self.assertEqual(git_history_credential_scan.scan_history(repo).finding_kinds, ())
+            self.assertEqual(git_history_credential_scan.main([str(repo)]), 0)
+            with self.assertRaises(git_history_credential_scan.HistoryScanError):
+                git_history_credential_scan.scan_history(repo / "missing")
+
+    def test_high_confidence_token_inside_lockfile_is_not_skipped_or_echoed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            self.git(repo, "init", "-q")
+            self.git(repo, "config", "user.name", "CI Test")
+            self.git(repo, "config", "user.email", "ci@example.invalid")
+            token = "ghp_" + "A" * 36
+            (repo / "package-lock.json").write_text(
+                json.dumps({"resolved": f"https://example.invalid/?token={token}"}),
+                encoding="utf-8",
+            )
+            self.git(repo, "add", "package-lock.json")
+            self.git(repo, "commit", "-qm", "lock fixture")
+            report = git_history_credential_scan.scan_history(repo)
+            self.assertIn("github_token", report.finding_kinds)
+            with patch("sys.stdout") as stdout:
+                self.assertEqual(git_history_credential_scan.main([str(repo)]), 1)
+            self.assertNotIn(token, "".join(str(call) for call in stdout.write.call_args_list))
+
+
+class PublicPostureSmokeTests(unittest.TestCase):
+    SHA = "a" * 40
+    ALBUM_ID = "11111111-1111-4111-8111-111111111111"
+
+    @staticmethod
+    def response(status, body=b"", *, content_type="application/json", cache=""):
+        headers = {"content-type": content_type}
+        if cache:
+            headers["cache-control"] = cache
+        return public_posture_smoke.RawResponse(status, headers, body)
+
+    def config(self):
+        return public_posture_smoke.PostureConfig(
+            "https://site.test",
+            "https://site.test/api",
+            "https://origin.site.test/api",
+            "https://abc.execute-api.us-west-2.amazonaws.com/prod",
+            "media.test",
+            "media-bucket",
+            "us-west-2",
+            1,
+            self.SHA,
+        )
+
+    def requester(self, *, hostile_allow_origin=False):
+        html_headers = {
+            "content-type": "text/html; charset=utf-8",
+            "strict-transport-security": "max-age=31536000",
+            "content-security-policy": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests",
+            "x-content-type-options": "nosniff",
+            "x-frame-options": "DENY",
+            "referrer-policy": "strict-origin-when-cross-origin",
+            "permissions-policy": "camera=(), geolocation=(), microphone=()",
+        }
+        public_headers = {
+            "content-type": "application/json",
+            "cache-control": "public,max-age=60,s-maxage=60",
+        }
+        summary = {
+            "albumId": self.ALBUM_ID,
+            "type": "photo",
+            "title": "Public",
+            "description": "",
+            "category": "Test",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "visibility": "public",
+            "imageCount": 1,
+            "coverImageUrl": "https://media.test/public/raw.jpg",
+            "coverThumbnailUrl": "https://media.test/public/thumb.jpg",
+            "coverBlurhash": "",
+        }
+        detail = {
+            "album": {key: value for key, value in summary.items() if key != "imageCount"},
+            "images": [
+                {
+                    "id": "public-image",
+                    "url": "https://media.test/public/raw.jpg",
+                    "thumbnailUrl": "https://media.test/public/thumb.jpg",
+                    "downloadUrl": "https://media.test/public/raw.jpg",
+                    "previewSrcSet": [
+                        {"width": 640, "url": "https://media.test/public/preview.webp"}
+                    ],
+                }
+            ],
+        }
+
+        def request(url, _timeout, headers, _max_bytes):
+            if url == "https://site.test/":
+                return public_posture_smoke.RawResponse(
+                    200, html_headers, b'<script type="module" src="/assets/app.js"></script>'
+                )
+            if url == "https://site.test/assets/app.js":
+                return public_posture_smoke.RawResponse(200, {"content-type": "text/javascript"}, self.SHA.encode())
+            if url.startswith("https://site.test/") and not url.startswith("https://site.test/api"):
+                return public_posture_smoke.RawResponse(200, html_headers, b"<main>safe</main>")
+            if url.startswith("https://origin.site.test/api/public/albums"):
+                return self.response(403, b'{"error":"Forbidden"}', cache="private,no-store")
+            if url.startswith("https://abc.execute-api.us-west-2.amazonaws.com/prod/public/albums"):
+                return self.response(404, b'{"message":"Not Found"}')
+            if url == "https://site.test/api/users":
+                return self.response(401, b'{"error":"Unauthorized"}', cache="private,no-store")
+            if url.startswith("https://site.test/api/public/albums?"):
+                response_headers = dict(public_headers)
+                if hostile_allow_origin and headers and headers.get("Origin"):
+                    response_headers["access-control-allow-origin"] = headers["Origin"]
+                return public_posture_smoke.RawResponse(
+                    200, response_headers, json.dumps({"items": [summary], "nextCursor": None}).encode()
+                )
+            if url == f"https://site.test/api/public/albums/{self.ALBUM_ID}":
+                return public_posture_smoke.RawResponse(200, public_headers, json.dumps(detail).encode())
+            if url.startswith("https://media.test/"):
+                return public_posture_smoke.RawResponse(206, {"content-type": "image/webp"}, b"x")
+            if url == "https://media-bucket.s3.us-west-2.amazonaws.com/public/thumb.jpg":
+                return self.response(403, b"denied", content_type="application/xml")
+            raise AssertionError(f"unexpected test URL: {url}")
+
+        return request
+
+    def test_complete_public_posture_contract_passes_with_aggregate_metrics(self):
+        metrics = public_posture_smoke.run_posture(
+            self.config(), requester=self.requester()
+        )
+        self.assertEqual(metrics["albumCount"], 1)
+        self.assertEqual(metrics["privacyRouteChecks"], 4)
+        self.assertEqual(metrics["mediaAuthorizationChecks"], 2)
+
+    def test_hostile_cors_and_invalid_config_fail_closed(self):
+        with self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke.run_posture(
+                self.config(), requester=self.requester(hostile_allow_origin=True)
+            )
+
+    def test_execute_api_denial_must_be_the_exact_disabled_endpoint_response(self):
+        underlying = self.requester()
+
+        def reachable_execute_api(url, timeout, headers, max_bytes):
+            if url.startswith("https://abc.execute-api.us-west-2.amazonaws.com/prod/public/albums"):
+                return self.response(403, b'{"message":"Forbidden"}')
+            return underlying(url, timeout, headers, max_bytes)
+
+        with self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke.run_posture(
+                self.config(), requester=reachable_execute_api
+            )
+
+    def test_public_posture_configuration_rejects_each_unsafe_boundary(self):
+        config = self.config()
+        unsafe_variants = (
+            replace(config, api_base_url="https://other.test/api"),
+            replace(config, api_base_url="https://site.test/not-api"),
+            replace(config, api_origin_url="https://origin.site.test/not-api"),
+            replace(config, execute_api_url="https://example.test/prod"),
+            replace(config, execute_api_url="https://abc.execute-api.us-west-2.amazonaws.com"),
+            replace(config, execute_api_url="https://abc.execute-api.us-west-2.amazonaws.com/prod/extra"),
+            replace(config, media_domain="media.test/path"),
+            replace(config, media_bucket_name="Invalid_Bucket"),
+            replace(config, aws_region="us-west"),
+            replace(config, expected_release_sha="not-a-sha"),
+            replace(config, expected_public_album_count=0),
+            replace(config, expected_public_album_count=True),
+            replace(config, timeout=0),
+        )
+        for unsafe in unsafe_variants:
+            with self.subTest(config=unsafe), self.assertRaises(
+                public_posture_smoke.PostureError
+            ):
+                public_posture_smoke.validate_config(unsafe)
+        with self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke.validate_config(
+                self.config().__class__(
+                    "http://site.test",
+                    self.config().api_base_url,
+                    self.config().api_origin_url,
+                    self.config().execute_api_url,
+                    self.config().media_domain,
+                    self.config().media_bucket_name,
+                    self.config().aws_region,
+                    self.config().expected_public_album_count,
+                    self.config().expected_release_sha,
+                )
+            )
+
+
 class CliTests(unittest.TestCase):
     def test_release_guard_subcommands_and_redacted_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -525,7 +1022,16 @@ class CliTests(unittest.TestCase):
 
             pages = root / "pages.json"
             pages.write_text(json.dumps([{"Changes": [change()]}]), encoding="utf-8")
-            self.assertEqual(release_guard.main(["gate-change-set", str(pages)]), 0)
+            intent = root / "intent.json"
+            intent.write_text(
+                json.dumps(ReleaseIntentTests.intent()), encoding="utf-8"
+            )
+            self.assertEqual(
+                release_guard.main(
+                    ["gate-change-set", str(pages), "--intent", str(intent)]
+                ),
+                0,
+            )
 
             invalid = root / "invalid.json"
             invalid.write_text("not-json", encoding="utf-8")
@@ -567,6 +1073,7 @@ class WorkflowPolicyTests(unittest.TestCase):
                 "frontend_deploy.sh",
                 "public_smoke.sh",
                 "wait_for_drift.sh",
+                "audit_stack_drift.sh",
             )
         ]
         for path in helper_paths:
@@ -578,6 +1085,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         frontend = helper_paths[3].read_text(encoding="utf-8")
         smoke = helper_paths[4].read_text(encoding="utf-8")
         drift = helper_paths[5].read_text(encoding="utf-8")
+        multi_drift = helper_paths[6].read_text(encoding="utf-8")
         self.assertIn("detect-stack-drift", plan)
         self.assertNotIn("wait stack-drift-detection-complete", plan)
         self.assertIn("DETECTION_IN_PROGRESS", drift)
@@ -587,6 +1095,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("AVAILABLE", collect)
         self.assertIn("ReleaseSha", collect)
         self.assertIn("gate-change-set", collect)
+        self.assertIn("release_intent.json", collect)
         self.assertIn("previous-parameters", plan)
         self.assertIn("--release-sha", plan)
         self.assertIn("ARTIFACT_KMS_KEY_ARN", plan)
@@ -604,12 +1113,23 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("get-public-access-block", frontend)
         self.assertIn("OriginAccessControlId", frontend)
         self.assertLess(frontend.index('"$root/index.html"'), frontend.index("create-invalidation"))
-        self.assertNotIn("--paths '/*'", frontend)
-        self.assertIn("'/index.html'", frontend)
-        self.assertIn("'/images/heroes/*'", frontend)
+        self.assertIn("--paths '/*'", frontend)
         self.assertIn('if [[ "$api" == "/api" ]]', smoke)
         self.assertIn('api="${site}${api}"', smoke)
         self.assertIn('elif [[ "$api" != https://* ]]', smoke)
+        self.assertIn("public_posture_smoke.py", smoke)
+        self.assertIn("audit_stacks.json", multi_drift)
+        self.assertIn("detect-stack-drift", multi_drift)
+
+    def test_scheduled_workflow_runs_history_posture_and_versioned_multi_stack_drift(self):
+        scheduled = (ROOT / ".github/workflows/scheduled-security.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("fetch-depth: 0", scheduled)
+        self.assertIn("git_history_credential_scan.py", scheduled)
+        self.assertIn("public_smoke.sh", scheduled)
+        self.assertIn("audit_stack_drift.sh", scheduled)
+        self.assertNotIn("cloudformation execute", scheduled.lower())
 
 
 if __name__ == "__main__":

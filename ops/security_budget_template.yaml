@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Guarded monthly cost budget for paid photography security and observability
+  services. It reuses an explicitly supplied same-account SNS topic and never
+  creates an email address, endpoint, SNS topic, or subscription.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    MinLength: 1
+    MaxLength: 20
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
+  ExpectedAccountId:
+    Type: String
+    AllowedPattern: '^[0-9]{12}$'
+    Description: Exact caller account confirmed by the read-only preflight.
+  BudgetDeploymentMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-absent]
+  MonthlyLimitUsd:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 100000
+    Description: Owner-approved monthly USD limit; zero is valid only in skip mode.
+  SecurityNotificationTopicArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:us-west-2:[0-9]{12}:ian-photography-security-[a-z0-9-]+)$'
+    Description: Existing topic with confirmed responders; no subscriber is created here.
+
+Rules:
+  ExpectedAccountMustMatch:
+    Assertions:
+      - Assert: !Equals [!Ref ExpectedAccountId, !Ref AWS::AccountId]
+        AssertDescription: ExpectedAccountId must equal the deployment account.
+  MustDeployInHomeRegion:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, us-west-2]
+        AssertDescription: The account budget stack is managed from us-west-2.
+  CreationRequiresApprovedLimitAndTopic:
+    RuleCondition: !Equals [!Ref BudgetDeploymentMode, create-confirmed-absent]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref MonthlyLimitUsd, 0]]
+        AssertDescription: An owner-approved positive monthly limit is required.
+      - Assert: !Not [!Equals [!Ref SecurityNotificationTopicArn, '']]
+        AssertDescription: An existing reviewed notification topic is required.
+      - Assert: !Equals
+          - !Ref SecurityNotificationTopicArn
+          - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
+        AssertDescription: The notification topic must exactly match this account, Region, and stage.
+
+Conditions:
+  CreateBudget: !Equals [!Ref BudgetDeploymentMode, create-confirmed-absent]
+
+Resources:
+  MonthlySecurityAndObservabilityBudget:
+    Type: AWS::Budgets::Budget
+    Condition: CreateBudget
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Budget:
+        BudgetName: !Sub 'ian-photography-monthly-${Stage}'
+        BudgetLimit:
+          Amount: !Ref MonthlyLimitUsd
+          Unit: USD
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        CostTypes:
+          IncludeCredit: true
+          IncludeDiscount: true
+          IncludeOtherSubscription: true
+          IncludeRecurring: true
+          IncludeRefund: true
+          IncludeSubscription: true
+          IncludeSupport: true
+          IncludeTax: true
+          IncludeUpfront: true
+          UseAmortized: false
+          UseBlended: false
+      NotificationsWithSubscribers:
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref SecurityNotificationTopicArn
+              SubscriptionType: SNS
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: FORECASTED
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref SecurityNotificationTopicArn
+              SubscriptionType: SNS
+      ResourceTags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  BudgetWasCreated:
+    Value: !If [CreateBudget, 'true', 'false']
+  BudgetName:
+    Condition: CreateBudget
+    Value: !Ref MonthlySecurityAndObservabilityBudget

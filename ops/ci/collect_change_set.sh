@@ -5,7 +5,10 @@ set -euo pipefail
 : "${CHANGE_SET_ID:?CHANGE_SET_ID is required}"
 : "${EXPECTED_STACK_NAME:?EXPECTED_STACK_NAME is required}"
 : "${EXPECTED_RELEASE_SHA:?EXPECTED_RELEASE_SHA is required}"
+: "${EXPECTED_TEMPLATE_SHA256:?EXPECTED_TEMPLATE_SHA256 is required}"
+: "${EXPECTED_STACK_PARAMETERS_PATH:?EXPECTED_STACK_PARAMETERS_PATH is required}"
 : "${CHANGE_PAGES_PATH:?CHANGE_PAGES_PATH is required}"
+: "${RELEASE_INTENT_PATH:=ops/ci/release_intent.json}"
 
 status="$(aws cloudformation describe-change-set \
   --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
@@ -34,10 +37,20 @@ if [[ "$actual_id" != "$CHANGE_SET_ID" || "$actual_stack" != "$EXPECTED_STACK_NA
   echo "Change set identity does not match the guarded release." >&2
   exit 2
 fi
-if [[ "$description" != "Attested GitHub release ${EXPECTED_RELEASE_SHA}" || "$release_sha" != "$EXPECTED_RELEASE_SHA" ]]; then
+if [[ ! "$EXPECTED_TEMPLATE_SHA256" =~ ^[0-9a-f]{64}$ \
+  || "$description" != "Attested GitHub release ${EXPECTED_RELEASE_SHA} template ${EXPECTED_TEMPLATE_SHA256}" \
+  || "$release_sha" != "$EXPECTED_RELEASE_SHA" ]]; then
   echo "Change set revision does not match the tested artifact." >&2
   exit 2
 fi
+
+parameters_path="$(dirname "$CHANGE_PAGES_PATH")/change-set-parameters.json"
+aws cloudformation describe-change-set \
+  --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
+  --query Parameters --output json > "$parameters_path"
+python3 ops/ci/release_guard.py preserved-parameters \
+  "$EXPECTED_STACK_PARAMETERS_PATH" "$parameters_path" \
+  --release-sha "$EXPECTED_RELEASE_SHA"
 
 mkdir -p "$(dirname "$CHANGE_PAGES_PATH")"
 echo '[]' > "$CHANGE_PAGES_PATH"
@@ -54,4 +67,6 @@ while true; do
   token="$(jq -r '.NextToken // empty' <<< "$page")"
   [[ -n "$token" ]] || break
 done
-python3 ops/ci/release_guard.py gate-change-set "$CHANGE_PAGES_PATH"
+python3 ops/ci/release_guard.py gate-change-set \
+  "$CHANGE_PAGES_PATH" \
+  --intent "$RELEASE_INTENT_PATH"

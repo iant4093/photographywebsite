@@ -26,10 +26,21 @@ are **dry-run by default** and require multiple exact production guards to apply
   restore gate, and retained audit dependency chain are documented in
   [`SECURITY_ACCOUNT_BASELINE.md`](SECURITY_ACCOUNT_BASELINE.md). The unsafe
   all-in-one security template was removed.
+- `regional_security_rollout.py` inventories GuardDuty and Security Hub in
+  every enabled Region and, only with exact account/Region/digest guards,
+  prepares non-executing CloudFormation change sets for owner review.
+- `security_budget_template.yaml`, `security_budget_preflight.py`, and
+  [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md) define a retained, alert-only
+  account budget. No budget is created until an owner approves the amount and
+  two human notification destinations are confirmed.
 - Migration helpers cover existing album ownership, GSIs, media visibility
   tags, media-cache invalidation, and Lambda log retention.
 - `SECURITY_OBSERVABILITY.md` defines the structured audit contract, centralized
   Lambda log group, alert ownership, privacy rules, triage, and rollback steps.
+- [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) and `alarm_registry.json` map every
+  declared application, WAF, observability, account-security, backup failure/
+  freshness, and account-budget signal to a privacy-safe runbook and make
+  missing human ownership explicit.
 - `observability_template.yaml`, `observability_preflight.py`, and
   [`OBSERVABILITY.md`](OBSERVABILITY.md) define the retained, privacy-controlled
   RUM, paid CloudFront metric, public Synthetics, dashboard, and alarm rollout.
@@ -486,10 +497,12 @@ active chain of trust.
 
 ## Logs, alarms, and routine operations
 
-The SAM stack creates privacy-minimized API access logs, media CloudFront logs,
-an encrypted async-failure queue, and alarms for API 5xx, API p95 latency, DLQ
-depth, and login throttling. No request/response bodies, tokens, email addresses,
-album IDs, share codes, or query strings should be added to log formats.
+The SAM stack creates privacy-minimized API access logs, media origin/CDN access
+logs, an encrypted async-failure queue, and alarms for API 5xx, API p95 latency,
+DLQ depth, and login throttling. The staged account-security and observability
+stacks add retained audit logs and privacy-safe detection alarms. No request or
+response bodies, tokens, email addresses, album IDs, share codes, object keys,
+or query strings should be added to log or notification formats.
 
 SAM-created Lambda log groups already in production need an explicit retention
 update because Lambda created them outside CloudFormation. Preview, then apply:
@@ -503,9 +516,15 @@ python3 ops/set_lambda_log_retention.py \
   --confirm-stack-name STACK_NAME
 ```
 
-Subscribe a monitored endpoint to the SNS alarm topic after deployment. Alarm
-delivery is not useful until the subscription is confirmed. Periodically test
-DLQ replay procedures with synthetic, non-sensitive payloads; never blindly
+Use `--include-synthetics` only for the stack that owns a Synthetics canary. The
+helper discovers the exact stack-owned canary Lambda prefix and dormant
+stack-owned Lambda groups; it does not match arbitrary account log groups.
+
+The alarm registry currently records notification delivery as blocked: the
+primary owner, backup owner, and two confirmed human destinations are still
+unassigned. Do not call the route operational until those owners confirm both
+destinations and a controlled privacy-safe test alarm succeeds. Periodically
+test DLQ replay procedures with synthetic, non-sensitive payloads; never blindly
 redrive old messages into production. Review log and media-log retention against
 traffic, privacy, and cost after 30 days.
 
@@ -513,19 +532,22 @@ traffic, privacy, and cost after 30 days.
 
 - Route 53 DNSSEC is prepared but deferred until the registrar ceremony is
   scheduled. Its required customer-managed KMS key has ongoing key/request cost.
-- AWS WAF managed rules are deferred for the initial release. Turnstile, strict
-  input validation, API/Lambda throttles, reserved concurrency, and atomic
-  per-action rate limits provide the first abuse boundary without a fixed WAF
-  monthly/rule/request charge. Revisit WAF if telemetry shows sustained hostile
-  traffic or the site becomes materially business-critical.
-- CloudTrail S3/Lambda data events, GuardDuty S3 protection, Security Hub, and
-  centralized multi-account log archival are useful paid controls but are not
-  enabled by this single-site stack. Reassess them alongside traffic, data
-  sensitivity, incident-response staffing, and budget.
+- The retained CloudFront WAF rollout is source controlled in COUNT mode with
+  request sampling disabled and sensitive fields redacted. Moving an individual
+  rule to BLOCK remains deferred until representative traffic evidence and a
+  documented rollback threshold are reviewed.
+- Guarded CloudTrail, Config, GuardDuty, Security Hub, Access Analyzer, Inspector,
+  and AWS Backup rollouts are source controlled separately from the application
+  stack. They are paid operational decisions, not proof of live enablement. Use
+  the complete singleton/Region inventory and reviewed change sets in
+  `SECURITY_ACCOUNT_BASELINE.md`; centralized multi-account archival remains a
+  future organization-level decision.
 - CloudFront standard logs, CloudWatch logs/metrics/alarms, Secrets Manager,
   DynamoDB PITR, S3 version storage, invalidations above the free allowance, and
-  retained backup/log objects all have usage or storage costs. Budgets and cost
-  anomaly alerts should be configured at the AWS account level.
+  retained backup/log objects all have usage or storage costs. The account-budget
+  template remains intentionally blocked until two human responders and an
+  owner-approved monthly amount are supplied; it never creates a subscriber or
+  automatically disables a security control.
 
 ## Post-release checks
 

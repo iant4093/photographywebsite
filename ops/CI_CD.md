@@ -33,31 +33,46 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   `GoogleDriveBackupFunction/googleapiclient/discovery_cache/documents/`
   `iamcredentials.v1.json` path, and its service identity fields must match the
   public IAM Credentials v1 schema. Directory enumeration and file reads fail
-  closed. The tracked-source grep remains stricter and rejects even partial
-  uppercase standard private-key markers plus long-term `AKIA` and temporary
-  `ASIA` access-key IDs before packaging.
+  closed. Every PR and `main` release also scans all reachable, size-bounded Git
+  blobs without printing paths or values. It covers private keys, AWS IDs,
+  high-confidence GitHub/Google/Slack/Stripe tokens, and credentialed URLs,
+  including lockfiles; the weekly run repeats the same full-history proof.
 - A push to `main` repeats that exact reusable quality gate, builds the SAM and
   frontend artifacts once, checksums them, attests them, and deploys those same
   bytes. Deployment never rebuilds source.
 - SAM code and the packaged CloudFormation template are uploaded beneath the
-  exact release SHA with the bootstrap KMS key. Planning uses the private S3
-  template URL so templates above CloudFormation's inline-size limit still use
-  the tested, immutable release prefix.
+  exact release SHA plus unique run/attempt with the bootstrap KMS key. Every
+  packaged `CodeUri` is rewritten to its exact S3 `Version`, the template is
+  uploaded with `If-None-Match`, and its versioned URL plus SHA-256 is bound to
+  the guarded change set.
 - Backend planning detects CloudFormation drift, retains every current stack
   parameter through `UsePreviousValue`, creates a non-executing change set, and
   rejects removals, replacements, recreation, protected-resource changes, and
-  migration/security invariant changes.
+  migration/security invariant changes. Execution independently requires the
+  change set to retain `UsePreviousValue` for every live parameter (including
+  `NoEcho` parameters) while only `ReleaseSha` receives an exact new value, and
+  rechecks security/migration invariants after the update. The versioned
+  `ops/ci/release_intent.json` also requires every observed logical ID,
+  resource type, action, and CloudFormation property path to match an exact
+  reviewed rule. Wildcards, duplicate rules, unknown properties, and
+  unexplained detail-free changes fail closed.
 - Backend execution uses a separate role and must reach `UPDATE_COMPLETE` before
   frontend deployment. Empty backend changes are an explicit safe no-op.
 - Frontend deployment never deletes S3 objects. Fingerprinted assets receive
   immutable caching, other static files receive short caching, `index.html` is
-  uploaded last with no-cache metadata, and the CloudFront invalidation is
-  awaited.
-- A manual workflow can only redeploy artifacts from a successful `main`
-  production run whose exact SHA remains in `main` history. It cannot build or
-  deploy arbitrary workflow-dispatch code.
-- The weekly workflow runs the complete quality suite and detects production
-  drift using a read-only audit role. It never remediates drift.
+  uploaded last with no-cache metadata, and a full `/*` CloudFront invalidation
+  is awaited. This covers SPA HTML plus every non-fingerprinted public path,
+  including `/.well-known/security.txt`.
+- A manual workflow can only redeploy independently attested artifacts from a
+  successful `main` production workflow path whose exact SHA remains in `main`
+  history. Guard, deploy, and smoke scripts stay at the current trusted control
+  SHA; the selected historical SHA is never executed as CI code.
+- The weekly workflow runs the complete quality suite, scans every reachable
+  Git blob without printing values or paths, runs the credential-free public
+  posture smoke, and detects drift for the versioned application, CI bootstrap,
+  security, WAF, backup, and observability stack inventory in `us-west-2`,
+  `us-east-1`, and `us-east-2`, plus exact secret-redacted frontend edge and
+  bucket posture. It never remediates drift.
 
 ## Required GitHub settings
 
@@ -81,8 +96,12 @@ non-secret variables at repository or environment scope as appropriate:
 | `FRONTEND_BUCKET` | Exact private/OAC frontend bucket. |
 | `FRONTEND_DISTRIBUTION_ID` | Exact frontend distribution. |
 | `SITE_URL` | Canonical HTTPS site URL. |
+| `API_ORIGIN_URL` | Regional custom API origin including `/api`; used only for the expected anonymous 403 bypass test. |
+| `EXECUTE_API_URL` | Default execute-api stage URL; used only to prove the endpoint remains disabled. |
 | `VITE_API_BASE_URL` | Public production API base; use same-origin `/api` after front-door cutover. |
 | `VITE_CLOUDFRONT_DOMAIN` | Public media CDN hostname. |
+| `MEDIA_BUCKET_NAME` | Exact media bucket name; smoke reuses one public CDN object's path to prove the corresponding direct regional S3 request remains denied. |
+| `EXPECTED_PUBLIC_ALBUM_COUNT` | Reviewed positive production catalog count; update after an intentional public-album addition or removal. |
 | `VITE_COGNITO_USER_POOL_ID` | Public Cognito pool identifier. |
 | `VITE_COGNITO_CLIENT_ID` | Public Cognito app-client identifier. |
 | `VITE_TURNSTILE_SITE_KEY` | Public Turnstile site key, never the Turnstile secret. |
@@ -95,12 +114,32 @@ None of these variables is a credential. Do not add AWS access keys, Cognito
 tokens, Turnstile secrets, provider secrets, CloudFormation parameter values,
 or application data to GitHub.
 
+`SITE_URL`, `API_ORIGIN_URL`, `EXECUTE_API_URL`, `MEDIA_BUCKET_NAME`,
+`EXPECTED_PUBLIC_ALBUM_COUNT`, and all
+public Vite build variables must be repository-scoped because reusable quality
+and credential-free smoke jobs do not attach a GitHub environment. Role ARNs
+and release-storage identifiers should remain scoped to their matching
+environment.
+
 The four RUM variables are an all-or-none optional set until the separately
 reviewed observability stack is deployed. Test and pre-deployment builds do not
 require them. The reusable quality workflow always injects the exact tested
 `github.sha` as `VITE_RELEASE_SHA`; do not create a mutable GitHub variable for
 the release SHA. See [`OBSERVABILITY.md`](OBSERVABILITY.md) for privacy, cost,
 activation, and rollback controls.
+
+The public posture helper paginates the complete anonymous catalog with a hard
+bound, requires its reviewed aggregate count, validates DTO allowlists and CDN-only media URLs, samples album details
+and one ranged CDN object, proves direct S3 remains denied, requires the custom
+origin and execute-api bypasses to stay closed (including API Gateway's exact
+JSON 404 response for its disabled default endpoint), checks hostile-origin CORS and
+the protected-user 401 boundary, and checks sensitive SPA routes under DNT/GPC
+headers for security headers, cookies, and eager RUM references. It emits only
+aggregate counts. The protected response must never show cache-hit evidence;
+when it carries a cache directive, that directive must be `private, no-store`.
+Source unit tests remain the authoritative proof that browser
+GPC/DNT and sensitive-route gates prevent RUM SDK initialization before a
+network import.
 
 ## OIDC trust and permissions
 
@@ -118,8 +157,65 @@ repository, organization, branch, or tag wildcard. The production execution
 role must not create arbitrary change sets; the plan role must not execute one.
 The frontend role must not have `s3:DeleteObject`, bucket-policy, public-access,
 distribution-update, application-data, or secret-value permissions. The audit
-role must not read log events, S3 object bodies, DynamoDB items, Cognito users,
-or secrets.
+role has no `secretsmanager:GetSecretValue`, `s3:GetObject`, `s3:GetObjectAcl`,
+`dynamodb:GetItem`, `kms:Decrypt`, log-event, Cognito-user, or detailed drift
+property permission. AWS requires CloudFormation drift detection to have each
+selected resource provider's read-handler permissions. Metadata-only provider
+calls are allowed only when `aws:CalledVia=cloudformation.amazonaws.com`, so
+the GitHub session cannot call them directly, and the scheduled script emits
+only aggregate detection status.
+
+The notification stack's unencrypted-filter `AWS::Lambda::EventSourceMapping`
+adds only `lambda:GetEventSourceMapping` and `lambda:ListTags` to that called-via
+allowlist; its source declares neither `KmsKeyArn` nor `FilterCriteria`, so the
+generic provider's `kms:Decrypt` is still denied. The backup freshness
+`AWS::Lambda::Permission` adds only called-via `lambda:GetPolicy`. Tests bind
+these exceptions to the exact source properties and continue to forbid direct
+Lambda invocation, queue message reads, and KMS decryption.
+
+The CloudFormation RUM provider declares DynamoDB item and S3 object reads even
+when JavaScript source-map deobfuscation is disabled. `RumAppMonitor` is
+therefore excluded from the observability stack's exact logical-resource drift
+filter. The audit instead uses resource-scoped `rum:GetAppMonitor`—never
+`rum:GetAppMonitorData`—to verify its privacy, telemetry, source-map, and
+sensitive-route exclusion configuration. Tests require the filter to equal all
+observability template resources except that one documented exception, so a new
+resource cannot silently escape review.
+
+The CloudFormation resources are the exact entries in
+`ops/ci/audit_stacks.json`; cross-region entries are the CloudFront WAF stack in
+`us-east-1` and retained backup replica in `us-east-2`, and drift-status polling
+is region-conditioned to those three reviewed regions. A change to the inventory and its exact audit-role ARN
+list must be reviewed and deployed together before the scheduled job is enabled.
+If a reviewed stack adds a CloudFormation resource type, compare that type's
+current registry read-handler permissions with
+`CloudFormationForwardAccessReads`, validate the rendered identity policy with
+IAM Access Analyzer, and add only the missing metadata called-via actions. If a
+provider requires a data-plane permission, filter that logical resource and add
+a resource-scoped configuration-only posture check instead of broadening the
+audit role.
+
+The initial permission derivation was checked against the live stack resource
+types and their current CloudFormation registry `read` handlers. The application
+stack already has its dedicated CloudFormation execution role, so application-
+only API Gateway, Cognito, DynamoDB, Secrets Manager, and edge-provider reads do
+not belong to the GitHub audit role. In the retained stacks without a service
+role, the generic Lambda handler's `kms:Decrypt` is unnecessary because the
+configuration-delivery function has no `KmsKeyArn`; the EventBridge handler's
+`iam:PassRole` is unnecessary because both exact targets have no `RoleArn`.
+Likewise, the current S3 bucket handler does not declare `s3:GetBucketAcl`, and
+none of the exact buckets defines `AccessControl`, so that action is not granted.
+The remaining called-via list exactly matches the metadata handler union after
+those property-specific removals and the documented RUM filter.
+The non-CloudFormation frontend edge contract is
+`ops/ci/frontend_edge_contract.json`. Its hashes cover the complete distribution
+configuration and exact bucket public-access, encryption, ownership, versioning,
+and policy-status documents; only the origin-verification header value is
+replaced with a fixed presence marker before hashing.
+After this source update, deploy the reviewed, non-executing bootstrap stack
+UPDATE change set before enabling or manually running the scheduled workflow;
+the existing audit role does not gain the new exact stack ARNs until that update
+is executed.
 
 The CloudFormation execution role is scoped to resources owned by the
 application stack and explicitly denies deletion of protected tables, buckets,
@@ -222,6 +318,10 @@ and `production-audit` in `iant4093/photographywebsite`, restrict all three to
 `main`, and require approval for `production` before enabling release jobs.
 Environment-based OIDC subjects do not contain a branch ref, so this GitHub
 environment protection is the enforcement point for the default branch.
+The workflows also fail when `GITHUB_REF` is not `refs/heads/main`, but that is
+only defense in depth because untrusted workflow source could remove its own
+check. Do not push while a required environment is absent or permits arbitrary
+deployment branches.
 
 The execution identity policy deliberately has no `AdministratorAccess` and no
 wildcard actions. The release KMS key policy uses the standard account-root
@@ -288,7 +388,8 @@ Enable GitHub secret scanning and push protection.
 
 Do not enable automatic production deployment until all of these are true:
 
-1. Frontend, backend, and ops line and branch gates independently pass at 80%.
+1. Frontend, backend, ops, and the separately packaged Node preview worker line
+   and branch gates independently pass at 80%.
 2. A bounded production drift audit reports `IN_SYNC` and all direct changes
    have been reconciled into reviewed infrastructure ownership.
 3. IAM Access Analyzer validates all four OIDC role policies and the execution
@@ -305,6 +406,7 @@ Run these before opening a pull request:
 npm ci
 npm run verify
 npm run test:coverage
+npm run test:coverage --prefix backend/preview_worker
 python3 -m venv .venv-ci
 .venv-ci/bin/pip install -r backend/requirements-dev.txt
 (cd backend && PYTHONPATH=functions ../.venv-ci/bin/coverage run --rcfile=.coveragerc -m unittest discover -s tests -p 'test_*.py')
@@ -317,10 +419,31 @@ PYTHONPATH=. .venv-ci/bin/coverage run --rcfile=ops/.coveragerc -m unittest disc
 python3 ops/ci/artifact_budget.py --output evidence/frontend-artifact-budget.json frontend --root dist
 python3 ops/ci/artifact_budget.py --output evidence/backend-artifact-budget.json sam --build-root backend/.aws-sam/build
 python3 ops/ci/workflow_policy.py .github/workflows/*.yml
+python3 ops/ci/git_history_credential_scan.py .
 ```
 
 Coverage output is transient and ignored. Never commit reports containing test
 fixtures or runner paths.
+
+## Release-intent maintenance
+
+`ops/ci/release_intent.json` is part of the production authorization boundary,
+not generated evidence. Its initial rules allow only `Code` and `Environment`
+modifications for the exact current Lambda logical IDs. If a reviewed release
+intentionally changes another unprotected resource or property, add the exact
+logical ID, CloudFormation resource type, action, and property paths in the same
+pull request. A new resource may set `allowNoDetails` only when its exact
+`Action=Add` change set legitimately contains no property detail; never use that
+flag to permit an unexplained modification. Protected resource types, removals,
+replacements, and recreations remain blocked even if an intent rule names them.
+In particular, do not add `RateLimitTable` PITR to the persistent release
+intent: its one-time `PointInTimeRecoverySpecification` update must use the
+separately reviewed protected change-set workflow before CI is enabled, after
+which ordinary CI plans must observe no DynamoDB table change.
+Because CloudFormation exposes Lambda environment changes only at top-level
+`Environment`, `ops/ci/template_environment_policy.json` additionally pins the
+exact source and SAM-built Environment-block digests. Intentional variable
+changes must update that policy in the same reviewed pull request.
 
 ## Artifact budget maintenance
 

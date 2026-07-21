@@ -17,6 +17,7 @@ if command -v cfn-lint >/dev/null 2>&1; then
     ops/security_managed_services_template.yaml \
     ops/security_backup_template.yaml \
     ops/security_backup_replica_template.yaml \
+    ops/security_budget_template.yaml \
     ops/observability_template.yaml \
     ops/waf_front_door_template.yaml
 else
@@ -29,6 +30,7 @@ else
     ops/security_managed_services_template.yaml \
     ops/security_backup_template.yaml \
     ops/security_backup_replica_template.yaml \
+    ops/security_budget_template.yaml \
     ops/observability_template.yaml \
     ops/waf_front_door_template.yaml; do
     sam validate --lint --template-file "$template"

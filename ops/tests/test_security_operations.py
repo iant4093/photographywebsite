@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import datetime
+import json
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+import textwrap
+import types
 import unittest
 from unittest.mock import patch
 
@@ -29,6 +34,7 @@ SECURITY_TEMPLATES = (
     OPS / "security_managed_services_template.yaml",
     OPS / "security_backup_template.yaml",
     OPS / "security_backup_replica_template.yaml",
+    OPS / "security_budget_template.yaml",
 )
 
 
@@ -40,6 +46,17 @@ def resource_block(template: str, logical_id: str) -> str:
     if not match:
         raise AssertionError(f"Missing resource {logical_id}")
     return match.group("body")
+
+
+def inline_python(template: str, logical_id: str) -> str:
+    block = resource_block(template, logical_id)
+    match = re.search(
+        r"(?ms)^      Code:\n        ZipFile: \|\n(?P<code>.*?)^      Tags:\n",
+        block,
+    )
+    if not match:
+        raise AssertionError(f"Missing inline code for {logical_id}")
+    return textwrap.dedent(match.group("code"))
 
 
 class SecurityTemplateTests(unittest.TestCase):
@@ -113,22 +130,67 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("AWS::KMS::Key", NOTIFICATIONS)
         self.assertIn("events.amazonaws.com", NOTIFICATIONS)
         self.assertIn("cloudwatch.amazonaws.com", NOTIFICATIONS)
-        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 2)
-        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 2)
+        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 4)
+        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 4)
         self.assertIn("SqsManagedSseEnabled: true", NOTIFICATIONS)
         self.assertIn("MetricName: ApproximateNumberOfMessagesVisible", NOTIFICATIONS)
         self.assertIn("AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'", NOTIFICATIONS)
         self.assertIn("MetricName: KmsSecurityConfigurationChange", NOTIFICATIONS)
         self.assertIn("MetricName: SecurityRoutingConfigurationChange", NOTIFICATIONS)
-        eventbridge_policy = NOTIFICATIONS.split(
-            "- Sid: AllowEventBridgeSecurityFindings", 1
-        )[1].split("- Sid: AllowExactCloudWatchAlarms", 1)[0]
-        self.assertNotIn("Condition:", eventbridge_policy)
+        self.assertIn("MetricName: SecurityServiceConfigurationChange", NOTIFICATIONS)
+        self.assertIn("MetricName: DataProtectionConfigurationChange", NOTIFICATIONS)
+        self.assertIn("MetricName: InfrastructureProtectionConfigurationChange", NOTIFICATIONS)
+        for logical_id in (
+            "DetectionTopologyChangeMetric",
+            "ManagedSecurityOrganizationChangeMetric",
+            "BackupProtectionChangeMetric",
+            "DataRetentionAndOwnershipChangeMetric",
+            "InfrastructureExecutionChangeMetric",
+        ):
+            self.assertIn("Type: AWS::Logs::MetricFilter", resource_block(NOTIFICATIONS, logical_id))
+        for event_name in (
+            "UpdateFindingAggregator",
+            "PutConfigurationRecorder",
+            "DeleteBucketEncryption",
+            "PutBucketPublicAccessBlock",
+            "DeleteBackupPlan",
+            "PutBackupVaultAccessPolicy",
+            "UpdateRecoveryPointLifecycle",
+            "BatchUpdateStandardsControlAssociations",
+            "UpdateOrganizationConfiguration",
+            "DeleteBucketOwnershipControls",
+            "UpdateTimeToLive",
+            "ExecuteChangeSet",
+            "DisassociateWebACL",
+        ):
+            self.assertIn(f'eventName = "{event_name}"', NOTIFICATIONS)
+        self.assertIn("Service: budgets.amazonaws.com", NOTIFICATIONS)
+        self.assertIn("budget/ian-photography-monthly-${Stage}", NOTIFICATIONS)
+        self.assertIn('"eventName":"guardduty.finding.high"', NOTIFICATIONS)
+        self.assertIn('"eventName":"securityhub.finding.high"', NOTIFICATIONS)
+        for logical_id in (
+            "GuardDutyFindingRule",
+            "GuardDutyCriticalFindingRule",
+            "SecurityHubFindingRule",
+            "SecurityHubCriticalFindingRule",
+        ):
+            block = resource_block(NOTIFICATIONS, logical_id)
+            self.assertIn("Input: !Sub >-", block)
+            self.assertIn("Arn: !GetAtt SecuritySignalQueue.Arn", block)
+        topic_policy = resource_block(NOTIFICATIONS, "SecurityNotificationsPolicy")
+        self.assertNotIn("AllowEventBridgeSecurityFindings", topic_policy)
+        queue_policy = resource_block(NOTIFICATIONS, "SecuritySignalQueuePolicy")
+        self.assertIn("aws:SourceAccount: !Ref AWS::AccountId", queue_policy)
+        self.assertIn("aws:SourceArn:", queue_policy)
+        key = resource_block(NOTIFICATIONS, "SecurityNotificationKey")
+        self.assertIn("kms:EncryptionContext:aws:sns:topicArn", key)
+        self.assertIn("kms:ViaService", key)
+        self.assertIn('"severity":"critical"', NOTIFICATIONS)
         self.assertIn("ArnEquals:\n                aws:SourceArn:", NOTIFICATIONS)
 
     def test_singletons_require_explicit_confirmed_absent_modes(self) -> None:
-        self.assertEqual(MANAGED.count("Default: skip"), 5)
-        self.assertEqual(MANAGED.count("create-confirmed-absent"), 8)
+        self.assertEqual(MANAGED.count("Default: skip"), 6)
+        self.assertEqual(MANAGED.count("create-confirmed-absent"), 11)
         self.assertIn("Features:", MANAGED)
         self.assertIn("Name: S3_DATA_EVENTS", MANAGED)
         self.assertIn("Name: RUNTIME_MONITORING", MANAGED)
@@ -141,6 +203,43 @@ class SecurityTemplateTests(unittest.TestCase):
         recorder = resource_block(MANAGED, "ConfigRecorder")
         self.assertNotIn("DependsOn: ConfigDeliveryChannel", recorder)
         self.assertIn("ResourceTypes:", MANAGED)
+
+    def test_regional_detection_and_aggregation_are_exactly_guarded(self) -> None:
+        self.assertIn("ExpectedAccountId:", MANAGED)
+        self.assertIn("ExpectedRegion:", MANAGED)
+        scope = MANAGED.split("  ExactDeploymentScope:", 1)[1].split(
+            "  FindingAggregatorRequiresConfirmedHomeHub:", 1
+        )[0]
+        self.assertIn("!Ref ExpectedAccountId, !Ref AWS::AccountId", scope)
+        self.assertIn("!Ref ExpectedRegion, !Ref AWS::Region", scope)
+        aggregator_rule = MANAGED.split(
+            "  FindingAggregatorRequiresConfirmedHomeHub:", 1
+        )[1].split("Conditions:", 1)[0]
+        self.assertIn("!Ref AWS::Region, !Ref SecurityHubHomeRegion", aggregator_rule)
+        self.assertIn("confirmed-enabled", aggregator_rule)
+        aggregator = resource_block(MANAGED, "SecurityHubFindingAggregator")
+        self.assertIn("Type: AWS::SecurityHub::FindingAggregator", aggregator)
+        self.assertIn("Condition: CreateSecurityHubAggregator", aggregator)
+        self.assertIn("DeletionPolicy: RetainExceptOnCreate", aggregator)
+        self.assertIn("UpdateReplacePolicy: Retain", aggregator)
+        self.assertIn("RegionLinkingMode: ALL_REGIONS", aggregator)
+        self.assertNotIn("Regions:", aggregator)
+
+    def test_config_adds_high_signal_rules_with_existing_dependencies(self) -> None:
+        expected = {
+            "ConfigS3PublicWriteProhibited": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
+            "ConfigS3EncryptionEnabled": "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
+            "ConfigLambdaPublicAccessProhibited": "LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED",
+            "ConfigCmkBackingKeyRotationEnabled": "CMK_BACKING_KEY_ROTATION_ENABLED",
+        }
+        for logical_id, source_identifier in expected.items():
+            block = resource_block(MANAGED, logical_id)
+            self.assertIn("Type: AWS::Config::ConfigRule", block)
+            self.assertIn("Condition: CreateConfig", block)
+            self.assertIn("- ConfigRecorder", block)
+            self.assertIn("- ConfigDeliveryChannel", block)
+            self.assertIn(f"SourceIdentifier: {source_identifier}", block)
+        self.assertNotIn("CLOUDFRONT_VIEWER_POLICY_HTTPS", MANAGED)
 
     def test_config_delivery_uses_a_dedicated_guarded_bucket(self) -> None:
         bucket = resource_block(MANAGED, "ConfigDeliveryBucket")
@@ -230,6 +329,148 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("us-east-2", BACKUP_REPLICA)
         self.assertIn("governance-confirmed-after-restore-test", BACKUP_REPLICA)
         self.assertNotIn("AlbumsTableArn", BACKUP)
+
+    def test_backup_failure_events_are_static_privacy_safe_and_reliably_routed(self) -> None:
+        for logical_id, event_name, detail_type in (
+            ("BackupJobFailureRule", "backup.job.failed", "Backup Job State Change"),
+            ("BackupCopyFailureRule", "backup.copy.failed", "Copy Job State Change"),
+            ("BackupRestoreFailureRule", "backup.restore.failed", "Restore Job State Change"),
+        ):
+            block = resource_block(BACKUP, logical_id)
+            self.assertIn("Type: AWS::Events::Rule", block)
+            self.assertIn(f"detail-type: [{detail_type}]", block)
+            self.assertIn(f'"eventName":"{event_name}"', block)
+            self.assertIn("DeadLetterConfig: !If", block)
+            self.assertIn("MaximumRetryAttempts: 10", block)
+            for forbidden in (
+                "statusMessage",
+                "resourceArn",
+                "backupJobId",
+                "copyJobId",
+                "restoreJobId",
+            ):
+                self.assertNotIn(forbidden, block)
+        self.assertEqual(BACKUP.count("DeadLetterConfig: !If"), 3)
+        self.assertIn("BackupAlertsRequiredForCreatedPlan", BACKUP)
+        self.assertIn("OptionalFailureDlqMustMatchDeployment", BACKUP)
+        self.assertIn("ian-photography-security-${Stage}", BACKUP)
+        self.assertIn("ian-photography-security-events-${Stage}-dlq", BACKUP)
+        self.assertIn("ian-photography-security-signals-${Stage}", BACKUP)
+        self.assertIn("BackupFreshnessFailureCount", BACKUP)
+        self.assertIn(
+            "TreatMissingData: breaching",
+            resource_block(BACKUP, "BackupFreshnessAlarm"),
+        )
+        self.assertIn(
+            "EXPECTED_RESOURCE_ARNS",
+            resource_block(BACKUP, "BackupFreshnessFunction"),
+        )
+        self.assertNotIn("AWS::SNS::Subscription", BACKUP)
+
+    def test_security_signal_processor_enforces_fixed_contract(self) -> None:
+        published = []
+
+        class Sns:
+            def publish(self, **kwargs):
+                published.append(kwargs)
+
+        fake_boto3 = types.SimpleNamespace(client=lambda service, **kwargs: Sns())
+        environment = {
+            "SECURITY_TOPIC_ARN": "arn:aws:sns:us-west-2:123:topic",
+            "STAGE": "prod",
+        }
+        namespace = {"__name__": "security_signal_processor_test"}
+        with patch.dict(sys.modules, {"boto3": fake_boto3}), patch.dict(
+            os.environ, environment, clear=False
+        ):
+            exec(compile(inline_python(NOTIFICATIONS, "SecuritySignalProcessor"), "<signal>", "exec"), namespace)
+
+        valid = {
+            "schemaVersion": 1,
+            "eventName": "securityhub.finding.critical",
+            "severity": "critical",
+            "stage": "prod",
+            "runbook": "ops/ALARM_REGISTRY.md#managed-security-findings",
+        }
+        result = namespace["handler"](
+            {"Records": [{"body": json.dumps(valid)}]}, types.SimpleNamespace()
+        )
+        self.assertEqual(result, {"forwarded": 1})
+        self.assertEqual(len(published), 1)
+        self.assertEqual(json.loads(published[0]["Message"]), valid)
+
+        tampered = {**valid, "severity": "high", "private": "must-not-forward"}
+        with self.assertRaisesRegex(ValueError, "invalid security signal shape"):
+            namespace["handler"](
+                {"Records": [{"body": json.dumps(tampered)}]},
+                types.SimpleNamespace(),
+            )
+        self.assertEqual(len(published), 1)
+
+    def test_backup_freshness_verifier_checks_every_exact_resource(self) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        expected = {
+            "arn:aws:dynamodb:us-west-2:123:table/albums",
+            "arn:aws:dynamodb:us-west-2:123:table/previews",
+            "arn:aws:s3:::media",
+        }
+        metrics = []
+
+        class Paginator:
+            def paginate(self, **kwargs):
+                return [
+                    {
+                        "RecoveryPoints": [
+                            {
+                                "ResourceArn": resource,
+                                "Status": "COMPLETED",
+                                "CompletionDate": now,
+                            }
+                            for resource in expected
+                        ]
+                    }
+                ]
+
+        class Backup:
+            def get_paginator(self, name):
+                self_name = name
+                if self_name != "list_recovery_points_by_backup_vault":
+                    raise AssertionError(self_name)
+                return Paginator()
+
+        class CloudWatch:
+            def put_metric_data(self, **kwargs):
+                metrics.append(kwargs)
+
+        def client(service, **kwargs):
+            if service == "backup":
+                return Backup()
+            if service == "cloudwatch":
+                return CloudWatch()
+            raise AssertionError(service)
+
+        fake_boto3 = types.SimpleNamespace(client=client)
+        environment = {
+            "EXPECTED_RESOURCE_ARNS": ",".join(sorted(expected)),
+            "FRESHNESS_MAX_AGE_HOURS": "36",
+            "REPLICA_VAULT_ARN": "",
+            "SOURCE_VAULT_NAME": "source",
+            "STAGE": "prod",
+        }
+        namespace = {"__name__": "backup_freshness_test"}
+        with patch.dict(sys.modules, {"boto3": fake_boto3}), patch.dict(
+            os.environ, environment, clear=False
+        ):
+            exec(compile(inline_python(BACKUP, "BackupFreshnessFunction"), "<freshness>", "exec"), namespace)
+            result = namespace["handler"]({}, types.SimpleNamespace())
+        self.assertEqual(result, {"expected": 3, "healthy": 3, "failed": 0})
+        metric_values = {
+            item["MetricName"]: item["Value"]
+            for item in metrics[0]["MetricData"]
+        }
+        self.assertEqual(metric_values["BackupExpectedCoverageCount"], 3)
+        self.assertEqual(metric_values["BackupHealthyCoverageCount"], 3)
+        self.assertEqual(metric_values["BackupFreshnessFailureCount"], 0)
 
 
 def empty_responses() -> dict[tuple[str, str], dict]:

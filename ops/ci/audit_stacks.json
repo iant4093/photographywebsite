@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "rumAppMonitor": {
+    "region": "us-west-2",
+    "name": "ian-photography-web-prod"
+  },
+  "stacks": [
+    {"region": "us-west-2", "name": "ian-website"},
+    {"region": "us-west-2", "name": "ian-photography-ci-bootstrap"},
+    {"region": "us-west-2", "name": "ian-photography-security-audit"},
+    {"region": "us-west-2", "name": "ian-photography-security-notifications"},
+    {"region": "us-west-2", "name": "ian-photography-security-managed"},
+    {"region": "us-west-2", "name": "ian-photography-backup-primary"},
+    {
+      "region": "us-west-2",
+      "name": "ian-photography-observability",
+      "logicalResourceIds": [
+        "CanaryArtifactBucket",
+        "CanaryArtifactBucketPolicy",
+        "FrontendFiveXxAlarm",
+        "FrontendMonitoringSubscription",
+        "MediaFiveXxAlarm",
+        "MediaMonitoringSubscription",
+        "ObservabilityDashboard",
+        "PublicCanary",
+        "PublicCanaryAlarm",
+        "PublicCanaryRole",
+        "RumGuestRole",
+        "RumIdentityPool",
+        "RumIdentityPoolRoleAttachment",
+        "RumJavascriptErrorAlarm",
+        "RumLcpAlarm"
+      ]
+    },
+    {"region": "us-east-1", "name": "ian-photography-front-door-waf"},
+    {"region": "us-east-2", "name": "ian-photography-backup-replica"}
+  ]
+}

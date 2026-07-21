@@ -41,10 +41,71 @@ Parameters:
     Type: String
     Default: unlocked
     AllowedValues: [unlocked, governance-confirmed-after-restore-test]
+  FreshnessMaximumAgeHours:
+    Type: Number
+    Default: 36
+    MinValue: 25
+    MaxValue: 168
+    Description: Maximum age of the latest completed recovery point for every exact resource.
+  SecurityAlarmTopicArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:us-west-2:[0-9]{12}:ian-photography-security-[a-z0-9-]+)$'
+    Description: Existing same-account security topic; this template creates no subscriber.
+  SecuritySignalQueueArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:(aws|aws-us-gov):sqs:us-west-2:[0-9]{12}:ian-photography-security-signals-[a-z0-9-]+)$'
+    Description: Exact rule-scoped security signal queue output by the notification stack.
+  SecurityEventDlqArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(|arn:(aws|aws-us-gov):sqs:us-west-2:[0-9]{12}:ian-photography-security-events-[a-z0-9-]+-dlq)$'
+    Description: Optional existing security EventBridge delivery DLQ ARN.
+
+Rules:
+  MustDeployInHomeRegion:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, us-west-2]
+        AssertDescription: The primary backup and alert rules must be deployed in us-west-2.
+  BackupAlertsRequiredForCreatedPlan:
+    RuleCondition: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref SecurityAlarmTopicArn, '']]
+        AssertDescription: A reviewed existing security topic is required when the backup plan exists.
+      - Assert: !Equals
+          - !Ref SecurityAlarmTopicArn
+          - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
+        AssertDescription: The security topic must exactly match this account, Region, and stage.
+      - Assert: !Equals
+          - !Ref SecuritySignalQueueArn
+          - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
+        AssertDescription: The security signal queue must exactly match this account, Region, and stage.
+  OptionalFailureDlqMustMatchDeployment:
+    RuleCondition: !Not [!Equals [!Ref SecurityEventDlqArn, '']]
+    Assertions:
+      - Assert: !Equals
+          - !Ref SecurityEventDlqArn
+          - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
+        AssertDescription: The optional delivery DLQ must exactly match this account, Region, and stage.
+  OptionalReplicaVaultMustMatchDeployment:
+    RuleCondition: !Not [!Equals [!Ref ReplicaBackupVaultArn, '']]
+    Assertions:
+      - Assert: !Equals
+          - !Ref ReplicaBackupVaultArn
+          - !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
+        AssertDescription: The replica vault must be the exact same-account, stage-owned us-east-2 vault.
 
 Conditions:
   CreateBackup: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
   HasReplicaVault: !Not [!Equals [!Ref ReplicaBackupVaultArn, '']]
+  HasSecurityAlarmTopic: !Not [!Equals [!Ref SecurityAlarmTopicArn, '']]
+  HasSecuritySignalQueue: !Not [!Equals [!Ref SecuritySignalQueueArn, '']]
+  HasSecurityEventDlq: !Not [!Equals [!Ref SecurityEventDlqArn, '']]
+  CreateBackupAlerts: !And
+    - !Condition CreateBackup
+    - !Condition HasSecurityAlarmTopic
+    - !Condition HasSecuritySignalQueue
   EnableGovernanceLock: !And
     - !Condition CreateBackup
     - !Equals [!Ref VaultLockMode, governance-confirmed-after-restore-test]
@@ -191,6 +252,321 @@ Resources:
           - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PreviewMetadataTableName}'
           - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucketName}'
 
+  BackupJobFailureRule:
+    Type: AWS::Events::Rule
+    Condition: CreateBackupAlerts
+    Properties:
+      Name: !Sub 'ian-photography-backup-job-failed-${Stage}'
+      Description: Privacy-safe alert for a terminal unsuccessful protected backup job.
+      State: ENABLED
+      EventPattern:
+        source: [aws.backup]
+        account: [!Ref AWS::AccountId]
+        region: [!Ref AWS::Region]
+        detail-type: [Backup Job State Change]
+        detail:
+          backupVaultName: [!Ref BackupVault]
+          state: [ABORTED, EXPIRED, FAILED, PARTIAL]
+      Targets:
+        - Id: SecuritySignals
+          Arn: !Ref SecuritySignalQueueArn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"backup.job.failed","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-job-failure"}
+          DeadLetterConfig: !If
+            - HasSecurityEventDlq
+            - Arn: !Ref SecurityEventDlqArn
+            - !Ref AWS::NoValue
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  BackupCopyFailureRule:
+    Type: AWS::Events::Rule
+    Condition: CreateBackupAlerts
+    Properties:
+      Name: !Sub 'ian-photography-backup-copy-failed-${Stage}'
+      Description: Privacy-safe alert for an unsuccessful cross-Region backup copy.
+      State: ENABLED
+      EventPattern:
+        source: [aws.backup]
+        account: [!Ref AWS::AccountId]
+        region: [!Ref AWS::Region]
+        detail-type: [Copy Job State Change]
+        detail:
+          sourceBackupVaultArn: [!GetAtt BackupVault.BackupVaultArn]
+          state: [FAILED, PARTIAL]
+      Targets:
+        - Id: SecuritySignals
+          Arn: !Ref SecuritySignalQueueArn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"backup.copy.failed","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-copy-failure"}
+          DeadLetterConfig: !If
+            - HasSecurityEventDlq
+            - Arn: !Ref SecurityEventDlqArn
+            - !Ref AWS::NoValue
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  BackupRestoreFailureRule:
+    Type: AWS::Events::Rule
+    Condition: CreateBackupAlerts
+    Properties:
+      Name: !Sub 'ian-photography-backup-restore-failed-${Stage}'
+      Description: Privacy-safe alert for any failed restore in the protected backup account and Region.
+      State: ENABLED
+      EventPattern:
+        source: [aws.backup]
+        account: [!Ref AWS::AccountId]
+        region: [!Ref AWS::Region]
+        detail-type: [Restore Job State Change]
+        detail:
+          status: [FAILED]
+      Targets:
+        - Id: SecuritySignals
+          Arn: !Ref SecuritySignalQueueArn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"backup.restore.failed","severity":"critical","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-restore-failure"}
+          DeadLetterConfig: !If
+            - HasSecurityEventDlq
+            - Arn: !Ref SecurityEventDlqArn
+            - !Ref AWS::NoValue
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  BackupFreshnessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateBackupAlerts
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/ian-photography-backup-freshness-${Stage}'
+      RetentionInDays: 90
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  BackupFreshnessRole:
+    Type: AWS::IAM::Role
+    Condition: CreateBackupAlerts
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadExactBackupVaultCoverage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: backup:ListRecoveryPointsByBackupVault
+                Resource: '*'
+        - PolicyName: PublishAggregateBackupFreshness
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: IanTruongPhotography/Security
+        - PolicyName: WriteBackupFreshnessLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt BackupFreshnessLogGroup.Arn
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  BackupFreshnessFunction:
+    Type: AWS::Lambda::Function
+    Condition: CreateBackupAlerts
+    DependsOn: BackupFreshnessLogGroup
+    Properties:
+      FunctionName: !Sub 'ian-photography-backup-freshness-${Stage}'
+      Description: Publishes aggregate freshness for the exact protected source and replica resources.
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt BackupFreshnessRole.Arn
+      MemorySize: 128
+      Timeout: 120
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          EXPECTED_RESOURCE_ARNS: !Join
+            - ','
+            - - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTableName}'
+              - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PreviewMetadataTableName}'
+              - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucketName}'
+          FRESHNESS_MAX_AGE_HOURS: !Ref FreshnessMaximumAgeHours
+          REPLICA_VAULT_ARN: !Ref ReplicaBackupVaultArn
+          SOURCE_VAULT_NAME: !Ref BackupVault
+          STAGE: !Ref Stage
+      Code:
+        ZipFile: |
+          import datetime
+          import logging
+          import os
+
+          import boto3
+
+
+          LOG = logging.getLogger()
+          LOG.setLevel(logging.INFO)
+          NAMESPACE = "IanTruongPhotography/Security"
+
+
+          def _completed(client, vault_name, expected):
+              latest = {}
+              paginator = client.get_paginator("list_recovery_points_by_backup_vault")
+              for page in paginator.paginate(BackupVaultName=vault_name):
+                  summaries = page.get("RecoveryPoints", [])
+                  if not isinstance(summaries, list):
+                      raise RuntimeError("invalid recovery point inventory")
+                  for summary in summaries:
+                      if not isinstance(summary, dict):
+                          raise RuntimeError("invalid recovery point inventory")
+                      resource = summary.get("ResourceArn")
+                      if resource not in expected or summary.get("Status") != "COMPLETED":
+                          continue
+                      completed = summary.get("CompletionDate") or summary.get("CreationDate")
+                      if not isinstance(completed, datetime.datetime):
+                          raise RuntimeError("invalid recovery point timestamp")
+                      if completed.tzinfo is None:
+                          completed = completed.replace(tzinfo=datetime.timezone.utc)
+                      if resource not in latest or completed > latest[resource]:
+                          latest[resource] = completed
+              return latest
+
+
+          def _replica_scope(arn):
+              if not arn:
+                  return None
+              parts = arn.split(":", 5)
+              if len(parts) != 6 or parts[2] != "backup" or not parts[5].startswith("backup-vault:"):
+                  raise RuntimeError("invalid replica vault scope")
+              return parts[3], parts[5].split("backup-vault:", 1)[1]
+
+
+          def _metric(name, value, stage, now):
+              return {
+                  "MetricName": name,
+                  "Dimensions": [{"Name": "Stage", "Value": stage}],
+                  "Timestamp": now,
+                  "Value": value,
+                  "Unit": "Count",
+              }
+
+
+          def handler(event, context):
+              try:
+                  expected = frozenset(filter(None, os.environ["EXPECTED_RESOURCE_ARNS"].split(",")))
+                  if len(expected) != 3:
+                      raise RuntimeError("invalid expected backup coverage")
+                  maximum_age = int(os.environ["FRESHNESS_MAX_AGE_HOURS"])
+                  if maximum_age < 25 or maximum_age > 168:
+                      raise RuntimeError("invalid freshness window")
+                  now = datetime.datetime.now(datetime.timezone.utc)
+                  cutoff = now - datetime.timedelta(hours=maximum_age)
+                  source = _completed(
+                      boto3.client("backup"), os.environ["SOURCE_VAULT_NAME"], expected
+                  )
+                  checks = [source.get(resource) for resource in expected]
+                  replica_scope = _replica_scope(os.environ.get("REPLICA_VAULT_ARN", ""))
+                  if replica_scope is not None:
+                      replica_region, replica_vault = replica_scope
+                      replica = _completed(
+                          boto3.client("backup", region_name=replica_region),
+                          replica_vault,
+                          expected,
+                      )
+                      checks.extend(replica.get(resource) for resource in expected)
+                  failures = sum(value is None or value < cutoff for value in checks)
+                  healthy = len(checks) - failures
+                  stage = os.environ["STAGE"]
+                  boto3.client("cloudwatch").put_metric_data(
+                      Namespace=NAMESPACE,
+                      MetricData=[
+                          _metric("BackupFreshnessFailureCount", failures, stage, now),
+                          _metric("BackupExpectedCoverageCount", len(checks), stage, now),
+                          _metric("BackupHealthyCoverageCount", healthy, stage, now),
+                      ],
+                  )
+                  LOG.info(
+                      "backup_freshness_check outcome=complete expected=%d healthy=%d failed=%d replica=%s",
+                      len(checks),
+                      healthy,
+                      failures,
+                      "enabled" if replica_scope is not None else "disabled",
+                  )
+                  return {"expected": len(checks), "healthy": healthy, "failed": failures}
+              except Exception as error:
+                  LOG.error(
+                      "backup_freshness_check outcome=failed error_type=%s",
+                      type(error).__name__,
+                  )
+                  raise RuntimeError("backup freshness check failed") from None
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  BackupFreshnessSchedule:
+    Type: AWS::Events::Rule
+    Condition: CreateBackupAlerts
+    Properties:
+      Name: !Sub 'ian-photography-backup-freshness-${Stage}'
+      Description: Runs aggregate exact-resource backup freshness verification every six hours.
+      ScheduleExpression: rate(6 hours)
+      State: ENABLED
+      Targets:
+        - Id: BackupFreshnessFunction
+          Arn: !GetAtt BackupFreshnessFunction.Arn
+
+  BackupFreshnessInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: CreateBackupAlerts
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BackupFreshnessFunction
+      Principal: events.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !GetAtt BackupFreshnessSchedule.Arn
+
+  BackupFreshnessAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateBackupAlerts
+    Properties:
+      AlarmName: !Sub 'ian-photography-backup-freshness-${Stage}'
+      AlarmDescription: One or more exact protected source or replica resources lacks a fresh completed recovery point.
+      Namespace: IanTruongPhotography/Security
+      MetricName: BackupFreshnessFailureCount
+      Dimensions:
+        - Name: Stage
+          Value: !Ref Stage
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref SecurityAlarmTopicArn]
+
 Outputs:
   BackupWasCreated:
     Value: !If [CreateBackup, 'true', 'false']
@@ -206,3 +582,5 @@ Outputs:
   BackupVaultKeyArn:
     Condition: CreateBackup
     Value: !GetAtt BackupVaultKey.Arn
+  BackupFailureAlertsEnabled:
+    Value: !If [CreateBackupAlerts, 'true', 'false']

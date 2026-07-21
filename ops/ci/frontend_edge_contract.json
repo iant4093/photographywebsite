@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "distributionId": "EIOCCNR8XGQ1B",
+  "bucketName": "iantruong-photography",
+  "region": "us-west-2",
+  "distributionSha256": "bbf76f0b5f30c52b607d1f84938a902bc6a90140fdd7b6f202056e820b60bd1d",
+  "publicAccessBlockSha256": "d916d52efcce3e921f5e5e1fdfbc46e2e0a7fde3f462784156b4d5e425fa8b02",
+  "encryptionSha256": "11244027e99656e7b09c8cf37e0ad918ad0243c8d818bd4180e3c6035a06eafe",
+  "ownershipSha256": "7031e64babddacbf2649badf7653f852005ac1ae39f2f1633dea0816f2e478ed",
+  "versioningSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "policyStatusSha256": "32ac713c13ca4a6a9d87084c0f31401dde6c93fb680ef61758ecd02b32a6cc82"
+}

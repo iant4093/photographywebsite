@@ -4,6 +4,14 @@ Description: >-
   skip and may be created only after read-only inventory proves it is absent.
 
 Parameters:
+  ExpectedAccountId:
+    Type: String
+    AllowedPattern: '^[0-9]{12}$'
+    ConstraintDescription: Must exactly match the active 12-digit AWS account ID.
+  ExpectedRegion:
+    Type: String
+    AllowedPattern: '^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]$'
+    ConstraintDescription: Must exactly match the Region receiving this stack operation.
   Stage:
     Type: String
     Default: prod
@@ -22,6 +30,21 @@ Parameters:
     Type: String
     Default: skip
     AllowedValues: [skip, create-confirmed-absent]
+  SecurityHubAggregationMode:
+    Type: String
+    Default: skip
+    AllowedValues: [skip, create-confirmed-absent-home-hub-enabled]
+    Description: >-
+      Create the account's sole all-Regions finding aggregator only after
+      inventory proves it absent and Security Hub is already enabled here.
+  SecurityHubHomeRegion:
+    Type: String
+    Default: us-west-2
+    AllowedPattern: '^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]$'
+  SecurityHubHomeHubState:
+    Type: String
+    Default: unverified
+    AllowedValues: [unverified, confirmed-enabled]
   AccessAnalyzerDeploymentMode:
     Type: String
     Default: skip
@@ -32,10 +55,32 @@ Parameters:
     AllowedValues: [skip, record-confirmed-home-region]
     Description: Record IAM and CloudFront resources only in the designated home region.
 
+Rules:
+  ExactDeploymentScope:
+    Assertions:
+      - Assert: !Equals [!Ref ExpectedAccountId, !Ref AWS::AccountId]
+        AssertDescription: ExpectedAccountId must exactly match the active AWS account.
+      - Assert: !Equals [!Ref ExpectedRegion, !Ref AWS::Region]
+        AssertDescription: ExpectedRegion must exactly match the active CloudFormation Region.
+  FindingAggregatorRequiresConfirmedHomeHub:
+    RuleCondition: !Equals
+      - !Ref SecurityHubAggregationMode
+      - create-confirmed-absent-home-hub-enabled
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, !Ref SecurityHubHomeRegion]
+        AssertDescription: The finding aggregator may be created only in its declared home Region.
+      - Assert: !Equals [!Ref ExpectedRegion, !Ref SecurityHubHomeRegion]
+        AssertDescription: ExpectedRegion must be the declared Security Hub home Region.
+      - Assert: !Equals [!Ref SecurityHubHomeHubState, confirmed-enabled]
+        AssertDescription: Inventory must confirm Security Hub is enabled in the home Region first.
+
 Conditions:
   CreateConfig: !Equals [!Ref ConfigDeploymentMode, create-confirmed-absent]
   CreateGuardDuty: !Equals [!Ref GuardDutyDeploymentMode, create-confirmed-absent]
   CreateSecurityHub: !Equals [!Ref SecurityHubDeploymentMode, create-confirmed-absent]
+  CreateSecurityHubAggregator: !Equals
+    - !Ref SecurityHubAggregationMode
+    - create-confirmed-absent-home-hub-enabled
   CreateAccessAnalyzer: !Equals [!Ref AccessAnalyzerDeploymentMode, create-confirmed-absent]
   RecordGlobalResources: !Equals [!Ref GlobalResourceRecordingMode, record-confirmed-home-region]
 
@@ -92,6 +137,14 @@ Resources:
       Tags:
         Application: IanTruongPhotography
         Stage: !Ref Stage
+
+  SecurityHubFindingAggregator:
+    Type: AWS::SecurityHub::FindingAggregator
+    Condition: CreateSecurityHubAggregator
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      RegionLinkingMode: ALL_REGIONS
 
   ConfigDeliveryBucket:
     Type: AWS::S3::Bucket
@@ -849,6 +902,30 @@ Resources:
         Owner: AWS
         SourceIdentifier: S3_BUCKET_PUBLIC_READ_PROHIBITED
 
+  ConfigS3PublicWriteProhibited:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-s3-public-write-prohibited-${Stage}'
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_PUBLIC_WRITE_PROHIBITED
+
+  ConfigS3EncryptionEnabled:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-s3-encryption-enabled-${Stage}'
+      Source:
+        Owner: AWS
+        SourceIdentifier: S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED
+
   ConfigS3SslOnly:
     Type: AWS::Config::ConfigRule
     Condition: CreateConfig
@@ -872,6 +949,31 @@ Resources:
       Source:
         Owner: AWS
         SourceIdentifier: DYNAMODB_PITR_ENABLED
+
+  ConfigLambdaPublicAccessProhibited:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-lambda-public-access-prohibited-${Stage}'
+      Source:
+        Owner: AWS
+        SourceIdentifier: LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED
+
+  ConfigCmkBackingKeyRotationEnabled:
+    Type: AWS::Config::ConfigRule
+    Condition: CreateConfig
+    DependsOn:
+      - ConfigRecorder
+      - ConfigDeliveryChannel
+    Properties:
+      ConfigRuleName: !Sub 'ian-photography-cmk-rotation-enabled-${Stage}'
+      MaximumExecutionFrequency: TwentyFour_Hours
+      Source:
+        Owner: AWS
+        SourceIdentifier: CMK_BACKING_KEY_ROTATION_ENABLED
 
   ConfigRootAccessKey:
     Type: AWS::Config::ConfigRule
@@ -901,6 +1003,12 @@ Outputs:
   SecurityHubArn:
     Condition: CreateSecurityHub
     Value: !Ref SecurityHub
+  SecurityHubFindingAggregatorArn:
+    Condition: CreateSecurityHubAggregator
+    Value: !Ref SecurityHubFindingAggregator
+  SecurityHubFindingAggregationRegion:
+    Condition: CreateSecurityHubAggregator
+    Value: !GetAtt SecurityHubFindingAggregator.FindingAggregationRegion
   AccessAnalyzerArn:
     Condition: CreateAccessAnalyzer
     Value: !GetAtt AccountExternalAccessAnalyzer.Arn

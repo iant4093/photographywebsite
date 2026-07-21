@@ -457,15 +457,153 @@ Resources:
               - Sid: DetectExactStackDrift
                 Effect: Allow
                 Action:
-                  - cloudformation:DescribeStackResourceDrifts
-                  - cloudformation:DescribeStackResources
-                  - cloudformation:DescribeStacks
                   - cloudformation:DetectStackDrift
-                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'
-              - Sid: PollDriftOnly
+                  - cloudformation:DetectStackResourceDrift
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/ian-photography-ci-bootstrap/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/ian-photography-security-audit/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/ian-photography-security-notifications/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/ian-photography-security-managed/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/ian-photography-backup-primary/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/ian-photography-observability/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-east-1:${AWS::AccountId}:stack/ian-photography-front-door-waf/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-east-2:${AWS::AccountId}:stack/ian-photography-backup-replica/*'
+              - Sid: ReadTypeConfigurationAndPoll
                 Effect: Allow
-                Action: cloudformation:DescribeStackDriftDetectionStatus
+                Action:
+                  - cloudformation:BatchDescribeTypeConfigurations
+                  - cloudformation:DescribeStackDriftDetectionStatus
                 Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion:
+                      - us-west-2
+                      - us-east-1
+                      - us-east-2
+              - Sid: ReadExactRumConfigurationPosture
+                Effect: Allow
+                Action: rum:GetAppMonitor
+                Resource: !Sub 'arn:${AWS::Partition}:rum:us-west-2:${AWS::AccountId}:appmonitor/ian-photography-web-prod'
+              - Sid: ReadExactFrontendDistributionPosture
+                Effect: Allow
+                Action: cloudfront:GetDistribution
+                Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistributionId}'
+              - Sid: ReadExactFrontendBucketPosture
+                Effect: Allow
+                Action:
+                  - s3:GetBucketOwnershipControls
+                  - s3:GetBucketPolicyStatus
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketVersioning
+                  - s3:GetEncryptionConfiguration
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FrontendBucketName}'
+              # CloudFormation drift uses a forward access session to call each
+              # selected metadata-safe resource provider read handler. These
+              # grants cannot be used by the GitHub session directly because
+              # aws:CalledVia is then absent.
+              - Sid: CloudFormationForwardAccessReads
+                Effect: Allow
+                Action:
+                  - access-analyzer:GetAnalyzer
+                  - access-analyzer:ListAnalyzers
+                  - access-analyzer:ListArchiveRules
+                  - backup:DescribeBackupVault
+                  - backup:GetBackupPlan
+                  - backup:GetBackupSelection
+                  - backup:GetBackupVaultAccessPolicy
+                  - backup:GetBackupVaultNotifications
+                  - backup:ListTags
+                  - cloudfront:GetMonitoringSubscription
+                  - cloudtrail:DescribeTrails
+                  - cloudtrail:GetEventConfiguration
+                  - cloudtrail:GetEventSelectors
+                  - cloudtrail:GetInsightSelectors
+                  - cloudtrail:GetTrail
+                  - cloudtrail:GetTrailStatus
+                  - cloudtrail:ListTags
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:GetDashboard
+                  - cloudwatch:ListTagsForResource
+                  - cognito-identity:DescribeIdentityPool
+                  - cognito-identity:GetIdentityPoolRoles
+                  - cognito-identity:ListTagsForResource
+                  - config:DescribeComplianceByConfigRule
+                  - config:DescribeConfigRules
+                  - events:DescribeRule
+                  - events:ListTagsForResource
+                  - events:ListTargetsByRule
+                  - guardduty:GetDetector
+                  - guardduty:ListTagsForResource
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListEntitiesForPolicy
+                  - iam:ListRolePolicies
+                  - iam:ListRoles
+                  - kms:DescribeKey
+                  - kms:GetKeyPolicy
+                  - kms:GetKeyRotationStatus
+                  - kms:ListAliases
+                  - kms:ListResourceTags
+                  - lambda:GetFunction
+                  - lambda:GetFunctionCodeSigningConfig
+                  - lambda:GetEventSourceMapping
+                  - lambda:GetFunctionRecursionConfig
+                  - lambda:GetFunctionScalingConfig
+                  - lambda:GetPolicy
+                  - lambda:GetRuntimeManagementConfig
+                  - lambda:ListTags
+                  - logs:DescribeIndexPolicies
+                  - logs:DescribeLogGroups
+                  - logs:DescribeMetricFilters
+                  - logs:DescribeResourcePolicies
+                  - logs:GetDataProtectionPolicy
+                  - logs:ListTagsForResource
+                  - s3:GetAccelerateConfiguration
+                  - s3:GetAnalyticsConfiguration
+                  - s3:GetBucketAbac
+                  - s3:GetBucketCORS
+                  - s3:GetBucketLocation
+                  - s3:GetBucketLogging
+                  - s3:GetBucketMetadataTableConfiguration
+                  - s3:GetBucketNotification
+                  - s3:GetBucketObjectLockConfiguration
+                  - s3:GetBucketOwnershipControls
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketTagging
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketWebsite
+                  - s3:GetEncryptionConfiguration
+                  - s3:GetIntelligentTieringConfiguration
+                  - s3:GetInventoryConfiguration
+                  - s3:GetLifecycleConfiguration
+                  - s3:GetMetricsConfiguration
+                  - s3:GetReplicationConfiguration
+                  - s3:ListAllMyBuckets
+                  - s3:ListBucket
+                  - s3:ListTagsForResource
+                  - securityhub:DescribeHub
+                  - securityhub:ListTagsForResource
+                  - sns:GetDataProtectionPolicy
+                  - sns:GetTopicAttributes
+                  - sns:ListSubscriptionsByTopic
+                  - sns:ListTagsForResource
+                  - sqs:GetQueueAttributes
+                  - sqs:ListQueueTags
+                  - synthetics:DescribeCanaries
+                  - synthetics:GetCanary
+                  - synthetics:ListTagsForResource
+                  - wafv2:GetLoggingConfiguration
+                  - wafv2:GetWebACL
+                  - wafv2:ListTagsForResource
+                Resource: '*'
+                Condition:
+                  ForAnyValue:StringEquals:
+                    aws:CalledVia: cloudformation.amazonaws.com
               - Sid: DenyAllCloudFormationMutation
                 Effect: Deny
                 Action:

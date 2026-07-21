@@ -17,16 +17,21 @@ reviewed change set.
 | Audit foundation | `security_audit_foundation_template.yaml` | One home-region stack. The Object-Locked CloudTrail evidence bucket, bucket policy, log group, role, and multi-region trail are retained together. After Config is healthy, an opt-in parameter adds exact-bucket Config delivery object events. |
 | Notifications | `security_notifications_template.yaml` | Regional encrypted SNS/KMS routing, encrypted SQS DLQ, metrics, and alarms. It creates no subscriber. |
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
+| Regional detection rollout | `regional_security_rollout.py` | Read-only-by-default inventory of every enabled Region. An explicitly guarded mode prepares non-executing per-Region CloudFormation change sets; it never executes, disables, or adopts a singleton. |
 | Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained CMK-encrypted vault. Creation and Vault Lock default off. |
+| Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One retained, alert-only account budget. Creation defaults off and requires an owner-approved amount plus two distinct confirmed human destinations. |
+| Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Complete source signal inventory, privacy contract, runbook routing, response ownership, and quarterly delivery-test state. |
 | Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors become `skip-inventory-incomplete`, never “absent.” |
 | Inspector | `enable_inspector_lambda_scanning.py` | Dry-run-by-default Inspector Lambda and Lambda code scanning enrollment with exact apply guards. |
 
 Use `us-west-2` as the initial home region. The foundation trail already records
 multi-region and global management events, so do not deploy another foundation
-copy elsewhere. Config delivery is home-region-only in this design. If regional
-GuardDuty coverage is expanded later, inventory each region and use a separate
-regional stack with Config, Security Hub, and Access Analyzer left at `skip`;
-approve corresponding regional notification routing and cost separately.
+copy elsewhere. Config delivery is home-region-only in this design. GuardDuty
+and Security Hub are regional, so the regional rollout uses the same managed-
+services template in each enabled Region while leaving Config and Access
+Analyzer at `skip`. The home stack alone may own the account's all-Regions
+Security Hub finding aggregator. Approve corresponding regional notification
+routing and cost separately.
 
 ## Validate before an AWS decision
 
@@ -41,13 +46,15 @@ The focused checks are:
 ```bash
 python3 -m unittest \
   ops.tests.test_config_delivery_orchestrator \
+  ops.tests.test_regional_security_rollout \
   ops.tests.test_security_operations \
   -v
 cfn-lint \
   ops/security_audit_foundation_template.yaml \
   ops/security_notifications_template.yaml \
   ops/security_managed_services_template.yaml \
-  ops/security_backup_template.yaml
+  ops/security_backup_template.yaml \
+  ops/security_budget_template.yaml
 ```
 
 With authenticated read-only AWS access, perform the additional service-side
@@ -62,6 +69,8 @@ aws cloudformation validate-template --region us-west-2 \
   --template-body file://ops/security_managed_services_template.yaml
 aws cloudformation validate-template --region us-west-2 \
   --template-body file://ops/security_backup_template.yaml
+aws cloudformation validate-template --region us-west-2 \
+  --template-body file://ops/security_budget_template.yaml
 ```
 
 ## Inventory and conflict decisions
@@ -92,8 +101,12 @@ For any existing singleton or matching fixed name, stop and determine the
 current owner:
 
 - Existing recorder or channel: `ConfigDeploymentMode=skip`.
-- Existing detector: `GuardDutyDeploymentMode=skip`; check Organizations and
-  delegated-administrator ownership before changing features.
+- Existing detector: `GuardDutyDeploymentMode=skip` only after `get-detector`
+  proves it is enabled and all six feature states exactly match the reviewed
+  template (S3/Lambda enabled; EKS, EBS malware, RDS, and runtime monitoring
+  disabled). A suspended, drifted, or newly unreviewed feature blocks rollout.
+  Check Organizations and delegated-
+  administrator ownership before changing features.
 - Existing hub: `SecurityHubDeploymentMode=skip`; check central configuration,
   regional aggregation, standards, and delegated administration.
 - Existing account analyzer: `AccessAnalyzerDeploymentMode=skip`; preserve its
@@ -106,6 +119,82 @@ Import is not automatic. First verify that the resource type supports import,
 capture its identifier and current configuration, retain it in the template,
 create an import change set, and review drift afterward. Never delete an account
 security service merely to make this template create a replacement.
+
+Every managed-services stack operation must now pass `ExpectedAccountId` and
+`ExpectedRegion`. CloudFormation rules compare them to `AWS::AccountId` and
+`AWS::Region` before evaluating resources, including a nominal all-`skip`
+deployment. Never use a guessed value or reuse a regional parameter file in a
+different Region.
+
+### Regional GuardDuty and Security Hub inventory
+
+Run the all-Region helper without a mutation flag first:
+
+```bash
+python3 ops/regional_security_rollout.py \
+  --home-region us-west-2 \
+  --stage prod
+```
+
+The helper obtains the enabled Region set from the account, then inventories
+the regional GuardDuty detector and Security Hub singleton in every one. An
+API error, malformed response, duplicate singleton, disabled or under-protected
+detector, disabled home Region, or finding aggregator with a different home/
+linking mode fails closed. Healthy existing detectors and hubs are reported as
+covered and left externally managed; the
+helper never changes their plans, standards, organization ownership, or
+delegated-administrator configuration. Output contains Region names and
+aggregate state, not detector IDs, hub ARNs, aggregator ARNs, findings, or
+resource content.
+
+The SHA-256 `planDigest` binds the active account, complete enabled-Region set,
+home Region, stack names, every planned action, and the exact template SHA-256.
+The helper checks the template digest again before preparation. After recording
+cost and owner approval, rerun against a fresh inventory with all guards copied
+from the reviewed plan:
+
+```bash
+python3 ops/regional_security_rollout.py \
+  --home-region us-west-2 \
+  --stage prod \
+  --prepare-change-sets \
+  --expected-account-id EXPECTED_12_DIGIT_ACCOUNT \
+  --expected-home-region us-west-2 \
+  --expected-enabled-region-count EXPECTED_EXACT_COUNT \
+  --expected-plan-digest EXPECTED_64_CHARACTER_SHA256 \
+  --confirm prepare-regional-security-change-sets
+```
+
+This mode prepares review artifacts only. It updates the exact existing
+`ian-photography-security-managed` home stack when necessary and proposes a
+same-named `ian-photography-security-regional` stack in each non-home Region
+that has an absent service. A pre-existing regional stack blocks the entire
+preparation pass before any change set is created; investigate ownership
+rather than updating or importing it automatically. The home stack must exist,
+have the exact stage, and be in a stable state. The helper never calls
+`ExecuteChangeSet`. An existing all-Regions aggregator plus another required
+home-stack service change also blocks automatic preparation so an operator can
+first prove whether the aggregator is owned by that stack or externally.
+
+Review every change set separately. Require no replacement or deletion of any
+existing resource, exact account/Region parameters, Config/Access Analyzer and
+global recording at `skip` outside the home Region, and creation only for a
+freshly proven-absent detector or hub. Execute approved change sets through the
+normal guarded CloudFormation process, wait for completion, enable termination
+protection on every newly created regional stack, and verify aggregate status
+without printing finding content. If preparation partially succeeds because a
+later API call fails, delete only the unexecuted change sets after reviewing
+their exact names; do not delete a security service or stable stack.
+
+Security Hub cross-Region aggregation does not enable Security Hub in linked
+Regions. For that reason, this rollout enables both services where absent. The
+home finding aggregator is staged only when the home hub already exists and
+inventory proves the account aggregator absent. If the home hub is absent, the
+plan reports `defer-until-home-hub-enabled`; complete the hub rollout, rerun the
+full inventory, and prepare a second home-stack update. `ALL_REGIONS` includes
+new Security Hub-supported Regions automatically after the account opts into
+them, but Security Hub itself is still not auto-enabled there, so rerun this
+helper whenever the enabled Region set changes.
 
 ## Staged rollout
 
@@ -139,17 +228,24 @@ precompute the generated bucket name.
 
 Pass the foundation log-group output to
 `security_notifications_template.yaml`. The topic uses a retained rotating
-customer KMS key because EventBridge and CloudWatch publishers need explicit
-KMS grants. The EventBridge SNS policy statement intentionally has no condition:
-EventBridge-to-SNS policies do not support condition blocks. It is still scoped
-to the EventBridge service, `sns:Publish`, and this exact topic. CloudWatch is
-limited to the exact account and exact alarm ARNs.
+customer KMS key. Native CloudWatch and Budget publishers are limited to the
+exact account/source resources, topic encryption context, and regional SNS
+service. EventBridge never publishes directly to the trusted responder topic:
+the exact four managed-finding and three backup-failure rule ARNs may send only
+to an encrypted SQS ingress queue. A bounded Lambda validates the complete fixed
+signal contract before publishing through its exact IAM role. This avoids the
+unscopable EventBridge-to-SNS topic-policy trust boundary.
 
-Both EventBridge targets use bounded retries and an encrypted 14-day SQS DLQ.
-The queue policy accepts only the exact two rule ARNs. A DLQ-depth alarm alerts
+All managed-finding EventBridge targets use bounded retries and an encrypted
+14-day SQS DLQ. Both queue policies accept only the exact seven rule ARNs. A
+DLQ-depth alarm alerts
 on the first visible failed delivery. Additional audit alarms cover KMS key
 disable/deletion/policy/alias changes and security routing changes, along with
-root, IAM, and CloudTrail configuration activity.
+root, IAM, CloudTrail, managed-security-service, data-protection, and
+infrastructure-protection configuration activity. GuardDuty and Security Hub
+targets send only static signal/severity/stage/runbook JSON; raw finding payloads
+never enter either queue or the notification channel. HIGH and CRITICAL findings
+use separate rules and retain their response severity.
 
 No subscriber is created. Attach a monitored destination only after the owner
 approves it and completes its confirmation flow. Test a controlled alarm and
@@ -310,6 +406,12 @@ enabled; EKS audit logs, EBS malware protection, RDS login events, and runtime
 monitoring are disabled. Enable other protection plans only with a documented
 threat model, supported-resource inventory, and cost approval. Confirm
 Security Hub standards and organization ownership before creating the hub.
+The Config layer also checks public S3 writes, default S3 encryption, public
+Lambda function access, and customer-managed KMS key rotation. These rules use
+only resource types already recorded by the exact home-region recorder. The
+rollout deliberately omits the us-east-1-only CloudFront HTTPS managed rule and
+noisy blanket versioning/deletion-protection rules that would flag intentional
+ephemeral or log resources.
 
 ### 4. Inspector Lambda scanning
 
@@ -369,6 +471,44 @@ then may a reviewed update use
 by sufficiently privileged identities. Compliance mode requires a separate
 legal and retention decision because it can become irreversible.
 
+The primary backup stack also owns privacy-safe EventBridge failure signals for
+backup jobs, replica copy jobs, and restore jobs. Every target receives a fixed
+signal/stage/runbook payload instead of the AWS event, resource ARN, job ID,
+object key, provider error, or table/media identifier. The exact existing
+security topic and exact-rule signal queue are mandatory whenever the backup
+plan is created; its optional delivery DLQ must also match the exact account,
+Region, and stage. Update the notification stack first so both queue policies
+trust the three exact backup rules before enabling them.
+
+A six-hour scheduled verifier reads recovery-point metadata only and publishes
+aggregate expected, healthy, and failed counts. It requires a fresh completed
+recovery point for the two tables and media bucket in the source vault and,
+when configured, the exact same-account replica vault. The alarm treats missing
+metrics as breaching, so a stopped verifier or stopped backup schedule cannot
+remain silently green. Neither logs nor metrics include resource or recovery-
+point ARNs.
+
+The replica vault is intentionally a separate `us-east-2` stack and has no
+invented cross-Region human route. A restore started directly in that Region is
+not covered by the `us-west-2` restore-failure rule. Keep replica-region restore
+operations gated until an owner approves and tests same-Region notification
+routing; do not route raw restore events across Regions as a shortcut.
+
+### 6. Cost budget and notification ownership
+
+Follow [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md). The source-controlled budget
+has no default spending amount, email address, subscription, resource action,
+or automatic security-control disablement. Its read-only preflight recommends
+creation only when the exact budget name is absent, the exact encrypted security
+topic exists, and two distinct confirmed human-compatible destinations are
+present. HTTPS, SQS, and Lambda fan-out do not satisfy that ownership gate.
+
+The current checked-in alarm registry deliberately remains
+`blocked-no-confirmed-human-destinations`: primary owner, backup owner, and the
+last end-to-end test date are unassigned. These are human decisions, not safe
+repository defaults. Assign them and test sanitized delivery before calling any
+security, backup, observability, WAF, or budget alert operational.
+
 ## Maintenance, cost, and evidence
 
 Before enabling a paid service, record its owner, region scope, estimated
@@ -393,7 +533,12 @@ AWS behavior references:
 
 - [CloudTrail S3 bucket policy](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/create-s3-bucket-policy-for-cloudtrail.html)
 - [AWS Config delivery channel](https://docs.aws.amazon.com/config/latest/developerguide/manage-delivery-channel.html)
+- [GuardDuty Regions](https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_regions.html)
+- [Security Hub cross-Region aggregation](https://docs.aws.amazon.com/securityhub/latest/userguide/security-hub-region-aggregation.html)
+- [CloudFormation finding aggregator](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-securityhub-findingaggregator.html)
 - [EventBridge resource policies](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-use-resource-based.html)
 - [SNS encrypted-topic key management](https://docs.aws.amazon.com/sns/latest/dg/sns-key-management.html)
 - [CloudFormation RetainExceptOnCreate](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-attribute-deletionpolicy.html)
 - [AWS Backup Vault Lock](https://docs.aws.amazon.com/backup/latest/devguide/vault-lock.html)
+- [AWS Budgets SNS policy and encrypted-topic permissions](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-sns-policy.html)
+- [CloudFormation AWS Budgets resource](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-budgets-budget.html)

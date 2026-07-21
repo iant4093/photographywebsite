@@ -14,6 +14,17 @@ import sys
 
 
 AWS_ACCESS_KEY_ID = re.compile(rb"(?:AKIA|ASIA)[0-9A-Z]{16}")
+HIGH_CONFIDENCE_TOKENS = (
+    ("github_token", re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{22,255})")),
+    ("google_api_key", re.compile(rb"AIza[0-9A-Za-z_-]{35}")),
+    ("slack_token", re.compile(rb"xox[baprs]-[0-9A-Za-z-]{20,255}")),
+    ("stripe_live_secret", re.compile(rb"sk_live_[0-9A-Za-z]{20,255}")),
+)
+CREDENTIALED_URL = re.compile(
+    rb"https?://(?P<username>[^\s/:@]{1,128}):"
+    rb"(?P<password>[^\s/@]{8,256})@(?P<host>[^\s/]+)"
+)
+SYNTHETIC_URL_HOSTS = frozenset({b"host.com", b"endpoint", b"domain"})
 PRIVATE_KEY_BEGIN = re.compile(rb"-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY)-----")
 PRIVATE_KEY_BODY_LINE = re.compile(rb"[A-Za-z0-9+/]+={0,2}")
 PRIVATE_KEY_METADATA_LINE = re.compile(
@@ -110,6 +121,36 @@ def _contains_private_key_block(payload: bytes) -> bool:
     return False
 
 
+def _high_confidence_token_kinds(payload: bytes) -> tuple[str, ...]:
+    kinds = [kind for kind, pattern in HIGH_CONFIDENCE_TOKENS if pattern.search(payload)]
+    if _contains_credentialed_url(payload):
+        kinds.append("credentialed_url")
+    return tuple(kinds)
+
+
+def _normalized_example_token(value: bytes) -> bytes:
+    return value.lower().strip(b"`'\"()[]{}<>.,;")
+
+
+def _is_synthetic_credentialed_url(match: re.Match[bytes]) -> bool:
+    username = _normalized_example_token(match.group("username"))
+    password = _normalized_example_token(match.group("password"))
+    host = _normalized_example_token(match.group("host").split(b":", 1)[0])
+    return (
+        username == b"username"
+        and password == b"password"
+        and host in SYNTHETIC_URL_HOSTS
+    )
+
+
+def _contains_credentialed_url(payload: bytes) -> bool:
+    """Detect real user-info URLs while ignoring explicit dependency placeholders."""
+    return any(
+        not _is_synthetic_credentialed_url(match)
+        for match in CREDENTIALED_URL.finditer(payload)
+    )
+
+
 def _artifact_entries(root: Path) -> list[Path]:
     pending = [root]
     files: list[Path] = []
@@ -171,6 +212,8 @@ def scan(root: Path) -> ScanReport:
             for match in AWS_ACCESS_KEY_ID.finditer(payload)
         ):
             findings.append(Finding("aws_access_key_id", relative))
+        for kind in _high_confidence_token_kinds(payload):
+            findings.append(Finding(kind, relative))
     if files_scanned == 0:
         raise ScanError("artifact root is empty")
     return ScanReport(files_scanned, tuple(findings))

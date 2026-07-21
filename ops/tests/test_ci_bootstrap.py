@@ -1,9 +1,11 @@
 import json
+import os
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -14,6 +16,7 @@ if str(OPS) not in sys.path:
     sys.path.insert(0, str(OPS))
 
 import ci_bootstrap_preflight
+from ci import frontend_edge_posture
 
 
 TEMPLATE_PATH = OPS / "ci_bootstrap_template.yaml"
@@ -115,8 +118,244 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertNotIn("cloudformation:", frontend)
         self.assertIn("cloudformation:DetectStackDrift", audit)
         self.assertIn("DenyAllCloudFormationMutation", audit)
-        for forbidden in ("s3:GetObject", "dynamodb:GetItem", "logs:GetLogEvents", "secretsmanager:GetSecretValue"):
-            self.assertNotIn(forbidden, audit)
+        forwarded = statement_block(audit, "CloudFormationForwardAccessReads")
+        self.assertIn("ForAnyValue:StringEquals:", forwarded)
+        self.assertIn("aws:CalledVia: cloudformation.amazonaws.com", forwarded)
+        audit_actions = {
+            line.strip()[2:]
+            for line in audit.splitlines()
+            if line.strip().startswith("- ")
+        }
+        for forbidden_data_read in (
+            "s3:GetObject",
+            "s3:GetObjectAcl",
+            "dynamodb:GetItem",
+            "secretsmanager:GetSecretValue",
+            "kms:Decrypt",
+        ):
+            self.assertNotIn(forbidden_data_read, audit_actions)
+        self.assertNotIn("iam:PassRole", audit_actions)
+        for required_metadata_read in (
+            "cloudfront:GetMonitoringSubscription",
+            "kms:GetKeyPolicy",
+            "lambda:GetEventSourceMapping",
+            "lambda:GetPolicy",
+            "lambda:ListTags",
+            "s3:GetBucketPolicy",
+            "s3:ListBucket",
+            "wafv2:GetWebACL",
+            "wafv2:GetLoggingConfiguration",
+        ):
+            self.assertIn(required_metadata_read, audit_actions)
+        rum = statement_block(audit, "ReadExactRumConfigurationPosture")
+        self.assertIn("Action: rum:GetAppMonitor", rum)
+        self.assertIn(
+            "appmonitor/ian-photography-web-prod",
+            rum,
+        )
+        self.assertNotIn("rum:GetAppMonitorData", audit)
+        self.assertNotIn("logs:GetLogEvents", audit)
+        self.assertNotIn("cloudformation:DescribeStackResourceDrifts", audit)
+        edge = statement_block(audit, "ReadExactFrontendDistributionPosture")
+        self.assertIn("cloudfront:GetDistribution", edge)
+        self.assertIn("distribution/${FrontendDistributionId}", edge)
+        bucket = statement_block(audit, "ReadExactFrontendBucketPosture")
+        self.assertIn("s3:GetBucketPolicyStatus", bucket)
+        self.assertIn("s3:GetEncryptionConfiguration", bucket)
+
+    def test_audit_role_drift_scope_matches_exact_versioned_multi_region_inventory(self):
+        audit = resource_block("AuditRole")
+        inventory = json.loads((OPS / "ci" / "audit_stacks.json").read_text(encoding="utf-8"))
+        self.assertEqual(inventory["version"], 1)
+        self.assertEqual(
+            inventory["rumAppMonitor"],
+            {"region": "us-west-2", "name": "ian-photography-web-prod"},
+        )
+        self.assertEqual(
+            {(item["region"], item["name"]) for item in inventory["stacks"]},
+            {
+                ("us-west-2", "ian-website"),
+                ("us-west-2", "ian-photography-ci-bootstrap"),
+                ("us-west-2", "ian-photography-security-audit"),
+                ("us-west-2", "ian-photography-security-notifications"),
+                ("us-west-2", "ian-photography-security-managed"),
+                ("us-west-2", "ian-photography-backup-primary"),
+                ("us-west-2", "ian-photography-observability"),
+                ("us-east-1", "ian-photography-front-door-waf"),
+                ("us-east-2", "ian-photography-backup-replica"),
+            },
+        )
+        for region, stack_name in sorted(
+            {(item["region"], item["name"]) for item in inventory["stacks"]}
+        ):
+            stack_expression = "${ApplicationStackName}" if stack_name == "ian-website" else stack_name
+            self.assertIn(
+                f"cloudformation:{region}:${{AWS::AccountId}}:stack/{stack_expression}/*",
+                audit,
+            )
+        poll = statement_block(audit, "ReadTypeConfigurationAndPoll")
+        self.assertIn("cloudformation:BatchDescribeTypeConfigurations", poll)
+        self.assertIn("aws:RequestedRegion:", poll)
+        self.assertIn("- us-west-2", poll)
+        self.assertIn("- us-east-1", poll)
+        self.assertIn("- us-east-2", poll)
+
+        observability = next(
+            item
+            for item in inventory["stacks"]
+            if item["name"] == "ian-photography-observability"
+        )
+        source = (OPS / "observability_template.yaml").read_text(encoding="utf-8")
+        resources = source.split("\nResources:\n", 1)[1].split("\nOutputs:\n", 1)[0]
+        source_ids = set(re.findall(r"(?m)^  ([A-Za-z][A-Za-z0-9]+):\n    Type: ", resources))
+        self.assertEqual(
+            set(observability["logicalResourceIds"]),
+            source_ids - {"RumAppMonitor"},
+        )
+        drift_script = (OPS / "ci" / "audit_stack_drift.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--logical-resource-ids", drift_script)
+        self.assertIn("rum get-app-monitor", drift_script)
+        self.assertNotIn("get-app-monitor-data", drift_script)
+
+    def test_new_lambda_security_resources_remain_drifted_without_kms_data_access(self):
+        inventory = json.loads((OPS / "ci" / "audit_stacks.json").read_text())
+        by_name = {item["name"]: item for item in inventory["stacks"]}
+        self.assertNotIn(
+            "logicalResourceIds",
+            by_name["ian-photography-security-notifications"],
+        )
+        self.assertNotIn(
+            "logicalResourceIds",
+            by_name["ian-photography-backup-primary"],
+        )
+
+        notifications = (OPS / "security_notifications_template.yaml").read_text()
+        mapping = re.search(
+            r"(?ms)^  SecuritySignalProcessorMapping:\n.*?"
+            r"(?=^  [A-Za-z][A-Za-z0-9]+:\n|^Outputs:)",
+            notifications,
+        )
+        self.assertIsNotNone(mapping)
+        self.assertNotIn("KmsKeyArn", mapping.group(0))
+        self.assertNotIn("FilterCriteria", mapping.group(0))
+
+        audit = resource_block("AuditRole")
+        forwarded = statement_block(audit, "CloudFormationForwardAccessReads")
+        self.assertIn("lambda:GetEventSourceMapping", forwarded)
+        self.assertIn("lambda:ListTags", forwarded)
+        self.assertIn("lambda:GetPolicy", forwarded)
+        self.assertNotIn("kms:Decrypt", audit)
+
+    def test_multi_stack_drift_script_filters_rum_and_emits_aggregate_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = pathlib.Path(directory)
+            fake_bin = temporary / "bin"
+            fake_bin.mkdir()
+            call_log = temporary / "aws-calls.log"
+            edge_documents = {
+                "distribution": {"Distribution": {
+                    "ARN": "arn:aws:cloudfront::123456789012:distribution/EXAMPLE",
+                    "Status": "Deployed",
+                    "DistributionConfig": {"Enabled": True, "Origins": {"Items": [{
+                        "Id": "api", "CustomHeaders": {"Items": [{
+                            "HeaderName": "X-Origin-Verify", "HeaderValue": "test-secret"
+                        }]},
+                    }]}},
+                }},
+                "publicAccessBlock": {"pab": True},
+                "encryption": {"encryption": "AES256"},
+                "ownership": {"ownership": "enforced"},
+                "versioning": {},
+                "policyStatus": {"public": False},
+            }
+            edge_contract = {
+                "version": 1,
+                "distributionId": "EXAMPLE",
+                "bucketName": "example-bucket",
+                "region": "us-west-2",
+                "distributionSha256": frontend_edge_posture._digest(
+                    frontend_edge_posture.sanitized_distribution(edge_documents["distribution"])
+                ),
+                "publicAccessBlockSha256": frontend_edge_posture._digest(edge_documents["publicAccessBlock"]),
+                "encryptionSha256": frontend_edge_posture._digest(edge_documents["encryption"]),
+                "ownershipSha256": frontend_edge_posture._digest(edge_documents["ownership"]),
+                "versioningSha256": frontend_edge_posture._digest(edge_documents["versioning"]),
+                "policyStatusSha256": frontend_edge_posture._digest(edge_documents["policyStatus"]),
+            }
+            edge_contract_path = temporary / "edge-contract.json"
+            edge_contract_path.write_text(json.dumps(edge_contract), encoding="utf-8")
+            fake_aws = fake_bin / "aws"
+            fake_aws.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' \"$*\" >> \"$AWS_CALL_LOG\"
+if [[ \"$1 $2\" == \"cloudformation detect-stack-drift\" ]]; then
+  printf '00000000-0000-0000-0000-000000000000\\n'
+elif [[ \"$1 $2\" == \"cloudformation describe-stack-drift-detection-status\" ]]; then
+  printf 'DETECTION_COMPLETE\\tIN_SYNC\\n'
+elif [[ \"$1 $2\" == \"rum get-app-monitor\" ]]; then
+  printf '%s\\n' '{"AppMonitor":{"Name":"ian-photography-web-prod","Domain":"iantruongphotography.com","Platform":"Web","State":"CREATED","CustomEvents":{"Status":"DISABLED"},"DeobfuscationConfiguration":{"JavaScriptSourceMaps":{"Status":"DISABLED"}},"AppMonitorConfiguration":{"AllowCookies":false,"EnableXRay":false,"SessionSampleRate":0.1,"Telemetries":["performance","errors","http"],"ExcludedPages":["https://iantruongphotography.com/login*","https://iantruongphotography.com/admin*","https://iantruongphotography.com/dashboard*","https://iantruongphotography.com/sharedalbum*"],"GuestRoleArn":"synthetic-role","IdentityPoolId":"synthetic-pool"}}}'
+elif [[ \"$1 $2\" == \"cloudfront get-distribution\" ]]; then
+  printf '%s\\n' '{"Distribution":{"ARN":"arn:aws:cloudfront::123456789012:distribution/EXAMPLE","Status":"Deployed","DistributionConfig":{"Enabled":true,"Origins":{"Items":[{"Id":"api","CustomHeaders":{"Items":[{"HeaderName":"X-Origin-Verify","HeaderValue":"test-secret"}]}}]}}}}'
+elif [[ \"$1 $2\" == \"s3api get-public-access-block\" ]]; then
+  printf '%s\\n' '{"pab":true}'
+elif [[ \"$1 $2\" == \"s3api get-bucket-encryption\" ]]; then
+  printf '%s\\n' '{"encryption":"AES256"}'
+elif [[ \"$1 $2\" == \"s3api get-bucket-ownership-controls\" ]]; then
+  printf '%s\\n' '{"ownership":"enforced"}'
+elif [[ \"$1 $2\" == \"s3api get-bucket-versioning\" ]]; then
+  printf '%s\\n' '{}'
+elif [[ \"$1 $2\" == \"s3api get-bucket-policy-status\" ]]; then
+  printf '%s\\n' '{"public":false}'
+else
+  exit 64
+fi
+""",
+                encoding="utf-8",
+            )
+            fake_aws.chmod(0o700)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "AWS_CALL_LOG": str(call_log),
+                    "PATH": f"{fake_bin}:{environment['PATH']}",
+                    "RUNNER_TEMP": str(temporary),
+                    "FRONTEND_EDGE_CONTRACT_PATH": str(edge_contract_path),
+                }
+            )
+            completed = subprocess.run(
+                ["bash", "ops/ci/audit_stack_drift.sh"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(
+                json.loads(completed.stdout),
+                {
+                    "filteredStackCount": 1,
+                    "metadataPostureCheckCount": 1,
+                    "frontendEdgeCheckCount": 1,
+                    "stackCount": 9,
+                    "status": "IN_SYNC",
+                },
+            )
+            calls = call_log.read_text(encoding="utf-8").splitlines()
+            detections = [
+                call for call in calls if call.startswith("cloudformation detect-stack-drift")
+            ]
+            self.assertEqual(len(detections), 9)
+            filtered = [call for call in detections if "--logical-resource-ids" in call]
+            self.assertEqual(len(filtered), 1)
+            self.assertIn("CanaryArtifactBucket", filtered[0])
+            self.assertNotIn("RumAppMonitor", filtered[0])
+            self.assertEqual(
+                sum(call.startswith("rum get-app-monitor") for call in calls), 1
+            )
 
     def test_release_bucket_and_key_are_private_encrypted_versioned_lifecycle_managed_and_retained(self):
         key = resource_block("ReleaseArtifactKey")

@@ -89,6 +89,7 @@ jobs:
     outputs:
       change_set_id: ${{ steps.plan.outputs.change_set_id }}
       noop: ${{ steps.plan.outputs.noop }}
+      template_sha256: ${{ steps.plan.outputs.template_sha256 }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -107,6 +108,7 @@ jobs:
       - uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
         with:
           use-installer: true
+          version: 1.154.0
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
@@ -151,6 +153,7 @@ jobs:
           STACK_NAME: ${{ vars.AWS_STACK_NAME }}
           CHANGE_SET_ID: ${{ needs.backend-plan.outputs.change_set_id }}
           EXPECTED_RELEASE_SHA: ${{ github.sha }}
+          EXPECTED_TEMPLATE_SHA256: ${{ needs.backend-plan.outputs.template_sha256 }}
         run: ./ops/ci/backend_execute.sh
 
   backend-smoke:
@@ -167,8 +170,14 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
           SITE_URL: ${{ vars.SITE_URL }}
           API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          API_ORIGIN_URL: ${{ vars.API_ORIGIN_URL }}
+          EXECUTE_API_URL: ${{ vars.EXECUTE_API_URL }}
+          MEDIA_DOMAIN: ${{ vars.VITE_CLOUDFRONT_DOMAIN }}
+          MEDIA_BUCKET_NAME: ${{ vars.MEDIA_BUCKET_NAME }}
+          EXPECTED_PUBLIC_ALBUM_COUNT: ${{ vars.EXPECTED_PUBLIC_ALBUM_COUNT }}
         run: ./ops/ci/public_smoke.sh
 
   frontend-deploy:
@@ -203,8 +212,15 @@ jobs:
           FRONTEND_DISTRIBUTION_ID: ${{ vars.FRONTEND_DISTRIBUTION_ID }}
         run: ./ops/ci/frontend_deploy.sh
       - env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
           SITE_URL: ${{ vars.SITE_URL }}
           API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          API_ORIGIN_URL: ${{ vars.API_ORIGIN_URL }}
+          EXECUTE_API_URL: ${{ vars.EXECUTE_API_URL }}
+          MEDIA_DOMAIN: ${{ vars.VITE_CLOUDFRONT_DOMAIN }}
+          MEDIA_BUCKET_NAME: ${{ vars.MEDIA_BUCKET_NAME }}
+          EXPECTED_PUBLIC_ALBUM_COUNT: ${{ vars.EXPECTED_PUBLIC_ALBUM_COUNT }}
+          EXPECTED_RELEASE_SHA: ${{ github.sha }}
         run: ./ops/ci/public_smoke.sh
 
   release-record:

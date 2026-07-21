@@ -352,7 +352,7 @@ class MediaAccessBranchTests(unittest.TestCase):
         self.assertEqual(media_access.url_expiry_metadata(123)["expiresIn"], 123)
 
     def test_key_normalization_and_namespace_validation_fail_closed(self):
-        for value in (None, "", "a" * 1025, "bad\\key", "bad\x00key", "../outside", ".", ".."): 
+        for value in (None, "", "a" * 1025, "bad\\key", "bad\x00key", "../outside", ".", ".."):
             with self.subTest(value=repr(value)):
                 with self.assertRaises(media_access.ValidationError):
                     media_access.normalize_object_key(value)

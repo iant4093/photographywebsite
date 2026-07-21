@@ -35,16 +35,20 @@ Resources:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
             Action: kms:*
             Resource: '*'
-          - Sid: AllowEventBridgeAndCloudWatchPublishers
+          - Sid: AllowDirectNotificationPublishers
             Effect: Allow
             Principal:
               Service:
-                - events.amazonaws.com
+                - budgets.amazonaws.com
                 - cloudwatch.amazonaws.com
             Action:
               - kms:Decrypt
               - kms:GenerateDataKey*
             Resource: '*'
+            Condition:
+              StringEquals:
+                kms:EncryptionContext:aws:sns:topicArn: !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
+                kms:ViaService: !Sub 'sns.${AWS::Region}.${AWS::URLSuffix}'
           - Sid: AllowSnsUseForThisTopic
             Effect: Allow
             Principal:
@@ -88,14 +92,17 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          # EventBridge does not support conditions in SNS topic policies. The
-          # publisher is limited to the EventBridge service and this exact topic.
-          - Sid: AllowEventBridgeSecurityFindings
+          - Sid: AllowExactAccountBudget
             Effect: Allow
             Principal:
-              Service: events.amazonaws.com
+              Service: budgets.amazonaws.com
             Action: sns:Publish
             Resource: !Ref SecurityNotifications
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:budgets::${AWS::AccountId}:budget/ian-photography-monthly-${Stage}'
           - Sid: AllowExactCloudWatchAlarms
             Effect: Allow
             Principal:
@@ -112,7 +119,54 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-iam-change-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-kms-change-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-routing-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-service-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-data-protection-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-infrastructure-protection-change-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-backup-freshness-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-${Stage}'
+
+  SecuritySignalQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-security-signals-${Stage}'
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 180
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SecurityEventDlq.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecuritySignalQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SecuritySignalQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowExactSecuritySignalRules
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt SecuritySignalQueue.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-high-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-critical-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-high-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-critical-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-restore-failed-${Stage}'
 
   SecurityEventDlq:
     Type: AWS::SQS::Queue
@@ -146,12 +200,172 @@ Resources:
               ArnEquals:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-high-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-critical-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-high-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-critical-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-restore-failed-${Stage}'
+
+  SecuritySignalProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/ian-photography-security-signal-processor-${Stage}'
+      RetentionInDays: 90
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecuritySignalProcessorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ConsumeExactSecuritySignalQueue
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ChangeMessageVisibility
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ReceiveMessage
+                Resource: !GetAtt SecuritySignalQueue.Arn
+        - PolicyName: PublishValidatedSecuritySignals
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref SecurityNotifications
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey*
+                Resource: !GetAtt SecurityNotificationKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:EncryptionContext:aws:sns:topicArn: !Ref SecurityNotifications
+                    kms:ViaService: !Sub 'sns.${AWS::Region}.${AWS::URLSuffix}'
+        - PolicyName: WriteSecuritySignalProcessorLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt SecuritySignalProcessorLogGroup.Arn
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecuritySignalProcessor:
+    Type: AWS::Lambda::Function
+    DependsOn: SecuritySignalProcessorLogGroup
+    Properties:
+      FunctionName: !Sub 'ian-photography-security-signal-processor-${Stage}'
+      Description: Validates fixed security signals before publishing to the responder topic.
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt SecuritySignalProcessorRole.Arn
+      MemorySize: 128
+      Timeout: 30
+      ReservedConcurrentExecutions: 2
+      Environment:
+        Variables:
+          SECURITY_TOPIC_ARN: !Ref SecurityNotifications
+          STAGE: !Ref Stage
+      Code:
+        ZipFile: |
+          import json
+          import logging
+          import os
+
+          import boto3
+
+
+          LOG = logging.getLogger()
+          LOG.setLevel(logging.INFO)
+          SNS = boto3.client("sns")
+          TOPIC_ARN = os.environ["SECURITY_TOPIC_ARN"]
+          STAGE = os.environ["STAGE"]
+          CONTRACTS = {
+              "guardduty.finding.high": ("high", "managed-security-findings"),
+              "guardduty.finding.critical": ("critical", "managed-security-findings"),
+              "securityhub.finding.high": ("high", "managed-security-findings"),
+              "securityhub.finding.critical": ("critical", "managed-security-findings"),
+              "backup.job.failed": ("high", "backup-job-failure"),
+              "backup.copy.failed": ("high", "backup-copy-failure"),
+              "backup.restore.failed": ("critical", "backup-restore-failure"),
+          }
+          KEYS = {"schemaVersion", "eventName", "severity", "stage", "runbook"}
+
+
+          def _validated(body):
+              try:
+                  value = json.loads(body)
+              except (TypeError, ValueError) as error:
+                  raise ValueError("invalid security signal json") from error
+              if not isinstance(value, dict) or set(value) != KEYS:
+                  raise ValueError("invalid security signal shape")
+              contract = CONTRACTS.get(value.get("eventName"))
+              if contract is None:
+                  raise ValueError("unknown security signal")
+              severity, anchor = contract
+              expected = {
+                  "schemaVersion": 1,
+                  "eventName": value["eventName"],
+                  "severity": severity,
+                  "stage": STAGE,
+                  "runbook": "ops/ALARM_REGISTRY.md#" + anchor,
+              }
+              if value != expected:
+                  raise ValueError("security signal contract mismatch")
+              return expected
+
+
+          def handler(event, context):
+              records = event.get("Records", []) if isinstance(event, dict) else []
+              if len(records) != 1 or not isinstance(records[0], dict):
+                  raise ValueError("invalid security signal batch")
+              signal = _validated(records[0].get("body"))
+              SNS.publish(
+                  TopicArn=TOPIC_ARN,
+                  Message=json.dumps(signal, sort_keys=True, separators=(",", ":")),
+              )
+              LOG.info("security_signal_forwarded count=1")
+              return {"forwarded": 1}
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  SecuritySignalProcessorMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: true
+      EventSourceArn: !GetAtt SecuritySignalQueue.Arn
+      FunctionName: !Ref SecuritySignalProcessor
 
   GuardDutyFindingRule:
     Type: AWS::Events::Rule
     DependsOn:
       - SecurityNotificationsPolicy
+      - SecuritySignalQueuePolicy
       - SecurityEventDlqPolicy
     Properties:
       Name: !Sub 'ian-photography-guardduty-high-${Stage}'
@@ -160,11 +374,41 @@ Resources:
         detail-type: [GuardDuty Finding]
         detail:
           severity:
-            - numeric: ['>=', 7]
+            - numeric: ['>=', 7, '<', 9]
       State: ENABLED
       Targets:
         - Id: SecurityNotifications
-          Arn: !Ref SecurityNotifications
+          Arn: !GetAtt SecuritySignalQueue.Arn
+          # Never forward the raw finding: it can contain resource identifiers,
+          # network details, object metadata, and other incident evidence that
+          # does not belong in a human notification channel.
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"guardduty.finding.high","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
+          DeadLetterConfig:
+            Arn: !GetAtt SecurityEventDlq.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  GuardDutyCriticalFindingRule:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - SecuritySignalQueuePolicy
+      - SecurityEventDlqPolicy
+    Properties:
+      Name: !Sub 'ian-photography-guardduty-critical-${Stage}'
+      EventPattern:
+        source: [aws.guardduty]
+        detail-type: [GuardDuty Finding]
+        detail:
+          severity:
+            - numeric: ['>=', 9]
+      State: ENABLED
+      Targets:
+        - Id: SecuritySignals
+          Arn: !GetAtt SecuritySignalQueue.Arn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"guardduty.finding.critical","severity":"critical","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
           DeadLetterConfig:
             Arn: !GetAtt SecurityEventDlq.Arn
           RetryPolicy:
@@ -175,6 +419,7 @@ Resources:
     Type: AWS::Events::Rule
     DependsOn:
       - SecurityNotificationsPolicy
+      - SecuritySignalQueuePolicy
       - SecurityEventDlqPolicy
     Properties:
       Name: !Sub 'ian-photography-securityhub-high-${Stage}'
@@ -184,13 +429,43 @@ Resources:
         detail:
           findings:
             Severity:
-              Label: [HIGH, CRITICAL]
+              Label: [HIGH]
             Workflow:
               Status: [NEW, NOTIFIED]
       State: ENABLED
       Targets:
         - Id: SecurityNotifications
-          Arn: !Ref SecurityNotifications
+          Arn: !GetAtt SecuritySignalQueue.Arn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"securityhub.finding.high","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
+          DeadLetterConfig:
+            Arn: !GetAtt SecurityEventDlq.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  SecurityHubCriticalFindingRule:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - SecuritySignalQueuePolicy
+      - SecurityEventDlqPolicy
+    Properties:
+      Name: !Sub 'ian-photography-securityhub-critical-${Stage}'
+      EventPattern:
+        source: [aws.securityhub]
+        detail-type: [Security Hub Findings - Imported]
+        detail:
+          findings:
+            Severity:
+              Label: [CRITICAL]
+            Workflow:
+              Status: [NEW, NOTIFIED]
+      State: ENABLED
+      Targets:
+        - Id: SecuritySignals
+          Arn: !GetAtt SecuritySignalQueue.Arn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"securityhub.finding.critical","severity":"critical","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
           DeadLetterConfig:
             Arn: !GetAtt SecurityEventDlq.Arn
           RetryPolicy:
@@ -254,10 +529,114 @@ Resources:
       LogGroupName: !Ref SecurityAuditLogGroupName
       FilterName: !Sub 'ian-photography-security-routing-change-${Stage}'
       FilterPattern: >-
-        { (($.eventSource = "sns.amazonaws.com") && (($.eventName = "DeleteTopic") || ($.eventName = "SetTopicAttributes") || ($.eventName = "Unsubscribe"))) || (($.eventSource = "events.amazonaws.com") && (($.eventName = "DeleteRule") || ($.eventName = "DisableRule") || ($.eventName = "RemoveTargets") || ($.eventName = "PutTargets"))) }
+        { (($.eventSource = "sns.amazonaws.com") && (($.eventName = "DeleteTopic") || ($.eventName = "SetTopicAttributes") || ($.eventName = "Subscribe") || ($.eventName = "ConfirmSubscription") || ($.eventName = "Unsubscribe"))) || (($.eventSource = "events.amazonaws.com") && (($.eventName = "DeleteRule") || ($.eventName = "DisableRule") || ($.eventName = "EnableRule") || ($.eventName = "PutRule") || ($.eventName = "RemoveTargets") || ($.eventName = "PutTargets"))) }
       MetricTransformations:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: SecurityRoutingConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  SecurityServiceChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-security-service-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "config.amazonaws.com") && (($.eventName = "StopConfigurationRecorder") || ($.eventName = "DeleteConfigurationRecorder") || ($.eventName = "DeleteDeliveryChannel") || ($.eventName = "DeleteConfigRule"))) || (($.eventSource = "guardduty.amazonaws.com") && (($.eventName = "DeleteDetector") || ($.eventName = "UpdateDetector") || ($.eventName = "UpdateMemberDetectors"))) || (($.eventSource = "securityhub.amazonaws.com") && (($.eventName = "DisableSecurityHub") || ($.eventName = "BatchDisableStandards") || ($.eventName = "UpdateStandardsControl"))) || (($.eventSource = "inspector2.amazonaws.com") && ($.eventName = "Disable")) || (($.eventSource = "access-analyzer.amazonaws.com") && ($.eventName = "DeleteAnalyzer")) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: SecurityServiceConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  DetectionTopologyChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-detection-topology-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "config.amazonaws.com") && (($.eventName = "PutConfigurationRecorder") || ($.eventName = "PutDeliveryChannel") || ($.eventName = "PutConfigRule"))) || (($.eventSource = "guardduty.amazonaws.com") && (($.eventName = "CreateMembers") || ($.eventName = "DisassociateMembers"))) || (($.eventSource = "securityhub.amazonaws.com") && (($.eventName = "CreateFindingAggregator") || ($.eventName = "UpdateFindingAggregator") || ($.eventName = "DeleteFindingAggregator") || ($.eventName = "UpdateSecurityHubConfiguration"))) || (($.eventSource = "inspector2.amazonaws.com") && ($.eventName = "Enable")) || (($.eventSource = "access-analyzer.amazonaws.com") && ($.eventName = "UpdateAnalyzer")) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: SecurityServiceConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  ManagedSecurityOrganizationChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-managed-security-org-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "guardduty.amazonaws.com") && (($.eventName = "DeleteMembers") || ($.eventName = "DisableOrganizationAdminAccount") || ($.eventName = "DisassociateFromAdministratorAccount") || ($.eventName = "StopMonitoringMembers") || ($.eventName = "UpdateOrganizationConfiguration") || ($.eventName = "UpdateOrganizationConfiguration2"))) || (($.eventSource = "securityhub.amazonaws.com") && (($.eventName = "BatchUpdateStandardsControlAssociations") || ($.eventName = "DeleteMembers") || ($.eventName = "DisableOrganizationAdminAccount") || ($.eventName = "DisassociateFromAdministratorAccount"))) || (($.eventSource = "inspector2.amazonaws.com") && ($.eventName = "DisassociateMember")) || (($.eventSource = "access-analyzer.amazonaws.com") && (($.eventName = "CreateArchiveRule") || ($.eventName = "UpdateArchiveRule") || ($.eventName = "DeleteArchiveRule"))) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: SecurityServiceConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  DataProtectionChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-data-protection-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "s3.amazonaws.com") && (($.eventName = "DeleteBucketPolicy") || ($.eventName = "DeletePublicAccessBlock") || ($.eventName = "DeleteBucketEncryption") || ($.eventName = "PutBucketPolicy") || ($.eventName = "PutBucketPublicAccessBlock") || ($.eventName = "PutBucketVersioning") || ($.eventName = "PutBucketEncryption") || ($.eventName = "PutBucketLogging") || ($.eventName = "PutBucketAcl"))) || (($.eventSource = "dynamodb.amazonaws.com") && (($.eventName = "DeleteTable") || ($.eventName = "UpdateContinuousBackups") || ($.eventName = "UpdateTable"))) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: DataProtectionConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  BackupProtectionChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-backup-protection-change-${Stage}'
+      FilterPattern: >-
+        { ($.eventSource = "backup.amazonaws.com") && (($.eventName = "DeleteBackupVault") || ($.eventName = "DeleteRecoveryPoint") || ($.eventName = "PutBackupVaultLockConfiguration") || ($.eventName = "DeleteBackupVaultLockConfiguration") || ($.eventName = "DeleteBackupVaultAccessPolicy") || ($.eventName = "PutBackupVaultAccessPolicy") || ($.eventName = "DeleteBackupPlan") || ($.eventName = "UpdateBackupPlan") || ($.eventName = "DeleteBackupSelection") || ($.eventName = "UpdateRecoveryPointLifecycle")) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: DataProtectionConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  DataRetentionAndOwnershipChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-data-retention-ownership-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "s3.amazonaws.com") && (($.eventName = "DeleteBucketLifecycle") || ($.eventName = "PutBucketLifecycleConfiguration") || ($.eventName = "DeleteBucketOwnershipControls") || ($.eventName = "PutBucketOwnershipControls") || ($.eventName = "DeleteBucketReplication") || ($.eventName = "PutBucketReplication") || ($.eventName = "PutObjectLockConfiguration"))) || (($.eventSource = "dynamodb.amazonaws.com") && ($.eventName = "UpdateTimeToLive")) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: DataProtectionConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  InfrastructureProtectionChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-infrastructure-protection-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "cloudformation.amazonaws.com") && (($.eventName = "DeleteStack") || ($.eventName = "SetStackPolicy") || ($.eventName = "UpdateTerminationProtection"))) || (($.eventSource = "cloudfront.amazonaws.com") && (($.eventName = "DeleteDistribution") || ($.eventName = "UpdateDistribution"))) || (($.eventSource = "wafv2.amazonaws.com") && (($.eventName = "DeleteWebACL") || ($.eventName = "UpdateWebACL") || ($.eventName = "DeleteLoggingConfiguration"))) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: InfrastructureProtectionConfigurationChange
+          MetricValue: '1'
+          DefaultValue: 0
+
+  InfrastructureExecutionChangeMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref SecurityAuditLogGroupName
+      FilterName: !Sub 'ian-photography-infrastructure-execution-change-${Stage}'
+      FilterPattern: >-
+        { (($.eventSource = "cloudformation.amazonaws.com") && (($.eventName = "UpdateStack") || ($.eventName = "ExecuteChangeSet") || ($.eventName = "RollbackStack"))) || (($.eventSource = "wafv2.amazonaws.com") && (($.eventName = "AssociateWebACL") || ($.eventName = "DisassociateWebACL") || ($.eventName = "PutLoggingConfiguration"))) || (($.eventSource = "cloudfront.amazonaws.com") && (($.eventName = "CreateContinuousDeploymentPolicy") || ($.eventName = "UpdateContinuousDeploymentPolicy") || ($.eventName = "DeleteContinuousDeploymentPolicy"))) }
+      MetricTransformations:
+        - MetricNamespace: IanTruongPhotography/Security
+          MetricName: InfrastructureProtectionConfigurationChange
           MetricValue: '1'
           DefaultValue: 0
 
@@ -341,6 +720,54 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions: [!Ref SecurityNotifications]
 
+  SecurityServiceChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-security-service-change-${Stage}'
+      AlarmDescription: A managed detection, configuration, or analyzer control was disabled or changed.
+      Namespace: IanTruongPhotography/Security
+      MetricName: SecurityServiceConfigurationChange
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+  DataProtectionChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-data-protection-change-${Stage}'
+      AlarmDescription: A data, backup, logging, versioning, or public-access protection was changed.
+      Namespace: IanTruongPhotography/Security
+      MetricName: DataProtectionConfigurationChange
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
+  InfrastructureProtectionChangeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'ian-photography-infrastructure-protection-change-${Stage}'
+      AlarmDescription: A protected stack, edge distribution, or web ACL was changed or weakened.
+      Namespace: IanTruongPhotography/Security
+      MetricName: InfrastructureProtectionConfigurationChange
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
+
   SecurityEventDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -366,5 +793,8 @@ Outputs:
     Description: Attach only an owner-approved monitored subscriber after deployment.
   SecurityNotificationKeyArn:
     Value: !GetAtt SecurityNotificationKey.Arn
+  SecuritySignalQueueArn:
+    Value: !GetAtt SecuritySignalQueue.Arn
+    Description: Exact rule-scoped ingress for static privacy-safe security signals.
   SecurityEventDeadLetterQueueArn:
     Value: !GetAtt SecurityEventDlq.Arn

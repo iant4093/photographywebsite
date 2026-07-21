@@ -127,6 +127,30 @@ aws cloudformation validate-template \
    sanitized report, S3 encryption, logs, and all three public API/media checks.
    Stop it immediately if any artifact contains a header, body, identifier, or
    route outside this contract.
+   Synthetics names its backing Lambda log group with a service-generated
+   suffix, so reconcile its retention through the exact stack-owned canary
+   prefix after the group exists:
+
+   ```bash
+   python3 ops/set_lambda_log_retention.py \
+     --stack-name ian-photography-observability \
+     --region us-west-2 \
+     --days 30 \
+     --include-synthetics
+
+   python3 ops/set_lambda_log_retention.py \
+     --stack-name ian-photography-observability \
+     --region us-west-2 \
+     --days 30 \
+     --include-synthetics \
+     --apply \
+     --expected-account-id EXPECTED_ACCOUNT_ID \
+     --confirm-stack-name ian-photography-observability
+   ```
+
+   The helper resolves each current backing Lambda from the stack-owned
+   canary's exact Synthetics `EngineArn`, prints aggregate counts only, and
+   fails if ownership is ambiguous.
 6. After that successful run, update the stack with
    `StartPublicCanary=true`. Keep `DryRunAndUpdate=true`.
 7. Copy the four public outputs to the complete GitHub variable set:
@@ -147,6 +171,9 @@ the production stack exists does not break the quality gate.
 When `AlarmTopicArn` is empty, alarms exist without actions. When supplied, it
 must be the exact pre-existing SNS topic ARN; this stack never invents an email
 endpoint or subscription. Test and document delivery separately.
+`ops/alarm_registry.json` and `ops/ALARM_REGISTRY.md` are the versioned signal
+inventory and runbook map. Production readiness remains blocked while their
+primary/backup responder and delivery-test fields are unassigned.
 
 - Canary alarm: verify all public routes independently, then inspect the
   sanitized log and homepage screenshot. Never paste full artifacts into chat

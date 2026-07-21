@@ -127,6 +127,29 @@ reach the centralized group, verify the metrics advance, and confirm the alarm
 destination. Then run the existing anonymous authorization/public-media smoke
 tests. Synthetic events must use no real email, album, share grant, or media.
 
+Reconcile retained legacy per-function groups, including dormant authentication
+groups that predate centralized logging, through the guarded stack inventory.
+Run the first command as a dry run and review only its aggregate counts:
+
+```bash
+python3 ops/set_lambda_log_retention.py \
+  --stack-name ian-website \
+  --region us-west-2 \
+  --days 30
+
+python3 ops/set_lambda_log_retention.py \
+  --stack-name ian-website \
+  --region us-west-2 \
+  --days 30 \
+  --apply \
+  --expected-account-id EXPECTED_ACCOUNT_ID \
+  --confirm-stack-name ian-website
+```
+
+Do not delete a dormant group merely because its function now uses the central
+group. Retention limits old security metadata while preserving the rollback and
+incident boundary.
+
 Rollback the Lambda release/configuration through the reviewed stack change set.
 Do not delete the centralized or legacy log groups, metric history, alarm state,
 or incident evidence. A rollback may stop new records from reaching the central

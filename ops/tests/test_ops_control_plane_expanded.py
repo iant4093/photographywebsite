@@ -235,6 +235,117 @@ class IndexAndRetentionTests(MainMixin, unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(sum(call[:2] == ["logs", "put-retention-policy"] for call in calls), 1)
 
+    def test_log_retention_uses_exact_stack_owned_synthetics_engine(self):
+        calls = []
+
+        def synthetics_aws(arguments, profile, region):
+            calls.append(arguments)
+            if arguments[:2] == ["sts", "get-caller-identity"]:
+                return {"Account": "123456789012"}
+            if arguments[:2] == ["cloudformation", "list-stack-resources"]:
+                return {
+                    "StackResourceSummaries": [
+                        {
+                            "ResourceType": "AWS::Synthetics::Canary",
+                            "PhysicalResourceId": "public-canary",
+                        },
+                        {
+                            "ResourceType": "AWS::S3::Bucket",
+                            "PhysicalResourceId": "ignored",
+                        },
+                    ]
+                }
+            if arguments[:2] == ["synthetics", "get-canary"]:
+                self.assertEqual(arguments[-1], "public-canary")
+                return {
+                    "Canary": {
+                        "EngineArn": (
+                            "arn:aws:lambda:us-west-2:123456789012:function:"
+                            "cwsyn-public-canary-generated:1"
+                        )
+                    }
+                }
+            if arguments[:2] == ["logs", "describe-log-groups"]:
+                self.assertEqual(
+                    arguments[-1], "/aws/lambda/cwsyn-public-canary-generated"
+                )
+                return {
+                    "logGroups": [
+                        {
+                            "logGroupName": "/aws/lambda/cwsyn-public-canary-generated",
+                        },
+                        {
+                            "logGroupName": "/aws/lambda/unrelated",
+                            "retentionInDays": 365,
+                        },
+                    ]
+                }
+            if arguments[:2] == ["logs", "put-retention-policy"]:
+                return {}
+            raise AssertionError(arguments)
+
+        with patch.object(
+            set_lambda_log_retention, "aws_json", side_effect=synthetics_aws
+        ):
+            result, output = self.run_main(
+                set_lambda_log_retention,
+                "--stack-name",
+                "observability",
+                "--days",
+                "30",
+                "--include-synthetics",
+                "--apply",
+                "--expected-account-id",
+                "123456789012",
+                "--confirm-stack-name",
+                "observability",
+            )
+        self.assertEqual(result, 0)
+        decoder = json.JSONDecoder()
+        report, offset = decoder.raw_decode(output)
+        update, _ = decoder.raw_decode(output[offset:].lstrip())
+        self.assertEqual(report["syntheticsCanaryCount"], 1)
+        self.assertEqual(report["syntheticsLogGroupCount"], 1)
+        self.assertEqual(update["updatedLogGroupCount"], 1)
+        writes = [call for call in calls if call[:2] == ["logs", "put-retention-policy"]]
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][2], "--log-group-name")
+        self.assertEqual(writes[0][3], "/aws/lambda/cwsyn-public-canary-generated")
+
+    def test_log_retention_rejects_ambiguous_synthetics_engine(self):
+        def synthetics_aws(arguments, profile, region):
+            if arguments[:2] == ["sts", "get-caller-identity"]:
+                return {"Account": "123456789012"}
+            if arguments[:2] == ["cloudformation", "list-stack-resources"]:
+                return {
+                    "StackResourceSummaries": [
+                        {
+                            "ResourceType": "AWS::Synthetics::Canary",
+                            "PhysicalResourceId": "public-canary",
+                        }
+                    ]
+                }
+            if arguments[:2] == ["synthetics", "get-canary"]:
+                return {
+                    "Canary": {
+                        "EngineArn": (
+                            "arn:aws:lambda:us-west-2:123456789012:function:"
+                            "cwsyn-unrelated-generated:1"
+                        )
+                    }
+                }
+            raise AssertionError(arguments)
+
+        with patch.object(
+            set_lambda_log_retention, "aws_json", side_effect=synthetics_aws
+        ), self.assertRaises(SystemExit):
+            self.run_main(
+                set_lambda_log_retention,
+                "--stack-name",
+                "observability",
+                "--include-synthetics",
+            )
+
 
 class InvalidationTests(MainMixin, unittest.TestCase):
     def fake_aws(self, arguments, profile, region):
