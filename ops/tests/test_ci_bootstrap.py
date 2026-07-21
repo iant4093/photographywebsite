@@ -313,6 +313,24 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         protection = statement_block(execution, "ProtectRetainedApplicationData")
         self.assertIn("cloudfront:DeleteDistribution", protection)
 
+    def test_event_source_mapping_tag_lifecycle_is_scoped_to_regional_account_arns(self):
+        execution = execution_permissions()
+        mappings = statement_block(execution, "ManageStackEventSourceMappings")
+        for action in (
+            "lambda:GetEventSourceMapping",
+            "lambda:ListTags",
+            "lambda:TagResource",
+            "lambda:UntagResource",
+            "lambda:UpdateEventSourceMapping",
+            "lambda:DeleteEventSourceMapping",
+        ):
+            self.assertIn(f"- {action}", mappings)
+        self.assertIn(
+            "arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:event-source-mapping:*",
+            mappings,
+        )
+        self.assertNotIn("Resource: '*'", mappings)
+
     def test_certificate_secret_and_managed_policy_lifecycles_are_narrow_and_complete(self):
         execution = execution_permissions()
         request = statement_block(execution, "RequestExactRegionalApiCertificate")

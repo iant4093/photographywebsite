@@ -595,6 +595,9 @@ Resources:
             Action:
               - lambda:DeleteEventSourceMapping
               - lambda:GetEventSourceMapping
+              - lambda:ListTags
+              - lambda:TagResource
+              - lambda:UntagResource
               - lambda:UpdateEventSourceMapping
             Resource: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:event-source-mapping:*'
           - Sid: ListEventSourceMappings
