@@ -163,6 +163,14 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("lambda.amazonaws.com", execution)
         self.assertIn("mediaconvert.amazonaws.com", execution)
 
+        transform = statement_block(execution, "InvokeExactSamTransform")
+        self.assertIn("Action: cloudformation:CreateChangeSet", transform)
+        self.assertIn(
+            "arn:${AWS::Partition}:cloudformation:us-west-2:aws:transform/Serverless-2016-10-31",
+            transform,
+        )
+        self.assertNotIn("Resource: '*'", transform)
+
     def test_execution_role_can_manage_only_the_exact_front_door_domain_and_dns_zone(self):
         execution = execution_permissions()
         self.assertIn("AllowedValues: [origin-api.iantruongphotography.com]", TEMPLATE)

@@ -223,6 +223,9 @@ not expose a usable resource ARN before creation (or do not support resource
 authorization). Creation is narrowed with exact region/account families,
 request tags, the exact certificate domain and DNS validation method, or the
 exact `ian-website-*` function condition where the service supports it.
+The exact regional `Serverless-2016-10-31` transform ARN is the only
+CloudFormation macro resource the application execution role may invoke while
+creating the already-guarded application change set.
 
 Front-door updates are otherwise bounded to
 `origin-api.iantruongphotography.com`, hosted zone `Z0915663I4P8Y0MEDWH`, its

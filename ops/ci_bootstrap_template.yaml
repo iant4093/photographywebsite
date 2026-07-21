@@ -518,6 +518,10 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
+          - Sid: InvokeExactSamTransform
+            Effect: Allow
+            Action: cloudformation:CreateChangeSet
+            Resource: !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:aws:transform/Serverless-2016-10-31'
           - Sid: ManageStackIamRoles
             Effect: Allow
             Action:
