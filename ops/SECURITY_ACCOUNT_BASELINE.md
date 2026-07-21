@@ -111,8 +111,10 @@ current owner:
   feature blocks rollout.
   Check Organizations and delegated-
   administrator ownership before changing features.
-- Existing hub: `SecurityHubDeploymentMode=skip`; check central configuration,
-  regional aggregation, standards, and delegated administration.
+- Existing hub: `SecurityHubDeploymentMode=skip` only after the home hub has
+  exactly the reviewed Foundational Security Best Practices and CIS 1.2.0
+  default standards in `READY`, while every satellite hub has zero enabled
+  standards. Also check central configuration and delegated administration.
 - Existing account analyzer: `AccessAnalyzerDeploymentMode=skip`; preserve its
   archive rules.
 - Existing named trail, log group, topic, KMS alias, queue, rule, alarm, vault,
@@ -143,9 +145,11 @@ python3 ops/regional_security_rollout.py \
 The helper obtains the enabled Region set from the account, then inventories
 the regional GuardDuty detector and Security Hub singleton in every one. An
 API error, malformed response, duplicate singleton, disabled or under-protected
-detector, disabled home Region, or finding aggregator with a different home/
-linking mode fails closed. Healthy existing detectors and hubs are reported as
-covered and left externally managed; the
+detector, disabled home Region, drifted Security Hub standards, or finding
+aggregator with a different home/linking mode fails closed. The home hub must
+have exactly the two reviewed default standards in `READY`; satellite hubs must
+have none because their stacks do not create regional Config recorders. Healthy
+existing detectors and hubs are reported as covered and left externally managed; the
 helper never changes their plans, standards, organization ownership, or
 delegated-administrator configuration. Output contains Region names and
 aggregate state, not detector IDs, hub ARNs, aggregator ARNs, findings, or
@@ -413,7 +417,10 @@ service-managed CloudTrail, DNS, and flow-log sources to be enabled and AI
 analyst, AI protection, and legacy EKS runtime monitoring to be disabled.
 Enable other protection plans only with a documented threat model,
 supported-resource inventory, and cost approval. Confirm
-Security Hub standards and organization ownership before creating the hub.
+Security Hub standards and organization ownership before creating the hub. The
+shared template enables its two default standards only when the same stack
+creates the home Config recorder; satellite hub-only stacks explicitly disable
+default-standard enrollment.
 The Config layer also checks public S3 writes, default S3 encryption, public
 Lambda function access, and customer-managed KMS key rotation. These rules use
 only resource types already recorded by the exact home-region recorder. The

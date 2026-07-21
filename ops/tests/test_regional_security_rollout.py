@@ -41,6 +41,22 @@ GUARDDUTY_FEATURES = [
     {"Name": "AI_PROTECTION", "Status": "DISABLED"},
     {"Name": "EKS_RUNTIME_MONITORING", "Status": "DISABLED"},
 ]
+HOME_SECURITY_HUB_STANDARDS = [
+    {
+        "StandardsArn": (
+            f"arn:aws:securityhub:{HOME}::standards/"
+            "aws-foundational-security-best-practices/v/1.0.0"
+        ),
+        "StandardsStatus": "READY",
+    },
+    {
+        "StandardsArn": (
+            f"arn:aws:securityhub:{HOME}::standards/"
+            "cis-aws-foundations-benchmark/v/1.2.0"
+        ),
+        "StandardsStatus": "READY",
+    },
+]
 
 
 def responses(*, aggregator: str = "absent") -> dict[tuple[str, str, str], dict]:
@@ -58,7 +74,13 @@ def responses(*, aggregator: str = "absent") -> dict[tuple[str, str, str], dict]
             "Features": GUARDDUTY_FEATURES,
         },
         (OTHER, "guardduty", "list-detectors"): {"DetectorIds": []},
-        (HOME, "securityhub", "describe-hub"): {"HubArn": "arn:home-hub"},
+        (HOME, "securityhub", "describe-hub"): {
+            "HubArn": "arn:home-hub",
+            "ControlFindingGenerator": "SECURITY_CONTROL",
+        },
+        (HOME, "securityhub", "get-enabled-standards"): {
+            "StandardsSubscriptions": HOME_SECURITY_HUB_STANDARDS,
+        },
         (OTHER, "securityhub", "describe-hub"): {},
         (HOME, "securityhub", "list-finding-aggregators"): {
             "FindingAggregators": (
@@ -183,7 +205,10 @@ class RegionalSecurityPlanTests(unittest.TestCase):
 
         self.assertEqual(
             rollout._security_hub_state(
-                caller=disabled_hub, profile=None, region=HOME
+                caller=disabled_hub,
+                profile=None,
+                region=HOME,
+                expect_default_standards=True,
             ),
             "absent",
         )
@@ -282,6 +307,7 @@ class RegionalSecurityPlanTests(unittest.TestCase):
                     caller=lambda arguments, profile, region, value=response: value,
                     profile=None,
                     region=HOME,
+                    expect_default_standards=True,
                 )
 
         def denied_hub(arguments: list[str], profile: str | None, region: str) -> dict:
@@ -289,7 +315,103 @@ class RegionalSecurityPlanTests(unittest.TestCase):
 
         with self.assertRaises(rollout.InventoryError):
             rollout._security_hub_state(
-                caller=denied_hub, profile=None, region=HOME
+                caller=denied_hub,
+                profile=None,
+                region=HOME,
+                expect_default_standards=True,
+            )
+
+    def test_security_hub_standards_are_exact_for_home_and_satellites(self) -> None:
+        def caller_with(standards, *, generator="SECURITY_CONTROL"):
+            def caller(arguments, profile, region):
+                if arguments[1] == "describe-hub":
+                    return {
+                        "HubArn": "arn:private-hub",
+                        "ControlFindingGenerator": generator,
+                    }
+                self.assertEqual(arguments[:2], ["securityhub", "get-enabled-standards"])
+                return {"StandardsSubscriptions": standards}
+
+            return caller
+
+        self.assertEqual(
+            rollout._security_hub_state(
+                caller=caller_with(HOME_SECURITY_HUB_STANDARDS),
+                profile=None,
+                region=HOME,
+                expect_default_standards=True,
+            ),
+            "existing",
+        )
+        self.assertEqual(
+            rollout._security_hub_state(
+                caller=caller_with([]),
+                profile=None,
+                region=OTHER,
+                expect_default_standards=False,
+            ),
+            "existing",
+        )
+
+        home_drift = (
+            HOME_SECURITY_HUB_STANDARDS[:1],
+            HOME_SECURITY_HUB_STANDARDS
+            + [
+                {
+                    "StandardsArn": (
+                        f"arn:aws:securityhub:{HOME}::standards/"
+                        "pci-dss/v/3.2.1"
+                    ),
+                    "StandardsStatus": "READY",
+                }
+            ],
+            [
+                {
+                    **item,
+                    "StandardsStatus": (
+                        "INCOMPLETE"
+                        if index == 0
+                        else item["StandardsStatus"]
+                    ),
+                }
+                for index, item in enumerate(HOME_SECURITY_HUB_STANDARDS)
+            ],
+            [HOME_SECURITY_HUB_STANDARDS[0], HOME_SECURITY_HUB_STANDARDS[0]],
+            [None],
+            [
+                {
+                    **HOME_SECURITY_HUB_STANDARDS[0],
+                    "StandardsArn": HOME_SECURITY_HUB_STANDARDS[0][
+                        "StandardsArn"
+                    ].replace(HOME, OTHER),
+                },
+                HOME_SECURITY_HUB_STANDARDS[1],
+            ],
+        )
+        for standards in home_drift:
+            with self.subTest(standards=standards), self.assertRaises(
+                rollout.InventoryError
+            ):
+                rollout._security_hub_state(
+                    caller=caller_with(standards),
+                    profile=None,
+                    region=HOME,
+                    expect_default_standards=True,
+                )
+
+        with self.assertRaises(rollout.InventoryError):
+            rollout._security_hub_state(
+                caller=caller_with(HOME_SECURITY_HUB_STANDARDS),
+                profile=None,
+                region=OTHER,
+                expect_default_standards=False,
+            )
+        with self.assertRaises(rollout.InventoryError):
+            rollout._security_hub_state(
+                caller=caller_with([], generator="PRODUCT_FIELDS"),
+                profile=None,
+                region=OTHER,
+                expect_default_standards=False,
             )
 
     def test_finding_aggregator_inventory_rejects_ambiguous_or_drifted_state(
@@ -533,7 +655,11 @@ class RegionalSecurityPlanTests(unittest.TestCase):
             "Features": GUARDDUTY_FEATURES,
         }
         values[(OTHER, "securityhub", "describe-hub")] = {
-            "HubArn": "arn:other-hub"
+            "HubArn": "arn:other-hub",
+            "ControlFindingGenerator": "SECURITY_CONTROL",
+        }
+        values[(OTHER, "securityhub", "get-enabled-standards")] = {
+            "StandardsSubscriptions": []
         }
         plan = build(values)
         prepared = rollout.prepare_change_sets(

@@ -224,6 +224,11 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("UpdateReplacePolicy: Retain", aggregator)
         self.assertIn("RegionLinkingMode: ALL_REGIONS", aggregator)
         self.assertNotIn("Regions:", aggregator)
+        hub = resource_block(MANAGED, "SecurityHub")
+        self.assertIn(
+            "EnableDefaultStandards: !If [CreateConfig, true, false]", hub
+        )
+        self.assertIn("ControlFindingGenerator: SECURITY_CONTROL", hub)
 
     def test_config_adds_high_signal_rules_with_existing_dependencies(self) -> None:
         expected = {

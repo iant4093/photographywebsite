@@ -52,6 +52,12 @@ EXPECTED_GUARDDUTY_FEATURES = {
     **CLOUDFORMATION_GUARDDUTY_FEATURES,
     **SERVICE_MANAGED_GUARDDUTY_FEATURES,
 }
+EXPECTED_HOME_SECURITY_HUB_STANDARDS = frozenset(
+    {
+        "aws-foundational-security-best-practices/v/1.0.0",
+        "cis-aws-foundations-benchmark/v/1.2.0",
+    }
+)
 STABLE_STACK_STATUSES = {
     "CREATE_COMPLETE",
     "IMPORT_COMPLETE",
@@ -167,8 +173,23 @@ def _guardduty_state(
     return "existing"
 
 
+def _security_hub_standard_key(arn: Any, *, region: str) -> str:
+    if not isinstance(arn, str):
+        raise InventoryError(f"Security Hub returned malformed standards in {region}")
+    match = re.fullmatch(
+        rf"arn:[^:]+:securityhub:{re.escape(region)}::standards/(.+)", arn
+    )
+    if match is None:
+        raise InventoryError(f"Security Hub returned out-of-scope standards in {region}")
+    return match.group(1)
+
+
 def _security_hub_state(
-    *, caller: AwsCaller, profile: str | None, region: str
+    *,
+    caller: AwsCaller,
+    profile: str | None,
+    region: str,
+    expect_default_standards: bool,
 ) -> str:
     try:
         response = caller(["securityhub", "describe-hub"], profile, region)
@@ -183,8 +204,44 @@ def _security_hub_state(
     arn = response.get("HubArn")
     if arn is None:
         return "absent"
-    if not isinstance(arn, str) or not arn:
+    if (
+        not isinstance(arn, str)
+        or not arn
+        or response.get("ControlFindingGenerator") != "SECURITY_CONTROL"
+    ):
         raise InventoryError(f"Security Hub returned malformed inventory in {region}")
+    standards_response = _call(
+        caller,
+        ["securityhub", "get-enabled-standards"],
+        profile,
+        region,
+    )
+    subscriptions = standards_response.get("StandardsSubscriptions")
+    if not isinstance(subscriptions, list):
+        raise InventoryError(f"Security Hub returned malformed standards in {region}")
+    if not expect_default_standards:
+        if subscriptions:
+            raise InventoryError(
+                f"Security Hub satellite standards differ from reviewed IaC in {region}"
+            )
+        return "existing"
+    standard_states: dict[str, str] = {}
+    for subscription in subscriptions:
+        if not isinstance(subscription, dict):
+            raise InventoryError(f"Security Hub returned malformed standards in {region}")
+        key = _security_hub_standard_key(
+            subscription.get("StandardsArn"), region=region
+        )
+        status = subscription.get("StandardsStatus")
+        if status != "READY" or key in standard_states:
+            raise InventoryError(
+                f"Security Hub home standards differ from reviewed IaC in {region}"
+            )
+        standard_states[key] = status
+    if frozenset(standard_states) != EXPECTED_HOME_SECURITY_HUB_STANDARDS:
+        raise InventoryError(
+            f"Security Hub home standards differ from reviewed IaC in {region}"
+        )
     return "existing"
 
 
@@ -248,7 +305,10 @@ def build_plan(
     for region in regions:
         guardduty = _guardduty_state(caller=caller, profile=profile, region=region)
         security_hub = _security_hub_state(
-            caller=caller, profile=profile, region=region
+            caller=caller,
+            profile=profile,
+            region=region,
+            expect_default_standards=region == home_region,
         )
         region_plans.append(
             {

@@ -132,7 +132,7 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      EnableDefaultStandards: true
+      EnableDefaultStandards: !If [CreateConfig, true, false]
       ControlFindingGenerator: SECURITY_CONTROL
       Tags:
         Application: IanTruongPhotography
