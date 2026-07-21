@@ -474,10 +474,11 @@ legal and retention decision because it can become irreversible.
 The primary backup stack also owns privacy-safe EventBridge failure signals for
 backup jobs, replica copy jobs, and restore jobs. Every target receives a fixed
 signal/stage/runbook payload instead of the AWS event, resource ARN, job ID,
-object key, provider error, or table/media identifier. The exact existing
-security topic and exact-rule signal queue are mandatory whenever the backup
-plan is created; its optional delivery DLQ must also match the exact account,
-Region, and stage. Update the notification stack first so both queue policies
+object key, provider error, or table/media identifier. The existing security
+topic, exact-rule signal queue, and delivery DLQ are mandatory whenever the
+backup plan is created. Their ARNs are not operator inputs: the backup template
+derives the exact same-account, `us-west-2`, and stage-owned names used by the
+notification stack. Update the notification stack first so both queue policies
 trust the three exact backup rules before enabling them.
 
 A six-hour scheduled verifier reads recovery-point metadata only and publishes
@@ -489,10 +490,14 @@ remain silently green. Neither logs nor metrics include resource or recovery-
 point ARNs.
 
 The replica vault is intentionally a separate `us-east-2` stack and has no
-invented cross-Region human route. A restore started directly in that Region is
-not covered by the `us-west-2` restore-failure rule. Keep replica-region restore
-operations gated until an owner approves and tests same-Region notification
-routing; do not route raw restore events across Regions as a shortcut.
+invented cross-Region human route. After that exact same-account, same-stage
+stack is deployed, set
+`ReplicaBackupDeploymentMode=use-existing-same-account-stage`; the primary
+template derives its ARN rather than accepting a caller-supplied destination.
+A restore started directly in that Region is not covered by the `us-west-2`
+restore-failure rule. Keep replica-region restore operations gated until an
+owner approves and tests same-Region notification routing; do not route raw
+restore events across Regions as a shortcut.
 
 ### 6. Cost budget and notification ownership
 

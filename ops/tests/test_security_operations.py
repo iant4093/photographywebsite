@@ -323,6 +323,11 @@ class SecurityTemplateTests(unittest.TestCase):
         )
         self.assertIn("arn:${AWS::Partition}:s3:::${ImagesBucketName}", BACKUP)
         self.assertIn("ReplicaBackupVaultArn", BACKUP)
+        self.assertIn("ReplicaBackupDeploymentMode", BACKUP)
+        self.assertIn("use-existing-same-account-stage", BACKUP)
+        rules = BACKUP.split("Rules:", 1)[1].split("Conditions:", 1)[0]
+        self.assertNotIn("!Sub", rules)
+        self.assertNotIn("Fn::Sub", rules)
         self.assertIn("CopyActions:", BACKUP)
         self.assertIn("AWS::Backup::BackupVault", BACKUP_REPLICA)
         self.assertIn("MustDeployInReplicaRegion", BACKUP_REPLICA)
@@ -340,7 +345,15 @@ class SecurityTemplateTests(unittest.TestCase):
             self.assertIn("Type: AWS::Events::Rule", block)
             self.assertIn(f"detail-type: [{detail_type}]", block)
             self.assertIn(f'"eventName":"{event_name}"', block)
-            self.assertIn("DeadLetterConfig: !If", block)
+            self.assertIn("DeadLetterConfig:", block)
+            self.assertIn(
+                "Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-signals-${Stage}'",
+                block,
+            )
+            self.assertIn(
+                "Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'",
+                block,
+            )
             self.assertIn("MaximumRetryAttempts: 10", block)
             for forbidden in (
                 "statusMessage",
@@ -350,9 +363,22 @@ class SecurityTemplateTests(unittest.TestCase):
                 "restoreJobId",
             ):
                 self.assertNotIn(forbidden, block)
-        self.assertEqual(BACKUP.count("DeadLetterConfig: !If"), 3)
-        self.assertIn("BackupAlertsRequiredForCreatedPlan", BACKUP)
-        self.assertIn("OptionalFailureDlqMustMatchDeployment", BACKUP)
+        self.assertEqual(BACKUP.count("DeadLetterConfig:"), 3)
+        for removed_input in (
+            "SecurityAlarmTopicArn",
+            "SecuritySignalQueueArn",
+            "SecurityEventDlqArn",
+            "HasSecurityAlarmTopic",
+            "HasSecuritySignalQueue",
+            "HasSecurityEventDlq",
+            "BackupAlertsRequiredForCreatedPlan",
+            "OptionalFailureDlqMustMatchDeployment",
+        ):
+            self.assertNotIn(removed_input, BACKUP)
+        self.assertIn(
+            "CreateBackupAlerts: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]",
+            BACKUP,
+        )
         self.assertIn("ian-photography-security-${Stage}", BACKUP)
         self.assertIn("ian-photography-security-events-${Stage}-dlq", BACKUP)
         self.assertIn("ian-photography-security-signals-${Stage}", BACKUP)

@@ -28,11 +28,11 @@ Parameters:
     MaxLength: 63
     AllowedPattern: '^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$'
     Description: Exact protected media bucket name output by the application stack.
-  ReplicaBackupVaultArn:
+  ReplicaBackupDeploymentMode:
     Type: String
-    Default: ''
-    AllowedPattern: '^(|arn:(aws|aws-us-gov):backup:us-east-2:[0-9]{12}:backup-vault:[A-Za-z0-9_.-]{2,50})$'
-    Description: Optional retained us-east-2 destination vault ARN deployed from the replica template.
+    Default: skip
+    AllowedValues: [skip, use-existing-same-account-stage]
+    Description: Enables copying to the exact retained us-east-2 vault derived for this account and stage.
   BackupDeploymentMode:
     Type: String
     Default: skip
@@ -47,65 +47,15 @@ Parameters:
     MinValue: 25
     MaxValue: 168
     Description: Maximum age of the latest completed recovery point for every exact resource.
-  SecurityAlarmTopicArn:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:us-west-2:[0-9]{12}:ian-photography-security-[a-z0-9-]+)$'
-    Description: Existing same-account security topic; this template creates no subscriber.
-  SecuritySignalQueueArn:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|arn:(aws|aws-us-gov):sqs:us-west-2:[0-9]{12}:ian-photography-security-signals-[a-z0-9-]+)$'
-    Description: Exact rule-scoped security signal queue output by the notification stack.
-  SecurityEventDlqArn:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|arn:(aws|aws-us-gov):sqs:us-west-2:[0-9]{12}:ian-photography-security-events-[a-z0-9-]+-dlq)$'
-    Description: Optional existing security EventBridge delivery DLQ ARN.
-
 Rules:
   MustDeployInHomeRegion:
     Assertions:
       - Assert: !Equals [!Ref AWS::Region, us-west-2]
         AssertDescription: The primary backup and alert rules must be deployed in us-west-2.
-  BackupAlertsRequiredForCreatedPlan:
-    RuleCondition: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
-    Assertions:
-      - Assert: !Not [!Equals [!Ref SecurityAlarmTopicArn, '']]
-        AssertDescription: A reviewed existing security topic is required when the backup plan exists.
-      - Assert: !Equals
-          - !Ref SecurityAlarmTopicArn
-          - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
-        AssertDescription: The security topic must exactly match this account, Region, and stage.
-      - Assert: !Equals
-          - !Ref SecuritySignalQueueArn
-          - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
-        AssertDescription: The security signal queue must exactly match this account, Region, and stage.
-  OptionalFailureDlqMustMatchDeployment:
-    RuleCondition: !Not [!Equals [!Ref SecurityEventDlqArn, '']]
-    Assertions:
-      - Assert: !Equals
-          - !Ref SecurityEventDlqArn
-          - !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
-        AssertDescription: The optional delivery DLQ must exactly match this account, Region, and stage.
-  OptionalReplicaVaultMustMatchDeployment:
-    RuleCondition: !Not [!Equals [!Ref ReplicaBackupVaultArn, '']]
-    Assertions:
-      - Assert: !Equals
-          - !Ref ReplicaBackupVaultArn
-          - !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
-        AssertDescription: The replica vault must be the exact same-account, stage-owned us-east-2 vault.
-
 Conditions:
   CreateBackup: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
-  HasReplicaVault: !Not [!Equals [!Ref ReplicaBackupVaultArn, '']]
-  HasSecurityAlarmTopic: !Not [!Equals [!Ref SecurityAlarmTopicArn, '']]
-  HasSecuritySignalQueue: !Not [!Equals [!Ref SecuritySignalQueueArn, '']]
-  HasSecurityEventDlq: !Not [!Equals [!Ref SecurityEventDlqArn, '']]
-  CreateBackupAlerts: !And
-    - !Condition CreateBackup
-    - !Condition HasSecurityAlarmTopic
-    - !Condition HasSecuritySignalQueue
+  HasReplicaVault: !Equals [!Ref ReplicaBackupDeploymentMode, use-existing-same-account-stage]
+  CreateBackupAlerts: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
   EnableGovernanceLock: !And
     - !Condition CreateBackup
     - !Equals [!Ref VaultLockMode, governance-confirmed-after-restore-test]
@@ -231,7 +181,7 @@ Resources:
               DeleteAfterDays: 35
             CopyActions: !If
               - HasReplicaVault
-              - - DestinationBackupVaultArn: !Ref ReplicaBackupVaultArn
+              - - DestinationBackupVaultArn: !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
                   Lifecycle:
                     DeleteAfterDays: 35
               - !Ref AWS::NoValue
@@ -269,13 +219,11 @@ Resources:
           state: [ABORTED, EXPIRED, FAILED, PARTIAL]
       Targets:
         - Id: SecuritySignals
-          Arn: !Ref SecuritySignalQueueArn
+          Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
           Input: !Sub >-
             {"schemaVersion":1,"eventName":"backup.job.failed","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-job-failure"}
-          DeadLetterConfig: !If
-            - HasSecurityEventDlq
-            - Arn: !Ref SecurityEventDlqArn
-            - !Ref AWS::NoValue
+          DeadLetterConfig:
+            Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
           RetryPolicy:
             MaximumEventAgeInSeconds: 3600
             MaximumRetryAttempts: 10
@@ -297,13 +245,11 @@ Resources:
           state: [FAILED, PARTIAL]
       Targets:
         - Id: SecuritySignals
-          Arn: !Ref SecuritySignalQueueArn
+          Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
           Input: !Sub >-
             {"schemaVersion":1,"eventName":"backup.copy.failed","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-copy-failure"}
-          DeadLetterConfig: !If
-            - HasSecurityEventDlq
-            - Arn: !Ref SecurityEventDlqArn
-            - !Ref AWS::NoValue
+          DeadLetterConfig:
+            Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
           RetryPolicy:
             MaximumEventAgeInSeconds: 3600
             MaximumRetryAttempts: 10
@@ -324,13 +270,11 @@ Resources:
           status: [FAILED]
       Targets:
         - Id: SecuritySignals
-          Arn: !Ref SecuritySignalQueueArn
+          Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
           Input: !Sub >-
             {"schemaVersion":1,"eventName":"backup.restore.failed","severity":"critical","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-restore-failure"}
-          DeadLetterConfig: !If
-            - HasSecurityEventDlq
-            - Arn: !Ref SecurityEventDlqArn
-            - !Ref AWS::NoValue
+          DeadLetterConfig:
+            Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
           RetryPolicy:
             MaximumEventAgeInSeconds: 3600
             MaximumRetryAttempts: 10
@@ -412,7 +356,10 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PreviewMetadataTableName}'
               - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucketName}'
           FRESHNESS_MAX_AGE_HOURS: !Ref FreshnessMaximumAgeHours
-          REPLICA_VAULT_ARN: !Ref ReplicaBackupVaultArn
+          REPLICA_VAULT_ARN: !If
+            - HasReplicaVault
+            - !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
+            - ''
           SOURCE_VAULT_NAME: !Ref BackupVault
           STAGE: !Ref Stage
       Code:
@@ -565,7 +512,8 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: breaching
-      AlarmActions: [!Ref SecurityAlarmTopicArn]
+      AlarmActions:
+        - !Sub 'arn:${AWS::Partition}:sns:us-west-2:${AWS::AccountId}:ian-photography-security-${Stage}'
 
 Outputs:
   BackupWasCreated:
@@ -578,7 +526,7 @@ Outputs:
     Value: !Ref ProtectedDataBackupPlan
   ReplicaBackupVaultArn:
     Condition: HasReplicaVault
-    Value: !Ref ReplicaBackupVaultArn
+    Value: !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
   BackupVaultKeyArn:
     Condition: CreateBackup
     Value: !GetAtt BackupVaultKey.Arn
