@@ -725,7 +725,10 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:${ApplicationStackName}-*'
               - !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:ian-photography/front-door/*'
-              - !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:RateLimitHashSecret-*'
+          - Sid: ReadRateLimitSecretMetadata
+            Effect: Allow
+            Action: secretsmanager:DescribeSecret
+            Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:RateLimitHashSecret-*'
           - Sid: GenerateApplicationSecretValues
             Effect: Allow
             Action: secretsmanager:GetRandomPassword
@@ -957,7 +960,6 @@ Resources:
               - logs:CreateLogGroup
               - logs:DeleteLogGroup
               - logs:DeleteMetricFilter
-              - logs:DescribeIndexPolicies
               - logs:DescribeMetricFilters
               - logs:ListTagsForResource
               - logs:PutMetricFilter
@@ -977,6 +979,7 @@ Resources:
             Effect: Allow
             Action:
               - cloudwatch:DescribeAlarms
+              - logs:DescribeIndexPolicies
               - logs:DescribeLogGroups
             Resource: '*'
           - Sid: ProtectRetainedApplicationData

@@ -247,9 +247,11 @@ CloudFormation macro resource the application execution role may invoke while
 creating the already-guarded application change set.
 
 CloudFormation drift detection also uses the stack execution role. Its
-read-only inspection grants include field-index metadata only for the exact
-application log-group families and secret metadata only for the generated
-`RateLimitHashSecret-*` family. They never grant `logs:GetLogEvents` or
+read-only inspection grants include account-level field-index metadata because
+`logs:DescribeIndexPolicies` does not support resource-level IAM scoping, and
+secret metadata only for the exact regional/account
+`RateLimitHashSecret-*` family. The inventory statement never grants
+`logs:GetLogEvents`, and the secret statement never grants
 `secretsmanager:GetSecretValue`.
 
 Front-door updates are otherwise bounded to
