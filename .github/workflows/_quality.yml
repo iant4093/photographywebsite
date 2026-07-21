@@ -89,21 +89,21 @@ jobs:
             --output evidence/frontend-artifact-budget.json \
             frontend \
             --root release-frontend/dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: success() && inputs.publish_release_artifacts
         with:
           name: release-frontend
           path: release-frontend
           if-no-files-found: error
           retention-days: 90
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: frontend-coverage
           path: coverage/frontend
           if-no-files-found: warn
           retention-days: 30
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: frontend-artifact-budget
@@ -141,7 +141,7 @@ jobs:
           python -m coverage report --rcfile=.coveragerc --fail-under=0
           python -m coverage xml --rcfile=.coveragerc --fail-under=0
           python ../ops/ci/coverage_gate.py coverage/backend/coverage.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: backend-coverage
@@ -203,21 +203,21 @@ jobs:
           mkdir -p release-backend
           tar -czf release-backend/backend-build.tar.gz -C backend .aws-sam/build
           python3 ops/ci/release_guard.py build-manifest release-backend release-backend/manifest.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: success() && inputs.publish_release_artifacts
         with:
           name: release-backend
           path: release-backend
           if-no-files-found: error
           retention-days: 90
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: ops-coverage
           path: coverage/ops
           if-no-files-found: warn
           retention-days: 30
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: backend-artifact-budget
@@ -283,7 +283,7 @@ jobs:
           ops/waf_front_door_template.yaml
       - name: Scan complete reachable history without echoing values or paths
         run: python3 ops/ci/git_history_credential_scan.py .
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: success() && inputs.publish_release_artifacts
         with:
           name: release-sbom
