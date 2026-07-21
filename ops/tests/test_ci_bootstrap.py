@@ -236,13 +236,34 @@ class CiBootstrapTemplateTests(unittest.TestCase):
 
         dns = statement_block(execution, "ChangeExactFrontDoorRecords")
         self.assertIn("hostedzone/${ApplicationHostedZoneId}", dns)
-        self.assertIn("route53:ChangeResourceRecordSetsActions", dns)
-        self.assertIn("route53:ChangeResourceRecordSetsRecordTypes", dns)
-        self.assertIn("route53:ChangeResourceRecordSetsNormalizedRecordNames", dns)
-        self.assertIn("- A", dns)
-        self.assertIn("- CNAME", dns)
-        self.assertIn("*.${ApplicationApiDomainName}.", dns)
+        # ACM's CloudFormation resource provider does not populate the Route53
+        # record-level condition keys when it creates DNS validation records.
+        # The permission must therefore be unconditional but remains bounded to
+        # the one allow-listed hosted zone.
+        self.assertNotIn("Condition:", dns)
         self.assertNotIn("Resource: '*'", dns)
+
+    def test_execution_role_has_narrow_rollback_package_and_table_tag_reads(self):
+        execution = execution_permissions()
+        rollback = statement_block(execution, "ReadLegacySamRollbackPackages")
+        self.assertIn("Action: s3:GetObject", rollback)
+        self.assertIn(
+            "arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-samclisourcebucket-e3y19skvw0we/ian-website/*",
+            rollback,
+        )
+        for forbidden in (
+            "s3:DeleteObject",
+            "s3:ListBucket",
+            "s3:GetObjectVersion",
+            "s3:PutObject",
+            "Resource: '*'",
+        ):
+            self.assertNotIn(forbidden, rollback)
+
+        tables = statement_block(execution, "ManageApplicationTables")
+        self.assertIn("dynamodb:ListTagsOfResource", tables)
+        self.assertIn("table/GoldenHour-*", tables)
+        self.assertNotIn("Resource: '*'", tables)
 
     def test_cloudfront_permissions_cover_reversible_application_resource_lifecycles(self):
         execution = execution_permissions()

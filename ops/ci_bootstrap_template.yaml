@@ -652,6 +652,14 @@ Resources:
             Resource:
               - !GetAtt ReleaseArtifactBucket.Arn
               - !Sub '${ReleaseArtifactBucket.Arn}/releases/*'
+          # Temporary recovery bridge for Lambda functions whose currently deployed
+          # code still points at the legacy SAM-managed packaging bucket. Remove this
+          # statement after a successful release confirms no stack template reference
+          # remains beneath this exact prefix.
+          - Sid: ReadLegacySamRollbackPackages
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub 'arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-samclisourcebucket-e3y19skvw0we/ian-website/*'
           - Sid: DecryptReleasePackagesThroughS3
             Effect: Allow
             Action:
@@ -668,6 +676,7 @@ Resources:
               - dynamodb:DescribeContinuousBackups
               - dynamodb:DescribeTable
               - dynamodb:DescribeTimeToLive
+              - dynamodb:ListTagsOfResource
               - dynamodb:TagResource
               - dynamodb:UntagResource
               - dynamodb:UpdateContinuousBackups
@@ -810,19 +819,6 @@ Resources:
             Effect: Allow
             Action: route53:ChangeResourceRecordSets
             Resource: !Sub 'arn:${AWS::Partition}:route53:::hostedzone/${ApplicationHostedZoneId}'
-            Condition:
-              ForAllValues:StringEquals:
-                route53:ChangeResourceRecordSetsActions:
-                  - CREATE
-                  - DELETE
-                  - UPSERT
-                route53:ChangeResourceRecordSetsRecordTypes:
-                  - A
-                  - CNAME
-              ForAllValues:StringLike:
-                route53:ChangeResourceRecordSetsNormalizedRecordNames:
-                  - !Sub '${ApplicationApiDomainName}.'
-                  - !Sub '*.${ApplicationApiDomainName}.'
           - Sid: ReadApplicationDnsChangeStatus
             Effect: Allow
             Action: route53:GetChange
