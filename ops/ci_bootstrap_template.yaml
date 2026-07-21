@@ -254,6 +254,7 @@ Resources:
                   - cloudformation:DescribeStackResources
                   - cloudformation:DescribeStacks
                   - cloudformation:DetectStackDrift
+                  - cloudformation:DetectStackResourceDrift
                   - cloudformation:GetTemplate
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'

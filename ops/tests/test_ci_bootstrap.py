@@ -98,6 +98,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         frontend = resource_block("FrontendRole")
         audit = resource_block("AuditRole")
         self.assertIn("cloudformation:CreateChangeSet", plan)
+        self.assertIn("cloudformation:DetectStackResourceDrift", plan)
         self.assertIn("PassOnlyExecutionRoleToCloudFormation", plan)
         self.assertIn("cloudformation:ExecuteChangeSet", plan)
         self.assertIn("ExplicitlyDenyExecutionAndDirectMutation", plan)
