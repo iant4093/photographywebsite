@@ -88,13 +88,13 @@ class ChangeSetGateTests(unittest.TestCase):
         ]
         self.assertEqual(
             release_guard.gate_change_set(pages),
-            {"Add": 1, "Modify": 1, "Remove": 0, "Total": 2},
+            {"Add": 1, "Modify": 1, "Total": 2},
         )
 
     def test_accepts_empty_change_set(self):
         self.assertEqual(
             release_guard.gate_change_set([{"Changes": []}]),
-            {"Add": 0, "Modify": 0, "Remove": 0, "Total": 0},
+            {"Add": 0, "Modify": 0, "Total": 0},
         )
 
     def test_rejects_removal_unknown_action_and_protected_resources(self):
@@ -107,35 +107,6 @@ class ChangeSetGateTests(unittest.TestCase):
         for item in cases:
             with self.subTest(item=item), self.assertRaises(release_guard.GateError):
                 release_guard.gate_change_set([{"Changes": [item]}])
-
-    def test_only_the_exact_deprecated_alarm_topic_can_be_removed(self):
-        item = change(
-            action="Remove",
-            logical_id="AlarmTopic",
-            resource_type="AWS::SNS::Topic",
-            replacement=None,
-        )
-        item["ResourceChange"]["Details"] = []
-        intent = release_guard.load_release_intent(
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "logicalId": "AlarmTopic",
-                        "resourceType": "AWS::SNS::Topic",
-                        "action": "Remove",
-                        "propertyPaths": [],
-                        "allowNoDetails": True,
-                    }
-                ],
-            }
-        )
-        self.assertEqual(
-            release_guard.gate_change_set(
-                [{"Changes": [item]}], release_intent=intent
-            ),
-            {"Add": 0, "Modify": 0, "Remove": 1, "Total": 1},
-        )
 
     def test_rejects_true_conditional_and_unknown_replacement(self):
         for replacement in ("True", "Conditional", "Maybe"):
@@ -190,7 +161,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 [{"Changes": [change(property_name="Environment"), change(property_name="Code")]}],
                 release_intent=intent,
             ),
-            {"Add": 0, "Modify": 2, "Remove": 0, "Total": 2},
+            {"Add": 0, "Modify": 2, "Total": 2},
         )
         for item in (
             change(logical_id="OtherFunction"),
@@ -271,7 +242,7 @@ class ReleaseIntentTests(unittest.TestCase):
             with self.subTest(document=document), self.assertRaises(release_guard.GateError):
                 release_guard.load_release_intent(document)
 
-    def test_tracked_intent_exactly_covers_release_code_alarm_routing_and_deprecation(self):
+    def test_tracked_intent_exactly_covers_release_code_and_alarm_routing(self):
         document = json.loads(
             (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
         )
@@ -310,17 +281,7 @@ class ReleaseIntentTests(unittest.TestCase):
             self.assertEqual(rule["propertyPaths"], ["AlarmActions"])
             self.assertFalse(rule["allowNoDetails"])
 
-        removal_rules = [rule for rule in document["rules"] if rule["action"] == "Remove"]
-        self.assertEqual(
-            removal_rules,
-            [{
-                "logicalId": "AlarmTopic",
-                "resourceType": "AWS::SNS::Topic",
-                "action": "Remove",
-                "propertyPaths": [],
-                "allowNoDetails": True,
-            }],
-        )
+        self.assertFalse(any(rule["action"] == "Remove" for rule in document["rules"]))
 
 
 class ReleaseDependencyTests(unittest.TestCase):
@@ -363,7 +324,7 @@ class ReleaseDependencyTests(unittest.TestCase):
                 release_intent=intent,
                 release_dependencies=dependencies,
             ),
-            {"Add": 0, "Modify": 1, "Remove": 0, "Total": 1},
+            {"Add": 0, "Modify": 1, "Total": 1},
         )
 
         for field, value in (

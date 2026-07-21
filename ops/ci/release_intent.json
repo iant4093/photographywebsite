@@ -1,7 +1,6 @@
 {
   "version": 1,
   "rules": [
-    {"logicalId": "AlarmTopic", "resourceType": "AWS::SNS::Topic", "action": "Remove", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "ApiServerErrorAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "ApiLatencyAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "FrontDoorDeniedAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
