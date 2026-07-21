@@ -39,7 +39,6 @@
       "name": "ian-photography-observability",
       "logicalResourceIds": [
         "CanaryArtifactBucket",
-        "CanaryArtifactBucketPolicy",
         "FrontendFiveXxAlarm",
         "FrontendMonitoringSubscription",
         "MediaFiveXxAlarm",
@@ -50,9 +49,13 @@
         "PublicCanaryRole",
         "RumGuestRole",
         "RumIdentityPool",
-        "RumIdentityPoolRoleAttachment",
         "RumJavascriptErrorAlarm",
         "RumLcpAlarm"
+      ],
+      "directPostureLogicalResourceIds": ["RumAppMonitor"],
+      "unsupportedLogicalResourceIds": [
+        "CanaryArtifactBucketPolicy",
+        "RumIdentityPoolRoleAttachment"
       ]
     },
     {"region": "us-east-1", "name": "ian-photography-front-door-waf"},

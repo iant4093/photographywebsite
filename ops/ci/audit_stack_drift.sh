@@ -13,11 +13,14 @@ jq -e '
   and all(.stacks[];
     ((keys | sort) == ["name", "region"]
       or (keys | sort) == ["logicalResourceIds", "name", "region"]
-      or (keys | sort) == ["excludedLogicalResourceIds", "name", "region"])
+      or (keys | sort) == ["excludedLogicalResourceIds", "name", "region"]
+      or (keys | sort) == ["directPostureLogicalResourceIds", "logicalResourceIds", "name", "region", "unsupportedLogicalResourceIds"])
     and (.region | test("^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"))
     and (.name | test("^[A-Za-z][A-Za-z0-9-]{0,127}$"))
     and ((.logicalResourceIds // []) | type == "array")
     and ((.excludedLogicalResourceIds // []) | type == "array")
+    and ((.directPostureLogicalResourceIds // []) | type == "array")
+    and ((.unsupportedLogicalResourceIds // []) | type == "array")
     and all((.logicalResourceIds // [])[];
       type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
     and (((.logicalResourceIds // []) | unique | length)
@@ -25,7 +28,15 @@ jq -e '
     and all((.excludedLogicalResourceIds // [])[];
       type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
     and (((.excludedLogicalResourceIds // []) | unique | length)
-      == ((.excludedLogicalResourceIds // []) | length)))
+      == ((.excludedLogicalResourceIds // []) | length))
+    and all((.directPostureLogicalResourceIds // [])[];
+      type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
+    and (((.directPostureLogicalResourceIds // []) | unique | length)
+      == ((.directPostureLogicalResourceIds // []) | length))
+    and all((.unsupportedLogicalResourceIds // [])[];
+      type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
+    and (((.unsupportedLogicalResourceIds // []) | unique | length)
+      == ((.unsupportedLogicalResourceIds // []) | length)))
   and ((.stacks | map([.region, .name] | join(":")) | unique | length) == (.stacks | length))
   and ((.regionalSecurityPosture | keys | sort)
     == ["cloudFormationExclusion", "homeRegion", "satelliteStackName"])
@@ -50,6 +61,9 @@ jq -e '
         == ([$excluded.logicalResourceId] + $excluded.unsupportedLogicalResourceIds | sort))
     and ([.stacks[] | .excludedLogicalResourceIds[]?] | sort
       == ([$excluded.logicalResourceId] + $excluded.unsupportedLogicalResourceIds | sort)))
+  and ([.stacks[] | .directPostureLogicalResourceIds[]?] == ["RumAppMonitor"])
+  and ([.stacks[] | .unsupportedLogicalResourceIds[]?] | sort
+    == ["CanaryArtifactBucketPolicy", "RumIdentityPoolRoleAttachment"])
 ' "$inventory" >/dev/null || { echo 'Drift inventory is invalid.' >&2; exit 2; }
 
 workspace="${RUNNER_TEMP:?RUNNER_TEMP is required}/stack-drift-audit"
@@ -58,14 +72,36 @@ detections="$workspace/detections.tsv"
 : > "$detections"
 
 filtered_stacks=0
-excluded_resources=0
 resource_drift_checks=0
 stack_count=0
-while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv; do
+direct_posture_resources="$(jq '[.stacks[] | .directPostureLogicalResourceIds[]?] | length' "$inventory")"
+direct_posture_resources=$((direct_posture_resources + 1))
+unsupported_resources="$(jq '([.stacks[] | .unsupportedLogicalResourceIds[]?] | length) + (.regionalSecurityPosture.cloudFormationExclusion.unsupportedLogicalResourceIds | length)' "$inventory")"
+excluded_resources=$((direct_posture_resources + unsupported_resources))
+while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv direct_ids_csv unsupported_ids_csv; do
   stack_count=$((stack_count + 1))
   logical_ids=()
   if [[ -n "$logical_ids_csv" ]]; then
     IFS=',' read -r -a logical_ids <<< "$logical_ids_csv"
+    current_resources="$(aws cloudformation list-stack-resources \
+      --region "$region" \
+      --stack-name "$stack_name" \
+      --query 'StackResourceSummaries[].LogicalResourceId' \
+      --output json 2>"$workspace/provider-error.log")" || {
+        : > "$workspace/provider-error.log"
+        echo 'CloudFormation filtered resource inventory failed.' >&2
+        exit 2
+      }
+    expected_csv="${logical_ids_csv},${direct_ids_csv},${unsupported_ids_csv}"
+    jq -e --arg expected_csv "$expected_csv" '
+      type == "array" and length > 0 and length <= 100
+      and all(.[]; type == "string" and test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
+      and (unique | length) == length
+      and (sort == ($expected_csv | split(",") | map(select(length > 0)) | sort))
+    ' <<< "$current_resources" >/dev/null || {
+      echo 'CloudFormation filtered resource coverage was incomplete.' >&2
+      exit 2
+    }
     filtered_stacks=$((filtered_stacks + 1))
   elif [[ -n "$excluded_ids_csv" ]]; then
     stack_resources="$(aws cloudformation list-stack-resources \
@@ -107,7 +143,6 @@ while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv; do
       exit 2
     }
     filtered_stacks=$((filtered_stacks + 1))
-    excluded_resources=$((excluded_resources + ${#excluded_ids[@]}))
   fi
   if [[ ${#logical_ids[@]} -gt 0 ]]; then
     for logical_id in "${logical_ids[@]}"; do
@@ -150,10 +185,11 @@ done < <(jq -r '.stacks[] | [
   .name,
   ((.logicalResourceIds // []) | join(",")),
   ((.excludedLogicalResourceIds // []) | join(","))
+  ,((.directPostureLogicalResourceIds // []) | join(","))
+  ,((.unsupportedLogicalResourceIds // []) | join(","))
 ] | join("|")' "$inventory")
 
 security_home_region="$(jq -r '.regionalSecurityPosture.homeRegion' "$inventory")"
-unsupported_resources="$(jq -r '.regionalSecurityPosture.cloudFormationExclusion.unsupportedLogicalResourceIds | length' "$inventory")"
 security_posture_path="$workspace/regional-security.json"
 python3 ops/ci/regional_security_posture.py \
   --home-region "$security_home_region" \
@@ -228,5 +264,5 @@ done < "$detections"
   exit 2
 }
 
-printf '{"excludedResourceCount":%d,"filteredStackCount":%d,"frontendEdgeCheckCount":1,"guardDutyPostureCheckCount":%d,"metadataPostureCheckCount":1,"resourceDriftCheckCount":%d,"securityHubPostureCheckCount":%d,"stackCount":%d,"status":"IN_SYNC","unsupportedResourceCount":%d}\n' \
-  "$excluded_resources" "$filtered_stacks" "$guardduty_checks" "$resource_drift_checks" "$security_hub_checks" "$stack_count" "$unsupported_resources"
+printf '{"directPostureResourceCount":%d,"excludedResourceCount":%d,"filteredStackCount":%d,"frontendEdgeCheckCount":1,"guardDutyPostureCheckCount":%d,"metadataPostureCheckCount":1,"resourceDriftCheckCount":%d,"securityHubPostureCheckCount":%d,"stackCount":%d,"status":"IN_SYNC","unsupportedResourceCount":%d}\n' \
+  "$direct_posture_resources" "$excluded_resources" "$filtered_stacks" "$guardduty_checks" "$resource_drift_checks" "$security_hub_checks" "$stack_count" "$unsupported_resources"

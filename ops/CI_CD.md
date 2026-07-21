@@ -180,9 +180,12 @@ when JavaScript source-map deobfuscation is disabled. `RumAppMonitor` is
 therefore excluded from the observability stack's exact logical-resource drift
 filter. The audit instead uses resource-scoped `rum:GetAppMonitor`—never
 `rum:GetAppMonitorData`—to verify its privacy, telemetry, source-map, and
-sensitive-route exclusion configuration. Tests require the filter to equal all
-observability template resources except that one documented exception, so a new
-resource cannot silently escape review.
+sensitive-route exclusion configuration. Tests require the inventory to split
+all observability template resources across the directly checked monitor, the
+provider-driftable resources, and the two explicitly counted resources that
+CloudFormation cannot evaluate (`CanaryArtifactBucketPolicy` and
+`RumIdentityPoolRoleAttachment`), so a new resource cannot silently escape
+review.
 
 The GuardDuty CloudFormation provider reports the six service-managed detector
 features as additions even though CloudFormation can configure only the other
