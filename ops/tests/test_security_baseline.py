@@ -49,7 +49,7 @@ class AccountSecurityBaselineTests(unittest.TestCase):
             "AWS::GuardDuty::Detector",
             "AWS::SecurityHub::Hub",
             "AWS::Config::ConfigurationRecorder",
-            "AWS::Config::DeliveryChannel",
+            "Custom::ConfigDeliveryChannel",
             "AWS::Config::ConfigRule",
             "AWS::Backup::BackupVault",
             "AWS::Backup::BackupPlan",

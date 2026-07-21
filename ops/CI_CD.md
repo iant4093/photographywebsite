@@ -70,7 +70,7 @@ non-secret variables at repository or environment scope as appropriate:
 | `FRONTEND_BUCKET` | Exact private/OAC frontend bucket. |
 | `FRONTEND_DISTRIBUTION_ID` | Exact frontend distribution. |
 | `SITE_URL` | Canonical HTTPS site URL. |
-| `VITE_API_BASE_URL` | Public production API base URL. |
+| `VITE_API_BASE_URL` | Public production API base; use same-origin `/api` after front-door cutover. |
 | `VITE_CLOUDFRONT_DOMAIN` | Public media CDN hostname. |
 | `VITE_COGNITO_USER_POOL_ID` | Public Cognito pool identifier. |
 | `VITE_COGNITO_CLIENT_ID` | Public Cognito app-client identifier. |

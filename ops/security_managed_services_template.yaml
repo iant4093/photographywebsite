@@ -10,12 +10,6 @@ Parameters:
     MinLength: 1
     MaxLength: 20
     AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
-  SecurityAuditBucketName:
-    Type: String
-    MinLength: 3
-    MaxLength: 63
-    AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
-    Description: Exact bucket name output by the audit foundation stack.
   ConfigDeploymentMode:
     Type: String
     Default: skip
@@ -99,6 +93,102 @@ Resources:
         Application: IanTruongPhotography
         Stage: !Ref Stage
 
+  ConfigDeliveryBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateConfig
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveConfigHistory
+            Status: Enabled
+            Transitions:
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 90
+            NoncurrentVersionTransitions:
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 90
+            ExpirationInDays: 2555
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 2555
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: ConfigurationHistory
+
+  ConfigDeliveryBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateConfig
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket: !Ref ConfigDeliveryBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt ConfigDeliveryBucket.Arn
+              - !Sub '${ConfigDeliveryBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: ConfigBucketPermissionsCheck
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt ConfigDeliveryBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:'
+          - Sid: ConfigBucketExistenceCheck
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:ListBucket
+            Resource: !GetAtt ConfigDeliveryBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:'
+          - Sid: ConfigBucketDelivery
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${ConfigDeliveryBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+                s3:x-amz-acl: bucket-owner-full-control
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:'
+
   ConfigRole:
     Type: AWS::IAM::Role
     Condition: CreateConfig
@@ -128,13 +218,551 @@ Resources:
                 Action:
                   - s3:GetBucketAcl
                   - s3:ListBucket
-                Resource: !Sub 'arn:${AWS::Partition}:s3:::${SecurityAuditBucketName}'
+                Resource: !GetAtt ConfigDeliveryBucket.Arn
               - Effect: Allow
                 Action: s3:PutObject
-                Resource: !Sub 'arn:${AWS::Partition}:s3:::${SecurityAuditBucketName}/AWSLogs/${AWS::AccountId}/Config/*'
+                Resource: !Sub '${ConfigDeliveryBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*'
                 Condition:
                   StringEquals:
                     s3:x-amz-acl: bucket-owner-full-control
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  ConfigDeliveryOrchestratorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateConfig
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/ian-photography-config-delivery-${Stage}'
+      RetentionInDays: 90
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  ConfigDeliveryOrchestratorRole:
+    Type: AWS::IAM::Role
+    Condition: CreateConfig
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReconcileExactRegionalConfigDeliveryChannel
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - config:DeleteDeliveryChannel
+                  - config:DescribeConfigurationRecorders
+                  - config:DescribeConfigurationRecorderStatus
+                  - config:DescribeDeliveryChannels
+                  - config:PutDeliveryChannel
+                  - config:StopConfigurationRecorder
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Effect: Allow
+                Action:
+                  - ssm:DeleteParameter
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-photography/config-delivery/ian-photography-${Stage}/owner'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+        - PolicyName: WriteOrchestratorLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt ConfigDeliveryOrchestratorLogGroup.Arn
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+
+  ConfigDeliveryOrchestratorFunction:
+    Type: AWS::Lambda::Function
+    Condition: CreateConfig
+    DependsOn: ConfigDeliveryOrchestratorLogGroup
+    Properties:
+      FunctionName: !Sub 'ian-photography-config-delivery-${Stage}'
+      Description: Safely supplies the Config delivery channel while the native recorder stabilizes.
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt ConfigDeliveryOrchestratorRole.Arn
+      MemorySize: 128
+      Timeout: 600
+      Environment:
+        Variables:
+          RECORDER_WAIT_SECONDS: '420'
+      Code:
+        ZipFile: |
+          import hashlib
+          import json
+          import logging
+          import os
+          import re
+          import time
+          import urllib.request
+
+          import boto3
+
+
+          LOG = logging.getLogger()
+          LOG.setLevel(logging.INFO)
+          CHANNEL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+          BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+          RESOURCE_TYPE = re.compile(r"^AWS::[A-Za-z0-9]+::[A-Za-z0-9]+$")
+          FREQUENCIES = {
+              "One_Hour",
+              "Three_Hours",
+              "Six_Hours",
+              "Twelve_Hours",
+              "TwentyFour_Hours",
+          }
+
+
+          def _scope(properties, context):
+              name = str(properties.get("ChannelName", ""))
+              bucket = str(properties.get("BucketName", ""))
+              frequency = str(properties.get("DeliveryFrequency", ""))
+              expected_account = str(properties.get("ExpectedAccountId", ""))
+              expected_region = str(properties.get("ExpectedRegion", ""))
+              expected_role = str(properties.get("ExpectedRecorderRoleArn", ""))
+              expected_types = properties.get("ExpectedResourceTypes", [])
+              marker_name = str(properties.get("OwnershipParameterName", ""))
+              arn_parts = context.invoked_function_arn.split(":")
+              partition = arn_parts[1] if len(arn_parts) > 1 else ""
+              actual_region = os.environ.get("AWS_REGION", "")
+              actual_account = arn_parts[4] if len(arn_parts) > 4 else ""
+              if not CHANNEL_NAME.fullmatch(name):
+                  raise ValueError("invalid channel name")
+              if not BUCKET_NAME.fullmatch(bucket):
+                  raise ValueError("invalid bucket name")
+              if frequency not in FREQUENCIES:
+                  raise ValueError("invalid delivery frequency")
+              if not re.fullmatch(r"[0-9]{12}", expected_account):
+                  raise ValueError("invalid expected account")
+              if expected_account != actual_account or expected_region != actual_region:
+                  raise PermissionError("custom resource scope mismatch")
+              expected_role_prefix = "arn:{}:iam::{}:role/".format(
+                  partition, expected_account
+              )
+              if not expected_role.startswith(expected_role_prefix):
+                  raise ValueError("invalid expected recorder role")
+              if (
+                  not isinstance(expected_types, list)
+                  or not expected_types
+                  or any(
+                      not isinstance(item, str) or not RESOURCE_TYPE.fullmatch(item)
+                      for item in expected_types
+                  )
+                  or len(set(expected_types)) != len(expected_types)
+              ):
+                  raise ValueError("invalid expected resource types")
+              expected_marker = "/ian-photography/config-delivery/{}/owner".format(
+                  name
+              )
+              if marker_name != expected_marker:
+                  raise ValueError("invalid ownership parameter name")
+              return {
+                  "name": name,
+                  "bucket": bucket,
+                  "frequency": frequency,
+                  "partition": partition,
+                  "account": expected_account,
+                  "region": expected_region,
+                  "role": expected_role,
+                  "types": frozenset(expected_types),
+                  "marker": marker_name,
+              }
+
+
+          def _physical_id(scope):
+              return "config-delivery-channel:{}:{}:{}:owned".format(
+                  scope["account"], scope["region"], scope["name"]
+              )
+
+
+          def _ownership_token(stack_id, scope):
+              prefix = "arn:{}:cloudformation:{}:{}:stack/".format(
+                  scope["partition"], scope["region"], scope["account"]
+              )
+              if not isinstance(stack_id, str) or not stack_id.startswith(prefix):
+                  raise PermissionError("stack scope mismatch")
+              return "v1:" + hashlib.sha256(stack_id.encode("utf-8")).hexdigest()
+
+
+          def _desired(scope):
+              return {
+                  "name": scope["name"],
+                  "s3BucketName": scope["bucket"],
+                  "configSnapshotDeliveryProperties": {
+                      "deliveryFrequency": scope["frequency"],
+                  },
+              }
+
+
+          def _marker_value(client, name):
+              try:
+                  response = client.get_parameter(Name=name, WithDecryption=False)
+              except Exception as error:
+                  if _error_code(error) == "ParameterNotFound":
+                      return None
+                  raise
+              value = response.get("Parameter", {}).get("Value")
+              if not isinstance(value, str) or not value:
+                  raise RuntimeError("ownership marker is malformed")
+              return value
+
+
+          def _claim_marker(client, name, token):
+              current = _marker_value(client, name)
+              if current is not None:
+                  if current != token:
+                      raise PermissionError("ownership marker mismatch")
+                  return "recovered"
+              try:
+                  client.put_parameter(
+                      Name=name,
+                      Description="CloudFormation ownership for the AWS Config delivery channel",
+                      Value=token,
+                      Type="String",
+                      Overwrite=False,
+                  )
+              except Exception as error:
+                  if _error_code(error) != "ParameterAlreadyExists":
+                      raise
+                  if _marker_value(client, name) != token:
+                      raise PermissionError("ownership marker race")
+                  return "recovered"
+              if _marker_value(client, name) != token:
+                  raise RuntimeError("ownership marker did not stabilize")
+              return "claimed"
+
+
+          def _delete_marker(client, name, token):
+              if _marker_value(client, name) != token:
+                  raise PermissionError("ownership marker changed before delete")
+              client.delete_parameter(Name=name)
+              if _marker_value(client, name) is not None:
+                  raise RuntimeError("ownership marker deletion did not stabilize")
+
+
+          def _matches(channel, desired):
+              return (
+                  channel.get("name") == desired["name"]
+                  and channel.get("s3BucketName") == desired["s3BucketName"]
+                  and not channel.get("s3KeyPrefix")
+                  and not channel.get("s3KmsKeyArn")
+                  and not channel.get("snsTopicARN")
+                  and channel.get("configSnapshotDeliveryProperties", {}).get(
+                      "deliveryFrequency"
+                  )
+                  == desired["configSnapshotDeliveryProperties"]["deliveryFrequency"]
+              )
+
+
+          def _error_code(error):
+              return getattr(error, "response", {}).get("Error", {}).get("Code", "")
+
+
+          def _channels(client):
+              return client.describe_delivery_channels().get("DeliveryChannels", [])
+
+
+          def _recorder_matches(recorder, scope):
+              group = recorder.get("recordingGroup", {})
+              return (
+                  recorder.get("name") == scope["name"]
+                  and recorder.get("roleARN") == scope["role"]
+                  and group.get("allSupported") is False
+                  and not group.get("includeGlobalResourceTypes", False)
+                  and frozenset(group.get("resourceTypes", [])) == scope["types"]
+              )
+
+
+          def _recorders(client):
+              return client.describe_configuration_recorders().get(
+                  "ConfigurationRecorders", []
+              )
+
+
+          def _wait_for_recorder(client, scope, seconds):
+              deadline = time.monotonic() + seconds
+              while True:
+                  recorders = _recorders(client)
+                  expected = [
+                      item for item in recorders if item.get("name") == scope["name"]
+                  ]
+                  if expected:
+                      if len(recorders) != 1 or not _recorder_matches(expected[0], scope):
+                          raise RuntimeError("unexpected configuration recorder exists")
+                      return expected[0]
+                  if recorders:
+                      raise RuntimeError("unexpected configuration recorder exists")
+                  if time.monotonic() >= deadline:
+                      raise TimeoutError("configuration recorder did not become available")
+                  time.sleep(2)
+
+
+          def _wait_for_channel(client, desired, seconds=30):
+              deadline = time.monotonic() + seconds
+              while True:
+                  channels = _channels(client)
+                  if len(channels) == 1 and _matches(channels[0], desired):
+                      return
+                  if channels and any(item.get("name") != desired["name"] for item in channels):
+                      raise RuntimeError("unexpected delivery channel exists")
+                  if time.monotonic() >= deadline:
+                      raise TimeoutError("delivery channel did not stabilize")
+                  time.sleep(1)
+
+
+          def _reconcile(
+              config_client,
+              marker_client,
+              request_type,
+              properties,
+              old_properties,
+              current_physical_id,
+              stack_id,
+              wait_seconds,
+              context,
+          ):
+              scope = _scope(properties, context)
+              desired = _desired(scope)
+              physical_id = _physical_id(scope)
+              token = _ownership_token(stack_id, scope)
+              if request_type == "Update":
+                  old_scope = _scope(old_properties, context)
+                  if old_scope["name"] != scope["name"]:
+                      raise ValueError("channel name is immutable")
+                  if old_scope["marker"] != scope["marker"]:
+                      raise ValueError("ownership parameter is immutable")
+                  old_desired = _desired(old_scope)
+                  if current_physical_id != physical_id:
+                      raise PermissionError("custom resource ownership mismatch")
+              else:
+                  old_desired = desired
+
+              _wait_for_recorder(config_client, scope, wait_seconds)
+              channels = _channels(config_client)
+              if any(item.get("name") != scope["name"] for item in channels):
+                  raise RuntimeError("unexpected delivery channel exists")
+              current = channels[0] if channels else None
+              marker = _marker_value(marker_client, scope["marker"])
+              if request_type == "Create" and current and marker is None:
+                  raise PermissionError("existing delivery channel lacks ownership marker")
+              if marker is not None and marker != token:
+                  raise PermissionError("ownership marker mismatch")
+              if request_type == "Update" and marker is None:
+                  raise PermissionError("ownership marker is missing")
+              if current and _matches(current, desired):
+                  return physical_id, "already-current"
+              if current and not _matches(current, old_desired):
+                  raise RuntimeError("delivery channel drift blocks update")
+
+              marker_outcome = _claim_marker(marker_client, scope["marker"], token)
+              config_client.put_delivery_channel(DeliveryChannel=desired)
+              _wait_for_channel(config_client, desired)
+              return physical_id, "reconciled-marker-{}".format(marker_outcome)
+
+
+          def _wait_until_stopped(client, name, seconds=30):
+              deadline = time.monotonic() + seconds
+              while True:
+                  try:
+                      statuses = client.describe_configuration_recorder_status(
+                          ConfigurationRecorderNames=[name]
+                      ).get("ConfigurationRecordersStatus", [])
+                  except Exception as error:
+                      if _error_code(error) == "NoSuchConfigurationRecorderException":
+                          return
+                      raise
+                  if not statuses or not statuses[0].get("recording", False):
+                      return
+                  if time.monotonic() >= deadline:
+                      raise TimeoutError("configuration recorder did not stop")
+                  time.sleep(1)
+
+
+          def _delete(
+              config_client,
+              marker_client,
+              properties,
+              physical_id,
+              stack_id,
+              context,
+          ):
+              scope = _scope(properties, context)
+              token = _ownership_token(stack_id, scope)
+              if physical_id != _physical_id(scope):
+                  return "retained-ownership-mismatch"
+              marker = _marker_value(marker_client, scope["marker"])
+              channels = _channels(config_client)
+              if marker is None:
+                  if not channels:
+                      return "already-absent"
+                  return "retained-marker-absent"
+              if marker != token:
+                  return "retained-marker-mismatch"
+              if not channels:
+                  _delete_marker(marker_client, scope["marker"], token)
+                  return "cleaned-marker-channel-absent"
+              desired = _desired(scope)
+              if len(channels) != 1 or not _matches(channels[0], desired):
+                  return "retained-drifted"
+
+              try:
+                  statuses = config_client.describe_configuration_recorder_status(
+                      ConfigurationRecorderNames=[scope["name"]]
+                  ).get("ConfigurationRecordersStatus", [])
+                  recorders = _recorders(config_client)
+                  if recorders and (
+                      len(recorders) != 1 or not _recorder_matches(recorders[0], scope)
+                  ):
+                      return "retained-recorder-drift"
+                  if statuses and statuses[0].get("recording", False):
+                      if not recorders:
+                          return "retained-recorder-drift"
+                      config_client.stop_configuration_recorder(
+                          ConfigurationRecorderName=scope["name"]
+                      )
+                      _wait_until_stopped(config_client, scope["name"])
+              except Exception as error:
+                  if _error_code(error) != "NoSuchConfigurationRecorderException":
+                      raise
+
+              deadline = time.monotonic() + 30
+              while True:
+                  try:
+                      config_client.delete_delivery_channel(
+                          DeliveryChannelName=scope["name"]
+                      )
+                      break
+                  except Exception as error:
+                      if _error_code(error) == "NoSuchDeliveryChannelException":
+                          break
+                      if (
+                          _error_code(error) != "LastDeliveryChannelDeleteFailedException"
+                          or time.monotonic() >= deadline
+                      ):
+                          raise
+                      time.sleep(1)
+              if any(
+                  item.get("name") == scope["name"]
+                  for item in _channels(config_client)
+              ):
+                  raise RuntimeError("delivery channel deletion did not stabilize")
+              _delete_marker(marker_client, scope["marker"], token)
+              return "deleted-initial-rollback"
+
+
+          def _reconcile_wait_seconds(context):
+              configured = int(os.environ.get("RECORDER_WAIT_SECONDS", "420"))
+              remaining = context.get_remaining_time_in_millis() / 1000
+              return max(0, min(configured, int(remaining - 90)))
+
+
+          def _send(event, context, status, physical_id, reason, data):
+              body = json.dumps(
+                  {
+                      "Status": status,
+                      "Reason": reason,
+                      "PhysicalResourceId": physical_id,
+                      "StackId": event["StackId"],
+                      "RequestId": event["RequestId"],
+                      "LogicalResourceId": event["LogicalResourceId"],
+                      "NoEcho": True,
+                      "Data": data,
+                  },
+                  separators=(",", ":"),
+              ).encode("utf-8")
+              for attempt in range(3):
+                  request = urllib.request.Request(
+                      event["ResponseURL"],
+                      data=body,
+                      headers={"content-type": "", "content-length": str(len(body))},
+                      method="PUT",
+                  )
+                  try:
+                      with urllib.request.urlopen(request, timeout=10):
+                          return
+                  except Exception:
+                      if attempt == 2:
+                          raise
+                      time.sleep(2 ** attempt)
+
+
+          def handler(event, context):
+              request_type = event.get("RequestType", "Unknown")
+              physical_id = event.get("PhysicalResourceId") or context.log_stream_name
+              try:
+                  properties = event.get("ResourceProperties", {})
+                  scope = _scope(properties, context)
+                  if request_type == "Create":
+                      physical_id = _physical_id(scope)
+                  config_client = boto3.client("config")
+                  marker_client = boto3.client("ssm")
+                  if request_type == "Delete":
+                      outcome = _delete(
+                          config_client,
+                          marker_client,
+                          properties,
+                          physical_id,
+                          event.get("StackId", ""),
+                          context,
+                      )
+                  elif request_type in {"Create", "Update"}:
+                      physical_id, outcome = _reconcile(
+                          config_client,
+                          marker_client,
+                          request_type,
+                          properties,
+                          event.get("OldResourceProperties", {}),
+                          event.get("PhysicalResourceId"),
+                          event.get("StackId", ""),
+                          _reconcile_wait_seconds(context),
+                          context,
+                      )
+                  else:
+                      raise ValueError("unsupported request type")
+                  LOG.info(
+                      "config_delivery_orchestration request_type=%s outcome=%s",
+                      request_type,
+                      outcome,
+                  )
+                  _send(event, context, "SUCCESS", physical_id, "Completed", {"Outcome": outcome})
+              except Exception as error:
+                  LOG.error(
+                      "config_delivery_orchestration request_type=%s outcome=failed error_type=%s",
+                      request_type,
+                      type(error).__name__,
+                  )
+                  _send(
+                      event,
+                      context,
+                      "FAILED",
+                      physical_id,
+                      "{}; see the orchestrator log group".format(type(error).__name__),
+                      {},
+                  )
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -167,15 +795,35 @@ Resources:
           - !If [RecordGlobalResources, 'AWS::CloudFront::Distribution', !Ref AWS::NoValue]
 
   ConfigDeliveryChannel:
-    Type: AWS::Config::DeliveryChannel
+    Type: Custom::ConfigDeliveryChannel
     Condition: CreateConfig
+    DependsOn: ConfigDeliveryBucketPolicy
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      Name: !Sub 'ian-photography-${Stage}'
-      S3BucketName: !Ref SecurityAuditBucketName
-      ConfigSnapshotDeliveryProperties:
-        DeliveryFrequency: TwentyFour_Hours
+      ServiceToken: !GetAtt ConfigDeliveryOrchestratorFunction.Arn
+      ServiceTimeout: 660
+      ChannelName: !Sub 'ian-photography-${Stage}'
+      BucketName: !Ref ConfigDeliveryBucket
+      DeliveryFrequency: TwentyFour_Hours
+      ExpectedAccountId: !Ref AWS::AccountId
+      ExpectedRegion: !Ref AWS::Region
+      ExpectedRecorderRoleArn: !GetAtt ConfigRole.Arn
+      ExpectedResourceTypes:
+        - AWS::S3::Bucket
+        - AWS::DynamoDB::Table
+        - AWS::Lambda::Function
+        - AWS::CloudTrail::Trail
+        - AWS::ApiGatewayV2::Api
+        - AWS::Cognito::UserPool
+        - AWS::SNS::Topic
+        - AWS::SQS::Queue
+        - AWS::KMS::Key
+        - !If [RecordGlobalResources, 'AWS::IAM::User', !Ref AWS::NoValue]
+        - !If [RecordGlobalResources, 'AWS::IAM::Role', !Ref AWS::NoValue]
+        - !If [RecordGlobalResources, 'AWS::IAM::Policy', !Ref AWS::NoValue]
+        - !If [RecordGlobalResources, 'AWS::CloudFront::Distribution', !Ref AWS::NoValue]
+      OwnershipParameterName: !Sub '/ian-photography/config-delivery/ian-photography-${Stage}/owner'
 
   ConfigCloudTrailEnabled:
     Type: AWS::Config::ConfigRule
@@ -241,6 +889,12 @@ Resources:
 Outputs:
   ConfigWasCreated:
     Value: !If [CreateConfig, 'true', 'false']
+  ConfigDeliveryBucketName:
+    Condition: CreateConfig
+    Value: !Ref ConfigDeliveryBucket
+  ConfigRecorderName:
+    Condition: CreateConfig
+    Value: !Ref ConfigRecorder
   GuardDutyDetectorId:
     Condition: CreateGuardDuty
     Value: !Ref GuardDutyDetector

@@ -346,6 +346,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         execute = helper_paths[1].read_text(encoding="utf-8")
         collect = helper_paths[2].read_text(encoding="utf-8")
         frontend = helper_paths[3].read_text(encoding="utf-8")
+        smoke = helper_paths[4].read_text(encoding="utf-8")
         drift = helper_paths[5].read_text(encoding="utf-8")
         self.assertIn("detect-stack-drift", plan)
         self.assertNotIn("wait stack-drift-detection-complete", plan)
@@ -376,6 +377,9 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertNotIn("--paths '/*'", frontend)
         self.assertIn("'/index.html'", frontend)
         self.assertIn("'/images/heroes/*'", frontend)
+        self.assertIn('if [[ "$api" == "/api" ]]', smoke)
+        self.assertIn('api="${site}${api}"', smoke)
+        self.assertIn('elif [[ "$api" != https://* ]]', smoke)
 
 
 if __name__ == "__main__":

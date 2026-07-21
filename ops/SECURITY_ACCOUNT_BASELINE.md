@@ -14,7 +14,7 @@ reviewed change set.
 
 | Layer | File | Ownership and guard |
 | --- | --- | --- |
-| Audit foundation | `security_audit_foundation_template.yaml` | One home-region stack. The evidence bucket, bucket policy, log group, role, and multi-region trail are retained together. |
+| Audit foundation | `security_audit_foundation_template.yaml` | One home-region stack. The Object-Locked CloudTrail evidence bucket, bucket policy, log group, role, and multi-region trail are retained together. After Config is healthy, an opt-in parameter adds exact-bucket Config delivery object events. |
 | Notifications | `security_notifications_template.yaml` | Regional encrypted SNS/KMS routing, encrypted SQS DLQ, metrics, and alarms. It creates no subscriber. |
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
 | Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained CMK-encrypted vault. Creation and Vault Lock default off. |
@@ -39,7 +39,10 @@ Run:
 The focused checks are:
 
 ```bash
-python3 -m unittest ops.tests.test_security_operations -v
+python3 -m unittest \
+  ops.tests.test_config_delivery_orchestrator \
+  ops.tests.test_security_operations \
+  -v
 cfn-lint \
   ops/security_audit_foundation_template.yaml \
   ops/security_notifications_template.yaml \
@@ -126,6 +129,12 @@ Lock governance retention, public access block, and the TLS deny. Confirm the
 bucket policy and role trust constrain CloudTrail to the exact trail ARN and
 account. Confirm termination protection is enabled.
 
+Leave `ConfigDeliveryBucketName` empty during initial foundation creation. The
+dedicated Config delivery bucket does not exist until the managed-services
+stack is successfully created, and an empty value preserves management-event
+logging without enabling any S3 object data-event selector. Do not guess or
+precompute the generated bucket name.
+
 ### 2. Notifications and alarms
 
 Pass the foundation log-group output to
@@ -153,16 +162,148 @@ First deploy `security_managed_services_template.yaml` with every mode at
 `skip`; that produces a no-op singleton layer. Only a fresh complete inventory
 proving one service absent justifies its exact `create-confirmed-absent` value.
 
-For Config, pass the audit bucket output. Use
-`GlobalResourceRecordingMode=record-confirmed-home-region` only in the chosen
-home region. The explicit resource list conditionally adds IAM and CloudFront in
-that mode; it deliberately omits `IncludeGlobalResourceTypes`, whose behavior is
-ambiguous alongside explicit types. The delivery channel and recorder must be
-created without an explicit dependency between them: Config requires the
-channel before the recorder can start, while CloudFormation can register the
-recorder and create the channel concurrently before stabilizing both. The
-foundation bucket policy restricts Config by account and regional Config source
-ARN.
+Config no longer accepts or uses the audit-foundation bucket. AWS Config does
+not support a delivery channel targeting an S3 bucket with Object Lock default
+retention, so this stack creates a separate, retained Config-history bucket. It
+is private, SSE-S3 encrypted, versioned, TLS-only, lifecycle-managed, and has no
+Object Lock default retention. Its three Config service grants are restricted
+to the exact account and regional Config source ARN. The recorder role has the
+same exact bucket and object-prefix scope as a fallback. The CloudTrail evidence
+bucket policy contains no Config grant.
+
+The Config control-plane startup order needs special handling. The native
+`AWS::Config::ConfigurationRecorder` provider calls `PutConfigurationRecorder`
+and then waits for a delivery channel before it stabilizes. `PutDeliveryChannel`
+in turn rejects a request until that recorder API record exists. Native recorder
+and channel handlers can therefore both remain `CREATE_IN_PROGRESS` without the
+channel handler ever issuing `PutDeliveryChannel`.
+
+This template keeps the native recorder, but replaces the native delivery
+channel with a narrowly scoped `Custom::ConfigDeliveryChannel`. The custom
+resource starts concurrently with the native recorder, polls only the aggregate
+recorder description until the exact expected recorder appears, rejects any
+other recorder or channel, then calls `PutDeliveryChannel` for the exact
+stack-created bucket. This unblocks the native provider, which starts and
+stabilizes the recorder normally. Config rules depend on both completed
+resources. Do not add a recorder dependency to the custom channel or a channel
+dependency to the recorder; either change recreates the deadlock.
+
+The orchestration Lambda can only describe Config state, put/delete the sole
+regional delivery channel, stop the exact expected recorder during an
+initial-create rollback, and get/put/delete one fixed regional SSM ownership
+parameter. IAM applies the active-region condition, while the SSM statement is
+also restricted to the exact account, stage, and parameter ARN. The handler
+independently verifies the expected account, region, names, bucket, frequency,
+recorder role ARN, exact resource-type set, old update state, stack ARN, and
+CloudFormation physical ownership before mutation. It logs only request type,
+aggregate outcome, and exception class; it never logs a CloudFormation event,
+response URL, bucket name, marker token, or service response.
+
+Create and update are retry-safe. Before `PutDeliveryChannel`, the handler
+creates `/ian-photography/config-delivery/ian-photography-STAGE/owner` with
+overwrite disabled. Its value is a one-way SHA-256 token derived from the stack
+ID, not the stack ID itself. A retry from the same stack recovers that marker
+and the exact channel. Another token, a pre-existing exact channel without the
+marker, a missing marker during update, or drifted channel state fails closed.
+There is no adoption path in the custom resource.
+
+On a create failure, the callback returns the deterministic owned physical ID
+as soon as the account/region/property scope is valid, even if the failure
+happened after AWS accepted `PutDeliveryChannel`. Initial rollback may delete a
+channel only when the physical ID, StackId-derived marker, channel definition,
+recorder role ARN, and recorder resource-type set all still match. A missing or
+mismatched marker, pre-existing channel, or drifted recorder/channel is never
+stopped or deleted. If the channel never existed, rollback removes only its own
+matching marker. The bounded 420-second recorder wait runs inside a 600-second
+Lambda and 660-second custom-resource timeout, reserving at least 90 seconds for
+verification and a three-attempt CloudFormation callback.
+
+After a successful create, `RetainExceptOnCreate` preserves the recorder,
+channel and its ownership marker, delivery bucket, bucket policy, and recorder
+role on ordinary stack deletion, matching the rest of the account-security
+retention posture.
+
+Use `GlobalResourceRecordingMode=record-confirmed-home-region` only in the
+chosen home region. The explicit resource list conditionally adds IAM and
+CloudFront in that mode; it deliberately omits `IncludeGlobalResourceTypes`,
+whose behavior is ambiguous alongside explicit types.
+
+Before an enabled deployment, inventory must show no recorder and no delivery
+channel. Also require the fixed SSM ownership parameter to be absent; check its
+name only and never print its value:
+
+```bash
+aws ssm get-parameter \
+  --region us-west-2 \
+  --name /ian-photography/config-delivery/ian-photography-prod/owner \
+  --query 'Parameter.Name' \
+  --output text
+```
+
+`ParameterNotFound` is the expected pre-create result. Any returned parameter
+requires ownership investigation; do not delete it merely to make a deployment
+pass. If a previous failed native rollout is still `CREATE_IN_PROGRESS`, do
+not manually create a channel or update the in-progress stack. Let the exact
+stack reach rollback, confirm the failed stack no longer owns a recorder or
+channel and the marker is absent, delete only the failed stack through
+CloudFormation if required, rerun preflight, and then use a newly reviewed
+create change set. If either singleton or the marker survives or belongs to
+another owner, keep `ConfigDeploymentMode=skip` and use a separately reviewed
+import/adoption plan; this template intentionally fails closed rather than
+taking it over.
+
+After the stack completes, verify without printing configuration content:
+
+```bash
+aws configservice describe-configuration-recorders \
+  --region us-west-2 \
+  --query 'ConfigurationRecorders[].name'
+aws configservice describe-configuration-recorder-status \
+  --region us-west-2 \
+  --query 'ConfigurationRecordersStatus[].{name:name,recording:recording,lastStatus:lastStatus}'
+aws configservice describe-delivery-channels \
+  --region us-west-2 \
+  --query 'DeliveryChannels[].{name:name,bucket:s3BucketName,frequency:configSnapshotDeliveryProperties.deliveryFrequency}'
+aws configservice describe-delivery-channel-status \
+  --region us-west-2 \
+  --query 'DeliveryChannelsStatus[].{name:name,historyStatus:configHistoryDeliveryInfo.lastStatus,snapshotStatus:configSnapshotDeliveryInfo.lastStatus}'
+aws ssm get-parameter \
+  --region us-west-2 \
+  --name /ian-photography/config-delivery/ian-photography-prod/owner \
+  --query 'Parameter.Name' \
+  --output text
+```
+
+Require exactly one expected recorder, `recording=true`, exactly one expected
+channel targeting the `ConfigDeliveryBucketName` stack output, and no failed
+delivery status. Require the SSM command to return only the expected parameter
+name; never query its value. Confirm the delivery bucket still has versioning,
+encryption, public access blocks, and no Object Lock configuration. Do not print
+delivered configuration objects in deployment or CI logs.
+
+Only after those checks pass, update the audit-foundation stack through a
+reviewed change set and pass the managed-services stack's exact
+`ConfigDeliveryBucketName` output to the audit foundation parameter of the same
+name. The resulting basic event selector keeps all read/write management,
+multi-region, and global-service coverage and adds one `AWS::S3::Object` data
+resource with the exact trailing-slash bucket ARN. It does not audit any other
+application, media, release, or audit bucket.
+
+Verify the selector shape without querying or printing events:
+
+```bash
+aws cloudtrail get-event-selectors \
+  --region us-west-2 \
+  --trail-name ian-photography-security-prod \
+  --query 'EventSelectors[].{management:IncludeManagementEvents,readWrite:ReadWriteType,dataResources:DataResources}'
+```
+
+Require management events to remain enabled with `ReadWriteType=All`, and
+require exactly one data resource of type `AWS::S3::Object` whose only value is
+`arn:aws:s3:::EXACT_CONFIG_DELIVERY_BUCKET/`. If the managed Config stack is
+intentionally removed or externally managed later, update this parameter only
+after an ownership review; an empty value removes the Config object selector
+but leaves management-event coverage intact.
 
 GuardDuty features are explicit: S3 data events and Lambda network logs are
 enabled; EKS audit logs, EBS malware protection, RDS login events, and runtime
@@ -225,10 +366,16 @@ legal and retention decision because it can become irreversible.
 ## Maintenance, cost, and evidence
 
 Before enabling a paid service, record its owner, region scope, estimated
-monthly cost, retention, and alert destination. Review CloudTrail/CloudWatch
-ingestion and retention, Config items/rules, GuardDuty plans, Security Hub
-checks, Inspector Lambda/code coverage, KMS/SNS/SQS requests, AWS Backup storage
-and restore tests, and S3 archive/retrieval.
+monthly cost, retention, and alert destination. CloudTrail S3 object data events
+are billable and can increase CloudTrail, S3, and CloudWatch ingestion volume;
+this design limits them to the dedicated low-volume Config delivery bucket.
+Data-event records can include Config object keys and request metadata, but not
+the delivered object body. Treat those records as security evidence: do not
+print event payloads or object keys in CI, deployment output, tickets, or chat.
+Review CloudTrail/CloudWatch ingestion and retention, Config items/rules,
+GuardDuty plans, Security Hub checks, Inspector Lambda/code coverage,
+KMS/SNS/SQS requests, AWS Backup storage and restore tests, and S3
+archive/retrieval.
 
 Quarterly, rerun preflight and drift detection. Check trail delivery and digest
 validation, Config status, detector/hub/analyzer ownership, Inspector coverage,

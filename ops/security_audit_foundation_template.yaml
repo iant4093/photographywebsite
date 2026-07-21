@@ -12,6 +12,19 @@ Parameters:
     MaxLength: 20
     AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
     ConstraintDescription: Use 1-20 lowercase letters, digits, or internal hyphens.
+  ConfigDeliveryBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$'
+    ConstraintDescription: >-
+      Leave empty to disable Config object data events, or provide one exact S3
+      bucket name using 3-63 lowercase letters, digits, periods, or hyphens.
+
+Conditions:
+  AuditConfigDeliveryObjectEvents: !Not
+    - !Equals
+      - !Ref ConfigDeliveryBucketName
+      - ''
 
 Resources:
   SecurityAuditBucket:
@@ -101,32 +114,6 @@ Resources:
                 aws:SourceAccount: !Ref AWS::AccountId
                 aws:SourceArn: !Sub 'arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/ian-photography-security-${Stage}'
                 s3:x-amz-acl: bucket-owner-full-control
-          - Sid: ConfigBucketDiscovery
-            Effect: Allow
-            Principal:
-              Service: config.amazonaws.com
-            Action:
-              - s3:GetBucketAcl
-              - s3:ListBucket
-            Resource: !GetAtt SecurityAuditBucket.Arn
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-              ArnLike:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:*'
-          - Sid: ConfigLogDelivery
-            Effect: Allow
-            Principal:
-              Service: config.amazonaws.com
-            Action: s3:PutObject
-            Resource: !Sub '${SecurityAuditBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*'
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-                s3:x-amz-acl: bucket-owner-full-control
-              ArnLike:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:*'
-
   SecurityAuditLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: RetainExceptOnCreate
@@ -191,6 +178,13 @@ Resources:
       EventSelectors:
         - IncludeManagementEvents: true
           ReadWriteType: All
+          DataResources:
+            - !If
+              - AuditConfigDeliveryObjectEvents
+              - Type: AWS::S3::Object
+                Values:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${ConfigDeliveryBucketName}/'
+              - !Ref AWS::NoValue
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -208,4 +202,3 @@ Outputs:
     Value: !GetAtt SecurityTrail.Arn
   CloudTrailName:
     Value: !Ref SecurityTrail
-

@@ -6,6 +6,12 @@ set -euo pipefail
 
 site="${SITE_URL%/}"
 api="${API_BASE_URL%/}"
+if [[ "$api" == "/api" ]]; then
+  api="${site}${api}"
+elif [[ "$api" != https://* ]]; then
+  echo "API base must be same-origin /api or an HTTPS URL." >&2
+  exit 2
+fi
 headers="$(mktemp)"
 trap 'rm -f "$headers"' EXIT
 

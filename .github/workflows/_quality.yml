@@ -54,7 +54,10 @@ jobs:
             [[ -n "${!name:-}" ]] || { echo "Required public build variable is missing: $name" >&2; exit 2; }
             [[ "${!name}" != *example* && "${!name}" != *EXAMPLE* ]] || { echo "Placeholder public build variable is forbidden." >&2; exit 2; }
           done
-          [[ "$API_URL" == https://* ]] || { echo 'Production API URL must use HTTPS.' >&2; exit 2; }
+          [[ "$API_URL" == "/api" || "$API_URL" == https://* ]] || {
+            echo 'Production API base must be same-origin /api or an HTTPS URL.' >&2
+            exit 2
+          }
           rum_names=(RUM_APPLICATION_ID RUM_GUEST_ROLE_ARN RUM_IDENTITY_POOL_ID RUM_REGION)
           rum_configured=0
           for name in "${rum_names[@]}"; do

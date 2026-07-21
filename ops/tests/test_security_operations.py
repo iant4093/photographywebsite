@@ -75,9 +75,35 @@ class SecurityTemplateTests(unittest.TestCase):
             block = resource_block(FOUNDATION, logical_id)
             self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
-        self.assertGreaterEqual(FOUNDATION.count("aws:SourceArn:"), 5)
+        self.assertEqual(FOUNDATION.count("aws:SourceArn:"), 3)
         self.assertIn("cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/", FOUNDATION)
-        self.assertIn("config:${AWS::Region}:${AWS::AccountId}:*", FOUNDATION)
+        bucket_policy = resource_block(FOUNDATION, "SecurityAuditBucketPolicy")
+        self.assertNotIn("config.amazonaws.com", bucket_policy)
+        self.assertNotIn("ConfigLogDelivery", bucket_policy)
+
+    def test_foundation_optionally_audits_only_the_exact_config_bucket(self) -> None:
+        self.assertIn(
+            "ConfigDeliveryBucketName:\n    Type: String\n    Default: ''",
+            FOUNDATION,
+        )
+        self.assertIn("AuditConfigDeliveryObjectEvents: !Not", FOUNDATION)
+        self.assertIn("- !Ref ConfigDeliveryBucketName\n      - ''", FOUNDATION)
+        bucket_policy = resource_block(FOUNDATION, "SecurityAuditBucketPolicy")
+        self.assertNotIn("ConfigDeliveryBucketName", bucket_policy)
+        trail = resource_block(FOUNDATION, "SecurityTrail")
+        self.assertIn("IncludeGlobalServiceEvents: true", trail)
+        self.assertIn("IsMultiRegionTrail: true", trail)
+        self.assertIn("IncludeManagementEvents: true", trail)
+        self.assertIn("ReadWriteType: All", trail)
+        self.assertIn("Type: AWS::S3::Object", trail)
+        self.assertIn("- AuditConfigDeliveryObjectEvents", trail)
+        self.assertIn("- !Ref AWS::NoValue", trail)
+        self.assertIn(
+            "arn:${AWS::Partition}:s3:::${ConfigDeliveryBucketName}/", trail
+        )
+        self.assertNotIn("${ConfigDeliveryBucketName}/*", trail)
+        self.assertEqual(trail.count("Type: AWS::S3::Object"), 1)
+        self.assertEqual(trail.count("DataResources:"), 1)
 
     def test_notifications_use_customer_key_exact_publishers_and_delivery_guards(self) -> None:
         self.assertNotIn("alias/aws/sns", NOTIFICATIONS)
@@ -109,7 +135,74 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("IncludeGlobalResourceTypes:", MANAGED)
         delivery_channel = resource_block(MANAGED, "ConfigDeliveryChannel")
         self.assertNotIn("DependsOn: ConfigRecorder", delivery_channel)
+        self.assertIn("Type: Custom::ConfigDeliveryChannel", delivery_channel)
+        self.assertIn("DependsOn: ConfigDeliveryBucketPolicy", delivery_channel)
+        recorder = resource_block(MANAGED, "ConfigRecorder")
+        self.assertNotIn("DependsOn: ConfigDeliveryChannel", recorder)
         self.assertIn("ResourceTypes:", MANAGED)
+
+    def test_config_delivery_uses_a_dedicated_guarded_bucket(self) -> None:
+        bucket = resource_block(MANAGED, "ConfigDeliveryBucket")
+        self.assertIn("DeletionPolicy: RetainExceptOnCreate", bucket)
+        self.assertIn("UpdateReplacePolicy: Retain", bucket)
+        self.assertIn("SSEAlgorithm: AES256", bucket)
+        self.assertIn("ObjectOwnership: BucketOwnerPreferred", bucket)
+        self.assertIn("VersioningConfiguration:", bucket)
+        self.assertIn("BlockPublicAcls: true", bucket)
+        self.assertNotIn("ObjectLock", bucket)
+        policy = resource_block(MANAGED, "ConfigDeliveryBucketPolicy")
+        self.assertIn("aws:SecureTransport: false", policy)
+        self.assertEqual(policy.count("aws:SourceAccount: !Ref AWS::AccountId"), 3)
+        self.assertEqual(
+            policy.count(
+                "arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:'"
+            ),
+            3,
+        )
+        self.assertIn("s3:x-amz-acl: bucket-owner-full-control", policy)
+        self.assertNotIn("SecurityAuditBucketName", MANAGED)
+
+    def test_config_orchestrator_is_regional_and_minimally_privileged(self) -> None:
+        role = resource_block(MANAGED, "ConfigDeliveryOrchestratorRole")
+        for action in (
+            "config:DeleteDeliveryChannel",
+            "config:DescribeConfigurationRecorders",
+            "config:DescribeConfigurationRecorderStatus",
+            "config:DescribeDeliveryChannels",
+            "config:PutDeliveryChannel",
+            "config:StopConfigurationRecorder",
+            "ssm:DeleteParameter",
+            "ssm:GetParameter",
+            "ssm:PutParameter",
+        ):
+            self.assertIn(action, role)
+        self.assertIn("aws:RequestedRegion: !Ref AWS::Region", role)
+        self.assertIn(
+            "parameter/ian-photography/config-delivery/ian-photography-${Stage}/owner",
+            role,
+        )
+        self.assertNotIn("config:DeleteConfigurationRecorder", role)
+        function = resource_block(MANAGED, "ConfigDeliveryOrchestratorFunction")
+        self.assertIn("Runtime: python3.12", function)
+        self.assertIn("Timeout: 600", function)
+        self.assertIn("RECORDER_WAIT_SECONDS: '420'", function)
+        self.assertIn("hashlib.sha256(stack_id.encode", function)
+        self.assertNotIn("LOG.info(event", function)
+        self.assertNotIn("logger.exception", function.lower())
+        channel = resource_block(MANAGED, "ConfigDeliveryChannel")
+        self.assertIn("ServiceTimeout: 660", channel)
+        self.assertIn("ExpectedRecorderRoleArn: !GetAtt ConfigRole.Arn", channel)
+        self.assertIn("ExpectedResourceTypes:", channel)
+        self.assertIn(
+            "OwnershipParameterName: !Sub '/ian-photography/config-delivery/ian-photography-${Stage}/owner'",
+            channel,
+        )
+        recorder = resource_block(MANAGED, "ConfigRecorder")
+        type_pattern = r"(?:- |')(AWS::[A-Za-z0-9]+::[A-Za-z0-9]+)"
+        self.assertEqual(
+            set(re.findall(type_pattern, recorder)),
+            set(re.findall(type_pattern, channel)),
+        )
 
     def test_scheduled_backup_role_cannot_restore_and_arn_is_local(self) -> None:
         self.assertNotIn("AWSBackupServiceRolePolicyForRestores", BACKUP)
