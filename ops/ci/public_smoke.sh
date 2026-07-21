@@ -28,6 +28,8 @@ arguments=(
   --media-bucket-name "$MEDIA_BUCKET_NAME"
   --aws-region "$AWS_REGION"
   --expected-public-album-count "$EXPECTED_PUBLIC_ALBUM_COUNT"
+  --attempts "${PUBLIC_SMOKE_ATTEMPTS:-2}"
+  --retry-delay "${PUBLIC_SMOKE_RETRY_DELAY_SECONDS:-5}"
 )
 if [[ -n "${EXPECTED_RELEASE_SHA:-}" ]]; then
   arguments+=(--expected-release-sha "$EXPECTED_RELEASE_SHA")

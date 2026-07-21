@@ -132,6 +132,10 @@ the protected-user 401 boundary, and checks sensitive SPA routes under DNT/GPC
 headers for security headers and cookies. It emits only
 aggregate counts. The protected response must never show cache-hit evidence;
 when it carries a cache directive, that directive must be `private, no-store`.
+CI permits one five-second retry only for an allowlisted transport, HTTP
+429/5xx, content-type/status, or CDN availability failure and logs the safe
+failure reason. CORS, bypass, caching, header, cookie, catalog-integrity,
+release-marker, and direct-storage posture failures are never retried.
 
 ## OIDC trust and permissions
 

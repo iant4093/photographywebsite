@@ -1151,6 +1151,56 @@ class PublicPostureSmokeTests(unittest.TestCase):
         self.assertEqual(metrics["privacyRouteChecks"], 4)
         self.assertEqual(metrics["mediaAuthorizationChecks"], 2)
 
+    def test_smoke_retry_is_bounded_and_only_for_availability_failures(self):
+        calls = []
+        sleeps = []
+
+        def transient_then_safe(config):
+            calls.append(config)
+            if len(calls) == 1:
+                raise public_posture_smoke.PostureError(
+                    "public endpoint request failed"
+                )
+            return {"albumCount": 1}
+
+        with patch("sys.stderr"):
+            metrics = public_posture_smoke.run_with_retries(
+                self.config(),
+                attempts=2,
+                retry_delay=5,
+                runner=transient_then_safe,
+                sleeper=sleeps.append,
+            )
+        self.assertEqual(metrics, {"albumCount": 1})
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(sleeps, [5])
+
+        calls.clear()
+
+        def security_failure(config):
+            calls.append(config)
+            raise public_posture_smoke.PostureError(
+                "hostile origin received an allow-origin response"
+            )
+
+        with patch("sys.stderr"), self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke.run_with_retries(
+                self.config(),
+                attempts=3,
+                retry_delay=0,
+                runner=security_failure,
+                sleeper=sleeps.append,
+            )
+        self.assertEqual(len(calls), 1)
+
+        for attempts, retry_delay in ((0, 0), (4, 0), (True, 0), (1, -1), (1, 11)):
+            with self.subTest(attempts=attempts, retry_delay=retry_delay), self.assertRaises(
+                public_posture_smoke.PostureError
+            ):
+                public_posture_smoke.run_with_retries(
+                    self.config(), attempts=attempts, retry_delay=retry_delay
+                )
+
     def test_hostile_cors_and_invalid_config_fail_closed(self):
         with self.assertRaises(public_posture_smoke.PostureError):
             public_posture_smoke.run_posture(
@@ -1348,6 +1398,8 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn('api="${site}${api}"', smoke)
         self.assertIn('elif [[ "$api" != https://* ]]', smoke)
         self.assertIn("public_posture_smoke.py", smoke)
+        self.assertIn("PUBLIC_SMOKE_ATTEMPTS:-2", smoke)
+        self.assertIn("PUBLIC_SMOKE_RETRY_DELAY_SECONDS:-5", smoke)
         self.assertIn("audit_stacks.json", multi_drift)
         self.assertIn("detect-stack-drift", multi_drift)
         self.assertIn("--resolved-values", collect)

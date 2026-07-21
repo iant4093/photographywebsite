@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Callable
 import urllib.error
 import urllib.parse
@@ -41,6 +42,16 @@ SENSITIVE_ROUTES = ("/login", "/admin", "/dashboard", "/sharedalbum/ci-posture-p
 
 class PostureError(ValueError):
     """A public security, privacy, or availability invariant failed."""
+
+
+RETRYABLE_REASONS = frozenset(
+    {
+        "public endpoint request failed",
+        "JSON endpoint returned an unexpected status or content type",
+        "site route returned an unexpected status or content type",
+        "public CDN media candidate is unavailable",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -359,6 +370,41 @@ def run_posture(
     }
 
 
+def _retryable(error: Exception) -> bool:
+    reason = str(error)
+    return reason in RETRYABLE_REASONS or bool(
+        re.fullmatch(r"endpoint returned HTTP (?:429|500|502|503|504)", reason)
+    )
+
+
+def run_with_retries(
+    config: PostureConfig,
+    *,
+    attempts: int,
+    retry_delay: float,
+    runner: Callable[[PostureConfig], dict[str, int | bool]] = run_posture,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> dict[str, int | bool]:
+    """Retry only bounded transport/availability failures, never posture failures."""
+
+    if isinstance(attempts, bool) or not 1 <= attempts <= 3:
+        raise PostureError("smoke attempt count is invalid")
+    if isinstance(retry_delay, bool) or not 0 <= retry_delay <= 10:
+        raise PostureError("smoke retry delay is invalid")
+    for attempt in range(1, attempts + 1):
+        try:
+            return runner(config)
+        except (PostureError, catalog_probe.ProbeError) as error:
+            print(
+                f"public posture smoke attempt {attempt}/{attempts} failed: {error}",
+                file=sys.stderr,
+            )
+            if attempt == attempts or not _retryable(error):
+                raise
+            sleeper(retry_delay)
+    raise PostureError("public posture smoke did not run")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-url", required=True)
@@ -371,9 +417,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-public-album-count", required=True, type=int)
     parser.add_argument("--expected-release-sha", default="")
     parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("--attempts", type=int, default=1)
+    parser.add_argument("--retry-delay", type=float, default=0.0)
     args = parser.parse_args(argv)
     try:
-        metrics = run_posture(
+        metrics = run_with_retries(
             PostureConfig(
                 args.site_url,
                 args.api_base_url,
@@ -385,7 +433,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.expected_public_album_count,
                 args.expected_release_sha,
                 args.timeout,
-            )
+            ),
+            attempts=args.attempts,
+            retry_delay=args.retry_delay,
         )
     except (PostureError, catalog_probe.ProbeError):
         print("public posture smoke failed closed", file=sys.stderr)
