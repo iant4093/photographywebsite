@@ -48,6 +48,28 @@ Parameters:
     MinValue: 90
     MaxValue: 3650
 
+Mappings:
+  AuditRegionContract:
+    Enabled:
+      Regions:
+        - ap-northeast-1
+        - ap-northeast-2
+        - ap-northeast-3
+        - ap-south-1
+        - ap-southeast-1
+        - ap-southeast-2
+        - ca-central-1
+        - eu-central-1
+        - eu-north-1
+        - eu-west-1
+        - eu-west-2
+        - eu-west-3
+        - sa-east-1
+        - us-east-1
+        - us-east-2
+        - us-west-1
+        - us-west-2
+
 Rules:
   MustDeployInApplicationRegion:
     Assertions:
@@ -459,6 +481,7 @@ Resources:
                 Action:
                   - cloudformation:DetectStackDrift
                   - cloudformation:DetectStackResourceDrift
+                  - cloudformation:ListStackResources
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'
                   - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/ian-photography-ci-bootstrap/*'
@@ -485,6 +508,43 @@ Resources:
                 Effect: Allow
                 Action: rum:GetAppMonitor
                 Resource: !Sub 'arn:${AWS::Partition}:rum:us-west-2:${AWS::AccountId}:appmonitor/ian-photography-web-prod'
+              - Sid: InventoryEnabledRegions
+                Effect: Allow
+                Action: ec2:DescribeRegions
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: us-west-2
+              - Sid: ReadRegionalGuardDutyPosture
+                Effect: Allow
+                Action:
+                  - guardduty:GetDetector
+                  - guardduty:ListDetectors
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !FindInMap [AuditRegionContract, Enabled, Regions]
+              - Sid: ReadRegionalSecurityHubPosture
+                Effect: Allow
+                Action:
+                  - securityhub:DescribeHub
+                  - securityhub:GetEnabledStandards
+                  - securityhub:GetFindingAggregator
+                  - securityhub:ListFindingAggregators
+                  - securityhub:ListTagsForResource
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !FindInMap [AuditRegionContract, Enabled, Regions]
+              - Sid: ReadRegionalSecurityStackGovernance
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ListStackResources
+                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:*:${AWS::AccountId}:stack/ian-photography-security-regional/*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !FindInMap [AuditRegionContract, Enabled, Regions]
               - Sid: ReadExactFrontendDistributionPosture
                 Effect: Allow
                 Action: cloudfront:GetDistribution

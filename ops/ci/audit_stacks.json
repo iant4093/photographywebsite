@@ -1,15 +1,28 @@
 {
-  "version": 1,
+  "version": 2,
   "rumAppMonitor": {
     "region": "us-west-2",
     "name": "ian-photography-web-prod"
+  },
+  "regionalSecurityPosture": {
+    "homeRegion": "us-west-2",
+    "satelliteStackName": "ian-photography-security-regional",
+    "cloudFormationExclusion": {
+      "region": "us-west-2",
+      "stackName": "ian-photography-security-managed",
+      "logicalResourceId": "GuardDutyDetector"
+    }
   },
   "stacks": [
     {"region": "us-west-2", "name": "ian-website"},
     {"region": "us-west-2", "name": "ian-photography-ci-bootstrap"},
     {"region": "us-west-2", "name": "ian-photography-security-audit"},
     {"region": "us-west-2", "name": "ian-photography-security-notifications"},
-    {"region": "us-west-2", "name": "ian-photography-security-managed"},
+    {
+      "region": "us-west-2",
+      "name": "ian-photography-security-managed",
+      "excludedLogicalResourceIds": ["GuardDutyDetector"]
+    },
     {"region": "us-west-2", "name": "ian-photography-backup-primary"},
     {
       "region": "us-west-2",

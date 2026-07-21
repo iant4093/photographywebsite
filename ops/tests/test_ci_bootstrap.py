@@ -166,7 +166,20 @@ class CiBootstrapTemplateTests(unittest.TestCase):
     def test_audit_role_drift_scope_matches_exact_versioned_multi_region_inventory(self):
         audit = resource_block("AuditRole")
         inventory = json.loads((OPS / "ci" / "audit_stacks.json").read_text(encoding="utf-8"))
-        self.assertEqual(inventory["version"], 1)
+        self.assertEqual(inventory["version"], 2)
+        regional = inventory["regionalSecurityPosture"]
+        self.assertEqual(regional["homeRegion"], "us-west-2")
+        self.assertEqual(
+            regional["satelliteStackName"], "ian-photography-security-regional"
+        )
+        self.assertEqual(
+            regional["cloudFormationExclusion"],
+            {
+                "region": "us-west-2",
+                "stackName": "ian-photography-security-managed",
+                "logicalResourceId": "GuardDutyDetector",
+            },
+        )
         self.assertEqual(
             inventory["rumAppMonitor"],
             {"region": "us-west-2", "name": "ian-photography-web-prod"},
@@ -199,6 +212,40 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("- us-west-2", poll)
         self.assertIn("- us-east-1", poll)
         self.assertIn("- us-east-2", poll)
+        detect = statement_block(audit, "DetectExactStackDrift")
+        self.assertIn("cloudformation:ListStackResources", detect)
+        self.assertIn("ec2:DescribeRegions", statement_block(audit, "InventoryEnabledRegions"))
+        guardduty = statement_block(audit, "ReadRegionalGuardDutyPosture")
+        self.assertIn("guardduty:ListDetectors", guardduty)
+        self.assertIn("guardduty:GetDetector", guardduty)
+        self.assertIn("aws:RequestedRegion:", guardduty)
+        security_hub = statement_block(audit, "ReadRegionalSecurityHubPosture")
+        for action in (
+            "securityhub:DescribeHub",
+            "securityhub:GetEnabledStandards",
+            "securityhub:GetFindingAggregator",
+            "securityhub:ListFindingAggregators",
+            "securityhub:ListTagsForResource",
+        ):
+            self.assertIn(action, security_hub)
+        governance = statement_block(audit, "ReadRegionalSecurityStackGovernance")
+        self.assertIn("cloudformation:DescribeStacks", governance)
+        self.assertIn("cloudformation:ListStackResources", governance)
+        self.assertIn("cloudformation:*:${AWS::AccountId}:stack/ian-photography-security-regional/*", governance)
+        self.assertIn("aws:RequestedRegion:", governance)
+        expected_enabled_regions = {
+            "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-south-1",
+            "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1",
+            "eu-north-1", "eu-west-1", "eu-west-2", "eu-west-3", "sa-east-1",
+            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+        }
+        mapping = TEMPLATE.split("\nMappings:\n", 1)[1].split("\nRules:\n", 1)[0]
+        for region in expected_enabled_regions:
+            self.assertIn(f"- {region}", mapping)
+        for block in (guardduty, security_hub, governance):
+            self.assertIn(
+                "!FindInMap [AuditRegionContract, Enabled, Regions]", block
+            )
 
         observability = next(
             item
@@ -216,6 +263,8 @@ class CiBootstrapTemplateTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("--logical-resource-ids", drift_script)
+        self.assertIn("regional_security_posture.py", drift_script)
+        self.assertNotIn("mapfile", drift_script)
         self.assertIn("rum get-app-monitor", drift_script)
         self.assertNotIn("get-app-monitor-data", drift_script)
 
@@ -295,6 +344,8 @@ if [[ \"$1 $2\" == \"cloudformation detect-stack-drift\" ]]; then
   printf '00000000-0000-0000-0000-000000000000\\n'
 elif [[ \"$1 $2\" == \"cloudformation describe-stack-drift-detection-status\" ]]; then
   printf 'DETECTION_COMPLETE\\tIN_SYNC\\n'
+elif [[ \"$1 $2\" == \"cloudformation list-stack-resources\" ]]; then
+  printf '%s\\n' '[\"ConfigRecorder\",\"GuardDutyDetector\",\"SecurityHub\"]'
 elif [[ \"$1 $2\" == \"rum get-app-monitor\" ]]; then
   printf '%s\\n' '{"AppMonitor":{"Name":"ian-photography-web-prod","Domain":"iantruongphotography.com","Platform":"Web","State":"CREATED","CustomEvents":{"Status":"DISABLED"},"DeobfuscationConfiguration":{"JavaScriptSourceMaps":{"Status":"DISABLED"}},"AppMonitorConfiguration":{"AllowCookies":false,"EnableXRay":false,"SessionSampleRate":0.1,"Telemetries":["performance","errors","http"],"ExcludedPages":["https://iantruongphotography.com/login*","https://iantruongphotography.com/admin*","https://iantruongphotography.com/dashboard*","https://iantruongphotography.com/sharedalbum*"],"GuestRoleArn":"synthetic-role","IdentityPoolId":"synthetic-pool"}}}'
 elif [[ \"$1 $2\" == \"cloudfront get-distribution\" ]]; then
@@ -316,6 +367,19 @@ fi
                 encoding="utf-8",
             )
             fake_aws.chmod(0o700)
+            fake_python = fake_bin / "python3"
+            fake_python.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "ops/ci/regional_security_posture.py" ]]; then
+  printf '%s\\n' '{"detectorCount":2,"enabledRegionCount":2,"findingAggregatorCount":1,"homeStandardCount":2,"satelliteStandardCount":0,"satelliteStackCount":1,"securityHubCount":2,"status":"IN_SYNC"}'
+else
+  exec "$REAL_PYTHON" "$@"
+fi
+""",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o700)
             environment = os.environ.copy()
             environment.update(
                 {
@@ -323,6 +387,7 @@ fi
                     "PATH": f"{fake_bin}:{environment['PATH']}",
                     "RUNNER_TEMP": str(temporary),
                     "FRONTEND_EDGE_CONTRACT_PATH": str(edge_contract_path),
+                    "REAL_PYTHON": sys.executable,
                 }
             )
             completed = subprocess.run(
@@ -337,9 +402,12 @@ fi
             self.assertEqual(
                 json.loads(completed.stdout),
                 {
-                    "filteredStackCount": 1,
+                    "excludedResourceCount": 1,
+                    "filteredStackCount": 2,
+                    "guardDutyPostureCheckCount": 2,
                     "metadataPostureCheckCount": 1,
                     "frontendEdgeCheckCount": 1,
+                    "securityHubPostureCheckCount": 2,
                     "stackCount": 9,
                     "status": "IN_SYNC",
                 },
@@ -350,12 +418,69 @@ fi
             ]
             self.assertEqual(len(detections), 9)
             filtered = [call for call in detections if "--logical-resource-ids" in call]
-            self.assertEqual(len(filtered), 1)
-            self.assertIn("CanaryArtifactBucket", filtered[0])
-            self.assertNotIn("RumAppMonitor", filtered[0])
+            self.assertEqual(len(filtered), 2)
+            observability_filter = next(
+                call for call in filtered if "CanaryArtifactBucket" in call
+            )
+            managed_filter = next(call for call in filtered if "ConfigRecorder" in call)
+            self.assertNotIn("RumAppMonitor", observability_filter)
+            self.assertNotIn("GuardDutyDetector", managed_filter)
+            self.assertIn("SecurityHub", managed_filter)
             self.assertEqual(
                 sum(call.startswith("rum get-app-monitor") for call in calls), 1
             )
+
+    def test_multi_stack_drift_inventory_rejects_unreviewed_exclusions(self):
+        source = json.loads((OPS / "ci" / "audit_stacks.json").read_text())
+        mutations = []
+        legacy = json.loads(json.dumps(source))
+        legacy["version"] = 1
+        mutations.append(legacy)
+        extra = json.loads(json.dumps(source))
+        extra["stacks"][0]["excludedLogicalResourceIds"] = ["UnexpectedResource"]
+        mutations.append(extra)
+        mismatch = json.loads(json.dumps(source))
+        mismatch["regionalSecurityPosture"]["cloudFormationExclusion"][
+            "logicalResourceId"
+        ] = "SecurityHub"
+        mutations.append(mismatch)
+        empty = json.loads(json.dumps(source))
+        managed = next(
+            item
+            for item in empty["stacks"]
+            if item["name"] == "ian-photography-security-managed"
+        )
+        managed["excludedLogicalResourceIds"] = []
+        mutations.append(empty)
+        unexpected_key = json.loads(json.dumps(source))
+        unexpected_key["regionalSecurityPosture"]["bypass"] = True
+        mutations.append(unexpected_key)
+
+        for inventory in mutations:
+            with self.subTest(
+                inventory=inventory["version"]
+            ), tempfile.TemporaryDirectory() as directory:
+                temporary = pathlib.Path(directory)
+                inventory_path = temporary / "audit.json"
+                inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "AUDIT_STACKS_PATH": str(inventory_path),
+                        "RUNNER_TEMP": str(temporary),
+                    }
+                )
+                completed = subprocess.run(
+                    ["bash", "ops/ci/audit_stack_drift.sh"],
+                    cwd=ROOT,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 2)
+                self.assertEqual(completed.stdout, "")
+                self.assertEqual(completed.stderr, "Drift inventory is invalid.\n")
 
     def test_release_bucket_and_key_are_private_encrypted_versioned_lifecycle_managed_and_retained(self):
         key = resource_block("ReleaseArtifactKey")

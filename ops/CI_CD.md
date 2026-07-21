@@ -72,7 +72,9 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   posture smoke, and detects drift for the versioned application, CI bootstrap,
   security, WAF, backup, and observability stack inventory in `us-west-2`,
   `us-east-1`, and `us-east-2`, plus exact secret-redacted frontend edge and
-  bucket posture. It never remediates drift.
+  bucket posture. It also inventories GuardDuty, Security Hub, the home
+  standards/aggregator, and protected two-resource satellite stacks in every
+  enabled Region. It never remediates drift.
 
 ## Required GitHub settings
 
@@ -181,6 +183,21 @@ filter. The audit instead uses resource-scoped `rum:GetAppMonitor`—never
 sensitive-route exclusion configuration. Tests require the filter to equal all
 observability template resources except that one documented exception, so a new
 resource cannot silently escape review.
+
+The GuardDuty CloudFormation provider reports the six service-managed detector
+features as additions even though CloudFormation can configure only the other
+six features. `GuardDutyDetector` is therefore the one reviewed exclusion from
+the managed-security stack's provider drift request. The scheduled audit does
+not ignore the detector: `regional_security_posture.py` inventories every
+enabled Region and requires exactly one enabled detector, the exact combined
+12-feature map, 15-minute publishing, and exact application/stage tags. It also
+requires one exact Security Hub per Region, two `READY` standards only in the
+home Region, zero satellite standards, one `ALL_REGIONS` aggregator, and every
+satellite stack to be stable, termination-protected, parameter-exact, and to
+own exactly its detector and hub. Output contains aggregate counts only. The
+audit role's read permissions are bounded to the currently reviewed enabled
+Region list; enabling another Region makes the audit fail closed until both
+the regional rollout and IAM allowlist are reviewed.
 
 The CloudFormation resources are the exact entries in
 `ops/ci/audit_stacks.json`; cross-region entries are the CloudFront WAF stack in

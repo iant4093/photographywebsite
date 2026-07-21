@@ -29,6 +29,10 @@ are **dry-run by default** and require multiple exact production guards to apply
 - `regional_security_rollout.py` inventories GuardDuty and Security Hub in
   every enabled Region and, only with exact account/Region/digest guards,
   prepares non-executing CloudFormation change sets for owner review.
+- `ci/regional_security_posture.py` is the aggregate-only scheduled counterpart:
+  it verifies the exact GuardDuty/Security Hub contract and protected
+  two-resource satellite stack ownership in every enabled Region without
+  printing provider identifiers or mutating the account.
 - `security_budget_template.yaml`, `security_budget_preflight.py`, and
   [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md) define a retained, alert-only
   account budget. No budget is created until an owner approves the amount and
