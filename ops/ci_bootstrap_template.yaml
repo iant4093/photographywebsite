@@ -48,28 +48,6 @@ Parameters:
     MinValue: 90
     MaxValue: 3650
 
-Mappings:
-  AuditRegionContract:
-    Enabled:
-      Regions:
-        - ap-northeast-1
-        - ap-northeast-2
-        - ap-northeast-3
-        - ap-south-1
-        - ap-southeast-1
-        - ap-southeast-2
-        - ca-central-1
-        - eu-central-1
-        - eu-north-1
-        - eu-west-1
-        - eu-west-2
-        - eu-west-3
-        - sa-east-1
-        - us-east-1
-        - us-east-2
-        - us-west-1
-        - us-west-2
-
 Rules:
   MustDeployInApplicationRegion:
     Assertions:
@@ -505,14 +483,7 @@ Resources:
                       - us-west-2
                       - us-east-1
                       - us-east-2
-              - Sid: InventoryEnabledRegions
-                Effect: Allow
-                Action: ec2:DescribeRegions
-                Resource: '*'
-                Condition:
-                  StringEquals:
-                    aws:RequestedRegion: us-west-2
-              - Sid: ReadRegionalGuardDutyPosture
+              - Sid: ReadHomeGuardDutyPosture
                 Effect: Allow
                 Action:
                   - guardduty:GetDetector
@@ -520,28 +491,17 @@ Resources:
                 Resource: '*'
                 Condition:
                   StringEquals:
-                    aws:RequestedRegion: !FindInMap [AuditRegionContract, Enabled, Regions]
-              - Sid: ReadRegionalSecurityHubPosture
+                    aws:RequestedRegion: us-west-2
+              - Sid: ReadHomeSecurityHubPosture
                 Effect: Allow
                 Action:
                   - securityhub:DescribeHub
                   - securityhub:GetEnabledStandards
-                  - securityhub:GetFindingAggregator
-                  - securityhub:ListFindingAggregators
                   - securityhub:ListTagsForResource
                 Resource: '*'
                 Condition:
                   StringEquals:
-                    aws:RequestedRegion: !FindInMap [AuditRegionContract, Enabled, Regions]
-              - Sid: ReadRegionalSecurityStackGovernance
-                Effect: Allow
-                Action:
-                  - cloudformation:DescribeStacks
-                  - cloudformation:ListStackResources
-                Resource: !Sub 'arn:${AWS::Partition}:cloudformation:*:${AWS::AccountId}:stack/ian-photography-security-regional/*'
-                Condition:
-                  StringEquals:
-                    aws:RequestedRegion: !FindInMap [AuditRegionContract, Enabled, Regions]
+                    aws:RequestedRegion: us-west-2
               - Sid: ReadExactFrontendDistributionPosture
                 Effect: Allow
                 Action: cloudfront:GetDistribution
@@ -587,8 +547,6 @@ Resources:
                   - events:DescribeRule
                   - events:ListTagsForResource
                   - events:ListTargetsByRule
-                  - guardduty:GetDetector
-                  - guardduty:ListTagsForResource
                   - iam:GetPolicy
                   - iam:GetPolicyVersion
                   - iam:GetRole

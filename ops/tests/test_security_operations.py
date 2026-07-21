@@ -189,8 +189,8 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("ArnEquals:\n                aws:SourceArn:", NOTIFICATIONS)
 
     def test_singletons_require_explicit_confirmed_absent_modes(self) -> None:
-        self.assertEqual(MANAGED.count("Default: skip"), 6)
-        self.assertEqual(MANAGED.count("create-confirmed-absent"), 11)
+        self.assertEqual(MANAGED.count("Default: skip"), 5)
+        self.assertEqual(MANAGED.count("create-confirmed-absent"), 8)
         self.assertIn("Features:", MANAGED)
         self.assertIn("Name: S3_DATA_EVENTS", MANAGED)
         self.assertIn("Name: RUNTIME_MONITORING", MANAGED)
@@ -204,26 +204,18 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("DependsOn: ConfigDeliveryChannel", recorder)
         self.assertIn("ResourceTypes:", MANAGED)
 
-    def test_regional_detection_and_aggregation_are_exactly_guarded(self) -> None:
+    def test_home_region_detection_is_exactly_guarded(self) -> None:
         self.assertIn("ExpectedAccountId:", MANAGED)
         self.assertIn("ExpectedRegion:", MANAGED)
         scope = MANAGED.split("  ExactDeploymentScope:", 1)[1].split(
-            "  FindingAggregatorRequiresConfirmedHomeHub:", 1
+            "Conditions:", 1
         )[0]
         self.assertIn("!Ref ExpectedAccountId, !Ref AWS::AccountId", scope)
         self.assertIn("!Ref ExpectedRegion, !Ref AWS::Region", scope)
-        aggregator_rule = MANAGED.split(
-            "  FindingAggregatorRequiresConfirmedHomeHub:", 1
-        )[1].split("Conditions:", 1)[0]
-        self.assertIn("!Ref AWS::Region, !Ref SecurityHubHomeRegion", aggregator_rule)
-        self.assertIn("confirmed-enabled", aggregator_rule)
-        aggregator = resource_block(MANAGED, "SecurityHubFindingAggregator")
-        self.assertIn("Type: AWS::SecurityHub::FindingAggregator", aggregator)
-        self.assertIn("Condition: CreateSecurityHubAggregator", aggregator)
-        self.assertIn("DeletionPolicy: RetainExceptOnCreate", aggregator)
-        self.assertIn("UpdateReplacePolicy: Retain", aggregator)
-        self.assertIn("RegionLinkingMode: ALL_REGIONS", aggregator)
-        self.assertNotIn("Regions:", aggregator)
+        self.assertNotIn("SecurityHubFindingAggregator", MANAGED)
+        self.assertNotIn("AWS::SecurityHub::FindingAggregator", MANAGED)
+        self.assertNotIn("SecurityHubAggregationMode", MANAGED)
+        self.assertNotIn("SecurityHubHomeRegion", MANAGED)
         hub = resource_block(MANAGED, "SecurityHub")
         self.assertIn(
             "EnableDefaultStandards: !If [CreateConfig, true, false]", hub

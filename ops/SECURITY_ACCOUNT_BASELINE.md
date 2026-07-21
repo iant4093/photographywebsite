@@ -17,7 +17,7 @@ reviewed change set.
 | Audit foundation | `security_audit_foundation_template.yaml` | One home-region stack. The Object-Locked CloudTrail evidence bucket, bucket policy, log group, role, and multi-region trail are retained together. After Config is healthy, an opt-in parameter adds exact-bucket Config delivery object events. |
 | Notifications | `security_notifications_template.yaml` | Regional encrypted SNS/KMS routing, encrypted SQS DLQ, metrics, and alarms. It creates no subscriber. |
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
-| Regional detection rollout | `regional_security_rollout.py` | Read-only-by-default inventory of every enabled Region. An explicitly guarded mode prepares non-executing per-Region CloudFormation change sets; it never executes, disables, or adopts a singleton. |
+| Home detection posture | `ci/home_security_posture.py` | Aggregate-only, read-only verification of the exact home-Region GuardDuty and Security Hub contract. It fails closed and never prints provider identifiers, tags, findings, or Region names. |
 | Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained CMK-encrypted vault. Creation and Vault Lock default off. |
 | Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One retained, alert-only account budget. Creation defaults off and requires an owner-approved amount plus two distinct confirmed human destinations. |
 | Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Complete source signal inventory, privacy contract, runbook routing, response ownership, and quarterly delivery-test state. |
@@ -26,12 +26,10 @@ reviewed change set.
 
 Use `us-west-2` as the initial home region. The foundation trail already records
 multi-region and global management events, so do not deploy another foundation
-copy elsewhere. Config delivery is home-region-only in this design. GuardDuty
-and Security Hub are regional, so the regional rollout uses the same managed-
-services template in each enabled Region while leaving Config and Access
-Analyzer at `skip`. The home stack alone may own the account's all-Regions
-Security Hub finding aggregator. Approve corresponding regional notification
-routing and cost separately.
+copy elsewhere. Config delivery, the managed GuardDuty detector, Security Hub,
+Access Analyzer, and their notification routing are home-region-only in this
+design. This repository does not claim GuardDuty or Security Hub coverage in
+other Regions and does not deploy or manage a Security Hub finding aggregator.
 
 ## Validate before an AWS decision
 
@@ -46,7 +44,7 @@ The focused checks are:
 ```bash
 python3 -m unittest \
   ops.tests.test_config_delivery_orchestrator \
-  ops.tests.test_regional_security_rollout \
+  ops.tests.test_home_security_posture \
   ops.tests.test_security_operations \
   -v
 cfn-lint \
@@ -113,8 +111,10 @@ current owner:
   administrator ownership before changing features.
 - Existing hub: `SecurityHubDeploymentMode=skip` only after the home hub has
   exactly the reviewed Foundational Security Best Practices and CIS 1.2.0
-  default standards in `READY`, while every satellite hub has zero enabled
-  standards. Also check central configuration and delegated administration.
+  default standards. Each standard must be `READY`, or provider-reconciling
+  `PENDING` while controls remain `READY_FOR_UPDATES` and no status reason is
+  present. Also check central configuration and delegated administration before
+  changing its configuration.
 - Existing account analyzer: `AccessAnalyzerDeploymentMode=skip`; preserve its
   archive rules.
 - Existing named trail, log group, topic, KMS alias, queue, rule, alarm, vault,
@@ -132,77 +132,40 @@ Every managed-services stack operation must now pass `ExpectedAccountId` and
 deployment. Never use a guessed value or reuse a regional parameter file in a
 different Region.
 
-### Regional GuardDuty and Security Hub inventory
+### Home-Region GuardDuty and Security Hub posture
 
-Run the all-Region helper without a mutation flag first:
-
-```bash
-python3 ops/regional_security_rollout.py \
-  --home-region us-west-2 \
-  --stage prod
-```
-
-The helper obtains the enabled Region set from the account, then inventories
-the regional GuardDuty detector and Security Hub singleton in every one. An
-API error, malformed response, duplicate singleton, disabled or under-protected
-detector, disabled home Region, drifted Security Hub standards, or finding
-aggregator with a different home/linking mode fails closed. The home hub must
-have exactly the two reviewed default standards in `READY`; satellite hubs must
-have none because their stacks do not create regional Config recorders. Healthy
-existing detectors and hubs are reported as covered and left externally managed; the
-helper never changes their plans, standards, organization ownership, or
-delegated-administrator configuration. Output contains Region names and
-aggregate state, not detector IDs, hub ARNs, aggregator ARNs, findings, or
-resource content.
-
-The SHA-256 `planDigest` binds the active account, complete enabled-Region set,
-home Region, stack names, every planned action, and the exact template SHA-256.
-The helper checks the template digest again before preparation. After recording
-cost and owner approval, rerun against a fresh inventory with all guards copied
-from the reviewed plan:
+Run the read-only home posture verifier:
 
 ```bash
-python3 ops/regional_security_rollout.py \
-  --home-region us-west-2 \
-  --stage prod \
-  --prepare-change-sets \
-  --expected-account-id EXPECTED_12_DIGIT_ACCOUNT \
-  --expected-home-region us-west-2 \
-  --expected-enabled-region-count EXPECTED_EXACT_COUNT \
-  --expected-plan-digest EXPECTED_64_CHARACTER_SHA256 \
-  --confirm prepare-regional-security-change-sets
+python3 ops/ci/home_security_posture.py --region us-west-2
 ```
 
-This mode prepares review artifacts only. It updates the exact existing
-`ian-photography-security-managed` home stack when necessary and proposes a
-same-named `ian-photography-security-regional` stack in each non-home Region
-that has an absent service. A pre-existing regional stack blocks the entire
-preparation pass before any change set is created; investigate ownership
-rather than updating or importing it automatically. The home stack must exist,
-have the exact stage, and be in a stable state. The helper never calls
-`ExecuteChangeSet`. An existing all-Regions aggregator plus another required
-home-stack service change also blocks automatic preparation so an operator can
-first prove whether the aggregator is owned by that stack or externally.
+The verifier accepts only a syntactically valid Region and then requires exactly
+one enabled GuardDuty detector with 15-minute publishing, the complete reviewed
+12-feature map, and the required application/stage tags. Additional AWS- or
+CloudFormation-managed tags are allowed, but missing or changed required tags,
+unknown features, duplicate features, or any feature-state difference fail
+closed.
 
-Review every change set separately. Require no replacement or deletion of any
-existing resource, exact account/Region parameters, Config/Access Analyzer and
-global recording at `skip` outside the home Region, and creation only for a
-freshly proven-absent detector or hub. Execute approved change sets through the
-normal guarded CloudFormation process, wait for completion, enable termination
-protection on every newly created regional stack, and verify aggregate status
-without printing finding content. If preparation partially succeeds because a
-later API call fails, delete only the unexecuted change sets after reviewing
-their exact names; do not delete a security service or stable stack.
+It also requires the home Security Hub default hub, the `SECURITY_CONTROL`
+finding generator, the required application/stage tags, and exactly the reviewed
+Foundational Security Best Practices and CIS 1.2.0 standards. `READY` is the
+steady state. AWS also uses `PENDING` while it adds controls to an already
+enabled standard; that state is accepted only when controls remain
+`READY_FOR_UPDATES` and no status reason exists. A missing hub, extra or missing
+standard, non-updatable transition, failure reason, malformed provider response,
+access failure, or timeout returns exit status `2`. Errors are generic, and a
+successful report contains only detector, hub, standard, and provider-transition
+counts plus `IN_SYNC`; it never exposes detector IDs, ARNs, account identity,
+tags, findings, or provider responses.
 
-Security Hub cross-Region aggregation does not enable Security Hub in linked
-Regions. For that reason, this rollout enables both services where absent. The
-home finding aggregator is staged only when the home hub already exists and
-inventory proves the account aggregator absent. If the home hub is absent, the
-plan reports `defer-until-home-hub-enabled`; complete the hub rollout, rerun the
-full inventory, and prepare a second home-stack update. `ALL_REGIONS` includes
-new Security Hub-supported Regions automatically after the account opts into
-them, but Security Hub itself is still not auto-enabled there, so rerun this
-helper whenever the enabled Region set changes.
+This verifier performs no mutation and does not inventory or claim protection
+outside the home Region. Create or update the managed-services stack only through
+a separately reviewed CloudFormation change set with the exact account and home-
+Region parameters. Require no unexplained replacement or deletion, enable stack
+termination protection, and rerun the home posture check after the stack reaches
+a stable state. Do not infer GuardDuty or Security Hub cross-Region coverage
+from the multi-region CloudTrail foundation.
 
 ## Staged rollout
 
@@ -412,15 +375,16 @@ but leaves management-event coverage intact.
 GuardDuty's complete reported feature inventory is explicit. CloudFormation
 configures six protection plans: S3 data events and Lambda network logs are
 enabled; EKS audit logs, EBS malware protection, RDS login events, and runtime
-monitoring are disabled. The regional verifier additionally requires the
+monitoring are disabled. The home posture verifier additionally requires the
 service-managed CloudTrail, DNS, and flow-log sources to be enabled and AI
 analyst, AI protection, and legacy EKS runtime monitoring to be disabled.
 Enable other protection plans only with a documented threat model,
 supported-resource inventory, and cost approval. Confirm
 Security Hub standards and organization ownership before creating the hub. The
-shared template enables its two default standards only when the same stack
-creates the home Config recorder; satellite hub-only stacks explicitly disable
-default-standard enrollment.
+home posture verifier requires both reviewed standards to be fully updatable
+and free of a failure reason; the steady state is `READY`, while AWS control
+expansion may temporarily report `PENDING`. The managed-services template
+enables them when the same home stack creates the Config recorder.
 The Config layer also checks public S3 writes, default S3 encryption, public
 Lambda function access, and customer-managed KMS key rotation. These rules use
 only resource types already recorded by the exact home-region recorder. The
@@ -557,8 +521,6 @@ AWS behavior references:
 - [CloudTrail S3 bucket policy](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/create-s3-bucket-policy-for-cloudtrail.html)
 - [AWS Config delivery channel](https://docs.aws.amazon.com/config/latest/developerguide/manage-delivery-channel.html)
 - [GuardDuty Regions](https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_regions.html)
-- [Security Hub cross-Region aggregation](https://docs.aws.amazon.com/securityhub/latest/userguide/security-hub-region-aggregation.html)
-- [CloudFormation finding aggregator](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-securityhub-findingaggregator.html)
 - [EventBridge resource policies](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-use-resource-based.html)
 - [SNS encrypted-topic key management](https://docs.aws.amazon.com/sns/latest/dg/sns-key-management.html)
 - [CloudFormation RetainExceptOnCreate](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-attribute-deletionpolicy.html)

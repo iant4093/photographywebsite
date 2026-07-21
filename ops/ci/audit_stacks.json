@@ -1,8 +1,7 @@
 {
-  "version": 3,
-  "regionalSecurityPosture": {
+  "version": 4,
+  "homeSecurityPosture": {
     "homeRegion": "us-west-2",
-    "satelliteStackName": "ian-photography-security-regional",
     "cloudFormationExclusion": {
       "region": "us-west-2",
       "stackName": "ian-photography-security-managed",

@@ -4,8 +4,8 @@ set -euo pipefail
 inventory="${AUDIT_STACKS_PATH:-ops/ci/audit_stacks.json}"
 [[ -f "$inventory" ]] || { echo 'Drift inventory is missing.' >&2; exit 2; }
 jq -e '
-  .version == 3
-  and ((keys | sort) == ["regionalSecurityPosture", "stacks", "version"])
+  .version == 4
+  and ((keys | sort) == ["homeSecurityPosture", "stacks", "version"])
   and (.stacks | type == "array" and length > 0)
   and all(.stacks[];
     ((keys | sort) == ["name", "region"]
@@ -24,16 +24,14 @@ jq -e '
     and (((.excludedLogicalResourceIds // []) | unique | length)
       == ((.excludedLogicalResourceIds // []) | length)))
   and ((.stacks | map([.region, .name] | join(":")) | unique | length) == (.stacks | length))
-  and ((.regionalSecurityPosture | keys | sort)
-    == ["cloudFormationExclusion", "homeRegion", "satelliteStackName"])
-  and (.regionalSecurityPosture.homeRegion
+  and ((.homeSecurityPosture | keys | sort)
+    == ["cloudFormationExclusion", "homeRegion"])
+  and (.homeSecurityPosture.homeRegion
     | test("^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"))
-  and (.regionalSecurityPosture.satelliteStackName
-    | test("^[A-Za-z][A-Za-z0-9-]{0,127}$"))
-  and ((.regionalSecurityPosture.cloudFormationExclusion | keys | sort)
+  and ((.homeSecurityPosture.cloudFormationExclusion | keys | sort)
     == ["logicalResourceId", "region", "stackName", "unsupportedLogicalResourceIds"])
-  and (.regionalSecurityPosture.cloudFormationExclusion as $excluded |
-    $excluded.region == .regionalSecurityPosture.homeRegion
+  and (.homeSecurityPosture.cloudFormationExclusion as $excluded |
+    $excluded.region == .homeSecurityPosture.homeRegion
     and ($excluded.stackName | test("^[A-Za-z][A-Za-z0-9-]{0,127}$"))
     and ($excluded.logicalResourceId | test("^[A-Za-z][A-Za-z0-9]{0,254}$"))
     and ($excluded.unsupportedLogicalResourceIds | type == "array" and length == 3)
@@ -58,7 +56,7 @@ filtered_stacks=0
 resource_drift_checks=0
 stack_count=0
 direct_posture_resources=1
-unsupported_resources="$(jq '.regionalSecurityPosture.cloudFormationExclusion.unsupportedLogicalResourceIds | length' "$inventory")"
+unsupported_resources="$(jq '.homeSecurityPosture.cloudFormationExclusion.unsupportedLogicalResourceIds | length' "$inventory")"
 excluded_resources=$((direct_posture_resources + unsupported_resources))
 while IFS='|' read -r region stack_name logical_ids_csv excluded_ids_csv; do
   stack_count=$((stack_count + 1))
@@ -169,30 +167,26 @@ done < <(jq -r '.stacks[] | [
   ((.excludedLogicalResourceIds // []) | join(","))
 ] | join("|")' "$inventory")
 
-security_home_region="$(jq -r '.regionalSecurityPosture.homeRegion' "$inventory")"
-security_posture_path="$workspace/regional-security.json"
-python3 ops/ci/regional_security_posture.py \
-  --home-region "$security_home_region" \
-  --satellite-stack-name "$(jq -r '.regionalSecurityPosture.satelliteStackName' "$inventory")" \
-  > "$security_posture_path" || {
-  echo 'Regional security posture audit did not complete.' >&2
+home_security_path="$workspace/home-security.json"
+python3 ops/ci/home_security_posture.py \
+  --region "$(jq -r '.homeSecurityPosture.homeRegion' "$inventory")" \
+  > "$home_security_path" || {
+  echo 'Home security posture audit did not complete.' >&2
   exit 2
 }
 jq -e '
-  .enabledRegionCount > 0
-  and .detectorCount == .enabledRegionCount
-  and .securityHubCount == .enabledRegionCount
-  and .findingAggregatorCount == 1
-  and .homeStandardCount == 2
-  and .satelliteStandardCount == 0
-  and .satelliteStackCount == (.enabledRegionCount - 1)
+  .detectorCount == 1
+  and (.providerTransitionCount | type == "number" and . >= 0 and . <= 2)
+  and .securityHubCount == 1
+  and .standardCount == 2
   and .status == "IN_SYNC"
-' "$security_posture_path" >/dev/null || {
-  echo 'Regional security posture audit returned an invalid report.' >&2
+' "$home_security_path" >/dev/null || {
+  echo 'Home security posture audit returned an invalid report.' >&2
   exit 2
 }
-guardduty_checks="$(jq -r '.detectorCount' "$security_posture_path")"
-security_hub_checks="$(jq -r '.securityHubCount' "$security_posture_path")"
+guardduty_checks="$(jq -r '.detectorCount' "$home_security_path")"
+security_hub_checks="$(jq -r '.securityHubCount' "$home_security_path")"
+security_hub_transitions="$(jq -r '.providerTransitionCount' "$home_security_path")"
 
 ./ops/ci/audit_frontend_edge.sh > "$workspace/frontend-edge.json"
 jq -e '.status == "IN_SYNC" and .metadataDocumentCount == 6' \
@@ -215,5 +209,5 @@ done < "$detections"
   exit 2
 }
 
-printf '{"directPostureResourceCount":%d,"excludedResourceCount":%d,"filteredStackCount":%d,"frontendEdgeCheckCount":1,"guardDutyPostureCheckCount":%d,"metadataPostureCheckCount":1,"resourceDriftCheckCount":%d,"securityHubPostureCheckCount":%d,"stackCount":%d,"status":"IN_SYNC","unsupportedResourceCount":%d}\n' \
-  "$direct_posture_resources" "$excluded_resources" "$filtered_stacks" "$guardduty_checks" "$resource_drift_checks" "$security_hub_checks" "$stack_count" "$unsupported_resources"
+printf '{"directPostureResourceCount":%d,"excludedResourceCount":%d,"filteredStackCount":%d,"frontendEdgeCheckCount":1,"guardDutyPostureCheckCount":%d,"metadataPostureCheckCount":1,"resourceDriftCheckCount":%d,"securityHubPostureCheckCount":%d,"securityHubProviderTransitionCount":%d,"stackCount":%d,"status":"IN_SYNC","unsupportedResourceCount":%d}\n' \
+  "$direct_posture_resources" "$excluded_resources" "$filtered_stacks" "$guardduty_checks" "$resource_drift_checks" "$security_hub_checks" "$security_hub_transitions" "$stack_count" "$unsupported_resources"

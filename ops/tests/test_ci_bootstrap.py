@@ -155,17 +155,14 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("s3:GetBucketPolicyStatus", bucket)
         self.assertIn("s3:GetEncryptionConfiguration", bucket)
 
-    def test_audit_role_drift_scope_matches_exact_versioned_multi_region_inventory(self):
+    def test_audit_role_drift_scope_matches_exact_versioned_home_inventory(self):
         audit = resource_block("AuditRole")
         inventory = json.loads((OPS / "ci" / "audit_stacks.json").read_text(encoding="utf-8"))
-        self.assertEqual(inventory["version"], 3)
-        regional = inventory["regionalSecurityPosture"]
-        self.assertEqual(regional["homeRegion"], "us-west-2")
+        self.assertEqual(inventory["version"], 4)
+        home_security = inventory["homeSecurityPosture"]
+        self.assertEqual(home_security["homeRegion"], "us-west-2")
         self.assertEqual(
-            regional["satelliteStackName"], "ian-photography-security-regional"
-        )
-        self.assertEqual(
-            regional["cloudFormationExclusion"],
+            home_security["cloudFormationExclusion"],
             {
                 "region": "us-west-2",
                 "stackName": "ian-photography-security-managed",
@@ -219,38 +216,23 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("- us-east-2", poll)
         detect = statement_block(audit, "DetectExactStackDrift")
         self.assertIn("cloudformation:ListStackResources", detect)
-        self.assertIn("ec2:DescribeRegions", statement_block(audit, "InventoryEnabledRegions"))
-        guardduty = statement_block(audit, "ReadRegionalGuardDutyPosture")
+        self.assertNotIn("ec2:DescribeRegions", audit)
+        guardduty = statement_block(audit, "ReadHomeGuardDutyPosture")
         self.assertIn("guardduty:ListDetectors", guardduty)
         self.assertIn("guardduty:GetDetector", guardduty)
-        self.assertIn("aws:RequestedRegion:", guardduty)
-        security_hub = statement_block(audit, "ReadRegionalSecurityHubPosture")
+        self.assertIn("aws:RequestedRegion: us-west-2", guardduty)
+        security_hub = statement_block(audit, "ReadHomeSecurityHubPosture")
         for action in (
             "securityhub:DescribeHub",
             "securityhub:GetEnabledStandards",
-            "securityhub:GetFindingAggregator",
-            "securityhub:ListFindingAggregators",
             "securityhub:ListTagsForResource",
         ):
             self.assertIn(action, security_hub)
-        governance = statement_block(audit, "ReadRegionalSecurityStackGovernance")
-        self.assertIn("cloudformation:DescribeStacks", governance)
-        self.assertIn("cloudformation:ListStackResources", governance)
-        self.assertIn("cloudformation:*:${AWS::AccountId}:stack/ian-photography-security-regional/*", governance)
-        self.assertIn("aws:RequestedRegion:", governance)
-        expected_enabled_regions = {
-            "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-south-1",
-            "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1",
-            "eu-north-1", "eu-west-1", "eu-west-2", "eu-west-3", "sa-east-1",
-            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-        }
-        mapping = TEMPLATE.split("\nMappings:\n", 1)[1].split("\nRules:\n", 1)[0]
-        for region in expected_enabled_regions:
-            self.assertIn(f"- {region}", mapping)
-        for block in (guardduty, security_hub, governance):
-            self.assertIn(
-                "!FindInMap [AuditRegionContract, Enabled, Regions]", block
-            )
+        self.assertIn("aws:RequestedRegion: us-west-2", security_hub)
+        self.assertNotIn("securityhub:GetFindingAggregator", audit)
+        self.assertNotIn("securityhub:ListFindingAggregators", audit)
+        self.assertNotIn("AuditRegionContract", TEMPLATE)
+        self.assertNotIn("ian-photography-security-regional", audit)
 
         observability = next(
             item
@@ -267,7 +249,8 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("detect-stack-resource-drift", drift_script)
         self.assertNotIn("--logical-resource-ids", drift_script)
         self.assertIn('.Status == "IN_SYNC"', drift_script)
-        self.assertIn("regional_security_posture.py", drift_script)
+        self.assertIn("home_security_posture.py", drift_script)
+        self.assertNotIn("regional_security_posture.py", drift_script)
         self.assertNotIn("mapfile", drift_script)
         self.assertNotIn("rum get-app-monitor", drift_script)
 
@@ -383,8 +366,8 @@ fi
             fake_python.write_text(
                 """#!/usr/bin/env bash
 set -euo pipefail
-if [[ "$1" == "ops/ci/regional_security_posture.py" ]]; then
-  printf '%s\\n' '{"detectorCount":2,"enabledRegionCount":2,"findingAggregatorCount":1,"homeStandardCount":2,"satelliteStandardCount":0,"satelliteStackCount":1,"securityHubCount":2,"status":"IN_SYNC"}'
+if [[ "$1" == "ops/ci/home_security_posture.py" ]]; then
+  printf '%s\\n' '{"detectorCount":1,"providerTransitionCount":0,"securityHubCount":1,"standardCount":2,"status":"IN_SYNC"}'
 else
   exec "$REAL_PYTHON" "$@"
 fi
@@ -417,11 +400,12 @@ fi
                     "directPostureResourceCount": 1,
                     "excludedResourceCount": 4,
                     "filteredStackCount": 1,
-                    "guardDutyPostureCheckCount": 2,
+                    "guardDutyPostureCheckCount": 1,
                     "metadataPostureCheckCount": 1,
                     "resourceDriftCheckCount": 2,
                     "frontendEdgeCheckCount": 1,
-                    "securityHubPostureCheckCount": 2,
+                    "securityHubPostureCheckCount": 1,
+                    "securityHubProviderTransitionCount": 0,
                     "stackCount": 9,
                     "status": "IN_SYNC",
                     "unsupportedResourceCount": 3,
@@ -451,13 +435,13 @@ fi
         source = json.loads((OPS / "ci" / "audit_stacks.json").read_text())
         mutations = []
         legacy = json.loads(json.dumps(source))
-        legacy["version"] = 2
+        legacy["version"] = 3
         mutations.append(legacy)
         extra = json.loads(json.dumps(source))
         extra["stacks"][0]["excludedLogicalResourceIds"] = ["UnexpectedResource"]
         mutations.append(extra)
         mismatch = json.loads(json.dumps(source))
-        mismatch["regionalSecurityPosture"]["cloudFormationExclusion"][
+        mismatch["homeSecurityPosture"]["cloudFormationExclusion"][
             "logicalResourceId"
         ] = "SecurityHub"
         mutations.append(mismatch)
@@ -470,10 +454,10 @@ fi
         managed["excludedLogicalResourceIds"] = []
         mutations.append(empty)
         unexpected_key = json.loads(json.dumps(source))
-        unexpected_key["regionalSecurityPosture"]["bypass"] = True
+        unexpected_key["homeSecurityPosture"]["bypass"] = True
         mutations.append(unexpected_key)
         unsupported = json.loads(json.dumps(source))
-        unsupported["regionalSecurityPosture"]["cloudFormationExclusion"][
+        unsupported["homeSecurityPosture"]["cloudFormationExclusion"][
             "unsupportedLogicalResourceIds"
         ].append("UnexpectedResource")
         mutations.append(unsupported)

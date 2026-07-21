@@ -26,13 +26,13 @@ are **dry-run by default** and require multiple exact production guards to apply
   restore gate, and retained audit dependency chain are documented in
   [`SECURITY_ACCOUNT_BASELINE.md`](SECURITY_ACCOUNT_BASELINE.md). The unsafe
   all-in-one security template was removed.
-- `regional_security_rollout.py` inventories GuardDuty and Security Hub in
-  every enabled Region and, only with exact account/Region/digest guards,
-  prepares non-executing CloudFormation change sets for owner review.
-- `ci/regional_security_posture.py` is the aggregate-only scheduled counterpart:
-  it verifies the exact GuardDuty/Security Hub contract and protected
-  two-resource satellite stack ownership in every enabled Region without
-  printing provider identifiers or mutating the account.
+- `ci/home_security_posture.py` is the aggregate-only, read-only scheduled
+  verifier for the home Region. It fails closed unless exactly one GuardDuty
+  detector and one Security Hub hub match the reviewed feature, frequency,
+  tag, control-generator, and two-standard contract. A provider `PENDING`
+  transition is accepted only while both standards remain fully updatable and
+  have no failure reason. It never prints
+  provider identifiers, tags, Region names, or findings.
 - `security_budget_template.yaml`, `security_budget_preflight.py`, and
   [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md) define a retained, alert-only
   account budget. No budget is created until an owner approves the amount and
@@ -539,7 +539,7 @@ traffic, privacy, and cost after 30 days.
 - Guarded CloudTrail, Config, GuardDuty, Security Hub, Access Analyzer, Inspector,
   and AWS Backup rollouts are source controlled separately from the application
   stack. They are paid operational decisions, not proof of live enablement. Use
-  the complete singleton/Region inventory and reviewed change sets in
+  the home-Region singleton inventory and reviewed change sets in
   `SECURITY_ACCOUNT_BASELINE.md`; centralized multi-account archival remains a
   future organization-level decision.
 - CloudFront standard logs, CloudWatch logs/metrics/alarms, Secrets Manager,

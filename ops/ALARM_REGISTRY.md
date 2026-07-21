@@ -72,10 +72,15 @@ delivery message merely to make the dashboard green.
 
 ## Security service change
 
-Check recorder/delivery status, detector features in every intended Region,
-Security Hub aggregation/standards, Inspector Lambda coverage, and Access
-Analyzer state. Restore only through the owning template or guarded regional
-orchestrator, then record why the service changed.
+Check home-Region recorder/delivery status, the exact detector feature map and
+publishing frequency, both Security Hub standards, Inspector Lambda coverage,
+and Access Analyzer state. Restore only through the owning templates, rerun the
+fail-closed home posture audit, and record why the service changed.
+
+The configuration-change metric intentionally continues to flag creation,
+update, or deletion of a Security Hub finding aggregator as unauthorized
+security-topology activity. This repository does not manage an aggregator;
+investigate that signal rather than treating it as expected drift.
 
 ## Data protection change
 

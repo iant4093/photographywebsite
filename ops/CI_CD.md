@@ -75,9 +75,11 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   posture smoke, and detects drift for the versioned application, CI bootstrap,
   security, WAF, backup, and observability stack inventory in `us-west-2`,
   `us-east-1`, and `us-east-2`, plus exact secret-redacted frontend edge and
-  bucket posture. It also inventories GuardDuty, Security Hub, the home
-  standards/aggregator, and protected two-resource satellite stacks in every
-  enabled Region. It never remediates drift.
+  bucket posture. It also verifies the exact GuardDuty detector, Security Hub,
+  and two reviewed standards in the home Region. `PENDING` is accepted only
+  during an AWS control expansion when both standards remain updatable and
+  expose no failure reason. It does not claim managed
+  detector or hub coverage in other Regions, and it never remediates drift.
 
 ## Required GitHub settings
 
@@ -183,16 +185,19 @@ CloudFormation's resource-level drift API cannot evaluate them. The inventory
 requires that four-item set exactly, dynamically proves that every other live
 stack resource is checked, and fails if a new exclusion appears. Source tests
 continue to bind the unsupported resources to their least-privilege contracts.
-The scheduled audit does not ignore the detector: `regional_security_posture.py` inventories every
-enabled Region and requires exactly one enabled detector, the exact combined
-12-feature map, 15-minute publishing, and exact application/stage tags. It also
-requires one exact Security Hub per Region, two `READY` standards only in the
-home Region, zero satellite standards, one `ALL_REGIONS` aggregator, and every
-satellite stack to be stable, termination-protected, parameter-exact, and to
-own exactly its detector and hub. Output contains aggregate counts only. The
-audit role's read permissions are bounded to the currently reviewed enabled
-Region list; enabling another Region makes the audit fail closed until both
-the regional rollout and IAM allowlist are reviewed.
+The scheduled audit does not ignore the detector: `home_security_posture.py`
+requires exactly one enabled detector in the home Region, the exact combined
+12-feature map, 15-minute publishing, and the required application/stage tags.
+It also requires the home Security Hub default hub, the `SECURITY_CONTROL`
+finding generator, required application/stage tags, and exactly the two reviewed
+standards. Each must be `READY`, or provider-reconciling `PENDING` with controls
+still `READY_FOR_UPDATES` and no status reason. Extra AWS- or
+CloudFormation-managed tags are allowed, but missing required tags or any
+detector, feature, hub, generator, standard, or updatability difference fails
+closed. Output contains aggregate counts only, including the number of provider
+transitions. The audit role's
+direct GuardDuty and Security Hub permissions are bounded to the home Region;
+the audit neither inventories nor claims managed coverage in other Regions.
 
 The CloudFormation resources are the exact entries in
 `ops/ci/audit_stacks.json`; cross-region entries are the CloudFront WAF stack in
