@@ -185,18 +185,7 @@ jobs:
       - name: Validate and build SAM from scratch
         run: ./ops/validate_infrastructure.sh --build
       - name: Refuse credential-like build artifacts
-        run: |
-          if find backend/.aws-sam/build -type f \( -name 'google_oauth_token.json' -o -name 'voice-assistant-*.json' -o -name '*service-account*.json' \) -print -quit | grep -q .; then
-            echo 'Credential-like file found in SAM build.' >&2
-            exit 1
-          fi
-          # CA bundles and Google API discovery schemas legitimately use .pem
-          # and *credentials* names. Inspect contents for private keys instead
-          # of rejecting those dependency files by basename.
-          if grep -RIlE --exclude='package-lock.json' -- 'BEGIN ([A-Z0-9]+ )*PRIVATE KEY|AKIA[0-9A-Z]{16}' backend/.aws-sam/build >/dev/null; then
-            echo 'Potential private key or AWS access key found in SAM build.' >&2
-            exit 1
-          fi
+        run: python3 ops/ci/credential_artifact_scan.py backend/.aws-sam/build
       - name: Enforce SAM artifact budgets and source isolation
         run: |
           python3 ops/ci/artifact_budget.py \
@@ -292,7 +281,7 @@ jobs:
           ops/waf_front_door_template.yaml
       - name: Refuse obvious private keys and AWS access keys
         run: |
-          if git grep -I -l -E -- 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}' -- ':!package-lock.json'; then
+          if git grep -I -l -E -- 'BEGIN ([A-Z0-9]+ )*PRIVATE KEY|A(KI|SI)A[0-9A-Z]{16}' -- ':!package-lock.json'; then
             echo 'Potential credential material found.' >&2
             exit 1
           fi

@@ -1014,7 +1014,11 @@ Resources:
           - !Ref FrontendUrl
         MaxAge: 600
       AccessLogSettings:
-        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        # AWS::Logs::LogGroup.Arn includes a trailing ':*', but API Gateway
+        # persists the access-log destination as the exact log-group ARN.
+        # Build that exact ARN from Ref (the existing group name) so drift
+        # detection compares like-for-like without replacing the log group.
+        DestinationArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiAccessLogGroup}'
         Format: >-
           {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}
       DefaultRouteSettings:

@@ -92,6 +92,17 @@ class DataProtectionTests(unittest.TestCase):
             self.assertIn("IanTruongPhotography/Security", block)
             self.assertIn("AlarmActions:\n        - !Ref AlarmTopic", block)
 
+    def test_api_access_log_destination_uses_exact_log_group_arn(self) -> None:
+        api = resource_block("Api")
+        expected = (
+            "DestinationArn: !Sub "
+            "'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:"
+            "log-group:${ApiAccessLogGroup}'"
+        )
+        self.assertIn(expected, api)
+        self.assertNotIn("DestinationArn: !GetAtt ApiAccessLogGroup.Arn", api)
+        self.assertNotRegex(api, r"DestinationArn:.*:\*['\"]?$")
+
     def test_album_table_is_recoverable_and_protected(self) -> None:
         block = resource_block("AlbumsTable")
         for expected in (

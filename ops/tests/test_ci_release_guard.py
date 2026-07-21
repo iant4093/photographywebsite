@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import tarfile
@@ -13,7 +14,31 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from ops.ci import coverage_gate, release_guard, workflow_policy  # noqa: E402
+from ops.ci import (  # noqa: E402
+    coverage_gate,
+    credential_artifact_scan,
+    release_guard,
+    workflow_policy,
+)
+
+
+def private_key_marker(label: str = "", *, ending: bool = False) -> str:
+    kind = f"{label} " if label else ""
+    return "-----" + ("END" if ending else "BEGIN") + f" {kind}PRIVATE KEY-----"
+
+
+def access_key_id(prefix: str, suffix: str) -> str:
+    return prefix + suffix
+
+
+def iam_credentials_discovery_document() -> dict[str, str]:
+    return {
+        "discoveryVersion": "v1",
+        "id": "iamcredentials:v1",
+        "name": "iamcredentials",
+        "rootUrl": "https://iamcredentials.googleapis.com/",
+        "version": "v1",
+    }
 
 
 def change(
@@ -281,6 +306,211 @@ class CoverageGateTests(unittest.TestCase):
             self.assertEqual(coverage_gate.main([str(path)]), 0)
             self.assertEqual(coverage_gate.main([str(path), "--minimum-branches", "81"]), 1)
             self.assertEqual(coverage_gate.main([str(path), "--minimum-lines", "91"]), 1)
+
+
+class CredentialArtifactScanTests(unittest.TestCase):
+    def test_workflow_keeps_strict_source_scan_and_uses_artifact_scanner(self):
+        workflow = (ROOT / ".github/workflows/_quality.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "python3 ops/ci/credential_artifact_scan.py backend/.aws-sam/build",
+            workflow,
+        )
+        self.assertIn("if git grep -I -l -E -- 'BEGIN", workflow)
+        source_pattern = (
+            "BEGIN "
+            + "([A-Z0-9]+ )*"
+            + "PRIVATE KEY|"
+            + "A(KI|SI)A"
+            + "[0-9A-Z]{16}"
+        )
+        self.assertIn(source_pattern, workflow)
+
+        with tempfile.TemporaryDirectory() as directory:
+            fixture_root = Path(directory)
+            fixtures = {
+                "generic.pem": private_key_marker(),
+                "encrypted.pem": private_key_marker("ENCRYPTED"),
+                "dsa.pem": private_key_marker("DSA"),
+                "long-term.txt": access_key_id("AKIA", "1234567890ABCDEF"),
+                "temporary.txt": access_key_id("ASIA", "1234567890ABCDEF"),
+            }
+            for name, value in fixtures.items():
+                (fixture_root / name).write_text(value, encoding="utf-8")
+            fixture_scan = subprocess.run(
+                ["grep", "-E", "-l", "--", source_pattern, *sorted(fixtures)],
+                cwd=fixture_root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(fixture_scan.returncode, 0, fixture_scan.stderr)
+            self.assertEqual(
+                set(fixture_scan.stdout.splitlines()),
+                set(fixtures),
+            )
+
+        completed = subprocess.run(
+            [
+                "git",
+                "grep",
+                "-I",
+                "-l",
+                "-E",
+                "--",
+                source_pattern,
+                ":!package-lock.json",
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stdout)
+        self.assertEqual(completed.stdout, "")
+
+    def test_observed_dependency_vocabulary_is_not_credential_material(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            openssh_begin = private_key_marker("OPENSSH")
+            openssh_end = private_key_marker("OPENSSH", ending=True)
+            rsa_begin = private_key_marker("RSA")
+            rsa_end = private_key_marker("RSA", ending=True)
+            ec_begin = private_key_marker("EC")
+            ec_end = private_key_marker("EC", ending=True)
+            documentation_id = access_key_id("AKIA", "IOSFODNN7EXAMPLE")
+            fixtures = {
+                "cryptography/hazmat/primitives/serialization/ssh.py": (
+                    f'_START = b"{openssh_begin}"\n'
+                    f'_END = b"{openssh_end}"\n'
+                ),
+                "google/auth/crypt/_python_rsa.py": (
+                    f'markers = ("{rsa_begin}", "{rsa_end}")\n'
+                ),
+                "google/oauth2/gdch_credentials.py": (
+                    f'example = "{ec_begin}\\n<key bytes>\\n{ec_end}\\n"\n'
+                ),
+                "googleapiclient/discovery_cache/documents/appengine.v1.json": (
+                    json.dumps({"description": f"{rsa_begin} {rsa_end}"})
+                ),
+                "GoogleDriveBackupFunction/googleapiclient/discovery_cache/documents/iamcredentials.v1.json": (
+                    json.dumps(iam_credentials_discovery_document())
+                ),
+                "node_modules/@aws-sdk/sts/AssumeRoleCommand.d.ts": (
+                    f'example: "{documentation_id}"\n'
+                ),
+            }
+            for relative, source in fixtures.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+
+            report = credential_artifact_scan.scan(root)
+            self.assertEqual(report.files_scanned, len(fixtures))
+            self.assertEqual(report.findings, ())
+            self.assertEqual(credential_artifact_scan.main([str(root)]), 0)
+
+    def test_real_material_and_forbidden_filename_fail_without_echoing_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            key_begin = private_key_marker()
+            key_end = private_key_marker(ending=True)
+            key = root / "leaked.pem"
+            key.write_text(
+                f"{key_begin}\n"
+                "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n"
+                f"{key_end}\n",
+                encoding="utf-8",
+            )
+            long_term_id = access_key_id("AKIA", "1234567890ABCDEF")
+            temporary_id = access_key_id("ASIA", "1234567890ABCDEF")
+            access_key = root / "handler.py"
+            access_key.write_text(
+                f'value = "{long_term_id}"\n'
+                f'temporary = "{temporary_id}"\n',
+                encoding="utf-8",
+            )
+            forbidden = root / "service-account-prod.json"
+            forbidden.write_text("{}", encoding="utf-8")
+            (root / "service_account_prod.json").write_text("{}", encoding="utf-8")
+            (root / "cached_credentials.json").write_text("{}", encoding="utf-8")
+
+            report = credential_artifact_scan.scan(root)
+            self.assertEqual(
+                {finding.kind for finding in report.findings},
+                {
+                    "aws_access_key_id",
+                    "forbidden_credential_filename",
+                    "private_key_block",
+                },
+            )
+            with patch("sys.stdout") as stdout:
+                self.assertEqual(credential_artifact_scan.main([str(root)]), 1)
+            rendered = "".join(str(call) for call in stdout.write.call_args_list)
+            self.assertNotIn(long_term_id, rendered)
+            self.assertNotIn(temporary_id, rendered)
+            self.assertNotIn("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", rendered)
+
+    def test_legacy_encrypted_pem_with_metadata_is_rejected(self):
+        begin = private_key_marker("RSA")
+        end = private_key_marker("RSA", ending=True)
+        payload = (
+            f"{begin}\n"
+            "Proc-Type: 4,ENCRYPTED\n"
+            "DEK-Info: AES-256-CBC,0123456789ABCDEF\n\n"
+            "MIIE6TAbBgkqhkiG9w0BBQMwDgQIZmFrZVNhbHQCAggA\n"
+            f"{end}\n"
+        ).encode()
+        self.assertTrue(credential_artifact_scan._contains_private_key_block(payload))
+
+    def test_iam_credentials_exception_requires_exact_path_and_schema_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            valid_document = json.dumps(iam_credentials_discovery_document())
+            wrong_path = root / "other" / "iamcredentials.v1.json"
+            wrong_path.parent.mkdir(parents=True)
+            wrong_path.write_text(valid_document, encoding="utf-8")
+            wrong_document = (
+                root
+                / "GoogleDriveBackupFunction"
+                / "googleapiclient"
+                / "discovery_cache"
+                / "documents"
+                / "iamcredentials.v1.json"
+            )
+            wrong_document.parent.mkdir(parents=True)
+            wrong_document.write_text("{}", encoding="utf-8")
+            report = credential_artifact_scan.scan(root)
+            self.assertEqual(
+                [finding.kind for finding in report.findings],
+                ["forbidden_credential_filename", "forbidden_credential_filename"],
+            )
+
+    def test_directory_enumeration_error_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blocked = root / "blocked"
+            blocked.mkdir()
+            (root / "safe.txt").write_text("safe", encoding="utf-8")
+            real_scandir = credential_artifact_scan.os.scandir
+
+            def guarded_scandir(path):
+                if Path(path) == blocked:
+                    raise PermissionError("blocked")
+                return real_scandir(path)
+
+            with patch.object(
+                credential_artifact_scan.os, "scandir", side_effect=guarded_scandir
+            ), self.assertRaises(credential_artifact_scan.ScanError):
+                credential_artifact_scan.scan(root)
+
+    def test_empty_or_unsafe_artifact_roots_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaises(credential_artifact_scan.ScanError):
+                credential_artifact_scan.scan(root)
+            with patch("sys.stderr") as stderr:
+                self.assertEqual(credential_artifact_scan.main([str(root)]), 2)
+            self.assertNotIn(str(root), "".join(str(call) for call in stderr.write.call_args_list))
 
 
 class CliTests(unittest.TestCase):

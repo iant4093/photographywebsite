@@ -25,6 +25,17 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   when a budget fails. Reports contain logical IDs, counts, byte totals, limits,
   and violation codes—not runner paths, source content, object keys, album IDs,
   credentials, or environment values.
+- Generated SAM artifacts are scanned separately for forbidden credential-file
+  names, complete private-key blocks (including legacy encrypted PEM metadata),
+  and AWS access-key IDs. The published AWS documentation example ID and
+  dependency source that merely names private-key formats are not credential
+  material. The only credential-like JSON filename exception is the exact
+  `GoogleDriveBackupFunction/googleapiclient/discovery_cache/documents/`
+  `iamcredentials.v1.json` path, and its service identity fields must match the
+  public IAM Credentials v1 schema. Directory enumeration and file reads fail
+  closed. The tracked-source grep remains stricter and rejects even partial
+  uppercase standard private-key markers plus long-term `AKIA` and temporary
+  `ASIA` access-key IDs before packaging.
 - A push to `main` repeats that exact reusable quality gate, builds the SAM and
   frontend artifacts once, checksums them, attests them, and deploys those same
   bytes. Deployment never rebuilds source.
