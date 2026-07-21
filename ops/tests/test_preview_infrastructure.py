@@ -82,7 +82,7 @@ class PreviewWorkerTests(unittest.TestCase):
         package = json.loads((ROOT / "backend" / "preview_worker" / "package.json").read_text(encoding="utf-8"))
         lock = json.loads((ROOT / "backend" / "preview_worker" / "package-lock.json").read_text(encoding="utf-8"))
         self.assertEqual(package["engines"]["node"], ">=22 <25")
-        self.assertEqual(package["dependencies"]["sharp"], "0.34.5")
+        self.assertEqual(package["dependencies"]["sharp"], "0.35.3")
         for dependency in (
             "@aws-sdk/client-dynamodb",
             "@aws-sdk/client-s3",
