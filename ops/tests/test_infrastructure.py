@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import unittest
@@ -40,6 +41,112 @@ class TemplateValidationTests(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+        )
+
+    def test_http_api_processed_openapi_has_valid_server_contract(self) -> None:
+        """Exercise SAM's real translator, not only the source YAML shape."""
+        translator_assertion = r"""
+import sys
+from pathlib import Path
+
+from samtranslator.parser.parser import Parser
+from samtranslator.translator.translator import Translator
+from samtranslator.yaml_helper import yaml_parse
+
+template = yaml_parse(Path(sys.argv[1]).read_text(encoding="utf-8"))
+
+# The translator expects deployable S3 locations. Artifact packaging is a
+# separate concern from this OpenAPI contract test, so replace local build
+# inputs in memory without changing the template under test.
+for logical_id, resource in template["Resources"].items():
+    if resource.get("Type") not in {
+        "AWS::Serverless::Function",
+        "AWS::Serverless::LayerVersion",
+    }:
+        continue
+    properties = resource.setdefault("Properties", {})
+    if "CodeUri" in properties:
+        properties["CodeUri"] = f"s3://sam-contract-test/{logical_id}.zip"
+    if "ContentUri" in properties:
+        properties["ContentUri"] = f"s3://sam-contract-test/{logical_id}.zip"
+
+processed = Translator({}, Parser()).translate(template, {})
+api = processed["Resources"]["Api"]
+assert api["Type"] == "AWS::ApiGatewayV2::Api"
+assert api["Properties"]["FailOnWarnings"] is True
+
+body = api["Properties"]["Body"]
+servers = body["servers"]
+assert len(servers) == 1
+assert servers[0]["url"] == "/"
+assert servers[0]["x-amazon-apigateway-endpoint-configuration"][
+    "disableExecuteApiEndpoint"
+] == {"Fn::If": ["DisableDefaultApiEndpoint", True, False]}
+actual_routes = {
+    (method.upper(), path)
+    for path, operations in body["paths"].items()
+    for method in operations
+    if method.lower() in {"delete", "get", "patch", "post", "put"}
+}
+expected_routes = {
+    ("GET", "/public/albums"),
+    ("GET", "/public/albums/{albumId}"),
+    ("GET", "/albums"),
+    ("GET", "/albums/{albumId}"),
+    ("GET", "/shared/{shareCode}"),
+    ("POST", "/login"),
+    ("POST", "/login/challenge"),
+    ("POST", "/contact"),
+    ("POST", "/albums"),
+    ("PUT", "/albums/{albumId}"),
+    ("DELETE", "/albums/{albumId}"),
+    ("POST", "/albums/{albumId}/images"),
+    ("POST", "/albums/{albumId}/zip"),
+    ("POST", "/shared/{shareCode}/zip"),
+    ("POST", "/albums/{albumId}/delete-images"),
+    ("POST", "/albums/{albumId}/download-url"),
+    ("POST", "/shared/{shareCode}/download-url"),
+    ("PATCH", "/albums/{albumId}/images"),
+    ("POST", "/upload-url"),
+    ("POST", "/users"),
+    ("GET", "/users"),
+    ("DELETE", "/users/{email}"),
+    ("PUT", "/users/{email}"),
+}
+assert actual_routes == expected_routes
+"""
+        candidates = [sys.executable]
+        sam_executable = shutil.which("sam")
+        if sam_executable:
+            resolved_sam = Path(sam_executable).resolve()
+            try:
+                with resolved_sam.open("rb") as sam_entrypoint:
+                    shebang = sam_entrypoint.readline().decode("utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                shebang = ""
+            if shebang.startswith("#!"):
+                sam_python = shebang[2:]
+                if Path(sam_python).is_file() and sam_python not in candidates:
+                    candidates.append(sam_python)
+
+        import_errors = []
+        for python in candidates:
+            result = subprocess.run(
+                [python, "-c", translator_assertion, str(ROOT / "backend" / "template.yaml")],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return
+            if "No module named 'samtranslator'" in result.stderr:
+                import_errors.append(f"{python}: {result.stderr.strip()}")
+                continue
+            self.fail(result.stderr or result.stdout)
+
+        self.fail(
+            "AWS SAM Translator is unavailable to verify the processed OpenAPI contract:\n"
+            + "\n".join(import_errors)
         )
 
     def test_dnssec_template_lint(self) -> None:

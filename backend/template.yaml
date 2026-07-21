@@ -1004,6 +1004,20 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref Stage
+      # SAM merges the endpoint-disable extension below into every OpenAPI
+      # server object. Keep an explicit, root-relative server URL so the
+      # transformed document remains valid OpenAPI without referring back to
+      # this API's generated ID or coupling the import to a deployment stage or
+      # custom domain. API Gateway stage and domain mappings remain managed by
+      # their dedicated CloudFormation resources.
+      DefinitionBody:
+        openapi: '3.0.1'
+        info:
+          title: !Ref AWS::StackName
+          version: '1.0'
+        servers:
+          - url: /
+        paths: {}
       DisableExecuteApiEndpoint: !If [DisableDefaultApiEndpoint, true, false]
       FailOnWarnings: true
       PropagateTags: true
