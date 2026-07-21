@@ -55,6 +55,7 @@ build-PreviewWorkerFunction:
 	  "$(NPM)" ci \
 	    --omit=dev \
 	    --include=optional \
+	    --no-bin-links \
 	    --os=linux \
 	    --cpu=x64 \
 	    --libc=glibc \

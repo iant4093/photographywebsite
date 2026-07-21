@@ -76,6 +76,7 @@ class PreviewWorkerTests(unittest.TestCase):
         self.assertIn("--os=linux", MAKEFILE)
         self.assertIn("--cpu=x64", MAKEFILE)
         self.assertIn("--libc=glibc", MAKEFILE)
+        self.assertIn("--no-bin-links", MAKEFILE)
         self.assertIn("npm ci", MAKEFILE.replace('"$(NPM)"', "npm"))
 
         package = json.loads((ROOT / "backend" / "preview_worker" / "package.json").read_text(encoding="utf-8"))
