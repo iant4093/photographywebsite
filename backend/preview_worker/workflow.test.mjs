@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { previewKeysFor } from './contract.mjs'
-import { validateReadyOrMarkPending } from './workflow.mjs'
+import { readyPreviewDescriptor, validateReadyOrMarkPending } from './workflow.mjs'
 
 const albumId = '11111111-1111-4111-8111-111111111111'
 const rawKey = `albums/${albumId}/original/photo.jpg`
@@ -60,4 +60,65 @@ test('corrupt ready metadata is hidden by marking it pending', async () => {
     })
     assert.equal(accepted, false)
     assert.equal(markedPending, 1)
+})
+
+test('rejects every incomplete ready-metadata contract boundary', () => {
+    const invalid = [
+        null,
+        { ...metadata, status: 'pending' },
+        { ...metadata, previewVersion: 1 },
+        { ...metadata, previewKeys: null },
+        { ...metadata, previewKeys: { ...keys, 1280: 'wrong' } },
+        { ...metadata, sourceSha256: null },
+        { ...metadata, sourceSha256: 'g'.repeat(64) },
+        { ...metadata, dimensions: null },
+        { ...metadata, dimensions: 'invalid' },
+        { ...metadata, dimensions: { ...metadata.dimensions, 640: null } },
+        { ...metadata, dimensions: { ...metadata.dimensions, 640: { width: 639, height: 427 } } },
+        { ...metadata, dimensions: { ...metadata.dimensions, 640: { width: 640, height: 1.5 } } },
+        { ...metadata, dimensions: { ...metadata.dimensions, 640: { width: 640, height: 0 } } },
+    ]
+    for (const value of invalid) assert.equal(readyPreviewDescriptor(value, keys), null)
+    assert.deepEqual(readyPreviewDescriptor(metadata, keys), {
+        sourceDigest: 'a'.repeat(64),
+        outputs: {
+            640: { width: 640, height: 427 },
+            1280: { width: 1280, height: 853 },
+        },
+    })
+})
+
+test('non-ready rows require neither validation nor a pending repair', async () => {
+    const accepted = await validateReadyOrMarkPending({
+        metadata: { ...metadata, status: 'pending' },
+        expectedKeys: keys,
+        validateObject: async () => assert.fail('must not validate pending metadata'),
+        tagObject: async () => assert.fail('must not tag pending metadata'),
+        visibility: 'private',
+        markPending: async () => assert.fail('must not repair pending metadata'),
+    })
+    assert.equal(accepted, false)
+})
+
+test('a tagging failure repairs metadata and a repair failure remains visible', async () => {
+    const actions = []
+    const accepted = await validateReadyOrMarkPending({
+        metadata,
+        expectedKeys: keys,
+        validateObject: async () => actions.push('validated'),
+        tagObject: async () => { throw new Error('tag failed') },
+        visibility: 'public',
+        markPending: async () => actions.push('pending'),
+    })
+    assert.equal(accepted, false)
+    assert.deepEqual(actions, ['validated', 'pending'])
+
+    await assert.rejects(validateReadyOrMarkPending({
+        metadata,
+        expectedKeys: keys,
+        validateObject: async () => { throw new Error('missing') },
+        tagObject: async () => {},
+        visibility: 'public',
+        markPending: async () => { throw new Error('repair failed') },
+    }), /repair failed/)
 })

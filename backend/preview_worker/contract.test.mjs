@@ -6,7 +6,10 @@ import {
     PREVIEW_FAILURE_REASON_CODES,
     isCompletePreview,
     mediaIdForKey,
+    normalizeAlbumId,
+    normalizeObjectKey,
     parseJob,
+    parsePositiveLimit,
     previewJobId,
     previewKeysFor,
     resolveManifestImage,
@@ -36,6 +39,42 @@ test('rejects malformed, cross-album, and obsolete jobs', () => {
         visibility: 'public',
         images: [{ rawKey: 'albums/another/photo.jpg' }],
     }, { albumId, rawKey: 'albums/another/photo.jpg', previewVersion: 2 }), /namespace/)
+})
+
+test('normalizes identifiers and rejects unsafe object-key shapes', () => {
+    assert.equal(normalizeAlbumId(`  ${albumId.toUpperCase()}  `), albumId)
+    for (const value of [undefined, null, 12, '', 'not-a-uuid']) {
+        assert.throws(() => normalizeAlbumId(value), /Invalid albumId/)
+    }
+
+    assert.equal(normalizeObjectKey(rawKey), rawKey)
+    for (const value of [
+        undefined,
+        '',
+        12,
+        ' albums/photo.jpg',
+        'a'.repeat(1025),
+        '/albums/photo.jpg',
+        'albums\\photo.jpg',
+        'albums/photo.jpg\0suffix',
+        'albums//photo.jpg',
+        'albums/./photo.jpg',
+        'albums/../photo.jpg',
+    ]) {
+        assert.throws(() => normalizeObjectKey(value), /Invalid media key/)
+    }
+})
+
+test('parses only object jobs for preview v2', () => {
+    assert.deepEqual(parseJob({
+        albumId: albumId.toUpperCase(),
+        rawKey,
+        previewVersion: '2',
+        ignored: 'field',
+    }), { albumId, rawKey, previewVersion: 2 })
+    for (const value of [null, [], 'job']) {
+        assert.throws(() => parseJob(value), /Invalid preview job/)
+    }
 })
 
 test('resolves only an active photo manifest entry and detects completion', () => {
@@ -70,6 +109,40 @@ test('supports a separately approved single-segment legacy prefix', () => {
     assert.equal(resolved.previewKeys['640'].startsWith(`albums/${albumId}/preview/v2/`), true)
 })
 
+test('rejects inactive, non-photo, malformed, and stale manifest entries', () => {
+    const job = { albumId, rawKey, previewVersion: 2 }
+    const base = { albumId, visibility: 'public', images: [{ rawKey }] }
+    const cases = [
+        [null, /does not match album/],
+        [{ ...base, albumId: '22222222-2222-4222-8222-222222222222' }, /does not match album/],
+        [{ ...base, status: 'archived' }, /not active/],
+        [{ ...base, type: 'video' }, /not a photo album/],
+        [{ ...base, visibility: 'pending' }, /visibility is invalid/],
+        [{ ...base, images: null }, /manifest is invalid/],
+        [{ ...base, images: [null, 'bad', { rawKey: `${rawKey}.other` }] }, /no longer/],
+    ]
+    for (const [album, pattern] of cases) {
+        assert.throws(() => resolveManifestImage(album, job), pattern)
+    }
+})
+
+test('detects incomplete preview shapes and parses bounded limits', () => {
+    const expectedKeys = previewKeysFor(albumId, rawKey)
+    for (const image of [
+        null,
+        { previewVersion: 1, previewKeys: expectedKeys },
+        { previewVersion: 2 },
+        { previewVersion: 2, previewKeys: 'not-an-object' },
+        { previewVersion: 2, previewKeys: { ...expectedKeys, 1280: 'wrong' } },
+    ]) {
+        assert.equal(isCompletePreview(image, expectedKeys), false)
+    }
+    assert.equal(parsePositiveLimit('1280', 640, 4096), 1280)
+    for (const value of [undefined, 'invalid', 0, -1, 1.5, 4097]) {
+        assert.equal(parsePositiveLimit(value, 640, 4096), 640)
+    }
+})
+
 test('failure telemetry permits only fixed privacy-safe reason codes', () => {
     assert.equal(new Set(PREVIEW_FAILURE_REASON_CODES).size, PREVIEW_FAILURE_REASON_CODES.length)
     for (const reasonCode of PREVIEW_FAILURE_REASON_CODES) {
@@ -78,4 +151,5 @@ test('failure telemetry permits only fixed privacy-safe reason codes', () => {
     }
     assert.equal(safePreviewFailureReason({ reasonCode: 'albums/private/client-name.jpg' }), 'unexpected_failure')
     assert.equal(safePreviewFailureReason(new Error('albums/private/client-name.jpg')), 'unexpected_failure')
+    assert.equal(safePreviewFailureReason(null), 'unexpected_failure')
 })

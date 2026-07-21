@@ -105,6 +105,14 @@ class PreviewReconciliationTests(unittest.TestCase):
         self.assertEqual(dimensions, {"640": 427, "1280": 853})
         self.assertFalse(failures)
 
+        metadata["dimensions"] = {
+            "640": {"width": 640, "height": 961},
+            "1280": {"width": 1280, "height": 1920},
+        }
+        _, dimensions, failures = reconcile_preview_v2.validate_ready_metadata(metadata, keys)
+        self.assertEqual(dimensions, {"640": 961, "1280": 1920})
+        self.assertFalse(failures)
+
         metadata["sourceSha256"] = "invalid"
         metadata["dimensions"]["1280"]["height"] = 700
         metadata["jobId"] = "must-not-remain"

@@ -18,6 +18,12 @@ test('object write failure classification is allowlisted and coarse', () => {
         [{ name: 'SlowDown', $metadata: { httpStatusCode: 503 } }, 'put_throttled', '5xx'],
         [{ name: 'ServiceFailure', $metadata: { httpStatusCode: 503 } }, 'put_service_failure', '5xx'],
         [{ name: 'TimeoutError' }, 'put_transport_failure', 'none'],
+        [{ Code: 'Forbidden', $metadata: { httpStatusCode: 403 } }, 'put_access_denied', '4xx'],
+        [{ code: 'ThrottlingException', $metadata: { httpStatusCode: 429 } }, 'put_throttled', '4xx'],
+        [{ $metadata: { httpStatusCode: 404 } }, 'put_invalid_request', '4xx'],
+        [{ $metadata: { httpStatusCode: 99 } }, 'put_unclassified', 'none'],
+        [{ $metadata: { httpStatusCode: 600 } }, 'put_unclassified', 'none'],
+        [{}, 'put_unclassified', 'none'],
         [{ name: 'SecretClientFilename', message: 'albums/private/client.jpg' }, 'put_unclassified', 'none'],
     ]
     for (const [error, failureCategory, httpClass] of cases) {
@@ -27,6 +33,17 @@ test('object write failure classification is allowlisted and coarse', () => {
         assert.equal(PREVIEW_HTTP_CLASSES.includes(classified.httpClass), true)
         assert.equal(JSON.stringify(classified).includes('client'), false)
     }
+})
+
+test('validation failures expose only the validation category and status class', () => {
+    assert.deepEqual(classifyPreviewObjectFailure({
+        name: 'NoSuchKey',
+        message: 'albums/private/client.jpg',
+        $metadata: { httpStatusCode: 404 },
+    }, 'validate'), {
+        failureCategory: 'object_validation_failed',
+        httpClass: '4xx',
+    })
 })
 
 test('safe stage errors retain approved nested diagnostics', async () => {
@@ -42,6 +59,22 @@ test('safe stage errors retain approved nested diagnostics', async () => {
         reasonCode: 'preview_object_write_failed',
         failureCategory: 'put_access_denied',
         httpClass: '4xx',
+    })
+})
+
+test('successful stage operations return their value', async () => {
+    assert.equal(await atPreviewStage('source_read_failed', async () => 'ok'), 'ok')
+})
+
+test('stage construction rejects unapproved diagnostic values', () => {
+    const error = previewStageFailure('private/client-name', {
+        failureCategory: 'private-client-name',
+        httpClass: '404-private-client-name',
+    })
+    assert.deepEqual(safePreviewFailureTelemetry(error), {
+        reasonCode: 'unexpected_failure',
+        failureCategory: 'none',
+        httpClass: 'none',
     })
 })
 
