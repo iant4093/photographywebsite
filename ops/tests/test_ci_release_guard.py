@@ -1406,6 +1406,7 @@ class WorkflowPolicyTests(unittest.TestCase):
                 "public_smoke.sh",
                 "wait_for_drift.sh",
                 "audit_stack_drift.sh",
+                "assert_aws_account.sh",
             )
         ]
         for path in helper_paths:
@@ -1418,6 +1419,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         smoke = helper_paths[4].read_text(encoding="utf-8")
         drift = helper_paths[5].read_text(encoding="utf-8")
         multi_drift = helper_paths[6].read_text(encoding="utf-8")
+        account_guard = helper_paths[7].read_text(encoding="utf-8")
         self.assertIn("detect-stack-drift", plan)
         self.assertNotIn("wait stack-drift-detection-complete", plan)
         self.assertIn("DETECTION_IN_PROGRESS", drift)
@@ -1438,11 +1440,16 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("EXPECTED_REQUESTED_PARAMETERS_PATH", plan)
         self.assertIn("--release-sha", plan)
         self.assertIn("ARTIFACT_KMS_KEY_ARN", plan)
+        self.assertIn("template_environment_policy.json", plan)
+        self.assertNotIn(".rules | length", plan)
         self.assertIn("--kms-key-id", plan)
         self.assertIn("packaged_template_key", plan)
         self.assertIn("--template-url", plan)
         self.assertNotIn('--template-body "file://$workspace/packaged.yaml"', plan)
         self.assertIn("collect_change_set.sh", plan)
+        self.assertIn("get-caller-identity", account_guard)
+        self.assertIn("EXPECTED_AWS_ACCOUNT_ID", account_guard)
+        self.assertNotIn("echo \"$actual_account_id\"", account_guard)
         self.assertIn("CAPABILITY_NAMED_IAM", plan)
         self.assertIn("stack-update-complete", execute)
         self.assertIn("EXPECTED_RELEASE_SHA", execute)

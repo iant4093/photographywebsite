@@ -73,7 +73,10 @@ jobs:
           role-to-assume: ${{ vars.AWS_AUDIT_ROLE_ARN }}
           role-session-name: audit-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ vars.AWS_REGION }}
-          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           mask-aws-account-id: true
+      - name: Verify exact AWS account
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: ./ops/ci/assert_aws_account.sh
       - name: Detect but never remediate versioned stack inventory
         run: ./ops/ci/audit_stack_drift.sh

@@ -114,8 +114,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ vars.AWS_REGION }}
-          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           mask-aws-account-id: true
+      - name: Verify exact AWS account
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: ./ops/ci/assert_aws_account.sh
       - name: Create non-executing guarded change set
         id: plan
         env:
@@ -145,8 +148,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_EXECUTE_ROLE_ARN }}
           role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ vars.AWS_REGION }}
-          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           mask-aws-account-id: true
+      - name: Verify exact AWS account
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: ./ops/ci/assert_aws_account.sh
       - env:
           AWS_REGION: ${{ vars.AWS_REGION }}
           STACK_NAME: ${{ vars.AWS_STACK_NAME }}
@@ -202,8 +208,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_FRONTEND_ROLE_ARN }}
           role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ vars.AWS_REGION }}
-          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           mask-aws-account-id: true
+      - name: Verify exact AWS account
+        env:
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: ./ops/ci/assert_aws_account.sh
       - env:
           AWS_REGION: ${{ vars.AWS_REGION }}
           FRONTEND_BUCKET: ${{ vars.FRONTEND_BUCKET }}

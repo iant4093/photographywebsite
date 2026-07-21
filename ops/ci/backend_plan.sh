@@ -48,7 +48,7 @@ sam package \
   --s3-prefix "releases/${GITHUB_SHA:?GITHUB_SHA is required}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/backend" \
   --output-template-file "$workspace/packaged-unbound.yaml"
 
-expected_object_count="$(jq -er '.rules | length' ops/ci/release_intent.json)"
+expected_object_count="$(jq -er '.blockCount' ops/ci/template_environment_policy.json)"
 python3 ops/ci/bind_s3_versions.py \
   "$workspace/packaged-unbound.yaml" "$workspace/packaged.yaml" \
   --bucket "$ARTIFACT_BUCKET" --region "$AWS_REGION" \

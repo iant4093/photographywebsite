@@ -218,10 +218,11 @@ python3 ops/set_lambda_log_retention.py \
   --confirm-stack-name STACK_NAME
 ```
 
-The alarm registry currently records notification delivery as blocked: the
-primary owner, backup owner, and two confirmed human destinations are still
-unassigned. Do not call the route operational until those owners confirm both
-destinations and a controlled privacy-safe test alarm succeeds. Periodically
+The alarm registry currently records notification delivery as degraded: the
+site owner and one owner-controlled human destination are confirmed, while a
+backup owner, second independent destination, and controlled privacy-safe
+end-to-end test are still outstanding. Do not call the route fully redundant
+until those remaining checks succeed. Periodically
 test DLQ replay procedures with synthetic, non-sensitive payloads; never blindly
 redrive old messages into production. Review log and media-log retention against
 traffic, privacy, and cost after 30 days.
