@@ -265,6 +265,22 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("table/GoldenHour-*", tables)
         self.assertNotIn("Resource: '*'", tables)
 
+    def test_execution_role_can_inspect_exact_drift_detection_dependencies(self):
+        execution = execution_permissions()
+        secrets = statement_block(execution, "ManageApplicationSecrets")
+        self.assertIn("secretsmanager:DescribeSecret", secrets)
+        self.assertIn("secret:RateLimitHashSecret-*", secrets)
+        self.assertNotIn("Resource: '*'", secrets)
+
+        observability = statement_block(
+            execution, "ManageApplicationLogsMetricsAndAlarms"
+        )
+        self.assertIn("logs:DescribeIndexPolicies", observability)
+        self.assertIn(
+            "log-group:/aws/apigateway/ian-photography-*", observability
+        )
+        self.assertNotIn("Resource: '*'", observability)
+
     def test_cloudfront_permissions_cover_reversible_application_resource_lifecycles(self):
         execution = execution_permissions()
         managed = statement_block(execution, "ManageApplicationCloudFront")

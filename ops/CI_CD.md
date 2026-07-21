@@ -246,6 +246,12 @@ The exact regional `Serverless-2016-10-31` transform ARN is the only
 CloudFormation macro resource the application execution role may invoke while
 creating the already-guarded application change set.
 
+CloudFormation drift detection also uses the stack execution role. Its
+read-only inspection grants include field-index metadata only for the exact
+application log-group families and secret metadata only for the generated
+`RateLimitHashSecret-*` family. They never grant `logs:GetLogEvents` or
+`secretsmanager:GetSecretValue`.
+
 Front-door updates are otherwise bounded to
 `origin-api.iantruongphotography.com`, hosted zone `Z0915663I4P8Y0MEDWH`, its
 API Gateway domain/mapping/tag paths, application-tagged regional ACM
