@@ -975,6 +975,27 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/apigateway/ian-photography-*'
               - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/ian-photography/application/*'
               - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:${ApplicationStackName}-*'
+          - Sid: ManageApiGatewayAccessLogDeliveries
+            Effect: Allow
+            Action:
+              - logs:CreateLogDelivery
+              - logs:DeleteLogDelivery
+              - logs:GetLogDelivery
+              - logs:ListLogDeliveries
+              - logs:UpdateLogDelivery
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: us-west-2
+          - Sid: EstablishApiGatewayAccessLogResourcePolicies
+            Effect: Allow
+            Action:
+              - logs:DescribeResourcePolicies
+              - logs:PutResourcePolicy
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: us-west-2
           - Sid: ReadGlobalObservabilityInventories
             Effect: Allow
             Action:

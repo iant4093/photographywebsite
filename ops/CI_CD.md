@@ -254,6 +254,13 @@ secret metadata only for the exact regional/account
 `logs:GetLogEvents`, and the secret statement never grants
 `secretsmanager:GetSecretValue`.
 
+HTTP API access-log reconciliation uses CloudWatch Logs delivery metadata and
+resource-policy APIs. AWS does not support resource-level IAM scoping for
+these actions, so the execution role grants only their documented lifecycle
+set on `Resource: '*'`, restricted to `us-west-2`. This statement cannot read,
+filter, write, or delete log events; log-group creation and retention remain
+separately limited to the exact application families.
+
 Front-door updates are otherwise bounded to
 `origin-api.iantruongphotography.com`, hosted zone `Z0915663I4P8Y0MEDWH`, its
 API Gateway domain/mapping/tag paths, application-tagged regional ACM

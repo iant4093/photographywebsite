@@ -279,6 +279,41 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("Resource: '*'", observability)
         self.assertNotIn("logs:GetLogEvents", observability)
 
+    def test_execution_role_has_only_metadata_permissions_for_api_log_delivery(self):
+        execution = execution_permissions()
+        delivery = statement_block(execution, "ManageApiGatewayAccessLogDeliveries")
+        for action in (
+            "logs:CreateLogDelivery",
+            "logs:DeleteLogDelivery",
+            "logs:GetLogDelivery",
+            "logs:ListLogDeliveries",
+            "logs:UpdateLogDelivery",
+        ):
+            self.assertIn(f"- {action}", delivery)
+        self.assertIn("Resource: '*'", delivery)
+        self.assertIn("aws:RequestedRegion: us-west-2", delivery)
+
+        policies = statement_block(
+            execution, "EstablishApiGatewayAccessLogResourcePolicies"
+        )
+        self.assertIn("- logs:DescribeResourcePolicies", policies)
+        self.assertIn("- logs:PutResourcePolicy", policies)
+        self.assertIn("Resource: '*'", policies)
+        self.assertIn("aws:RequestedRegion: us-west-2", policies)
+        for forbidden in (
+            "logs:CreateLogGroup",
+            "logs:CreateDelivery",
+            "logs:DeleteLogGroup",
+            "logs:DeleteResourcePolicy",
+            "logs:FilterLogEvents",
+            "logs:GetLogEvents",
+            "logs:PutLogEvents",
+            "logs:PutDeliveryDestination",
+            "logs:PutDeliverySource",
+        ):
+            self.assertNotIn(forbidden, delivery)
+            self.assertNotIn(forbidden, policies)
+
     def test_cloudfront_permissions_cover_reversible_application_resource_lifecycles(self):
         execution = execution_permissions()
         managed = statement_block(execution, "ManageApplicationCloudFront")
@@ -413,6 +448,8 @@ class CiBootstrapTemplateTests(unittest.TestCase):
             "CreateTaggedUserPool",
             "CreateCloudFrontResources",
             "CreateTaggedApplicationKey",
+            "EstablishApiGatewayAccessLogResourcePolicies",
+            "ManageApiGatewayAccessLogDeliveries",
             "ReadGlobalObservabilityInventories",
         }
         allow_star = {
