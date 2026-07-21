@@ -1215,6 +1215,7 @@ class WorkflowPolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("Run frontend tests with deterministic public configuration", quality)
+        self.assertIn("VITE_CLOUDFRONT_DOMAIN: media.example.invalid", quality)
         self.assertIn("VITE_COGNITO_USER_POOL_ID: us-west-2_TESTPOOL", quality)
         self.assertIn("VITE_COGNITO_CLIENT_ID: test-client-id", quality)
         self.assertRegex(

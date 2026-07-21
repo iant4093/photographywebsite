@@ -31,6 +31,7 @@ jobs:
       - name: Run frontend tests with deterministic public configuration
         env:
           VITE_API_BASE_URL: /api
+          VITE_CLOUDFRONT_DOMAIN: media.example.invalid
           VITE_COGNITO_USER_POOL_ID: us-west-2_TESTPOOL
           VITE_COGNITO_CLIENT_ID: test-client-id
         run: npm run test:coverage
