@@ -163,6 +163,56 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("lambda.amazonaws.com", execution)
         self.assertIn("mediaconvert.amazonaws.com", execution)
 
+        service_grants = statement_block(
+            execution, "CreateAwsServiceGrantsForTaggedApplicationKeys"
+        )
+        self.assertIn("Action: kms:CreateGrant", service_grants)
+        self.assertIn(
+            "aws:ResourceTag/Application: IanTruongPhotography", service_grants
+        )
+        self.assertIn("kms:GrantIsForAWSResource: 'true'", service_grants)
+        self.assertIn(
+            "arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*",
+            service_grants,
+        )
+        self.assertIn("kms:DeleteAlias", execution)
+        self.assertIn("sqs:DeleteQueue", execution)
+        self.assertNotIn("kms:ScheduleKeyDeletion", service_grants)
+        for forbidden in ("kms:ListGrants", "kms:RevokeGrant", "kms:RetireGrant"):
+            self.assertNotIn(forbidden, service_grants)
+
+        dynamodb_crypto = statement_block(
+            execution, "UseTaggedApplicationKeysForDynamoDb"
+        )
+        for action in (
+            "kms:Decrypt",
+            "kms:DescribeKey",
+            "kms:Encrypt",
+            "kms:GenerateDataKey",
+            "kms:GenerateDataKeyWithoutPlaintext",
+            "kms:ReEncryptFrom",
+            "kms:ReEncryptTo",
+        ):
+            self.assertIn(f"- {action}", dynamodb_crypto)
+        self.assertIn(
+            "aws:ResourceTag/Application: IanTruongPhotography", dynamodb_crypto
+        )
+        self.assertIn(
+            "kms:ViaService: !Sub 'dynamodb.us-west-2.${AWS::URLSuffix}'",
+            dynamodb_crypto,
+        )
+        self.assertIn(
+            "arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*",
+            dynamodb_crypto,
+        )
+        for forbidden in (
+            "kms:CreateGrant",
+            "kms:ListGrants",
+            "kms:RevokeGrant",
+            "kms:RetireGrant",
+        ):
+            self.assertNotIn(forbidden, dynamodb_crypto)
+
         transform = statement_block(execution, "InvokeExactSamTransform")
         self.assertIn("Action: cloudformation:CreateChangeSet", transform)
         self.assertIn(

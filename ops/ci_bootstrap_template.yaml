@@ -679,6 +679,7 @@ Resources:
             Action:
               - sqs:AddPermission
               - sqs:CreateQueue
+              - sqs:DeleteQueue
               - sqs:GetQueueAttributes
               - sqs:ListQueueTags
               - sqs:RemovePermission
@@ -911,6 +912,7 @@ Resources:
             Effect: Allow
             Action:
               - kms:CreateAlias
+              - kms:DeleteAlias
               - kms:DescribeKey
               - kms:EnableKeyRotation
               - kms:GetKeyPolicy
@@ -924,6 +926,30 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*'
               - !Sub 'arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:alias/ian-photography-*'
+          - Sid: CreateAwsServiceGrantsForTaggedApplicationKeys
+            Effect: Allow
+            Action: kms:CreateGrant
+            Resource: !Sub 'arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*'
+            Condition:
+              StringEquals:
+                aws:ResourceTag/Application: IanTruongPhotography
+              Bool:
+                kms:GrantIsForAWSResource: 'true'
+          - Sid: UseTaggedApplicationKeysForDynamoDb
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+            Resource: !Sub 'arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*'
+            Condition:
+              StringEquals:
+                aws:ResourceTag/Application: IanTruongPhotography
+                kms:ViaService: !Sub 'dynamodb.us-west-2.${AWS::URLSuffix}'
           - Sid: ManageApplicationLogsMetricsAndAlarms
             Effect: Allow
             Action:
