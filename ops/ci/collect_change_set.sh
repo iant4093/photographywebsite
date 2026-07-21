@@ -48,9 +48,14 @@ parameters_path="$(dirname "$CHANGE_PAGES_PATH")/change-set-parameters.json"
 aws cloudformation describe-change-set \
   --region "$AWS_REGION" --change-set-name "$CHANGE_SET_ID" \
   --query Parameters --output json > "$parameters_path"
+if [[ -n "${EXPECTED_REQUESTED_PARAMETERS_PATH:-}" ]]; then
+  python3 ops/ci/release_guard.py preserved-parameters \
+    "$EXPECTED_STACK_PARAMETERS_PATH" "$EXPECTED_REQUESTED_PARAMETERS_PATH" \
+    --release-sha "$EXPECTED_RELEASE_SHA"
+fi
 python3 ops/ci/release_guard.py preserved-parameters \
   "$EXPECTED_STACK_PARAMETERS_PATH" "$parameters_path" \
-  --release-sha "$EXPECTED_RELEASE_SHA"
+  --release-sha "$EXPECTED_RELEASE_SHA" --resolved-values
 
 mkdir -p "$(dirname "$CHANGE_PAGES_PATH")"
 echo '[]' > "$CHANGE_PAGES_PATH"

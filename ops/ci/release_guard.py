@@ -219,9 +219,13 @@ def previous_parameter_payload(
 
 
 def require_preserved_parameters(
-    stack: dict[str, Any], change_parameters: Any, *, release_sha: str
+    stack: dict[str, Any],
+    change_parameters: Any,
+    *,
+    release_sha: str,
+    resolved_values: bool = False,
 ) -> None:
-    """Require UsePreviousValue for every existing parameter except ReleaseSha."""
+    """Prove preserved request markers or their exact provider-resolved values."""
 
     if not re.fullmatch(r"[0-9a-f]{40}", release_sha):
         raise GateError("release SHA must be an exact lowercase commit SHA")
@@ -252,8 +256,18 @@ def require_preserved_parameters(
                 or parameter.get("ParameterValue") != release_sha
             ):
                 raise GateError("change set release SHA is not exact")
-        elif parameter.get("UsePreviousValue") is not True:
-            raise GateError("change set modifies a preserved stack parameter")
+        elif resolved_values:
+            deployed = current[key]
+            if (
+                "ParameterValue" not in deployed
+                or parameter.get("ParameterValue") != deployed.get("ParameterValue")
+            ):
+                raise GateError("change set resolved a different preserved parameter value")
+        elif (
+            parameter.get("UsePreviousValue") is not True
+            or "ParameterValue" in parameter
+        ):
+            raise GateError("change set request modifies a preserved stack parameter")
 
 
 def environment_contract(source: str) -> dict[str, Any]:
@@ -473,6 +487,7 @@ def main(argv: list[str] | None = None) -> int:
     preserved.add_argument("stack_json")
     preserved.add_argument("change_parameters_json")
     preserved.add_argument("--release-sha", required=True)
+    preserved.add_argument("--resolved-values", action="store_true")
     environment = subparsers.add_parser("template-environment-policy")
     environment.add_argument("template")
     environment.add_argument("policy_json")
@@ -510,6 +525,7 @@ def main(argv: list[str] | None = None) -> int:
                 _read_json(args.stack_json),
                 _read_json(args.change_parameters_json),
                 release_sha=args.release_sha,
+                resolved_values=args.resolved_values,
             )
         elif args.command == "template-environment-policy":
             require_environment_contract(

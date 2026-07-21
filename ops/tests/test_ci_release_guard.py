@@ -344,7 +344,7 @@ class StackGuardTests(unittest.TestCase):
             with self.subTest(stack=stack), self.assertRaises(release_guard.GateError):
                 release_guard.require_stack_invariants(stack)
 
-    def test_change_set_parameters_use_previous_value_except_release_sha(self):
+    def test_requested_parameters_use_previous_value_except_release_sha(self):
         sha = "b" * 40
         stack = {"Parameters": [
             {"ParameterKey": "Stage", "ParameterValue": "prod"},
@@ -365,6 +365,35 @@ class StackGuardTests(unittest.TestCase):
         ):
             with self.assertRaises(release_guard.GateError):
                 release_guard.require_preserved_parameters(stack, invalid, release_sha=sha)
+
+    def test_provider_resolved_parameters_equal_the_deployed_values(self):
+        sha = "b" * 40
+        stack = {"Parameters": [
+            {"ParameterKey": "Stage", "ParameterValue": "prod"},
+            {"ParameterKey": "SecretArn", "ParameterValue": "****"},
+            {"ParameterKey": "ReleaseSha", "ParameterValue": "a" * 40},
+        ]}
+        resolved = [
+            {"ParameterKey": "Stage", "ParameterValue": "prod"},
+            {"ParameterKey": "SecretArn", "ParameterValue": "****"},
+            {"ParameterKey": "ReleaseSha", "ParameterValue": sha},
+        ]
+        release_guard.require_preserved_parameters(
+            stack, resolved, release_sha=sha, resolved_values=True
+        )
+        for invalid in (
+            resolved[:-1],
+            [*resolved[:1], {"ParameterKey": "SecretArn", "ParameterValue": "changed"}, resolved[-1]],
+            [*resolved[:-1], {"ParameterKey": "ReleaseSha", "ParameterValue": "c" * 40}],
+            [
+                {"ParameterKey": "Stage", "UsePreviousValue": True},
+                *resolved[1:],
+            ],
+        ):
+            with self.assertRaises(release_guard.GateError):
+                release_guard.require_preserved_parameters(
+                    stack, invalid, release_sha=sha, resolved_values=True
+                )
 
     def test_tracked_source_and_built_environment_contracts_are_exact(self):
         policy = json.loads((ROOT / "ops/ci/template_environment_policy.json").read_text())
@@ -1176,6 +1205,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("gate-change-set", collect)
         self.assertIn("release_intent.json", collect)
         self.assertIn("previous-parameters", plan)
+        self.assertIn("EXPECTED_REQUESTED_PARAMETERS_PATH", plan)
         self.assertIn("--release-sha", plan)
         self.assertIn("ARTIFACT_KMS_KEY_ARN", plan)
         self.assertIn("--kms-key-id", plan)
@@ -1199,6 +1229,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("public_posture_smoke.py", smoke)
         self.assertIn("audit_stacks.json", multi_drift)
         self.assertIn("detect-stack-drift", multi_drift)
+        self.assertIn("--resolved-values", collect)
 
     def test_scheduled_workflow_runs_history_posture_and_versioned_multi_stack_drift(self):
         scheduled = (ROOT / ".github/workflows/scheduled-security.yml").read_text(

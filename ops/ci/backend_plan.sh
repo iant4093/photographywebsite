@@ -115,6 +115,7 @@ EXPECTED_STACK_NAME="$STACK_NAME" \
 EXPECTED_RELEASE_SHA="$GITHUB_SHA" \
 EXPECTED_TEMPLATE_SHA256="$packaged_template_sha" \
 EXPECTED_STACK_PARAMETERS_PATH="$workspace/stack.json" \
+EXPECTED_REQUESTED_PARAMETERS_PATH="$workspace/parameters.json" \
 CHANGE_PAGES_PATH="$workspace/change-pages.json" \
   ./ops/ci/collect_change_set.sh
 
