@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -411,6 +412,91 @@ class InspectorHelperTests(unittest.TestCase):
             "ENABLED",
         )
         self.assertEqual(inspector_helper.resource_status({}, "lambdaCode"), "UNKNOWN")
+
+    def test_waits_through_enabling_until_both_modes_are_enabled(self) -> None:
+        statuses = [
+            {
+                "accountId": "123456789012",
+                "resourceState": {
+                    "lambda": {"status": "DISABLED"},
+                    "lambdaCode": {"status": "DISABLED"},
+                },
+            },
+            {
+                "accountId": "123456789012",
+                "resourceState": {
+                    "lambda": {"status": "ENABLING"},
+                    "lambdaCode": {"status": "ENABLING"},
+                },
+            },
+            {
+                "accountId": "123456789012",
+                "resourceState": {
+                    "lambda": {"status": "ENABLED"},
+                    "lambdaCode": {"status": "ENABLING"},
+                },
+            },
+            {
+                "accountId": "123456789012",
+                "resourceState": {
+                    "lambda": {"status": "ENABLED"},
+                    "lambdaCode": {"status": "ENABLED"},
+                },
+            },
+        ]
+        with patch.object(
+            inspector_helper, "get_account_status", side_effect=statuses
+        ), patch.object(inspector_helper.time, "monotonic", return_value=0), patch.object(
+            inspector_helper.time, "sleep"
+        ) as sleep:
+            result = inspector_helper.wait_until_lambda_scanning_enabled(
+                account_id="123456789012",
+                profile=None,
+                region="us-west-2",
+                timeout_seconds=30,
+                poll_interval_seconds=5,
+            )
+        self.assertEqual(result, ("ENABLED", "ENABLED"))
+        self.assertEqual(sleep.call_count, 3)
+
+    def test_wait_fails_closed_on_unexpected_state_and_timeout(self) -> None:
+        failed = {
+            "accountId": "123456789012",
+            "resourceState": {
+                "lambda": {"status": "ENABLING"},
+                "lambdaCode": {"status": "FAILED"},
+            },
+        }
+        with patch.object(
+            inspector_helper, "get_account_status", return_value=failed
+        ), self.assertRaises(RuntimeError):
+            inspector_helper.wait_until_lambda_scanning_enabled(
+                account_id="123456789012",
+                profile=None,
+                region="us-west-2",
+                timeout_seconds=30,
+                poll_interval_seconds=5,
+            )
+
+        still_disabled = {
+            "accountId": "123456789012",
+            "resourceState": {
+                "lambda": {"status": "DISABLED"},
+                "lambdaCode": {"status": "DISABLED"},
+            },
+        }
+        with patch.object(
+            inspector_helper, "get_account_status", return_value=still_disabled
+        ), patch.object(
+            inspector_helper.time, "monotonic", side_effect=[0, 31]
+        ), self.assertRaises(TimeoutError):
+            inspector_helper.wait_until_lambda_scanning_enabled(
+                account_id="123456789012",
+                profile=None,
+                region="us-west-2",
+                timeout_seconds=30,
+                poll_interval_seconds=5,
+            )
 
 
 if __name__ == "__main__":

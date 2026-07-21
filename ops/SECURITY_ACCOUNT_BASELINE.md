@@ -336,8 +336,14 @@ python3 ops/enable_inspector_lambda_scanning.py \
 ```
 
 The helper rejects partial or preexisting enrollment instead of taking over an
-unknown configuration. It has no disable action. After an approved apply,
-verify both modes reach `ENABLED`, review findings without exporting code or
+unknown configuration. It has no disable action. After an approved apply, it
+waits up to five minutes by default for both requested modes to move through
+the eventually consistent `DISABLED`/`ENABLING` transition and reach exactly
+`ENABLED`; any other state or a bounded-wait expiry fails the operation. A mode
+that remains `DISABLED` never satisfies the postcondition.
+`--wait-timeout-seconds` accepts 30 through 900 seconds and
+`--poll-interval-seconds` accepts 1 through 30 seconds when a different bounded
+wait is operationally necessary. Review findings without exporting code or
 secrets, and document a rollback decision separately if cost or compatibility
 is unacceptable.
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 from typing import Any
 
 from aws_stack import aws_json
@@ -19,6 +20,10 @@ from aws_stack import aws_json
 ACCOUNT_PATTERN = re.compile(r"^[0-9]{12}$")
 REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-[0-9]$")
 CONFIRMATION = "enable-inspector-lambda-code-scanning"
+MIN_WAIT_TIMEOUT_SECONDS = 30
+MAX_WAIT_TIMEOUT_SECONDS = 900
+MIN_POLL_INTERVAL_SECONDS = 1
+MAX_POLL_INTERVAL_SECONDS = 30
 
 
 def get_account_status(
@@ -80,6 +85,40 @@ def validate_apply_guards(
         raise SystemExit(f"--confirm must be exactly {CONFIRMATION}")
 
 
+def wait_until_lambda_scanning_enabled(
+    *,
+    account_id: str,
+    profile: str | None,
+    region: str,
+    timeout_seconds: int,
+    poll_interval_seconds: int,
+) -> tuple[str, str]:
+    """Wait for only the requested Inspector Lambda modes to become enabled."""
+    deadline = time.monotonic() + timeout_seconds
+    # Inspector can report the aggregate account as ENABLING before these
+    # resource-level statuses reflect the accepted request. DISABLED is only a
+    # bounded transitional state here; it never satisfies the postcondition.
+    accepted_states = {"ENABLED", "ENABLING", "DISABLED"}
+    while True:
+        account = get_account_status(account_id, profile, region)
+        lambda_state = resource_status(account, "lambda")
+        lambda_code_state = resource_status(account, "lambdaCode")
+        if lambda_state == lambda_code_state == "ENABLED":
+            return lambda_state, lambda_code_state
+        if lambda_state not in accepted_states or lambda_code_state not in accepted_states:
+            raise RuntimeError(
+                "Inspector entered an unexpected state before both requested "
+                "Lambda scanning modes were enabled"
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                "Inspector did not enable both requested Lambda scanning modes "
+                "before the bounded wait expired"
+            )
+        time.sleep(min(poll_interval_seconds, remaining))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", default="us-west-2")
@@ -90,6 +129,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-lambda-state", choices=["DISABLED"])
     parser.add_argument("--expected-lambda-code-state", choices=["DISABLED"])
     parser.add_argument("--confirm")
+    parser.add_argument("--wait-timeout-seconds", type=int, default=300)
+    parser.add_argument("--poll-interval-seconds", type=int, default=5)
     return parser.parse_args()
 
 
@@ -97,6 +138,18 @@ def main() -> int:
     args = parse_args()
     if not REGION_PATTERN.fullmatch(args.region):
         raise SystemExit("--region is not a valid AWS region name")
+    if not MIN_WAIT_TIMEOUT_SECONDS <= args.wait_timeout_seconds <= MAX_WAIT_TIMEOUT_SECONDS:
+        raise SystemExit(
+            f"--wait-timeout-seconds must be between {MIN_WAIT_TIMEOUT_SECONDS} "
+            f"and {MAX_WAIT_TIMEOUT_SECONDS}"
+        )
+    if not MIN_POLL_INTERVAL_SECONDS <= args.poll_interval_seconds <= MAX_POLL_INTERVAL_SECONDS:
+        raise SystemExit(
+            f"--poll-interval-seconds must be between {MIN_POLL_INTERVAL_SECONDS} "
+            f"and {MAX_POLL_INTERVAL_SECONDS}"
+        )
+    if args.poll_interval_seconds >= args.wait_timeout_seconds:
+        raise SystemExit("--poll-interval-seconds must be less than --wait-timeout-seconds")
     identity = aws_json(["sts", "get-caller-identity"], args.profile, args.region)
     account_id = identity.get("Account")
     if not isinstance(account_id, str) or not ACCOUNT_PATTERN.fullmatch(account_id):
@@ -147,16 +200,17 @@ def main() -> int:
         args.profile,
         args.region,
     )
-    after = get_account_status(account_id, args.profile, args.region)
-    after_lambda = resource_status(after, "lambda")
-    after_lambda_code = resource_status(after, "lambdaCode")
-    accepted = {"ENABLED", "ENABLING"}
-    if after_lambda not in accepted or after_lambda_code not in accepted:
-        raise RuntimeError("Inspector did not accept both requested Lambda scanning modes")
+    after_lambda, after_lambda_code = wait_until_lambda_scanning_enabled(
+        account_id=account_id,
+        profile=args.profile,
+        region=args.region,
+        timeout_seconds=args.wait_timeout_seconds,
+        poll_interval_seconds=args.poll_interval_seconds,
+    )
     print(
         json.dumps(
             {
-                "result": "enable-request-accepted",
+                "result": "enabled",
                 "lambdaScanning": after_lambda,
                 "lambdaCodeScanning": after_lambda_code,
             },

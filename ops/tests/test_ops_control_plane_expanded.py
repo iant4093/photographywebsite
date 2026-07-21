@@ -502,7 +502,7 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
             }
 
         with patch.object(inspector, "aws_json", side_effect=rejected), self.assertRaisesRegex(
-            RuntimeError, "did not accept"
+            RuntimeError, "unexpected state"
         ):
             self.run_main(
                 inspector,
@@ -589,7 +589,19 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
             )
         self.assertEqual(result, 0)
         self.assertTrue(any(call[:2] == ["inspector2", "enable"] for call in calls))
-        self.assertIn("enable-request-accepted", output)
+        self.assertIn('"result": "enabled"', output)
+
+        for arguments in (
+            ("--wait-timeout-seconds", "29"),
+            ("--wait-timeout-seconds", "901"),
+            ("--poll-interval-seconds", "0"),
+            ("--poll-interval-seconds", "31"),
+            ("--wait-timeout-seconds", "30", "--poll-interval-seconds", "30"),
+        ):
+            with self.subTest(arguments=arguments), patch.object(
+                sys, "argv", [inspector.__file__, *arguments]
+            ), self.assertRaises(SystemExit):
+                inspector.main()
 
     def test_preflight_aws_call_errors_names_and_main(self):
         completed = Mock(returncode=0, stdout='{"ok":true}', stderr="")
