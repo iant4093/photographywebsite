@@ -108,7 +108,7 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("AllSupported: false", MANAGED)
         self.assertNotIn("IncludeGlobalResourceTypes:", MANAGED)
         delivery_channel = resource_block(MANAGED, "ConfigDeliveryChannel")
-        self.assertIn("DependsOn: ConfigRecorder", delivery_channel)
+        self.assertNotIn("DependsOn: ConfigRecorder", delivery_channel)
         self.assertIn("ResourceTypes:", MANAGED)
 
     def test_scheduled_backup_role_cannot_restore_and_arn_is_local(self) -> None:

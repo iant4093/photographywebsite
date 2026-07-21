@@ -777,10 +777,27 @@ Resources:
               StringEquals:
                 acm:ValidationMethod: DNS
                 aws:RequestedRegion: us-west-2
-                aws:RequestTag/Application: IanTruongPhotography
               ForAllValues:StringEquals:
                 acm:DomainNames:
                   - !Ref ApplicationApiDomainName
+              'Null':
+                acm:DomainNames: 'false'
+                acm:ValidationMethod: 'false'
+          - Sid: AddInitialApplicationCertificateTags
+            Effect: Allow
+            Action: acm:AddTagsToCertificate
+            Resource: !Sub 'arn:${AWS::Partition}:acm:us-west-2:${AWS::AccountId}:certificate/*'
+            Condition:
+              StringEquals:
+                aws:RequestTag/Application: IanTruongPhotography
+              ForAllValues:StringLike:
+                aws:TagKeys:
+                  - Application
+                  - Stage
+                  - 'aws:cloudformation:*'
+              'Null':
+                aws:RequestTag/Application: 'false'
+                aws:TagKeys: 'false'
           - Sid: ManageTaggedRegionalApiCertificates
             Effect: Allow
             Action:
@@ -853,6 +870,9 @@ Resources:
               - cloudfront:CreateDistribution
               - cloudfront:CreateOriginAccessControl
               - cloudfront:CreateResponseHeadersPolicy
+              - cloudfront:DeleteCachePolicy
+              - cloudfront:DeleteOriginAccessControl
+              - cloudfront:DeleteResponseHeadersPolicy
               - cloudfront:GetCachePolicy
               - cloudfront:GetDistribution
               - cloudfront:GetDistributionConfig
@@ -877,6 +897,10 @@ Resources:
               - cloudfront:CreateDistribution
               - cloudfront:CreateOriginAccessControl
               - cloudfront:CreateResponseHeadersPolicy
+              - cloudfront:ListCachePolicies
+              - cloudfront:ListDistributions
+              - cloudfront:ListOriginAccessControls
+              - cloudfront:ListResponseHeadersPolicies
             Resource: '*'
   CloudFormationExecutionEncryptionAndObservabilityPolicy:
     Type: AWS::IAM::ManagedPolicy

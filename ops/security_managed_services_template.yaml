@@ -169,7 +169,6 @@ Resources:
   ConfigDeliveryChannel:
     Type: AWS::Config::DeliveryChannel
     Condition: CreateConfig
-    DependsOn: ConfigRecorder
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:

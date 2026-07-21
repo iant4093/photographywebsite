@@ -648,8 +648,8 @@ Resources:
         ParametersInCacheKeyAndForwardedToOrigin:
           CookiesConfig:
             CookieBehavior: none
-          EnableAcceptEncodingBrotli: true
-          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
           HeadersConfig:
             HeaderBehavior: none
           QueryStringsConfig:

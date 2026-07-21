@@ -130,6 +130,8 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
         self.assertIn("/albums/*/preview/v2/*", policy)
         for expected in ("DefaultTTL: 0", "MaxTTL: 0", "MinTTL: 0"):
             self.assertIn(expected, cache)
+        self.assertIn("EnableAcceptEncodingBrotli: false", cache)
+        self.assertIn("EnableAcceptEncodingGzip: false", cache)
         self.assertIn("PathPattern: 'albums/*/preview/v2/*'", distribution)
         self.assertIn("CachePolicyId: !Ref PreviewMediaCachePolicy", distribution)
 

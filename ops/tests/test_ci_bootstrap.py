@@ -194,14 +194,70 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("*.${ApplicationApiDomainName}.", dns)
         self.assertNotIn("Resource: '*'", dns)
 
+    def test_cloudfront_permissions_cover_reversible_application_resource_lifecycles(self):
+        execution = execution_permissions()
+        managed = statement_block(execution, "ManageApplicationCloudFront")
+        for action in (
+            "cloudfront:DeleteCachePolicy",
+            "cloudfront:DeleteOriginAccessControl",
+            "cloudfront:DeleteResponseHeadersPolicy",
+            "cloudfront:GetCachePolicy",
+            "cloudfront:GetDistribution",
+            "cloudfront:GetDistributionConfig",
+            "cloudfront:GetOriginAccessControl",
+            "cloudfront:GetResponseHeadersPolicy",
+            "cloudfront:ListTagsForResource",
+            "cloudfront:TagResource",
+            "cloudfront:UntagResource",
+            "cloudfront:UpdateCachePolicy",
+            "cloudfront:UpdateDistribution",
+            "cloudfront:UpdateOriginAccessControl",
+            "cloudfront:UpdateResponseHeadersPolicy",
+        ):
+            self.assertIn(action, managed)
+        for resource_family in (
+            "distribution/*",
+            "cache-policy/*",
+            "origin-access-control/*",
+            "response-headers-policy/*",
+        ):
+            self.assertIn(resource_family, managed)
+        self.assertNotIn("Resource: '*'", managed)
+        self.assertNotIn("cloudfront:DeleteDistribution", managed)
+
+        create_and_list = statement_block(execution, "CreateCloudFrontResources")
+        for action in (
+            "cloudfront:CreateCachePolicy",
+            "cloudfront:CreateDistribution",
+            "cloudfront:CreateOriginAccessControl",
+            "cloudfront:CreateResponseHeadersPolicy",
+            "cloudfront:ListCachePolicies",
+            "cloudfront:ListDistributions",
+            "cloudfront:ListOriginAccessControls",
+            "cloudfront:ListResponseHeadersPolicies",
+        ):
+            self.assertIn(action, create_and_list)
+        self.assertIn("Resource: '*'", create_and_list)
+
+        protection = statement_block(execution, "ProtectRetainedApplicationData")
+        self.assertIn("cloudfront:DeleteDistribution", protection)
+
     def test_certificate_secret_and_managed_policy_lifecycles_are_narrow_and_complete(self):
         execution = execution_permissions()
         request = statement_block(execution, "RequestExactRegionalApiCertificate")
         self.assertIn("acm:RequestCertificate", request)
         self.assertIn("acm:ValidationMethod: DNS", request)
         self.assertIn("acm:DomainNames", request)
-        self.assertIn("aws:RequestTag/Application: IanTruongPhotography", request)
         self.assertIn("aws:RequestedRegion: us-west-2", request)
+        self.assertIn("acm:DomainNames: 'false'", request)
+        self.assertIn("acm:ValidationMethod: 'false'", request)
+        self.assertNotIn("aws:RequestTag/Application", request)
+        initial_tags = statement_block(execution, "AddInitialApplicationCertificateTags")
+        self.assertIn("acm:AddTagsToCertificate", initial_tags)
+        self.assertIn("aws:RequestTag/Application: IanTruongPhotography", initial_tags)
+        self.assertIn("aws:TagKeys:", initial_tags)
+        self.assertIn("'aws:cloudformation:*'", initial_tags)
+        self.assertIn("aws:RequestTag/Application: 'false'", initial_tags)
         certificate = statement_block(execution, "ManageTaggedRegionalApiCertificates")
         for action in (
             "acm:AddTagsToCertificate",

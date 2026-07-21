@@ -218,11 +218,19 @@ wildcard actions. The release KMS key policy uses the standard account-root
 external principal access. The execution role's allow statements use
 `Resource: '*'` only for Lambda event-source-mapping creation/listing, Secrets
 Manager random-password generation, ACM certificate requests, tagged Cognito,
-CloudFront and KMS creation, and global log/alarm inventory reads. Those APIs do
-not expose a usable resource ARN before creation (or do not support resource
-authorization). Creation is narrowed with exact region/account families,
-request tags, the exact certificate domain and DNS validation method, or the
-exact `ian-website-*` function condition where the service supports it.
+CloudFront creation and account inventory, KMS creation, and global log/alarm
+inventory reads. Those APIs do not expose a usable resource ARN before
+creation (or do not support resource authorization). The ACM certificate grant
+requires the exact API-origin domain, DNS validation, and deployment region;
+its initial tag call permits only the application, stage, and CloudFormation
+tag-key families before later certificate access becomes application-tag
+scoped. CloudFront cache-policy,
+response-header-policy, and origin-access-control update and rollback deletion
+remain bounded to those exact account ARN families; distribution deletion
+remains explicitly denied. Creation is narrowed with exact region/account
+families, request tags where the resource provider supplies them, the exact
+certificate domain and DNS validation method,
+or the exact `ian-website-*` function condition where the service supports it.
 The exact regional `Serverless-2016-10-31` transform ARN is the only
 CloudFormation macro resource the application execution role may invoke while
 creating the already-guarded application change set.
