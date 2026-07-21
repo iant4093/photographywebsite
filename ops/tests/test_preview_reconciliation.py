@@ -265,7 +265,9 @@ class PreviewReconciliationTests(unittest.TestCase):
         rendered = output.call_args.args[0]
         summary = json.loads(rendered)
         self.assertEqual(summary["status"], "pass")
+        self.assertEqual(summary["account"], "verified")
         self.assertEqual(summary["objectValidatedCount"], 2)
+        self.assertNotIn('"account": "123"', rendered)
         self.assertNotIn(ALBUM_ID, rendered)
         self.assertNotIn(RAW_KEY, rendered)
         self.assertNotIn(media_id, rendered)

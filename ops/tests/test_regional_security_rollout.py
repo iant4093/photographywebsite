@@ -28,8 +28,18 @@ AGGREGATOR_ARN = (
     "00000000-0000-4000-8000-000000000000"
 )
 GUARDDUTY_FEATURES = [
-    {"Name": name, "Status": status}
-    for name, status in rollout.EXPECTED_GUARDDUTY_FEATURES.items()
+    {"Name": "S3_DATA_EVENTS", "Status": "ENABLED"},
+    {"Name": "EKS_AUDIT_LOGS", "Status": "DISABLED"},
+    {"Name": "EBS_MALWARE_PROTECTION", "Status": "DISABLED"},
+    {"Name": "RDS_LOGIN_EVENTS", "Status": "DISABLED"},
+    {"Name": "LAMBDA_NETWORK_LOGS", "Status": "ENABLED"},
+    {"Name": "RUNTIME_MONITORING", "Status": "DISABLED"},
+    {"Name": "CLOUD_TRAIL", "Status": "ENABLED"},
+    {"Name": "DNS_LOGS", "Status": "ENABLED"},
+    {"Name": "FLOW_LOGS", "Status": "ENABLED"},
+    {"Name": "AI_ANALYST", "Status": "DISABLED"},
+    {"Name": "AI_PROTECTION", "Status": "DISABLED"},
+    {"Name": "EKS_RUNTIME_MONITORING", "Status": "DISABLED"},
 ]
 
 
@@ -195,6 +205,10 @@ class RegionalSecurityPlanTests(unittest.TestCase):
             "existing",
         )
         self.assertEqual(healthy_calls[1][-2:], ["--detector-id", "private-id"])
+        self.assertEqual(
+            {item["Name"]: item["Status"] for item in GUARDDUTY_FEATURES},
+            rollout.EXPECTED_GUARDDUTY_FEATURES,
+        )
 
         unhealthy_details = (
             {"Status": "DISABLED", "Features": []},
@@ -211,6 +225,28 @@ class RegionalSecurityPlanTests(unittest.TestCase):
                 "Features": [
                     {"Name": name, "Status": "ENABLED" if name == "RUNTIME_MONITORING" else status}
                     for name, status in rollout.EXPECTED_GUARDDUTY_FEATURES.items()
+                ],
+            },
+            {
+                "Status": "ENABLED",
+                "Features": [
+                    feature
+                    for feature in GUARDDUTY_FEATURES
+                    if feature["Name"] != "AI_ANALYST"
+                ],
+            },
+            {
+                "Status": "ENABLED",
+                "Features": [
+                    {
+                        "Name": feature["Name"],
+                        "Status": (
+                            "DISABLED"
+                            if feature["Name"] == "DNS_LOGS"
+                            else feature["Status"]
+                        ),
+                    }
+                    for feature in GUARDDUTY_FEATURES
                 ],
             },
             {

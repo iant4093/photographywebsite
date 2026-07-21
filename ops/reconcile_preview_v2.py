@@ -417,7 +417,7 @@ def main() -> int:
             entry_validated += 1
 
     summary = {
-        "account": account,
+        "account": "verified",
         "eligibleInventoryCount": len(inventory),
         "eligibleInventoryDigest": digest,
         "entryValidatedCount": entry_validated,

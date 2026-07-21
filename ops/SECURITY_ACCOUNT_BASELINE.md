@@ -102,9 +102,13 @@ current owner:
 
 - Existing recorder or channel: `ConfigDeploymentMode=skip`.
 - Existing detector: `GuardDutyDeploymentMode=skip` only after `get-detector`
-  proves it is enabled and all six feature states exactly match the reviewed
-  template (S3/Lambda enabled; EKS, EBS malware, RDS, and runtime monitoring
-  disabled). A suspended, drifted, or newly unreviewed feature blocks rollout.
+  proves it is enabled and all 12 reported feature states exactly match the
+  reviewed inventory. The six CloudFormation-configurable states are S3/Lambda
+  enabled and EKS audit, EBS malware, RDS login, and runtime monitoring
+  disabled. GuardDuty's service-managed CloudTrail, DNS, and flow-log sources
+  must be enabled; AI analyst, AI protection, and legacy EKS runtime monitoring
+  must be disabled. A missing, extra, suspended, drifted, or newly unreviewed
+  feature blocks rollout.
   Check Organizations and delegated-
   administrator ownership before changing features.
 - Existing hub: `SecurityHubDeploymentMode=skip`; check central configuration,
@@ -401,10 +405,14 @@ intentionally removed or externally managed later, update this parameter only
 after an ownership review; an empty value removes the Config object selector
 but leaves management-event coverage intact.
 
-GuardDuty features are explicit: S3 data events and Lambda network logs are
+GuardDuty's complete reported feature inventory is explicit. CloudFormation
+configures six protection plans: S3 data events and Lambda network logs are
 enabled; EKS audit logs, EBS malware protection, RDS login events, and runtime
-monitoring are disabled. Enable other protection plans only with a documented
-threat model, supported-resource inventory, and cost approval. Confirm
+monitoring are disabled. The regional verifier additionally requires the
+service-managed CloudTrail, DNS, and flow-log sources to be enabled and AI
+analyst, AI protection, and legacy EKS runtime monitoring to be disabled.
+Enable other protection plans only with a documented threat model,
+supported-resource inventory, and cost approval. Confirm
 Security Hub standards and organization ownership before creating the hub.
 The Config layer also checks public S3 writes, default S3 encryption, public
 Lambda function access, and customer-managed KMS key rotation. These rules use
