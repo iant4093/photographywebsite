@@ -1,14 +1,14 @@
-# Guarded AWS account security rollout
+# Guarded AWS account security operations
 
-These templates replace the former all-in-one security baseline. They are
+These templates implement the account security baseline. They are
 separated by lifecycle and ownership boundary so a failed update or stack
 deletion cannot strand a retained CloudTrail while deleting its bucket policy,
 log group, or delivery role.
 
-Nothing in this rollout creates an SNS subscription, sends email, deploys a
-stack, imports a resource, enables Inspector, or enables another paid account
-service by itself. Those are explicit owner decisions after inventory and a
-reviewed change set.
+Reading or validating this repository never creates an SNS subscription, sends
+email, deploys a stack, imports a resource, enables Inspector, or enables
+another paid account service. Those remain explicit owner decisions after
+inventory and a reviewed change set.
 
 ## Files and ownership
 
@@ -19,12 +19,12 @@ reviewed change set.
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
 | Home detection posture | `ci/home_security_posture.py` | Aggregate-only, read-only verification of the exact home-Region GuardDuty and Security Hub contract. It fails closed and never prints provider identifiers, tags, findings, or Region names. |
 | Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained CMK-encrypted vault. Creation and Vault Lock default off. |
-| Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One retained, alert-only account budget. Creation defaults off and requires an owner-approved amount plus two distinct confirmed human destinations. |
+| Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One retained, alert-only account budget. Creation defaults off and requires an owner-approved amount plus one confirmed owner-controlled human destination. |
 | Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Complete source signal inventory, privacy contract, runbook routing, response ownership, and quarterly delivery-test state. |
 | Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors become `skip-inventory-incomplete`, never “absent.” |
 | Inspector | `enable_inspector_lambda_scanning.py` | Dry-run-by-default Inspector Lambda and Lambda code scanning enrollment with exact apply guards. |
 
-Use `us-west-2` as the initial home region. The foundation trail already records
+`us-west-2` is the reviewed home Region. The foundation trail already records
 multi-region and global management events, so do not deploy another foundation
 copy elsewhere. Config delivery, the managed GuardDuty detector, Security Hub,
 Access Analyzer, and their notification routing are home-region-only in this
@@ -167,7 +167,7 @@ termination protection, and rerun the home posture check after the stack reaches
 a stable state. Do not infer GuardDuty or Security Hub cross-Region coverage
 from the multi-region CloudTrail foundation.
 
-## Staged rollout
+## Guarded stack operations
 
 ### 1. Audit foundation
 
@@ -225,9 +225,11 @@ not print finding messages.
 
 ### 3. Managed security services
 
-First deploy `security_managed_services_template.yaml` with every mode at
-`skip`; that produces a no-op singleton layer. Only a fresh complete inventory
-proving one service absent justifies its exact `create-confirmed-absent` value.
+For a new account or an intentional re-creation, first deploy
+`security_managed_services_template.yaml` with every mode at `skip`; that
+produces a no-op singleton layer. Routine updates preserve the current live
+parameters. Only a fresh complete inventory proving one service absent justifies
+its exact `create-confirmed-absent` value.
 
 Config no longer accepts or uses the audit-foundation bucket. AWS Config does
 not support a delivery channel targeting an S3 bucket with Object Lock default
@@ -487,8 +489,10 @@ Follow [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md). The source-controlled budget
 has no default spending amount, email address, subscription, resource action,
 or automatic security-control disablement. Its read-only preflight recommends
 creation only when the exact budget name is absent, the exact encrypted security
-topic exists, and two distinct confirmed human-compatible destinations are
-present. HTTPS, SQS, and Lambda fan-out do not satisfy that ownership gate.
+topic exists, and one confirmed owner-controlled human-compatible destination is
+present. HTTPS, SQS, and Lambda fan-out do not satisfy that ownership gate. The
+separate alarm-routing readiness contract still requires primary and backup
+responders with two tested destinations.
 
 The current checked-in alarm registry deliberately remains
 `blocked-no-confirmed-human-destinations`: primary owner, backup owner, and the

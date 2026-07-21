@@ -5,12 +5,9 @@ of truth for edge monitoring. It does not own either CloudFront distribution.
 It owns only each distribution's real-time metrics subscription, a 5xx alarm
 for each distribution, and one CloudWatch dashboard.
 
-The unused CloudWatch RUM and Synthetics experiment has been removed. The
-frontend no longer loads a browser telemetry SDK, accepts telemetry-specific
-build variables, or creates an unauthenticated identity pool. The stack no
-longer creates a canary, canary execution role, or artifact bucket. Reintroducing
-browser telemetry or synthetic probes requires a new privacy, security, cost,
-dependency, and operational review; it is not an observability-stack toggle.
+Browser RUM and synthetic canaries are not part of this stack. Adding either
+requires a new privacy, security, cost, dependency, and operational review; it
+is not an observability-stack toggle.
 
 ## Cost and data boundary
 
@@ -72,21 +69,16 @@ aws cloudformation validate-template \
   --template-body file://ops/observability_template.yaml
 ```
 
-## Update and cleanup procedure
+## Update procedure
 
 1. Run update-mode preflight and save only its aggregate result.
 2. Create a CloudFormation change set with the exact two distribution IDs,
    optional exact SNS topic ARN, and tested `ReleaseSha`.
 3. Confirm the change set preserves both monitoring subscriptions, both 5xx
-   alarms, and the dashboard. For the one-time cleanup update, it may remove
-   only the retired browser-telemetry and synthetic-probe resources.
+   alarms, and the dashboard, and changes no other resource.
 4. Execute the reviewed change set and retain termination protection.
-5. Because the retired resources had retain policies, separately inventory the
-   resulting orphaned resources, prove they are no longer referenced, and
-   delete them one at a time under the approved cleanup record. Never delete a
-   CloudFront distribution, application resource, media object, or security
-   evidence as part of this cleanup.
-6. Run the scheduled drift audit and confirm the full observability stack is in
+5. Run the public edge-posture smoke and scheduled drift audit. Confirm the
+   canonical site remains healthy and the full observability stack is in
    sync without exclusions or service-specific posture bypasses.
 
 ## Alarm ownership and triage

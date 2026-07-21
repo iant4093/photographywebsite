@@ -1,8 +1,8 @@
 # CI/CD operations guide
 
 The workflows under `.github/workflows/` implement a credential-free GitHub
-Actions release path. They are deliberately fail-closed: merging must remain
-blocked until the three independent coverage domains meet 80%, and production
+Actions release path. They are deliberately fail-closed: a production release
+remains blocked until the four independent coverage domains meet 80%, and
 deployment cannot begin until the AWS/GitHub bootstrap described below exists.
 
 ## Workflow contract
@@ -284,7 +284,7 @@ aws cloudformation validate-template \
 Deployment is a separately approved one-time operation. Use a dedicated stack,
 review its change set, pass `CAPABILITY_NAMED_IAM`, select the preflight-approved
 provider mode, and enable termination protection immediately after creation.
-Never run these commands from an unreviewed pull request:
+Never run these commands from an unreviewed commit:
 
 ```bash
 aws cloudformation deploy \
@@ -327,13 +327,13 @@ Copy the stack outputs into the matching GitHub variables:
 | `FrontendRoleArn` | `AWS_FRONTEND_ROLE_ARN` |
 | `AuditRoleArn` | `AWS_AUDIT_ROLE_ARN` |
 
-Set `AWS_ACCOUNT_ID`, `AWS_REGION=us-west-2`, `AWS_STACK_NAME=ian-website`,
-`FRONTEND_BUCKET=iantruong-photography`, and
-`FRONTEND_DISTRIBUTION_ID=EIOCCNR8XGQ1B` separately. No GitHub Environment
-setup is required. The OIDC subject itself restricts AWS access to
+Set the remaining repository variables from the exact current account, Region,
+application stack, frontend bucket, and frontend distribution. Do not commit
+their physical identifiers to this runbook. No GitHub Environment setup is
+required. The OIDC subject itself restricts AWS access to
 `refs/heads/main`; scheduled and manual workflows additionally fail when their
-control revision is not running from that exact ref. A pull request ref cannot
-assume any production role.
+control revision is not running from that exact ref. No non-`main` ref can
+assume a production role.
 
 The execution identity policy deliberately has no `AdministratorAccess` and no
 wildcard actions. The release KMS key policy uses the standard account-root
@@ -377,28 +377,30 @@ filter, write, or delete log events; log-group creation and retention remain
 separately limited to the exact application families.
 
 Front-door updates are otherwise bounded to
-`origin-api.iantruongphotography.com`, hosted zone `Z0915663I4P8Y0MEDWH`, its
+`origin-api.iantruongphotography.com`, the exact hosted zone supplied by the
+reviewed stack configuration, its
 API Gateway domain/mapping/tag paths, application-tagged regional ACM
 certificates, and A/CNAME changes at that hostname or its validation-record
 subtree. The Route53 change-status ARN necessarily contains a change-ID
 wildcard, but is not a `Resource: '*'` grant. The generated front-door secret
 uses only its `ian-photography/front-door/*` ARN family, and its read-only IAM
 managed policy uses only the application stack's policy-name family. Retained
-resources remain protected by explicit destructive denies. Before enabling the
-workflow, run IAM Access Analyzer policy validation and a sandboxed change-set
+resources remain protected by explicit destructive denies. When changing these
+policies, run IAM Access Analyzer validation and a sandboxed change-set
 test against the current `backend/template.yaml`; extend only the specific
 missing action/resource reported by CloudTrail, never a managed administrator
 policy.
 
 ## Repository rules
 
-Protect `main` from direct/force pushes and deletion. Require pull requests,
-conversation resolution, the `quality-gate` check, dependency review, and
-CodeQL. Apply the rules to administrators and require CODEOWNER review for
-workflow, infrastructure, lockfile, operations, and security-boundary changes.
-Enable GitHub secret scanning and push protection.
+`main` is the sole deployment branch, and an ordinary push to it starts the
+complete production quality, security, deployment, and smoke workflow. Permit
+ordinary reviewed pushes, but prohibit force pushes and branch deletion. Enable
+GitHub secret scanning and push protection. Treat workflow, infrastructure,
+lockfile, operations, and security-boundary commits as deployment-authorizing
+changes and review them before pushing.
 
-Do not enable automatic production deployment until all of these are true:
+Keep automatic production deployment enabled only while all of these are true:
 
 1. Frontend, backend, ops, and the separately packaged Node preview worker line
    and branch gates independently pass at 80%.
@@ -412,7 +414,7 @@ Do not enable automatic production deployment until all of these are true:
 
 ## Local parity
 
-Run these before opening a pull request:
+Run these before pushing to `main`:
 
 ```bash
 npm ci
@@ -440,22 +442,22 @@ fixtures or runner paths.
 ## Release-intent maintenance
 
 `ops/ci/release_intent.json` is part of the production authorization boundary,
-not generated evidence. Its initial rules allow only `Code` and `Environment`
+not generated evidence. Its current rules allow only `Code` and `Environment`
 modifications for the exact current Lambda logical IDs. If a reviewed release
 intentionally changes another unprotected resource or property, add the exact
 logical ID, CloudFormation resource type, action, and property paths in the same
-pull request. A new resource may set `allowNoDetails` only when its exact
+reviewed change. A new resource may set `allowNoDetails` only when its exact
 `Action=Add` change set legitimately contains no property detail; never use that
 flag to permit an unexplained modification. Protected resource types, removals,
 replacements, and recreations remain blocked even if an intent rule names them.
 In particular, do not add `RateLimitTable` PITR to the persistent release
-intent: its one-time `PointInTimeRecoverySpecification` update must use the
-separately reviewed protected change-set workflow before CI is enabled, after
-which ordinary CI plans must observe no DynamoDB table change.
+intent: a `PointInTimeRecoverySpecification` update must use the separately
+reviewed protected change-set workflow, after which ordinary CI plans must
+observe no DynamoDB table change.
 Because CloudFormation exposes Lambda environment changes only at top-level
 `Environment`, `ops/ci/template_environment_policy.json` additionally pins the
 exact source and SAM-built Environment-block digests. Intentional variable
-changes must update that policy in the same reviewed pull request.
+changes must update that policy in the same reviewed change.
 
 CloudFormation also reports conservative dependency cascades when an unchanged
 protected resource refers to a Lambda or bucket that appears in the release.
@@ -470,8 +472,8 @@ unchanged.
 ## Artifact budget maintenance
 
 `ops/ci/artifact_budgets.json` is the reviewed performance contract. Raise a
-limit only with the same pull request that explains the intended dependency or
-bundle growth. Do not calculate limits from whichever artifact happens to be in
+limit only with the same reviewed change that explains the intended dependency
+or bundle growth. Do not calculate limits from whichever artifact happens to be in
 `.aws-sam`; CI always performs a clean SAM build first. The evidence files are
 diagnostic artifacts, not deployable inputs.
 

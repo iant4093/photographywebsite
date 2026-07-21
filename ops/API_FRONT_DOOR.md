@@ -1,103 +1,83 @@
 # Single CloudFront API front door
 
-This design gives the browser one origin: `https://iantruongphotography.com`. Static files and `/api/*` share the frontend CloudFront distribution and its CloudFront-scope WAF. The regional HTTP API remains the application/auth boundary; WAF is defense in depth.
+The browser uses one origin: `https://iantruongphotography.com`. Static files
+and `/api/*` share the frontend CloudFront distribution and its CloudFront-scope
+WAF. The regional HTTP API remains the application and authentication boundary;
+WAF is defense in depth.
 
-No script in this repository deploys this architecture by default. `cloudfront_frontend.py` is dry-run-first, and the SAM switches that change reachability or enforcement default to `false`.
+## Current security contract
 
-## Security contract
+- The browser API base is `/api`.
+- `/api/public/*` caches only anonymous `GET`/`HEAD` responses and varies only
+  on the reviewed `cursor`, `limit`, and `type` query keys plus compression.
+- `/api/*` otherwise has caching disabled and forwards only the reviewed
+  methods, query strings, and API/auth/CORS headers. It forwards no cookies.
+- CloudFront reaches the TLS 1.2 regional custom domain through the fixed `api`
+  mapping and adds the secret `X-Origin-Verify` header. Every application route
+  verifies that value before authentication, validation, or business work.
+- The retained secret contains `current` and optional `previous` values so a
+  rotation can overlap Lambda caching and CloudFront propagation safely. Secret
+  values never belong in source, arguments, output, logs, fixtures, or release
+  artifacts.
+- The default execute-api endpoint is disabled. Direct custom-domain requests
+  lack the CloudFront-only header and receive the fixed, no-store denial.
+- The separate WAF stack remains in the CloudFront home Region. Sampling is
+  disabled, sensitive fields are redacted, and each managed or rate rule stays
+  in its explicitly reviewed COUNT or BLOCK mode.
 
-- Browser API base: `/api`.
-- CloudFront public cache behavior: `/api/public/*`; GET/HEAD cache only, query keys `cursor`, `limit`, and `type`, no cookies, no `Authorization`, Brotli/Gzip cache variants, 60-second default and 300-second maximum edge TTL.
-- CloudFront non-public behavior: `/api/*`; caching disabled, all required methods, all query strings, no cookies, and an allowlist of API/CORS/auth headers.
-- Regional origin: `origin-api.iantruongphotography.com`, API mapping key `api`, TLS 1.2, regional ACM certificate validated through the exact Route53 public zone.
-- Origin verification: CloudFront adds `X-Origin-Verify`. Every one of the 21 Lambda HTTP handlers (23 routes) checks it before auth, validation, database, provider, or other business work.
-- Secret contract: a retained Secrets Manager JSON document with `current` and optional `previous` strings. Lambda accepts either value during rotation and caches only in memory for a bounded TTL. No value belongs in source, a shell argument, output, log, test fixture, or deployment artifact.
-- Final bypass closure: `FrontDoorEnforcementEnabled=true` and `DisableExecuteApiEndpoint=true`. The custom domain remains reachable as DNS, but direct requests lack the CloudFront-only header and receive a fixed no-store 403. The default execute-api hostname is disabled.
-- WAF: the separate `waf_front_door_template.yaml` stack must be deployed in `us-east-1`. Common, known-bad-input, IP reputation, and per-IP rate rules all begin in COUNT. Request sampling is disabled; authorization, cookie, origin-verification, and query fields are redacted; only COUNT/BLOCK records are retained.
+## Validate and update
 
-## Staged deployment order
+Normal `main` releases preserve the deployed front-door parameters. A front-
+door change is a separate reviewed operation:
 
-Use the exact `main`-ref OIDC trust, non-executing change sets, exact existing parameter values, drift checks, and the repository release guard. Never deploy from an unreviewed local template.
+1. Run the complete repository tests and infrastructure validation.
+2. Run `front_door_preflight.py` with the exact stack, account, certificate,
+   secret, and WAF guards. It reads metadata only and never reads the secret
+   value.
+3. Run `cloudfront_frontend.py --include-api-front-door` without `--apply`.
+   Supply the exact current resource guards and review the proposed distribution
+   changes and current ETag.
+4. Apply only the unchanged dry-run plan with the exact ETag, account, resource
+   guards, and confirmation phrase. Wait for CloudFront to reach `Deployed`.
+5. Verify public list/detail pagination, protected identity behavior, CORS,
+   cache headers, origin verification, disabled execute-api access, and WAF
+   redaction/count behavior through the canonical host.
+6. Run the credential-free public-posture smoke and the scheduled edge/drift
+   audit. Retain only aggregate, secret-redacted evidence.
 
-1. Validate source:
-
-   ```sh
-   ./ops/validate_infrastructure.sh --build
-   python3 -m unittest discover -s backend/tests -p 'test_*.py' -v
-   ```
-
-2. Plan the backend with defaults retained:
-
-   - `ProvisionApiFrontDoor=false`
-   - `FrontDoorEnforcementEnabled=false`
-   - `DisableExecuteApiEndpoint=false`
-
-   This can create the retained generated secret and ship the dormant verifier without changing request reachability.
-
-3. Plan/deploy the WAF stack in `us-east-1`. Confirm every rule action/override is COUNT, the log group is retained, filters/redaction are present, and any alarm topic/key policy is already correct. Do not associate it yet.
-
-4. Plan the backend custom domain with `ProvisionApiFrontDoor=true` and the exact Route53 hosted-zone ID. Keep enforcement and endpoint disabling false. Certificate DNS validation can take time; do not execute unrelated application changes while waiting.
-
-5. Confirm the regional certificate is `ISSUED`, the API mapping key is `api`, and the Route53 alias resolves. Direct custom-domain calls still work during this compatibility stage.
-
-6. Run a CloudFront dry run with `--include-api-front-door`, the exact certificate/secret/WAF ARNs, and no `--apply`. It validates ownership, regionality, domain/certificate binding, count-only WAF state, and existing frontend origin shape without reading the secret value.
-
-7. Review the dry-run actions and current ETag. Apply only with all guards:
-
-   ```text
-   --apply
-   --expected-etag <exact-current-etag>
-   --expected-account-id <exact-account>
-   --expected-frontend-origin-id <exact-current-id>
-   --expected-frontend-origin-domain <exact-current-domain>
-   --expected-api-origin-domain origin-api.iantruongphotography.com
-   --expected-api-certificate-arn <exact-regional-cert-arn>
-   --expected-origin-secret-arn <exact-secret-arn>
-   --expected-web-acl-arn <exact-global-web-acl-arn>
-   --confirm-front-door ADD-SINGLE-API-FRONT-DOOR
-   ```
-
-   The tool reads only `current` during an approved apply and never prints it. Wait for CloudFront `Deployed` before testing.
-
-8. Build the frontend with `VITE_API_BASE_URL=/api`. Test public list/detail pagination, login/new-password/MFA, contact, owner/admin lists, photo/video upload, thumbnail updates, downloads, ZIP polling, sharing, and CORS/preflight through the canonical host. Confirm mutation/auth responses are `no-store` and public cache keys vary only on the documented query allowlist and compression.
-
-9. Run `front_door_preflight.py`. It must report the WAF, API behaviors, mapping, and custom header present while reporting `originSecretValueRead: false`.
-
-10. Enable `FrontDoorEnforcementEnabled=true` and `DisableExecuteApiEndpoint=true` together in a separately reviewed backend change set. The template rule rejects enforcement without both the provisioned domain and disabled default endpoint.
-
-11. Repeat all canaries. Required negative checks:
-
-    - canonical `/api/public/albums` succeeds;
-    - canonical protected/admin routes retain their normal identity behavior;
-    - direct `execute-api` request cannot invoke a route;
-    - direct API custom-domain request without the origin header receives the fixed 403;
-    - a random/empty origin header receives the same fixed 403;
-    - hostile browser Origin receives no readable CORS grant;
-    - WAF COUNT metrics/logs contain no authorization, cookie, query, secret, body, or sampled-request payload.
+The helper's `--help` output is the source of truth for required arguments. A
+stale ETag, changed origin, mismatched certificate/secret/WAF resource, direct
+endpoint re-enablement, or unexplained viewer-request association blocks apply.
 
 ## Zero-downtime origin-secret rotation
 
-Rotation is an explicit security operation, separate from provider credential rotation.
+1. In a protected operator process, create a new random value and update the
+   secret so `previous` is the old `current` and `current` is the new value.
+2. Keep CloudFront on the old value for longer than the maximum Lambda secret
+   cache TTL plus margin; keep canonical canaries running during this drain.
+3. Apply the reviewed CloudFront plan so its origin header uses the new
+   `current`, then wait for `Deployed` and run positive and negative canaries.
+4. Keep both values for an additional propagation and rollback window. Then
+   clear `previous`, wait another cache TTL, and rerun canaries.
+5. Record only redacted version/timestamp and change evidence—never either
+   secret value.
 
-1. Generate a new random value in a protected operator process. Update the secret JSON so `previous` is the old `current` and `current` is the new value. Never display either.
-2. Keep CloudFront sending the old value for longer than the maximum configured Lambda cache TTL plus operational margin. Warm processes then refresh to the two-value contract; an idle process will refresh before comparison because its cache has expired. Keep canaries running through the canonical host during this drain window.
-3. Run a guarded CloudFront apply. It reads the new `current` into the custom origin header and never prints it.
-4. Wait for CloudFront `Deployed`, run positive/negative canaries, and keep both values accepted for an additional propagation and rollback window.
-5. Update the secret so `previous` is empty without changing `current`, wait another cache TTL before considering the old value retired everywhere, and re-run canaries.
-6. Preserve only redacted change evidence (ARN, version IDs/timestamps, change-set/distribution IDs), never values.
+If rotation fails before CloudFront switches, restore the prior two-value JSON
+contract. If it fails afterward, keep both values accepted while repairing the
+distribution. Do not disable origin verification as a rollback shortcut.
 
-If rotation fails before CloudFront switches, restore the prior JSON contract. If it fails after CloudFront switches, keep both values accepted while investigating. Do not disable verification as a convenience rollback.
+## Rollback and review
 
-## Availability rollback
+- For a WAF false positive, return only the affected rule to COUNT; do not add a
+  broad allow rule.
+- Restore a reviewed prior CloudFront configuration with the current ETag for
+  an origin or behavior regression.
+- Re-enabling execute-api or disabling origin enforcement reopens the bypass and
+  is an emergency, time-bounded, separately reviewed backend change.
+- Never delete the retained certificate, custom domain, mapping, DNS record,
+  secret, WAF ACL, or security logs as a rollback.
 
-- WAF false positive: return the individual rule to COUNT. Never add a broad allow rule.
-- CloudFront behavior/origin regression before enforcement: restore the reviewed prior distribution config using its current ETag and keep the direct endpoint available temporarily.
-- Regression after final enforcement: first repair or roll back the CloudFront behavior while the verifier accepts current/previous. Re-enabling the execute-api endpoint or disabling enforcement is an emergency, reviewed change-set action and reopens the bypass; time-bound it, alert on it, and close it immediately after recovery.
-- Never delete the retained certificate, custom domain, mapping, DNS record, secret, WAF ACL, or security log group as rollback. Removal is a separate decommission project with dependency and evidence review.
-
-## Operational review
-
-- Review WAF COUNT metrics through at least two representative normal traffic cycles before changing any single rule to BLOCK.
-- Record every exclusion with owner, reason, evidence, expiry, test, and per-rule rollback.
-- Alert on origin-verification denials, WAF count/block surges, direct-endpoint re-enablement, secret reads outside deployment/runtime roles, WAF/logging changes, and CloudFront distribution drift.
-- Treat IP addresses, URI paths, user agents, and request identifiers as personal/security data. Retain only for the approved period and restrict access.
+Review WAF metrics over representative traffic before promoting a rule. Record
+every exclusion with an owner, reason, evidence, expiry, test, and rollback.
+Treat IP addresses, paths, user agents, and request identifiers as restricted
+security data.

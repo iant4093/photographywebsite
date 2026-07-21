@@ -156,17 +156,18 @@ or incident evidence. A rollback may stop new records from reaching the central
 group; retain both group names in the incident record so the time boundary is
 clear.
 
-## Account-level controls not activated by this application change
+## Account-level integration
 
-This implementation does not enable or mutate CloudTrail, GuardDuty, AWS Config,
-Security Hub, Inspector, WAF, Macie, AWS Backup, IAM Access Analyzer, KMS, AWS
-Organizations, Budgets, or external notification subscriptions. Those controls
-belong in a separate security-bootstrap stack/account with its own execution
-role, cost approval, evidence retention, and rollback/runbooks. Do not enable
-them manually as an incidental application deployment.
+This application stack owns application logging, privacy-safe metrics, and its
+application alarms only. The account-level CloudTrail, GuardDuty, AWS Config,
+Security Hub, Inspector, WAF, AWS Backup, IAM Access Analyzer, KMS, and budget
+controls are active in separate protected stacks so an application release
+cannot weaken or replace them.
 
-When that bootstrap is approved, deploy CloudTrail/protected evidence first,
-then alert routing, Access Analyzer/Inspector/GuardDuty, selected Config and
-Security Hub controls, count-first WAF, and finally selective paid data events
-or discovery jobs. Preserve the owner's decision not to rotate provider
-credentials unless a separate authorization or active incident requires it.
+[`SECURITY_ACCOUNT_BASELINE.md`](SECURITY_ACCOUNT_BASELINE.md) is the source of
+truth for those controls, deployment boundaries, evidence retention, drift,
+and rollback. [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) maps their signals to
+response procedures and notification requirements. Do not mutate account-level
+controls manually during an application deployment. Provider credential
+rotation remains a separate authorized operation unless an active incident
+requires it.
