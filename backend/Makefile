@@ -61,7 +61,7 @@ build-PreviewWorkerFunction:
 	    --libc=glibc \
 	    --no-audit \
 	    --no-fund; \
-	  test -f node_modules/sharp/lib/index.js; \
+	  test -f node_modules/sharp/dist/index.mjs; \
 	  test -d node_modules/@img/sharp-linux-x64; \
 	  test -d node_modules/@img/sharp-libvips-linux-x64
 
