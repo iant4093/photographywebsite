@@ -48,7 +48,15 @@ sam package \
   --s3-prefix "releases/${GITHUB_SHA:?GITHUB_SHA is required}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/backend" \
   --output-template-file "$workspace/packaged-unbound.yaml"
 
-expected_object_count="$(jq -er '.blockCount' ops/ci/template_environment_policy.json)"
+expected_object_count="$(jq -er '
+  if .version == 1
+    and (.codeUriCount | type) == "number"
+    and .codeUriCount >= 1
+    and .codeUriCount <= 500
+  then .codeUriCount
+  else error("invalid release artifact contract")
+  end
+' ops/ci/release_artifact_contract.json)"
 python3 ops/ci/bind_s3_versions.py \
   "$workspace/packaged-unbound.yaml" "$workspace/packaged.yaml" \
   --bucket "$ARTIFACT_BUCKET" --region "$AWS_REGION" \

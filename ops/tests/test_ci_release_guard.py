@@ -1440,8 +1440,17 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("EXPECTED_REQUESTED_PARAMETERS_PATH", plan)
         self.assertIn("--release-sha", plan)
         self.assertIn("ARTIFACT_KMS_KEY_ARN", plan)
-        self.assertIn("template_environment_policy.json", plan)
+        self.assertIn("release_artifact_contract.json", plan)
         self.assertNotIn(".rules | length", plan)
+        artifact_contract = json.loads(
+            (ROOT / "ops/ci/release_artifact_contract.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(set(artifact_contract), {"version", "codeUriCount"})
+        self.assertEqual(artifact_contract["version"], 1)
+        self.assertEqual(
+            artifact_contract["codeUriCount"],
+            len(re.findall(r"(?m)^\s+CodeUri:", (ROOT / "backend/template.yaml").read_text())),
+        )
         self.assertIn("--kms-key-id", plan)
         self.assertIn("packaged_template_key", plan)
         self.assertIn("--template-url", plan)
