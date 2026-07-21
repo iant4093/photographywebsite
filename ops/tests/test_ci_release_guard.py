@@ -328,11 +328,25 @@ class WorkflowPolicyTests(unittest.TestCase):
             self.assertEqual(workflow_policy.main([str(path)]), 1)
 
     def test_deploy_helpers_preserve_release_safety_contract(self):
-        plan = (ROOT / "ops" / "ci" / "backend_plan.sh").read_text(encoding="utf-8")
-        execute = (ROOT / "ops" / "ci" / "backend_execute.sh").read_text(encoding="utf-8")
-        frontend = (ROOT / "ops" / "ci" / "frontend_deploy.sh").read_text(encoding="utf-8")
-        drift = (ROOT / "ops" / "ci" / "wait_for_drift.sh").read_text(encoding="utf-8")
-        collect = (ROOT / "ops" / "ci" / "collect_change_set.sh").read_text(encoding="utf-8")
+        helper_paths = [
+            ROOT / "ops" / "ci" / name
+            for name in (
+                "backend_plan.sh",
+                "backend_execute.sh",
+                "collect_change_set.sh",
+                "frontend_deploy.sh",
+                "public_smoke.sh",
+                "wait_for_drift.sh",
+            )
+        ]
+        for path in helper_paths:
+            self.assertTrue(path.stat().st_mode & 0o111, f"{path.name} must be executable")
+
+        plan = helper_paths[0].read_text(encoding="utf-8")
+        execute = helper_paths[1].read_text(encoding="utf-8")
+        collect = helper_paths[2].read_text(encoding="utf-8")
+        frontend = helper_paths[3].read_text(encoding="utf-8")
+        drift = helper_paths[5].read_text(encoding="utf-8")
         self.assertIn("detect-stack-drift", plan)
         self.assertNotIn("wait stack-drift-detection-complete", plan)
         self.assertIn("DETECTION_IN_PROGRESS", drift)
