@@ -122,6 +122,10 @@ class ObservabilityTemplateTests(unittest.TestCase):
             "'/public/albums?limit=1&type=photo'",
             "'/public/albums/' + encodeURIComponent(selectedAlbumId)",
             "MAX_PREVIEW_BYTES = 512 * 1024",
+            """- Key: Environment
+          Value: !Ref Stage
+        - Key: ManagedBy
+          Value: CloudFormation""",
         ):
             self.assertIn(contract, canary)
         self.assertIn("Default: 'false'", TEMPLATE)

@@ -469,6 +469,10 @@ Resources:
           Value: PublicEndpointsOnly
         - Key: ReleaseSha
           Value: !Ref ReleaseSha
+        - Key: Environment
+          Value: !Ref Stage
+        - Key: ManagedBy
+          Value: CloudFormation
 
   PublicCanaryAlarm:
     Type: AWS::CloudWatch::Alarm

@@ -115,9 +115,12 @@ aws cloudformation validate-template \
 2. Create and review a CloudFormation change set with the exact two distribution
    IDs, canonical site/API URLs, optional exact SNS topic ARN, exact tested
    `ReleaseSha`, and `StartPublicCanary=false`. Acknowledge IAM capabilities.
-3. Confirm all resources are tagged, the RUM role ARN names only the expected
-   app monitor, the artifact bucket is private/encrypted/versioned/lifecycle
-   managed, and alarms route only to the reviewed topic (or nowhere when empty).
+3. Confirm all resources are tagged. In particular, the Synthetics canary has
+   explicit `Environment` and `ManagedBy=CloudFormation` tags because its
+   resource provider does not reliably inherit those stack tags. Also confirm
+   the RUM role ARN names only the expected app monitor, the artifact bucket is
+   private/encrypted/versioned/lifecycle managed, and alarms route only to the
+   reviewed topic (or nowhere when empty).
 4. Execute the approved change set and enable termination protection. Do not
    start the canary from an unreviewed CI job.
 5. Manually start the stopped canary once. Inspect the public-only screenshot,
