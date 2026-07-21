@@ -425,9 +425,9 @@ def main() -> int:
         "failureCounts": dict(sorted(failures.items())),
         "metadataRecordCount": len(raw_metadata),
         "objectValidatedCount": object_validated,
-        "privacy": "aggregate-only; no album, media, object, URL, owner, title, or share identifiers emitted",
+        "privacy": "aggregate-only; no account, stack, album, media, object, URL, owner, title, or share identifiers emitted",
         "reconciliationScope": "full",
-        "stack": args.stack_name,
+        "stack": "verified",
         "status": "pass" if not failures and entry_validated == len(inventory) else "fail",
         "sourceInventoryCounts": inventory_counts,
     }
