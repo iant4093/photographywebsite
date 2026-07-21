@@ -37,13 +37,23 @@ sam package \
   --s3-prefix "releases/${GITHUB_SHA:?GITHUB_SHA is required}/backend" \
   --output-template-file "$workspace/packaged.yaml"
 
+packaged_template_key="releases/${GITHUB_SHA}/backend/packaged.yaml"
+aws s3 cp \
+  "$workspace/packaged.yaml" \
+  "s3://${ARTIFACT_BUCKET}/${packaged_template_key}" \
+  --region "$AWS_REGION" \
+  --sse aws:kms \
+  --sse-kms-key-id "$ARTIFACT_KMS_KEY_ARN" \
+  --only-show-errors
+packaged_template_url="https://${ARTIFACT_BUCKET}.s3.${AWS_REGION}.amazonaws.com/${packaged_template_key}"
+
 change_set_name="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 change_set_id="$(aws cloudformation create-change-set \
   --region "$AWS_REGION" \
   --stack-name "$STACK_NAME" \
   --change-set-name "$change_set_name" \
   --change-set-type UPDATE \
-  --template-body "file://$workspace/packaged.yaml" \
+  --template-url "$packaged_template_url" \
   --parameters "file://$workspace/parameters.json" \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --role-arn "$CLOUDFORMATION_EXECUTION_ROLE_ARN" \

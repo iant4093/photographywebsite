@@ -28,6 +28,10 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
 - A push to `main` repeats that exact reusable quality gate, builds the SAM and
   frontend artifacts once, checksums them, attests them, and deploys those same
   bytes. Deployment never rebuilds source.
+- SAM code and the packaged CloudFormation template are uploaded beneath the
+  exact release SHA with the bootstrap KMS key. Planning uses the private S3
+  template URL so templates above CloudFormation's inline-size limit still use
+  the tested, immutable release prefix.
 - Backend planning detects CloudFormation drift, retains every current stack
   parameter through `UsePreviousValue`, creates a non-executing change set, and
   rejects removals, replacements, recreation, protected-resource changes, and
