@@ -267,6 +267,15 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("Resource: '*'", observability)
         self.assertNotIn("logs:GetLogEvents", observability)
 
+        messaging = statement_block(execution, "ManageApplicationQueuesAndTopics")
+        self.assertIn("sns:ListTagsForResource", messaging)
+        self.assertIn(
+            "arn:${AWS::Partition}:sns:us-west-2:${AWS::AccountId}:ian-photography-*",
+            messaging,
+        )
+        self.assertNotIn("sns:ListTopics", messaging)
+        self.assertNotIn("Resource: '*'", messaging)
+
     def test_execution_role_has_only_metadata_permissions_for_api_log_delivery(self):
         execution = execution_permissions()
         delivery = statement_block(execution, "ManageApiGatewayAccessLogDeliveries")

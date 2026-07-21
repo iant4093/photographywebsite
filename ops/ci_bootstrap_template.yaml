@@ -693,6 +693,7 @@ Resources:
               - sqs:UntagQueue
               - sns:CreateTopic
               - sns:GetTopicAttributes
+              - sns:ListTagsForResource
               - sns:SetTopicAttributes
               - sns:TagResource
               - sns:UntagResource

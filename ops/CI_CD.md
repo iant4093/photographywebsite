@@ -250,7 +250,10 @@ CloudFormation drift detection also uses the stack execution role. Its
 read-only inspection grants include account-level field-index metadata because
 `logs:DescribeIndexPolicies` does not support resource-level IAM scoping, and
 secret metadata only for the exact regional/account
-`RateLimitHashSecret-*` family. The inventory statement never grants
+`RateLimitHashSecret-*` family. SNS topic-tag reads are limited to the existing
+regional/account `ian-photography-*` family so the resource provider can
+compare declared alarm-topic tags instead of reporting a false removal. The
+inventory statement never grants
 `logs:GetLogEvents`, and the secret statement never grants
 `secretsmanager:GetSecretValue`.
 
