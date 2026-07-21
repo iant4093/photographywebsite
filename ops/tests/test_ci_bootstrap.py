@@ -243,22 +243,10 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertNotIn("Condition:", dns)
         self.assertNotIn("Resource: '*'", dns)
 
-    def test_execution_role_has_narrow_rollback_package_and_table_tag_reads(self):
+    def test_execution_role_has_no_legacy_package_bridge_and_keeps_table_tag_reads(self):
         execution = execution_permissions()
-        rollback = statement_block(execution, "ReadLegacySamRollbackPackages")
-        self.assertIn("Action: s3:GetObject", rollback)
-        self.assertIn(
-            "arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-samclisourcebucket-e3y19skvw0we/ian-website/*",
-            rollback,
-        )
-        for forbidden in (
-            "s3:DeleteObject",
-            "s3:ListBucket",
-            "s3:GetObjectVersion",
-            "s3:PutObject",
-            "Resource: '*'",
-        ):
-            self.assertNotIn(forbidden, rollback)
+        self.assertNotIn("ReadLegacySamRollbackPackages", execution)
+        self.assertNotIn("aws-sam-cli-managed-default-samclisourcebucket", execution)
 
         tables = statement_block(execution, "ManageApplicationTables")
         self.assertIn("dynamodb:ListTagsOfResource", tables)

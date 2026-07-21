@@ -656,14 +656,6 @@ Resources:
             Resource:
               - !GetAtt ReleaseArtifactBucket.Arn
               - !Sub '${ReleaseArtifactBucket.Arn}/releases/*'
-          # Temporary recovery bridge for Lambda functions whose currently deployed
-          # code still points at the legacy SAM-managed packaging bucket. Remove this
-          # statement after a successful release confirms no stack template reference
-          # remains beneath this exact prefix.
-          - Sid: ReadLegacySamRollbackPackages
-            Effect: Allow
-            Action: s3:GetObject
-            Resource: !Sub 'arn:${AWS::Partition}:s3:::aws-sam-cli-managed-default-samclisourcebucket-e3y19skvw0we/ian-website/*'
           - Sid: DecryptReleasePackagesThroughS3
             Effect: Allow
             Action:
