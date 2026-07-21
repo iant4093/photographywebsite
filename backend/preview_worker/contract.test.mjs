@@ -3,12 +3,14 @@ import test from 'node:test'
 
 import {
     PREVIEW_VERSION,
+    PREVIEW_FAILURE_REASON_CODES,
     isCompletePreview,
     mediaIdForKey,
     parseJob,
     previewJobId,
     previewKeysFor,
     resolveManifestImage,
+    safePreviewFailureReason,
 } from './contract.mjs'
 
 const albumId = '11111111-1111-4111-8111-111111111111'
@@ -66,4 +68,14 @@ test('supports a separately approved single-segment legacy prefix', () => {
         images: [{ rawKey: legacyRaw }],
     }, { albumId, rawKey: legacyRaw, previewVersion: 2 })
     assert.equal(resolved.previewKeys['640'].startsWith(`albums/${albumId}/preview/v2/`), true)
+})
+
+test('failure telemetry permits only fixed privacy-safe reason codes', () => {
+    assert.equal(new Set(PREVIEW_FAILURE_REASON_CODES).size, PREVIEW_FAILURE_REASON_CODES.length)
+    for (const reasonCode of PREVIEW_FAILURE_REASON_CODES) {
+        assert.match(reasonCode, /^[a-z][a-z_]+$/)
+        assert.equal(safePreviewFailureReason({ reasonCode }), reasonCode)
+    }
+    assert.equal(safePreviewFailureReason({ reasonCode: 'albums/private/client-name.jpg' }), 'unexpected_failure')
+    assert.equal(safePreviewFailureReason(new Error('albums/private/client-name.jpg')), 'unexpected_failure')
 })

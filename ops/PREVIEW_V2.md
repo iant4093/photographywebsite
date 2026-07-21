@@ -125,6 +125,13 @@ inspect aggregate queue/DLQ/alarm state, and produce a new dry run. Pause if any
 worker error, throttle, DLQ message, metadata system error, or unexpected API/S3
 latency alarm occurs.
 
+Worker failures log only an allowlisted `reasonCode` such as
+`source_read_failed`, `source_transform_failed`,
+`preview_object_write_failed`, `visibility_tag_failed`, or
+`metadata_commit_failed`. Triage aggregate counts by that field. The worker
+never logs exception text, album/media identifiers, or object keys; do not add
+those fields as a diagnostic shortcut.
+
 ## 5. Verify the canary before expanding
 
 After the queue and in-flight count return to zero, require exactly five new

@@ -5,6 +5,19 @@ export const PREVIEW_WIDTHS = Object.freeze([640, 1280])
 export const PREVIEW_QUALITY = 80
 export const ALLOWED_VISIBILITIES = new Set(['public', 'private', 'unlisted'])
 export const SUPPORTED_SOURCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+export const PREVIEW_FAILURE_REASON_CODES = Object.freeze([
+    'job_contract_invalid',
+    'metadata_read_failed',
+    'existing_preview_invalid',
+    'metadata_pending_failed',
+    'source_read_failed',
+    'source_type_invalid',
+    'source_transform_failed',
+    'preview_object_write_failed',
+    'visibility_tag_failed',
+    'metadata_commit_failed',
+    'unexpected_failure',
+])
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const LEGACY_PREFIX_PATTERN = /^albums\/[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?\/$/
@@ -103,4 +116,9 @@ export function previewJobId(jobValue) {
 export function parsePositiveLimit(value, fallback, maximum) {
     const parsed = Number(value)
     return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= maximum ? parsed : fallback
+}
+
+export function safePreviewFailureReason(error) {
+    const reasonCode = error && typeof error === 'object' ? error.reasonCode : null
+    return PREVIEW_FAILURE_REASON_CODES.includes(reasonCode) ? reasonCode : 'unexpected_failure'
 }

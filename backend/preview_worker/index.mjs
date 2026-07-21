@@ -22,6 +22,7 @@ import {
     parsePositiveLimit,
     previewJobId,
     resolveManifestImage,
+    safePreviewFailureReason,
 } from './contract.mjs'
 import { validateReadyOrMarkPending } from './workflow.mjs'
 
@@ -48,6 +49,21 @@ function isMissing(error) {
 
 function isPreconditionFailure(error) {
     return errorCode(error) === 'PreconditionFailed' || error?.$metadata?.httpStatusCode === 412
+}
+
+function stageFailure(reasonCode) {
+    const error = new Error('Preview processing stage failed')
+    error.name = 'PreviewStageError'
+    error.reasonCode = reasonCode
+    return error
+}
+
+async function atStage(reasonCode, operation) {
+    try {
+        return await operation()
+    } catch {
+        throw stageFailure(reasonCode)
+    }
 }
 
 async function albumById(albumId) {
@@ -269,44 +285,73 @@ async function tagUntilVisibilityStable(job, previewKeys) {
 }
 
 async function processJob(jobValue) {
-    const job = parseJob(jobValue)
-    let resolved = resolveManifestImage(await albumById(job.albumId), job)
+    const job = await atStage('job_contract_invalid', async () => parseJob(jobValue))
+    let resolved = await atStage(
+        'job_contract_invalid',
+        async () => resolveManifestImage(await albumById(job.albumId), job),
+    )
     const mediaId = mediaIdForKey(job.rawKey)
-    const existingMetadata = await previewMetadata(job.albumId, mediaId)
+    const existingMetadata = await atStage(
+        'metadata_read_failed',
+        async () => previewMetadata(job.albumId, mediaId),
+    )
     const jobId = previewJobId(job)
     if (existingMetadata?.status === 'ready') {
-        if (!isCompletePreview(existingMetadata, resolved.previewKeys)) throw new Error('Preview metadata conflicts')
-        const accepted = await validateReadyOrMarkPending({
-            metadata: existingMetadata,
-            expectedKeys: resolved.previewKeys,
-            validateObject: validateStoredPreview,
-            tagObject: setVisibilityTag,
-            visibility: resolved.visibility,
-            markPending: () => markReadyMetadataPending(resolved, mediaId, jobId),
+        const accepted = await atStage('existing_preview_invalid', async () => {
+            if (!isCompletePreview(existingMetadata, resolved.previewKeys)) {
+                throw new Error('Preview metadata conflicts')
+            }
+            return validateReadyOrMarkPending({
+                metadata: existingMetadata,
+                expectedKeys: resolved.previewKeys,
+                validateObject: validateStoredPreview,
+                tagObject: setVisibilityTag,
+                visibility: resolved.visibility,
+                markPending: () => markReadyMetadataPending(resolved, mediaId, jobId),
+            })
         })
         if (accepted) {
-            await tagUntilVisibilityStable(job, resolved.previewKeys)
+            await atStage(
+                'visibility_tag_failed',
+                async () => tagUntilVisibilityStable(job, resolved.previewKeys),
+            )
             return { status: 'already-complete' }
         }
     }
 
-    await recordPendingMetadata(resolved, jobId)
-    const { bytes: sourceBytes, head } = await readObjectBounded(job.rawKey, MAX_SOURCE_BYTES)
+    await atStage('metadata_pending_failed', async () => recordPendingMetadata(resolved, jobId))
+    const { bytes: sourceBytes, head } = await atStage(
+        'source_read_failed',
+        async () => readObjectBounded(job.rawKey, MAX_SOURCE_BYTES),
+    )
     if (head.ContentType && !SUPPORTED_SOURCE_TYPES.has(head.ContentType.toLowerCase())) {
-        throw new Error('Unsupported source content type')
+        throw stageFailure('source_type_invalid')
     }
     const sourceDigest = createHash('sha256').update(sourceBytes).digest('hex')
-    const outputs = await generateOutputs(sourceBytes)
+    const outputs = await atStage('source_transform_failed', async () => generateOutputs(sourceBytes))
     for (const width of PREVIEW_WIDTHS) {
-        await ensurePreviewObject(resolved.previewKeys[String(width)], outputs[String(width)], sourceDigest)
+        await atStage(
+            'preview_object_write_failed',
+            async () => ensurePreviewObject(
+                resolved.previewKeys[String(width)],
+                outputs[String(width)],
+                sourceDigest,
+            ),
+        )
     }
 
     // Preview metadata is registered as pending before object creation, so a
     // visibility mutation can discover these deterministic keys. Re-read after
     // each tag pass until album visibility is stable; update_album performs a
     // second preview-only tag pass after its album write for convergence.
-    resolved = await tagUntilVisibilityStable(job, resolved.previewKeys)
-    await commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, outputs)
+    resolved = await atStage(
+        'visibility_tag_failed',
+        async () => tagUntilVisibilityStable(job, resolved.previewKeys),
+    )
+    await atStage(
+        'metadata_commit_failed',
+        async () => commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, outputs),
+    )
     return { status: 'completed' }
 }
 
@@ -341,6 +386,7 @@ export async function handler(event) {
             console.error(JSON.stringify({
                 event: 'preview_job_failed',
                 errorType: error?.name || 'Error',
+                reasonCode: safePreviewFailureReason(error),
                 requestId: entry.id || 'direct',
             }))
             failures.push({ itemIdentifier: entry.id })
