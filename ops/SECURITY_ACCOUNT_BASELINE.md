@@ -157,9 +157,12 @@ For Config, pass the audit bucket output. Use
 `GlobalResourceRecordingMode=record-confirmed-home-region` only in the chosen
 home region. The explicit resource list conditionally adds IAM and CloudFront in
 that mode; it deliberately omits `IncludeGlobalResourceTypes`, whose behavior is
-ambiguous alongside explicit types. The delivery channel depends on the
-recorder, and the foundation bucket policy restricts Config by account and
-regional Config source ARN.
+ambiguous alongside explicit types. The delivery channel and recorder must be
+created without an explicit dependency between them: Config requires the
+channel before the recorder can start, while CloudFormation can register the
+recorder and create the channel concurrently before stabilizing both. The
+foundation bucket policy restricts Config by account and regional Config source
+ARN.
 
 GuardDuty features are explicit: S3 data events and Lambda network logs are
 enabled; EKS audit logs, EBS malware protection, RDS login events, and runtime
