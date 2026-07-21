@@ -176,12 +176,17 @@ def _guardduty_state(
 def _security_hub_standard_key(arn: Any, *, region: str) -> str:
     if not isinstance(arn, str):
         raise InventoryError(f"Security Hub returned malformed standards in {region}")
-    match = re.fullmatch(
+    regional = re.fullmatch(
         rf"arn:[^:]+:securityhub:{re.escape(region)}::standards/(.+)", arn
     )
-    if match is None:
-        raise InventoryError(f"Security Hub returned out-of-scope standards in {region}")
-    return match.group(1)
+    if regional is not None:
+        return regional.group(1)
+    global_ruleset = re.fullmatch(
+        r"arn:[^:]+:securityhub:::ruleset/(.+)", arn
+    )
+    if global_ruleset is not None:
+        return global_ruleset.group(1)
+    raise InventoryError(f"Security Hub returned out-of-scope standards in {region}")
 
 
 def _security_hub_state(

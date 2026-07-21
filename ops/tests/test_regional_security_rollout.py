@@ -51,7 +51,7 @@ HOME_SECURITY_HUB_STANDARDS = [
     },
     {
         "StandardsArn": (
-            f"arn:aws:securityhub:{HOME}::standards/"
+            "arn:aws:securityhub:::ruleset/"
             "cis-aws-foundations-benchmark/v/1.2.0"
         ),
         "StandardsStatus": "READY",
@@ -386,6 +386,15 @@ class RegionalSecurityPlanTests(unittest.TestCase):
                     ].replace(HOME, OTHER),
                 },
                 HOME_SECURITY_HUB_STANDARDS[1],
+            ],
+            [
+                HOME_SECURITY_HUB_STANDARDS[0],
+                {
+                    **HOME_SECURITY_HUB_STANDARDS[1],
+                    "StandardsArn": HOME_SECURITY_HUB_STANDARDS[1][
+                        "StandardsArn"
+                    ].replace("securityhub:::", f"securityhub:{OTHER}::"),
+                },
             ],
         )
         for standards in home_drift:
