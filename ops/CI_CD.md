@@ -105,9 +105,14 @@ distribution-update, application-data, or secret-value permissions. The audit
 role must not read log events, S3 object bodies, DynamoDB items, Cognito users,
 or secrets.
 
-The CloudFormation execution role should be scoped to resources owned by the
-application stack and explicitly deny deletion of protected tables, buckets,
-Cognito resources, distributions, KMS keys, and secrets. The current SAM
+The CloudFormation execution role is scoped to resources owned by the
+application stack and explicitly denies deletion of protected tables, buckets,
+Cognito resources, distributions, KMS keys, and secrets. Its permissions are
+split across four attached `AWS::IAM::ManagedPolicy` resources. Every compact
+policy document must remain below IAM's 6,144-character managed-policy
+limit; do not move these statements back into role inline policies, whose
+10,240-character aggregate quota caused the original bootstrap create to roll
+back. The current SAM
 template does not attach an IAM permissions boundary to generated roles, so the
 bootstrap instead restricts role management and `iam:PassRole` to the exact
 `ian-website-*` family. Adding a boundary later must be coordinated with
@@ -170,11 +175,16 @@ aws cloudformation update-termination-protection \
 
 For a genuinely absent provider, use `GitHubOidcProviderMode=create` and omit
 the existing ARN. The provider, KMS key and alias, versioned artifact bucket and
-policy, four GitHub roles, and CloudFormation execution role all use retained
-replacement/deletion behavior. The bucket has full public-access block,
-bucket-owner-enforced ownership, a rotating customer-managed KMS key, incomplete
-multipart cleanup, and noncurrent-version expiration. Retention is a recovery
-control, so deleting the bootstrap stack is not a cleanup procedure.
+policy, four GitHub roles, CloudFormation execution role, and its four managed
+policies all use `DeletionPolicy: RetainExceptOnCreate` with
+`UpdateReplacePolicy: Retain`. This keeps established resources and replaced
+resources recoverable while allowing CloudFormation to clean up resources it
+created during a failed initial stack create. Always confirm a failed bootstrap
+reaches `ROLLBACK_COMPLETE` without newly orphaned named roles, providers,
+buckets, aliases, or policies before retrying. The bucket has full public-access
+block, bucket-owner-enforced ownership, a rotating customer-managed KMS key,
+incomplete multipart cleanup, and noncurrent-version expiration. Retention is a
+recovery control, so deleting the bootstrap stack is not a cleanup procedure.
 
 Copy the stack outputs into the matching GitHub variables:
 

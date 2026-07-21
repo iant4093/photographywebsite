@@ -1,3 +1,4 @@
+import json
 import pathlib
 import re
 import shutil
@@ -21,6 +22,13 @@ WORKFLOW = (ROOT / ".github" / "workflows" / "_quality.yml").read_text(encoding=
 VALIDATOR = (OPS / "validate_infrastructure.sh").read_text(encoding="utf-8")
 RUNBOOK = (OPS / "CI_CD.md").read_text(encoding="utf-8")
 
+EXECUTION_POLICY_IDS = (
+    "CloudFormationExecutionIdentityAndComputePolicy",
+    "CloudFormationExecutionDataAndMessagingPolicy",
+    "CloudFormationExecutionEdgeAndIdentityPolicy",
+    "CloudFormationExecutionEncryptionAndObservabilityPolicy",
+)
+
 
 def resource_block(logical_id: str) -> str:
     match = re.search(
@@ -34,12 +42,16 @@ def resource_block(logical_id: str) -> str:
 
 def statement_block(resource: str, sid: str) -> str:
     match = re.search(
-        rf"(?ms)^\s+- Sid: {re.escape(sid)}\n.*?(?=^\s+- Sid: |^\s+- PolicyName: |^\s+Tags:)",
+        rf"(?ms)^\s+- Sid: {re.escape(sid)}\n.*?(?=^\s+- Sid: |^\s+- PolicyName: |^\s+Tags:|^  [A-Za-z][A-Za-z0-9]+:|\Z)",
         resource,
     )
     if not match:
         raise AssertionError(f"statement not found: {sid}")
     return match.group(0)
+
+
+def execution_permissions() -> str:
+    return "\n".join(resource_block(logical_id) for logical_id in EXECUTION_POLICY_IDS)
 
 
 class CiBootstrapTemplateTests(unittest.TestCase):
@@ -58,7 +70,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("The CI bootstrap must be deployed in us-west-2", TEMPLATE)
         provider = resource_block("GitHubOidcProvider")
         self.assertIn("Condition: CreateGitHubOidcProvider", provider)
-        self.assertIn("DeletionPolicy: Retain", provider)
+        self.assertIn("DeletionPolicy: RetainExceptOnCreate", provider)
         self.assertIn("UpdateReplacePolicy: Retain", provider)
         self.assertIn("Url: https://token.actions.githubusercontent.com", provider)
         self.assertIn("- sts.amazonaws.com", provider)
@@ -111,7 +123,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         bucket = resource_block("ReleaseArtifactBucket")
         policy = resource_block("ReleaseArtifactBucketPolicy")
         for block in (key, bucket, policy):
-            self.assertIn("DeletionPolicy: Retain", block)
+            self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
         self.assertIn("EnableKeyRotation: true", key)
         self.assertIn("SSEAlgorithm: aws:kms", bucket)
@@ -125,7 +137,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("s3:x-amz-server-side-encryption", policy)
 
     def test_execution_role_is_bounded_to_current_application_families_and_protects_retained_data(self):
-        execution = resource_block("CloudFormationExecutionRole")
+        execution = execution_permissions()
         self.assertNotIn("AdministratorAccess", TEMPLATE)
         self.assertNotIn("Action: '*'", TEMPLATE)
         for scope in (
@@ -152,7 +164,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("mediaconvert.amazonaws.com", execution)
 
     def test_execution_role_can_manage_only_the_exact_front_door_domain_and_dns_zone(self):
-        execution = resource_block("CloudFormationExecutionRole")
+        execution = execution_permissions()
         self.assertIn("AllowedValues: [origin-api.iantruongphotography.com]", TEMPLATE)
         self.assertIn("AllowedValues: [Z0915663I4P8Y0MEDWH]", TEMPLATE)
 
@@ -175,7 +187,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertNotIn("Resource: '*'", dns)
 
     def test_certificate_secret_and_managed_policy_lifecycles_are_narrow_and_complete(self):
-        execution = resource_block("CloudFormationExecutionRole")
+        execution = execution_permissions()
         request = statement_block(execution, "RequestExactRegionalApiCertificate")
         self.assertIn("acm:RequestCertificate", request)
         self.assertIn("acm:ValidationMethod: DNS", request)
@@ -210,7 +222,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertNotIn("iam:DeletePolicy\n", managed)
 
     def test_execution_role_allow_wildcards_are_explicit_and_minimal(self):
-        execution = resource_block("CloudFormationExecutionRole")
+        execution = execution_permissions()
         allowed = {
             "CreateStackEventSourceMappings",
             "ListEventSourceMappings",
@@ -229,10 +241,53 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         }
         self.assertEqual(allow_star, allowed)
 
+    def test_execution_permissions_use_bounded_managed_policies(self):
+        from cfnlint.decode import decode
+
+        template, errors = decode(str(TEMPLATE_PATH))
+        self.assertEqual(errors, [])
+        role = template["Resources"]["CloudFormationExecutionRole"]["Properties"]
+        self.assertNotIn("Policies", role)
+        self.assertEqual(
+            role["ManagedPolicyArns"],
+            [{"Ref": logical_id} for logical_id in EXECUTION_POLICY_IDS],
+        )
+        for logical_id in EXECUTION_POLICY_IDS:
+            with self.subTest(policy=logical_id):
+                resource = template["Resources"][logical_id]
+                self.assertEqual(resource["Type"], "AWS::IAM::ManagedPolicy")
+                compact = json.dumps(
+                    resource["Properties"]["PolicyDocument"],
+                    separators=(",", ":"),
+                )
+                self.assertLess(len(compact), 6144)
+                self.assertEqual(resource["DeletionPolicy"], "RetainExceptOnCreate")
+                self.assertEqual(resource["UpdateReplacePolicy"], "Retain")
+
+    def test_bootstrap_resources_clean_up_failed_creates_but_retain_replacements(self):
+        retained_ids = (
+            "GitHubOidcProvider",
+            "ReleaseArtifactKey",
+            "ReleaseArtifactKeyAlias",
+            "ReleaseArtifactBucket",
+            "ReleaseArtifactBucketPolicy",
+            "PlanRole",
+            "ExecuteRole",
+            "FrontendRole",
+            "AuditRole",
+            "CloudFormationExecutionRole",
+            *EXECUTION_POLICY_IDS,
+        )
+        for logical_id in retained_ids:
+            with self.subTest(resource=logical_id):
+                block = resource_block(logical_id)
+                self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
+                self.assertIn("UpdateReplacePolicy: Retain", block)
+
     def test_roles_and_outputs_are_retained_and_operationally_complete(self):
         for logical_id in ("PlanRole", "ExecuteRole", "FrontendRole", "AuditRole", "CloudFormationExecutionRole"):
             block = resource_block(logical_id)
-            self.assertIn("DeletionPolicy: Retain", block)
+            self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
         for output in (
             "PlanRoleArn",
