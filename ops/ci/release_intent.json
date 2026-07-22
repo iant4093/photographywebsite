@@ -43,13 +43,6 @@
     {"logicalId": "CreateUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "ListUsersFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "DeleteUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
-    {"logicalId": "EditUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
-    {"logicalId": "HeroCoverFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": ["Architectures", "Code", "Environment", "Handler", "LoggingConfig", "MemorySize", "ReservedConcurrentExecutions", "Role", "Runtime", "Tags", "Timeout", "TracingConfig"], "allowNoDetails": true},
-    {"logicalId": "HeroCoverFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": ["AssumeRolePolicyDocument", "ManagedPolicyArns", "Policies", "Tags"], "allowNoDetails": true},
-    {"logicalId": "HeroCoverFunctionHeroCoverOperationPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": ["Action", "FunctionName", "Principal", "SourceArn"], "allowNoDetails": true},
-    {"logicalId": "HeroMediaCachePolicy", "resourceType": "AWS::CloudFront::CachePolicy", "action": "Add", "propertyPaths": ["CachePolicyConfig"], "allowNoDetails": true},
-    {"logicalId": "HeroMediaResponseHeadersPolicy", "resourceType": "AWS::CloudFront::ResponseHeadersPolicy", "action": "Add", "propertyPaths": ["ResponseHeadersPolicyConfig"], "allowNoDetails": true},
-    {"logicalId": "Api", "resourceType": "AWS::ApiGatewayV2::Api", "action": "Modify", "propertyPaths": ["Body"], "allowNoDetails": false, "allowProtectedModify": true},
-    {"logicalId": "ImagesCloudFront", "resourceType": "AWS::CloudFront::Distribution", "action": "Modify", "propertyPaths": ["DistributionConfig"], "allowNoDetails": false, "allowProtectedModify": true}
+    {"logicalId": "EditUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false}
   ]
 }
