@@ -147,25 +147,31 @@ class CreateAlbumBranchTests(unittest.TestCase):
             queue=patch.object(create_album, "enqueue_preview_jobs", side_effect=RuntimeError("queue")),
         )
         self.assertEqual(response["statusCode"], 201)
-        self.assertEqual(table.put_item.call_args.kwargs["Item"]["status"], "active")
+        public_item = table.put_item.call_args.kwargs["Item"]
+        self.assertEqual(public_item["status"], "active")
+        self.assertEqual(public_item["ownerEmail"], "")
+        self.assertNotIn("ownerSub", public_item)
         self.assertEqual(table.update_item.call_count, 2)
 
     def test_unlisted_share_code_and_private_notification_success_and_failure(self):
         with patch.object(create_album.secrets, "token_urlsafe", return_value="share-code"):
             response, table, _ = self._run_success(create_body(visibility="unlisted", isShared=True))
         self.assertEqual(response["statusCode"], 201)
-        self.assertEqual(table.put_item.call_args.kwargs["Item"]["shareCode"], "share-code")
+        unlisted_item = table.put_item.call_args.kwargs["Item"]
+        self.assertEqual(unlisted_item["shareCode"], "share-code")
+        self.assertNotIn("ownerSub", unlisted_item)
 
         for failure in (False, True):
             with self.subTest(failure=failure):
                 send = patch.object(create_album, "send_email", side_effect=RuntimeError("email") if failure else None)
-                response, _, entered = self._run_success(
+                response, table, entered = self._run_success(
                     create_body(visibility="private", ownerEmail="owner@example.com", ownerSub=ALBUM_ID),
                     owner=patch.object(create_album, "_resolve_owner", return_value=("owner@example.com", ALBUM_ID)),
                     send=send,
                     emit=patch.object(create_album, "emit_audit_event"),
                 )
                 self.assertEqual(response["statusCode"], 201)
+                self.assertEqual(table.put_item.call_args.kwargs["Item"]["ownerSub"], ALBUM_ID)
 
     def test_drive_dispatch_success_and_failure_are_nonfatal(self):
         for failure in (False, True):
@@ -332,10 +338,12 @@ class UpdateAlbumBranchTests(unittest.TestCase):
         with patch.object(update_album.secrets, "token_urlsafe", return_value="new-share"):
             shared = update_album._updated_album(base, {"visibility": "unlisted", "isShared": True})
         self.assertEqual(shared["shareCode"], "new-share")
+        self.assertNotIn("ownerSub", shared)
         revoked = update_album._updated_album({**shared, "shareCode": "old"}, {"visibility": "unlisted", "isShared": False})
         self.assertNotIn("shareCode", revoked)
         public = update_album._updated_album({**shared, "ownerEmail": "x", "ownerSub": ALBUM_ID}, {"visibility": "public"})
         self.assertEqual(public["ownerEmail"], "")
+        self.assertNotIn("ownerSub", public)
         self.assertFalse(public["isShared"])
         preserved = update_album._updated_album(
             {**shared, "visibility": "unlisted", "shareCode": "existing"}, {"isShared": True}

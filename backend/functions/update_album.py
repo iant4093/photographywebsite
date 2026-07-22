@@ -87,7 +87,9 @@ def _updated_album(album, body):
         raise ValidationError("Private albums require ownerEmail and ownerSub")
     if new_visibility != "private":
         updated["ownerEmail"] = ""
-        updated["ownerSub"] = ""
+        # ownerSub backs OwnerSubCreatedAtIndex and therefore cannot be an
+        # empty string. Omission keeps public/unlisted albums out of the index.
+        updated.pop("ownerSub", None)
     if new_visibility == "unlisted":
         sharing = validate_bool(body.get("isShared"), "isShared", default=bool(album.get("isShared", True)))
         updated["isShared"] = sharing

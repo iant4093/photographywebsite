@@ -185,12 +185,16 @@ def handler(event, context):
             "createdAt": created_at,
             "visibility": visibility,
             "ownerEmail": owner_email,
-            "ownerSub": owner_sub,
             "isShared": is_shared,
             "backupToGoogleDrive": backup_to_drive,
             "status": "pending",
             "createdBySub": claims["sub"],
         }
+        # ownerSub is the partition key of OwnerSubCreatedAtIndex. DynamoDB
+        # rejects empty strings for any table or index key, so non-private
+        # albums must omit this attribute rather than persisting "".
+        if owner_sub:
+            item["ownerSub"] = owner_sub
         if is_shared:
             item["shareCode"] = secrets.token_urlsafe(24)
 
