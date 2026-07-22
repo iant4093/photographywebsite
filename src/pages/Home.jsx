@@ -92,8 +92,8 @@ function Home() {
         let frame = null
         const update = () => {
             frame = null
-            const shift = Math.min(Math.max(0, window.scrollY) * 0.15, 60)
-            hero.style.transform = `translateY(${shift}px)`
+            const shift = Math.min(Math.max(0, window.scrollY) * 0.08, 24)
+            hero.style.transform = `translateY(-${shift}px)`
         }
         const onScroll = () => {
             if (frame === null) frame = window.requestAnimationFrame(update)
@@ -144,7 +144,7 @@ function Home() {
 
     return (
         <div ref={pageRef} className="animate-fade-in">
-            <section className="relative overflow-hidden">
+            <section className="home-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     {useStaticHero ? (
                         <picture>
@@ -161,7 +161,7 @@ function Home() {
                                 fetchPriority="high"
                                 loading="eager"
                                 decoding="async"
-                                className="w-full h-[110%] object-cover object-[center_30%] parallax-hero"
+                                className="home-hero-media parallax-hero"
                             />
                         </picture>
                     ) : (
@@ -175,10 +175,10 @@ function Home() {
                             loading="eager"
                             decoding="async"
                             onError={() => setUseStaticHero(true)}
-                            className="w-full h-[110%] object-cover object-[center_30%] parallax-hero"
+                            className="home-hero-media parallax-hero"
                         />
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-b from-charcoal/40 via-charcoal/20 to-cream" />
+                    <div className="home-hero-overlay absolute inset-0" />
                 </div>
 
                 <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
