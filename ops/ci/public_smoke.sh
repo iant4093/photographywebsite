@@ -8,7 +8,6 @@ set -euo pipefail
 : "${MEDIA_DOMAIN:?MEDIA_DOMAIN is required}"
 : "${MEDIA_BUCKET_NAME:?MEDIA_BUCKET_NAME is required}"
 : "${AWS_REGION:?AWS_REGION is required}"
-: "${EXPECTED_PUBLIC_ALBUM_COUNT:?EXPECTED_PUBLIC_ALBUM_COUNT is required}"
 
 site="${SITE_URL%/}"
 api="${API_BASE_URL%/}"
@@ -27,7 +26,6 @@ arguments=(
   --media-domain "$MEDIA_DOMAIN"
   --media-bucket-name "$MEDIA_BUCKET_NAME"
   --aws-region "$AWS_REGION"
-  --expected-public-album-count "$EXPECTED_PUBLIC_ALBUM_COUNT"
   --attempts "${PUBLIC_SMOKE_ATTEMPTS:-2}"
   --retry-delay "${PUBLIC_SMOKE_RETRY_DELAY_SECONDS:-5}"
 )

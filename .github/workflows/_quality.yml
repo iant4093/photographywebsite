@@ -52,12 +52,11 @@ jobs:
           MEDIA_DOMAIN: ${{ vars.VITE_CLOUDFRONT_DOMAIN }}
           MEDIA_BUCKET_NAME: ${{ vars.MEDIA_BUCKET_NAME }}
           SITE_URL: ${{ vars.SITE_URL }}
-          EXPECTED_PUBLIC_ALBUM_COUNT: ${{ vars.EXPECTED_PUBLIC_ALBUM_COUNT }}
           USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
           CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
           TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
         run: |
-          for name in API_URL API_ORIGIN_URL EXECUTE_API_URL MEDIA_DOMAIN MEDIA_BUCKET_NAME SITE_URL EXPECTED_PUBLIC_ALBUM_COUNT USER_POOL_ID CLIENT_ID TURNSTILE_SITE_KEY; do
+          for name in API_URL API_ORIGIN_URL EXECUTE_API_URL MEDIA_DOMAIN MEDIA_BUCKET_NAME SITE_URL USER_POOL_ID CLIENT_ID TURNSTILE_SITE_KEY; do
             [[ -n "${!name:-}" ]] || { echo "Required public build variable is missing: $name" >&2; exit 2; }
             [[ "${!name}" != *example* && "${!name}" != *EXAMPLE* ]] || { echo "Placeholder public build variable is forbidden." >&2; exit 2; }
           done
@@ -68,10 +67,6 @@ jobs:
           execute_api_pattern='^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com/[A-Za-z0-9_$-]+/?$'
           [[ "$SITE_URL" == https://* && "$API_ORIGIN_URL" == https://*/api && "$EXECUTE_API_URL" =~ $execute_api_pattern ]] || {
             echo 'Production public posture URLs do not match their required HTTPS forms.' >&2
-            exit 2
-          }
-          [[ "$EXPECTED_PUBLIC_ALBUM_COUNT" =~ ^[1-9][0-9]{0,3}$ ]] || {
-            echo 'Expected public album count must be a positive reviewed integer.' >&2
             exit 2
           }
       - name: Build production bundle

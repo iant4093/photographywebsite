@@ -108,7 +108,6 @@ not used. Configure all of these non-secret variables at repository scope:
 | `VITE_API_BASE_URL` | Public production API base; use same-origin `/api` after front-door cutover. |
 | `VITE_CLOUDFRONT_DOMAIN` | Public media CDN hostname. |
 | `MEDIA_BUCKET_NAME` | Exact media bucket name; smoke reuses one public CDN object's path to prove the corresponding direct regional S3 request remains denied. |
-| `EXPECTED_PUBLIC_ALBUM_COUNT` | Reviewed positive production catalog count; update after an intentional public-album addition or removal. |
 | `VITE_COGNITO_USER_POOL_ID` | Public Cognito pool identifier. |
 | `VITE_COGNITO_CLIENT_ID` | Public Cognito app-client identifier. |
 | `VITE_TURNSTILE_SITE_KEY` | Public Turnstile site key, never the Turnstile secret. |
@@ -116,6 +115,12 @@ not used. Configure all of these non-secret variables at repository scope:
 None of these variables is a credential. Do not add AWS access keys, Cognito
 tokens, Turnstile secrets, provider secrets, CloudFormation parameter values,
 or application data to GitHub.
+
+Catalog, album, photo, and video counts are deliberately not repository
+variables or deployment gates. The credential-free smoke test instead proves
+that the live catalog is nonempty, fully paginated, internally consistent, and
+serves usable public media through the exact CDN. Normal content changes
+therefore require no GitHub configuration maintenance.
 
 All variables above are repository-scoped so the reusable quality, deployment,
 and credential-free smoke jobs share one reviewed configuration. The AWS role

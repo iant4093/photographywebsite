@@ -46,7 +46,6 @@ jobs:
           EXECUTE_API_URL: ${{ vars.EXECUTE_API_URL }}
           MEDIA_DOMAIN: ${{ vars.VITE_CLOUDFRONT_DOMAIN }}
           MEDIA_BUCKET_NAME: ${{ vars.MEDIA_BUCKET_NAME }}
-          EXPECTED_PUBLIC_ALBUM_COUNT: ${{ vars.EXPECTED_PUBLIC_ALBUM_COUNT }}
           EXPECTED_RELEASE_SHA: ${{ github.sha }}
         run: ./ops/ci/public_smoke.sh
 

@@ -1186,7 +1186,6 @@ class PublicPostureSmokeTests(unittest.TestCase):
             "media.test",
             "media-bucket",
             "us-west-2",
-            1,
             self.SHA,
         )
 
@@ -1354,8 +1353,6 @@ class PublicPostureSmokeTests(unittest.TestCase):
             replace(config, media_bucket_name="Invalid_Bucket"),
             replace(config, aws_region="us-west"),
             replace(config, expected_release_sha="not-a-sha"),
-            replace(config, expected_public_album_count=0),
-            replace(config, expected_public_album_count=True),
             replace(config, timeout=0),
         )
         for unsafe in unsafe_variants:
@@ -1373,7 +1370,6 @@ class PublicPostureSmokeTests(unittest.TestCase):
                     self.config().media_domain,
                     self.config().media_bucket_name,
                     self.config().aws_region,
-                    self.config().expected_public_album_count,
                     self.config().expected_release_sha,
                 )
             )
@@ -1537,6 +1533,8 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("public_posture_smoke.py", smoke)
         self.assertIn("PUBLIC_SMOKE_ATTEMPTS:-2", smoke)
         self.assertIn("PUBLIC_SMOKE_RETRY_DELAY_SECONDS:-5", smoke)
+        self.assertNotIn("EXPECTED_PUBLIC_ALBUM_COUNT", smoke)
+        self.assertNotIn("expected-public-album-count", smoke)
         self.assertIn("audit_stacks.json", multi_drift)
         self.assertIn("detect-stack-drift", multi_drift)
         self.assertIn("--resolved-values", collect)
@@ -1603,6 +1601,11 @@ class WorkflowPolicyTests(unittest.TestCase):
             self.assertNotIn("change_set_id", source)
         for source in (release, manual, scheduled):
             self.assertNotRegex(source, r"(?m)^\s+environment:\s*")
+            self.assertNotIn("EXPECTED_PUBLIC_ALBUM_COUNT", source)
+        quality = (ROOT / ".github/workflows/_quality.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("EXPECTED_PUBLIC_ALBUM_COUNT", quality)
         self.assertIn("refs/heads/main", manual)
         self.assertIn("refs/heads/main", scheduled)
 

@@ -70,7 +70,6 @@ class PostureConfig:
     media_domain: str
     media_bucket_name: str
     aws_region: str
-    expected_public_album_count: int
     expected_release_sha: str = ""
     timeout: float = 20.0
 
@@ -156,8 +155,6 @@ def validate_config(config: PostureConfig) -> PostureConfig:
         raise PostureError("expected release SHA is invalid")
     if not 1 <= config.timeout <= 60:
         raise PostureError("timeout is invalid")
-    if isinstance(config.expected_public_album_count, bool) or not 1 <= config.expected_public_album_count <= 10_000:
-        raise PostureError("expected public album count is invalid")
     execute_path = urllib.parse.urlsplit(execute).path
     if not re.fullmatch(r"/[A-Za-z0-9_$-]+", execute_path):
         raise PostureError("execute API URL must identify one exact stage")
@@ -169,7 +166,6 @@ def validate_config(config: PostureConfig) -> PostureConfig:
         media_domain,
         config.media_bucket_name,
         config.aws_region,
-        config.expected_public_album_count,
         config.expected_release_sha,
         config.timeout,
     )
@@ -341,8 +337,6 @@ def run_posture(
     )
     if catalog_metrics["albumCount"] < 1 or not catalog_metrics["complete"]:
         raise PostureError("public catalog is unexpectedly empty or incomplete")
-    if catalog_metrics["albumCount"] != config.expected_public_album_count:
-        raise PostureError("public catalog count differs from the reviewed production baseline")
     if not media_candidates:
         raise PostureError("public catalog did not expose a CDN media candidate")
     media_url = min(media_candidates, key=lambda item: item[0])[1]
@@ -414,7 +408,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--media-domain", required=True)
     parser.add_argument("--media-bucket-name", required=True)
     parser.add_argument("--aws-region", required=True)
-    parser.add_argument("--expected-public-album-count", required=True, type=int)
     parser.add_argument("--expected-release-sha", default="")
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--attempts", type=int, default=1)
@@ -430,7 +423,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.media_domain,
                 args.media_bucket_name,
                 args.aws_region,
-                args.expected_public_album_count,
                 args.expected_release_sha,
                 args.timeout,
             ),
