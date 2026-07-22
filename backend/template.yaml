@@ -1978,6 +1978,7 @@ Resources:
               Action:
                 - s3:GetObject
                 - s3:PutObject
+                - s3:PutObjectTagging
               Resource: !Sub '${ImagesBucket.Arn}/temp-zips/*'
             - Effect: Allow
               Action: lambda:InvokeFunction
