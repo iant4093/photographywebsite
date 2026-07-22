@@ -9,6 +9,7 @@ const DISPLAY_URL_FIELDS = [
 ]
 
 const PREVIEW_WIDTHS = [640, 1280]
+export const HERO_COVER_KEY = 'site/hero/home'
 
 function safePreviewUrl(value) {
     if (typeof value !== 'string' || value.length > 4096 || /[\s,]/.test(value)) return ''
@@ -104,6 +105,10 @@ export function cdnUrl(key) {
     if (!key) return ''
     if (/^https?:\/\//i.test(key)) return key
     return cdnDomain ? `https://${cdnDomain}/${String(key).replace(/^\/+/, '')}` : ''
+}
+
+export function heroCoverUrl() {
+    return cdnUrl(HERO_COVER_KEY)
 }
 
 export function albumCoverUrl(album) {

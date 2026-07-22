@@ -65,6 +65,7 @@ describe('small presentational and routing components', () => {
     routed(<AdminDashboard />)
     expect(screen.getByRole('link', { name: /Upload Photos/ })).toHaveAttribute('href', '/admin/upload')
     expect(screen.getByRole('link', { name: /Upload Videos/ })).toHaveAttribute('href', '/admin/upload-video')
+    expect(screen.getByRole('link', { name: /Change Hero Cover/ })).toHaveAttribute('href', '/admin/hero')
     expect(screen.getByRole('link', { name: /Manage Photo Albums/ })).toHaveAttribute('href', '/admin/manage?type=photo')
     expect(screen.getByRole('link', { name: /Manage Video Albums/ })).toHaveAttribute('href', '/admin/manage?type=video')
     expect(screen.getByRole('link', { name: /Manage Users/ })).toHaveAttribute('href', '/admin/users')

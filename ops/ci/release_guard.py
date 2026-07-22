@@ -61,9 +61,10 @@ PROTECTED_RESOURCE_TYPES = frozenset(
 ALLOWED_ACTIONS = frozenset({"Add", "Modify"})
 SAFE_REPLACEMENTS = frozenset({None, "False"})
 SAFE_RECREATION = frozenset({None, "Never"})
-INTENT_RULE_KEYS = frozenset(
+INTENT_RULE_REQUIRED_KEYS = frozenset(
     {"logicalId", "resourceType", "action", "propertyPaths", "allowNoDetails"}
 )
+INTENT_RULE_KEYS = INTENT_RULE_REQUIRED_KEYS | {"allowProtectedModify"}
 DEPENDENCY_RULE_KEYS = frozenset(
     {"logicalId", "resourceType", "propertyPath", "causingEntities"}
 )
@@ -82,22 +83,27 @@ class GateError(ValueError):
 
 def load_release_intent(
     document: Any,
-) -> dict[tuple[str, str, str], tuple[frozenset[str], bool]]:
+) -> dict[tuple[str, str, str], tuple[frozenset[str], bool, bool]]:
     """Validate the versioned, exact resource/property release allowlist."""
 
     if not isinstance(document, dict) or set(document) != {"version", "rules"}:
         raise GateError("release intent must contain only version and rules")
     if document.get("version") != 1 or not isinstance(document.get("rules"), list):
         raise GateError("release intent version or rules are invalid")
-    rules: dict[tuple[str, str, str], tuple[frozenset[str], bool]] = {}
+    rules: dict[tuple[str, str, str], tuple[frozenset[str], bool, bool]] = {}
     for raw in document["rules"]:
-        if not isinstance(raw, dict) or set(raw) != INTENT_RULE_KEYS:
+        if (
+            not isinstance(raw, dict)
+            or not INTENT_RULE_REQUIRED_KEYS.issubset(raw)
+            or not set(raw).issubset(INTENT_RULE_KEYS)
+        ):
             raise GateError("release intent rule shape is invalid")
         logical_id = raw.get("logicalId")
         resource_type = raw.get("resourceType")
         action = raw.get("action")
         property_paths = raw.get("propertyPaths")
         allow_no_details = raw.get("allowNoDetails")
+        allow_protected_modify = raw.get("allowProtectedModify", False)
         if not isinstance(logical_id, str) or not LOGICAL_ID_RE.fullmatch(logical_id):
             raise GateError("release intent logical ID is invalid")
         if not isinstance(resource_type, str) or not RESOURCE_TYPE_RE.fullmatch(resource_type):
@@ -113,14 +119,22 @@ def load_release_intent(
             raise GateError("release intent property paths must be unique and exact")
         if not isinstance(allow_no_details, bool):
             raise GateError("release intent detail policy is invalid")
+        if not isinstance(allow_protected_modify, bool):
+            raise GateError("release intent protected-change policy is invalid")
         if allow_no_details and action != "Add":
             raise GateError("only an exact Add rule may allow missing change details")
+        if allow_protected_modify and action != "Modify":
+            raise GateError("only an exact Modify rule may approve a protected change")
         if not property_paths and not allow_no_details:
             raise GateError("release intent must name at least one exact property path")
         key = (logical_id, resource_type, action)
         if key in rules:
             raise GateError("release intent contains a duplicate rule")
-        rules[key] = (frozenset(property_paths), allow_no_details)
+        rules[key] = (
+            frozenset(property_paths),
+            allow_no_details,
+            allow_protected_modify,
+        )
     if not rules:
         raise GateError("release intent must contain at least one exact rule")
     return rules
@@ -190,7 +204,9 @@ def gate_change_set(
     pages: Iterable[dict[str, Any]],
     *,
     protected_ids: frozenset[str] = PROTECTED_LOGICAL_IDS,
-    release_intent: dict[tuple[str, str, str], tuple[frozenset[str], bool]] | None = None,
+    release_intent: dict[
+        tuple[str, str, str], tuple[frozenset[str], bool, bool]
+    ] | None = None,
     release_dependencies: dict[tuple[str, str, str], frozenset[str]] | None = None,
 ) -> dict[str, int]:
     """Validate every paginated resource change and return aggregate counts."""
@@ -216,10 +232,11 @@ def gate_change_set(
             raise GateError("resource change Details must be a list")
         intended_properties: frozenset[str] | None = None
         allow_no_details = False
+        allow_protected_modify = False
         if release_intent is not None:
             rule = release_intent.get((logical_id, resource_type, action))
             if rule is not None:
-                intended_properties, allow_no_details = rule
+                intended_properties, allow_no_details, allow_protected_modify = rule
             if rule is not None and not details and not allow_no_details:
                 raise GateError("resource change has no property evidence for its release intent")
         dynamic_details: list[bool] = []
@@ -255,7 +272,18 @@ def gate_change_set(
                     raise GateError("resource property is outside the versioned release intent")
         dependency_only = bool(details) and all(dynamic_details)
         protected = logical_id in protected_ids or resource_type in PROTECTED_RESOURCE_TYPES
-        if protected and not dependency_only:
+        # Protected changes require either dependency-only evidence or an
+        # explicit, exact versioned exception. Replacements remain impossible
+        # regardless of the intent document.
+        explicitly_reviewed_protected_change = (
+            protected
+            and intended_properties is not None
+            and (
+                action == "Add"
+                or (action == "Modify" and allow_protected_modify and bool(details))
+            )
+        )
+        if protected and not dependency_only and not explicitly_reviewed_protected_change:
             raise GateError("protected resource change requires exceptional approval")
         if release_intent is not None and intended_properties is None and not dependency_only:
             raise GateError("resource change is outside the versioned release intent")

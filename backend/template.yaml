@@ -708,6 +708,73 @@ Resources:
               Value: public, max-age=31536000, immutable
               Override: true
 
+  HeroMediaCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'GoldenHour-Hero-${Stage}'
+        Comment: Cache the fixed hero at the edge while browsers revalidate after admin overwrites
+        DefaultTTL: 86400
+        MaxTTL: 86400
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  HeroMediaResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub 'GoldenHour-Hero-Headers-${Stage}'
+        Comment: Harden hero responses and force browser revalidation after path invalidation
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items:
+              - Content-Type
+              - Range
+          AccessControlAllowMethods:
+            Items:
+              - GET
+              - HEAD
+              - OPTIONS
+          AccessControlAllowOrigins:
+            Items:
+              - !Ref FrontendUrl
+          AccessControlExposeHeaders:
+            Items:
+              - Accept-Ranges
+              - Content-Length
+              - Content-Range
+              - ETag
+          AccessControlMaxAgeSec: 600
+          OriginOverride: true
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Cache-Control
+              Value: public, max-age=0, must-revalidate
+              Override: true
+
   MediaResponseHeadersPolicy:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
@@ -857,6 +924,15 @@ Resources:
           ResponseHeadersPolicyId: !Ref MediaResponseHeadersPolicy
           Compress: true
         CacheBehaviors:
+          - PathPattern: 'site/hero/*'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: !Ref HeroMediaCachePolicy
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+            ResponseHeadersPolicyId: !Ref HeroMediaResponseHeadersPolicy
+            Compress: false
           - PathPattern: 'albums/*/preview/v2/*'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
@@ -2177,6 +2253,47 @@ Resources:
           Properties:
             ApiId: !Ref Api
             Path: /upload-url
+            Method: POST
+
+  HeroCoverFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: hero_cover.handler
+      ReservedConcurrentExecutions: 2
+      Environment:
+        Variables:
+          IMAGES_BUCKET: !Ref ImagesBucket
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectTagging
+                - s3:DeleteObject
+                - s3:PutObject
+                - s3:PutObjectTagging
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/temp-zips/hero-pending'
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectTagging
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/site/hero/home'
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+      Events:
+        HeroCoverOperation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/hero/{operation}
             Method: POST
 
   CreateUserFunction:

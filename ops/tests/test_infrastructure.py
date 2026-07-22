@@ -108,6 +108,7 @@ expected_routes = {
     ("POST", "/shared/{shareCode}/download-url"),
     ("PATCH", "/albums/{albumId}/images"),
     ("POST", "/upload-url"),
+    ("POST", "/admin/hero/{operation}"),
     ("POST", "/users"),
     ("GET", "/users"),
     ("DELETE", "/users/{email}"),
@@ -272,6 +273,25 @@ class DataProtectionTests(unittest.TestCase):
             "AllowedHeaders:\n              - Content-Type\n              - Range\n              - x-amz-tagging",
             bucket,
         )
+
+    def test_admin_hero_upload_is_fixed_key_unmodified_and_least_privilege(self) -> None:
+        function = resource_block("HeroCoverFunction")
+        distribution = resource_block("ImagesCloudFront")
+        policy = resource_block("ImagesBucketPolicy")
+        cache = resource_block("HeroMediaCachePolicy")
+        headers = resource_block("HeroMediaResponseHeadersPolicy")
+        self.assertIn("Path: /admin/hero/{operation}", function)
+        self.assertIn("ReservedConcurrentExecutions: 2", function)
+        self.assertIn("${ImagesBucket.Arn}/temp-zips/hero-pending", function)
+        self.assertIn("${ImagesBucket.Arn}/site/hero/home", function)
+        self.assertNotIn("GoogleDriveBackupFunction", function)
+        self.assertNotIn("albums/*", function)
+        self.assertIn("cloudfront:CreateInvalidation", function)
+        self.assertIn("DenyCloudFrontTemporaryZipReads", policy)
+        self.assertIn("PathPattern: 'site/hero/*'", distribution)
+        self.assertIn("Compress: false", distribution)
+        self.assertIn("DefaultTTL: 86400", cache)
+        self.assertIn("Value: public, max-age=0, must-revalidate", headers)
 
     def test_abandoned_pending_uploads_expire_after_recovery_window(self) -> None:
         bucket = resource_block("ImagesBucket")

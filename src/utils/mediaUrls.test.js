@@ -3,6 +3,7 @@ import {
     albumCoverUrl,
     annotateMediaExpiry,
     cdnUrl,
+    heroCoverUrl,
     mediaDisplayUrl,
     mediaExpiresAt,
     mediaFileName,
@@ -19,6 +20,7 @@ describe('media URL compatibility', () => {
     it('preserves absolute URLs and resolves legacy CDN keys', () => {
         expect(cdnUrl('https://example.com/signed')).toBe('https://example.com/signed')
         expect(cdnUrl('/albums/example.jpg')).toMatch(/\/albums\/example\.jpg$/)
+        expect(heroCoverUrl()).toMatch(/\/site\/hero\/home$/)
     })
 
     it('prefers the safe API fields while retaining legacy fallbacks', () => {

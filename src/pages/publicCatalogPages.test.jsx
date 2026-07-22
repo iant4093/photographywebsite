@@ -146,6 +146,17 @@ describe('Home complete public catalog', () => {
     expect(disconnect).toHaveBeenCalled()
     expect(window.cancelAnimationFrame).toHaveBeenCalledWith(9)
   })
+
+  it('falls back to the bundled responsive hero if the managed CDN object is unavailable', async () => {
+    catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
+    const { container } = routed(<Home />)
+    const managed = screen.getByRole('img', { name: 'Golden hour landscape' })
+    fireEvent.error(managed)
+    const fallback = screen.getByRole('img', { name: 'Golden hour landscape' })
+    expect(fallback).toHaveAttribute('src', '/images/heroes/photo-1280.jpg')
+    expect(fallback).toHaveAttribute('srcset')
+    expect(container.querySelector('source[type="image/avif"]')).toBeTruthy()
+  })
 })
 
 describe('Videos paginated catalog', () => {

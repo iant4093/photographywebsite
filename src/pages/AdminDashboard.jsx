@@ -28,6 +28,17 @@ function AdminDashboard() {
             color: 'from-blue-500 to-blue-600',
         },
         {
+            title: 'Change Hero Cover',
+            description: 'Replace the main homepage cover with an original, full-quality image.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5l5-5 4 4 3-3 6 6M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm10-11h.01" />
+                </svg>
+            ),
+            link: '/admin/hero',
+            color: 'from-rose-500 to-amber-dark',
+        },
+        {
             title: 'Manage Photo Albums',
             description: 'Edit, delete, and manage photos across all photography albums.',
             icon: (

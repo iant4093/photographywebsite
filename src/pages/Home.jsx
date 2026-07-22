@@ -12,6 +12,7 @@ import {
     setCatalogSnapshot,
 } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
+import { heroCoverUrl } from '../utils/mediaUrls'
 
 const CATALOG_KEY = 'public-photos'
 // Fetch the complete current public catalog in one compressed response while
@@ -21,6 +22,7 @@ const HERO_WIDTHS = [640, 960, 1280, 1920]
 const heroSet = (format) => HERO_WIDTHS
     .map((width) => `/images/heroes/photo-${width}.${format} ${width}w`)
     .join(', ')
+const MANAGED_HERO_URL = heroCoverUrl()
 
 function Home() {
     const navigationType = useNavigationType()
@@ -36,6 +38,7 @@ function Home() {
     const [loading, setLoading] = useState(!initialSnapshot)
     const [error, setError] = useState(null)
     const [loadAttempt, setLoadAttempt] = useState(0)
+    const [useStaticHero, setUseStaticHero] = useState(!MANAGED_HERO_URL)
 
     const savePage = useCallback((items, cursor) => {
         catalogSnapshotRef.current = { items, nextCursor: cursor }
@@ -98,7 +101,7 @@ function Home() {
             window.removeEventListener('scroll', onScroll)
             if (frame !== null) window.cancelAnimationFrame(frame)
         }
-    }, [])
+    }, [useStaticHero])
 
     useEffect(() => {
         const elements = pageRef.current?.querySelectorAll('[data-reveal-id]') || []
@@ -141,23 +144,38 @@ function Home() {
         <div ref={pageRef} className="animate-fade-in">
             <section className="relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
-                    <picture>
-                        <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
-                        <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
+                    {useStaticHero ? (
+                        <picture>
+                            <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
+                            <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
+                            <img
+                                ref={heroRef}
+                                src="/images/heroes/photo-1280.jpg"
+                                srcSet={heroSet('jpg')}
+                                sizes="100vw"
+                                width="6000"
+                                height="4000"
+                                alt="Golden hour landscape"
+                                fetchPriority="high"
+                                loading="eager"
+                                decoding="async"
+                                className="w-full h-[110%] object-cover object-[center_30%] parallax-hero"
+                            />
+                        </picture>
+                    ) : (
                         <img
                             ref={heroRef}
-                            src="/images/heroes/photo-1280.jpg"
-                            srcSet={heroSet('jpg')}
-                            sizes="100vw"
+                            src={MANAGED_HERO_URL}
                             width="6000"
                             height="4000"
                             alt="Golden hour landscape"
                             fetchPriority="high"
                             loading="eager"
                             decoding="async"
+                            onError={() => setUseStaticHero(true)}
                             className="w-full h-[110%] object-cover object-[center_30%] parallax-hero"
                         />
-                    </picture>
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/40 via-charcoal/20 to-cream" />
                 </div>
 

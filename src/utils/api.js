@@ -387,6 +387,28 @@ export function requestUploadUrl(token, albumId, filename, contentType, size, ki
     })
 }
 
+export function requestHeroUploadUrl(token, file, options = {}) {
+    return apiFetch('/admin/hero/upload-url', {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({
+            filename: file.name,
+            contentType: file.type,
+            size: file.size,
+        }),
+        signal: options.signal,
+    })
+}
+
+export function completeHeroUpload(token, etag, options = {}) {
+    return apiFetch('/admin/hero/complete', {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({ etag }),
+        signal: options.signal,
+    })
+}
+
 export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, options = {}) {
     const uploadHeaders = Object.keys(requiredHeaders).length > 0
         ? requiredHeaders

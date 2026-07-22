@@ -110,6 +110,7 @@ class AuditIntegrationTests(unittest.TestCase):
             "delete_images.py",
             "update_image.py",
             "get_upload_url.py",
+            "hero_cover.py",
             "get_download_url.py",
             "get_shared_album.py",
             "get_album.py",

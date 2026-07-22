@@ -257,6 +257,7 @@ class ReleaseIntentTests(unittest.TestCase):
         lambda_rules = [
             rule for rule in document["rules"]
             if rule["resourceType"] == "AWS::Lambda::Function"
+            and rule["action"] == "Modify"
         ]
         self.assertEqual({rule["logicalId"] for rule in lambda_rules}, logical_ids)
         for rule in lambda_rules:
@@ -282,6 +283,87 @@ class ReleaseIntentTests(unittest.TestCase):
             self.assertFalse(rule["allowNoDetails"])
 
         self.assertFalse(any(rule["action"] == "Remove" for rule in document["rules"]))
+
+    def test_exact_add_intent_can_introduce_but_never_modify_a_protected_resource(self):
+        document = {
+            "version": 1,
+            "rules": [{
+                "logicalId": "NewRole",
+                "resourceType": "AWS::IAM::Role",
+                "action": "Add",
+                "propertyPaths": ["Policies"],
+                "allowNoDetails": True,
+            }],
+        }
+        intent = release_guard.load_release_intent(document)
+        added = change(
+            action="Add",
+            logical_id="NewRole",
+            resource_type="AWS::IAM::Role",
+            replacement=None,
+        )
+        added["ResourceChange"]["Details"] = []
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": [added]}], release_intent=intent
+            ),
+            {"Add": 1, "Modify": 0, "Total": 1},
+        )
+
+        modified = change(
+            action="Modify",
+            logical_id="NewRole",
+            resource_type="AWS::IAM::Role",
+            property_name="Policies",
+        )
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set(
+                [{"Changes": [modified]}], release_intent=intent
+            )
+
+    def test_exact_exception_can_modify_but_never_replace_a_protected_resource(self):
+        document = {
+            "version": 1,
+            "rules": [{
+                "logicalId": "ProtectedDistribution",
+                "resourceType": "AWS::CloudFront::Distribution",
+                "action": "Modify",
+                "propertyPaths": ["DistributionConfig"],
+                "allowNoDetails": False,
+                "allowProtectedModify": True,
+            }],
+        }
+        intent = release_guard.load_release_intent(document)
+        modified = change(
+            logical_id="ProtectedDistribution",
+            resource_type="AWS::CloudFront::Distribution",
+            property_name="DistributionConfig",
+            replacement="False",
+        )
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": [modified]}], release_intent=intent
+            ),
+            {"Add": 0, "Modify": 1, "Total": 1},
+        )
+
+        replaced = change(
+            logical_id="ProtectedDistribution",
+            resource_type="AWS::CloudFront::Distribution",
+            property_name="DistributionConfig",
+            replacement="True",
+        )
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set(
+                [{"Changes": [replaced]}], release_intent=intent
+            )
+
+        invalid_add = document["rules"][0] | {
+            "action": "Add",
+            "allowNoDetails": True,
+        }
+        with self.assertRaises(release_guard.GateError):
+            release_guard.load_release_intent({"version": 1, "rules": [invalid_add]})
 
 
 class ReleaseDependencyTests(unittest.TestCase):
