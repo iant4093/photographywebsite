@@ -336,6 +336,16 @@ class AlbumDetailTests(unittest.TestCase):
         self.assertEqual(body["images"][0]["width"], 6000)
         self.assertEqual(body["images"][0]["thumbnailTime"], 1.25)
 
+    def test_verified_admin_public_detail_includes_management_keys_and_is_not_cacheable(self):
+        stored_album = album()
+        with patch.object(get_album.table, "get_item", return_value={"Item": stored_album}), patch.object(
+            get_album, "get_verified_claims", return_value=claims(groups=["Admins"])
+        ):
+            response = get_album.handler(self._event(), None)
+        body = response_body(response)
+        self.assertEqual(body["images"][0]["rawKey"], stored_album["images"][0]["rawKey"])
+        self.assertEqual(response["headers"]["Cache-Control"], "private, no-store")
+
     def test_private_detail_requires_owner(self):
         private = album("private")
         with patch.object(get_album.table, "get_item", return_value={"Item": private}), patch.object(

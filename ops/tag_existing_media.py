@@ -12,9 +12,11 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
+import re
 import subprocess
 from typing import Any
 from urllib.parse import unquote, urlparse
+import uuid
 
 from aws_stack import aws_json, stack_resource
 
@@ -30,6 +32,7 @@ ALLOWED_VISIBILITIES = {"public", "private", "unlisted"}
 # Distinct from upload-state "pending": the bucket lifecycle expires pending
 # uploads, while migration orphans must be retained for manual recovery.
 QUARANTINE_VISIBILITY = "quarantined"
+LEGACY_PREFIX_PATTERN = re.compile(r"^albums/[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?/$")
 
 
 def create_s3_tag_client(profile: str | None, region: str, workers: int):
@@ -60,7 +63,7 @@ def scan_all(table: str, profile: str | None, region: str | None) -> list[dict[s
             "--table-name",
             table,
             "--projection-expression",
-            "albumId, #visibility, images, coverImageUrl, coverThumbKey, s3Prefix",
+            "albumId, #visibility, images, coverImageUrl, coverThumbKey, legacyS3Prefix",
             "--expression-attribute-names",
             '{"#visibility":"visibility"}',
         ]
@@ -144,6 +147,32 @@ def object_key(value: Any) -> str | None:
     return value.lstrip("/")
 
 
+def approved_album_prefixes(album: dict[str, Any]) -> tuple[str, ...] | None:
+    """Return only canonical and explicitly approved legacy ownership prefixes."""
+    album_id = album.get("albumId")
+    if not isinstance(album_id, str):
+        return None
+    try:
+        normalized_id = str(uuid.UUID(album_id))
+    except (ValueError, AttributeError):
+        return None
+    if normalized_id != album_id:
+        return None
+
+    prefixes = [f"albums/{album_id}/"]
+    legacy_prefix = album.get("legacyS3Prefix")
+    if legacy_prefix not in (None, ""):
+        if not isinstance(legacy_prefix, str) or not LEGACY_PREFIX_PATTERN.fullmatch(legacy_prefix):
+            return None
+        if legacy_prefix not in prefixes:
+            prefixes.append(legacy_prefix)
+    return tuple(prefixes)
+
+
+def key_belongs_to_prefixes(key: str, prefixes: tuple[str, ...]) -> bool:
+    return any(key.startswith(prefix) and key != prefix.rstrip("/") for prefix in prefixes)
+
+
 def classify_existing_objects(
     assignments: dict[str, str], object_keys: set[str]
 ) -> tuple[dict[str, str], set[str], set[str]]:
@@ -199,26 +228,35 @@ def main() -> int:
     assignments: dict[str, str] = {}
     conflicts = 0
     invalid_visibility = 0
+    invalid_prefix_records = 0
+    cross_prefix_references = 0
 
     for album in albums:
         visibility = album.get("visibility")
         if visibility not in ALLOWED_VISIBILITIES:
             invalid_visibility += 1
             continue
+        prefixes = approved_album_prefixes(album)
+        if prefixes is None:
+            invalid_prefix_records += 1
+            continue
         candidates: set[str] = set()
         for image in album.get("images") or []:
             if isinstance(image, dict):
                 for field in ("rawKey", "thumbKey", "hlsUrl"):
                     key = object_key(image.get(field))
-                    if key:
+                    if key and key_belongs_to_prefixes(key, prefixes):
                         candidates.add(key)
+                    elif key:
+                        cross_prefix_references += 1
         for field in ("coverImageUrl", "coverThumbKey"):
             key = object_key(album.get(field))
-            if key:
+            if key and key_belongs_to_prefixes(key, prefixes):
                 candidates.add(key)
+            elif key:
+                cross_prefix_references += 1
 
-        prefix = object_key(album.get("s3Prefix"))
-        if prefix and prefix.startswith("albums/"):
+        for prefix in prefixes:
             candidates.update(list_objects_all(bucket, prefix, args.profile, args.region))
 
         for key in candidates:
@@ -228,9 +266,13 @@ def main() -> int:
             else:
                 assignments[key] = visibility
 
-    if invalid_visibility or conflicts:
+    if invalid_visibility or invalid_prefix_records or cross_prefix_references or conflicts:
         raise SystemExit(
-            f"Refusing to continue: invalid_visibility_records={invalid_visibility}, conflicting_keys={conflicts}."
+            "Refusing to continue: "
+            f"invalid_visibility_records={invalid_visibility}, "
+            f"invalid_prefix_records={invalid_prefix_records}, "
+            f"cross_prefix_references={cross_prefix_references}, "
+            f"conflicting_keys={conflicts}."
         )
     bucket_object_keys = set(list_objects_all(bucket, "albums/", args.profile, args.region))
     plan, orphan_keys, missing_references = classify_existing_objects(

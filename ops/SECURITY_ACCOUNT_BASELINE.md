@@ -218,6 +218,16 @@ targets send only static signal/severity/stage/runbook JSON; raw finding payload
 never enter either queue or the notification channel. HIGH and CRITICAL findings
 use separate rules and retain their response severity.
 
+Security Hub notifications accept only active findings that remain in the
+`NEW` workflow state. They exclude the exact Config service-linked-role
+preference and GuardDuty/Inspector EC2, ECR, EKS, RDS, malware, and runtime
+controls that are non-applicable to this reviewed Lambda/S3/DynamoDB workload.
+Those findings remain visible and auditable in Security Hub; the filter only
+prevents repetitive owner email. `SSM.7` is deliberately not excluded because
+the account-level SSM public-document sharing setting must remain disabled. If
+the architecture later introduces any excluded workload family, remove its
+control exclusion in the same reviewed infrastructure change.
+
 No subscriber is created. Attach a monitored destination only after the owner
 approves it and completes its confirmation flow. Test a controlled alarm and
 EventBridge event after routing exists. Inspect only aggregate DLQ counts; do

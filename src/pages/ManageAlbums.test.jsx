@@ -112,4 +112,54 @@ describe('ManageAlbums', () => {
     expect(await screen.findByText('No albums found.')).toBeInTheDocument()
     await waitFor(() => expect(console.error).toHaveBeenCalled())
   })
+
+  it('uses administrator media keys for cover and removal mutations', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const mediaItem = {
+      id: 'opaque-media-id',
+      rawKey: 'albums/photo/raw.jpg',
+      thumbKey: 'albums/photo/thumb.jpg',
+      thumbnailUrl: 'https://cdn.test/thumb.jpg',
+      blurhash: 'hash',
+    }
+    api.fetchAlbum.mockResolvedValue({ album: albums[0], images: [mediaItem] })
+    api.deleteImages.mockResolvedValue({})
+
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    fireEvent.click(await screen.findByTitle('Set as album cover'))
+    await waitFor(() => expect(api.updateAlbum).toHaveBeenCalledWith('admin-token', 'photo', {
+      coverImageUrl: mediaItem.rawKey,
+      coverThumbKey: mediaItem.thumbKey,
+      coverBlurhash: mediaItem.blurhash,
+    }))
+
+    // Cover updates refresh and collapse the panel, so expand it again before removal.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    fireEvent.click(await screen.findByTitle('Remove'))
+    await waitFor(() => expect(api.deleteImages).toHaveBeenCalledWith(
+      'admin-token', 'photo', [mediaItem.rawKey],
+    ))
+    expect(confirm).toHaveBeenCalled()
+  })
+
+  it('blocks media mutations when a management key is absent', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    api.fetchAlbum.mockResolvedValue({
+      album: albums[0],
+      images: [{ id: 'opaque-media-id', thumbnailUrl: 'https://cdn.test/thumb.jpg' }],
+    })
+
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    fireEvent.click(await screen.findByTitle('Remove'))
+    expect(await screen.findByText(/missing its management key/i)).toBeInTheDocument()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(api.deleteImages).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTitle('Set as album cover'))
+    expect(api.updateAlbum).not.toHaveBeenCalled()
+  })
 })

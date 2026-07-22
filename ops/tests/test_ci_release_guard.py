@@ -279,7 +279,26 @@ class ReleaseIntentTests(unittest.TestCase):
         self.assertEqual({rule["logicalId"] for rule in alarm_rules}, alarm_ids)
         for rule in alarm_rules:
             self.assertEqual(rule["action"], "Modify")
-            self.assertEqual(rule["propertyPaths"], ["AlarmActions"])
+            expected_paths = (
+                ["AlarmActions", "AlarmDescription", "Threshold"]
+                if rule["logicalId"] == "FrontDoorDeniedAlarm"
+                else ["AlarmActions"]
+            )
+            self.assertEqual(rule["propertyPaths"], expected_paths)
+            self.assertFalse(rule["allowNoDetails"])
+
+        role_rules = [
+            rule for rule in document["rules"]
+            if rule["resourceType"] == "AWS::IAM::Role"
+        ]
+        self.assertEqual(
+            {rule["logicalId"] for rule in role_rules},
+            {"CreateAlbumFunctionRole", "UpdateAlbumFunctionRole", "CreateZipFunctionRole"},
+        )
+        for rule in role_rules:
+            self.assertEqual(rule["action"], "Modify")
+            self.assertEqual(rule["propertyPaths"], ["Policies"])
+            self.assertTrue(rule["allowProtectedModify"])
             self.assertFalse(rule["allowNoDetails"])
 
         self.assertFalse(any(rule["action"] == "Remove" for rule in document["rules"]))

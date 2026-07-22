@@ -117,7 +117,7 @@ describe('client media processing', () => {
       return video
     })
     const failed = processVideo(new Blob(), 2)
-    const expectation = expect(failed).rejects.toThrow('Failed to load video')
+    const expectation = expect(failed).rejects.toThrow('Export the video as H.264 MP4')
     const failHandler = video.onerror
     const seekHandler = video.onseeked
     const canPlayHandler = video.oncanplay

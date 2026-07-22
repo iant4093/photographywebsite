@@ -240,6 +240,7 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
         self.assertIn("MetricName: FrontDoorDenied", metric_filter)
         self.assertIn("Namespace: IanTruongPhotography/Security", alarm)
         self.assertIn("MetricName: FrontDoorDenied", alarm)
+        self.assertIn("Threshold: 10", alarm)
         self.assertIn("ian-photography-security-${Stage}", alarm)
 
 

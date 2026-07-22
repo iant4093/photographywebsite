@@ -3,7 +3,7 @@
   "rules": [
     {"logicalId": "ApiServerErrorAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "ApiLatencyAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
-    {"logicalId": "FrontDoorDeniedAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
+    {"logicalId": "FrontDoorDeniedAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions", "AlarmDescription", "Threshold"], "allowNoDetails": false},
     {"logicalId": "AsyncFailureQueueAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "PreviewDeadLetterQueueAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "PreviewQueueAgeAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
@@ -43,6 +43,9 @@
     {"logicalId": "CreateUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "ListUsersFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "DeleteUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
-    {"logicalId": "EditUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false}
+    {"logicalId": "EditUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
+    {"logicalId": "CreateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "UpdateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "CreateZipFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true}
   ]
 }

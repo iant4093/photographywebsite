@@ -122,7 +122,7 @@ class GetAlbumBranchTests(unittest.TestCase):
             get_album, "serialize_images", return_value=[]
         ), patch.object(get_album, "_audit") as audit:
             response = get_album.handler(request(path={"albumId": ALBUM_ID}), None)
-        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+        self.assertEqual(response["headers"]["Cache-Control"], "private, no-store")
         audit.assert_called_once()
 
     def test_handler_validation_and_protected_provider_failure_audit(self):

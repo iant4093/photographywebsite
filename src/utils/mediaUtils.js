@@ -4,6 +4,9 @@ const THUMBNAIL_MAX_SIZE = 800
 const THUMBNAIL_MIME_TYPE = 'image/jpeg'
 const THUMBNAIL_QUALITY = 0.85
 const BLURHASH_SIZE = 32
+const VIDEO_DECODE_TIMEOUT_MS = 30_000
+
+export const VIDEO_DECODE_ERROR_MESSAGE = 'This video codec cannot be decoded by your browser. Export the video as H.264 MP4 and try again.'
 
 function scaledDimensions(sourceWidth, sourceHeight) {
     if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth < 1 || sourceHeight < 1) {
@@ -112,8 +115,12 @@ export async function processVideo(file, time) {
         const objectUrl = URL.createObjectURL(file)
         let initialized = false
         let settled = false
+        const decodeTimeout = window.setTimeout(() => {
+            fail(new Error(VIDEO_DECODE_ERROR_MESSAGE))
+        }, VIDEO_DECODE_TIMEOUT_MS)
 
         const cleanup = () => {
+            window.clearTimeout(decodeTimeout)
             video.oncanplay = null
             video.onseeked = null
             video.onerror = null
@@ -151,7 +158,7 @@ export async function processVideo(file, time) {
             }, 300)
         }
 
-        video.onerror = () => fail(new Error('Failed to load video for processing'))
+        video.onerror = () => fail(new Error(VIDEO_DECODE_ERROR_MESSAGE))
         video.src = objectUrl
     })
 }

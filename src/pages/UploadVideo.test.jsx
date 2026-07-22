@@ -142,4 +142,17 @@ describe('UploadVideo', () => {
     expect(await screen.findByText('Upload failed.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Upload Video(s)' })).toBeEnabled()
   })
+
+  it('shows an actionable message for a browser-incompatible video codec', async () => {
+    const { container } = mounted()
+    populate(container, [new File(['film'], 'camera.mov', { type: 'video/quicktime' })])
+    media.processVideo.mockRejectedValueOnce(new Error(
+      'This video codec cannot be decoded by your browser. Export the video as H.264 MP4 and try again.',
+    ))
+    fireEvent.submit(container.querySelector('form'))
+
+    expect(await screen.findByText(/Export the video as H\.264 MP4/i)).toBeInTheDocument()
+    expect(api.requestUploadUrl).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Upload Video(s)' })).toBeEnabled()
+  })
 })

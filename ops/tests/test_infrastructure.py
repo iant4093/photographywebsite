@@ -174,6 +174,21 @@ assert actual_routes == expected_routes
 
 
 class DataProtectionTests(unittest.TestCase):
+    def test_album_handler_iam_matches_runtime_data_operations(self) -> None:
+        create_album = resource_block("CreateAlbumFunction")
+        for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
+            self.assertIn(action, create_album)
+
+        update_album = resource_block("UpdateAlbumFunction")
+        self.assertIn("dynamodb:GetItem", update_album)
+        self.assertIn("dynamodb:PutItem", update_album)
+        self.assertNotIn("dynamodb:UpdateItem", update_album)
+
+        create_zip = resource_block("CreateZipFunction")
+        self.assertIn("Action: s3:ListBucket", create_zip)
+        self.assertIn("s3:prefix: temp-zips/*", create_zip)
+        self.assertIn("${ImagesBucket.Arn}/temp-zips/*", create_zip)
+
     def test_new_fixed_name_log_resources_do_not_orphan_on_initial_rollback(self) -> None:
         for logical_id in ("MediaAccessLogsBucket", "ApiAccessLogGroup", "ApplicationLogGroup"):
             block = resource_block(logical_id)
@@ -683,6 +698,8 @@ class MigrationAndPackagingTests(unittest.TestCase):
         self.assertIn("tag_client.get_object_tagging", source)
         self.assertIn("tag_client.put_object_tagging", source)
         self.assertIn('"aws-cli"', source)
+        self.assertIn("legacyS3Prefix", source)
+        self.assertNotIn('album.get("s3Prefix")', source)
 
     def test_tag_migration_paginates_s3_listing(self) -> None:
         pages = [

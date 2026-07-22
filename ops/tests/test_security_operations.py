@@ -179,6 +179,23 @@ class SecurityTemplateTests(unittest.TestCase):
             block = resource_block(NOTIFICATIONS, logical_id)
             self.assertIn("Input: !Sub >-", block)
             self.assertIn("Arn: !GetAtt SecuritySignalQueue.Arn", block)
+        for logical_id in ("SecurityHubFindingRule", "SecurityHubCriticalFindingRule"):
+            block = resource_block(NOTIFICATIONS, logical_id)
+            self.assertIn("RecordState: [ACTIVE]", block)
+            self.assertIn("Status: [NEW]", block)
+            self.assertNotIn("NOTIFIED", block)
+            for control_id in (
+                "Config.1",
+                "GuardDuty.5",
+                "GuardDuty.7",
+                "GuardDuty.8",
+                "GuardDuty.9",
+                "GuardDuty.11",
+                "Inspector.1",
+                "Inspector.2",
+            ):
+                self.assertIn(f"security-control/{control_id}", block)
+            self.assertNotIn("security-control/SSM.7", block)
         topic_policy = resource_block(NOTIFICATIONS, "SecurityNotificationsPolicy")
         self.assertNotIn("AllowEventBridgeSecurityFindings", topic_policy)
         queue_policy = resource_block(NOTIFICATIONS, "SecuritySignalQueuePolicy")

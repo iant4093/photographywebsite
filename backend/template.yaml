@@ -1638,7 +1638,10 @@ Resources:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
-              Action: dynamodb:PutItem
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action: dynamodb:BatchGetItem
@@ -1722,7 +1725,7 @@ Resources:
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
-                - dynamodb:UpdateItem
+                - dynamodb:PutItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action: dynamodb:BatchGetItem
@@ -1965,6 +1968,12 @@ Resources:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Ref RateLimitHashSecret
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: temp-zips/*
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -2560,14 +2569,14 @@ Resources:
   FrontDoorDeniedAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: A request reached an API Lambda without valid CloudFront origin verification.
+      AlarmDescription: At least ten requests reached API Lambdas without valid CloudFront origin verification in five minutes.
       Namespace: IanTruongPhotography/Security
       MetricName: FrontDoorDenied
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
       DatapointsToAlarm: 1
-      Threshold: 1
+      Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:

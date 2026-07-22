@@ -37,6 +37,11 @@ function isCurrentAlbumCover(album, image) {
         || album.coverThumbKey === thumbKey
 }
 
+function managementMediaKey(image) {
+    const value = image?.rawKey || image?.key
+    return typeof value === 'string' && value.trim() ? value : ''
+}
+
 // Helper component for picking a thumbnail time for a video
 function VideoThumbnailScrubber({ file, time, onTimeChange }) {
     const videoRef = useRef(null)
@@ -331,7 +336,11 @@ function ManageAlbums() {
 
     // Remove specific image
     async function handleRemoveImage(img) {
-        const key = img.rawKey || img.key
+        const key = managementMediaKey(img)
+        if (!key) {
+            setActionError('This item is missing its management key. Refresh the album and try again.')
+            return
+        }
         const expandedAlbum = albums.find((album) => album.albumId === expandedAlbumId)
         const deletingCover = isCurrentAlbumCover(expandedAlbum, img)
         const message = deletingCover
@@ -357,9 +366,14 @@ function ManageAlbums() {
 
     // Set an image as the album cover
     async function handleSetCover(img) {
+        const imgKey = managementMediaKey(img)
+        if (!imgKey) {
+            setActionError('This item is missing its management key. Refresh the album and try again.')
+            return
+        }
+        setActionError('')
         try {
             const token = await getIdToken()
-            const imgKey = img.rawKey || img.key;
             const updates = {
                 coverImageUrl: imgKey,
                 coverThumbKey: img.thumbKey || '',
@@ -379,7 +393,12 @@ function ManageAlbums() {
 
     // Change the thumbnail of an already-uploaded video using the scrubber's video element
     async function handleChangeVideoThumbnail(img) {
-        const rawKey = img.rawKey || img.key
+        const rawKey = managementMediaKey(img)
+
+        if (!rawKey) {
+            setActionError('This video is missing its management key. Refresh the album and try again.')
+            return
+        }
 
         if (!scrubberVideoRef.current) {
             setActionError('Video not loaded yet — try again in a moment')

@@ -455,8 +455,23 @@ Resources:
           findings:
             Severity:
               Label: [HIGH]
+            # These controls describe workload families that this reviewed
+            # serverless account baseline intentionally does not operate, plus
+            # Config.1's service-linked-role preference. Config itself remains
+            # enabled, recording, and independently posture-checked.
+            GeneratorId:
+              - anything-but:
+                  - security-control/Config.1
+                  - security-control/GuardDuty.5
+                  - security-control/GuardDuty.7
+                  - security-control/GuardDuty.8
+                  - security-control/GuardDuty.9
+                  - security-control/GuardDuty.11
+                  - security-control/Inspector.1
+                  - security-control/Inspector.2
+            RecordState: [ACTIVE]
             Workflow:
-              Status: [NEW, NOTIFIED]
+              Status: [NEW]
       State: ENABLED
       Targets:
         - Id: SecurityNotifications
@@ -483,8 +498,19 @@ Resources:
           findings:
             Severity:
               Label: [CRITICAL]
+            GeneratorId:
+              - anything-but:
+                  - security-control/Config.1
+                  - security-control/GuardDuty.5
+                  - security-control/GuardDuty.7
+                  - security-control/GuardDuty.8
+                  - security-control/GuardDuty.9
+                  - security-control/GuardDuty.11
+                  - security-control/Inspector.1
+                  - security-control/Inspector.2
+            RecordState: [ACTIVE]
             Workflow:
-              Status: [NEW, NOTIFIED]
+              Status: [NEW]
       State: ENABLED
       Targets:
         - Id: SecuritySignals

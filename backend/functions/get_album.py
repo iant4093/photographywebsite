@@ -90,12 +90,20 @@ def handler(event, context):
         if not album.get("images"):
             album = {**album, "images": _legacy_images(album)}
 
-        include_admin = access_mode == "admin"
+        # Public albums remain anonymously readable, but a verified admin using
+        # the management endpoint still needs the internal keys required by
+        # cover, thumbnail, and deletion mutations. Never infer this from
+        # visibility alone: the optional JWT has already been fully verified.
+        include_admin = bool(claims and is_admin(claims))
         body = {
             "album": serialize_album_detail(album, include_admin=include_admin),
             "images": serialize_images(album, include_internal=include_admin),
         }
-        cache_control = "public, max-age=60, s-maxage=300" if access_mode == "public" else "no-store"
+        cache_control = (
+            "public, max-age=60, s-maxage=300"
+            if access_mode == "public" and not include_admin
+            else "private, no-store"
+        )
         if protected_request:
             _audit(
                 event, context, "success", "protected_access_granted",

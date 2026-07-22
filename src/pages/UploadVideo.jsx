@@ -346,6 +346,9 @@ export default function UploadVideo() {
 
                     <div className="mb-8">
                         <label className="block text-sm font-medium text-charcoal mb-2">Raw Video Files *</label>
+                        <p className="text-xs text-warm-gray mb-3">
+                            For reliable browser thumbnail processing, use an H.264 MP4 source. The original file is preserved for server-side transcoding.
+                        </p>
                         <div className="border-2 border-dashed border-warm-border rounded-2xl p-6 text-center hover:border-amber/40 transition-colors">
                             <input
                                 ref={fileInputRef}

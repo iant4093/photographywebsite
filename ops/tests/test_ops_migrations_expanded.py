@@ -638,6 +638,20 @@ class TagExistingMediaTests(MainMixin, unittest.TestCase):
         self.assertIsNone(tag_existing_media.object_key(None))
         self.assertEqual(tag_existing_media.object_key("/a/b"), "a/b")
         self.assertEqual(tag_existing_media.object_key("https://bucket.example/a%20b"), "a b")
+        self.assertEqual(
+            tag_existing_media.approved_album_prefixes({"albumId": ALBUM_ID}),
+            (f"albums/{ALBUM_ID}/",),
+        )
+        self.assertEqual(
+            tag_existing_media.approved_album_prefixes(
+                {"albumId": ALBUM_ID, "legacyS3Prefix": "albums/legacy-name/"}
+            ),
+            (f"albums/{ALBUM_ID}/", "albums/legacy-name/"),
+        )
+        self.assertIsNone(tag_existing_media.approved_album_prefixes({"albumId": "bad"}))
+        self.assertIsNone(tag_existing_media.approved_album_prefixes(
+            {"albumId": ALBUM_ID, "legacyS3Prefix": "albums/nested/bad/"}
+        ))
         plan, orphans, missing = tag_existing_media.classify_existing_objects(
             {"assigned": "public", "missing": "private"}, {"assigned", "orphan"}
         )
@@ -650,6 +664,40 @@ class TagExistingMediaTests(MainMixin, unittest.TestCase):
         if prefix == "albums/":
             return [self.raw_key, self.orphan_key]
         return [self.raw_key]
+
+    def test_lists_canonical_and_approved_legacy_prefixes_but_never_mutable_prefix(self):
+        legacy_key = "albums/legacy-name/original/photo.jpg"
+        album = {
+            **self.album,
+            "legacyS3Prefix": string("albums/legacy-name/"),
+            "s3Prefix": string("albums/untrusted-mutable/"),
+        }
+        calls = []
+
+        def listing(bucket, prefix, profile, region):
+            calls.append(prefix)
+            if prefix == "albums/":
+                return [self.raw_key, legacy_key]
+            if prefix == "albums/legacy-name/":
+                return [legacy_key]
+            if prefix == f"albums/{ALBUM_ID}/":
+                return [self.raw_key]
+            raise AssertionError(prefix)
+
+        with patch.object(tag_existing_media, "aws_json", return_value={"Account": "123"}), patch.object(
+            tag_existing_media, "stack_resource", side_effect=["table", "bucket"]
+        ), patch.object(tag_existing_media, "scan_all", return_value=[album]), patch.object(
+            tag_existing_media, "list_objects_all", side_effect=listing
+        ):
+            result, output = self.invoke(tag_existing_media, "--stack-name", "stack")
+        self.assertEqual(result, 0)
+        report = json.loads(output.split("\nDry run", 1)[0])
+        self.assertEqual(report["orphanQuarantineCount"], 0)
+        self.assertEqual(
+            calls,
+            [f"albums/{ALBUM_ID}/", "albums/legacy-name/", "albums/"],
+        )
+        self.assertNotIn("albums/untrusted-mutable/", calls)
 
     def run_tag(self, *arguments, albums=None, client=None, cli_tags=None):
         selected_albums = [self.album] if albums is None else albums
@@ -687,6 +735,12 @@ class TagExistingMediaTests(MainMixin, unittest.TestCase):
         invalid = [{**self.album, "visibility": string("secret")}]
         with self.assertRaisesRegex(SystemExit, "invalid_visibility"):
             self.run_tag(albums=invalid)
+        invalid_prefix = [{**self.album, "legacyS3Prefix": string("albums/nested/bad/")}]
+        with self.assertRaisesRegex(SystemExit, "invalid_prefix_records"):
+            self.run_tag(albums=invalid_prefix)
+        cross_prefix = [{**self.album, "images": {"L": [{"M": {"rawKey": string("albums/other/raw.jpg")}}]}}]
+        with self.assertRaisesRegex(SystemExit, "cross_prefix_references"):
+            self.run_tag(albums=cross_prefix)
         conflict_album = {
             **self.album,
             "albumId": string(SECOND_ID),
