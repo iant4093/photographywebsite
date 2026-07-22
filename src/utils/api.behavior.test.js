@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from './api'
+import {
+  clearCatalogSnapshots,
+  getCatalogSnapshot,
+  reconcilePublicCatalogItems,
+  setCatalogSnapshot,
+} from './catalogState'
 
 const jsonResponse = (body, init = {}) => new Response(JSON.stringify(body), {
   status: 200,
@@ -11,10 +17,12 @@ const jsonResponse = (body, init = {}) => new Response(JSON.stringify(body), {
 describe('public API client behavior', () => {
   beforeEach(() => {
     api.clearApiCache()
+    clearCatalogSnapshots()
     vi.spyOn(Math, 'random').mockReturnValue(0)
   })
   afterEach(() => {
     api.clearApiCache()
+    clearCatalogSnapshots()
     vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -117,6 +125,43 @@ describe('public API client behavior', () => {
 
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
     await expect(api.deleteAlbum('token', 'a')).resolves.toBeNull()
+  })
+
+  it('invalidates complete snapshots and overlays successful album writes immediately', async () => {
+    const stale = {
+      albumId: 'old', type: 'photo', visibility: 'public', title: 'Old', createdAt: '2025-01-01',
+    }
+    const created = {
+      albumId: 'new', type: 'photo', visibility: 'public', title: 'New', createdAt: '2026-01-01',
+    }
+    setCatalogSnapshot('public-photos', { items: [stale], nextCursor: null })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(created, { status: 201 }))
+      .mockResolvedValueOnce(jsonResponse({ ...created, visibility: 'private' }))
+      .mockResolvedValueOnce(jsonResponse({ message: 'deleted' })))
+
+    await api.createAlbum('token', { title: 'New' })
+    expect(getCatalogSnapshot('public-photos')).toBeNull()
+    expect(reconcilePublicCatalogItems([stale], 'photo').map((album) => album.albumId))
+      .toEqual(['new', 'old'])
+
+    setCatalogSnapshot('public-photos', { items: [created, stale], nextCursor: null })
+    await api.updateAlbum('token', 'new', { visibility: 'private' })
+    expect(getCatalogSnapshot('public-photos')).toBeNull()
+    expect(reconcilePublicCatalogItems([created, stale], 'photo').map((album) => album.albumId))
+      .toEqual(['old'])
+
+    await api.deleteAlbum('token', 'old')
+    expect(reconcilePublicCatalogItems([created, stale], 'photo')).toEqual([])
+  })
+
+  it('keeps catalog snapshots when an album mutation fails', async () => {
+    const snapshot = { items: [{ albumId: 'old' }], nextCursor: null }
+    setCatalogSnapshot('public-photos', snapshot)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 })))
+
+    await expect(api.createAlbum('token', { title: 'Failed' })).rejects.toMatchObject({ status: 503 })
+    expect(getCatalogSnapshot('public-photos')).toMatchObject(snapshot)
   })
 
   it('paginates modern users, supports the legacy array response, and rejects loops', async () => {

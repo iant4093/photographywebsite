@@ -8,6 +8,7 @@ const catalog = vi.hoisted(() => ({
   setCatalogSnapshot: vi.fn(),
   deleteCatalogSnapshot: vi.fn(),
   loadCompleteCatalog: vi.fn(),
+  reconcilePublicCatalogItems: vi.fn((items) => items),
 }))
 const scroll = vi.hoisted(() => ({
   isRevealed: vi.fn(() => false),

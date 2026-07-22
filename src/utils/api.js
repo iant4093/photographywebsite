@@ -1,4 +1,9 @@
 import { isSafeCursor, normalizePage } from './apiResponse'
+import {
+    invalidateCatalogSnapshots,
+    recordPublicCatalogDeletion,
+    recordPublicCatalogUpsert,
+} from './catalogState'
 import { annotateMediaExpiry } from './mediaUrls'
 
 // Production uses the single CloudFront front door. An explicit absolute URL
@@ -218,6 +223,17 @@ export function clearApiCache() {
     catalogCache.clear()
     for (const record of catalogRequests.values()) record.controller.abort()
     catalogRequests.clear()
+}
+
+function invalidateAlbumCatalog({ album, deletedAlbumId } = {}) {
+    clearApiCache()
+    if (album?.albumId) {
+        recordPublicCatalogUpsert(album)
+    } else if (deletedAlbumId) {
+        recordPublicCatalogDeletion(deletedAlbumId)
+    } else {
+        invalidateCatalogSnapshots()
+    }
 }
 
 export function readCachedAlbumsPage(params = {}) {
@@ -449,57 +465,69 @@ export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, o
     throw new ApiError('The upload could not be completed. Please try again.', { code: 'UPLOAD_FAILED' })
 }
 
-export function createAlbum(token, albumData, options = {}) {
-    return apiFetch('/albums', {
+export async function createAlbum(token, albumData, options = {}) {
+    const album = await apiFetch('/albums', {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify(albumData),
         signal: options.signal,
     }, { timeoutMs: 60_000 })
+    invalidateAlbumCatalog({ album })
+    return album
 }
 
-export function updateAlbum(token, albumId, data, options = {}) {
-    return apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
+export async function updateAlbum(token, albumId, data, options = {}) {
+    const album = await apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
         method: 'PUT',
         headers: authHeaders(token),
         body: JSON.stringify(data),
         signal: options.signal,
     })
+    invalidateAlbumCatalog({ album })
+    return album
 }
 
-export function addImagesToAlbum(token, albumId, images, options = {}) {
-    return apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
+export async function addImagesToAlbum(token, albumId, images, options = {}) {
+    const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify({ images }),
         signal: options.signal,
     }, { timeoutMs: 60_000 })
+    invalidateAlbumCatalog()
+    return result
 }
 
-export function deleteAlbum(token, albumId, options = {}) {
-    return apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
+export async function deleteAlbum(token, albumId, options = {}) {
+    const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
         method: 'DELETE',
         headers: authHeaders(token),
         signal: options.signal,
     }, { timeoutMs: 60_000 })
+    invalidateAlbumCatalog({ deletedAlbumId: albumId })
+    return result
 }
 
-export function deleteImages(token, albumId, keys, options = {}) {
-    return apiFetch(`/albums/${encodeURIComponent(albumId)}/delete-images`, {
+export async function deleteImages(token, albumId, keys, options = {}) {
+    const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}/delete-images`, {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify({ keys }),
         signal: options.signal,
     }, { timeoutMs: 60_000 })
+    invalidateAlbumCatalog()
+    return result
 }
 
-export function updateImageThumbnail(token, albumId, rawKey, data, options = {}) {
-    return apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
+export async function updateImageThumbnail(token, albumId, rawKey, data, options = {}) {
+    const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
         method: 'PATCH',
         headers: authHeaders(token),
         body: JSON.stringify({ rawKey, ...data }),
         signal: options.signal,
     })
+    invalidateAlbumCatalog()
+    return result
 }
 
 export function createUser(token, email, options = {}) {

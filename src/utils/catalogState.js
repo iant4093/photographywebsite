@@ -1,8 +1,35 @@
 import { isSafeCursor, mergeUniqueById } from './apiResponse'
 
 const catalogSnapshots = new Map()
+const pendingCatalogMutations = new Map()
 const MAX_SNAPSHOT_AGE_MS = 5 * 60_000
+const MAX_PENDING_MUTATION_AGE_MS = 10 * 60_000
 const MAX_CATALOG_PAGES = 100
+const PUBLIC_ALBUM_FIELDS = [
+    'albumId',
+    'type',
+    'title',
+    'description',
+    'category',
+    'createdAt',
+    'visibility',
+    'status',
+    'imageCount',
+    'coverImageUrl',
+    'coverThumbnailUrl',
+    'coverBlurhash',
+]
+
+function prunePendingCatalogMutations() {
+    const cutoff = Date.now() - MAX_PENDING_MUTATION_AGE_MS
+    for (const [albumId, mutation] of pendingCatalogMutations) {
+        if (mutation.savedAt < cutoff) pendingCatalogMutations.delete(albumId)
+    }
+}
+
+function albumMatchesType(album, type) {
+    return type === 'video' ? album?.type === 'video' : album?.type !== 'video'
+}
 
 export class CatalogPaginationError extends Error {
     constructor(message, code) {
@@ -28,12 +55,73 @@ export function setCatalogSnapshot(key, value) {
     catalogSnapshots.set(key, { ...value, savedAt: Date.now() })
 }
 
+export function invalidateCatalogSnapshots() {
+    catalogSnapshots.clear()
+}
+
 export function clearCatalogSnapshots() {
     catalogSnapshots.clear()
+    pendingCatalogMutations.clear()
 }
 
 export function deleteCatalogSnapshot(key) {
     catalogSnapshots.delete(key)
+}
+
+export function recordPublicCatalogUpsert(album) {
+    const albumId = album?.albumId
+    if (typeof albumId !== 'string' || !albumId) {
+        invalidateCatalogSnapshots()
+        return
+    }
+    const retainedFields = album.visibility === 'public'
+        ? PUBLIC_ALBUM_FIELDS
+        : ['albumId', 'type', 'visibility', 'status']
+    const publicAlbum = Object.fromEntries(
+        retainedFields
+            .filter((field) => album[field] !== undefined)
+            .map((field) => [field, album[field]]),
+    )
+    pendingCatalogMutations.set(albumId, {
+        kind: 'upsert',
+        album: publicAlbum,
+        savedAt: Date.now(),
+    })
+    invalidateCatalogSnapshots()
+}
+
+export function recordPublicCatalogDeletion(albumId) {
+    if (typeof albumId !== 'string' || !albumId) {
+        invalidateCatalogSnapshots()
+        return
+    }
+    pendingCatalogMutations.set(albumId, { kind: 'delete', savedAt: Date.now() })
+    invalidateCatalogSnapshots()
+}
+
+export function reconcilePublicCatalogItems(items, type) {
+    prunePendingCatalogMutations()
+    const reconciled = new Map()
+    for (const album of Array.isArray(items) ? items : []) {
+        if (album?.albumId && albumMatchesType(album, type)) reconciled.set(album.albumId, album)
+    }
+
+    for (const [albumId, mutation] of pendingCatalogMutations) {
+        reconciled.delete(albumId)
+        const album = mutation.album
+        if (
+            mutation.kind === 'upsert'
+            && album?.visibility === 'public'
+            && (album.status === undefined || album.status === 'active')
+            && albumMatchesType(album, type)
+        ) {
+            reconciled.set(albumId, album)
+        }
+    }
+
+    return [...reconciled.values()].sort((left, right) => (
+        String(right?.createdAt || '').localeCompare(String(left?.createdAt || ''))
+    ))
 }
 
 export async function loadCompleteCatalog({

@@ -9,6 +9,7 @@ import {
     deleteCatalogSnapshot,
     getCatalogSnapshot,
     loadCompleteCatalog,
+    reconcilePublicCatalogItems,
     setCatalogSnapshot,
 } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
@@ -41,9 +42,10 @@ function Home() {
     const [useStaticHero, setUseStaticHero] = useState(!MANAGED_HERO_URL)
 
     const savePage = useCallback((items, cursor) => {
-        catalogSnapshotRef.current = { items, nextCursor: cursor }
-        setAlbums(items)
-        setCatalogSnapshot(CATALOG_KEY, { items, nextCursor: cursor })
+        const reconciledItems = reconcilePublicCatalogItems(items, 'photo')
+        catalogSnapshotRef.current = { items: reconciledItems, nextCursor: cursor }
+        setAlbums(reconciledItems)
+        setCatalogSnapshot(CATALOG_KEY, { items: reconciledItems, nextCursor: cursor })
     }, [])
 
     useEffect(() => {

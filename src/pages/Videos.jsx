@@ -5,7 +5,7 @@ import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbumsPage } from '../utils/api'
 import { mergeUniqueById } from '../utils/apiResponse'
-import { getCatalogSnapshot, setCatalogSnapshot } from '../utils/catalogState'
+import { getCatalogSnapshot, reconcilePublicCatalogItems, setCatalogSnapshot } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 
 const CATALOG_KEY = 'public-videos'
@@ -32,9 +32,10 @@ export default function Videos() {
     const [error, setError] = useState(null)
 
     const savePage = useCallback((items, cursor) => {
-        setAlbums(items)
+        const reconciledItems = reconcilePublicCatalogItems(items, 'video')
+        setAlbums(reconciledItems)
         setNextCursor(cursor)
-        setCatalogSnapshot(CATALOG_KEY, { items, nextCursor: cursor })
+        setCatalogSnapshot(CATALOG_KEY, { items: reconciledItems, nextCursor: cursor })
     }, [])
 
     useEffect(() => {

@@ -3,7 +3,11 @@ import {
     clearCatalogSnapshots,
     deleteCatalogSnapshot,
     getCatalogSnapshot,
+    invalidateCatalogSnapshots,
     loadCompleteCatalog,
+    reconcilePublicCatalogItems,
+    recordPublicCatalogDeletion,
+    recordPublicCatalogUpsert,
     setCatalogSnapshot,
 } from './catalogState'
 
@@ -26,6 +30,66 @@ describe('loadCompleteCatalog', () => {
         setCatalogSnapshot('clear', { items: [] })
         clearCatalogSnapshots()
         expect(getCatalogSnapshot('clear')).toBeNull()
+    })
+
+    it('reconciles recent public mutations over a stale edge catalog', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+        const staleItems = [
+            { albumId: 'old-photo', type: 'photo', visibility: 'public', title: 'Old', createdAt: '2025-01-01' },
+            { albumId: 'old-video', type: 'video', visibility: 'public', title: 'Video', createdAt: '2025-01-02' },
+        ]
+
+        setCatalogSnapshot('public-photos', { items: staleItems, nextCursor: null })
+        recordPublicCatalogUpsert({
+            albumId: 'new-photo',
+            type: 'photo',
+            visibility: 'public',
+            title: 'New',
+            createdAt: '2026-01-01',
+            ownerEmail: 'must-not-be-cached@example.test',
+            s3Prefix: 'must-not-be-cached/',
+        })
+        expect(getCatalogSnapshot('public-photos')).toBeNull()
+        const reconciledPhotos = reconcilePublicCatalogItems(staleItems, 'photo')
+        expect(reconciledPhotos.map((album) => album.albumId))
+            .toEqual(['new-photo', 'old-photo'])
+        expect(reconciledPhotos[0]).not.toHaveProperty('ownerEmail')
+        expect(reconciledPhotos[0]).not.toHaveProperty('s3Prefix')
+        expect(reconcilePublicCatalogItems(staleItems, 'video').map((album) => album.albumId))
+            .toEqual(['old-video'])
+
+        recordPublicCatalogUpsert({
+            albumId: 'old-photo',
+            type: 'photo',
+            visibility: 'private',
+            title: 'Old',
+            createdAt: '2025-01-01',
+        })
+        recordPublicCatalogDeletion('old-video')
+        expect(reconcilePublicCatalogItems(staleItems, 'photo').map((album) => album.albumId))
+            .toEqual(['new-photo'])
+        expect(reconcilePublicCatalogItems(staleItems, 'video')).toEqual([])
+    })
+
+    it('expires mutation overlays and distinguishes invalidation from logout clearing', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+        const created = {
+            albumId: 'created', type: 'photo', visibility: 'public', createdAt: '2026-01-01',
+        }
+        recordPublicCatalogUpsert(created)
+        setCatalogSnapshot('public-photos', { items: [created], nextCursor: null })
+        invalidateCatalogSnapshots()
+        expect(getCatalogSnapshot('public-photos')).toBeNull()
+        expect(reconcilePublicCatalogItems([], 'photo')).toEqual([created])
+
+        vi.advanceTimersByTime(10 * 60_000 + 1)
+        expect(reconcilePublicCatalogItems([], 'photo')).toEqual([])
+
+        recordPublicCatalogUpsert(created)
+        clearCatalogSnapshots()
+        expect(reconcilePublicCatalogItems([], 'photo')).toEqual([])
     })
 
     it('requires a page loader and honors a signal aborted before the first request', async () => {
