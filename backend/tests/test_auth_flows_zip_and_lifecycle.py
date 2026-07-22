@@ -2,7 +2,6 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from botocore.exceptions import ClientError
 
 from test_support import claims, response_body
 
@@ -269,11 +268,10 @@ class ZipTests(unittest.TestCase):
             "type": "photo",
             "images": [{"rawKey": f"albums/{ALBUM_ID}/original/one.jpg"}],
         }
-        missing = ClientError({"Error": {"Code": "404"}}, "HeadObject")
         with patch.object(create_zip, "get_album_record", return_value=album), patch.object(
             create_zip, "get_verified_claims", return_value=None
         ), patch.object(create_zip, "check_rate_limit", return_value=True), patch.object(
-            create_zip.s3, "head_object", side_effect=[missing, missing]
+            create_zip.s3, "list_objects_v2", side_effect=[{"Contents": []}, {"Contents": []}]
         ), patch.object(create_zip.s3, "put_object"), patch.object(create_zip.lambda_client, "invoke"):
             response = create_zip.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
         self.assertEqual(response["statusCode"], 202)

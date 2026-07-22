@@ -5,7 +5,6 @@ import re
 import json
 
 import boto3
-from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
 from album_access import authorize_album
@@ -20,6 +19,24 @@ from zip_helpers import get_album_record, raw_image_keys, zip_keys
 s3 = boto3.client("s3")
 lambda_client = boto3.client("lambda")
 SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+
+
+def _object_metadata(bucket, key):
+    """Check an exact temporary key with prefix-scoped ListBucket access.
+
+    S3 intentionally returns 403, rather than 404, when HeadObject checks a
+    missing key and the caller's ListBucket permission is prefix-constrained.
+    Listing the exact server-generated key avoids that ambiguity without
+    granting this request handler permission to enumerate album object names.
+    """
+    response = s3.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1)
+    contents = response.get("Contents", [])
+    if not isinstance(contents, list):
+        raise RuntimeError("Malformed temporary object lookup")
+    return next(
+        (item for item in contents if isinstance(item, dict) and item.get("Key") == key),
+        None,
+    )
 
 
 def _not_found():
@@ -90,8 +107,7 @@ def handler(event, context):
 
         zip_key, lock_key = zip_keys(album)
         bucket = bucket_name()
-        try:
-            s3.head_object(Bucket=bucket, Key=zip_key)
+        if _object_metadata(bucket, zip_key):
             _audit(
                 event, context, "success", "archive_ready", zip_state="ready",
                 actor_type=access_actor, auth_method=access_auth,
@@ -103,20 +119,14 @@ def handler(event, context):
                     "url": presigned_get_url(zip_key, download_filename=f"{album.get('title', 'album')}.zip", expiration=600),
                 },
             )
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
-                raise
 
         worker_running = False
-        try:
-            lock = s3.head_object(Bucket=bucket, Key=lock_key)
+        lock = _object_metadata(bucket, lock_key)
+        if lock:
             import datetime
 
             age = (datetime.datetime.now(datetime.timezone.utc) - lock["LastModified"]).total_seconds()
             worker_running = age < 900
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
-                raise
 
         if not worker_running:
             s3.put_object(

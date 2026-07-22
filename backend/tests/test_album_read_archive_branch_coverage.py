@@ -406,9 +406,13 @@ class UploadDownloadBranchTests(unittest.TestCase):
 
 
 class CreateZipBranchTests(unittest.TestCase):
-    def _call(self, path, *, record=None, claims_value=None, authorize_error=None, rate=True, head_effect=None):
+    def _call(self, path, *, record=None, claims_value=None, authorize_error=None, rate=True, list_effect=None):
         s3 = Mock()
-        s3.head_object.side_effect = head_effect
+        if list_effect is None and record:
+            zip_key, _ = create_zip.zip_keys(record)
+            s3.list_objects_v2.return_value = {"Contents": [{"Key": zip_key}]}
+        else:
+            s3.list_objects_v2.side_effect = list_effect
         worker = Mock()
         with patch.object(create_zip, "get_album_record", return_value=record), patch.object(
             create_zip, "get_verified_claims", return_value=claims_value
@@ -429,23 +433,35 @@ class CreateZipBranchTests(unittest.TestCase):
         with patch.dict(os.environ, {"ZIP_MAX_OBJECTS": "1"}):
             self.assertEqual(self._call({"albumId": ALBUM_ID}, record=album(images=[{"rawKey": RAW_KEY}, {"rawKey": RAW_KEY_2}]))[0]["statusCode"], 413)
         self.assertEqual(self._call({"albumId": ALBUM_ID}, record=album(), rate=False)[0]["statusCode"], 429)
-        response, _, _ = self._call({"albumId": ALBUM_ID}, record=album(), head_effect=None)
+        response, _, _ = self._call({"albumId": ALBUM_ID}, record=album())
         self.assertEqual(response_body(response)["status"], "ready")
 
     def test_share_processing_stale_and_active_locks_and_provider_errors(self):
         shared = album(visibility="unlisted", isShared=True, shareCode=SHARE_CODE)
-        missing = client_error("404", "HeadObject")
         stale = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=901)
+        _, shared_lock = create_zip.zip_keys(shared)
         response, s3, worker = self._call(
-            {"shareCode": SHARE_CODE}, record=shared, head_effect=[missing, {"LastModified": stale}]
+            {"shareCode": SHARE_CODE},
+            record=shared,
+            list_effect=[
+                {"Contents": []},
+                {"Contents": [{"Key": shared_lock, "LastModified": stale}]},
+            ],
         )
         self.assertEqual(response["statusCode"], 202)
         s3.put_object.assert_called_once()
         worker.invoke.assert_called_once()
 
         recent = datetime.datetime.now(datetime.timezone.utc)
+        active = album()
+        _, active_lock = create_zip.zip_keys(active)
         response, s3, worker = self._call(
-            {"albumId": ALBUM_ID}, record=album(), head_effect=[missing, {"LastModified": recent}]
+            {"albumId": ALBUM_ID},
+            record=active,
+            list_effect=[
+                {"Contents": []},
+                {"Contents": [{"Key": active_lock, "LastModified": recent}]},
+            ],
         )
         self.assertEqual(response["statusCode"], 202)
         s3.put_object.assert_not_called()
@@ -460,15 +476,26 @@ class CreateZipBranchTests(unittest.TestCase):
             400,
         )
         self.assertEqual(
-            self._call({"albumId": ALBUM_ID}, record=album(), head_effect=client_error("AccessDenied", "HeadObject"))[0]["statusCode"],
+            self._call(
+                {"albumId": ALBUM_ID},
+                record=album(),
+                list_effect=client_error("AccessDenied", "ListObjectsV2"),
+            )[0]["statusCode"],
             500,
         )
-        missing = client_error("404", "HeadObject")
         self.assertEqual(
             self._call(
                 {"albumId": ALBUM_ID},
                 record=album(),
-                head_effect=[missing, client_error("AccessDenied", "HeadObject")],
+                list_effect=[{"Contents": []}, client_error("AccessDenied", "ListObjectsV2")],
+            )[0]["statusCode"],
+            500,
+        )
+        self.assertEqual(
+            self._call(
+                {"albumId": ALBUM_ID},
+                record=album(),
+                list_effect=[{"Contents": "malformed"}],
             )[0]["statusCode"],
             500,
         )
