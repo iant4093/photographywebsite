@@ -2,21 +2,18 @@ import { Link } from 'react-router'
 import ProgressiveImage from './ProgressiveImage'
 import { albumCoverUrl } from '../utils/mediaUrls'
 
-// Album card displaying cover image, title, and a subtle hover effect
-function AlbumCard({ album }) {
+// Shared album card used by public, video, and signed-in catalogs.
+function AlbumCard({ album, onOpen, onImageError, onMouseEnter }) {
     // Determine the route: jump directly to video player if only 1 video
     const isSingleVideo = album.type === 'video' && album.imageCount === 1
     const targetRoute = isSingleVideo
         ? `/video/${album.albumId}?play=1`
         : `/${album.type === 'video' ? 'video' : 'album'}/${album.albumId}`
 
-    return (
-        <Link
-            to={targetRoute}
-            className="group flex flex-col h-full rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-xl transition-all duration-500 bg-white hover:-translate-y-1.5"
-        >
+    const content = (
+        <>
             {/* Cover image with warm overlay on hover */}
-            <div className="relative aspect-[4/3] overflow-hidden bg-cream-dark">
+            <div className="album-card-image relative aspect-[4/3] overflow-hidden bg-cream-dark">
                 {albumCoverUrl(album) ? (
                     <ProgressiveImage
                         src={albumCoverUrl(album)}
@@ -24,8 +21,9 @@ function AlbumCard({ album }) {
                         alt={album.title}
                         width={album.coverWidth || 4}
                         height={album.coverHeight || 3}
+                        onError={onImageError}
                         sizes="(min-width: 768px) 360px, (min-width: 640px) 320px, 280px"
-                        className="w-full h-full group-hover:scale-[1.08] transition-transform duration-700 ease-out"
+                        className="w-full h-full"
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">
@@ -36,9 +34,9 @@ function AlbumCard({ album }) {
                 )}
                 {album.type === 'video' && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white shadow-lg relative">
+                        <div className="album-play w-12 h-12 flex items-center justify-center text-white relative">
                             {album.imageCount > 1 && (
-                                <div className="absolute -top-1 -right-1 bg-amber text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-charcoal">
+                                <div className="absolute -top-1 -right-1 bg-amber text-xs font-bold w-5 h-5 flex items-center justify-center border border-cream">
                                     {album.imageCount}
                                 </div>
                             )}
@@ -53,12 +51,13 @@ function AlbumCard({ album }) {
                     </div>
                 )}
                 {/* Golden gradient overlay on hover */}
-                <div className="absolute inset-0 bg-gradient-to-t from-amber-dark/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-20 pointer-events-none" />
+                <div className="album-card-wash absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-20 pointer-events-none" />
             </div>
 
             {/* Card info */}
-            <div className="p-5 flex-1 flex flex-col">
-                <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors duration-300">
+            <div className="album-card-copy py-4 flex-1 flex flex-col">
+                <p className="album-card-index">{album.type === 'video' ? 'Moving image' : 'Photographic series'}</p>
+                <h3 className="font-serif text-xl font-normal text-charcoal group-hover:text-amber-dark transition-colors duration-300">
                     {album.title}
                 </h3>
                 {album.description && (
@@ -76,6 +75,22 @@ function AlbumCard({ album }) {
                     </p>
                 )}
             </div>
+        </>
+    )
+
+    const className = 'album-card group flex w-full flex-col h-full overflow-hidden transition-all duration-500 text-left cursor-pointer'
+
+    if (onOpen) {
+        return (
+            <button type="button" onClick={onOpen} onMouseEnter={onMouseEnter} className={className} aria-label={`Open ${album.title}`}>
+                {content}
+            </button>
+        )
+    }
+
+    return (
+        <Link to={targetRoute} onMouseEnter={onMouseEnter} className={className}>
+            {content}
         </Link>
     )
 }

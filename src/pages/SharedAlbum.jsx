@@ -174,7 +174,7 @@ export default function SharedAlbum() {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="max-w-md mx-auto px-6 py-24 text-center pt-[88px] md:pt-[104px]"
+                className="linen-shared-gate max-w-md mx-auto px-6 py-24 text-center pt-[112px]"
             >
                 <svg className="w-16 h-16 mx-auto text-amber mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
@@ -216,7 +216,7 @@ export default function SharedAlbum() {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="max-w-md mx-auto px-6 py-24 text-center pt-[88px] md:pt-[104px]"
+                className="linen-shared-gate max-w-md mx-auto px-6 py-24 text-center pt-[112px]"
             >
                 <h1 className="font-serif text-3xl font-semibold text-charcoal mb-4">Verify Access</h1>
                 <p className="text-warm-gray mb-8">{accessMessage || 'Complete the security check to open this shared gallery.'}</p>
@@ -241,7 +241,7 @@ export default function SharedAlbum() {
                 initial="initial"
                 animate="animate"
                 exit="exit"
-                className="max-w-md mx-auto px-6 py-24 text-center pt-[88px] md:pt-[104px]"
+                className="linen-shared-gate max-w-md mx-auto px-6 py-24 text-center pt-[112px]"
             >
                 <svg className="w-16 h-16 mx-auto text-red-400 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -285,11 +285,11 @@ export default function SharedAlbum() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="max-w-7xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]"
+            className="linen-gallery-page max-w-7xl mx-auto px-6 py-12 pt-[100px]"
         >
             <div className="animate-fade-in">
                 {/* Album header */}
-                <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
+                <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
                     <div>
                         <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
                             {album.title}
@@ -339,15 +339,18 @@ export default function SharedAlbum() {
                 )}
 
                 {/* Image grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {images.map((img, index) => {
                         const thumbUrl = mediaThumbnailUrl(img)
 
                         return (
-                            <div
+                            <button
+                                data-page-scroll-media
+                                type="button"
                                 key={mediaId(img) || index}
-                                className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative"
+                                className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative text-left"
                                 onClick={() => setLightboxIndex(index)}
+                                aria-label={`Open item ${index + 1} from ${album.title}`}
                             >
                                 <div
                                     className="w-full h-full relative"
@@ -361,7 +364,7 @@ export default function SharedAlbum() {
                                         sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                         alt={`Item ${index + 1} from ${album.title}`}
                                         onError={() => requestMediaRefresh('media-error')}
-                                        className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                        className="w-full h-full"
                                     />
                                 </div>
                                 {album.type === 'video' && (
@@ -373,7 +376,7 @@ export default function SharedAlbum() {
                                         </div>
                                     </div>
                                 )}
-                            </div>
+                            </button>
                         )
                     })}
                 </div>

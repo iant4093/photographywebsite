@@ -5,6 +5,7 @@ import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
 import BackToTop from './components/BackToTop'
 import DocumentMetadata from './components/DocumentMetadata'
+import MotionExperience from './components/MotionExperience'
 import Home from './pages/Home'
 
 const AlbumGallery = lazy(() => import('./pages/AlbumGallery'))
@@ -40,14 +41,16 @@ function PageLoading() {
 function App() {
     const location = useLocation()
     const navigationType = useNavigationType()
+    const isAdminRoute = location.pathname.startsWith('/admin')
 
     useEffect(() => {
         if (navigationType !== 'POP') window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
     }, [location.pathname, navigationType])
 
     return (
-        <div className="min-h-screen flex flex-col bg-cream">
+        <div className={`${isAdminRoute ? '' : 'linen-site'} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
+            <MotionExperience />
             <Navbar />
             <main className="flex-1">
                 <Suspense fallback={<PageLoading />}>
@@ -77,7 +80,7 @@ function App() {
                 </Suspense>
             </main>
             <BackToTop />
-            <Footer />
+            <Footer editorial={!isAdminRoute} />
         </div>
     )
 }

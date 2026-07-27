@@ -119,7 +119,7 @@ export default function Videos() {
 
     return (
         <div ref={pageRef} className="animate-fade-in">
-            <section className="relative overflow-hidden">
+            <section className="linen-video-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>
                         <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
@@ -142,21 +142,19 @@ export default function Videos() {
                 </div>
                 <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="max-w-2xl animate-fade-in">
-                        <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight w-fit">Videography</h1>
-                        <p className="mt-6 text-lg md:text-xl text-white/90 font-light leading-relaxed">Explore some of my video work!</p>
+                        <p className="linen-kicker">Motion studies / Selected work</p>
+                        <h1 className="font-serif text-5xl md:text-7xl font-normal text-white leading-tight tracking-tight w-fit">Videography</h1>
+                        <p className="mt-6 text-lg text-white/90 font-light leading-relaxed">Short films, moving portraits and moments gathered in motion.</p>
                     </div>
                 </div>
             </section>
 
-            <section className="bg-white">
+            <section className="linen-catalog-paper">
                 <div className="max-w-7xl mx-auto px-6 py-16 md:py-24">
-                    <div data-reveal-id="video-projects-header" className="text-center mb-12 scroll-animate">
-                        <h2 className="font-serif text-3xl md:text-4xl font-semibold text-charcoal flex items-center justify-center gap-3">
-                            <svg className="w-8 h-8 md:w-10 md:h-10 text-amber" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                            Video Projects
-                        </h2>
+                    <div data-reveal-id="video-projects-header" className="linen-section-heading mb-14 scroll-animate">
+                        <span>Film index</span>
+                        <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal">Video Projects</h2>
+                        <p>Studies in rhythm, movement &amp; atmosphere</p>
                     </div>
 
                     {loading && <SkeletonGrid count={6} type="video" />}
@@ -167,7 +165,8 @@ export default function Videos() {
                         return (
                             <div key={category} data-reveal-id={sectionId} className="mb-16 scroll-animate catalog-section" style={{ transitionDelay: `${Math.min(categoryIndex, 4) * 80}ms` }}>
                                 <div className="flex items-center gap-4 mb-8">
-                                    <h3 className="font-serif text-2xl font-medium text-charcoal">{category}</h3>
+                                    <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
+                                    <h3 className="font-serif text-2xl font-normal text-charcoal">{category}</h3>
                                     <div className="h-px bg-warm-border flex-1" />
                                 </div>
                                 <ScrollRow scrollKey={`videos-${category}`}>

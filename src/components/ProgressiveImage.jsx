@@ -1,6 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import { Blurhash } from 'react-blurhash'
 
+const lazyCallbacks = new Map()
+let sharedLazyObserver = null
+let sharedObserverConstructor = null
+
+function getLazyObserver() {
+    if (typeof IntersectionObserver === 'undefined') return null
+    if (!sharedLazyObserver || sharedObserverConstructor !== IntersectionObserver) {
+        sharedLazyObserver?.disconnect()
+        sharedObserverConstructor = IntersectionObserver
+        sharedLazyObserver = new IntersectionObserver((entries, observer) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) return
+                if (entry.target) {
+                    lazyCallbacks.get(entry.target)?.()
+                    lazyCallbacks.delete(entry.target)
+                    if (observer?.unobserve) observer.unobserve(entry.target)
+                    else observer?.disconnect?.()
+                    return
+                }
+                lazyCallbacks.forEach((load) => load())
+                lazyCallbacks.clear()
+                observer?.disconnect?.()
+            })
+        }, { rootMargin: '280px', threshold: 0.01 })
+    }
+    return sharedLazyObserver
+}
+
 export default function ProgressiveImage({
     src,
     srcSet,
@@ -28,19 +56,19 @@ export default function ProgressiveImage({
     useEffect(() => {
         if (!src || eager || visibleSrc === src) return undefined
         const element = containerRef.current
-        if (!element || typeof IntersectionObserver === 'undefined') {
+        const observer = getLazyObserver()
+        if (!element || !observer) {
             setVisibleSrc(src)
             return undefined
         }
 
-        const observer = new IntersectionObserver(([entry]) => {
-            if (entry.isIntersecting) {
-                setVisibleSrc(src)
-                observer.disconnect()
-            }
-        }, { rootMargin: '240px', threshold: 0.01 })
+        lazyCallbacks.set(element, () => setVisibleSrc(src))
         observer.observe(element)
-        return () => observer.disconnect()
+        return () => {
+            lazyCallbacks.delete(element)
+            if (observer.unobserve) observer.unobserve(element)
+            else observer.disconnect?.()
+        }
     }, [eager, src, visibleSrc])
 
     return (

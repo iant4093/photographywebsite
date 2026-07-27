@@ -4,11 +4,11 @@ import { useAuth } from '../context/auth'
 import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { motion, AnimatePresence } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
+import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { useScrollRestoration, saveVerticalScroll, getSavedScroll, isRevealed, markAsRevealed } from '../utils/scroll'
+import { useScrollRestoration, saveVerticalScroll, getSavedScroll, markAsRevealed } from '../utils/scroll'
 import {
-    albumCoverUrl,
     mediaDisplayUrl,
     mediaFileName,
     mediaId,
@@ -271,67 +271,26 @@ function UserDashboard() {
     }
 
     const renderAlbumGrid = (categoriesList) => {
-        return categoriesList.map(({ category, items }) => (
+        return categoriesList.map(({ category, items }, categoryIndex) => (
             <div key={category}>
                 <div className="flex items-center gap-4 mb-6">
-                    <h3 className="font-serif text-2xl font-medium text-charcoal">{category}</h3>
+                    <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
+                    <h3 className="font-serif text-2xl font-normal text-charcoal">{category}</h3>
                     <div className="h-px bg-warm-border flex-1"></div>
                 </div>
                 <ScrollRow scrollKey={`user-${category}`}>
                     {items.map((album) => (
-                        <motion.div
+                        <div
                             key={album.albumId}
-                            initial={isRevealed(`user-album-${album.albumId}`) ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-                            whileInView={isRevealed(`user-album-${album.albumId}`) ? {} : { opacity: 1, y: 0 }}
-                            onViewportEnter={() => markAsRevealed(`user-album-${album.albumId}`)}
-                            viewport={{ once: true, margin: "50px" }}
-                            transition={{ duration: 0.5, ease: "easeOut" }}
-                            onClick={() => openAlbum(album)}
-                            className={`shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start stagger-child group block rounded-2xl overflow-hidden shadow-warm hover:shadow-warm-xl hover:-translate-y-1.5 transition-all duration-500 bg-white text-left cursor-pointer ${isRevealed(`user-album-${album.albumId}`) ? 'no-stagger' : ''}`}
+                            className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start stagger-child"
                         >
-                            {/* Cover image */}
-                            <div className="aspect-[4/3] overflow-hidden relative">
-                                {albumCoverUrl(album) ? (
-                                    <ProgressiveImage
-                                        src={albumCoverUrl(album)}
-                                        blurhash={album.coverBlurhash}
-                                        alt={album.title}
-                                        onError={() => requestCoverRefresh('media-error')}
-                                        className="w-full h-full group-hover:scale-105 transition-transform duration-700 ease-out"
-                                    />
-                                ) : (
-                                    <div className="w-full h-full bg-cream-dark flex items-center justify-center">
-                                        <svg className="w-12 h-12 text-warm-gray/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                        </svg>
-                                    </div>
-                                )}
-                                {album.type === 'video' && (
-                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                        <div className="w-12 h-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white shadow-lg relative">
-                                            {album.imageCount > 1 && (
-                                                <div className="absolute -top-1 -right-1 bg-amber text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-charcoal">
-                                                    {album.imageCount}
-                                                </div>
-                                            )}
-                                            {album.imageCount > 1 ? (
-                                                <svg className="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24">
-                                                    <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z" />
-                                                </svg>
-                                            ) : (
-                                                <svg className="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                                {/* Golden gradient overlay on hover */}
-                                <div className="absolute inset-0 bg-gradient-to-t from-amber-dark/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-20 pointer-events-none" />
-                            </div>
-                            <div className="p-5">
-                                <h3 className="font-serif text-lg font-semibold text-charcoal group-hover:text-amber-dark transition-colors">{album.title}</h3>
-                                {album.description && <p className="mt-1 text-sm text-warm-gray line-clamp-2">{album.description}</p>}
-                            </div>
-                        </motion.div>
+                            <AlbumCard
+                                album={album}
+                                onOpen={() => openAlbum(album)}
+                                onImageError={() => requestCoverRefresh('media-error')}
+                                onMouseEnter={() => markAsRevealed(`user-album-${album.albumId}`)}
+                            />
+                        </div>
                     ))}
                 </ScrollRow>
             </div>
@@ -344,17 +303,17 @@ function UserDashboard() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="flex-1 bg-cream animate-fade-in"
+            className="linen-user-dashboard flex-1 bg-cream animate-fade-in"
         >
             {/* Header section with User Info */}
             <div className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
                 {/* Albums grid or selected album view */}
                 {selectedAlbum ? (
                     /* Album detail view */
-                    <div className="animate-fade-in">
+                    <div className="linen-gallery-page linen-gallery-page-embedded animate-fade-in">
                         <button
                             onClick={() => { setSelectedAlbum(null); setImages([]); requestAnimationFrame(() => window.scrollTo({ top: savedScrollY.current, behavior: 'instant' })) }}
-                            className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
+                            className="linen-gallery-back inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -362,7 +321,7 @@ function UserDashboard() {
                             Back to Albums
                         </button>
 
-                        <div className="flex items-start justify-between mb-8">
+                        <div className="linen-gallery-header flex items-start justify-between mb-8 pb-6 border-b border-warm-border">
                             <div>
                                 <h2 className="font-serif text-3xl font-semibold text-charcoal">{selectedAlbum.title}</h2>
                                 {selectedAlbum.description && <p className="mt-2 text-warm-gray">{selectedAlbum.description}</p>}
@@ -400,15 +359,18 @@ function UserDashboard() {
                                 <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {images.map((img, index) => {
                                     const thumbUrl = mediaThumbnailUrl(img)
 
                                     return (
-                                        <div
+                                        <button
+                                            data-page-scroll-media
+                                            type="button"
                                             key={mediaId(img) || index}
-                                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative"
+                                            className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative text-left"
                                             onClick={() => setLightboxIndex(index)}
+                                            aria-label={`Open item ${index + 1} from ${selectedAlbum.title}`}
                                         >
                                             <div className="relative w-full h-full">
                                                 <ProgressiveImage
@@ -420,12 +382,12 @@ function UserDashboard() {
                                                     sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                                     alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
                                                     onError={() => requestSelectedRefresh('media-error')}
-                                                    className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                                    className="w-full h-full"
                                                 />
                                                 {/* Warm overlay on hover */}
                                                 <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                                             </div>
-                                        </div>
+                                        </button>
                                     )
                                 })}
                             </div>

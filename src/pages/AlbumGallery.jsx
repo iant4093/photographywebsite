@@ -178,12 +178,12 @@ function AlbumGallery() {
 
 
     return (
-        <div className="flex-1 bg-cream animate-fade-in pb-16 pt-[88px] md:pt-[104px]">
+        <div className="linen-gallery-page flex-1 bg-cream animate-fade-in pb-16 pt-[88px] md:pt-[104px]">
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}
                 <button
                     onClick={() => navigate(-1)}
-                    className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
+                    className="linen-gallery-back inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
                 >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -209,7 +209,7 @@ function AlbumGallery() {
                 {!loading && album && (
                     <div>
                         {/* Album header with slide-up animation */}
-                        <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in">
+                        <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in">
                             <div className="animate-slide-up">
                                 <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
                                     {album.title}
@@ -263,15 +263,16 @@ function AlbumGallery() {
                             {loading ? (
                                 <SkeletonGrid count={6} type="photo" />
                             ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {images.map((img, index) => {
                                         const thumbUrl = mediaThumbnailUrl(img)
 
                                         return (
                                             <button
+                                                data-page-scroll-media
                                                 type="button"
                                                 key={mediaId(img) || index}
-                                                className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
+                                                className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                                                 onClick={() => setLightboxIndex(index)}
                                                 aria-label={`Open item ${index + 1} from ${album.title}`}
                                             >
@@ -285,7 +286,7 @@ function AlbumGallery() {
                                                         sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                                         alt={`Item ${index + 1} from ${album.title}`}
                                                         onError={() => requestMediaRefresh('media-error')}
-                                                        className="w-full h-full group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                                        className="w-full h-full"
                                                     />
                                                     {/* Warm overlay on hover */}
                                                     <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />

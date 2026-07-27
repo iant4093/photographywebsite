@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router'
 import { AuthProvider } from './context/authContext'
 import App from './App'
 import './index.css'
+import './linen.css'
 
 const releaseSha = import.meta.env.VITE_RELEASE_SHA ?? ''
 if (/^[0-9a-f]{40}$/.test(releaseSha)) {

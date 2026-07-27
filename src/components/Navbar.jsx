@@ -49,11 +49,11 @@ function Navbar() {
     return (
         <>
             {/* Top Navigation Bar */}
-            <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
-                <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <nav className={`linen-nav fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'menu-is-open bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
+                <div className="linen-nav-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
-                    <Link to="/" onClick={() => setIsMenuOpen(false)} className="flex items-center gap-3 group z-50 relative">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
+                    <Link to="/" onClick={() => setIsMenuOpen(false)} className="linen-brand flex items-center gap-3 group z-50 relative">
+                        <div className="linen-logo-tile w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
                             <span className="text-cream font-serif font-bold text-sm tracking-tight">IT</span>
                         </div>
                         <span className="font-serif text-xl font-semibold text-charcoal tracking-tight">
@@ -63,12 +63,22 @@ function Navbar() {
 
                     {/* Navigation Container */}
                     <div className="flex items-center gap-6 relative z-50">
-                        {/* Desktop Links removed from here per user request */}
+                        <div className="linen-desktop-links hidden" aria-label="Primary navigation">
+                            <Link to="/" aria-label="Photographs — primary navigation">Photographs</Link>
+                            <Link to="/videos" aria-label="Videos — primary navigation">Videos</Link>
+                            <Link to="/sharedalbum" aria-label="Find Album — primary navigation">Find Album</Link>
+                            <Link to="/contact" aria-label="Enquiries — primary navigation">Enquiries</Link>
+                            {user ? (
+                                <Link to={isAdmin ? '/admin' : '/dashboard'} aria-label="Studio — primary navigation">Studio</Link>
+                            ) : (
+                                <Link to="/login" aria-label="Sign in — primary navigation">Sign in</Link>
+                            )}
+                        </div>
 
                         {/* Hamburger Toggle */}
                         <button
                             onClick={() => setIsMenuOpen(!isMenuOpen)}
-                            className="w-10 h-10 rounded-xl bg-cream/50 hover:bg-cream border border-warm-border flex flex-col justify-center items-center gap-1.5 transition-colors duration-300 cursor-pointer"
+                            className="linen-menu-toggle w-10 h-10 rounded-xl bg-cream/50 hover:bg-cream border border-warm-border flex flex-col justify-center items-center gap-1.5 transition-colors duration-300 cursor-pointer"
                             aria-label="Toggle menu"
                         >
                             <span className={`w-5 h-0.5 bg-charcoal rounded-full transition-all duration-300 ${isMenuOpen ? 'rotate-45 translate-y-2' : ''}`} />
@@ -80,8 +90,8 @@ function Navbar() {
             </nav>
 
             {/* Fullscreen Overlay Menu */}
-            <div className={`fixed inset-0 z-40 bg-cream/95 backdrop-blur-xl transition-all duration-500 ease-in-out flex flex-col items-center justify-center ${isMenuOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'}`}>
-                <div className={`flex flex-col items-center gap-8 md:gap-12 transition-all duration-500 delay-100 ${isMenuOpen ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
+            <div className={`linen-menu fixed inset-0 z-40 bg-cream/95 backdrop-blur-xl transition-all duration-500 ease-in-out flex flex-col items-center justify-center ${isMenuOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'}`}>
+                <div className={`linen-menu-list flex flex-col items-center gap-8 md:gap-12 transition-all duration-500 delay-100 ${isMenuOpen ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
 
                     <Link to="/" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
                         Gallery
@@ -110,7 +120,7 @@ function Navbar() {
                             </Link>
                             <button
                                 onClick={() => { logout(); setIsMenuOpen(false); }}
-                                className="mt-8 font-sans text-lg font-medium px-8 py-3 rounded-xl bg-charcoal text-cream hover:bg-charcoal-light transition-colors duration-300 cursor-pointer"
+                                className="linen-menu-action mt-8 font-sans text-lg font-medium px-8 py-3 rounded-xl bg-charcoal text-cream hover:bg-charcoal-light transition-colors duration-300 cursor-pointer"
                             >
                                 Log Out
                             </button>
@@ -119,7 +129,7 @@ function Navbar() {
                         <Link
                             to="/login"
                             onClick={() => setIsMenuOpen(false)}
-                            className="mt-8 font-sans text-lg font-medium px-8 py-3 rounded-xl bg-amber text-cream hover:bg-amber-dark transition-colors duration-300 shadow-warm-sm hover:shadow-warm"
+                            className="linen-menu-action mt-8 font-sans text-lg font-medium px-8 py-3 rounded-xl bg-amber text-cream hover:bg-amber-dark transition-colors duration-300 shadow-warm-sm hover:shadow-warm"
                         >
                             Log In
                         </Link>

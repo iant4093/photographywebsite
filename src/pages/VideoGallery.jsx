@@ -168,12 +168,12 @@ export default function VideoGallery() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="max-w-7xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]"
+            className="linen-gallery-page max-w-7xl mx-auto px-6 py-12 pt-[100px]"
         >
             {/* Gallery View Header */}
             <button
                 onClick={handleBack}
-                className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
+                className="linen-gallery-back inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
             >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -181,7 +181,7 @@ export default function VideoGallery() {
                 Back
             </button>
 
-            <div className="mb-12">
+            <div className="linen-gallery-header mb-12">
                 <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
                     {album.title}
                 </h1>
@@ -199,14 +199,17 @@ export default function VideoGallery() {
             )}
 
             {/* Thumbnail Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {images.map((img, index) => {
                     const thumbUrl = mediaThumbnailUrl(img)
                     return (
-                        <div
+                        <button
+                            data-page-scroll-media
+                            type="button"
                             key={mediaId(img) || index}
-                            className="group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-video relative"
+                            className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-video relative text-left"
                             onClick={() => setLightboxIndex(index)}
+                            aria-label={`Open video ${index + 1} from ${album.title}`}
                         >
                             <ProgressiveImage
                                 src={thumbUrl}
@@ -216,7 +219,7 @@ export default function VideoGallery() {
                                 sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                                 alt={`Video ${index + 1}`}
                                 onError={() => requestMediaRefresh('media-error')}
-                                className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-700 ease-out"
+                                className="w-full h-full object-cover"
                             />
                             {/* Play Button Overlay */}
                             <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors flex items-center justify-center">
@@ -226,7 +229,7 @@ export default function VideoGallery() {
                                     </svg>
                                 </div>
                             </div>
-                        </div>
+                        </button>
                     )
                 })}
             </div>

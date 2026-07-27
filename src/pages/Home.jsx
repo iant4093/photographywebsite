@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigationType } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
+import FloatingGallery from '../components/FloatingGallery'
 import { fetchAlbumsPage } from '../utils/api'
 import {
     CatalogPaginationError,
@@ -144,7 +145,7 @@ function Home() {
 
     return (
         <div ref={pageRef} className="animate-fade-in">
-            <section className="home-hero relative overflow-hidden">
+            <section className="home-hero linen-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     {useStaticHero ? (
                         <picture>
@@ -181,21 +182,21 @@ function Home() {
                     <div className="home-hero-overlay absolute inset-0" />
                 </div>
 
-                <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
-                    <div className="max-w-xs sm:max-w-sm md:max-w-md lg:max-w-[35%] animate-fade-in">
-                        <h1 className="font-serif text-5xl md:text-7xl font-semibold text-white leading-tight tracking-tight">Ian Truong</h1>
-                        <p className="mt-6 text-lg md:text-xl text-white/90 font-light leading-relaxed">
+                <div className="linen-hero-content relative max-w-7xl mx-auto px-6 py-32 md:py-48">
+                    <div className="linen-hero-copy max-w-xs sm:max-w-sm md:max-w-md animate-fade-in">
+                        <h1 className="font-serif text-5xl md:text-7xl font-normal text-white leading-[0.95] tracking-tight">Ian Truong<br />Photography</h1>
+                        <p className="mt-6 text-base md:text-lg text-white/90 font-light leading-relaxed">
                             Hi, I'm Ian — welcome to my photography portfolio. I shoot wildlife, portraits, sports, and general
                             photography as a hobby. Take a look around!
                         </p>
                         <div className="flex flex-wrap items-center gap-4 mt-8">
-                            <a href="#albums" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-amber text-white font-medium hover:bg-amber-dark transition-all duration-300 shadow-warm hover:shadow-warm-lg hover:scale-105 active:scale-95">
+                            <a href="#albums" className="linen-button linen-button-light inline-flex items-center gap-2 px-6 py-3 text-white font-medium transition-all duration-300">
                                 Explore Photos
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
                             </a>
-                            <Link to="/videos" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 backdrop-blur-md text-white border border-white/20 font-medium transition-all duration-300 shadow-warm hover:shadow-warm-lg hover:scale-105 active:scale-95">
+                            <Link to="/videos" className="linen-text-link inline-flex items-center gap-2 px-1 py-3 text-white font-medium transition-all duration-300">
                                 Explore Videos
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -208,8 +209,12 @@ function Home() {
             </section>
 
             <section id="albums" className="max-w-7xl mx-auto px-6 py-16 md:py-24">
-                <div data-reveal-id="home-photo-header" className="text-center mb-12 scroll-animate">
-                    <h2 className="font-serif text-3xl md:text-4xl font-semibold text-charcoal inline-block">Photo Albums</h2>
+                <FloatingGallery albums={photoAlbums} />
+
+                <div data-reveal-id="home-photo-header" className="linen-section-heading mb-14 scroll-animate">
+                    <span>Selected index</span>
+                    <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal inline-block">Photo Albums</h2>
+                    <p>Wildlife, portraiture, sport &amp; place</p>
                 </div>
 
                 {loading && <SkeletonGrid count={6} type="photo" />}
@@ -240,7 +245,8 @@ function Home() {
                             style={{ transitionDelay: `${Math.min(categoryIndex, 4) * 80}ms` }}
                         >
                             <div className="flex items-center gap-4 mb-8">
-                                <h3 className="font-serif text-2xl font-medium text-charcoal w-fit">{category}</h3>
+                                <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
+                                <h3 className="font-serif text-2xl font-normal text-charcoal w-fit">{category}</h3>
                                 <div className="h-px bg-warm-border flex-1" />
                             </div>
                             <ScrollRow scrollKey={`home-photo-${category}`}>
