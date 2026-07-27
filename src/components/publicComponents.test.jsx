@@ -174,6 +174,8 @@ describe('scroll controls and progressive loading', () => {
     const scroller = container.querySelector('.overflow-x-auto')
     expect(scroller).toHaveClass('px-6', '-mx-6')
     expect(scroller).toHaveStyle({ scrollPaddingInline: '1.5rem' })
+    expect(scroller.style.maskImage)
+      .toBe('linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)')
     Object.defineProperties(scroller, {
       scrollLeft: { configurable: true, writable: true, value: 10 },
       scrollWidth: { configurable: true, value: 1000 },
@@ -182,8 +184,14 @@ describe('scroll controls and progressive loading', () => {
     scroller.scrollBy = vi.fn()
     fireEvent.scroll(scroller)
     act(() => vi.advanceTimersByTime(500))
-    fireEvent.click(screen.getByRole('button', { name: 'Scroll left' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Scroll right' }))
+    const leftButton = screen.getByRole('button', { name: 'Scroll left' })
+    const rightButton = screen.getByRole('button', { name: 'Scroll right' })
+    expect(leftButton).toHaveClass('left-3')
+    expect(leftButton).not.toHaveClass('-translate-x-1/2')
+    expect(rightButton).toHaveClass('right-3')
+    expect(rightButton).not.toHaveClass('translate-x-1/2')
+    fireEvent.click(leftButton)
+    fireEvent.click(rightButton)
     expect(scroller.scrollBy).toHaveBeenNthCalledWith(1, { left: -240, behavior: 'smooth' })
     expect(scroller.scrollBy).toHaveBeenNthCalledWith(2, { left: 240, behavior: 'smooth' })
     unmount()

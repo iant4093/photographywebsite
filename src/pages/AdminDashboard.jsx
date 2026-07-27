@@ -85,11 +85,12 @@ function AdminDashboard() {
             initial="initial"
             animate="animate"
             exit="exit"
-            className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]"
+            className="linen-admin-page max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]"
         >
             <div className="animate-slide-up">
                 {/* Header */}
-                <div className="mb-10">
+                <div className="linen-admin-heading mb-10">
+                    <span>Studio controls</span>
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">
                         Admin Dashboard
                     </h1>
@@ -99,15 +100,16 @@ function AdminDashboard() {
                 </div>
 
                 {/* Widget grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {widgets.map((widget) => (
+                <div className="linen-admin-grid grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {widgets.map((widget, index) => (
                         <Link
                             key={widget.title}
                             to={widget.link}
-                            className="group block bg-white rounded-2xl p-6 shadow-warm hover:shadow-warm-lg transition-all duration-500 border border-warm-border hover:border-amber/30"
+                            className="linen-admin-card group block bg-white rounded-2xl p-6 shadow-warm hover:shadow-warm-lg transition-all duration-500 border border-warm-border hover:border-amber/30"
                         >
+                            <span className="linen-admin-card-index">{String(index + 1).padStart(2, '0')}</span>
                             {/* Icon circle */}
-                            <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${widget.color} flex items-center justify-center text-white shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300 mb-5`}>
+                            <div className={`linen-admin-icon w-14 h-14 rounded-xl bg-gradient-to-br ${widget.color} flex items-center justify-center text-white shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300 mb-5`}>
                                 {widget.icon}
                             </div>
                             {/* Text */}
@@ -118,7 +120,7 @@ function AdminDashboard() {
                                 {widget.description}
                             </p>
                             {/* Arrow */}
-                            <div className="mt-4 flex items-center gap-1 text-sm font-medium text-amber opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <div className="linen-admin-card-link mt-4 flex items-center gap-1 text-sm font-medium text-amber opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                                 Open
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

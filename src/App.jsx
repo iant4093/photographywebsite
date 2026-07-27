@@ -48,7 +48,7 @@ function App() {
     }, [location.pathname, navigationType])
 
     return (
-        <div className={`${isAdminRoute ? '' : 'linen-site'} min-h-screen flex flex-col bg-cream`}>
+        <div className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
             <MotionExperience />
             <Navbar />
@@ -80,7 +80,7 @@ function App() {
                 </Suspense>
             </main>
             <BackToTop />
-            <Footer editorial={!isAdminRoute} />
+            <Footer />
         </div>
     )
 }

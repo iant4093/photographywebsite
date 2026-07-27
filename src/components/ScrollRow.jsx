@@ -1,6 +1,13 @@
 import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
 import { saveHorizontalScroll, getHorizontalScroll } from '../utils/scroll'
 
+const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)'
+const SCROLL_VIEWPORT_STYLE = {
+    WebkitMaskImage: EDGE_FADE,
+    maskImage: EDGE_FADE,
+    scrollPaddingInline: '1.5rem',
+}
+
 // Horizontal scroll row with left/right arrow buttons on desktop
 export default function ScrollRow({ children, className = '', scrollKey }) {
     const scrollRef = useRef(null)
@@ -74,7 +81,7 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
             {/* Scroll container */}
             <div
                 ref={scrollRef}
-                style={{ scrollPaddingInline: '1.5rem' }}
+                style={SCROLL_VIEWPORT_STYLE}
                 className={`flex overflow-x-auto gap-6 px-6 -mx-6 pt-6 pb-10 snap-x snap-mandatory scrollbar-hide ${className}`}
             >
                 {children}
@@ -84,7 +91,7 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
             {canScrollLeft && (
                 <button
                     onClick={() => scroll('left')}
-                    className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-20
+                    className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 z-20
                         w-11 h-11 items-center justify-center rounded-full
                         bg-white/90 backdrop-blur-sm border border-warm-border
                         shadow-warm-lg hover:shadow-warm-xl hover:bg-white
@@ -103,7 +110,7 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
             {canScrollRight && (
                 <button
                     onClick={() => scroll('right')}
-                    className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20
+                    className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 z-20
                         w-11 h-11 items-center justify-center rounded-full
                         bg-white/90 backdrop-blur-sm border border-warm-border
                         shadow-warm-lg hover:shadow-warm-xl hover:bg-white

@@ -73,7 +73,7 @@ describe('FloatingGallery', () => {
         expect(container.querySelectorAll('.floating-loop-group[aria-hidden="true"]')).toHaveLength(5)
         expect(container.querySelector('.floating-print-wall')).toHaveClass('is-floating-visible')
         expect(container.querySelector('.floating-lane').style.maskImage)
-            .toBe('linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)')
+            .toBe('linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)')
     })
 
     it('starts observing when asynchronously loaded albums create the wall', () => {

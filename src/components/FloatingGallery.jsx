@@ -7,7 +7,7 @@ const LANE_COUNT = 3
 const MAX_ALBUMS_PER_LANE = 10
 const PAGE_RANDOM_SEED = globalThis.crypto?.randomUUID?.()
     || `${Date.now()}-${Math.random()}`
-const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)'
+const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)'
 const EDGE_FADE_STYLE = {
     WebkitMaskImage: EDGE_FADE,
     maskImage: EDGE_FADE,

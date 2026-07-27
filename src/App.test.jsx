@@ -59,6 +59,12 @@ describe('App routing shell', () => {
     })
   })
 
+  it('uses the editorial admin shell on protected admin routes', async () => {
+    const { container } = render(<MemoryRouter initialEntries={['/admin']}><App /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Admin route' })).toBeInTheDocument())
+    expect(container.firstElementChild).toHaveClass('linen-site', 'linen-admin')
+  })
+
   it.each([
     ['/album/id', 'Album route'], ['/video/id', 'Video route'], ['/sharedalbum/code', 'Shared route'],
     ['/contact', 'Contact route'], ['/privacy', 'Privacy route'], ['/login', 'Login route'],

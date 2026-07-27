@@ -1,7 +1,7 @@
 /*
  * Linen Editorial
- * Production styling for the selected redesign. Admin routes intentionally do
- * not receive the .linen-site wrapper, preserving the existing admin UI.
+ * Production styling for the selected redesign. Admin routes share the
+ * editorial materials but keep a quieter, utility-first motion treatment.
  */
 .linen-site {
   --color-cream: #f3efe6;
@@ -413,6 +413,133 @@
   box-shadow: 12px 12px 0 rgba(114, 95, 77, 0.08);
 }
 
+/* Admin studio — same materials, deliberately calmer than public galleries. */
+.linen-site.linen-admin {
+  background:
+    linear-gradient(rgba(243, 239, 230, 0.9), rgba(243, 239, 230, 0.9)),
+    repeating-linear-gradient(90deg, rgba(82, 61, 43, 0.025) 0 1px, transparent 1px 7px);
+}
+
+.linen-admin main {
+  padding-inline: clamp(0.15rem, 1vw, 0.75rem);
+}
+
+.linen-admin main h1 {
+  font-weight: 400;
+  letter-spacing: -0.025em;
+}
+
+.linen-admin main form.bg-white,
+.linen-admin main div.bg-white[class*="border"],
+.linen-admin main a.bg-white[class*="border"] {
+  background: rgba(250, 247, 240, 0.72);
+  border-color: rgba(54, 45, 37, 0.68);
+  box-shadow:
+    0 0 0 1px rgba(255, 252, 245, 0.7) inset,
+    7px 8px 0 rgba(91, 70, 51, 0.065);
+}
+
+.linen-admin main form > button[type="submit"],
+.linen-admin main button.bg-amber,
+.linen-admin main a.bg-amber {
+  border: 1px solid var(--color-charcoal);
+  border-radius: 0;
+  background: var(--color-charcoal);
+  box-shadow: none;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.11em;
+}
+
+.linen-admin main form > button[type="submit"]:hover,
+.linen-admin main button.bg-amber:hover,
+.linen-admin main a.bg-amber:hover {
+  background: var(--color-amber-dark);
+}
+
+.linen-admin .linen-admin-heading {
+  display: grid;
+  grid-template-columns: minmax(6rem, 0.24fr) minmax(0, 1fr);
+  gap: 0.45rem clamp(1rem, 3vw, 2.5rem);
+  align-items: end;
+  padding-block: 1rem;
+  border-block: 1px solid var(--color-charcoal);
+}
+
+.linen-admin .linen-admin-heading > span {
+  grid-row: 1 / span 2;
+  align-self: start;
+  padding-top: 0.25rem;
+  color: var(--color-amber-dark);
+  font-size: 0.59rem;
+  font-weight: 500;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+
+.linen-admin .linen-admin-heading h1,
+.linen-admin .linen-admin-heading p {
+  grid-column: 2;
+}
+
+.linen-admin .linen-admin-heading p {
+  margin-top: 0;
+}
+
+.linen-admin .linen-admin-card {
+  position: relative;
+  min-height: 15.5rem;
+  padding: 1.25rem;
+  border-color: rgba(54, 45, 37, 0.7);
+  box-shadow: 5px 6px 0 rgba(91, 70, 51, 0.07);
+}
+
+.linen-admin .linen-admin-card:hover {
+  border-color: var(--color-charcoal);
+  box-shadow: 8px 9px 0 rgba(91, 70, 51, 0.1);
+  transform: translateY(-2px);
+}
+
+.linen-admin .linen-admin-card-index {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  color: var(--color-warm-gray);
+  font-size: 0.56rem;
+  letter-spacing: 0.17em;
+}
+
+.linen-admin .linen-admin-icon {
+  width: 2.8rem;
+  height: 2.8rem;
+  border: 1px solid var(--color-charcoal);
+  border-radius: 0;
+  color: var(--color-charcoal);
+  background: transparent;
+  box-shadow: none;
+}
+
+.linen-admin .linen-admin-icon svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.linen-admin .linen-admin-card-link {
+  opacity: 1;
+  color: var(--color-amber-dark);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.linen-admin .linen-admin-card-link svg {
+  transition: transform 180ms ease;
+}
+
+.linen-admin .linen-admin-card:hover .linen-admin-card-link svg {
+  transform: translateX(3px);
+}
+
 /* Footer */
 .linen-site .linen-footer {
   background: rgba(233, 226, 213, 0.58);
@@ -723,6 +850,19 @@
   .linen-site .linen-section-heading {
     grid-template-columns: 1fr;
     gap: 0.45rem;
+  }
+
+  .linen-admin .linen-admin-heading {
+    grid-template-columns: 1fr;
+  }
+
+  .linen-admin .linen-admin-heading > span {
+    grid-row: auto;
+  }
+
+  .linen-admin .linen-admin-heading h1,
+  .linen-admin .linen-admin-heading p {
+    grid-column: 1;
   }
 
   .linen-site .linen-section-heading > p {
