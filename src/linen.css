@@ -29,6 +29,10 @@
   min-width: 0;
 }
 
+.linen-site:not(.linen-admin) .linen-gallery-page {
+  background: transparent;
+}
+
 .linen-site > main,
 .linen-site > footer {
   position: relative;
@@ -631,17 +635,22 @@
 .linen-site .editorial-progress {
   position: absolute;
   top: 50%;
-  right: clamp(0.55rem, 1.45vw, 1.2rem);
-  width: 1px;
+  right: 0.3rem;
+  width: 12px;
   height: clamp(6rem, 17vh, 10rem);
   overflow: hidden;
-  background: rgba(41, 36, 31, 0.22);
+  border: 1px solid rgba(41, 36, 31, 0.58);
+  background:
+    radial-gradient(circle at 2px 4px, var(--color-cream) 0 1px, transparent 1.25px) 0 0 / 100% 8px repeat-y,
+    radial-gradient(circle at calc(100% - 2px) 4px, var(--color-cream) 0 1px, transparent 1.25px) 0 0 / 100% 8px repeat-y,
+    rgba(41, 36, 31, 0.78);
+  box-shadow: 0 2px 8px rgba(41, 36, 31, 0.14);
   transform: translateY(-50%);
 }
 
 .linen-site .editorial-progress i {
   position: absolute;
-  inset: 0;
+  inset: 2px 3px;
   display: block;
   background: var(--color-amber-dark);
   transform: scaleY(var(--editorial-progress, 0));
@@ -700,7 +709,7 @@
 /* Floating print wall — homepage only. */
 .linen-site .floating-print-wall {
   --floating-gap: clamp(0.8rem, 1.5vw, 1.4rem);
-  margin-bottom: clamp(5rem, 9vw, 8rem);
+  margin-bottom: clamp(3.75rem, 6.5vw, 6rem);
   overflow: hidden;
   border-block: 1px solid var(--color-warm-border);
   background: rgba(233, 226, 213, 0.56);
@@ -751,9 +760,16 @@
   animation-duration: 58s;
 }
 
-.linen-site .floating-print-wall:hover .floating-loop-track,
-.linen-site .floating-print-wall:focus-within .floating-loop-track {
-  animation-play-state: paused;
+.linen-site .is-floating-slow-fallback .floating-lane-0 .floating-loop-track {
+  animation-duration: 168s;
+}
+
+.linen-site .is-floating-slow-fallback .floating-lane-1 .floating-loop-track {
+  animation-duration: 200s;
+}
+
+.linen-site .is-floating-slow-fallback .floating-lane-2 .floating-loop-track {
+  animation-duration: 152s;
 }
 
 .linen-site .floating-print-card {
@@ -846,6 +862,12 @@
   }
 }
 
+@media (min-width: 1440px) {
+  .linen-site:not(.linen-admin) .max-w-7xl {
+    max-width: 104rem;
+  }
+}
+
 @media (max-width: 720px) {
   .linen-site .linen-footer-inner {
     flex-direction: column;
@@ -891,13 +913,19 @@
   }
 
   .linen-site .editorial-progress {
-    right: 0.45rem;
+    width: 10px;
     height: 5.2rem;
   }
 
   .linen-site .floating-print-card {
     width: min(16rem, calc(100vw - 5rem));
     height: 14rem;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .linen-site .floating-loop-track {
+    animation-play-state: running;
   }
 }
 

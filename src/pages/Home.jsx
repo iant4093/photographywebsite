@@ -219,7 +219,7 @@ function Home() {
                 </div>
             </section>
 
-            <section id="albums" className="max-w-7xl mx-auto px-6 py-16 md:py-24">
+            <section id="albums" className="max-w-7xl mx-auto px-6 pt-10 pb-16 md:pt-14 md:pb-24">
                 <FloatingGallery albums={photoAlbums} />
 
                 <div

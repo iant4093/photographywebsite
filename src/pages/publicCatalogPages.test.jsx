@@ -87,9 +87,12 @@ describe('Home complete public catalog', () => {
     const { container } = routed(<Home />)
     const target = container.querySelector('#photo-albums')
     const link = screen.getByRole('link', { name: 'Explore Photos' })
+    const albumsSection = container.querySelector('#albums')
 
     expect(link).toHaveAttribute('href', '#photo-albums')
     expect(target).toHaveStyle({ scrollMarginTop: '6rem' })
+    expect(albumsSection).toHaveClass('pt-10', 'md:pt-14', 'pb-16', 'md:pb-24')
+    expect(albumsSection).not.toHaveClass('py-16', 'md:py-24')
     expect(screen.queryByText('Wildlife, portraiture, sport & place')).toBeNull()
     fireEvent.click(link)
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })

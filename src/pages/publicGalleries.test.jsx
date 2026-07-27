@@ -91,6 +91,7 @@ describe('AlbumGallery', () => {
     expect(firstPhoto).toHaveAttribute('srcset')
     const firstPhotoButton = screen.getByRole('button', { name: 'Open item 1 from Wild Album' })
     expect(firstPhotoButton).toHaveClass('linen-photo-frame')
+    expect(firstPhotoButton.closest('.linen-gallery-page')).not.toHaveClass('bg-cream')
     expect(firstPhotoButton.querySelector('.linen-photo-viewport')).toContainElement(firstPhoto)
     fireEvent.error(screen.getByRole('img', { name: 'Item 1 from Wild Album' }))
     expect(expiry.refresh).toHaveBeenCalledWith('media-error')

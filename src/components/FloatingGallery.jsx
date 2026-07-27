@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router'
 import { albumCoverUrl } from '../utils/mediaUrls'
 
@@ -113,6 +113,30 @@ export default function FloatingGallery({ albums }) {
         () => buildGalleryLanes(albums),
         [albums],
     )
+    const setPlaybackRate = useCallback((rate) => {
+        const stage = stageRef.current
+        if (!stage) return
+        let adjustedAnimation = false
+        stage.querySelectorAll('.floating-loop-track').forEach((track) => {
+            track.getAnimations?.().forEach((animation) => {
+                adjustedAnimation = true
+                if (typeof animation.updatePlaybackRate === 'function') {
+                    animation.updatePlaybackRate(rate)
+                } else {
+                    animation.playbackRate = rate
+                }
+            })
+        })
+        stage.classList.toggle('is-floating-slow-fallback', rate < 1 && !adjustedAnimation)
+    }, [])
+    const slowAnimations = useCallback((event) => {
+        if (event.pointerType === 'touch') return
+        setPlaybackRate(0.38)
+    }, [setPlaybackRate])
+    const restoreAnimations = useCallback(() => setPlaybackRate(1), [setPlaybackRate])
+    const restoreAfterFocus = useCallback((event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) restoreAnimations()
+    }, [restoreAnimations])
 
     useEffect(() => {
         if (!albumLanes.length) return undefined
@@ -132,7 +156,15 @@ export default function FloatingGallery({ albums }) {
     if (!albumLanes.length) return null
 
     return (
-        <section ref={stageRef} className="floating-print-wall" aria-label="Featured photo albums">
+        <section
+            ref={stageRef}
+            className="floating-print-wall"
+            aria-label="Featured photo albums"
+            onPointerEnter={slowAnimations}
+            onPointerLeave={restoreAnimations}
+            onFocusCapture={() => setPlaybackRate(0.38)}
+            onBlurCapture={restoreAfterFocus}
+        >
             <div className="floating-stage">
                 {albumLanes.map((laneAlbums, lane) => (
                     <Lane

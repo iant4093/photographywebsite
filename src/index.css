@@ -114,22 +114,42 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar with warm tones */
+/* Vertical film-strip scrollbar; horizontal media rows opt out below. */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 14px;
+  height: 14px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-cream);
+  border-left: 1px solid rgba(44, 40, 37, 0.28);
+  background:
+    linear-gradient(90deg,
+      #312b26 0 2px,
+      var(--color-cream-dark) 2px 12px,
+      #312b26 12px 14px);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-warm-border);
-  border-radius: 4px;
+  min-height: 56px;
+  border: 1px solid #312b26;
+  border-radius: 1px;
+  background:
+    radial-gradient(circle at 2px 5px, var(--color-cream) 0 1.25px, transparent 1.5px) 0 0 / 100% 10px repeat-y,
+    radial-gradient(circle at calc(100% - 2px) 5px, var(--color-cream) 0 1.25px, transparent 1.5px) 0 0 / 100% 10px repeat-y,
+    linear-gradient(90deg,
+      #312b26 0 3px,
+      var(--color-amber) 3px 9px,
+      #312b26 9px 12px);
+  box-shadow: inset 0 0 0 1px rgba(255, 252, 245, 0.16);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-warm-gray);
+  filter: brightness(0.82) saturate(1.08);
+}
+
+html {
+  scrollbar-color: var(--color-amber) #312b26;
+  scrollbar-gutter: stable;
 }
 
 /* Utility to hide scrollbars on horizontal lists */

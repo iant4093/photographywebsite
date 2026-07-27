@@ -178,7 +178,7 @@ function AlbumGallery() {
 
 
     return (
-        <div className="linen-gallery-page flex-1 bg-cream animate-fade-in pb-16 pt-[88px] md:pt-[104px]">
+        <div className="linen-gallery-page flex-1 animate-fade-in pb-16 pt-[88px] md:pt-[104px]">
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}
                 <button

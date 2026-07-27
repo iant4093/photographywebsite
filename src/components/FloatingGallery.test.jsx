@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -75,6 +75,48 @@ describe('FloatingGallery', () => {
         expect(container.querySelector('.floating-print-wall')).toHaveClass('is-floating-visible')
         expect(container.querySelector('.floating-lane').style.maskImage)
             .toBe('linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)')
+    })
+
+    it('slows rather than stops the wall for pointer and keyboard interaction', () => {
+        vi.stubGlobal('IntersectionObserver', undefined)
+        const { container } = render(
+            <MemoryRouter>
+                <FloatingGallery albums={makeAlbums(12)} />
+            </MemoryRouter>,
+        )
+        const wall = container.querySelector('.floating-print-wall')
+        const animations = Array.from(container.querySelectorAll('.floating-loop-track'), () => ({
+            updatePlaybackRate: vi.fn(),
+        }))
+        container.querySelectorAll('.floating-loop-track').forEach((track, index) => {
+            track.getAnimations = () => [animations[index]]
+        })
+
+        fireEvent.pointerEnter(wall, { pointerType: 'mouse' })
+        animations.forEach((animation) => expect(animation.updatePlaybackRate).toHaveBeenCalledWith(0.38))
+        fireEvent.pointerLeave(wall)
+        animations.forEach((animation) => expect(animation.updatePlaybackRate).toHaveBeenCalledWith(1))
+
+        const firstLink = screen.getAllByRole('link')[0]
+        fireEvent.focus(firstLink)
+        animations.forEach((animation) => expect(animation.updatePlaybackRate).toHaveBeenCalledWith(0.38))
+        fireEvent.blur(firstLink, { relatedTarget: document.body })
+        animations.forEach((animation) => expect(animation.updatePlaybackRate).toHaveBeenCalledWith(1))
+    })
+
+    it('uses a slower-duration class when the Web Animations API is unavailable', () => {
+        vi.stubGlobal('IntersectionObserver', undefined)
+        const { container } = render(
+            <MemoryRouter>
+                <FloatingGallery albums={makeAlbums(12)} />
+            </MemoryRouter>,
+        )
+        const wall = container.querySelector('.floating-print-wall')
+
+        fireEvent.pointerEnter(wall)
+        expect(wall).toHaveClass('is-floating-slow-fallback')
+        fireEvent.pointerLeave(wall)
+        expect(wall).not.toHaveClass('is-floating-slow-fallback')
     })
 
     it('starts observing when asynchronously loaded albums create the wall', () => {
