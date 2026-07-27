@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router'
 import { fetchAlbum, requestAlbumMediaDownload } from '../utils/api'
 import { useAuth } from '../context/auth'
 import { motion } from 'framer-motion'

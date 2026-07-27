@@ -2656,8 +2656,6 @@ Resources:
       Threshold: 50
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerFailureAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2672,8 +2670,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2691,8 +2687,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerDurationAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2710,8 +2704,6 @@ Resources:
       Threshold: 150000
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewWorkerThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2729,8 +2721,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewMetadataSystemErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2767,8 +2757,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   LoginThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2786,8 +2774,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   AuditFailureAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2818,8 +2804,6 @@ Resources:
       Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   ApiAuthorizationDeniedAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -2834,8 +2818,6 @@ Resources:
       Threshold: 25
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
 Outputs:
   ApiUrl:

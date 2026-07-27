@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { v4 as uuidv4 } from 'uuid'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { mapWithConcurrency } from '../utils/concurrency'

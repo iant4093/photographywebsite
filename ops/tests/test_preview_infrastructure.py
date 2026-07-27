@@ -187,16 +187,21 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
         for logical_id in (
             "PreviewDeadLetterQueueAlarm",
             "PreviewQueueAgeAlarm",
+            "PreviewMetadataSystemErrorsAlarm",
+        ):
+            block = resource_block(logical_id)
+            self.assertIn("ian-photography-security-${Stage}", block)
+            self.assertIn("TreatMissingData: notBreaching", block)
+        for logical_id in (
             "PreviewQueueDepthAlarm",
             "PreviewWorkerFailureAlarm",
             "PreviewWorkerErrorsAlarm",
             "PreviewWorkerDurationAlarm",
             "PreviewWorkerThrottleAlarm",
-            "PreviewMetadataSystemErrorsAlarm",
             "PreviewMetadataThrottleAlarm",
         ):
             block = resource_block(logical_id)
-            self.assertIn("ian-photography-security-${Stage}", block)
+            self.assertNotIn("AlarmActions:", block)
             self.assertIn("TreatMissingData: notBreaching", block)
 
     def test_backfill_uses_guarded_direct_queue_dispatch(self) -> None:

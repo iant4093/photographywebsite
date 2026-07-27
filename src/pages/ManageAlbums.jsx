@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router'
 import { useAuth } from '../context/auth'
 import { processImage, processVideo, extractFrameFromVideoElement } from '../utils/mediaUtils'
 import {

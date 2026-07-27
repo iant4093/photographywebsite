@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigationType } from 'react-router-dom'
+import { Link, useLocation, useNavigationType } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'

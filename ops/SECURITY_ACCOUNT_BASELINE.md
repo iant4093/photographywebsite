@@ -15,11 +15,11 @@ inventory and a reviewed change set.
 | Layer | File | Ownership and guard |
 | --- | --- | --- |
 | Audit foundation | `security_audit_foundation_template.yaml` | One home-region stack. The Object-Locked CloudTrail evidence bucket, bucket policy, log group, role, and multi-region trail are retained together. After Config is healthy, an opt-in parameter adds exact-bucket Config delivery object events. |
-| Notifications | `security_notifications_template.yaml` | Regional encrypted SNS/KMS routing, encrypted SQS DLQ, metrics, and alarms. It creates no subscriber. |
+| Notifications | `security_notifications_template.yaml` | Regional encrypted SNS/KMS routing for exact website alarms, encrypted SQS delivery guards, and audit-only account alarms. It creates no subscriber. |
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
 | Home detection posture | `ci/home_security_posture.py` | Aggregate-only, read-only verification of the exact home-Region GuardDuty and Security Hub contract. It fails closed and never prints provider identifiers, tags, findings, or Region names. |
 | Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained CMK-encrypted vault. Creation and Vault Lock default off. |
-| Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One retained, alert-only account budget. Creation defaults off and requires an owner-approved amount plus one confirmed owner-controlled human destination. |
+| Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One optional retained, console-only account budget. Creation defaults off and requires an owner-approved amount; it has no notification route. |
 | Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Complete source signal inventory, privacy contract, runbook routing, response ownership, and quarterly delivery-test state. |
 | Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors become `skip-inventory-incomplete`, never “absent.” |
 | Inspector | `enable_inspector_lambda_scanning.py` | Dry-run-by-default Inspector Lambda and Lambda code scanning enrollment with exact apply guards. |
@@ -27,9 +27,10 @@ inventory and a reviewed change set.
 `us-west-2` is the reviewed home Region. The foundation trail already records
 multi-region and global management events, so do not deploy another foundation
 copy elsewhere. Config delivery, the managed GuardDuty detector, Security Hub,
-Access Analyzer, and their notification routing are home-region-only in this
-design. This repository does not claim GuardDuty or Security Hub coverage in
-other Regions and does not deploy or manage a Security Hub finding aggregator.
+and Access Analyzer are home-region-only in this design. They remain queryable
+and audited but do not route account-wide findings to the website email topic.
+This repository does not claim GuardDuty or Security Hub coverage in other
+Regions and does not deploy or manage a Security Hub finding aggregator.
 
 ## Validate before an AWS decision
 
@@ -199,34 +200,20 @@ precompute the generated bucket name.
 
 Pass the foundation log-group output to
 `security_notifications_template.yaml`. The topic uses a retained rotating
-customer KMS key. Native CloudWatch and Budget publishers are limited to the
-exact account/source resources, topic encryption context, and regional SNS
-service. EventBridge never publishes directly to the trusted responder topic:
-the exact four managed-finding and three backup-failure rule ARNs may send only
-to an encrypted SQS ingress queue. A bounded Lambda validates the complete fixed
-signal contract before publishing through its exact IAM role. This avoids the
-unscopable EventBridge-to-SNS topic-policy trust boundary.
+customer KMS key. Native CloudWatch publishing is restricted to exact website
+alarm name patterns and the topic encryption context. EventBridge never
+publishes directly to the responder topic: only exact website backup and WAF
+rules may send fixed signals to the encrypted SQS ingress queue. A bounded
+Lambda validates the complete signal contract before publishing through its
+exact IAM role.
 
-All managed-finding EventBridge targets use bounded retries and an encrypted
-14-day SQS DLQ. Both queue policies accept only the exact seven rule ARNs. A
-DLQ-depth alarm alerts
-on the first visible failed delivery. Additional audit alarms cover KMS key
-disable/deletion/policy/alias changes and security routing changes, along with
-root, IAM, CloudTrail, managed-security-service, data-protection, and
-infrastructure-protection configuration activity. GuardDuty and Security Hub
-targets send only static signal/severity/stage/runbook JSON; raw finding payloads
-never enter either queue or the notification channel. HIGH and CRITICAL findings
-use separate rules and retain their response severity.
-
-Security Hub notifications accept only active findings that remain in the
-`NEW` workflow state. They exclude the exact Config service-linked-role
-preference and GuardDuty/Inspector EC2, ECR, EKS, RDS, malware, and runtime
-controls that are non-applicable to this reviewed Lambda/S3/DynamoDB workload.
-Those findings remain visible and auditable in Security Hub; the filter only
-prevents repetitive owner email. `SSM.7` is deliberately not excluded because
-the account-level SSM public-document sharing setting must remain disabled. If
-the architecture later introduces any excluded workload family, remove its
-control exclusion in the same reviewed infrastructure change.
+Website EventBridge targets use bounded retries and an encrypted 14-day SQS
+DLQ. A DLQ-depth alarm alerts on the first visible failed delivery. Audit-only
+account alarms cover KMS key, routing, root, IAM, CloudTrail,
+managed-security-service, data-protection, and infrastructure configuration
+activity without publishing email. GuardDuty and Security Hub remain enabled,
+queryable, and posture-checked in their source services, but their account-wide
+findings are not website notifications.
 
 No subscriber is created. Attach a monitored destination only after the owner
 approves it and completes its confirmation flow. Test a controlled alarm and
@@ -466,14 +453,16 @@ by sufficiently privileged identities. Compliance mode requires a separate
 legal and retention decision because it can become irreversible.
 
 The primary backup stack also owns privacy-safe EventBridge failure signals for
-backup jobs, replica copy jobs, and restore jobs. Every target receives a fixed
-signal/stage/runbook payload instead of the AWS event, resource ARN, job ID,
-object key, provider error, or table/media identifier. The existing security
-topic, exact-rule signal queue, and delivery DLQ are mandatory whenever the
-backup plan is created. Their ARNs are not operator inputs: the backup template
-derives the exact same-account, `us-west-2`, and stage-owned names used by the
-notification stack. Update the notification stack first so both queue policies
-trust the three exact backup rules before enabling them.
+the exact website backup jobs and replica copy jobs. Restore operations stay
+visible in AWS Backup and CloudTrail but are not an account-wide website email
+source. Every routed target receives a fixed signal/stage/runbook payload
+instead of the AWS event, resource ARN, job ID, object key, provider error, or
+table/media identifier. The existing security topic, exact-rule signal queue,
+and delivery DLQ are mandatory whenever the backup plan is created. Their ARNs
+are not operator inputs: the backup template derives the exact same-account,
+`us-west-2`, and stage-owned names used by the notification stack. Update the
+notification stack first so both queue policies trust the two exact backup
+rules before enabling them.
 
 A six-hour scheduled verifier reads recovery-point metadata only and publishes
 aggregate expected, healthy, and failed counts. It requires a fresh completed
@@ -488,28 +477,22 @@ invented cross-Region human route. After that exact same-account, same-stage
 stack is deployed, set
 `ReplicaBackupDeploymentMode=use-existing-same-account-stage`; the primary
 template derives its ARN rather than accepting a caller-supplied destination.
-A restore started directly in that Region is not covered by the `us-west-2`
-restore-failure rule. Keep replica-region restore operations gated until an
-owner approves and tests same-Region notification routing; do not route raw
-restore events across Regions as a shortcut.
+Restore operations remain gated and are reviewed in AWS Backup; they do not
+produce account-wide website email.
 
 ### 6. Cost budget and notification ownership
 
 Follow [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md). The source-controlled budget
 has no default spending amount, email address, subscription, resource action,
 or automatic security-control disablement. Its read-only preflight recommends
-creation only when the exact budget name is absent, the exact encrypted security
-topic exists, and one confirmed owner-controlled human-compatible destination is
-present. HTTPS, SQS, and Lambda fan-out do not satisfy that ownership gate. The
-separate alarm-routing readiness contract still requires primary and backup
-responders with two tested destinations.
+creation only when the exact budget name is absent and the owner confirms the
+name and amount. It remains console-only and never publishes to the website
+responder topic.
 
 The current checked-in alarm registry is
-`degraded-one-confirmed-human-destination`: the site owner has one confirmed
-destination, while the backup owner, second destination, and last end-to-end
-test date remain unassigned. Those remaining items are human decisions, not safe
-repository defaults. Complete them and test sanitized delivery before calling
-the route fully redundant.
+`active-one-confirmed-owner-destination`: the site owner has one confirmed
+destination, which is the complete requirement for this personal website.
+Record a sanitized end-to-end delivery test quarterly and after routing changes.
 
 ## Maintenance, cost, and evidence
 

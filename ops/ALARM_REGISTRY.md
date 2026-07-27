@@ -3,16 +3,16 @@
 The machine-readable inventory is `ops/alarm_registry.json`. It is the source
 of truth for alarm-to-runbook coverage. Notification endpoints are deliberately
 not stored in Git. One owner-controlled human destination is confirmed on the
-central topic. Delivery remains degraded until a backup responder is assigned,
-a second destination is confirmed, and a synthetic end-to-end delivery test is
-recorded.
+central topic, which is the complete delivery requirement for this personal
+website. A synthetic end-to-end delivery test should still be recorded
+quarterly and after routing changes.
 
-EventBridge findings and backup events pass through the exact-rule security
-signal queue and a strict allowlist validator, so only fixed signal names,
-severity, stage, and runbook IDs reach the topic. Native CloudWatch and Budget
-notifications may additionally contain stable AWS alarm/budget names, account
-scope, aggregate metric or cost state, and AWS-generated state reasons. Never
-copy raw findings or Backup events, request or response bodies, emails, album or
+Only exact website backup and WAF events pass through the rule-scoped security
+signal queue and strict allowlist validator. Native CloudWatch notifications
+are restricted by topic policy to exact website alarm name patterns. Account
+identity, managed-security, configuration, and cost signals remain available in
+their source services and audit-only CloudWatch alarms but never route to this
+email topic. Never copy raw events, request or response bodies, emails, album or
 media identifiers, object keys, request URLs, credentials, provider errors, or
 log messages into notifications, tickets, or chat.
 
@@ -51,7 +51,8 @@ systematic. Never purge or bulk-redrive; select only proven idempotent messages.
 
 Group denials by stable reason, route template, status, and release. Separate a
 client/session regression from abuse without enumerating accounts. Preserve
-CAPTCHA, rate limits, JWT validation, and owner/admin/share boundaries.
+CAPTCHA, rate limits, JWT validation, and owner/admin/share boundaries. These
+alarms are audit-only to avoid emailing on routine internet scanning.
 
 ## Application audit failure
 
@@ -64,19 +65,29 @@ audit outage remains open until event delivery and forbidden-field tests pass.
 Correlate root, IAM, and KMS changes to an approved operator/session. For an
 unapproved change, contain the identity, preserve CloudTrail, and verify keys
 remain enabled and unscheduled for deletion before restoring policy via IaC.
+These are account-wide audit alarms and do not publish to the website topic.
 
 ## Trail and notification change
 
 Verify trail logging, S3 and CloudWatch delivery, digest creation, topic policy,
 EventBridge targets, retries, and DLQ depth. Never delete evidence or a failed
-delivery message merely to make the dashboard green.
+delivery message merely to make the dashboard green. The control-plane change
+alarms are audit-only.
+
+## Website notification delivery
+
+Inspect the website security-event DLQ and the exact backup/WAF EventBridge
+targets. Do not purge or redrive messages in bulk. Confirm the fixed signal
+contract, retry only proven idempotent events, and verify the owner subscription
+remains confirmed without recording its endpoint.
 
 ## Security service change
 
 Check home-Region recorder/delivery status, the exact detector feature map and
 publishing frequency, both Security Hub standards, Inspector Lambda coverage,
 and Access Analyzer state. Restore only through the owning templates, rerun the
-fail-closed home posture audit, and record why the service changed.
+fail-closed home posture audit, and record why the service changed. This
+account-wide alarm is audit-only.
 
 The configuration-change metric intentionally continues to flag creation,
 update, or deletion of a Security Hub finding aggregator as unauthorized
@@ -98,16 +109,6 @@ CloudFront configuration, and WAF association/logging. Reject unexplained
 replacement, deletion, public access, direct-origin bypass, or blocking-rule
 promotion.
 
-## Managed security findings
-
-The notification deliberately contains no raw GuardDuty or Security Hub finding.
-Open the source service in the signaled Region using an approved incident role,
-then review severity, resource scope, evidence, and workflow there. Preserve the
-finding, contain the affected resource or identity through its owning control,
-and record only a sanitized incident reference in shared systems. A duplicate
-Security Hub copy does not require a second incident, but both source workflows
-must receive an explicit disposition.
-
 ## Backup job failure
 
 Use aggregate AWS Backup job state and resource type. Confirm the protected
@@ -120,12 +121,6 @@ Verify source recovery point health, replica vault/key state, Region, copy
 permissions, and retention. A successful source backup does not close a failed
 replica copy; require later replica recovery-point evidence.
 
-## Backup restore failure
-
-Keep the source recovery point and vault unchanged. Review the isolated restore
-role and destination preflight, then retry to a new approved isolation target.
-Close only after aggregate count/checksum/schema/authorization validation.
-
 ## Backup freshness
 
 Treat missing metric data as a failed control. Verify the scheduled freshness
@@ -134,14 +129,6 @@ expected count is exactly three source resources, or six when the configured
 replica vault is present. Do not print recovery-point ARNs or resource ARNs.
 Close only after every exact table and media bucket has a completed recovery
 point inside the approved age window in the source vault and configured replica.
-
-## Account cost budget
-
-Confirm whether actual spend exceeded 80% or forecast spend exceeded 100% of
-the owner-approved monthly limit. Review aggregate service cost by the approved
-billing workflow. Cost pressure never authorizes disabling logging, detection,
-backup, WAF, evidence retention, or rollback access. Escalate an unexplained
-increase without copying billing exports or account identifiers into chat.
 
 ## Edge health
 
@@ -152,16 +139,17 @@ posture smoke test for release verification.
 
 ## WAF observation
 
-Use aggregate rule labels/actions and the redacted count/block log. The common
-managed group remains in count mode; known-bad inputs, Amazon IP reputation,
-and the per-IP rate limit block. Return only an affected high-confidence rule to
-count mode after a verified false positive. Any exclusion needs an owner,
-reason, expiry, regression fixture, and rollback record.
+Use aggregate rule labels/actions and the redacted count/block log. Email is
+reserved for sustained known-bad or rate-limit blocking; the common managed
+group remains in count mode and audit-only. Return only an affected
+high-confidence rule to count mode after a verified false positive. Any
+exclusion needs an owner, reason, expiry, regression fixture, and rollback
+record.
 
 ## Delivery test and review record
 
 Quarterly and after routing changes, send synthetic messages containing only a
-test marker, signal ID, timestamp, and release. Confirm primary and backup
-receipt, record acknowledgment latency, verify the delivery DLQ remains empty,
-and update `lastEndToEndTestDate` in the JSON registry. A topic ARN or pending
-subscription is not successful delivery.
+test marker, signal ID, timestamp, and release. Confirm owner receipt, record
+acknowledgment latency, verify the delivery DLQ remains empty, and update
+`lastEndToEndTestDate` in the JSON registry. A topic ARN or pending subscription
+is not successful delivery.

@@ -214,7 +214,12 @@ class DataProtectionTests(unittest.TestCase):
         for logical_id in ("AuditFailureAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"):
             block = resource_block(logical_id)
             self.assertIn("IanTruongPhotography/Security", block)
-            self.assertIn("ian-photography-security-${Stage}", block)
+        self.assertIn(
+            "ian-photography-security-${Stage}",
+            resource_block("AuditFailureAlarm"),
+        )
+        self.assertNotIn("AlarmActions:", resource_block("LoginDeniedAlarm"))
+        self.assertNotIn("AlarmActions:", resource_block("ApiAuthorizationDeniedAlarm"))
 
     def test_api_access_log_destination_uses_exact_log_group_arn(self) -> None:
         api = resource_block("Api")

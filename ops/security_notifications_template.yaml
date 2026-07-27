@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Encrypted security notification routing and audit alarms. This stack creates
-  no subscription; attach only an owner-approved monitored destination later.
+  Encrypted website-only notification routing and audit-only account alarms.
+  This stack creates no subscription; attach only an owner-approved monitored
+  destination later.
 
 Parameters:
   Stage:
@@ -39,7 +40,6 @@ Resources:
             Effect: Allow
             Principal:
               Service:
-                - budgets.amazonaws.com
                 - cloudwatch.amazonaws.com
             Action:
               - kms:Decrypt
@@ -92,18 +92,7 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: AllowExactAccountBudget
-            Effect: Allow
-            Principal:
-              Service: budgets.amazonaws.com
-            Action: sns:Publish
-            Resource: !Ref SecurityNotifications
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-              ArnEquals:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:budgets::${AWS::AccountId}:budget/ian-photography-monthly-${Stage}'
-          - Sid: AllowAccountCloudWatchAlarms
+          - Sid: AllowExactWebsiteCloudWatchAlarms
             Effect: Allow
             Principal:
               Service: cloudwatch.amazonaws.com
@@ -113,7 +102,19 @@ Resources:
               StringEquals:
                 AWS:SourceAccount: !Ref AWS::AccountId
               ArnLike:
-                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*'
+                AWS:SourceArn:
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-ApiServerErrorAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-ApiLatencyAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-FrontDoorDeniedAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AsyncFailureQueueAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewDeadLetterQueueAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewQueueAgeAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewMetadataSystemErrorsAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AuditFailureAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-frontend-5xx-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-media-5xx-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-backup-freshness-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-${Stage}'
 
   SecuritySignalQueue:
     Type: AWS::SQS::Queue
@@ -150,13 +151,8 @@ Resources:
                 aws:SourceAccount: !Ref AWS::AccountId
               ArnEquals:
                 aws:SourceArn:
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-high-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-critical-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-high-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-critical-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-restore-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
 
   SecurityEventDlq:
@@ -190,13 +186,8 @@ Resources:
                 aws:SourceAccount: !Ref AWS::AccountId
               ArnEquals:
                 aws:SourceArn:
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-high-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-guardduty-critical-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-high-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-securityhub-critical-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-restore-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
 
   SecuritySignalProcessorLogGroup:
@@ -294,13 +285,8 @@ Resources:
           TOPIC_ARN = os.environ["SECURITY_TOPIC_ARN"]
           STAGE = os.environ["STAGE"]
           CONTRACTS = {
-              "guardduty.finding.high": ("high", "managed-security-findings"),
-              "guardduty.finding.critical": ("critical", "managed-security-findings"),
-              "securityhub.finding.high": ("high", "managed-security-findings"),
-              "securityhub.finding.critical": ("critical", "managed-security-findings"),
               "backup.job.failed": ("high", "backup-job-failure"),
               "backup.copy.failed": ("high", "backup-copy-failure"),
-              "backup.restore.failed": ("critical", "backup-restore-failure"),
               "waf.alarm": ("high", "waf-observation"),
           }
           KEYS = {"schemaVersion", "eventName", "severity", "stage", "runbook"}
@@ -371,7 +357,6 @@ Resources:
           alarmName:
             - !Sub 'ian-photography-waf-blocked-${Stage}'
             - !Sub 'ian-photography-waf-rate-${Stage}'
-            - !Sub 'ian-photography-waf-managed-${Stage}'
           state:
             value: [ALARM]
       State: ENABLED
@@ -380,143 +365,6 @@ Resources:
           Arn: !GetAtt SecuritySignalQueue.Arn
           Input: !Sub >-
             {"schemaVersion":1,"eventName":"waf.alarm","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#waf-observation"}
-          DeadLetterConfig:
-            Arn: !GetAtt SecurityEventDlq.Arn
-          RetryPolicy:
-            MaximumEventAgeInSeconds: 3600
-            MaximumRetryAttempts: 10
-
-  GuardDutyFindingRule:
-    Type: AWS::Events::Rule
-    DependsOn:
-      - SecurityNotificationsPolicy
-      - SecuritySignalQueuePolicy
-      - SecurityEventDlqPolicy
-    Properties:
-      Name: !Sub 'ian-photography-guardduty-high-${Stage}'
-      EventPattern:
-        source: [aws.guardduty]
-        detail-type: [GuardDuty Finding]
-        detail:
-          severity:
-            - numeric: ['>=', 7, '<', 9]
-      State: ENABLED
-      Targets:
-        - Id: SecurityNotifications
-          Arn: !GetAtt SecuritySignalQueue.Arn
-          # Never forward the raw finding: it can contain resource identifiers,
-          # network details, object metadata, and other incident evidence that
-          # does not belong in a human notification channel.
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"guardduty.finding.high","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
-          DeadLetterConfig:
-            Arn: !GetAtt SecurityEventDlq.Arn
-          RetryPolicy:
-            MaximumEventAgeInSeconds: 3600
-            MaximumRetryAttempts: 10
-
-  GuardDutyCriticalFindingRule:
-    Type: AWS::Events::Rule
-    DependsOn:
-      - SecuritySignalQueuePolicy
-      - SecurityEventDlqPolicy
-    Properties:
-      Name: !Sub 'ian-photography-guardduty-critical-${Stage}'
-      EventPattern:
-        source: [aws.guardduty]
-        detail-type: [GuardDuty Finding]
-        detail:
-          severity:
-            - numeric: ['>=', 9]
-      State: ENABLED
-      Targets:
-        - Id: SecuritySignals
-          Arn: !GetAtt SecuritySignalQueue.Arn
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"guardduty.finding.critical","severity":"critical","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
-          DeadLetterConfig:
-            Arn: !GetAtt SecurityEventDlq.Arn
-          RetryPolicy:
-            MaximumEventAgeInSeconds: 3600
-            MaximumRetryAttempts: 10
-
-  SecurityHubFindingRule:
-    Type: AWS::Events::Rule
-    DependsOn:
-      - SecurityNotificationsPolicy
-      - SecuritySignalQueuePolicy
-      - SecurityEventDlqPolicy
-    Properties:
-      Name: !Sub 'ian-photography-securityhub-high-${Stage}'
-      EventPattern:
-        source: [aws.securityhub]
-        detail-type: [Security Hub Findings - Imported]
-        detail:
-          findings:
-            Severity:
-              Label: [HIGH]
-            # These controls describe workload families that this reviewed
-            # serverless account baseline intentionally does not operate, plus
-            # Config.1's service-linked-role preference. Config itself remains
-            # enabled, recording, and independently posture-checked.
-            GeneratorId:
-              - anything-but:
-                  - security-control/Config.1
-                  - security-control/GuardDuty.5
-                  - security-control/GuardDuty.7
-                  - security-control/GuardDuty.8
-                  - security-control/GuardDuty.9
-                  - security-control/GuardDuty.11
-                  - security-control/Inspector.1
-                  - security-control/Inspector.2
-            RecordState: [ACTIVE]
-            Workflow:
-              Status: [NEW]
-      State: ENABLED
-      Targets:
-        - Id: SecurityNotifications
-          Arn: !GetAtt SecuritySignalQueue.Arn
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"securityhub.finding.high","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
-          DeadLetterConfig:
-            Arn: !GetAtt SecurityEventDlq.Arn
-          RetryPolicy:
-            MaximumEventAgeInSeconds: 3600
-            MaximumRetryAttempts: 10
-
-  SecurityHubCriticalFindingRule:
-    Type: AWS::Events::Rule
-    DependsOn:
-      - SecuritySignalQueuePolicy
-      - SecurityEventDlqPolicy
-    Properties:
-      Name: !Sub 'ian-photography-securityhub-critical-${Stage}'
-      EventPattern:
-        source: [aws.securityhub]
-        detail-type: [Security Hub Findings - Imported]
-        detail:
-          findings:
-            Severity:
-              Label: [CRITICAL]
-            GeneratorId:
-              - anything-but:
-                  - security-control/Config.1
-                  - security-control/GuardDuty.5
-                  - security-control/GuardDuty.7
-                  - security-control/GuardDuty.8
-                  - security-control/GuardDuty.9
-                  - security-control/GuardDuty.11
-                  - security-control/Inspector.1
-                  - security-control/Inspector.2
-            RecordState: [ACTIVE]
-            Workflow:
-              Status: [NEW]
-      State: ENABLED
-      Targets:
-        - Id: SecuritySignals
-          Arn: !GetAtt SecuritySignalQueue.Arn
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"securityhub.finding.critical","severity":"critical","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#managed-security-findings"}
           DeadLetterConfig:
             Arn: !GetAtt SecurityEventDlq.Arn
           RetryPolicy:
@@ -705,7 +553,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   CloudTrailChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -721,7 +568,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   IamChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -737,7 +583,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   KmsChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -753,7 +598,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   SecurityRoutingChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -769,7 +613,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   SecurityServiceChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -785,7 +628,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   DataProtectionChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -801,7 +643,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   InfrastructureProtectionChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -817,13 +658,12 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions: [!Ref SecurityNotifications]
 
   SecurityEventDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'
-      AlarmDescription: EventBridge could not deliver one or more security findings.
+      AlarmDescription: EventBridge could not deliver one or more website backup or WAF signals.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -841,7 +681,7 @@ Resources:
 Outputs:
   SecurityNotificationTopicArn:
     Value: !Ref SecurityNotifications
-    Description: Attach only an owner-approved monitored subscriber after deployment.
+    Description: Website-only responder topic; attach only an owner-approved monitored subscriber.
   SecurityNotificationKeyArn:
     Value: !GetAtt SecurityNotificationKey.Arn
   SecuritySignalQueueArn:

@@ -1,76 +1,42 @@
 # Guarded cost budget operations
 
-`security_budget_template.yaml` owns one retained monthly account cost budget.
-It never creates an email address, SNS topic, endpoint, subscription, cost-cutoff
-action, or automatic security-service disablement. The owner must choose the
-monthly USD limit and confirm the owner notification on the existing encrypted security
-topic before deployment.
+`security_budget_template.yaml` can create one retained, console-only monthly
+account cost budget. It creates no email address, SNS topic, endpoint,
+subscription, notification, cost-cutoff action, or automatic security-service
+disablement. The budget is deliberately excluded from the website responder
+topic because account-wide billing is not a website incident.
 
-The budget measures the account's total monthly cost. This is intentionally
-broader than a tag filter: not every paid security service supports consistent
-cost-allocation tags, and a narrow filter could silently omit GuardDuty,
-Security Hub, Config, WAF, Backup, CloudWatch, or data-transfer
-charges. Actual-spend notifications start above 50% and 80%, and the forecasted
-notification starts above 100% of the owner-approved limit. Neither notification
-changes AWS resources.
-
-## Prerequisites
-
-1. Deploy the reviewed notification-stack update that grants only the exact
-   named budget permission to publish to the encrypted topic.
-2. Attach and confirm the owner email destination outside this repository.
-   Record its owner and a synthetic delivery test in
-   `alarm_registry.json`; never commit endpoint addresses.
-3. Choose the monthly amount after reviewing current billing and the 24-hour,
-   7-day, and 30-day paid-service cost observations. Do not treat a default or
-   guessed number as approval.
+The budget measures the account's total monthly cost. This is broader than a tag
+filter because not every paid security service supports consistent cost
+allocation tags. Review it in AWS Billing when performing monthly maintenance.
 
 ## Read-only preflight
 
-The preflight lists budgets, verifies the exact same-account/same-Region topic,
-and counts unique confirmed human-compatible destinations (`email`,
-`email-json`, or `sms`) without printing endpoint addresses or subscription
-identifiers. Confirmed HTTPS, SQS, Lambda, and Firehose fan-out can be useful,
-but proves only a machine route and does not satisfy the human-destination gate. It
-never calls a write API.
+The preflight verifies the exact account, validates the owner-approved amount,
+checks whether the fixed budget name already exists, and prints only aggregate
+state. It never calls a write API.
 
 ```bash
 python3 ops/security_budget_preflight.py \
   --stage prod \
   --region us-west-2 \
   --expected-account-id EXPECTED_12_DIGIT_ACCOUNT \
-  --security-notification-topic-arn EXACT_REVIEWED_TOPIC_ARN \
   --monthly-limit-usd OWNER_APPROVED_AMOUNT \
   --confirm-budget-name ian-photography-monthly-prod
 ```
 
-Exit status `2` and `BudgetDeploymentMode=skip` are expected while the topic has
-no confirmed human destination, the exact budget already exists, or the
-name confirmation is absent. An existing budget requires an ownership/import
-review; never delete or replace it merely to satisfy the preflight.
-
-The inventory digest binds only aggregate counts, the approved limit, and topic
-existence. Save it with the change record, but rerun immediately before creating
-the CloudFormation change set because subscriptions and budgets can change.
+Exit status `2` and `BudgetDeploymentMode=skip` are expected when the exact
+budget already exists or the name confirmation is absent. Never delete or
+replace an existing budget merely to satisfy the preflight.
 
 ## Deployment and validation
 
 Create a non-executing change set with the exact preflight parameters and
 `BudgetDeploymentMode=create-confirmed-absent`. Confirm it creates only
-`AWS::Budgets::Budget`, has no email subscriber, and does not replace any
-existing budget or notification resource. Execute only after owner approval,
-enable stack termination protection, then verify the actual and forecast
-notifications both reference the reviewed SNS topic.
+`AWS::Budgets::Budget`, contains no `NotificationsWithSubscribers`, and does not
+replace an existing budget or website notification resource. Execute only after
+owner approval and enable stack termination protection.
 
-Send a privacy-safe synthetic topic message separately to test delivery; do not
-force real account spend. Review actual costs daily during the first week and
-monthly afterward. A budget alert must never automatically disable logging,
-detection, backup, WAF, rollback access, or evidence retention.
-
-## Update and rollback
-
-Changing `NotificationsWithSubscribers` can replace the CloudFormation budget
-resource. Treat recipient or threshold changes as a replacement-risk change set
-and preserve the old budget until the replacement is verified. To stop alert
-noise, correct routing or the limit through the reviewed template. Do not delete
-the security topic, KMS key, evidence, detector, backup, or observability stack.
+Review actual costs daily during the first week after enabling a new paid
+service and monthly afterward. Cost pressure never authorizes disabling
+logging, detection, backup, WAF, rollback access, or evidence retention.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useAuth } from '../context/auth'
 import { Turnstile } from '@marsidev/react-turnstile'
 import { motion as Motion } from 'framer-motion'

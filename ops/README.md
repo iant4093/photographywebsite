@@ -36,18 +36,17 @@ are **dry-run by default** and require multiple exact production guards to apply
   have no failure reason. It never prints
   provider identifiers, tags, Region names, or findings.
 - `security_budget_template.yaml`, `security_budget_preflight.py`, and
-  [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md) define a retained, alert-only
-  account budget. No budget is created until an owner approves the amount and
-  one owner-controlled human notification destination is confirmed. The wider
-  alarm-routing readiness gate still requires primary and backup responders.
+  [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md) define an optional retained,
+  console-only account budget. It has no notification route and is not part of
+  website incident delivery.
 - Migration helpers cover existing album ownership, GSIs, media visibility
   tags, media-cache invalidation, and Lambda log retention.
 - `SECURITY_OBSERVABILITY.md` defines the structured audit contract, centralized
   Lambda log group, alert ownership, privacy rules, triage, and rollback steps.
 - [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) and `alarm_registry.json` map every
-  declared application, WAF, observability, account-security, backup failure/
-  freshness, and account-budget signal to a privacy-safe runbook and make
-  missing human ownership explicit.
+  declared application, WAF, observability, account-security, and backup
+  failure/freshness signal to a privacy-safe runbook, separating website email
+  delivery from audit-only account signals.
 - `observability_template.yaml`, `observability_preflight.py`, and
   [`OBSERVABILITY.md`](OBSERVABILITY.md) define the retained, privacy-controlled
   paid CloudFront metrics, dashboard, and edge-alarm operations.
@@ -244,10 +243,9 @@ traffic, privacy, and cost after 30 days.
 - CloudFront standard logs, CloudWatch logs/metrics/alarms, Secrets Manager,
   DynamoDB PITR, S3 version storage, invalidations above the free allowance, and
   retained backup/log objects all have usage or storage costs. Budget creation
-  requires an owner-approved monthly amount and one confirmed owner-controlled
-  destination; the complete alert route remains non-operational until a backup
-  responder and second destination are tested. The budget never creates a
-  subscriber or automatically disables a security control.
+  requires an owner-approved monthly amount. The budget remains console-only;
+  it never creates a subscriber, sends website incident email, or automatically
+  disables a security control.
 
 ## Post-release checks
 

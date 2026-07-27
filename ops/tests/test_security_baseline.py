@@ -69,7 +69,7 @@ class AccountSecurityBaselineTests(unittest.TestCase):
         self.assertNotIn("AWS::SNS::Subscription", SECURITY_TEMPLATES)
         self.assertNotIn("NotificationEmail", SECURITY_TEMPLATES)
         self.assertNotIn("@", SECURITY_TEMPLATES)
-        self.assertIn("Attach only an owner-approved monitored subscriber", SECURITY_TEMPLATES)
+        self.assertIn("owner-approved monitored subscriber", SECURITY_TEMPLATES)
 
     def test_alarm_registry_covers_every_declared_signal_exactly_once(self):
         template_paths = (
@@ -121,15 +121,18 @@ class AccountSecurityBaselineTests(unittest.TestCase):
                 set(group),
                 {"id", "logicalResourceIds", "severity", "route", "runbook", "autoClose"},
             )
-            self.assertIn(group["severity"], {"low", "medium", "high", "critical"})
+            self.assertIn(
+                group["severity"],
+                {"diagnostic", "audit", "low", "medium", "high", "critical"},
+            )
             self.assertTrue(group["route"])
             self.assertTrue(group["autoClose"])
         self.assertEqual(
             ALARM_REGISTRY["deliveryState"]["status"],
-            "degraded-one-confirmed-human-destination",
+            "active-one-confirmed-owner-destination",
         )
         self.assertEqual(
-            ALARM_REGISTRY["deliveryState"]["requiredConfirmedDestinations"], 2
+            ALARM_REGISTRY["deliveryState"]["requiredConfirmedDestinations"], 1
         )
         runbook_headings = {
             heading.replace("-", " ").lower()

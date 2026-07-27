@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { useAuth } from '../context/auth'
 import { listUsers, editUser } from '../utils/api'
 

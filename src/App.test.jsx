@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./components/Navbar', async () => {
-  const { Link } = await import('react-router-dom')
+  const { Link } = await import('react-router')
   return { default: () => <nav><Link to="/videos">Videos nav</Link></nav> }
 })
 vi.mock('./components/Footer', () => ({ default: () => <footer>Footer</footer> }))

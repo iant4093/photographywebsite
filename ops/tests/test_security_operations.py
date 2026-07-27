@@ -130,8 +130,8 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("AWS::KMS::Key", NOTIFICATIONS)
         self.assertIn("events.amazonaws.com", NOTIFICATIONS)
         self.assertIn("cloudwatch.amazonaws.com", NOTIFICATIONS)
-        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 5)
-        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 5)
+        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 1)
+        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 1)
         self.assertIn("SqsManagedSseEnabled: true", NOTIFICATIONS)
         self.assertIn("MetricName: ApproximateNumberOfMessagesVisible", NOTIFICATIONS)
         self.assertIn("AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'", NOTIFICATIONS)
@@ -164,38 +164,23 @@ class SecurityTemplateTests(unittest.TestCase):
             "DisassociateWebACL",
         ):
             self.assertIn(f'eventName = "{event_name}"', NOTIFICATIONS)
-        self.assertIn("Service: budgets.amazonaws.com", NOTIFICATIONS)
-        self.assertIn("budget/ian-photography-monthly-${Stage}", NOTIFICATIONS)
-        self.assertIn("AllowAccountCloudWatchAlarms", NOTIFICATIONS)
-        self.assertIn("cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*", NOTIFICATIONS)
-        self.assertIn('"eventName":"guardduty.finding.high"', NOTIFICATIONS)
-        self.assertIn('"eventName":"securityhub.finding.high"', NOTIFICATIONS)
+        self.assertNotIn("budgets.amazonaws.com", NOTIFICATIONS)
+        self.assertIn("AllowExactWebsiteCloudWatchAlarms", NOTIFICATIONS)
+        self.assertNotIn(":alarm:*", NOTIFICATIONS)
+        for alarm_pattern in (
+            "ian-website-ApiServerErrorAlarm-*",
+            "ian-website-PreviewDeadLetterQueueAlarm-*",
+            "ian-photography-frontend-5xx-${Stage}",
+            "ian-photography-backup-freshness-${Stage}",
+        ):
+            self.assertIn(alarm_pattern, NOTIFICATIONS)
         for logical_id in (
             "GuardDutyFindingRule",
             "GuardDutyCriticalFindingRule",
             "SecurityHubFindingRule",
             "SecurityHubCriticalFindingRule",
         ):
-            block = resource_block(NOTIFICATIONS, logical_id)
-            self.assertIn("Input: !Sub >-", block)
-            self.assertIn("Arn: !GetAtt SecuritySignalQueue.Arn", block)
-        for logical_id in ("SecurityHubFindingRule", "SecurityHubCriticalFindingRule"):
-            block = resource_block(NOTIFICATIONS, logical_id)
-            self.assertIn("RecordState: [ACTIVE]", block)
-            self.assertIn("Status: [NEW]", block)
-            self.assertNotIn("NOTIFIED", block)
-            for control_id in (
-                "Config.1",
-                "GuardDuty.5",
-                "GuardDuty.7",
-                "GuardDuty.8",
-                "GuardDuty.9",
-                "GuardDuty.11",
-                "Inspector.1",
-                "Inspector.2",
-            ):
-                self.assertIn(f"security-control/{control_id}", block)
-            self.assertNotIn("security-control/SSM.7", block)
+            self.assertNotRegex(NOTIFICATIONS, rf"(?m)^  {logical_id}:$")
         topic_policy = resource_block(NOTIFICATIONS, "SecurityNotificationsPolicy")
         self.assertNotIn("AllowEventBridgeSecurityFindings", topic_policy)
         queue_policy = resource_block(NOTIFICATIONS, "SecuritySignalQueuePolicy")
@@ -204,8 +189,22 @@ class SecurityTemplateTests(unittest.TestCase):
         key = resource_block(NOTIFICATIONS, "SecurityNotificationKey")
         self.assertIn("kms:EncryptionContext:aws:sns:topicArn", key)
         self.assertIn("kms:ViaService", key)
-        self.assertIn('"severity":"critical"', NOTIFICATIONS)
         self.assertIn("ArnEquals:\n                aws:SourceArn:", NOTIFICATIONS)
+        for logical_id in (
+            "RootActivityAlarm",
+            "CloudTrailChangeAlarm",
+            "IamChangeAlarm",
+            "KmsChangeAlarm",
+            "SecurityRoutingChangeAlarm",
+            "SecurityServiceChangeAlarm",
+            "DataProtectionChangeAlarm",
+            "InfrastructureProtectionChangeAlarm",
+        ):
+            self.assertNotIn("AlarmActions:", resource_block(NOTIFICATIONS, logical_id))
+        self.assertIn(
+            "AlarmActions: [!Ref SecurityNotifications]",
+            resource_block(NOTIFICATIONS, "SecurityEventDlqAlarm"),
+        )
         waf_forward = resource_block(NOTIFICATIONS, "WafAlarmForwardRule")
         self.assertIn('"eventName":"waf.alarm"', waf_forward)
         self.assertIn("region: [us-east-1]", waf_forward)
@@ -377,7 +376,6 @@ class SecurityTemplateTests(unittest.TestCase):
         for logical_id, event_name, detail_type in (
             ("BackupJobFailureRule", "backup.job.failed", "Backup Job State Change"),
             ("BackupCopyFailureRule", "backup.copy.failed", "Copy Job State Change"),
-            ("BackupRestoreFailureRule", "backup.restore.failed", "Restore Job State Change"),
         ):
             block = resource_block(BACKUP, logical_id)
             self.assertIn("Type: AWS::Events::Rule", block)
@@ -401,7 +399,9 @@ class SecurityTemplateTests(unittest.TestCase):
                 "restoreJobId",
             ):
                 self.assertNotIn(forbidden, block)
-        self.assertEqual(BACKUP.count("DeadLetterConfig:"), 3)
+        self.assertEqual(BACKUP.count("DeadLetterConfig:"), 2)
+        self.assertNotIn("BackupRestoreFailureRule", BACKUP)
+        self.assertNotIn("backup.restore.failed", BACKUP)
         for removed_input in (
             "SecurityAlarmTopicArn",
             "SecuritySignalQueueArn",
@@ -451,10 +451,10 @@ class SecurityTemplateTests(unittest.TestCase):
 
         valid = {
             "schemaVersion": 1,
-            "eventName": "securityhub.finding.critical",
-            "severity": "critical",
+            "eventName": "backup.job.failed",
+            "severity": "high",
             "stage": "prod",
-            "runbook": "ops/ALARM_REGISTRY.md#managed-security-findings",
+            "runbook": "ops/ALARM_REGISTRY.md#backup-job-failure",
         }
         result = namespace["handler"](
             {"Records": [{"body": json.dumps(valid)}]}, types.SimpleNamespace()

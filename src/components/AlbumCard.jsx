@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import ProgressiveImage from './ProgressiveImage'
 import { albumCoverUrl } from '../utils/mediaUrls'
 

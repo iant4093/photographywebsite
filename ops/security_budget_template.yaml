@@ -1,8 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Guarded monthly cost budget for paid photography security and observability
-  services. It reuses an explicitly supplied same-account SNS topic and never
-  creates an email address, endpoint, SNS topic, or subscription.
+  Guarded console-only monthly cost budget for photography security and
+  observability services. It creates no email, SNS, or other notification route.
 
 Parameters:
   Stage:
@@ -25,12 +24,6 @@ Parameters:
     MinValue: 0
     MaxValue: 100000
     Description: Owner-approved monthly USD limit; zero is valid only in skip mode.
-  SecurityNotificationTopicArn:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:us-west-2:[0-9]{12}:ian-photography-security-[a-z0-9-]+)$'
-    Description: Existing topic with confirmed responders; no subscriber is created here.
-
 Rules:
   ExpectedAccountMustMatch:
     Assertions:
@@ -40,17 +33,11 @@ Rules:
     Assertions:
       - Assert: !Equals [!Ref AWS::Region, us-west-2]
         AssertDescription: The account budget stack is managed from us-west-2.
-  CreationRequiresApprovedLimitAndTopic:
+  CreationRequiresApprovedLimit:
     RuleCondition: !Equals [!Ref BudgetDeploymentMode, create-confirmed-absent]
     Assertions:
       - Assert: !Not [!Equals [!Ref MonthlyLimitUsd, 0]]
         AssertDescription: An owner-approved positive monthly limit is required.
-      - Assert: !Not [!Equals [!Ref SecurityNotificationTopicArn, '']]
-        AssertDescription: An existing reviewed notification topic is required.
-      - Assert: !Equals
-          - !Ref SecurityNotificationTopicArn
-          - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
-        AssertDescription: The notification topic must exactly match this account, Region, and stage.
 
 Conditions:
   CreateBudget: !Equals [!Ref BudgetDeploymentMode, create-confirmed-absent]
@@ -81,31 +68,6 @@ Resources:
           IncludeUpfront: true
           UseAmortized: false
           UseBlended: false
-      NotificationsWithSubscribers:
-        - Notification:
-            ComparisonOperator: GREATER_THAN
-            NotificationType: ACTUAL
-            Threshold: 50
-            ThresholdType: PERCENTAGE
-          Subscribers:
-            - Address: !Ref SecurityNotificationTopicArn
-              SubscriptionType: SNS
-        - Notification:
-            ComparisonOperator: GREATER_THAN
-            NotificationType: ACTUAL
-            Threshold: 80
-            ThresholdType: PERCENTAGE
-          Subscribers:
-            - Address: !Ref SecurityNotificationTopicArn
-              SubscriptionType: SNS
-        - Notification:
-            ComparisonOperator: GREATER_THAN
-            NotificationType: FORECASTED
-            Threshold: 100
-            ThresholdType: PERCENTAGE
-          Subscribers:
-            - Address: !Ref SecurityNotificationTopicArn
-              SubscriptionType: SNS
       ResourceTags:
         - Key: Application
           Value: IanTruongPhotography

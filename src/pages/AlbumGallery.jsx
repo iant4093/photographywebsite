@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate, useNavigationType } from 'react-router-dom'
+import { useParams, useNavigate, useNavigationType } from 'react-router'
 import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
 import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { useScrollRestoration } from '../utils/scroll'
-import { useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router'
 import {
     mediaDisplayUrl,
     mediaFileName,

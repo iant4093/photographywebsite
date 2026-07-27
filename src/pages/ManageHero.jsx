@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { useAuth } from '../context/auth'
 import { completeHeroUpload, requestHeroUploadUrl, uploadFileToS3 } from '../utils/api'
 import { heroCoverUrl } from '../utils/mediaUrls'

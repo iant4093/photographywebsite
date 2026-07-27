@@ -256,31 +256,6 @@ Resources:
             MaximumEventAgeInSeconds: 3600
             MaximumRetryAttempts: 10
 
-  BackupRestoreFailureRule:
-    Type: AWS::Events::Rule
-    Condition: CreateBackupAlerts
-    Properties:
-      Name: !Sub 'ian-photography-backup-restore-failed-${Stage}'
-      Description: Privacy-safe alert for any failed restore in the protected backup account and Region.
-      State: ENABLED
-      EventPattern:
-        source: [aws.backup]
-        account: [!Ref AWS::AccountId]
-        region: [!Ref AWS::Region]
-        detail-type: [Restore Job State Change]
-        detail:
-          status: [FAILED]
-      Targets:
-        - Id: SecuritySignals
-          Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"backup.restore.failed","severity":"critical","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-restore-failure"}
-          DeadLetterConfig:
-            Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
-          RetryPolicy:
-            MaximumEventAgeInSeconds: 3600
-            MaximumRetryAttempts: 10
-
   BackupFreshnessLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: CreateBackupAlerts

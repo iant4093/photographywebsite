@@ -18,11 +18,6 @@ Parameters:
     Type: Number
     Default: 30
     AllowedValues: [7, 14, 30, 60, 90, 120, 180, 365]
-  AlarmTopicArn:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|arn:[A-Za-z0-9-]+:sns:[A-Za-z0-9-]+:[0-9]{12}:[A-Za-z0-9_.:/+=,@-]+)$'
-    Description: Optional pre-created notification topic; no public subscription is created here.
   SecurityEventBusArn:
     Type: String
     Default: ''
@@ -35,7 +30,6 @@ Parameters:
     Description: Optional existing KMS key whose policy already permits CloudWatch Logs in us-east-1.
 
 Conditions:
-  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
   HasSecurityEventBus: !Not [!Equals [!Ref SecurityEventBusArn, '']]
   HasLogsKmsKey: !Not [!Equals [!Ref LogsKmsKeyArn, '']]
 
@@ -156,7 +150,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub 'ian-photography-waf-blocked-${Stage}'
-      AlarmDescription: Front-door WAF emitted one or more terminating block actions.
+      AlarmDescription: Front-door WAF emitted a sustained burst of terminating block actions.
       Namespace: AWS/WAFV2
       MetricName: BlockedRequests
       Dimensions:
@@ -168,13 +162,11 @@ Resources:
           Value: ALL
       Statistic: Sum
       Period: 300
-      EvaluationPeriods: 1
-      DatapointsToAlarm: 1
-      Threshold: 1
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 25
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !If [HasAlarmTopic, !Ref AlarmTopicArn, !Ref AWS::NoValue]
 
   WafRateObservationAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -192,13 +184,11 @@ Resources:
           Value: PerIpRateLimit
       Statistic: Sum
       Period: 300
-      EvaluationPeriods: 1
-      DatapointsToAlarm: 1
-      Threshold: 1
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !If [HasAlarmTopic, !Ref AlarmTopicArn, !Ref AWS::NoValue]
 
   WafManagedObservationAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -221,8 +211,6 @@ Resources:
       Threshold: 50
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !If [HasAlarmTopic, !Ref AlarmTopicArn, !Ref AWS::NoValue]
 
   WafAlarmForwardRole:
     Type: AWS::IAM::Role
@@ -259,7 +247,6 @@ Resources:
           alarmName:
             - !Sub 'ian-photography-waf-blocked-${Stage}'
             - !Sub 'ian-photography-waf-rate-${Stage}'
-            - !Sub 'ian-photography-waf-managed-${Stage}'
       State: ENABLED
       Targets:
         - Id: HomeRegionSecurityBus

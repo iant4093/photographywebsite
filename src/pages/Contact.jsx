@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Turnstile } from '@marsidev/react-turnstile'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { sendContactMessage } from '../utils/api'
 
 export default function Contact() {

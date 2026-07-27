@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "privacyContract": "EventBridge security signals are fixed allowlisted JSON. Native CloudWatch and Budget notifications may contain stable AWS alarm or budget names, account scope, aggregate metrics or cost, and state reasons; no route may contain user data, request bodies, credentials, object keys, media identifiers, request URLs, raw findings, or raw Backup events.",
+  "privacyContract": "Website EventBridge signals are fixed allowlisted JSON. Native CloudWatch notifications may contain stable website alarm names, aggregate metrics, and state reasons; no route may contain user data, request bodies, credentials, object keys, media identifiers, request URLs, raw findings, or raw Backup events.",
   "deliveryState": {
-    "status": "degraded-one-confirmed-human-destination",
-    "requiredConfirmedDestinations": 2,
+    "status": "active-one-confirmed-owner-destination",
+    "requiredConfirmedDestinations": 1,
     "primaryOwner": "site-owner",
-    "backupOwner": "UNASSIGNED",
+    "backupOwner": "not-required-for-personal-site",
     "lastEndToEndTestDate": null,
     "testIntervalDays": 90
   },
@@ -28,17 +28,25 @@
     },
     {
       "id": "application-async-and-preview",
-      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewQueueDepthAlarm", "PreviewWorkerFailureAlarm", "PreviewWorkerErrorsAlarm", "PreviewWorkerDurationAlarm", "PreviewWorkerThrottleAlarm", "PreviewMetadataSystemErrorsAlarm", "PreviewMetadataThrottleAlarm"],
+      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewMetadataSystemErrorsAlarm"],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
       "autoClose": "CloudWatch metric state only; messages are never automatically deleted or redriven"
     },
     {
+      "id": "application-operational-diagnostics",
+      "logicalResourceIds": ["PreviewQueueDepthAlarm", "PreviewWorkerFailureAlarm", "PreviewWorkerErrorsAlarm", "PreviewWorkerDurationAlarm", "PreviewWorkerThrottleAlarm", "PreviewMetadataThrottleAlarm"],
+      "severity": "diagnostic",
+      "route": "cloudwatch-audit-only",
+      "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
+      "autoClose": "CloudWatch metric state only"
+    },
+    {
       "id": "authentication-and-authorization",
       "logicalResourceIds": ["LoginThrottleAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"],
-      "severity": "high",
-      "route": "security-notification-topic",
+      "severity": "diagnostic",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#authentication-and-authorization",
       "autoClose": "CloudWatch metric state only"
     },
@@ -53,58 +61,50 @@
     {
       "id": "account-identity-and-encryption-change",
       "logicalResourceIds": ["RootActivityAlarm", "IamChangeAlarm", "KmsChangeAlarm"],
-      "severity": "critical",
-      "route": "security-notification-topic",
+      "severity": "audit",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#account-identity-and-encryption-change",
       "autoClose": "Never auto-close without an approved change or incident record"
     },
     {
       "id": "trail-and-notification-change",
-      "logicalResourceIds": ["CloudTrailChangeAlarm", "SecurityRoutingChangeAlarm", "SecurityEventDlqAlarm"],
-      "severity": "critical",
-      "route": "security-notification-topic",
+      "logicalResourceIds": ["CloudTrailChangeAlarm", "SecurityRoutingChangeAlarm"],
+      "severity": "audit",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#trail-and-notification-change",
       "autoClose": "Never auto-close without delivery and evidence verification"
     },
     {
+      "id": "website-notification-delivery",
+      "logicalResourceIds": ["SecurityEventDlqAlarm"],
+      "severity": "high",
+      "route": "security-notification-topic",
+      "runbook": "ops/ALARM_REGISTRY.md#website-notification-delivery",
+      "autoClose": "CloudWatch metric state only; messages are never automatically deleted"
+    },
+    {
       "id": "security-service-change",
       "logicalResourceIds": ["SecurityServiceChangeAlarm"],
-      "severity": "critical",
-      "route": "security-notification-topic",
+      "severity": "audit",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#security-service-change",
       "autoClose": "Never auto-close without Config, GuardDuty, Security Hub, Inspector, and analyzer verification"
     },
     {
       "id": "data-protection-change",
       "logicalResourceIds": ["DataProtectionChangeAlarm"],
-      "severity": "critical",
-      "route": "security-notification-topic",
+      "severity": "audit",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#data-protection-change",
       "autoClose": "Never auto-close without live S3, DynamoDB, backup, and logging checks"
     },
     {
       "id": "infrastructure-protection-change",
       "logicalResourceIds": ["InfrastructureProtectionChangeAlarm"],
-      "severity": "high",
-      "route": "security-notification-topic",
+      "severity": "audit",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#infrastructure-protection-change",
       "autoClose": "Close only after change-set and drift evidence agree"
-    },
-    {
-      "id": "managed-security-findings-high",
-      "logicalResourceIds": ["GuardDutyFindingRule", "SecurityHubFindingRule"],
-      "severity": "high",
-      "route": "security-notification-topic",
-      "runbook": "ops/ALARM_REGISTRY.md#managed-security-findings",
-      "autoClose": "Never auto-close from notification state; require finding workflow disposition in the source service"
-    },
-    {
-      "id": "managed-security-findings-critical",
-      "logicalResourceIds": ["GuardDutyCriticalFindingRule", "SecurityHubCriticalFindingRule"],
-      "severity": "critical",
-      "route": "security-notification-topic-via-validated-signal-queue",
-      "runbook": "ops/ALARM_REGISTRY.md#managed-security-findings",
-      "autoClose": "Never auto-close from notification state; require finding workflow disposition in the source service"
     },
     {
       "id": "backup-job-failure",
@@ -123,28 +123,12 @@
       "autoClose": "Never; require a later successful replica copy and recorded disposition"
     },
     {
-      "id": "backup-restore-failure",
-      "logicalResourceIds": ["BackupRestoreFailureRule"],
-      "severity": "critical",
-      "route": "security-notification-topic",
-      "runbook": "ops/ALARM_REGISTRY.md#backup-restore-failure",
-      "autoClose": "Never; require a successful isolated restore and integrity proof"
-    },
-    {
       "id": "backup-freshness",
       "logicalResourceIds": ["BackupFreshnessAlarm"],
       "severity": "critical",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#backup-freshness",
       "autoClose": "CloudWatch state only; close the incident only after every exact source and configured replica resource has a fresh completed recovery point"
-    },
-    {
-      "id": "account-cost-budget",
-      "logicalResourceIds": ["MonthlySecurityAndObservabilityBudget.Actual50Percent", "MonthlySecurityAndObservabilityBudget.Actual80Percent", "MonthlySecurityAndObservabilityBudget.Forecasted100Percent"],
-      "severity": "high",
-      "route": "security-notification-topic",
-      "runbook": "ops/ALARM_REGISTRY.md#account-cost-budget",
-      "autoClose": "Budget state only; never disable a security control automatically"
     },
     {
       "id": "edge-health",
@@ -156,11 +140,19 @@
     },
     {
       "id": "waf-observation",
-      "logicalResourceIds": ["WafBlockedRequestAlarm", "WafRateObservationAlarm", "WafManagedObservationAlarm", "WafAlarmForwardRule"],
+      "logicalResourceIds": ["WafBlockedRequestAlarm", "WafRateObservationAlarm", "WafAlarmForwardRule"],
       "severity": "high",
       "route": "security-notification-topic-via-cross-region-validated-signal-queue",
       "runbook": "ops/ALARM_REGISTRY.md#waf-observation",
       "autoClose": "CloudWatch metric state only; rule promotion or exclusions require review"
+    },
+    {
+      "id": "waf-managed-rule-diagnostics",
+      "logicalResourceIds": ["WafManagedObservationAlarm"],
+      "severity": "diagnostic",
+      "route": "cloudwatch-audit-only",
+      "runbook": "ops/ALARM_REGISTRY.md#waf-observation",
+      "autoClose": "CloudWatch metric state only"
     }
   ]
 }

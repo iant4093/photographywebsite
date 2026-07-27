@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
+import { useLocation, useNavigate, useNavigationType } from 'react-router'
 import { useAuth } from '../context/auth'
 import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { motion, AnimatePresence } from 'framer-motion'

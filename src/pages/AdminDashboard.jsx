@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { motion } from 'framer-motion'
 
 // Admin dashboard — hub with widget cards for Upload, Manage, and Add Users
