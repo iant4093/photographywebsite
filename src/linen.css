@@ -370,6 +370,21 @@
   transition-property: opacity, filter !important;
 }
 
+/*
+ * Public photo galleries use an inset viewport instead of a padded,
+ * hard-shadowed button. This keeps every painted pixel inside the frame even
+ * while the outer card is being translated or rotated by the scroll effect.
+ */
+.linen-site .linen-photo-frame {
+  padding: 0;
+  contain: paint;
+}
+
+.linen-site .linen-photo-viewport {
+  position: absolute;
+  inset: 4px;
+}
+
 .linen-site .linen-user-dashboard > div {
   max-width: 80rem;
 }
@@ -541,7 +556,7 @@
 /* Floating print wall — homepage only. */
 .linen-site .floating-print-wall {
   --floating-gap: clamp(0.8rem, 1.5vw, 1.4rem);
-  margin: 0 calc(50% - 50vw) clamp(5rem, 9vw, 8rem);
+  margin-bottom: clamp(5rem, 9vw, 8rem);
   overflow: hidden;
   border-block: 1px solid var(--color-warm-border);
   background: rgba(233, 226, 213, 0.56);
@@ -549,16 +564,16 @@
 }
 
 .linen-site .floating-stage {
-  height: clamp(40rem, 72vw, 57rem);
+  padding-block: clamp(0.8rem, 1.5vw, 1.35rem);
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: clamp(0.3rem, 1vw, 0.8rem);
-  transform: rotate(-0.55deg) scale(1.012);
 }
 
 .linen-site .floating-lane {
-  padding-block: 1.15rem;
+  min-width: 0;
+  padding-block: clamp(0.55rem, 1vw, 0.9rem);
   overflow: hidden;
 }
 
@@ -688,6 +703,18 @@
 }
 
 @media (max-width: 720px) {
+  .linen-site .linen-footer-inner {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .linen-site .linen-footer-links {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
   .linen-site .linen-hero,
   .linen-site .linen-video-hero {
     margin-inline: 0.45rem;
@@ -711,12 +738,8 @@
     height: 5.2rem;
   }
 
-  .linen-site .floating-stage {
-    height: 40rem;
-  }
-
   .linen-site .floating-print-card {
-    width: 16rem;
+    width: min(16rem, calc(100vw - 5rem));
     height: 14rem;
   }
 }

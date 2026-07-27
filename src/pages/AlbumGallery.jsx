@@ -272,11 +272,11 @@ function AlbumGallery() {
                                                 data-page-scroll-media
                                                 type="button"
                                                 key={mediaId(img) || index}
-                                                className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
+                                                className="linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                                                 onClick={() => setLightboxIndex(index)}
                                                 aria-label={`Open item ${index + 1} from ${album.title}`}
                                             >
-                                                <div className="relative w-full h-full">
+                                                <div className="linen-photo-viewport">
                                                     <ProgressiveImage
                                                         src={thumbUrl}
                                                         srcSet={mediaPreviewSrcSet(img) || undefined}

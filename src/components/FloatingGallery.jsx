@@ -3,6 +3,58 @@ import { Link } from 'react-router'
 import { albumCoverUrl } from '../utils/mediaUrls'
 
 const TILT_PATTERN = [-0.3, 0.14, 0.28, -0.12]
+const LANE_COUNT = 3
+const MAX_ALBUMS_PER_LANE = 10
+const PAGE_RANDOM_SEED = globalThis.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random()}`
+
+function hashString(value) {
+    let hash = 2166136261
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index)
+        hash = Math.imul(hash, 16777619)
+    }
+    return hash >>> 0
+}
+
+function galleryAlbumKey(album, index) {
+    return String(
+        album?.albumId
+        || album?.coverThumbKey
+        || album?.coverImageUrl
+        || album?.title
+        || index,
+    )
+}
+
+function buildGalleryLanes(albums, seed = PAGE_RANDOM_SEED) {
+    const seen = new Set()
+    const randomizedAlbums = albums
+        .map((album, index) => ({
+            album,
+            key: galleryAlbumKey(album, index),
+            rank: hashString(`${seed}:${galleryAlbumKey(album, index)}`),
+            index,
+        }))
+        .filter(({ album, key }) => {
+            if (!albumCoverUrl(album) || seen.has(key)) return false
+            seen.add(key)
+            return true
+        })
+        .sort((left, right) => left.rank - right.rank || left.index - right.index)
+        .map(({ album }) => album)
+
+    const laneLength = Math.min(MAX_ALBUMS_PER_LANE, randomizedAlbums.length)
+    if (!laneLength) return []
+
+    return Array.from({ length: LANE_COUNT }, (_, laneIndex) => {
+        const start = (laneIndex * laneLength) % randomizedAlbums.length
+        return Array.from(
+            { length: laneLength },
+            (_, albumIndex) => randomizedAlbums[(start + albumIndex) % randomizedAlbums.length],
+        )
+    })
+}
 
 function GalleryCard({ album, position }) {
     return (
@@ -49,8 +101,8 @@ function Lane({ albums, lane, interactive = true }) {
 
 export default function FloatingGallery({ albums }) {
     const stageRef = useRef(null)
-    const featuredAlbums = useMemo(
-        () => albums.filter((album) => Boolean(albumCoverUrl(album))).slice(0, 10),
+    const albumLanes = useMemo(
+        () => buildGalleryLanes(albums),
         [albums],
     )
 
@@ -64,14 +116,19 @@ export default function FloatingGallery({ albums }) {
         return () => observer.disconnect()
     }, [])
 
-    if (!featuredAlbums.length) return null
+    if (!albumLanes.length) return null
 
     return (
         <section ref={stageRef} className="floating-print-wall" aria-label="Featured photo albums">
             <div className="floating-stage">
-                <Lane albums={featuredAlbums} lane={0} />
-                <Lane albums={[...featuredAlbums.slice(1), featuredAlbums[0]]} lane={1} interactive={false} />
-                <Lane albums={[...featuredAlbums.slice(2), ...featuredAlbums.slice(0, 2)]} lane={2} interactive={false} />
+                {albumLanes.map((laneAlbums, lane) => (
+                    <Lane
+                        key={lane}
+                        albums={laneAlbums}
+                        lane={lane}
+                        interactive={lane === 0}
+                    />
+                ))}
             </div>
         </section>
     )

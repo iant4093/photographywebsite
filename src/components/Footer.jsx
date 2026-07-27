@@ -4,16 +4,16 @@ import { Link } from 'react-router'
 function Footer({ editorial = true }) {
     return (
         <footer className="linen-footer mt-auto border-t border-warm-border bg-cream-dark/50">
-            <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="linen-footer-inner max-w-7xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
                 {editorial ? (
-                    <div>
+                    <div className="linen-footer-identity">
                         <p className="linen-footer-mark">Ian Truong</p>
                         <p className="text-xs text-warm-gray mt-1">&copy; {new Date().getFullYear()} — Photography archive</p>
                     </div>
                 ) : (
                     <p className="text-sm text-warm-gray">&copy; {new Date().getFullYear()} Ian Truong</p>
                 )}
-                <div className="flex items-center gap-6">
+                <div className="linen-footer-links flex items-center gap-6">
                     <Link
                         to="/privacy"
                         className="text-sm text-warm-gray hover:text-amber-dark transition-colors duration-300"

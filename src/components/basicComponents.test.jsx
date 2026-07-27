@@ -35,7 +35,9 @@ describe('small presentational and routing components', () => {
   })
 
   it('renders footer links with safe external-link attributes', () => {
-    routed(<Footer />)
+    const { container } = routed(<Footer />)
+    expect(container.querySelector('.linen-footer-identity')).toBeInTheDocument()
+    expect(container.querySelector('.linen-footer-links')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy')
     for (const name of ['Instagram', 'Source Code']) {
       const link = screen.getByRole('link', { name })
@@ -43,6 +45,13 @@ describe('small presentational and routing components', () => {
       expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     }
     expect(screen.getByText(new RegExp(String(new Date().getFullYear())))).toBeInTheDocument()
+  })
+
+  it('keeps the non-editorial footer content compact for admin routes', () => {
+    const { container } = routed(<Footer editorial={false} />)
+    expect(screen.getByText(`© ${new Date().getFullYear()} Ian Truong`)).toBeInTheDocument()
+    expect(container.querySelector('.linen-footer-identity')).not.toBeInTheDocument()
+    expect(container.querySelector('.linen-footer-mark')).not.toBeInTheDocument()
   })
 
   it('renders static navigation pages and all admin destinations', () => {
