@@ -633,28 +633,41 @@
 }
 
 .linen-site .editorial-progress {
-  position: absolute;
-  top: 50%;
-  right: 0.3rem;
-  width: 12px;
-  height: clamp(6rem, 17vh, 10rem);
-  overflow: hidden;
-  border: 1px solid rgba(41, 36, 31, 0.58);
+  --editorial-progress-offset: 0px;
+  position: fixed;
+  z-index: 45;
+  top: calc(74px + 0.75rem);
+  right: 0.25rem;
+  bottom: 0.75rem;
+  width: 14px;
+  border-inline: 1px solid rgba(41, 36, 31, 0.22);
   background:
-    radial-gradient(circle at 2px 4px, var(--color-cream) 0 1px, transparent 1.25px) 0 0 / 100% 8px repeat-y,
-    radial-gradient(circle at calc(100% - 2px) 4px, var(--color-cream) 0 1px, transparent 1.25px) 0 0 / 100% 8px repeat-y,
-    rgba(41, 36, 31, 0.78);
-  box-shadow: 0 2px 8px rgba(41, 36, 31, 0.14);
-  transform: translateY(-50%);
+    repeating-linear-gradient(180deg, rgba(41, 36, 31, 0.18) 0 1px, transparent 1px 12px),
+    linear-gradient(90deg, transparent 5px, rgba(41, 36, 31, 0.3) 5px 7px, transparent 7px);
+  cursor: pointer;
+  touch-action: none;
 }
 
 .linen-site .editorial-progress i {
   position: absolute;
-  inset: 2px 3px;
-  display: block;
-  background: var(--color-amber-dark);
-  transform: scaleY(var(--editorial-progress, 0));
-  transform-origin: top;
+  top: 0;
+  left: -1px;
+  width: 14px;
+  height: clamp(5rem, 18vh, 9rem);
+  border: 1px solid rgba(41, 36, 31, 0.72);
+  background:
+    radial-gradient(circle at 2px 5px, var(--color-cream) 0 1.15px, transparent 1.4px) 0 0 / 100% 10px repeat-y,
+    radial-gradient(circle at calc(100% - 2px) 5px, var(--color-cream) 0 1.15px, transparent 1.4px) 0 0 / 100% 10px repeat-y,
+    linear-gradient(90deg, #312b26 0 3px, var(--color-amber) 3px 9px, #312b26 9px 12px);
+  box-shadow: 0 3px 9px rgba(41, 36, 31, 0.18);
+  transform: translateY(var(--editorial-progress-offset));
+  transition: transform 80ms linear;
+  cursor: grab;
+}
+
+.linen-site .editorial-progress.is-dragging i {
+  cursor: grabbing;
+  transition: none;
 }
 
 .linen-site .editorial-gate {
@@ -913,8 +926,15 @@
   }
 
   .linen-site .editorial-progress {
-    width: 10px;
-    height: 5.2rem;
+    top: calc(74px + 0.5rem);
+    right: 0.18rem;
+    bottom: 0.5rem;
+    width: 12px;
+  }
+
+  .linen-site .editorial-progress i {
+    width: 12px;
+    height: clamp(4rem, 16vh, 6rem);
   }
 
   .linen-site .floating-print-card {
@@ -938,6 +958,10 @@
   }
 
   .linen-site .editorial-motion-overlay {
+    display: none;
+  }
+
+  .linen-site .editorial-progress {
     display: none;
   }
 

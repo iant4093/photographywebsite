@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router'
 
 const TARGET_SELECTOR = [
@@ -33,12 +33,87 @@ function clearMotionStyles(target) {
 export default function MotionExperience() {
     const { pathname } = useLocation()
     const isAdmin = pathname.startsWith('/admin')
+    const progressRef = useRef(null)
+    const dragRef = useRef(null)
+
+    const scrollFromPointer = useCallback((clientY, pointerOffset) => {
+        const rail = progressRef.current
+        const thumb = rail?.firstElementChild
+        if (!rail || !thumb) return
+
+        const railBounds = rail.getBoundingClientRect()
+        const thumbTravel = Math.max(rail.clientHeight - thumb.offsetHeight, 0)
+        const pageTravel = Math.max(document.documentElement.scrollHeight - window.innerHeight, 0)
+        if (thumbTravel <= 0 || pageTravel <= 0) return
+
+        const thumbTop = clamp(clientY - railBounds.top - pointerOffset, 0, thumbTravel)
+        window.scrollTo({
+            top: (thumbTop / thumbTravel) * pageTravel,
+            left: 0,
+            behavior: 'instant',
+        })
+    }, [])
+
+    const handlePointerDown = useCallback((event) => {
+        if (event.button !== 0) return
+        const rail = progressRef.current
+        const thumb = rail?.firstElementChild
+        if (!rail || !thumb) return
+
+        const thumbBounds = thumb.getBoundingClientRect()
+        const pointerOffset = event.target === thumb
+            ? event.clientY - thumbBounds.top
+            : thumbBounds.height / 2
+        dragRef.current = { pointerId: event.pointerId, pointerOffset }
+        rail.classList.add('is-dragging')
+        rail.setPointerCapture?.(event.pointerId)
+        scrollFromPointer(event.clientY, pointerOffset)
+        event.preventDefault()
+    }, [scrollFromPointer])
+
+    const handlePointerMove = useCallback((event) => {
+        const drag = dragRef.current
+        if (!drag || drag.pointerId !== event.pointerId) return
+        scrollFromPointer(event.clientY, drag.pointerOffset)
+    }, [scrollFromPointer])
+
+    const endPointerDrag = useCallback((event) => {
+        const rail = progressRef.current
+        const drag = dragRef.current
+        if (!drag || (event.pointerId !== undefined && drag.pointerId !== event.pointerId)) return
+        rail?.releasePointerCapture?.(drag.pointerId)
+        rail?.classList.remove('is-dragging')
+        dragRef.current = null
+    }, [])
+
+    const handleScrollKey = useCallback((event) => {
+        const pageTravel = Math.max(document.documentElement.scrollHeight - window.innerHeight, 0)
+        const pageStep = window.innerHeight * 0.85
+        const lineStep = Math.min(120, window.innerHeight * 0.12)
+        let nextScroll = window.scrollY
+
+        if (event.key === 'ArrowDown') nextScroll += lineStep
+        else if (event.key === 'ArrowUp') nextScroll -= lineStep
+        else if (event.key === 'PageDown') nextScroll += pageStep
+        else if (event.key === 'PageUp') nextScroll -= pageStep
+        else if (event.key === 'Home') nextScroll = 0
+        else if (event.key === 'End') nextScroll = pageTravel
+        else return
+
+        event.preventDefault()
+        window.scrollTo({
+            top: clamp(nextScroll, 0, pageTravel),
+            left: 0,
+            behavior: 'smooth',
+        })
+    }, [])
 
     useEffect(() => {
         if (isAdmin || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
 
         const root = document.documentElement
         const main = document.querySelector('main')
+        const progressRail = progressRef.current
         if (!main) return undefined
 
         let updateFrame = null
@@ -48,7 +123,7 @@ export default function MotionExperience() {
         let velocity = 0
         const activeTargets = new Set()
 
-        root.classList.add('editorial-motion-active')
+        root.classList.add('editorial-motion-active', 'editorial-scrollbar-active')
 
         const requestUpdate = () => {
             if (updateFrame === null) updateFrame = window.requestAnimationFrame(update)
@@ -107,11 +182,21 @@ export default function MotionExperience() {
             velocity += ((scrollY - previousScrollY) - velocity) * 0.24
             previousScrollY = scrollY
             const motionKick = clamp(velocity, -24, 24)
-            const pageProgress = clamp(
-                scrollY / Math.max(document.documentElement.scrollHeight - viewportHeight, 1),
-                0,
-                1,
-            )
+            const pageTravel = Math.max(document.documentElement.scrollHeight - viewportHeight, 0)
+            const pageProgress = clamp(scrollY / Math.max(pageTravel, 1), 0, 1)
+            if (progressRail) {
+                const progressThumb = progressRail.firstElementChild
+                const isScrollable = pageTravel > 1
+                progressRail.hidden = !isScrollable
+                progressRail.setAttribute('aria-valuenow', String(Math.round(pageProgress * 100)))
+                if (isScrollable && progressThumb) {
+                    const thumbTravel = Math.max(progressRail.clientHeight - progressThumb.offsetHeight, 0)
+                    progressRail.style.setProperty(
+                        '--editorial-progress-offset',
+                        `${(pageProgress * thumbTravel).toFixed(2)}px`,
+                    )
+                }
+            }
 
             root.style.setProperty('--editorial-progress', pageProgress.toFixed(5))
             root.style.setProperty('--editorial-speed', clamp(Math.abs(velocity) / 42, 0, 1).toFixed(4))
@@ -153,20 +238,42 @@ export default function MotionExperience() {
             if (updateFrame !== null) window.cancelAnimationFrame(updateFrame)
             if (collectFrame !== null) window.cancelAnimationFrame(collectFrame)
             targets.forEach(clearMotionStyles)
-            root.classList.remove('editorial-motion-active')
+            root.classList.remove('editorial-motion-active', 'editorial-scrollbar-active')
             root.style.removeProperty('--editorial-progress')
             root.style.removeProperty('--editorial-speed')
+            progressRail?.style.removeProperty('--editorial-progress-offset')
         }
     }, [isAdmin, pathname])
 
     if (isAdmin) return null
 
     return (
-        <div className="editorial-motion-overlay" aria-hidden="true">
-            <div className="editorial-light-leak" />
-            <div className="editorial-exposure-sweep" />
-            <div className="editorial-gate"><i /><i /><i /><i /></div>
-            <span className="editorial-progress"><i /></span>
-        </div>
+        <>
+            <div className="editorial-motion-overlay" aria-hidden="true">
+                <div className="editorial-light-leak" />
+                <div className="editorial-exposure-sweep" />
+                <div className="editorial-gate"><i /><i /><i /><i /></div>
+            </div>
+            <div
+                ref={progressRef}
+                className="editorial-progress"
+                role="scrollbar"
+                aria-label="Page scroll position"
+                aria-controls="root"
+                aria-orientation="vertical"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+                tabIndex={0}
+                onKeyDown={handleScrollKey}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={endPointerDrag}
+                onPointerCancel={endPointerDrag}
+                onLostPointerCapture={endPointerDrag}
+            >
+                <i aria-hidden="true" />
+            </div>
+        </>
     )
 }
