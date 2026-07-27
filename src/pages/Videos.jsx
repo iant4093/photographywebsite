@@ -142,7 +142,6 @@ export default function Videos() {
                 </div>
                 <div className="relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="max-w-2xl animate-fade-in">
-                        <p className="linen-kicker">Motion studies / Selected work</p>
                         <h1 className="font-serif text-5xl md:text-7xl font-normal text-white leading-tight tracking-tight w-fit">Videography</h1>
                         <p className="mt-6 text-lg text-white/90 font-light leading-relaxed">Short films, moving portraits and moments gathered in motion.</p>
                     </div>
@@ -151,10 +150,9 @@ export default function Videos() {
 
             <section className="linen-catalog-paper">
                 <div className="max-w-7xl mx-auto px-6 py-16 md:py-24">
-                    <div data-reveal-id="video-projects-header" className="linen-section-heading mb-14 scroll-animate">
+                    <div data-reveal-id="video-projects-header" className="linen-section-heading linen-section-heading-compact mb-14 scroll-animate">
                         <span>Film index</span>
                         <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal">Video Projects</h2>
-                        <p>Studies in rhythm, movement &amp; atmosphere</p>
                     </div>
 
                     {loading && <SkeletonGrid count={6} type="video" />}

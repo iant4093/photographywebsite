@@ -42,12 +42,14 @@ describe('AlbumCard', () => {
   it('routes photo, single-video, and multi-video cards correctly', () => {
     const photo = routed(<AlbumCard album={{ albumId: 'p 1', title: 'Wildlife', description: 'Birds', createdAt: '2026-01-02', coverImageUrl: 'https://x.test/a' }} />)
     expect(screen.getByRole('link', { name: /Wildlife/ })).toHaveAttribute('href', '/album/p 1')
+    expect(screen.queryByText('Photographic series')).toBeNull()
     expect(screen.getByText('Birds')).toBeInTheDocument()
     expect(screen.getByText(/January [12], 2026/)).toBeInTheDocument()
     photo.unmount()
 
     const single = routed(<AlbumCard album={{ albumId: 'v', title: 'One', type: 'video', imageCount: 1 }} />)
     expect(screen.getByRole('link', { name: /One/ })).toHaveAttribute('href', '/video/v?play=1')
+    expect(screen.queryByText('Moving image')).toBeNull()
     single.unmount()
 
     routed(<AlbumCard album={{ albumId: 'v2', title: 'Series', type: 'video', imageCount: 3 }} />)
@@ -172,10 +174,10 @@ describe('scroll controls and progressive loading', () => {
     sessionStorage.clear()
     const { container, unmount } = render(<ScrollRow scrollKey="test"><div>item</div></ScrollRow>)
     const scroller = container.querySelector('.overflow-x-auto')
-    expect(scroller).toHaveClass('px-6', '-mx-6')
-    expect(scroller).toHaveStyle({ scrollPaddingInline: '1.5rem' })
+    expect(scroller).toHaveClass('px-8', '-mx-6')
+    expect(scroller).toHaveStyle({ scrollPaddingInline: '2rem' })
     expect(scroller.style.maskImage)
-      .toBe('linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)')
+      .toBe('linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)')
     Object.defineProperties(scroller, {
       scrollLeft: { configurable: true, writable: true, value: 10 },
       scrollWidth: { configurable: true, value: 1000 },

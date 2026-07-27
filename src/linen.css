@@ -201,7 +201,6 @@
 }
 
 .linen-site .linen-kicker,
-.linen-site .album-card-index,
 .linen-site .linen-section-heading > span,
 .linen-site .linen-category-number {
   color: var(--color-amber-dark);
@@ -252,6 +251,10 @@
   letter-spacing: 0.08em;
 }
 
+.linen-site .linen-section-heading-compact {
+  grid-template-columns: minmax(7rem, 0.26fr) minmax(0, 1fr);
+}
+
 .linen-site .linen-catalog-paper {
   background: transparent;
 }
@@ -263,6 +266,7 @@
 
 /* Shared album cards */
 .linen-site .album-card {
+  --editorial-hover-scale: 0;
   padding: 0.42rem;
   overflow: hidden;
   color: var(--color-charcoal);
@@ -271,6 +275,15 @@
   box-shadow:
     0 0 0 1px rgba(255, 252, 245, 0.62) inset,
     5px 6px 0 rgba(91, 70, 51, 0.075);
+  transform: scale(calc(1 + var(--editorial-hover-scale)));
+  transition: transform 320ms ease, box-shadow 320ms ease;
+}
+
+.linen-site .album-card:hover {
+  --editorial-hover-scale: 0.015;
+  box-shadow:
+    0 0 0 1px rgba(255, 252, 245, 0.68) inset,
+    7px 8px 0 rgba(91, 70, 51, 0.1);
 }
 
 .linen-site button.album-card {
@@ -305,13 +318,7 @@
   border-bottom: 1px solid var(--color-warm-border);
 }
 
-.linen-site .album-card-index {
-  margin: 0 0 0.45rem;
-  color: var(--color-warm-gray);
-  font-size: 0.54rem;
-}
-
-.linen-site .album-card-copy > p:not(.album-card-index) {
+.linen-site .album-card-copy > p {
   max-width: 30ch;
   line-height: 1.5;
 }
@@ -346,6 +353,7 @@
 }
 
 .linen-site .linen-media-frame {
+  --editorial-hover-scale: 0;
   padding: 4px;
   overflow: hidden;
   border: 1px solid rgba(54, 45, 37, 0.58) !important;
@@ -354,6 +362,15 @@
   box-shadow:
     0 0 0 1px rgba(255, 252, 245, 0.72) inset,
     4px 5px 0 rgba(91, 70, 51, 0.07);
+  transform: scale(calc(1 + var(--editorial-hover-scale)));
+  transition: transform 320ms ease, box-shadow 320ms ease;
+}
+
+.linen-site .linen-media-frame:hover {
+  --editorial-hover-scale: 0.012;
+  box-shadow:
+    0 0 0 1px rgba(255, 252, 245, 0.78) inset,
+    6px 7px 0 rgba(91, 70, 51, 0.1);
 }
 
 .linen-site .linen-media-frame > .relative,
@@ -598,7 +615,7 @@
   transform:
     translate3d(var(--editorial-x), var(--editorial-card-y), 0)
     rotate(var(--editorial-card-rotation))
-    scale(var(--editorial-card-scale)) !important;
+    scale(calc(var(--editorial-card-scale) + var(--editorial-hover-scale, 0))) !important;
   transform-origin: center;
 }
 
@@ -885,6 +902,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .linen-site .album-card,
+  .linen-site .linen-media-frame {
+    --editorial-hover-scale: 0;
+    transform: none !important;
+    transition: none;
+  }
+
   .linen-site .editorial-motion-overlay {
     display: none;
   }

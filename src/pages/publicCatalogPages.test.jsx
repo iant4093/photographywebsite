@@ -79,6 +79,22 @@ describe('Home complete public catalog', () => {
     await waitFor(() => expect(container.querySelector('[data-reveal-id="home-photo-header"]')).toHaveClass('is-visible', 'no-stagger'))
   })
 
+  it('smoothly skips the moving wall and targets the photo album heading', () => {
+    catalog.getCatalogSnapshot.mockReturnValue({ items: [], nextCursor: null })
+    catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const { container } = routed(<Home />)
+    const target = container.querySelector('#photo-albums')
+    const link = screen.getByRole('link', { name: 'Explore Photos' })
+
+    expect(link).toHaveAttribute('href', '#photo-albums')
+    expect(target).toHaveStyle({ scrollMarginTop: '6rem' })
+    expect(screen.queryByText('Wildlife, portraiture, sport & place')).toBeNull()
+    fireEvent.click(link)
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+  })
+
   it('clears a broken cursor snapshot, reports errors, and retries', async () => {
     const error = Object.assign(new Error('Pagination broke'), { code: 'BAD_CURSOR' })
     catalog.loadCompleteCatalog.mockRejectedValueOnce(error).mockImplementationOnce(async ({ onPage }) => {
@@ -183,6 +199,8 @@ describe('Videos paginated catalog', () => {
       ], nextCursor: null })
     routed(<Videos />)
     expect(await screen.findByText('First')).toBeInTheDocument()
+    expect(screen.queryByText('Motion studies / Selected work')).toBeNull()
+    expect(screen.queryByText('Studies in rhythm, movement & atmosphere')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Load more videos' }))
     expect(await screen.findByText('Updated')).toBeInTheDocument()
     expect(screen.getByText('Second')).toBeInTheDocument()

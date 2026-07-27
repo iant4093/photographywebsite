@@ -79,12 +79,12 @@ function GalleryCard({ album, position }) {
     )
 }
 
-function LoopGroup({ albums, hidden = false, offset = 0 }) {
+function LoopGroup({ albums, copy = false, offset = 0 }) {
     return (
-        <div className="floating-loop-group" aria-hidden={hidden || undefined} inert={hidden || undefined}>
+        <div className="floating-loop-group">
             {albums.map((album, index) => (
                 <GalleryCard
-                    key={`${hidden ? 'copy' : 'source'}-${offset}-${album.albumId}`}
+                    key={`${copy ? 'copy' : 'source'}-${offset}-${album.albumId}`}
                     album={album}
                     position={index + offset}
                 />
@@ -93,15 +93,15 @@ function LoopGroup({ albums, hidden = false, offset = 0 }) {
     )
 }
 
-function Lane({ albums, lane, interactive = true }) {
+function Lane({ albums, lane }) {
     return (
         <div
             className={`floating-lane floating-lane-${lane}`}
             style={EDGE_FADE_STYLE}
         >
             <div className="floating-loop-track">
-                <LoopGroup albums={albums} hidden={!interactive} offset={lane} />
-                <LoopGroup albums={albums} hidden offset={lane} />
+                <LoopGroup albums={albums} offset={lane} />
+                <LoopGroup albums={albums} copy offset={lane} />
             </div>
         </div>
     )
@@ -139,7 +139,6 @@ export default function FloatingGallery({ albums }) {
                         key={lane}
                         albums={laneAlbums}
                         lane={lane}
-                        interactive={lane === 0}
                     />
                 ))}
             </div>

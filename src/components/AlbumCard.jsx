@@ -56,7 +56,6 @@ function AlbumCard({ album, onOpen, onImageError, onMouseEnter }) {
 
             {/* Card info */}
             <div className="album-card-copy py-4 flex-1 flex flex-col">
-                <p className="album-card-index">{album.type === 'video' ? 'Moving image' : 'Photographic series'}</p>
                 <h3 className="font-serif text-xl font-normal text-charcoal group-hover:text-amber-dark transition-colors duration-300">
                     {album.title}
                 </h3>

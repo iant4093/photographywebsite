@@ -1,11 +1,11 @@
 import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
 import { saveHorizontalScroll, getHorizontalScroll } from '../utils/scroll'
 
-const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)'
+const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)'
 const SCROLL_VIEWPORT_STYLE = {
     WebkitMaskImage: EDGE_FADE,
     maskImage: EDGE_FADE,
-    scrollPaddingInline: '1.5rem',
+    scrollPaddingInline: '2rem',
 }
 
 // Horizontal scroll row with left/right arrow buttons on desktop
@@ -82,7 +82,7 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
             <div
                 ref={scrollRef}
                 style={SCROLL_VIEWPORT_STYLE}
-                className={`flex overflow-x-auto gap-6 px-6 -mx-6 pt-6 pb-10 snap-x snap-mandatory scrollbar-hide ${className}`}
+                className={`flex overflow-x-auto gap-6 px-8 -mx-6 pt-6 pb-10 snap-x snap-mandatory scrollbar-hide ${className}`}
             >
                 {children}
             </div>

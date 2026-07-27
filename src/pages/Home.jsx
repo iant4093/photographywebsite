@@ -42,6 +42,13 @@ function Home() {
     const [loadAttempt, setLoadAttempt] = useState(0)
     const [useStaticHero, setUseStaticHero] = useState(!MANAGED_HERO_URL)
 
+    const handleExplorePhotos = useCallback((event) => {
+        const target = document.getElementById('photo-albums')
+        if (!target) return
+        event.preventDefault()
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, [])
+
     const savePage = useCallback((items, cursor) => {
         const reconciledItems = reconcilePublicCatalogItems(items, 'photo')
         catalogSnapshotRef.current = { items: reconciledItems, nextCursor: cursor }
@@ -190,7 +197,11 @@ function Home() {
                             photography as a hobby. Take a look around!
                         </p>
                         <div className="flex flex-wrap items-center gap-4 mt-8">
-                            <a href="#albums" className="linen-button linen-button-light inline-flex items-center gap-2 px-6 py-3 text-white font-medium transition-all duration-300">
+                            <a
+                                href="#photo-albums"
+                                onClick={handleExplorePhotos}
+                                className="linen-button linen-button-light inline-flex items-center gap-2 px-6 py-3 text-white font-medium transition-all duration-300"
+                            >
                                 Explore Photos
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -211,10 +222,14 @@ function Home() {
             <section id="albums" className="max-w-7xl mx-auto px-6 py-16 md:py-24">
                 <FloatingGallery albums={photoAlbums} />
 
-                <div data-reveal-id="home-photo-header" className="linen-section-heading mb-14 scroll-animate">
+                <div
+                    id="photo-albums"
+                    data-reveal-id="home-photo-header"
+                    className="linen-section-heading linen-section-heading-compact mb-14 scroll-animate"
+                    style={{ scrollMarginTop: '6rem' }}
+                >
                     <span>Selected index</span>
                     <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal inline-block">Photo Albums</h2>
-                    <p>Wildlife, portraiture, sport &amp; place</p>
                 </div>
 
                 {loading && <SkeletonGrid count={6} type="photo" />}
