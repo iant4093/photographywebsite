@@ -74,7 +74,8 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
             {/* Scroll container */}
             <div
                 ref={scrollRef}
-                className={`flex overflow-x-auto gap-6 px-3 -mx-3 pt-6 pb-10 snap-x snap-mandatory scrollbar-hide ${className}`}
+                style={{ scrollPaddingInline: '1.5rem' }}
+                className={`flex overflow-x-auto gap-6 px-6 -mx-6 pt-6 pb-10 snap-x snap-mandatory scrollbar-hide ${className}`}
             >
                 {children}
             </div>

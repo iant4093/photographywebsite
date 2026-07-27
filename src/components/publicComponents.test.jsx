@@ -172,6 +172,8 @@ describe('scroll controls and progressive loading', () => {
     sessionStorage.clear()
     const { container, unmount } = render(<ScrollRow scrollKey="test"><div>item</div></ScrollRow>)
     const scroller = container.querySelector('.overflow-x-auto')
+    expect(scroller).toHaveClass('px-6', '-mx-6')
+    expect(scroller).toHaveStyle({ scrollPaddingInline: '1.5rem' })
     Object.defineProperties(scroller, {
       scrollLeft: { configurable: true, writable: true, value: 10 },
       scrollWidth: { configurable: true, value: 1000 },

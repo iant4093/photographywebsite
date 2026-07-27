@@ -7,6 +7,11 @@ const LANE_COUNT = 3
 const MAX_ALBUMS_PER_LANE = 10
 const PAGE_RANDOM_SEED = globalThis.crypto?.randomUUID?.()
     || `${Date.now()}-${Math.random()}`
+const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)'
+const EDGE_FADE_STYLE = {
+    WebkitMaskImage: EDGE_FADE,
+    maskImage: EDGE_FADE,
+}
 
 function hashString(value) {
     let hash = 2166136261
@@ -90,7 +95,10 @@ function LoopGroup({ albums, hidden = false, offset = 0 }) {
 
 function Lane({ albums, lane, interactive = true }) {
     return (
-        <div className={`floating-lane floating-lane-${lane}`}>
+        <div
+            className={`floating-lane floating-lane-${lane}`}
+            style={EDGE_FADE_STYLE}
+        >
             <div className="floating-loop-track">
                 <LoopGroup albums={albums} hidden={!interactive} offset={lane} />
                 <LoopGroup albums={albums} hidden offset={lane} />
@@ -107,14 +115,19 @@ export default function FloatingGallery({ albums }) {
     )
 
     useEffect(() => {
+        if (!albumLanes.length) return undefined
         const stage = stageRef.current
-        if (!stage || typeof IntersectionObserver === 'undefined') return undefined
+        if (!stage) return undefined
+        if (typeof IntersectionObserver === 'undefined') {
+            stage.classList.add('is-floating-visible')
+            return undefined
+        }
         const observer = new IntersectionObserver(([entry]) => {
             stage.classList.toggle('is-floating-visible', entry.isIntersecting)
         }, { rootMargin: '25% 0px', threshold: 0 })
         observer.observe(stage)
         return () => observer.disconnect()
-    }, [])
+    }, [albumLanes.length])
 
     if (!albumLanes.length) return null
 

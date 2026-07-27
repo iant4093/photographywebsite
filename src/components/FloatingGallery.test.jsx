@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import FloatingGallery from './FloatingGallery'
 
@@ -14,6 +14,8 @@ function makeAlbums(count) {
 }
 
 describe('FloatingGallery', () => {
+    afterEach(() => vi.unstubAllGlobals())
+
     it('selects stable randomized lanes from the full available catalog', () => {
         const albums = makeAlbums(36)
         const view = render(
@@ -69,5 +71,49 @@ describe('FloatingGallery', () => {
         expect(screen.getAllByRole('link')).toHaveLength(10)
         expect(container.querySelectorAll('.floating-print-card')).toHaveLength(60)
         expect(container.querySelectorAll('.floating-loop-group[aria-hidden="true"]')).toHaveLength(5)
+        expect(container.querySelector('.floating-print-wall')).toHaveClass('is-floating-visible')
+        expect(container.querySelector('.floating-lane').style.maskImage)
+            .toBe('linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)')
+    })
+
+    it('starts observing when asynchronously loaded albums create the wall', () => {
+        let intersectionCallback
+        const observe = vi.fn()
+        const disconnect = vi.fn()
+        vi.stubGlobal('IntersectionObserver', class {
+            constructor(callback) {
+                intersectionCallback = callback
+            }
+            observe(element) {
+                observe(element)
+            }
+            disconnect() {
+                disconnect()
+            }
+        })
+        const view = render(
+            <MemoryRouter>
+                <FloatingGallery albums={[]} />
+            </MemoryRouter>,
+        )
+
+        expect(view.container.querySelector('.floating-print-wall')).toBeNull()
+        expect(observe).not.toHaveBeenCalled()
+
+        view.rerender(
+            <MemoryRouter>
+                <FloatingGallery albums={makeAlbums(12)} />
+            </MemoryRouter>,
+        )
+        const wall = view.container.querySelector('.floating-print-wall')
+        expect(observe).toHaveBeenCalledWith(wall)
+
+        act(() => intersectionCallback([{ isIntersecting: true }]))
+        expect(wall).toHaveClass('is-floating-visible')
+        act(() => intersectionCallback([{ isIntersecting: false }]))
+        expect(wall).not.toHaveClass('is-floating-visible')
+
+        view.unmount()
+        expect(disconnect).toHaveBeenCalledOnce()
     })
 })
