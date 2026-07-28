@@ -269,8 +269,12 @@
 }
 
 /* Shared album cards */
-.linen-site .album-card {
+.linen-site :is(.album-card, .floating-print-card) {
   --editorial-hover-scale: 0;
+  transition: transform 320ms ease, box-shadow 320ms ease;
+}
+
+.linen-site .album-card {
   padding: 0.42rem;
   overflow: hidden;
   color: var(--color-charcoal);
@@ -280,10 +284,9 @@
     0 0 0 1px rgba(255, 252, 245, 0.62) inset,
     5px 6px 0 rgba(91, 70, 51, 0.075);
   transform: scale(calc(1 + var(--editorial-hover-scale)));
-  transition: transform 320ms ease, box-shadow 320ms ease;
 }
 
-.linen-site .album-card:hover {
+.linen-site :is(.album-card, .floating-print-card):hover {
   --editorial-hover-scale: 0.015;
   box-shadow:
     0 0 0 1px rgba(255, 252, 245, 0.68) inset,
@@ -733,7 +736,6 @@
   padding-block: clamp(0.8rem, 1.5vw, 1.35rem);
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: clamp(0.3rem, 1vw, 0.8rem);
 }
 
@@ -787,17 +789,16 @@
 
 .linen-site .floating-print-card {
   position: relative;
-  flex: none;
   width: clamp(13rem, 24vw, 22rem);
   height: clamp(11rem, 20vw, 18rem);
-  display: block;
   padding: 0.65rem 0.65rem 4.25rem;
   overflow: hidden;
   border: 1px solid rgba(44, 40, 37, 0.28);
-  color: var(--color-charcoal);
   background: #f4f0e8;
   box-shadow: 0 12px 28px rgba(44, 40, 37, 0.12);
-  transform: rotate(var(--floating-tilt, 0deg));
+  transform:
+    rotate(var(--floating-tilt, 0deg))
+    scale(calc(1 + var(--editorial-hover-scale)));
 }
 
 .linen-site .floating-print-card img {
