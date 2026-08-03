@@ -40,10 +40,10 @@ SOURCES_RefreshGoogleDriveUsageFunction := audit_helpers.py auth_helpers.py fron
 SOURCES_DeleteUserFunction := audit_helpers.py auth_helpers.py delete_user.py deletion_helpers.py front_door.py media_access.py owner_helpers.py response_helpers.py validation_helpers.py
 SOURCES_EditUserFunction := audit_helpers.py auth_helpers.py edit_user.py front_door.py owner_helpers.py response_helpers.py validation_helpers.py
 
-DEPS_GetAlbumFunction := PyJWT==2.13.0 cryptography==49.0.0
-DEPS_GetAlbumsFunction := PyJWT==2.13.0 cryptography==49.0.0
-DEPS_CreateZipFunction := PyJWT==2.13.0 cryptography==49.0.0
-DEPS_GetDownloadUrlFunction := PyJWT==2.13.0 cryptography==49.0.0
+DEPS_GetAlbumFunction := PyJWT==2.13.0 cryptography==50.0.0
+DEPS_GetAlbumsFunction := PyJWT==2.13.0 cryptography==50.0.0
+DEPS_CreateZipFunction := PyJWT==2.13.0 cryptography==50.0.0
+DEPS_GetDownloadUrlFunction := PyJWT==2.13.0 cryptography==50.0.0
 DEPS_ContactFunction := resend==2.34.0
 DEPS_CreateAlbumFunction := ExifRead==3.5.1 resend==2.34.0
 DEPS_AddImagesFunction := ExifRead==3.5.1 resend==2.34.0

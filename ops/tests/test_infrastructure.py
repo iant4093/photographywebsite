@@ -831,7 +831,7 @@ class MigrationAndPackagingTests(unittest.TestCase):
         self.assertNotIn("cp functions/*.json", MAKEFILE)
         for dependency in (
             "PyJWT==2.13.0",
-            "cryptography==49.0.0",
+            "cryptography==50.0.0",
             "resend==2.34.0",
             "ExifRead==3.5.1",
             "google-api-python-client==2.198.0",
