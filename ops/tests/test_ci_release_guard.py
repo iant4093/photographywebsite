@@ -328,6 +328,10 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("GetGoogleDriveUsageFunction", "AWS::Lambda::Function"),
                 ("GetGoogleDriveUsageFunctionRole", "AWS::IAM::Role"),
                 ("GetGoogleDriveUsageFunctionGetGoogleDriveUsagePermission", "AWS::Lambda::Permission"),
+                ("RefreshGoogleDriveUsageFunction", "AWS::Lambda::Function"),
+                ("RefreshGoogleDriveUsageFunctionRole", "AWS::IAM::Role"),
+                ("RefreshGoogleDriveUsageFunctionDriveUsageDailyRefresh", "AWS::Events::Rule"),
+                ("RefreshGoogleDriveUsageFunctionDriveUsageDailyRefreshPermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:

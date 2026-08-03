@@ -2478,6 +2478,52 @@ Resources:
             Path: /admin/drive-usage
             Method: GET
 
+  RefreshGoogleDriveUsageFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: refresh_google_drive_usage.handler
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          DRIVE_USAGE_CACHE_TABLE: !Ref DriveUsageCacheTable
+          GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
+          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt DriveUsageCacheTable.Arn
+        - !If
+          - HasGoogleOAuthSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref GoogleOAuthSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
+      Events:
+        DriveUsageDailyRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: cron(15 9 * * ? *)
+            Enabled: true
+            Input: '{"source":"ian.photography.drive-usage-refresh","action":"refresh"}'
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 3600
+              MaximumRetryAttempts: 2
+
   DeleteUserFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild

@@ -61,7 +61,9 @@ export default function GoogleDriveUsage() {
     }, [getIdToken, requestVersion])
 
     const backup = report?.websiteBackup
+    const rawBackup = report?.rawPhotoBackup
     const categories = backup?.categories || {}
+    const rawCategories = rawBackup?.categories || {}
     const percentUsed = Number(report?.percentUsed)
     const hasPercent = Number.isFinite(percentUsed) && report?.percentUsed !== null
     const boundedPercent = hasPercent ? Math.max(0, Math.min(100, percentUsed)) : 0
@@ -78,7 +80,7 @@ export default function GoogleDriveUsage() {
             <div className="linen-admin-heading drive-usage-page-heading">
                 <span>Storage overview</span>
                 <h1>Google Drive Usage</h1>
-                <p>A daily, aggregate view of account storage and this website’s backups.</p>
+                <p>A daily, aggregate view of account storage, website backups, and raw photo backups.</p>
             </div>
 
             {loading && (
@@ -106,7 +108,7 @@ export default function GoogleDriveUsage() {
                 </div>
             )}
 
-            {!loading && !error && report && backup && (
+            {!loading && !error && report && backup && rawBackup && (
                 <div className="drive-usage-content">
                     {report.cacheStatus === 'stale' && (
                         <div className="drive-usage-stale" role="status">
@@ -124,6 +126,7 @@ export default function GoogleDriveUsage() {
                         <SummaryCard label="Account limit" value={formatBytes(report.limitBytes)} note="The quota reported by Google Drive" />
                         <SummaryCard label="Remaining" value={formatBytes(report.remainingBytes)} note="Available space based on the reported quota" />
                         <SummaryCard label="Website backups" value={formatBytes(backup.totalBytes)} note={`${backup.fileCount.toLocaleString()} files in ${backup.folderCount.toLocaleString()} folders`} />
+                        <SummaryCard label="Raw photo backups" value={formatBytes(rawBackup.totalBytes)} note={`${rawBackup.fileCount.toLocaleString()} files in ${rawBackup.folderCount.toLocaleString()} folders`} />
                     </div>
 
                     <section className="drive-usage-panel" aria-labelledby="drive-capacity-heading">
@@ -180,11 +183,25 @@ export default function GoogleDriveUsage() {
                                 <BreakdownRow label="Other" value={categories.other?.bytes} note={`${(categories.other?.fileCount || 0).toLocaleString()} files`} />
                             </div>
                         </section>
+
+                        <section className="drive-usage-panel" aria-labelledby="raw-photo-backup-heading">
+                            <div className="drive-usage-panel-heading">
+                                <div>
+                                    <p className="drive-usage-eyebrow">Raw photo backup</p>
+                                    <h2 id="raw-photo-backup-heading" className="drive-usage-panel-title">Backup categories</h2>
+                                </div>
+                            </div>
+                            <div className="drive-usage-breakdown">
+                                <BreakdownRow label="Images" value={rawCategories.images?.bytes} note={`${(rawCategories.images?.fileCount || 0).toLocaleString()} files`} />
+                                <BreakdownRow label="Videos" value={rawCategories.videos?.bytes} note={`${(rawCategories.videos?.fileCount || 0).toLocaleString()} files`} />
+                                <BreakdownRow label="Other" value={rawCategories.other?.bytes} note={`${(rawCategories.other?.fileCount || 0).toLocaleString()} files`} />
+                            </div>
+                        </section>
                     </div>
 
                     <div className="drive-usage-footnotes">
                         <p>Maximum single-file upload reported by Google: {formatBytes(report.maxUploadBytes)}.</p>
-                        <p>Google Workspace may report pooled limits differently. This dashboard intentionally shows totals only and never exposes backup file names or Google Drive identifiers.</p>
+                        <p>Google Workspace may report pooled limits differently. This dashboard intentionally shows totals only and never exposes backup file names or Google Drive identifiers. Raw Photo Backup access is metadata-only and limited by its shared-folder permission.</p>
                     </div>
                 </div>
             )}

@@ -12,7 +12,7 @@ import GoogleDriveUsage from './GoogleDriveUsage'
 import { formatBytes } from '../utils/formatBytes'
 
 const REPORT = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: '2026-08-03T12:00:00Z',
     nextRefreshAt: '2026-08-04T00:00:00Z',
     cacheStatus: 'fresh',
@@ -33,6 +33,14 @@ const REPORT = {
             other: { bytes: 0, fileCount: 1 },
         },
     },
+    rawPhotoBackup: {
+        totalBytes: 20 * (1024 ** 3), fileCount: 25, folderCount: 6,
+        categories: {
+            images: { bytes: 18 * (1024 ** 3), fileCount: 20 },
+            videos: { bytes: 2 * (1024 ** 3), fileCount: 2 },
+            other: { bytes: 0, fileCount: 3 },
+        },
+    },
 }
 
 function renderPage() {
@@ -45,7 +53,7 @@ describe('Google Drive usage admin page', () => {
         api.fetchGoogleDriveUsage.mockReset().mockResolvedValue(REPORT)
     })
 
-    it('renders account capacity and aggregate website backup categories', async () => {
+    it('renders account capacity and aggregate website and raw backup categories', async () => {
         renderPage()
         expect(screen.getByRole('status', { name: 'Loading Google Drive usage report' })).toBeInTheDocument()
         expect(await screen.findByRole('heading', { name: 'Google Drive Usage' })).toBeInTheDocument()
@@ -53,9 +61,13 @@ describe('Google Drive usage admin page', () => {
         expect(screen.getByText('60 GB')).toBeInTheDocument()
         expect(screen.getByText('15 GB')).toBeInTheDocument()
         expect(screen.getByText('12 files in 4 folders')).toBeInTheDocument()
+        expect(screen.getByText('20 GB')).toBeInTheDocument()
+        expect(screen.getByText('25 files in 6 folders')).toBeInTheDocument()
         expect(screen.getByRole('progressbar', { name: 'Google account storage used' })).toHaveAttribute('aria-valuenow', '40')
         expect(screen.getByText('Photos')).toBeInTheDocument()
-        expect(screen.getByText('Videos')).toBeInTheDocument()
+        expect(screen.getByText('Images')).toBeInTheDocument()
+        expect(screen.getAllByText('Videos')).toHaveLength(2)
+        expect(screen.getByText(/metadata-only and limited by its shared-folder permission/i)).toBeInTheDocument()
         expect(api.fetchGoogleDriveUsage).toHaveBeenCalledWith('admin-token', { signal: expect.any(AbortSignal) })
     })
 

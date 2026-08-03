@@ -38,5 +38,5 @@
 .drive-usage-breakdown-value { color: var(--color-charcoal); font-family: var(--font-serif); font-size: 1.125rem; white-space: nowrap; }
 .drive-usage-footnotes { display: grid; gap: 0.25rem; padding-top: 0.5rem; border-top: 1px solid var(--color-warm-border); }
 @media (min-width: 48rem) { .drive-usage-page { padding-top: 6.5rem; } .drive-usage-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .drive-usage-panel { padding: 1.75rem; } }
-@media (min-width: 64rem) { .drive-usage-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } .drive-usage-panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 64rem) { .drive-usage-summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } .drive-usage-panel-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .drive-usage-content { animation: none; } }

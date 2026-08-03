@@ -69,16 +69,21 @@ topic.
 ## Admin Google Drive usage report
 
 The protected `/admin/drive-usage` page reuses the website backup worker's
-existing Google Drive credential and `drive.file` scope. It requires no browser
-credential, no broader OAuth scope, and no additional Google Cloud setup. The
-Lambda can read only the configured credential secret, its dedicated
-`GoldenHour-DriveUsageCache-prod` table, the fixed Drive account summary, and
-the configured website-backup folder tree.
+existing encrypted Google credential secret. Account quota and website-backup
+totals continue to use the OAuth credential's narrow `drive.file` scope. Raw
+Photo Backup totals use the nested service account with metadata-only Drive
+access; Google Drive ACLs limit that identity to folders explicitly shared with
+it. The secret also stores the fixed Raw Photo Backup folder ID so the report
+does not depend on a mutable folder name. The Lambda can read only this fixed
+credential secret and its dedicated `GoldenHour-DriveUsageCache-prod` table.
 
-The first authorized request in each UTC day refreshes one aggregate snapshot.
-Later requests use that snapshot; a failed refresh serves the prior snapshot as
-stale and is not retried until the next UTC day. The stored and returned report
-contains quota totals, category byte/file counts, and folder counts only. It
+An EventBridge rule refreshes one aggregate snapshot daily at 09:15 UTC. The
+Lambda has a bounded five-minute background runtime because the raw archive can
+contain tens of thousands of metadata records; browser requests never wait for
+that scan and read the cached snapshot immediately. A failed refresh retains
+the prior snapshot as stale and releases its daily claim for at most two
+bounded EventBridge retries. The stored and returned report contains quota
+totals, website and raw-backup category byte/file counts, and folder counts only. It
 never contains Google file names, file IDs, folder IDs, credentials, account
 identifiers, or provider error details, and browser responses are `no-store`.
 

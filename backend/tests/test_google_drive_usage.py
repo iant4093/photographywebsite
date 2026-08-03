@@ -16,7 +16,7 @@ ADMIN_EVENT = gateway_event(claims(groups=["Admins"]))
 
 def report(**updates):
     value = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "generatedAt": "2026-08-02T12:00:00Z",
         "quotaAvailable": True,
         "limitBytes": 1000,
@@ -37,6 +37,16 @@ def report(**updates):
                 "other": {"bytes": 0, "fileCount": 0},
             },
         },
+        "rawPhotoBackup": {
+            "totalBytes": 225,
+            "fileCount": 5,
+            "folderCount": 3,
+            "categories": {
+                "images": {"bytes": 200, "fileCount": 3},
+                "videos": {"bytes": 20, "fileCount": 1},
+                "other": {"bytes": 5, "fileCount": 1},
+            },
+        },
     }
     value.update(updates)
     return value
@@ -45,7 +55,7 @@ def report(**updates):
 def cache_item(value=None, cache_date="2026-08-02"):
     return {
         "cacheKey": get_google_drive_usage.CACHE_KEY,
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "cacheDate": cache_date,
         "lastAttemptDate": cache_date,
         "payload": json.dumps(value or report()),
@@ -72,6 +82,13 @@ class DriveUsageHandlerTests(unittest.TestCase):
             self.assertIs(get_google_drive_usage.handler({}, CONTEXT), denied)
             cache.assert_not_called()
 
+        with patch.object(get_google_drive_usage, "verify_front_door_request", return_value=denied), patch.object(
+            get_google_drive_usage.cache_table, "get_item"
+        ) as cache:
+            almost_scheduled = {**get_google_drive_usage.SCHEDULED_REFRESH_EVENT, "action": "not-refresh"}
+            self.assertIs(get_google_drive_usage.handler(almost_scheduled, CONTEXT), denied)
+            cache.assert_not_called()
+
         with patch.object(get_google_drive_usage, "verify_front_door_request", return_value=None), patch.object(
             get_google_drive_usage, "require_admin", return_value=denied
         ), patch.object(get_google_drive_usage.cache_table, "get_item") as cache:
@@ -89,55 +106,58 @@ class DriveUsageHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         body = response_body(response)
         self.assertEqual(body["cacheStatus"], "fresh")
-        self.assertEqual(body["nextRefreshAt"], "2026-08-04T00:00:00Z")
+        self.assertEqual(body["nextRefreshAt"], "2026-08-04T09:15:00Z")
         self.assertEqual(response["headers"]["Cache-Control"], "no-store")
         claim.assert_not_called()
         provider.assert_not_called()
         self.assertEqual(audit.call_args.kwargs["reason_code"], "fresh_report")
         self.assertNotIn("details", audit.call_args.kwargs)
 
-    def test_daily_refresh_builds_and_stores_aggregate_report(self):
+    def test_scheduled_refresh_builds_and_stores_aggregate_report(self):
         fresh = report(generatedAt="2026-08-03T12:00:00Z")
-        with self.common()[0], self.common()[1], self.common()[2], patch.object(
+        with patch.object(get_google_drive_usage, "_utc_today", return_value=TODAY), patch.object(
             get_google_drive_usage.cache_table, "get_item", return_value={}
         ), patch.object(get_google_drive_usage.cache_table, "update_item", return_value={}) as claim, patch.object(
             get_google_drive_usage.cache_table, "put_item", return_value={}
-        ) as store, patch.object(get_google_drive_usage, "_build_report", return_value=fresh), patch.object(
-            get_google_drive_usage, "emit_audit_event"
+        ) as store, patch.object(get_google_drive_usage, "_build_report", return_value=fresh), self.assertLogs(
+            "photography_api.google_drive_usage", level="INFO"
         ):
-            response = get_google_drive_usage.handler(ADMIN_EVENT, CONTEXT)
-        self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(response_body(response)["cacheStatus"], "fresh")
+            response = get_google_drive_usage.refresh_handler(get_google_drive_usage.SCHEDULED_REFRESH_EVENT, CONTEXT)
+        self.assertEqual(response, {"refreshed": True, "status": "fresh"})
         claim.assert_called_once()
         stored = store.call_args.kwargs["Item"]
         self.assertEqual(stored["cacheDate"], TODAY.isoformat())
         self.assertNotIn("cacheStatus", json.loads(stored["payload"]))
 
-    def test_provider_failure_serves_stale_cache_without_leaking_error(self):
+    def test_scheduled_failure_releases_claim_and_api_serves_stale_without_leaking_error(self):
         stale = cache_item()
+        with patch.object(get_google_drive_usage, "_utc_today", return_value=TODAY), patch.object(
+            get_google_drive_usage.cache_table, "get_item", return_value={"Item": stale}
+        ), patch.object(get_google_drive_usage.cache_table, "update_item", side_effect=[{}, {}]) as updates, patch.object(
+            get_google_drive_usage, "_build_report", side_effect=RuntimeError("provider secret")
+        ), self.assertLogs(
+            "photography_api.google_drive_usage", level="ERROR"
+        ) as logs, self.assertRaises(RuntimeError):
+            get_google_drive_usage.refresh_handler(get_google_drive_usage.SCHEDULED_REFRESH_EVENT, CONTEXT)
+        self.assertEqual(updates.call_count, 2)
+        self.assertNotIn("provider secret", " ".join(logs.output))
+
         with self.common()[0], self.common()[1], self.common()[2], patch.object(
             get_google_drive_usage.cache_table, "get_item", return_value={"Item": stale}
-        ), patch.object(get_google_drive_usage.cache_table, "update_item", return_value={}), patch.object(
-            get_google_drive_usage, "_build_report", side_effect=RuntimeError("provider secret")
-        ), patch.object(get_google_drive_usage, "emit_audit_event") as audit, self.assertLogs(
-            "photography_api.google_drive_usage", level="ERROR"
-        ) as logs:
+        ), patch.object(get_google_drive_usage, "emit_audit_event") as audit:
             response = get_google_drive_usage.handler(ADMIN_EVENT, CONTEXT)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response_body(response)["cacheStatus"], "stale")
-        self.assertNotIn("provider secret", " ".join(logs.output))
         self.assertEqual(audit.call_args.kwargs["severity"], "warning")
 
-    def test_first_provider_failure_and_cache_failure_are_safe(self):
+    def test_missing_cache_and_cache_failure_are_safe(self):
         with self.common()[0], self.common()[1], self.common()[2], patch.object(
             get_google_drive_usage.cache_table, "get_item", return_value={}
-        ), patch.object(get_google_drive_usage.cache_table, "update_item", return_value={}), patch.object(
-            get_google_drive_usage, "_build_report", side_effect=RuntimeError("provider secret")
-        ), self.assertLogs("photography_api.google_drive_usage", level="ERROR"):
+        ), patch.object(get_google_drive_usage, "_build_report") as provider:
             response = get_google_drive_usage.handler(ADMIN_EVENT, CONTEXT)
         self.assertEqual(response["statusCode"], 503)
-        self.assertEqual(response_body(response)["code"], "drive_usage_unavailable")
-        self.assertNotIn("provider secret", response["body"])
+        self.assertEqual(response_body(response)["code"], "drive_usage_preparing")
+        provider.assert_not_called()
 
         with self.common()[0], self.common()[1], self.common()[2], patch.object(
             get_google_drive_usage.cache_table, "get_item", side_effect=RuntimeError("table secret")
@@ -149,31 +169,42 @@ class DriveUsageHandlerTests(unittest.TestCase):
         provider.assert_not_called()
         self.assertNotIn("table secret", response["body"] + " ".join(logs.output))
 
-    def test_another_invocation_claimed_refresh_serves_cache_or_preparing(self):
-        stale = cache_item()
-        for responses, expected_status, expected_code in (
-            ([{"Item": stale}, {"Item": stale}], 200, None),
-            ([{}, {}], 503, "drive_usage_preparing"),
-        ):
-            with self.subTest(status=expected_status), self.common()[0], self.common()[1], self.common()[2], patch.object(
-                get_google_drive_usage.cache_table, "get_item", side_effect=responses
-            ), patch.object(
-                get_google_drive_usage.cache_table, "update_item", side_effect=ConditionalFailure()
-            ), patch.object(get_google_drive_usage, "emit_audit_event"):
-                response = get_google_drive_usage.handler(ADMIN_EVENT, CONTEXT)
-            self.assertEqual(response["statusCode"], expected_status)
-            if expected_code:
-                self.assertEqual(response_body(response)["code"], expected_code)
+    def test_scheduled_refresh_skips_fresh_or_already_claimed_snapshots(self):
+        fresh = cache_item(cache_date=TODAY.isoformat())
+        with patch.object(get_google_drive_usage, "_utc_today", return_value=TODAY), patch.object(
+            get_google_drive_usage.cache_table, "get_item", return_value={"Item": fresh}
+        ), patch.object(get_google_drive_usage.cache_table, "update_item") as claim, patch.object(
+            get_google_drive_usage, "_build_report"
+        ) as provider:
+            response = get_google_drive_usage.refresh_handler(get_google_drive_usage.SCHEDULED_REFRESH_EVENT, CONTEXT)
+        self.assertEqual(response, {"refreshed": False, "status": "fresh"})
+        claim.assert_not_called()
+        provider.assert_not_called()
+
+        with patch.object(get_google_drive_usage, "_utc_today", return_value=TODAY), patch.object(
+            get_google_drive_usage.cache_table, "get_item", return_value={}
+        ), patch.object(
+            get_google_drive_usage.cache_table, "update_item", side_effect=ConditionalFailure()
+        ), patch.object(get_google_drive_usage, "_build_report") as provider:
+            response = get_google_drive_usage.refresh_handler(get_google_drive_usage.SCHEDULED_REFRESH_EVENT, CONTEXT)
+        self.assertEqual(response, {"refreshed": False, "status": "already_claimed"})
+        provider.assert_not_called()
+
+        with patch.object(get_google_drive_usage.cache_table, "get_item") as cache, self.assertRaises(ValueError):
+            get_google_drive_usage.refresh_handler({"source": "unexpected"}, CONTEXT)
+        cache.assert_not_called()
 
 
 class DriveUsageProviderTests(unittest.TestCase):
     def setUp(self):
         get_google_drive_usage._credential_payload_cache = None
         get_google_drive_usage._credentials_cache = None
+        get_google_drive_usage._raw_backup_credentials_cache = None
 
     def tearDown(self):
         get_google_drive_usage._credential_payload_cache = None
         get_google_drive_usage._credentials_cache = None
+        get_google_drive_usage._raw_backup_credentials_cache = None
 
     def test_build_report_aggregates_quota_and_recursive_backup(self):
         pages = [
@@ -190,9 +221,21 @@ class DriveUsageProviderTests(unittest.TestCase):
                 "nextPageToken": "next-page",
             },
             {"files": [{"id": "photo-two", "name": "b.jpg", "mimeType": "image/jpeg", "quotaBytesUsed": "20"}]},
+            {
+                "files": [
+                    {"id": "raw-root", "parents": [], "mimeType": get_google_drive_usage.FOLDER_MIME_TYPE},
+                    {"id": "raw-folder", "parents": ["raw-root"], "mimeType": get_google_drive_usage.FOLDER_MIME_TYPE},
+                    {"id": "raw-photo", "parents": ["raw-root"], "mimeType": "image/x-sony-arw", "size": "100"},
+                    {"id": "raw-sidecar", "parents": ["raw-root"], "mimeType": "application/xml", "size": "5"},
+                    {"id": "raw-video", "parents": ["raw-folder"], "mimeType": "video/quicktime", "quotaBytesUsed": "25"},
+                ]
+            },
         ]
 
-        def provider(resource, parameters):
+        credential_sources = []
+
+        def provider(resource, parameters, credential_source="primary"):
+            credential_sources.append(credential_source)
             if resource == "about":
                 self.assertEqual(
                     parameters["fields"],
@@ -204,7 +247,9 @@ class DriveUsageProviderTests(unittest.TestCase):
                 }
             return pages.pop(0)
 
-        with patch.object(get_google_drive_usage, "_authorized_json", side_effect=provider), patch.dict(
+        with patch.object(get_google_drive_usage, "_authorized_json", side_effect=provider), patch.object(
+            get_google_drive_usage, "_raw_photo_backup_folder_id", return_value="raw-root"
+        ), patch.dict(
             get_google_drive_usage.os.environ, {"GOOGLE_DRIVE_FOLDER_ID": "root"}
         ):
             value = get_google_drive_usage._build_report(TODAY)
@@ -217,9 +262,24 @@ class DriveUsageProviderTests(unittest.TestCase):
         self.assertEqual(value["websiteBackup"]["folderCount"], 2)
         self.assertEqual(value["websiteBackup"]["categories"]["photos"], {"bytes": 30, "fileCount": 2})
         self.assertEqual(value["websiteBackup"]["categories"]["videos"], {"bytes": 40, "fileCount": 1})
+        self.assertEqual(value["rawPhotoBackup"]["totalBytes"], 130)
+        self.assertEqual(value["rawPhotoBackup"]["fileCount"], 3)
+        self.assertEqual(value["rawPhotoBackup"]["folderCount"], 1)
+        self.assertEqual(value["rawPhotoBackup"]["categories"]["images"], {"bytes": 100, "fileCount": 1})
+        self.assertEqual(value["rawPhotoBackup"]["categories"]["videos"], {"bytes": 25, "fileCount": 1})
+        self.assertEqual(credential_sources.count("raw_backup"), 1)
 
     def test_missing_quota_is_supported_for_service_accounts(self):
-        with patch.object(get_google_drive_usage, "_authorized_json", side_effect=[{"storageQuota": {}}, {"files": []}]), patch.dict(
+        with patch.object(
+            get_google_drive_usage, "_authorized_json",
+            side_effect=[
+                {"storageQuota": {}},
+                {"files": []},
+                {"files": [{"id": "raw-root", "parents": [], "mimeType": get_google_drive_usage.FOLDER_MIME_TYPE}]},
+            ],
+        ), patch.object(
+            get_google_drive_usage, "_raw_photo_backup_folder_id", return_value="raw-root"
+        ), patch.dict(
             get_google_drive_usage.os.environ, {"GOOGLE_DRIVE_FOLDER_ID": "root"}
         ):
             value = get_google_drive_usage._build_report(TODAY)
@@ -227,6 +287,7 @@ class DriveUsageProviderTests(unittest.TestCase):
         self.assertIsNone(value["limitBytes"])
         self.assertIsNone(value["percentUsed"])
         self.assertEqual(value["websiteBackup"]["totalBytes"], 0)
+        self.assertEqual(value["rawPhotoBackup"]["totalBytes"], 0)
 
     def test_credentials_support_nested_oauth_service_account_and_binary_secret(self):
         credential = Mock(valid=False, token="token")
@@ -252,6 +313,23 @@ class DriveUsageProviderTests(unittest.TestCase):
         ) as service:
             self.assertIs(get_google_drive_usage._credentials(), service_credentials)
             service.assert_called_once_with(payload["service_account"], scopes=get_google_drive_usage.DRIVE_SCOPE)
+
+        get_google_drive_usage._credential_payload_cache = None
+        get_google_drive_usage._credentials_cache = None
+        get_google_drive_usage._raw_backup_credentials_cache = None
+        raw_credentials = Mock(valid=False, token="raw-token")
+        payload["raw_photo_backup_folder_id"] = "raw-folder"
+        with patch.object(
+            get_google_drive_usage.secrets_client, "get_secret_value", return_value={"SecretString": json.dumps(payload)}
+        ), patch.object(
+            get_google_drive_usage.service_account.Credentials,
+            "from_service_account_info",
+            return_value=raw_credentials,
+        ) as service:
+            self.assertIs(get_google_drive_usage._raw_backup_credentials(), raw_credentials)
+            raw_credentials.refresh.assert_called_once()
+            service.assert_called_once_with(payload["service_account"], scopes=get_google_drive_usage.RAW_BACKUP_SCOPE)
+            self.assertEqual(get_google_drive_usage._raw_photo_backup_folder_id(), "raw-folder")
 
     def test_credential_contract_rejects_missing_invalid_and_unsupported_secrets(self):
         cases = [
@@ -307,6 +385,9 @@ class DriveUsageProviderTests(unittest.TestCase):
         self.assertEqual(get_google_drive_usage._optional_bytes(None), None)
         self.assertEqual(get_google_drive_usage._category_for_root_folder("PHOTOS"), "photos")
         self.assertEqual(get_google_drive_usage._category_for_root_folder("Videos"), "videos")
+        self.assertEqual(get_google_drive_usage._category_for_media("image/x-canon-cr3"), "images")
+        self.assertEqual(get_google_drive_usage._category_for_media("video/mp4"), "videos")
+        self.assertEqual(get_google_drive_usage._category_for_media("application/xml"), "other")
 
         invalid_pages = [
             {},
@@ -328,6 +409,21 @@ class DriveUsageProviderTests(unittest.TestCase):
             get_google_drive_usage._scan_website_backup("root")
         with self.assertRaises(get_google_drive_usage.ProviderContractError):
             get_google_drive_usage._scan_website_backup("bad id")
+        with patch.object(
+            get_google_drive_usage, "_credential_payload", return_value={"raw_photo_backup_folder_id": "bad id"}
+        ), self.assertRaises(get_google_drive_usage.ProviderContractError):
+            get_google_drive_usage._raw_photo_backup_folder_id()
+
+        invalid_inventory_pages = [
+            {"files": []},
+            {"files": [{"id": "raw-root", "parents": "bad", "mimeType": get_google_drive_usage.FOLDER_MIME_TYPE}]},
+            {"files": [{"id": "raw-root", "parents": ["bad id"], "mimeType": get_google_drive_usage.FOLDER_MIME_TYPE}]},
+        ]
+        for page in invalid_inventory_pages:
+            with self.subTest(raw_page=page), patch.object(
+                get_google_drive_usage, "_authorized_json", return_value=page
+            ), self.assertRaises(get_google_drive_usage.ProviderContractError):
+                get_google_drive_usage._scan_raw_photo_backup("raw-root")
 
 
 class DriveUsageCacheContractTests(unittest.TestCase):
@@ -337,8 +433,9 @@ class DriveUsageCacheContractTests(unittest.TestCase):
             {"Item": {"payload": ""}},
             {"Item": {"payload": "x" * (get_google_drive_usage.MAX_CACHE_PAYLOAD_BYTES + 1)}},
             {"Item": {"payload": "{"}},
-            {"Item": {"payload": json.dumps(report(schemaVersion=2))}},
+            {"Item": {"payload": json.dumps(report(schemaVersion=1))}},
             {"Item": {"payload": json.dumps(report(websiteBackup={}))}},
+            {"Item": {"payload": json.dumps(report(rawPhotoBackup={}))}},
         ]
         for response in candidates:
             with self.subTest(response=list(response)), patch.object(
@@ -356,11 +453,15 @@ class DriveUsageCacheContractTests(unittest.TestCase):
         ) as put:
             get_google_drive_usage._store_report(TODAY, report())
         put.assert_not_called()
-
         with patch.object(get_google_drive_usage.cache_table, "update_item", side_effect=ConditionalFailure()):
             self.assertFalse(get_google_drive_usage._claim_daily_refresh(TODAY))
         with patch.object(get_google_drive_usage.cache_table, "update_item", side_effect=RuntimeError("provider")), self.assertRaises(RuntimeError):
             get_google_drive_usage._claim_daily_refresh(TODAY)
+
+        with patch.object(get_google_drive_usage.cache_table, "update_item", side_effect=ConditionalFailure()):
+            get_google_drive_usage._release_daily_refresh(TODAY)
+        with patch.object(get_google_drive_usage.cache_table, "update_item", side_effect=RuntimeError("provider")), self.assertRaises(RuntimeError):
+            get_google_drive_usage._release_daily_refresh(TODAY)
 
 
 if __name__ == "__main__":

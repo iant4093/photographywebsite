@@ -279,6 +279,7 @@ class DataProtectionTests(unittest.TestCase):
     def test_drive_usage_is_daily_cached_admin_only_and_least_privilege(self) -> None:
         table = resource_block("DriveUsageCacheTable")
         function = resource_block("GetGoogleDriveUsageFunction")
+        refresh = resource_block("RefreshGoogleDriveUsageFunction")
         for expected in (
             "DeletionPolicy: Retain",
             "UpdateReplacePolicy: Retain",
@@ -290,6 +291,11 @@ class DataProtectionTests(unittest.TestCase):
             self.assertIn(expected, table)
         self.assertIn("Path: /admin/drive-usage", function)
         self.assertIn("Method: GET", function)
+        self.assertIn("Timeout: 300", refresh)
+        self.assertIn("MemorySize: 512", refresh)
+        self.assertIn("Type: Schedule", refresh)
+        self.assertIn("Schedule: cron(15 9 * * ? *)", refresh)
+        self.assertIn("MaximumRetryAttempts: 2", refresh)
         self.assertIn("GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId", function)
         self.assertIn("GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn", function)
         for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
@@ -300,6 +306,8 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("Action: secretsmanager:GetSecretValue", function)
         self.assertIn("SOURCES_GetGoogleDriveUsageFunction :=", MAKEFILE)
         self.assertIn("DEPS_GetGoogleDriveUsageFunction := google-auth==", MAKEFILE)
+        self.assertIn("SOURCES_RefreshGoogleDriveUsageFunction :=", MAKEFILE)
+        self.assertIn("DEPS_RefreshGoogleDriveUsageFunction := google-auth==", MAKEFILE)
 
     def test_existing_tables_do_not_toggle_dynamodb_encryption_mode(self) -> None:
         # DynamoDB always encrypts tables at rest. Explicitly adding/removing an
