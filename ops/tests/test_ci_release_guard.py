@@ -324,6 +324,10 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("GetCostReportFunction", "AWS::Lambda::Function"),
                 ("GetCostReportFunctionRole", "AWS::IAM::Role"),
                 ("GetCostReportFunctionGetCostReportPermission", "AWS::Lambda::Permission"),
+                ("DriveUsageCacheTable", "AWS::DynamoDB::Table"),
+                ("GetGoogleDriveUsageFunction", "AWS::Lambda::Function"),
+                ("GetGoogleDriveUsageFunctionRole", "AWS::IAM::Role"),
+                ("GetGoogleDriveUsageFunctionGetGoogleDriveUsagePermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:

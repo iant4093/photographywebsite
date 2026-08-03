@@ -1,0 +1,454 @@
+"""Admin-only, once-daily aggregate Google Drive storage report."""
+
+from __future__ import annotations
+
+import base64
+import copy
+import datetime as dt
+import json
+import logging
+import os
+import re
+from urllib.parse import urlencode
+from urllib.request import HTTPRedirectHandler, Request as UrlRequest, build_opener
+
+import boto3
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+
+from audit_helpers import actor_context, emit_audit_event
+from auth_helpers import require_admin
+from front_door import verify_front_door_request
+from response_helpers import error_response, json_response
+
+
+logger = logging.getLogger("photography_api.google_drive_usage")
+logger.setLevel(logging.INFO)
+
+CACHE_KEY = "google-drive-usage-v1"
+CACHE_SCHEMA_VERSION = 1
+DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive.file"]
+DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+MAX_CACHE_PAYLOAD_BYTES = 100_000
+MAX_PROVIDER_RESPONSE_BYTES = 2_000_000
+MAX_PROVIDER_PAGES = 500
+MAX_BACKUP_ITEMS = 100_000
+MAX_BYTE_VALUE = 9_223_372_036_854_775_807
+DRIVE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+
+cache_table = boto3.resource("dynamodb").Table(os.environ["DRIVE_USAGE_CACHE_TABLE"])
+secrets_client = boto3.client("secretsmanager")
+_credential_payload_cache = None
+_credentials_cache = None
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, _request, _file_pointer, _code, _message, _headers, _new_url):
+        return None
+
+
+_provider_opener = build_opener(_NoRedirectHandler)
+
+
+class ProviderContractError(ValueError):
+    """Google returned data outside the intentionally narrow report contract."""
+
+
+def _utc_today():
+    return dt.datetime.now(dt.timezone.utc).date()
+
+
+def _credential_payload():
+    global _credential_payload_cache
+    if _credential_payload_cache is not None:
+        return _credential_payload_cache
+    secret_arn = os.environ.get("GOOGLE_OAUTH_SECRET_ARN", "").strip()
+    if not secret_arn:
+        raise ProviderContractError("Google credential secret is unavailable")
+    response = secrets_client.get_secret_value(SecretId=secret_arn)
+    if "SecretString" in response:
+        raw = response["SecretString"]
+    else:
+        binary = response.get("SecretBinary")
+        raw = binary.decode("utf-8") if isinstance(binary, bytes) else base64.b64decode(binary).decode("utf-8")
+    if not isinstance(raw, str) or not 2 <= len(raw) <= 64_000:
+        raise ProviderContractError("Google credential secret is invalid")
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        raise ProviderContractError("Google credential secret is invalid") from None
+    if not isinstance(payload, dict):
+        raise ProviderContractError("Google credential secret is invalid")
+    _credential_payload_cache = payload
+    return payload
+
+
+def _credentials():
+    global _credentials_cache
+    if _credentials_cache is None:
+        payload = _credential_payload()
+        oauth_info = payload.get("oauth") if isinstance(payload.get("oauth"), dict) else None
+        service_info = payload.get("service_account") if isinstance(payload.get("service_account"), dict) else None
+        if oauth_info:
+            _credentials_cache = Credentials.from_authorized_user_info(oauth_info, scopes=DRIVE_SCOPE)
+        elif service_info:
+            _credentials_cache = service_account.Credentials.from_service_account_info(
+                service_info, scopes=DRIVE_SCOPE
+            )
+        elif payload.get("type") == "service_account":
+            _credentials_cache = service_account.Credentials.from_service_account_info(
+                payload, scopes=DRIVE_SCOPE
+            )
+        elif payload.get("refresh_token"):
+            _credentials_cache = Credentials.from_authorized_user_info(payload, scopes=DRIVE_SCOPE)
+        else:
+            raise ProviderContractError("Google credential payload is unsupported")
+    if not _credentials_cache.valid:
+        _credentials_cache.refresh(GoogleAuthRequest())
+    token = getattr(_credentials_cache, "token", None)
+    if not isinstance(token, str) or not token:
+        raise ProviderContractError("Google access token is unavailable")
+    return _credentials_cache
+
+
+def _authorized_json(resource, parameters):
+    if resource not in {"about", "files"}:
+        raise ProviderContractError("Google API resource is invalid")
+    credentials = _credentials()
+    url = f"{DRIVE_API_BASE}/{resource}?{urlencode(parameters)}"
+    request = UrlRequest(
+        url,
+        headers={"Authorization": f"Bearer {credentials.token}", "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with _provider_opener.open(request, timeout=10) as response:
+            if getattr(response, "status", 200) != 200:
+                raise ProviderContractError("Google Drive response status is invalid")
+            payload = response.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+    except Exception:
+        raise ProviderContractError("Google Drive request failed") from None
+    if not 1 <= len(payload) <= MAX_PROVIDER_RESPONSE_BYTES:
+        raise ProviderContractError("Google Drive response size is invalid")
+    try:
+        document = json.loads(payload)
+    except (TypeError, ValueError, UnicodeDecodeError):
+        raise ProviderContractError("Google Drive response is invalid") from None
+    if not isinstance(document, dict):
+        raise ProviderContractError("Google Drive response is invalid")
+    return document
+
+
+def _optional_bytes(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise ProviderContractError("Google Drive byte value is invalid")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ProviderContractError("Google Drive byte value is invalid") from None
+    if parsed < 0 or parsed > MAX_BYTE_VALUE:
+        raise ProviderContractError("Google Drive byte value is invalid")
+    return parsed
+
+
+def _drive_literal(value):
+    return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _category_for_root_folder(name):
+    normalized = name.strip().lower() if isinstance(name, str) else ""
+    if normalized == "photos":
+        return "photos"
+    if normalized == "videos":
+        return "videos"
+    return "other"
+
+
+def _empty_category():
+    return {"bytes": 0, "fileCount": 0}
+
+
+def _scan_website_backup(root_folder_id):
+    if not isinstance(root_folder_id, str) or not DRIVE_ID_RE.fullmatch(root_folder_id):
+        raise ProviderContractError("Google Drive destination is invalid")
+    categories = {"photos": _empty_category(), "videos": _empty_category(), "other": _empty_category()}
+    stack = [(root_folder_id, "other", True)]
+    seen_ids = {root_folder_id}
+    item_count = 0
+    folder_count = 0
+    page_count = 0
+
+    while stack:
+        parent_id, parent_category, is_root = stack.pop()
+        page_token = None
+        seen_tokens = set()
+        while True:
+            page_count += 1
+            if page_count > MAX_PROVIDER_PAGES:
+                raise ProviderContractError("Google Drive pagination exceeded safe limit")
+            parameters = {
+                "q": f"'{_drive_literal(parent_id)}' in parents and trashed=false",
+                "spaces": "drive",
+                "pageSize": "1000",
+                "supportsAllDrives": "true",
+                "includeItemsFromAllDrives": "true",
+                "fields": "nextPageToken,files(id,name,mimeType,size,quotaBytesUsed)",
+            }
+            if page_token:
+                parameters["pageToken"] = page_token
+            document = _authorized_json("files", parameters)
+            items = document.get("files")
+            if not isinstance(items, list):
+                raise ProviderContractError("Google Drive file list is invalid")
+            for item in items:
+                if not isinstance(item, dict):
+                    raise ProviderContractError("Google Drive file item is invalid")
+                item_id = item.get("id")
+                mime_type = item.get("mimeType")
+                if not isinstance(item_id, str) or not DRIVE_ID_RE.fullmatch(item_id):
+                    raise ProviderContractError("Google Drive file identifier is invalid")
+                if item_id in seen_ids:
+                    raise ProviderContractError("Google Drive file traversal repeated an item")
+                seen_ids.add(item_id)
+                if not isinstance(mime_type, str) or not 1 <= len(mime_type) <= 200:
+                    raise ProviderContractError("Google Drive MIME type is invalid")
+                item_count += 1
+                if item_count > MAX_BACKUP_ITEMS:
+                    raise ProviderContractError("Google Drive backup exceeded safe item limit")
+                category = _category_for_root_folder(item.get("name")) if is_root else parent_category
+                if mime_type == FOLDER_MIME_TYPE:
+                    folder_count += 1
+                    stack.append((item_id, category, False))
+                    continue
+                used_bytes = _optional_bytes(item.get("quotaBytesUsed"))
+                if used_bytes is None:
+                    used_bytes = _optional_bytes(item.get("size")) or 0
+                categories[category]["bytes"] += used_bytes
+                if categories[category]["bytes"] > MAX_BYTE_VALUE:
+                    raise ProviderContractError("Google Drive backup byte total is invalid")
+                categories[category]["fileCount"] += 1
+
+            next_token = document.get("nextPageToken")
+            if not next_token:
+                break
+            if (
+                not isinstance(next_token, str)
+                or not 1 <= len(next_token) <= 8192
+                or next_token in seen_tokens
+            ):
+                raise ProviderContractError("Google Drive pagination is invalid")
+            seen_tokens.add(next_token)
+            page_token = next_token
+
+    return {
+        "totalBytes": sum(value["bytes"] for value in categories.values()),
+        "fileCount": sum(value["fileCount"] for value in categories.values()),
+        "folderCount": folder_count,
+        "categories": categories,
+    }
+
+
+def _build_report(today):
+    about = _authorized_json(
+        "about",
+        {"fields": "storageQuota(limit,usage,usageInDrive,usageInDriveTrash),maxUploadSize"},
+    )
+    quota = about.get("storageQuota")
+    if quota is None:
+        quota = {}
+    if not isinstance(quota, dict):
+        raise ProviderContractError("Google Drive quota response is invalid")
+    limit = _optional_bytes(quota.get("limit"))
+    usage = _optional_bytes(quota.get("usage"))
+    drive_usage = _optional_bytes(quota.get("usageInDrive"))
+    trash_usage = _optional_bytes(quota.get("usageInDriveTrash"))
+    maximum_upload = _optional_bytes(about.get("maxUploadSize"))
+    remaining = max(limit - usage, 0) if limit is not None and usage is not None else None
+    percent = round(min(100, usage / limit * 100), 2) if limit and usage is not None else None
+    other_google = max(usage - drive_usage, 0) if usage is not None and drive_usage is not None else None
+    website_backup = _scan_website_backup(os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip())
+    return {
+        "schemaVersion": CACHE_SCHEMA_VERSION,
+        "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "quotaAvailable": any(value is not None for value in (limit, usage, drive_usage, trash_usage)),
+        "limitBytes": limit,
+        "usageBytes": usage,
+        "driveBytes": drive_usage,
+        "trashBytes": trash_usage,
+        "otherGoogleBytes": other_google,
+        "remainingBytes": remaining,
+        "percentUsed": percent,
+        "maxUploadBytes": maximum_upload,
+        "websiteBackup": website_backup,
+    }
+
+
+def _valid_cached_report(report):
+    if not isinstance(report, dict) or report.get("schemaVersion") != CACHE_SCHEMA_VERSION:
+        return False
+    if not isinstance(report.get("generatedAt"), str) or not 1 <= len(report["generatedAt"]) <= 64:
+        return False
+    if not isinstance(report.get("quotaAvailable"), bool):
+        return False
+    for key in (
+        "limitBytes", "usageBytes", "driveBytes", "trashBytes", "otherGoogleBytes",
+        "remainingBytes", "maxUploadBytes",
+    ):
+        value = report.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_BYTE_VALUE):
+            return False
+    percent = report.get("percentUsed")
+    if percent is not None and (isinstance(percent, bool) or not isinstance(percent, (int, float)) or not 0 <= percent <= 100):
+        return False
+    backup = report.get("websiteBackup")
+    if not isinstance(backup, dict) or set(backup) != {"totalBytes", "fileCount", "folderCount", "categories"}:
+        return False
+    for key in ("totalBytes", "fileCount", "folderCount"):
+        value = backup.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_BYTE_VALUE:
+            return False
+    categories = backup.get("categories")
+    if not isinstance(categories, dict) or set(categories) != {"photos", "videos", "other"}:
+        return False
+    return all(
+        isinstance(value, dict)
+        and set(value) == {"bytes", "fileCount"}
+        and all(isinstance(value[field], int) and not isinstance(value[field], bool) and 0 <= value[field] <= MAX_BYTE_VALUE for field in ("bytes", "fileCount"))
+        for value in categories.values()
+    )
+
+
+def _cached_item():
+    response = cache_table.get_item(Key={"cacheKey": CACHE_KEY}, ConsistentRead=True)
+    item = response.get("Item")
+    if not isinstance(item, dict):
+        return None, None
+    payload = item.get("payload")
+    if not isinstance(payload, str) or not 1 <= len(payload.encode("utf-8")) <= MAX_CACHE_PAYLOAD_BYTES:
+        return None, item
+    try:
+        report = json.loads(payload)
+    except (TypeError, ValueError):
+        return None, item
+    return (report if _valid_cached_report(report) else None), item
+
+
+def _claim_daily_refresh(today):
+    try:
+        cache_table.update_item(
+            Key={"cacheKey": CACHE_KEY},
+            UpdateExpression="SET lastAttemptDate = :today",
+            ConditionExpression="attribute_not_exists(lastAttemptDate) OR lastAttemptDate <> :today",
+            ExpressionAttributeValues={":today": today.isoformat()},
+        )
+        return True
+    except Exception as error:
+        code = str(getattr(error, "response", {}).get("Error", {}).get("Code", ""))
+        if code == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _store_report(today, report):
+    payload = json.dumps(report, separators=(",", ":"), sort_keys=True)
+    if len(payload.encode("utf-8")) > MAX_CACHE_PAYLOAD_BYTES:
+        raise ValueError("Google Drive usage cache payload exceeded safe limit")
+    cache_table.put_item(
+        Item={
+            "cacheKey": CACHE_KEY,
+            "schemaVersion": CACHE_SCHEMA_VERSION,
+            "cacheDate": today.isoformat(),
+            "lastAttemptDate": today.isoformat(),
+            "payload": payload,
+        }
+    )
+
+
+def _with_cache_status(report, status, today):
+    result = copy.deepcopy(report)
+    result["cacheStatus"] = status
+    result["nextRefreshAt"] = dt.datetime.combine(
+        today + dt.timedelta(days=1), dt.time.min, tzinfo=dt.timezone.utc
+    ).isoformat().replace("+00:00", "Z")
+    return result
+
+
+def _audit_view(event, context, status):
+    actor_type, auth_method = actor_context(event)
+    emit_audit_event(
+        event_name="provider.drive_usage",
+        outcome="success",
+        action="provider.drive_usage.view",
+        resource_type="provider",
+        reason_code=f"{status}_report",
+        event=event,
+        context=context,
+        actor_type=actor_type,
+        auth_method=auth_method,
+        severity="warning" if status == "stale" else "info",
+    )
+
+
+def handler(event, context):
+    front_door_denied = verify_front_door_request(event, context)
+    if front_door_denied:
+        return front_door_denied
+    denied = require_admin(event)
+    if denied:
+        return denied
+
+    today = _utc_today()
+    try:
+        cached, item = _cached_item()
+        if cached is not None and item.get("cacheDate") == today.isoformat():
+            _audit_view(event, context, "fresh")
+            return json_response(200, _with_cache_status(cached, "fresh", today))
+
+        if not _claim_daily_refresh(today):
+            cached, item = _cached_item()
+            if cached is not None:
+                status = "fresh" if item.get("cacheDate") == today.isoformat() else "stale"
+                _audit_view(event, context, status)
+                return json_response(200, _with_cache_status(cached, status, today))
+            return error_response(
+                503,
+                "The daily Google Drive usage report is being prepared. Please try again shortly.",
+                code="drive_usage_preparing",
+            )
+
+        try:
+            report = _build_report(today)
+            _store_report(today, report)
+            _audit_view(event, context, "fresh")
+            return json_response(200, _with_cache_status(report, "fresh", today))
+        except Exception as error:
+            request_id = getattr(context, "aws_request_id", "unknown") if context else "unknown"
+            logger.error(
+                "drive_usage_refresh_failed request_id=%s error_type=%s",
+                request_id,
+                type(error).__name__,
+            )
+            if cached is not None:
+                _audit_view(event, context, "stale")
+                return json_response(200, _with_cache_status(cached, "stale", today))
+            return error_response(
+                503,
+                "The daily Google Drive usage report is temporarily unavailable.",
+                code="drive_usage_unavailable",
+            )
+    except Exception as error:
+        request_id = getattr(context, "aws_request_id", "unknown") if context else "unknown"
+        logger.error(
+            "drive_usage_cache_failed request_id=%s error_type=%s",
+            request_id,
+            type(error).__name__,
+        )
+        return error_response(
+            503,
+            "The daily Google Drive usage report is temporarily unavailable.",
+            code="drive_usage_unavailable",
+        )

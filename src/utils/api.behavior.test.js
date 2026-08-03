@@ -179,14 +179,20 @@ describe('public API client behavior', () => {
     await expect(api.listUsers('token')).rejects.toMatchObject({ code: 'REPEATED_CURSOR' })
   })
 
-  it('loads the admin cost report with authorization and caller cancellation', async () => {
+  it('loads admin reports with authorization and caller cancellation', async () => {
     const report = { schemaVersion: 1, months: [] }
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(report))
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(report)))
     vi.stubGlobal('fetch', fetchMock)
     const signal = new AbortController().signal
     await expect(api.fetchCostReport('admin-token', { signal })).resolves.toEqual(report)
     expect(fetchMock.mock.calls[0][0]).toMatch(/\/admin\/costs$/)
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer admin-token' },
+      signal: expect.any(AbortSignal),
+    }))
+    await expect(api.fetchGoogleDriveUsage('admin-token', { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[1][0]).toMatch(/\/admin\/drive-usage$/)
+    expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
       headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))

@@ -65,3 +65,23 @@ than a final invoice. Enabling Cost Explorer can also create an account-wide
 Cost Anomaly Detection monitor and daily-summary subscription; review that
 subscription separately instead of routing it into the website incident SNS
 topic.
+
+## Admin Google Drive usage report
+
+The protected `/admin/drive-usage` page reuses the website backup worker's
+existing Google Drive credential and `drive.file` scope. It requires no browser
+credential, no broader OAuth scope, and no additional Google Cloud setup. The
+Lambda can read only the configured credential secret, its dedicated
+`GoldenHour-DriveUsageCache-prod` table, the fixed Drive account summary, and
+the configured website-backup folder tree.
+
+The first authorized request in each UTC day refreshes one aggregate snapshot.
+Later requests use that snapshot; a failed refresh serves the prior snapshot as
+stale and is not retried until the next UTC day. The stored and returned report
+contains quota totals, category byte/file counts, and folder counts only. It
+never contains Google file names, file IDs, folder IDs, credentials, account
+identifiers, or provider error details, and browser responses are `no-store`.
+
+Some service accounts and pooled Google Workspace accounts do not expose an
+individual storage limit. In that case the page still reports the bounded
+website-backup totals and clearly marks account capacity as unavailable.

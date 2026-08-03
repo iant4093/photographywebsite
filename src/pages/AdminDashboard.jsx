@@ -82,6 +82,17 @@ function AdminDashboard() {
             link: '/admin/costs',
             color: 'from-amber-dark to-charcoal',
         },
+        {
+            title: 'Google Drive Usage',
+            description: 'Review daily Google account storage, Drive usage, and website backup totals.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.5 4h5l6.5 11.5-2.5 4.5h-5M9.5 4 3 15.5 5.5 20h13M9.5 4l6.5 11.5H3" />
+                </svg>
+            ),
+            link: '/admin/drive-usage',
+            color: 'from-green-600 to-blue-600',
+        },
     ]
 
     const pageVariants = {

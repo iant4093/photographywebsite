@@ -589,3 +589,10 @@ export function fetchCostReport(token, options = {}) {
         signal: options.signal,
     }, { timeoutMs: 30_000, retries: 0 })
 }
+
+export function fetchGoogleDriveUsage(token, options = {}) {
+    return apiFetch('/admin/drive-usage', {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }, { timeoutMs: 60_000, retries: 0 })
+}

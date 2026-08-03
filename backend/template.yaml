@@ -399,6 +399,30 @@ Resources:
         - Key: DataClassification
           Value: AccountBillingMetadata
 
+  DriveUsageCacheTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'GoldenHour-DriveUsageCache-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: cacheKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cacheKey
+          KeyType: HASH
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: AccountStorageMetadata
+
   # Per-stack random key used to HMAC privacy-sensitive rate-limit identifiers.
   RateLimitHashSecret:
     Type: AWS::SecretsManager::Secret
@@ -2408,6 +2432,50 @@ Resources:
           Properties:
             ApiId: !Ref Api
             Path: /admin/costs
+            Method: GET
+
+  GetGoogleDriveUsageFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_google_drive_usage.handler
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          DRIVE_USAGE_CACHE_TABLE: !Ref DriveUsageCacheTable
+          GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
+          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt DriveUsageCacheTable.Arn
+        - !If
+          - HasGoogleOAuthSecret
+          - Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref GoogleOAuthSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
+      Events:
+        GetGoogleDriveUsage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/drive-usage
             Method: GET
 
   DeleteUserFunction:

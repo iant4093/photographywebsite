@@ -112,6 +112,7 @@ expected_routes = {
     ("POST", "/users"),
     ("GET", "/users"),
     ("GET", "/admin/costs"),
+    ("GET", "/admin/drive-usage"),
     ("DELETE", "/users/{email}"),
     ("PUT", "/users/{email}"),
 }
@@ -275,11 +276,36 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("Resource: !GetAtt CostReportCacheTable.Arn", function)
         self.assertIn("SOURCES_GetCostReportFunction :=", MAKEFILE)
 
+    def test_drive_usage_is_daily_cached_admin_only_and_least_privilege(self) -> None:
+        table = resource_block("DriveUsageCacheTable")
+        function = resource_block("GetGoogleDriveUsageFunction")
+        for expected in (
+            "DeletionPolicy: Retain",
+            "UpdateReplacePolicy: Retain",
+            "DeletionProtectionEnabled: true",
+            "PointInTimeRecoveryEnabled: true",
+            "DataClassification",
+            "AccountStorageMetadata",
+        ):
+            self.assertIn(expected, table)
+        self.assertIn("Path: /admin/drive-usage", function)
+        self.assertIn("Method: GET", function)
+        self.assertIn("GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId", function)
+        self.assertIn("GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn", function)
+        for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
+            self.assertIn(action, function)
+        for forbidden in ("dynamodb:Scan", "dynamodb:Query", "secretsmanager:*", "kms:*"):
+            self.assertNotIn(forbidden, function)
+        self.assertIn("Resource: !GetAtt DriveUsageCacheTable.Arn", function)
+        self.assertIn("Action: secretsmanager:GetSecretValue", function)
+        self.assertIn("SOURCES_GetGoogleDriveUsageFunction :=", MAKEFILE)
+        self.assertIn("DEPS_GetGoogleDriveUsageFunction := google-auth==", MAKEFILE)
+
     def test_existing_tables_do_not_toggle_dynamodb_encryption_mode(self) -> None:
         # DynamoDB always encrypts tables at rest. Explicitly adding/removing an
         # AWS-owned-key SSESpecification on these existing resources needlessly
         # consumes the service's guarded encryption-mode update quota.
-        for logical_id in ("AlbumsTable", "RateLimitTable", "CostReportCacheTable"):
+        for logical_id in ("AlbumsTable", "RateLimitTable", "CostReportCacheTable", "DriveUsageCacheTable"):
             self.assertNotRegex(resource_block(logical_id), r"(?m)^\s+SSESpecification:")
 
     def test_media_bucket_is_private_versioned_and_tls_only(self) -> None:

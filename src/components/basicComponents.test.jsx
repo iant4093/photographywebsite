@@ -73,11 +73,11 @@ describe('small presentational and routing components', () => {
 
     const admin = routed(<AdminDashboard />)
     expect(screen.getByText('Studio controls')).toBeInTheDocument()
-    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(7)
+    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(8)
     expect(Array.from(
       admin.container.querySelectorAll('.linen-admin-card-index'),
       (index) => index.textContent,
-    )).toEqual(['01', '02', '03', '04', '05', '06', '07'])
+    )).toEqual(['01', '02', '03', '04', '05', '06', '07', '08'])
     expect(screen.getByRole('link', { name: /Upload Photos/ })).toHaveAttribute('href', '/admin/upload')
     expect(screen.getByRole('link', { name: /Upload Videos/ })).toHaveAttribute('href', '/admin/upload-video')
     expect(screen.getByRole('link', { name: /Change Hero Cover/ })).toHaveAttribute('href', '/admin/hero')
@@ -85,6 +85,7 @@ describe('small presentational and routing components', () => {
     expect(screen.getByRole('link', { name: /Manage Video Albums/ })).toHaveAttribute('href', '/admin/manage?type=video')
     expect(screen.getByRole('link', { name: /Manage Users/ })).toHaveAttribute('href', '/admin/users')
     expect(screen.getByRole('link', { name: /AWS Costs/ })).toHaveAttribute('href', '/admin/costs')
+    expect(screen.getByRole('link', { name: /Google Drive Usage/ })).toHaveAttribute('href', '/admin/drive-usage')
   })
 
   it('requires an auth provider and exposes the provided value', () => {

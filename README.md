@@ -6,7 +6,7 @@ Production source for [iantruongphotography.com](https://iantruongphotography.co
 
 - Responsive public photo and video albums with progressive previews.
 - Private client accounts and shared albums with authorization enforced by the API.
-- Administrative album, media, and user management.
+- Administrative album, media, and user management, with daily AWS cost and Google Drive storage reporting.
 - Direct media uploads, preview generation, EXIF extraction, ZIP downloads, and HLS video processing.
 - Contact protection, rate limiting, structured audit logging, backups, drift audits, and edge security controls.
 
