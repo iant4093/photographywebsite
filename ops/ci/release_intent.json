@@ -48,6 +48,7 @@
     {"logicalId": "CreateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "UpdateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "CreateZipFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "Api", "resourceType": "AWS::ApiGatewayV2::Api", "action": "Modify", "propertyPaths": ["Body"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "CostReportCacheTable", "resourceType": "AWS::DynamoDB::Table", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GetCostReportFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GetCostReportFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},

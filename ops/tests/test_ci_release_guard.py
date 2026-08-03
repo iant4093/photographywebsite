@@ -302,6 +302,16 @@ class ReleaseIntentTests(unittest.TestCase):
             self.assertTrue(rule["allowProtectedModify"])
             self.assertFalse(rule["allowNoDetails"])
 
+        api_rules = [
+            rule for rule in document["rules"]
+            if rule["logicalId"] == "Api" and rule["action"] == "Modify"
+        ]
+        self.assertEqual(len(api_rules), 1)
+        self.assertEqual(api_rules[0]["resourceType"], "AWS::ApiGatewayV2::Api")
+        self.assertEqual(api_rules[0]["propertyPaths"], ["Body"])
+        self.assertTrue(api_rules[0]["allowProtectedModify"])
+        self.assertFalse(api_rules[0]["allowNoDetails"])
+
         add_rules = {
             (rule["logicalId"], rule["resourceType"])
             for rule in document["rules"]
