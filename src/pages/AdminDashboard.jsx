@@ -71,6 +71,17 @@ function AdminDashboard() {
             link: '/admin/users',
             color: 'from-green-500 to-green-600',
         },
+        {
+            title: 'AWS Costs',
+            description: 'Review daily account spending, monthly trends, forecasts, and highest-cost AWS services.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 19V9m5 10V5m5 14v-7m5 7V3M3 21h18" />
+                </svg>
+            ),
+            link: '/admin/costs',
+            color: 'from-amber-dark to-charcoal',
+        },
     ]
 
     const pageVariants = {

@@ -179,6 +179,19 @@ describe('public API client behavior', () => {
     await expect(api.listUsers('token')).rejects.toMatchObject({ code: 'REPEATED_CURSOR' })
   })
 
+  it('loads the admin cost report with authorization and caller cancellation', async () => {
+    const report = { schemaVersion: 1, months: [] }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(report))
+    vi.stubGlobal('fetch', fetchMock)
+    const signal = new AbortController().signal
+    await expect(api.fetchCostReport('admin-token', { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/admin\/costs$/)
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer admin-token' },
+      signal: expect.any(AbortSignal),
+    }))
+  })
+
   it.each([
     [400, 'request detail'],
     [401, 'session has expired'],

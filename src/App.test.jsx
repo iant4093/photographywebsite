@@ -18,6 +18,7 @@ vi.mock('./pages/Contact', () => ({ default: () => <h1>Contact route</h1> }))
 vi.mock('./pages/Privacy', () => ({ default: () => <h1>Privacy route</h1> }))
 vi.mock('./pages/Login', () => ({ default: () => <h1>Login route</h1> }))
 vi.mock('./pages/AdminDashboard', () => ({ default: () => <h1>Admin route</h1> }))
+vi.mock('./pages/AwsCosts', () => ({ default: () => <h1>AWS costs route</h1> }))
 vi.mock('./pages/Admin', () => ({ default: () => <h1>Upload route</h1> }))
 vi.mock('./pages/UploadVideo', () => ({ default: () => <h1>Upload video route</h1> }))
 vi.mock('./pages/ManageHero', () => ({ default: () => <h1>Hero route</h1> }))
@@ -68,7 +69,7 @@ describe('App routing shell', () => {
   it.each([
     ['/album/id', 'Album route'], ['/video/id', 'Video route'], ['/sharedalbum/code', 'Shared route'],
     ['/contact', 'Contact route'], ['/privacy', 'Privacy route'], ['/login', 'Login route'],
-    ['/admin', 'Admin route'], ['/admin/upload', 'Upload route'], ['/admin/upload-video', 'Upload video route'],
+    ['/admin', 'Admin route'], ['/admin/costs', 'AWS costs route'], ['/admin/upload', 'Upload route'], ['/admin/upload-video', 'Upload video route'],
     ['/admin/hero', 'Hero route'],
     ['/admin/manage', 'Manage route'], ['/admin/users', 'Users route'], ['/admin/users/add', 'Add user route'],
     ['/admin/users/delete', 'Delete user route'], ['/admin/users/edit', 'Edit user route'],

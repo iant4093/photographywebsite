@@ -1,0 +1,332 @@
+.aws-cost-page {
+    width: min(100%, 80rem);
+    margin-inline: auto;
+    padding: 5.5rem 1.5rem 3rem;
+}
+
+.aws-cost-back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+    color: var(--color-warm-gray);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: color 200ms ease;
+}
+
+.aws-cost-back-link:hover {
+    color: var(--color-amber);
+}
+
+.aws-cost-back-icon {
+    width: 1rem;
+    height: 1rem;
+}
+
+.aws-cost-page-heading {
+    margin-bottom: 2.5rem;
+}
+
+.aws-cost-page-heading h1 {
+    color: var(--color-charcoal);
+    font-family: var(--font-serif);
+    font-size: 2.25rem;
+}
+
+.aws-cost-page-heading p {
+    color: var(--color-warm-gray);
+}
+
+.aws-cost-loading {
+    display: flex;
+    min-height: 16rem;
+    align-items: center;
+    justify-content: center;
+}
+
+.aws-cost-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 3px solid var(--color-amber);
+    border-top-color: transparent;
+    border-radius: 999px;
+    animation: aws-cost-spin 1s linear infinite;
+}
+
+@keyframes aws-cost-spin {
+    to { transform: rotate(360deg); }
+}
+
+.aws-cost-error {
+    padding: 1.5rem;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    background: #fef2f2;
+}
+
+.aws-cost-error-title,
+.aws-cost-service-amount {
+    font-weight: 500;
+}
+
+.aws-cost-error-message {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.aws-cost-retry {
+    margin-top: 1.25rem;
+    padding: 0.625rem 1.25rem;
+    color: white;
+    background: var(--color-amber);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.aws-cost-retry:hover {
+    background: var(--color-amber-dark);
+}
+
+.aws-cost-content {
+    display: grid;
+    gap: 2rem;
+    animation: slide-up 0.5s ease-out;
+}
+
+.aws-cost-stale {
+    padding: 1rem;
+    border: 1px solid var(--color-amber);
+    color: var(--color-charcoal);
+    background: color-mix(in srgb, var(--color-amber) 10%, transparent);
+    font-size: 0.875rem;
+}
+
+.aws-cost-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--color-warm-border);
+}
+
+.aws-cost-generated,
+.aws-cost-service-heading,
+.aws-cost-empty {
+    font-size: 0.875rem;
+}
+
+.aws-cost-generated,
+.aws-cost-refresh-note,
+.aws-cost-month-label,
+.aws-cost-eyebrow,
+.aws-cost-detail,
+.aws-cost-summary-note,
+.aws-cost-chart-axis,
+.aws-cost-service-share,
+.aws-cost-empty,
+.aws-cost-disclaimer {
+    color: var(--color-warm-gray);
+}
+
+.aws-cost-refresh-note {
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+}
+
+.aws-cost-month-label,
+.aws-cost-eyebrow {
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.aws-cost-month-select {
+    display: block;
+    min-width: 13rem;
+    margin-top: 0.5rem;
+    padding: 0.625rem 1rem;
+    border: 1px solid var(--color-charcoal);
+    color: var(--color-charcoal);
+    background: var(--color-cream);
+    font-size: 0.875rem;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+.aws-cost-summary-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+}
+
+.aws-cost-summary-card,
+.aws-cost-panel {
+    border: 1px solid var(--color-warm-border);
+    background: white;
+    box-shadow: var(--shadow-warm);
+}
+
+.aws-cost-summary-card {
+    padding: 1.25rem;
+}
+
+.aws-cost-summary-value {
+    margin-top: 0.75rem;
+    color: var(--color-charcoal);
+    font-family: var(--font-serif);
+    font-size: 1.875rem;
+}
+
+.aws-cost-summary-note,
+.aws-cost-disclaimer {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.625;
+}
+
+.aws-cost-panel {
+    padding: 1.25rem;
+}
+
+.aws-cost-panel-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1.75rem;
+}
+
+.aws-cost-panel-title {
+    margin-top: 0.25rem;
+    color: var(--color-charcoal);
+    font-family: var(--font-serif);
+    font-size: 1.5rem;
+}
+
+.aws-cost-detail {
+    font-size: 0.75rem;
+}
+
+.aws-cost-chart {
+    display: flex;
+    height: 16rem;
+    align-items: flex-end;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--color-warm-border);
+}
+
+.aws-cost-chart-column {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    flex: 1;
+    align-items: flex-end;
+}
+
+.aws-cost-chart-bar {
+    width: 100%;
+    background: color-mix(in srgb, var(--color-amber) 70%, transparent);
+    transition: background 200ms ease;
+}
+
+.aws-cost-chart-column:hover .aws-cost-chart-bar {
+    background: var(--color-amber-dark);
+}
+
+.aws-cost-chart-tooltip {
+    position: absolute;
+    bottom: calc(100% + 0.4rem);
+    left: 50%;
+    display: none;
+    padding: 0.25rem 0.5rem;
+    transform: translateX(-50%);
+    color: white;
+    background: var(--color-charcoal);
+    font-size: 0.625rem;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.aws-cost-chart-column:hover .aws-cost-chart-tooltip {
+    display: block;
+}
+
+.aws-cost-chart-axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.75rem;
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.aws-cost-services {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.aws-cost-service-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.aws-cost-service-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-charcoal);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.aws-cost-service-amount {
+    color: var(--color-charcoal);
+    white-space: nowrap;
+}
+
+.aws-cost-service-track {
+    height: 0.5rem;
+    background: color-mix(in srgb, var(--color-warm-border) 40%, transparent);
+}
+
+.aws-cost-service-bar {
+    height: 100%;
+    background: var(--color-amber-dark);
+}
+
+.aws-cost-service-share {
+    margin-top: 0.25rem;
+    font-size: 0.625rem;
+    text-align: right;
+}
+
+@media (min-width: 48rem) {
+    .aws-cost-page {
+        padding-top: 6.5rem;
+    }
+
+    .aws-cost-panel {
+        padding: 1.75rem;
+    }
+
+    .aws-cost-chart {
+        gap: 0.75rem;
+    }
+
+    .aws-cost-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 80rem) {
+    .aws-cost-summary-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}

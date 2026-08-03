@@ -17,6 +17,7 @@ DEFAULT_ENV = {
     "AWS_REGION": "us-west-2",
     "ALBUMS_TABLE": "albums-test",
     "RATE_LIMIT_TABLE": "rate-test",
+    "COST_REPORT_CACHE_TABLE": "cost-report-test",
     "RATE_LIMIT_HASH_SECRET": "unit-test-rate-hash-secret",
     "IMAGES_BUCKET": "images-test",
     "CLOUDFRONT_DOMAIN": "media.example.test",

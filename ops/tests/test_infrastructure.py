@@ -111,6 +111,7 @@ expected_routes = {
     ("POST", "/admin/hero/{operation}"),
     ("POST", "/users"),
     ("GET", "/users"),
+    ("GET", "/admin/costs"),
     ("DELETE", "/users/{email}"),
     ("PUT", "/users/{email}"),
 }
@@ -250,11 +251,35 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("TimeToLiveSpecification:", block)
         self.assertIn("DataClassification", block)
 
+    def test_cost_report_is_daily_cached_admin_only_and_least_privilege(self) -> None:
+        table = resource_block("CostReportCacheTable")
+        function = resource_block("GetCostReportFunction")
+        for expected in (
+            "DeletionPolicy: Retain",
+            "UpdateReplacePolicy: Retain",
+            "DeletionProtectionEnabled: true",
+            "PointInTimeRecoveryEnabled: true",
+            "DataClassification",
+            "AccountBillingMetadata",
+        ):
+            self.assertIn(expected, table)
+        self.assertIn("Path: /admin/costs", function)
+        self.assertIn("Method: GET", function)
+        self.assertIn("ce:GetCostAndUsage", function)
+        self.assertIn("ce:GetCostForecast", function)
+        self.assertNotIn("ce:*", function)
+        for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
+            self.assertIn(action, function)
+        for forbidden in ("dynamodb:Scan", "dynamodb:Query", "budgets:", "aws-portal:", "billing:"):
+            self.assertNotIn(forbidden, function)
+        self.assertIn("Resource: !GetAtt CostReportCacheTable.Arn", function)
+        self.assertIn("SOURCES_GetCostReportFunction :=", MAKEFILE)
+
     def test_existing_tables_do_not_toggle_dynamodb_encryption_mode(self) -> None:
         # DynamoDB always encrypts tables at rest. Explicitly adding/removing an
         # AWS-owned-key SSESpecification on these existing resources needlessly
         # consumes the service's guarded encryption-mode update quota.
-        for logical_id in ("AlbumsTable", "RateLimitTable"):
+        for logical_id in ("AlbumsTable", "RateLimitTable", "CostReportCacheTable"):
             self.assertNotRegex(resource_block(logical_id), r"(?m)^\s+SSESpecification:")
 
     def test_media_bucket_is_private_versioned_and_tls_only(self) -> None:

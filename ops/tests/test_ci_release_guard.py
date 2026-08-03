@@ -290,6 +290,7 @@ class ReleaseIntentTests(unittest.TestCase):
         role_rules = [
             rule for rule in document["rules"]
             if rule["resourceType"] == "AWS::IAM::Role"
+            and rule["action"] == "Modify"
         ]
         self.assertEqual(
             {rule["logicalId"] for rule in role_rules},
@@ -300,6 +301,25 @@ class ReleaseIntentTests(unittest.TestCase):
             self.assertEqual(rule["propertyPaths"], ["Policies"])
             self.assertTrue(rule["allowProtectedModify"])
             self.assertFalse(rule["allowNoDetails"])
+
+        add_rules = {
+            (rule["logicalId"], rule["resourceType"])
+            for rule in document["rules"]
+            if rule["action"] == "Add"
+        }
+        self.assertEqual(
+            add_rules,
+            {
+                ("CostReportCacheTable", "AWS::DynamoDB::Table"),
+                ("GetCostReportFunction", "AWS::Lambda::Function"),
+                ("GetCostReportFunctionRole", "AWS::IAM::Role"),
+                ("GetCostReportFunctionGetCostReportPermission", "AWS::Lambda::Permission"),
+            },
+        )
+        for rule in document["rules"]:
+            if rule["action"] == "Add":
+                self.assertEqual(rule["propertyPaths"], [])
+                self.assertTrue(rule["allowNoDetails"])
 
         self.assertFalse(any(rule["action"] == "Remove" for rule in document["rules"]))
 

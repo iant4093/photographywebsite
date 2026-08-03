@@ -40,3 +40,28 @@ owner approval and enable stack termination protection.
 Review actual costs daily during the first week after enabling a new paid
 service and monthly afterward. Cost pressure never authorizes disabling
 logging, detection, backup, WAF, rollback access, or evidence retention.
+
+## Admin cost report
+
+The protected `/admin/costs` page provides an account-wide Cost Explorer
+summary without granting the browser AWS credentials or billing permissions.
+Its Lambda accepts no billing query parameters and can call only
+`ce:GetCostAndUsage`, `ce:GetCostForecast`, and item operations on the dedicated
+`GoldenHour-CostReportCache-prod` table. The stored and returned payload contains
+aggregate month/service amounts only—never account IDs, resources, tags,
+invoices, payment details, or provider errors.
+
+The first authorized request in each UTC day claims that day's refresh and
+stores one aggregate snapshot. Later requests use the same snapshot, keeping
+Cost Explorer calls and cost bounded to one usage query (plus bounded
+pagination) and one optional forecast query per day. A failed refresh serves
+the prior snapshot as stale and is not retried until the next UTC day. The
+browser response is always `no-store` even when the server-side daily cache is
+fresh.
+
+Cost Explorer must already be enabled in the AWS Billing console. Its data can
+lag more than 24 hours, and the page is an estimated operational view rather
+than a final invoice. Enabling Cost Explorer can also create an account-wide
+Cost Anomaly Detection monitor and daily-summary subscription; review that
+subscription separately instead of routing it into the website incident SNS
+topic.

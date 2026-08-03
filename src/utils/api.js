@@ -582,3 +582,10 @@ export function editUser(token, email, data, options = {}) {
         signal: options.signal,
     })
 }
+
+export function fetchCostReport(token, options = {}) {
+    return apiFetch('/admin/costs', {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }, { timeoutMs: 30_000, retries: 0 })
+}
