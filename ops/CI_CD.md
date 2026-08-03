@@ -251,7 +251,9 @@ template does not attach an IAM permissions boundary to generated roles, so the
 bootstrap instead restricts role management and `iam:PassRole` to the exact
 `ian-website-*` family. Adding a boundary later must be coordinated with
 `backend/template.yaml`; requiring one only in the execution policy would break
-the current deployment. Bootstrap OIDC, roles, and release storage through the
+the current deployment. EventBridge rule lifecycle access is likewise limited
+to the application stack's `ian-website-*` rule family; the execution role has
+no event-bus publishing access. Bootstrap OIDC, roles, and release storage through the
 separately protected stack with termination protection. The application stack
 must never create the role that can deploy it.
 

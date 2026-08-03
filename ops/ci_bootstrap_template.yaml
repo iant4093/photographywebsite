@@ -752,6 +752,19 @@ Resources:
               - lambda:GetEventSourceMapping
               - lambda:ListEventSourceMappings
             Resource: '*'
+          - Sid: ManageStackEventBridgeRules
+            Effect: Allow
+            Action:
+              - events:DeleteRule
+              - events:DescribeRule
+              - events:ListTagsForResource
+              - events:ListTargetsByRule
+              - events:PutRule
+              - events:PutTargets
+              - events:RemoveTargets
+              - events:TagResource
+              - events:UntagResource
+            Resource: !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/${ApplicationStackName}-*'
   CloudFormationExecutionDataAndMessagingPolicy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: RetainExceptOnCreate

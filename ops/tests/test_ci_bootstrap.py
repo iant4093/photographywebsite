@@ -760,6 +760,28 @@ fi
         ):
             self.assertNotIn(forbidden, inventory)
 
+    def test_eventbridge_rule_lifecycle_is_scoped_to_application_rules(self):
+        execution = execution_permissions()
+        rules = statement_block(execution, "ManageStackEventBridgeRules")
+        for action in (
+            "events:DeleteRule",
+            "events:DescribeRule",
+            "events:ListTagsForResource",
+            "events:ListTargetsByRule",
+            "events:PutRule",
+            "events:PutTargets",
+            "events:RemoveTargets",
+            "events:TagResource",
+            "events:UntagResource",
+        ):
+            self.assertIn(f"- {action}", rules)
+        self.assertIn(
+            "arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/${ApplicationStackName}-*",
+            rules,
+        )
+        self.assertNotIn("Resource: '*'", rules)
+        self.assertNotIn("events:PutEvents", rules)
+
     def test_certificate_secret_and_managed_policy_lifecycles_are_narrow_and_complete(self):
         execution = execution_permissions()
         request = statement_block(execution, "RequestExactRegionalApiCertificate")
