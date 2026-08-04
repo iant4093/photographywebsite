@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbumsPage } from '../utils/api'
+import './Search.css'
 import {
     CatalogPaginationError,
     deleteCatalogSnapshot,
