@@ -88,63 +88,38 @@ jobs:
       id-token: write
     outputs:
       change_set_name: ${{ steps.plan.outputs.change_set_name }}
-      noop: ${{ steps.plan.outputs.noop || steps.scope.outputs.noop }}
+      noop: ${{ steps.plan.outputs.noop }}
       template_sha256: ${{ steps.plan.outputs.template_sha256 }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
           persist-credentials: false
-      - name: Detect backend artifact changes
-        id: scope
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          CURRENT_SHA: ${{ github.sha }}
-        run: |
-          [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ && "$CURRENT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
-            echo 'Push revisions must be exact commit hashes.' >&2
-            exit 2
-          }
-          git cat-file -e "${BEFORE_SHA}^{commit}"
-          git cat-file -e "${CURRENT_SHA}^{commit}"
-          if git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- backend/; then
-            echo 'backend_changed=false' >> "$GITHUB_OUTPUT"
-            echo 'noop=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'backend_changed=true' >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: steps.scope.outputs.backend_changed == 'true'
         with:
           name: attested-release
           path: release
       - name: Verify and extract tested SAM build
-        if: steps.scope.outputs.backend_changed == 'true'
         run: |
           python3 ops/ci/release_guard.py verify-manifest release/backend release/backend/manifest.json --allow-sibling-manifest
           python3 ops/ci/release_guard.py verify-tar release/backend/backend-build.tar.gz
           mkdir -p release/backend/.aws-sam
           tar -xzf release/backend/backend-build.tar.gz -C release/backend
       - uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
-        if: steps.scope.outputs.backend_changed == 'true'
         with:
           use-installer: true
           version: 1.154.0
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
-        if: steps.scope.outputs.backend_changed == 'true'
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           role-session-name: gha-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
       - name: Verify exact AWS account
-        if: steps.scope.outputs.backend_changed == 'true'
         env:
           EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
         run: ./ops/ci/assert_aws_account.sh
       - name: Create non-executing guarded change set
-        if: steps.scope.outputs.backend_changed == 'true'
         id: plan
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}

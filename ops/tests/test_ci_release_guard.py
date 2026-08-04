@@ -1640,17 +1640,14 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("./.github/workflows/_quality.yml", release)
         self.assertIn("frontend_deploy.sh", release)
         self.assertIn("backend_execute.sh", release)
-        self.assertIn("Detect backend artifact changes", release)
-        self.assertIn('git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- backend/', release)
-        self.assertIn("steps.plan.outputs.noop || steps.scope.outputs.noop", release)
+        self.assertNotIn("Detect backend artifact changes", release)
+        self.assertNotIn("backend_changed", release)
+        self.assertIn("noop: ${{ steps.plan.outputs.noop }}", release)
         self.assertRegex(
             release,
             r"(?s)frontend-deploy:\s+name: Deploy exact frontend artifact\s+needs: \[attest, backend-smoke\]\s+if: always\(\) && needs\.attest\.result == 'success' && needs\.backend-smoke\.result == 'success'",
         )
-        self.assertRegex(
-            release,
-            r"(?s)Create non-executing guarded change set\s+if: steps\.scope\.outputs\.backend_changed == 'true'",
-        )
+        self.assertRegex(release, r"(?s)Create non-executing guarded change set\s+id: plan")
         for source in (release, manual):
             self.assertIn("change_set_name", source)
             self.assertNotIn("change_set_id", source)
