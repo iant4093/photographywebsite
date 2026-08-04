@@ -212,6 +212,7 @@ jobs:
   frontend-deploy:
     name: Deploy exact frontend artifact
     needs: [attest, backend-smoke]
+    if: always() && needs.attest.result == 'success' && needs.backend-smoke.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

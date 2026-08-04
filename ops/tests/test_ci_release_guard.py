@@ -1639,6 +1639,10 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("steps.plan.outputs.noop || steps.scope.outputs.noop", release)
         self.assertRegex(
             release,
+            r"(?s)frontend-deploy:\s+name: Deploy exact frontend artifact\s+needs: \[attest, backend-smoke\]\s+if: always\(\) && needs\.attest\.result == 'success' && needs\.backend-smoke\.result == 'success'",
+        )
+        self.assertRegex(
+            release,
             r"(?s)Create non-executing guarded change set\s+if: steps\.scope\.outputs\.backend_changed == 'true'",
         )
         for source in (release, manual):
