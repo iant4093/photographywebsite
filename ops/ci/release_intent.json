@@ -18,7 +18,7 @@
     {"logicalId": "AuditFailureAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "LoginDeniedAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "ApiAuthorizationDeniedAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
-    {"logicalId": "RateLimitTable", "resourceType": "AWS::DynamoDB::Table", "action": "Modify", "propertyPaths": ["DeletionProtectionEnabled"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "RateLimitTable", "resourceType": "AWS::DynamoDB::Table", "action": "Modify", "propertyPaths": ["DeletionPolicy", "DeletionProtectionEnabled", "UpdateReplacePolicy"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "MediaAccessLogsBucketPolicy", "resourceType": "AWS::S3::BucketPolicy", "action": "Modify", "propertyPaths": ["PolicyDocument"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "ImagesCloudFront", "resourceType": "AWS::CloudFront::Distribution", "action": "Modify", "propertyPaths": ["DistributionConfig"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "PreviewJobFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["FilterPattern"], "allowNoDetails": false},

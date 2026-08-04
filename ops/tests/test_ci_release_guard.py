@@ -428,6 +428,54 @@ class ReleaseIntentTests(unittest.TestCase):
         with self.assertRaises(release_guard.GateError):
             release_guard.load_release_intent({"version": 1, "rules": [invalid_add]})
 
+    def test_exact_exception_can_approve_retention_attributes(self):
+        document = {
+            "version": 1,
+            "rules": [{
+                "logicalId": "RateLimitTable",
+                "resourceType": "AWS::DynamoDB::Table",
+                "action": "Modify",
+                "propertyPaths": [
+                    "DeletionPolicy",
+                    "DeletionProtectionEnabled",
+                    "UpdateReplacePolicy",
+                ],
+                "allowNoDetails": False,
+                "allowProtectedModify": True,
+            }],
+        }
+        item = change(
+            logical_id="RateLimitTable",
+            resource_type="AWS::DynamoDB::Table",
+            property_name="DeletionProtectionEnabled",
+        )
+        item["ResourceChange"]["Details"].extend([
+            {
+                "Target": {
+                    "Attribute": "DeletionPolicy",
+                    "RequiresRecreation": "Never",
+                }
+            },
+            {
+                "Target": {
+                    "Attribute": "UpdateReplacePolicy",
+                    "RequiresRecreation": "Never",
+                }
+            },
+        ])
+        intent = release_guard.load_release_intent(document)
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": [item]}], release_intent=intent
+            )["Total"],
+            1,
+        )
+        item["ResourceChange"]["Details"][1]["Target"]["Attribute"] = "Metadata"
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set(
+                [{"Changes": [item]}], release_intent=intent
+            )
+
 
 class ReleaseDependencyTests(unittest.TestCase):
     @staticmethod

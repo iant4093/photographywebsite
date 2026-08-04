@@ -267,6 +267,10 @@ def gate_change_set(
                     attribute == "Properties"
                     and isinstance(name, str)
                     and (name in intended_properties or is_reviewed_dynamic)
+                ) or (
+                    attribute in {"DeletionPolicy", "UpdateReplacePolicy"}
+                    and name is None
+                    and attribute in intended_properties
                 )
                 if not property_allowed:
                     raise GateError("resource property is outside the versioned release intent")
