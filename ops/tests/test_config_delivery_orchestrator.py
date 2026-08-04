@@ -85,6 +85,19 @@ def properties(**overrides) -> dict:
     return result
 
 
+def legacy_properties(**overrides) -> dict:
+    result = properties()
+    result.pop("ExpectedAllSupported")
+    result.pop("ExpectedIncludeGlobalResourceTypes")
+    result["ExpectedResourceTypes"] = [
+        "AWS::S3::Bucket",
+        "AWS::DynamoDB::Table",
+        "AWS::Lambda::Function",
+    ]
+    result.update(overrides)
+    return result
+
+
 def desired(props: dict | None = None) -> dict:
     props = props or properties()
     return {
@@ -377,7 +390,7 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
         self.assertEqual(config.stop_calls, [])
 
     def test_update_requires_marker_physical_id_and_undrifted_old_state(self) -> None:
-        old = properties(DeliveryFrequency="Twelve_Hours")
+        old = legacy_properties(DeliveryFrequency="Twelve_Hours")
         config = ConfigClient(channels=[desired(old)])
         marker = MarkerClient(TOKEN)
         physical_id, outcome = self.reconcile(
@@ -430,6 +443,7 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
             properties(ExpectedRecorderRoleArn="arn:aws:iam::999999999999:role/x"),
             properties(ExpectedAllSupported=False),
             properties(ExpectedIncludeGlobalResourceTypes="false"),
+            legacy_properties(ExpectedResourceTypes=[]),
             properties(OwnershipParameterName="/unrelated/marker"),
         )
         for bad in bad_values:
@@ -437,6 +451,12 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
                 with self.assertRaises((PermissionError, ValueError)):
                     self.module._scope(bad, Context())
         scope = self.module._scope(properties(), Context())
+        legacy_scope = self.module._scope(
+            legacy_properties(), Context(), allow_legacy_recording=True
+        )
+        self.assertFalse(legacy_scope["all_supported"])
+        with self.assertRaisesRegex(ValueError, "all-supported"):
+            self.module._scope(legacy_properties(), Context())
         with self.assertRaisesRegex(PermissionError, "stack scope mismatch"):
             self.module._ownership_token("not-a-stack-arn", scope)
 

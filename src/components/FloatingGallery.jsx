@@ -80,7 +80,7 @@ function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = ''
                 alt=""
                 width={album.coverWidth || 4}
                 height={album.coverHeight || 3}
-                className="floating-card-image"
+                className="h-full w-full"
             />
             <span className="floating-card-copy">
                 <strong data-title={album.title} />

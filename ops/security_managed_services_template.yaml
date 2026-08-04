@@ -319,6 +319,7 @@ Resources:
           LOG.setLevel(logging.INFO)
           CHANNEL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
           BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+          RESOURCE_TYPE = re.compile(r"^AWS::[A-Za-z0-9]+::[A-Za-z0-9]+$")
           FREQUENCIES = {
               "One_Hour",
               "Three_Hours",
@@ -328,7 +329,7 @@ Resources:
           }
 
 
-          def _scope(properties, context):
+          def _scope(properties, context, allow_legacy_recording=False):
               name = str(properties.get("ChannelName", ""))
               bucket = str(properties.get("BucketName", ""))
               frequency = str(properties.get("DeliveryFrequency", ""))
@@ -337,6 +338,7 @@ Resources:
               expected_role = str(properties.get("ExpectedRecorderRoleArn", ""))
               expected_all_supported = properties.get("ExpectedAllSupported")
               expected_globals = properties.get("ExpectedIncludeGlobalResourceTypes")
+              expected_types = properties.get("ExpectedResourceTypes", [])
               marker_name = str(properties.get("OwnershipParameterName", ""))
               arn_parts = context.invoked_function_arn.split(":")
               partition = arn_parts[1] if len(arn_parts) > 1 else ""
@@ -357,10 +359,23 @@ Resources:
               )
               if not expected_role.startswith(expected_role_prefix):
                   raise ValueError("invalid expected recorder role")
-              if expected_all_supported is not True:
+              if expected_all_supported is True and isinstance(expected_globals, bool):
+                  pass
+              elif allow_legacy_recording and (
+                  expected_all_supported is None
+                  and expected_globals is None
+                  and isinstance(expected_types, list)
+                  and expected_types
+                  and all(
+                      isinstance(item, str) and RESOURCE_TYPE.fullmatch(item)
+                      for item in expected_types
+                  )
+                  and len(set(expected_types)) == len(expected_types)
+              ):
+                  expected_all_supported = False
+                  expected_globals = False
+              else:
                   raise ValueError("all-supported recording is required")
-              if not isinstance(expected_globals, bool):
-                  raise ValueError("invalid global resource recording setting")
               expected_marker = "/ian-photography/config-delivery/{}/owner".format(
                   name
               )
@@ -538,7 +553,11 @@ Resources:
               physical_id = _physical_id(scope)
               token = _ownership_token(stack_id, scope)
               if request_type == "Update":
-                  old_scope = _scope(old_properties, context)
+                  old_scope = _scope(
+                      old_properties,
+                      context,
+                      allow_legacy_recording=True,
+                  )
                   if old_scope["name"] != scope["name"]:
                       raise ValueError("channel name is immutable")
                   if old_scope["marker"] != scope["marker"]:
