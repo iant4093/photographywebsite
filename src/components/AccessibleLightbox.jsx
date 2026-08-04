@@ -30,6 +30,12 @@ export default function AccessibleLightbox({
     useEffect(() => {
         const dialog = dialogRef.current
         const previousOverflow = document.body.style.overflow
+        const siteChromeState = Array.from(document.querySelectorAll('.linen-nav, .editorial-progress'))
+            .map((element) => ({
+                element,
+                visibility: element.style.visibility,
+                pointerEvents: element.style.pointerEvents,
+            }))
         const backgroundState = Array.from(dialog?.parentElement?.children || [])
             .filter((element) => element !== dialog)
             .map((element) => ({
@@ -46,7 +52,10 @@ export default function AccessibleLightbox({
             element.setAttribute('inert', '')
             element.setAttribute('aria-hidden', 'true')
         })
-        document.documentElement.classList.add('linen-lightbox-open')
+        siteChromeState.forEach(({ element }) => {
+            element.style.visibility = 'hidden'
+            element.style.pointerEvents = 'none'
+        })
         document.body.style.overflow = 'hidden'
 
         const initialFocus = dialog?.querySelector('[data-lightbox-initial-focus]')
@@ -92,8 +101,11 @@ export default function AccessibleLightbox({
         window.addEventListener('keydown', handleKeyDown)
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
-            document.documentElement.classList.remove('linen-lightbox-open')
             document.body.style.overflow = previousOverflow
+            siteChromeState.forEach(({ element, visibility, pointerEvents }) => {
+                element.style.visibility = visibility
+                element.style.pointerEvents = pointerEvents
+            })
             backgroundState.forEach(({ element, ariaHidden, inert }) => {
                 if (!inert) element.removeAttribute('inert')
                 if (ariaHidden === null) element.removeAttribute('aria-hidden')

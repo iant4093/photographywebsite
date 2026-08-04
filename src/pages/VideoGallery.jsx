@@ -234,13 +234,17 @@ export default function VideoGallery() {
                     onClose={closeLightbox}
                     onNext={images.length > 1 ? goNext : undefined}
                     onPrevious={images.length > 1 ? goPrev : undefined}
-                    className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 animate-fade-in"
+                    className="fixed inset-0 z-[1000] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 animate-fade-in"
                 >
                     {/* Close button */}
                     <button
                         type="button"
                         onClick={closeLightbox}
-                        className="linen-lightbox-close w-12 h-12 text-white/80 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                        className="linen-lightbox-close fixed z-[1001] w-12 h-12 text-white/80 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                        style={{
+                            top: 'max(1rem, calc(env(safe-area-inset-top) + 0.5rem))',
+                            right: 'max(1rem, calc(env(safe-area-inset-right) + 0.5rem))',
+                        }}
                         title="Close Player"
                         aria-label="Close video player"
                         data-lightbox-initial-focus

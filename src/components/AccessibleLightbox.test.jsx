@@ -10,6 +10,8 @@ function Harness() {
 
     return (
         <>
+            <div className="linen-nav" data-testid="site-navigation" />
+            <div className="editorial-progress" data-testid="film-scrollbar" />
             <button type="button" onClick={() => setOpen(true)}>Open viewer</button>
             {open && (
                 <AccessibleLightbox
@@ -43,7 +45,8 @@ describe('AccessibleLightbox', () => {
         expect(screen.getByRole('dialog', { name: 'Test viewer' })).toHaveClass('linen-lightbox')
         expect(appRoot).toHaveAttribute('inert')
         expect(appRoot).toHaveAttribute('aria-hidden', 'true')
-        expect(document.documentElement).toHaveClass('linen-lightbox-open')
+        expect(screen.getByTestId('site-navigation')).toHaveStyle({ visibility: 'hidden', pointerEvents: 'none' })
+        expect(screen.getByTestId('film-scrollbar')).toHaveStyle({ visibility: 'hidden', pointerEvents: 'none' })
         expect(document.body.style.overflow).toBe('hidden')
 
         const close = screen.getByRole('button', { name: 'Close viewer' })
@@ -58,7 +61,8 @@ describe('AccessibleLightbox', () => {
         expect(screen.queryByRole('dialog')).toBeNull()
         expect(appRoot).not.toHaveAttribute('inert')
         expect(appRoot).not.toHaveAttribute('aria-hidden')
-        expect(document.documentElement).not.toHaveClass('linen-lightbox-open')
+        expect(screen.getByTestId('site-navigation')).not.toHaveStyle({ visibility: 'hidden' })
+        expect(screen.getByTestId('film-scrollbar')).not.toHaveStyle({ visibility: 'hidden' })
         expect(document.body.style.overflow).toBe('')
         expect(opener).toHaveFocus()
     })

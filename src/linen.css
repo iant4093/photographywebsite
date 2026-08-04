@@ -64,23 +64,6 @@
   transform: translateY(0);
 }
 
-/* Keep full-screen media controls above the scroll-reactive site chrome. */
-.linen-lightbox {
-  z-index: 1000 !important;
-}
-
-.linen-lightbox .linen-lightbox-close {
-  position: fixed;
-  z-index: 2;
-  top: max(1rem, env(safe-area-inset-top));
-  right: max(1rem, env(safe-area-inset-right));
-}
-
-.linen-lightbox-open .linen-site :is(.linen-nav, .editorial-progress) {
-  visibility: hidden;
-  pointer-events: none;
-}
-
 .linen-site [class*="rounded-"]:not(.rounded-full) {
   border-radius: 2px;
 }
@@ -170,11 +153,11 @@
   right: 0;
 }
 
-.linen-site .linen-desktop-links a.is-active::after {
+.linen-desktop-links a.is-active::after {
   right: 0;
 }
 
-.linen-site .linen-menu-list > a.is-active:not(.linen-menu-action) {
+.linen-menu-list > a.is-active:not(.linen-menu-action) {
   color: var(--color-amber-dark);
 }
 
