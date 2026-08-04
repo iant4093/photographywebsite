@@ -66,6 +66,7 @@ function Navbar() {
                         <div className="linen-desktop-links hidden" aria-label="Primary navigation">
                             <Link to="/" aria-label="Photographs — primary navigation">Photographs</Link>
                             <Link to="/videos" aria-label="Videos — primary navigation">Videos</Link>
+                            <Link to="/search" aria-label="Search — primary navigation">Search</Link>
                             <Link to="/sharedalbum" aria-label="Find Album — primary navigation">Find Album</Link>
                             <Link to="/contact" aria-label="Enquiries — primary navigation">Enquiries</Link>
                             {user ? (
@@ -99,6 +100,10 @@ function Navbar() {
 
                     <Link to="/videos" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
                         Videos
+                    </Link>
+
+                    <Link to="/search" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">
+                        Search Archive
                     </Link>
 
                     <Link to="/sharedalbum" onClick={() => setIsMenuOpen(false)} className="font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300">

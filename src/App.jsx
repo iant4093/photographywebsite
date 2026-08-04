@@ -9,6 +9,7 @@ import MotionExperience from './components/MotionExperience'
 import Home from './pages/Home'
 
 const AlbumGallery = lazy(() => import('./pages/AlbumGallery'))
+const Search = lazy(() => import('./pages/Search'))
 const SharedAlbum = lazy(() => import('./pages/SharedAlbum'))
 const Contact = lazy(() => import('./pages/Contact'))
 const Privacy = lazy(() => import('./pages/Privacy'))
@@ -59,6 +60,7 @@ function App() {
                     <Routes location={location}>
                         <Route path="/" element={<Home />} />
                         <Route path="/videos" element={<Videos />} />
+                        <Route path="/search" element={<Search />} />
                         <Route path="/album/:albumId" element={<AlbumGallery />} />
                         <Route path="/video/:albumId" element={<VideoGallery />} />
                         <Route path="/sharedalbum" element={<SharedAlbum />} />

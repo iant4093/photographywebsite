@@ -80,6 +80,7 @@ describe('navigation and metadata', () => {
   it.each([
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],
+    ['Search Archive', '/search'],
     ['Contact Me', '/contact'],
     ['Log In', '/login'],
   ])('closes the guest menu through %s', (name, destination) => {
