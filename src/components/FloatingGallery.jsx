@@ -61,12 +61,13 @@ function buildGalleryLanes(albums, seed = PAGE_RANDOM_SEED) {
     })
 }
 
-function GalleryCard({ album, position }) {
+function GalleryCard({ album, position, duplicate = false }) {
     return (
         <Link
             to={`/album/${album.albumId}`}
             className="floating-print-card"
             aria-label={`View ${album.title}`}
+            tabIndex={duplicate ? -1 : undefined}
             style={{ '--floating-tilt': `${TILT_PATTERN[position % TILT_PATTERN.length]}deg` }}
         >
             <span className="floating-frame-number">{String(position + 1).padStart(2, '0')}</span>
@@ -81,12 +82,13 @@ function GalleryCard({ album, position }) {
 
 function LoopGroup({ albums, copy = false, offset = 0 }) {
     return (
-        <div className="floating-loop-group">
+        <div className="floating-loop-group" aria-hidden={copy ? 'true' : undefined}>
             {albums.map((album, index) => (
                 <GalleryCard
                     key={`${copy ? 'copy' : 'source'}-${offset}-${album.albumId}`}
                     album={album}
                     position={index + offset}
+                    duplicate={copy}
                 />
             ))}
         </div>

@@ -5,6 +5,7 @@ import { useAuth } from '../context/auth'
 import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
+import AccessibleLightbox from '../components/AccessibleLightbox'
 import {
     mediaFileName,
     mediaId,
@@ -13,6 +14,7 @@ import {
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
+import { navigateBackOr } from '../utils/navigation'
 
 export default function VideoGallery() {
     const { albumId } = useParams()
@@ -93,19 +95,10 @@ export default function VideoGallery() {
         setLightboxIndex((i) => (i - 1 + images.length) % images.length)
     }, [images.length])
 
-    useEffect(() => {
-        if (lightboxIndex === null) return
-        function handleKey(e) {
-            if (e.key === 'ArrowRight') goNext()
-            if (e.key === 'ArrowLeft') goPrev()
-            if (e.key === 'Escape') setLightboxIndex(null)
-        }
-        window.addEventListener('keydown', handleKey)
-        return () => window.removeEventListener('keydown', handleKey)
-    }, [lightboxIndex, goNext, goPrev])
+    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
 
     const handleBack = () => {
-        navigate(-1)
+        navigateBackOr(navigate, '/videos')
     }
 
     const downloadOriginal = async (e) => {
@@ -178,7 +171,7 @@ export default function VideoGallery() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                Back
+                Back to Videos
             </button>
 
             <div className="linen-gallery-header mb-12">
@@ -236,14 +229,21 @@ export default function VideoGallery() {
 
             {/* Video Lightbox Player */}
             {lightboxIndex !== null && images[lightboxIndex] && (
-                <div
+                <AccessibleLightbox
+                    ariaLabel={`Video player for ${album.title}`}
+                    onClose={closeLightbox}
+                    onNext={images.length > 1 ? goNext : undefined}
+                    onPrevious={images.length > 1 ? goPrev : undefined}
                     className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 animate-fade-in"
                 >
                     {/* Close button */}
                     <button
-                        onClick={() => setLightboxIndex(null)}
-                        className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10"
+                        type="button"
+                        onClick={closeLightbox}
+                        className="linen-lightbox-close w-12 h-12 text-white/80 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
                         title="Close Player"
+                        aria-label="Close video player"
+                        data-lightbox-initial-focus
                     >
                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -256,6 +256,7 @@ export default function VideoGallery() {
                             <button
                                 onClick={goPrev}
                                 className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                aria-label="Previous video"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -264,6 +265,7 @@ export default function VideoGallery() {
                             <button
                                 onClick={goNext}
                                 className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                aria-label="Next video"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -288,6 +290,7 @@ export default function VideoGallery() {
                             onClick={downloadOriginal}
                             className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
                             title="Download Video"
+                            aria-label="Download video"
                         >
                             <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -299,7 +302,7 @@ export default function VideoGallery() {
                             </span>
                         )}
                     </div>
-                </div>
+                </AccessibleLightbox>
             )}
         </motion.div>
     )

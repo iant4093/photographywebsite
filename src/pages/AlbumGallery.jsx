@@ -4,6 +4,7 @@ import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils
 import { useAuth } from '../context/auth'
 import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
+import AccessibleLightbox from '../components/AccessibleLightbox'
 import { useScrollRestoration } from '../utils/scroll'
 import { useLocation } from 'react-router'
 import {
@@ -17,6 +18,7 @@ import {
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
+import { navigateBackOr } from '../utils/navigation'
 
 
 
@@ -105,17 +107,11 @@ function AlbumGallery() {
         setLightboxIndex((i) => (i - 1 + images.length) % images.length)
     }, [images.length])
 
-    // Keyboard navigation for lightbox
-    useEffect(() => {
-        if (lightboxIndex === null) return
-        function handleKey(e) {
-            if (e.key === 'ArrowRight') goNext()
-            if (e.key === 'ArrowLeft') goPrev()
-            if (e.key === 'Escape') setLightboxIndex(null)
-        }
-        window.addEventListener('keydown', handleKey)
-        return () => window.removeEventListener('keydown', handleKey)
-    }, [lightboxIndex, goNext, goPrev])
+    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
+    const handleBack = useCallback(
+        () => navigateBackOr(navigate, '/#photo-albums'),
+        [navigate],
+    )
 
     // Download current lightbox image
     const downloadImage = async (e) => {
@@ -182,7 +178,7 @@ function AlbumGallery() {
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}
                 <button
-                    onClick={() => navigate(-1)}
+                    onClick={handleBack}
                     className="linen-gallery-back inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
                 >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -201,7 +197,7 @@ function AlbumGallery() {
                 {!loading && !album && (
                     <div className="py-24 text-center">
                         <p className="text-warm-gray">{loadError || 'This album could not be loaded.'}</p>
-                        <button onClick={() => navigate(-1)} className="mt-4 text-amber hover:underline">Go Back</button>
+                        <button onClick={handleBack} className="mt-4 text-amber hover:underline">Go Back</button>
                     </div>
                 )}
 
@@ -307,39 +303,52 @@ function AlbumGallery() {
 
                         {/* Lightbox Overlay */}
                         {lightboxIndex !== null && images[lightboxIndex] && (
-                                <div
+                                <AccessibleLightbox
+                                    ariaLabel={`Photo viewer for ${album.title}`}
+                                    onClose={closeLightbox}
+                                    onNext={images.length > 1 ? goNext : undefined}
+                                    onPrevious={images.length > 1 ? goPrev : undefined}
                                     className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0 animate-fade-in"
-                                    onClick={() => setLightboxIndex(null)}
-                                    role="dialog"
-                                    aria-modal="true"
-                                    aria-label="Photo viewer"
                                 >
                                     {/* Close button */}
-                                    <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
+                                    <button
+                                        type="button"
+                                        onClick={closeLightbox}
+                                        className="linen-lightbox-close w-12 h-12 text-white/80 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                                        aria-label="Close photo viewer"
+                                        title="Close Photo Viewer"
+                                        data-lightbox-initial-focus
+                                    >
                                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                         </svg>
                                     </button>
 
-                                    {/* Previous arrow */}
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); goPrev() }}
-                                        className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                    >
-                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                        </svg>
-                                    </button>
+                                    {images.length > 1 && (
+                                        <>
+                                            {/* Previous arrow */}
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); goPrev() }}
+                                                className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                                aria-label="Previous photo"
+                                            >
+                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                                </svg>
+                                            </button>
 
-                                    {/* Next arrow */}
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); goNext() }}
-                                        className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                    >
-                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                        </svg>
-                                    </button>
+                                            {/* Next arrow */}
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); goNext() }}
+                                                className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                                aria-label="Next photo"
+                                            >
+                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                </svg>
+                                            </button>
+                                        </>
+                                    )}
 
                                     {/* Image Wrapper */}
                                     <div
@@ -407,6 +416,7 @@ function AlbumGallery() {
                                             onClick={downloadImage}
                                             className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
                                             title="Download Photo"
+                                            aria-label="Download photo"
                                         >
                                             <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -416,7 +426,7 @@ function AlbumGallery() {
                                             {lightboxIndex + 1} / {images.length}
                                         </span>
                                     </div>
-                                </div>
+                                </AccessibleLightbox>
                         )}
                     </div>
                 )}

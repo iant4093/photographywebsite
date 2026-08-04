@@ -57,6 +57,8 @@ function gallery(ui, path) {
         <Route path="/album/:albumId" element={ui} />
         <Route path="/video/:albumId" element={ui} />
         <Route path="/previous" element={<div>Previous page</div>} />
+        <Route path="/" element={<div>Photo archive</div>} />
+        <Route path="/videos" element={<div>Video archive</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -80,6 +82,7 @@ describe('AlbumGallery', () => {
     urls.resolveMediaDownloadUrl.mockImplementation((request) => request().then((value) => value.downloadUrl))
     api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'https://x.test/download' })
     zip.pollZipJob.mockResolvedValue('https://x.test/photos.zip')
+    window.history.replaceState({ idx: 0 }, '')
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -96,15 +99,17 @@ describe('AlbumGallery', () => {
     fireEvent.error(screen.getByRole('img', { name: 'Item 1 from Wild Album' }))
     expect(expiry.refresh).toHaveBeenCalledWith('media-error')
 
-    fireEvent.click(firstPhoto)
+    firstPhotoButton.focus()
+    fireEvent.click(firstPhotoButton)
+    expect(screen.getByRole('dialog', { name: 'Photo viewer for Wild Album' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close photo viewer' })).toHaveFocus()
     expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/one-full')
     expect(screen.getByText('Camera')).toBeInTheDocument()
     expect(screen.getByText('Lens')).toBeInTheDocument()
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
-    const overlay = screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed')
-    fireEvent.click(overlay.querySelector('button.absolute.right-4'))
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed').querySelector('button.absolute.left-4'))
+    fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'ArrowRight' })
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
@@ -115,12 +120,12 @@ describe('AlbumGallery', () => {
     expect(urls.startBrowserDownload).toHaveBeenCalledWith('https://x.test/download', 'one')
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
-    fireEvent.click(screen.getByRole('img', { name: 'Item 1 from Wild Album' }))
-    const reopened = screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed')
-    fireEvent.click(reopened.querySelector('button.absolute.top-6'))
+    expect(firstPhotoButton).toHaveFocus()
+    fireEvent.click(firstPhotoButton)
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
-    fireEvent.click(screen.getByRole('img', { name: 'Item 1 from Wild Album' }))
-    fireEvent.click(screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed'))
+    fireEvent.click(firstPhotoButton)
+    fireEvent.mouseDown(screen.getByRole('dialog', { name: 'Photo viewer for Wild Album' }))
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
   })
 
@@ -150,7 +155,7 @@ describe('AlbumGallery', () => {
     const first = gallery(<AlbumGallery />, '/album/missing')
     expect(await screen.findByText(/may not exist or you may not have access/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Go Back' }))
-    expect(screen.getByText('Previous page')).toBeInTheDocument()
+    expect(screen.getByText('Photo archive')).toBeInTheDocument()
     first.unmount()
 
     api.fetchAlbum.mockResolvedValueOnce(photoData).mockRejectedValueOnce(new Error('refresh failed'))
@@ -172,6 +177,14 @@ describe('AlbumGallery', () => {
     gallery(<AlbumGallery />, '/album/a1')
     expect(await screen.findByText('No photos in this album yet.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Download All' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Albums' }))
+    expect(screen.getByText('Photo archive')).toBeInTheDocument()
+  })
+
+  it('returns to an existing history entry when the album was opened in-app', async () => {
+    window.history.replaceState({ idx: 1 }, '')
+    gallery(<AlbumGallery />, '/album/a1')
+    await screen.findByText('Wild Album')
     fireEvent.click(screen.getByRole('button', { name: 'Back to Albums' }))
     expect(screen.getByText('Previous page')).toBeInTheDocument()
   })
@@ -200,14 +213,16 @@ describe('VideoGallery', () => {
     api.fetchAlbum.mockResolvedValue(videoData)
     urls.resolveMediaDownloadUrl.mockImplementation((request) => request().then((value) => value.downloadUrl))
     api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'https://x.test/video-download' })
+    window.history.replaceState({ idx: 0 }, '')
   })
 
   it('auto-plays a deep link and navigates videos by buttons and keyboard', async () => {
     gallery(<VideoGallery />, '/video/v-album?play=1')
     expect(await screen.findByText('Playing v1')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Video player for Video Album' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close video player' })).toHaveFocus()
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
-    const unlabeledButtons = screen.getAllByRole('button').filter((button) => !button.textContent && !button.title)
-    fireEvent.click(unlabeledButtons.at(-1))
+    fireEvent.click(screen.getByRole('button', { name: 'Next video' }))
     expect(screen.getByText('Playing v2')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'ArrowLeft' })
     expect(screen.getByText('Playing v1')).toBeInTheDocument()
@@ -226,8 +241,8 @@ describe('VideoGallery', () => {
     fireEvent.click(screen.getByTitle('Download Video'))
     await waitFor(() => expect(urls.startBrowserDownload).toHaveBeenCalledWith('https://x.test/video-download', 'v1'))
     fireEvent.click(screen.getByTitle('Close Player'))
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-    expect(screen.getByText('Previous page')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Videos' }))
+    expect(screen.getByText('Video archive')).toBeInTheDocument()
   })
 
   it('reports initial, background, and download failures', async () => {

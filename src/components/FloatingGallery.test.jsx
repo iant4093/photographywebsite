@@ -60,7 +60,7 @@ describe('FloatingGallery', () => {
         expect(firstLaneHrefs).not.toContain('/album/missing-cover')
     })
 
-    it('keeps every visible loop copy interactive across all three lanes', () => {
+    it('keeps visual loop copies clickable while removing duplicates from assistive navigation', () => {
         vi.stubGlobal('IntersectionObserver', undefined)
         const { container } = render(
             <MemoryRouter>
@@ -68,10 +68,12 @@ describe('FloatingGallery', () => {
             </MemoryRouter>,
         )
 
-        expect(screen.getAllByRole('link')).toHaveLength(60)
+        expect(screen.getAllByRole('link')).toHaveLength(30)
         expect(container.querySelectorAll('.floating-print-card')).toHaveLength(60)
-        expect(container.querySelectorAll('.floating-loop-group[aria-hidden="true"]')).toHaveLength(0)
-        expect(container.querySelectorAll('.floating-loop-group[inert]')).toHaveLength(0)
+        expect(container.querySelectorAll('.floating-loop-group[aria-hidden="true"]')).toHaveLength(3)
+        const duplicateLinks = container.querySelectorAll('.floating-loop-group[aria-hidden="true"] a')
+        expect(duplicateLinks).toHaveLength(30)
+        duplicateLinks.forEach((link) => expect(link).toHaveAttribute('tabindex', '-1'))
         expect(container.querySelector('.floating-print-wall')).toHaveClass('is-floating-visible')
         expect(container.querySelector('.floating-lane').style.maskImage)
             .toBe('linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)')

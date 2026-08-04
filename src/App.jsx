@@ -47,15 +47,22 @@ function App() {
     const isAdminRoute = location.pathname.startsWith('/admin')
 
     useEffect(() => {
+        if (location.hash) {
+            const frame = window.requestAnimationFrame(() => {
+                document.getElementById(location.hash.slice(1))?.scrollIntoView?.({ block: 'start' })
+            })
+            return () => window.cancelAnimationFrame(frame)
+        }
         if (navigationType !== 'POP') window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-    }, [location.pathname, navigationType])
+        return undefined
+    }, [location.hash, location.pathname, navigationType])
 
     return (
         <div className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
-            <MotionExperience />
+            <a className="linen-skip-link" href="#main-content">Skip to main content</a>
             <Navbar />
-            <main className="flex-1">
+            <main id="main-content" tabIndex={-1} className="flex-1">
                 <Suspense fallback={<PageLoading />}>
                     <Routes location={location}>
                         <Route path="/" element={<Home />} />
@@ -87,6 +94,7 @@ function App() {
             </main>
             <BackToTop />
             <Footer />
+            <MotionExperience />
         </div>
     )
 }

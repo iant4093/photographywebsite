@@ -40,10 +40,19 @@ describe('App routing shell', () => {
   beforeEach(() => vi.spyOn(window, 'scrollTo').mockImplementation(() => {}))
 
   it('renders the eager home route and persistent shell', () => {
-    render(<MemoryRouter><App /></MemoryRouter>)
+    const { container } = render(<MemoryRouter><App /></MemoryRouter>)
     expect(screen.getByRole('heading', { name: 'Home route' })).toBeInTheDocument()
     expect(screen.getByText('Footer')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content')
+    expect(container.querySelector('main')).toHaveAttribute('id', 'main-content')
     expect(window.history.scrollRestoration).toBe('manual')
+  })
+
+  it('scrolls a canonical fallback hash target into view', async () => {
+    const scrollIntoView = vi.fn()
+    const { container } = render(<MemoryRouter initialEntries={['/#main-content']}><App /></MemoryRouter>)
+    container.querySelector('main').scrollIntoView = scrollIntoView
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }))
   })
 
   it('can be evaluated safely during server-side tooling without window', async () => {

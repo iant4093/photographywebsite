@@ -44,6 +44,43 @@
   outline-offset: 4px;
 }
 
+.linen-site .linen-skip-link {
+  position: fixed;
+  z-index: 200;
+  top: 0.75rem;
+  left: 0.75rem;
+  padding: 0.7rem 1rem;
+  color: var(--color-cream);
+  background: var(--color-charcoal);
+  border: 1px solid var(--color-cream);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: translateY(calc(-100% - 1rem));
+  transition: transform 180ms ease;
+}
+
+.linen-site .linen-skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Keep full-screen media controls above the scroll-reactive site chrome. */
+.linen-lightbox {
+  z-index: 1000 !important;
+}
+
+.linen-lightbox .linen-lightbox-close {
+  position: fixed;
+  z-index: 2;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+}
+
+.linen-lightbox-open .linen-site :is(.linen-nav, .editorial-progress) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .linen-site [class*="rounded-"]:not(.rounded-full) {
   border-radius: 2px;
 }
@@ -131,6 +168,14 @@
 
 .linen-site .linen-desktop-links a:hover::after {
   right: 0;
+}
+
+.linen-site .linen-desktop-links a.is-active::after {
+  right: 0;
+}
+
+.linen-site .linen-menu-list > a.is-active:not(.linen-menu-action) {
+  color: var(--color-amber-dark);
 }
 
 .linen-site .linen-menu-toggle {
@@ -640,21 +685,33 @@
   position: fixed;
   z-index: 45;
   top: calc(74px + 0.75rem);
-  right: 0.25rem;
+  right: 0;
   bottom: 0.75rem;
+  width: 44px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.linen-site .editorial-progress::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0.25rem;
+  bottom: 0;
   width: 14px;
   border-inline: 1px solid rgba(41, 36, 31, 0.22);
   background:
     repeating-linear-gradient(180deg, rgba(41, 36, 31, 0.18) 0 1px, transparent 1px 12px),
     linear-gradient(90deg, transparent 5px, rgba(41, 36, 31, 0.3) 5px 7px, transparent 7px);
-  cursor: pointer;
-  touch-action: none;
+  pointer-events: none;
 }
 
 .linen-site .editorial-progress i {
   position: absolute;
   top: 0;
-  left: -1px;
+  right: 0.25rem;
   width: 14px;
   height: clamp(5rem, 18vh, 9rem);
   border: 1px solid rgba(41, 36, 31, 0.72);
@@ -928,12 +985,18 @@
 
   .linen-site .editorial-progress {
     top: calc(74px + 0.5rem);
-    right: 0.18rem;
+    right: 0;
     bottom: 0.5rem;
+    width: 44px;
+  }
+
+  .linen-site .editorial-progress::before {
+    right: 0.18rem;
     width: 12px;
   }
 
   .linen-site .editorial-progress i {
+    right: 0.18rem;
     width: 12px;
     height: clamp(4rem, 16vh, 6rem);
   }

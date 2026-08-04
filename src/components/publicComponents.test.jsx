@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -68,11 +68,19 @@ describe('navigation and metadata', () => {
 
   it('opens and closes the guest menu and resets the body lock', () => {
     const { unmount } = routed(<Navbar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }))
+    const toggle = screen.getByRole('button', { name: 'Open menu' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAttribute('aria-controls', 'site-menu')
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: 'Close menu' })).toHaveAttribute('aria-expanded', 'true')
     expect(document.body.style.overflow).toBe('hidden')
-    expect(screen.getByRole('link', { name: 'Log In' })).toHaveAttribute('href', '/login')
-    fireEvent.click(screen.getByRole('link', { name: 'Gallery' }))
+    const menu = document.getElementById('site-menu')
+    expect(menu).not.toHaveAttribute('inert')
+    expect(within(menu).getByRole('link', { name: 'Sign In' })).toHaveAttribute('href', '/login')
+    fireEvent.keyDown(window, { key: 'Escape' })
     expect(document.body.style.overflow).toBe('unset')
+    expect(document.getElementById('site-menu')).toHaveAttribute('inert')
+    expect(screen.getByRole('button', { name: 'Open menu' })).toHaveFocus()
     unmount()
     expect(document.body.style.overflow).toBe('unset')
   })
@@ -80,13 +88,15 @@ describe('navigation and metadata', () => {
   it.each([
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],
-    ['Search Archive', '/search'],
-    ['Contact Me', '/contact'],
-    ['Log In', '/login'],
+    ['Search', '/search'],
+    ['Contact', '/contact'],
+    ['Sign In', '/login'],
   ])('closes the guest menu through %s', (name, destination) => {
     const view = routed(<Navbar />)
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }))
-    const link = screen.getByRole('link', { name })
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    const link = name instanceof RegExp
+      ? screen.getByRole('link', { name })
+      : within(document.getElementById('site-menu')).getByRole('link', { name })
     expect(link).toHaveAttribute('href', destination)
     fireEvent.click(link)
     expect(document.body.style.overflow).toBe('unset')
@@ -98,8 +108,8 @@ describe('navigation and metadata', () => {
     const logout = vi.fn()
     const { container } = routed(<Navbar />, { user: { email: 'admin@test' }, isAdmin: true, logout })
     const nav = container.querySelector('nav')
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }))
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/admin')
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(within(document.getElementById('site-menu')).getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/admin')
     fireEvent.click(screen.getByRole('button', { name: 'Log Out' }))
     expect(logout).toHaveBeenCalledOnce()
 
@@ -114,12 +124,13 @@ describe('navigation and metadata', () => {
   it('routes a signed-in viewer to the user dashboard and closes through every menu link', () => {
     const auth = { user: { email: 'viewer@test' }, isAdmin: false, logout: vi.fn() }
     routed(<Navbar />, auth)
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }))
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/dashboard')
-    fireEvent.click(screen.getByRole('link', { name: 'Dashboard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    const menu = document.getElementById('site-menu')
+    expect(within(menu).getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/dashboard')
+    fireEvent.click(within(menu).getByRole('link', { name: 'Dashboard' }))
     expect(document.body.style.overflow).toBe('unset')
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }))
-    fireEvent.click(screen.getByRole('link', { name: 'Videos' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    fireEvent.click(within(menu).getByRole('link', { name: 'Videos' }))
     expect(document.body.style.overflow).toBe('unset')
   })
 
@@ -169,6 +180,24 @@ describe('scroll controls and progressive loading', () => {
     fireEvent.scroll(window)
     unmount()
     expect(cancel).toHaveBeenCalledWith(77)
+  })
+
+  it('hides BackToTop while the footer is visible', () => {
+    let intersectionCallback
+    const disconnect = vi.fn()
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback) { intersectionCallback = callback }
+      observe() {}
+      disconnect() { disconnect() }
+    })
+    Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 600 })
+    const { unmount } = render(<><BackToTop /><footer>Footer</footer></>)
+    fireEvent.scroll(window)
+    expect(screen.getByRole('button', { name: 'Back to top' })).toBeInTheDocument()
+    act(() => intersectionCallback([{ isIntersecting: true }]))
+    expect(screen.queryByRole('button', { name: 'Back to top' })).toBeNull()
+    unmount()
+    expect(disconnect).toHaveBeenCalledOnce()
   })
 
   it('restores, persists, and operates both ScrollRow arrows', () => {

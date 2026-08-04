@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 export default function BackToTop() {
     const [isVisible, setIsVisible] = useState(false)
+    const [footerVisible, setFooterVisible] = useState(false)
     const visibleRef = useRef(false)
 
     useEffect(() => {
@@ -24,7 +25,17 @@ export default function BackToTop() {
         }
     }, [])
 
-    if (!isVisible) return null
+    useEffect(() => {
+        const footer = document.querySelector('footer')
+        if (!footer || typeof IntersectionObserver === 'undefined') return undefined
+        const observer = new IntersectionObserver(([entry]) => {
+            setFooterVisible(entry.isIntersecting)
+        }, { threshold: 0.01 })
+        observer.observe(footer)
+        return () => observer.disconnect()
+    }, [])
+
+    if (!isVisible || footerVisible) return null
     return (
         <button
             type="button"
