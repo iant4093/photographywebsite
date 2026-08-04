@@ -59,7 +59,7 @@ describe('admin hero cover upload', () => {
     expect(screen.getByText(/under the recommended 2560-pixel width/)).toBeInTheDocument()
 
     fireEvent.submit(container.querySelector('form'))
-    expect(await screen.findByText('Hero cover updated successfully.')).toBeInTheDocument()
+    expect(await screen.findByText('Hero cover processing started successfully.')).toBeInTheDocument()
     expect(api.requestHeroUploadUrl).toHaveBeenCalledWith('admin-token', file, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(api.uploadFileToS3).toHaveBeenCalledWith(
       'https://upload.example',

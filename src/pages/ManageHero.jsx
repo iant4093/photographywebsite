@@ -84,7 +84,7 @@ export default function ManageHero() {
             const etag = uploadResponse.headers.get('ETag')
             if (!etag) throw new Error('The upload finished without a receipt. Please try again.')
 
-            setStatus('Publishing the new cover…')
+            setStatus('Creating responsive high-quality versions…')
             await completeHeroUpload(token, etag, { signal: controller.signal })
             setSuccess(true)
             setStatus('')
@@ -122,8 +122,8 @@ export default function ManageHero() {
 
                 {success && (
                     <div className="mb-8 p-5 rounded-2xl bg-green-50 border border-green-200 text-green-800" role="status">
-                        <p className="font-medium">Hero cover updated successfully.</p>
-                        <p className="mt-1 text-sm">The CDN is refreshing the cover now; it may take a short moment to appear everywhere.</p>
+                        <p className="font-medium">Hero cover processing started successfully.</p>
+                        <p className="mt-1 text-sm">The original is preserved exactly while optimized display sizes are created. The new cover will appear automatically in about a minute.</p>
                     </div>
                 )}
                 {error && (
@@ -167,7 +167,7 @@ export default function ManageHero() {
                         />
                         <p className="mt-3 text-sm text-warm-gray leading-relaxed">
                             JPEG, PNG, WebP, or AVIF; up to 50 MB. For a crisp result, use a landscape image at least 2560 pixels wide.
-                            The exact selected file is uploaded—no resizing, recompression, preview generation, or Google Drive backup.
+                            The exact selected file is retained as the unmodified master with no Google Drive backup. Responsive high-quality display versions are generated automatically for fast loading.
                         </p>
                         {file && (
                             <p className="mt-2 text-sm font-medium text-charcoal">

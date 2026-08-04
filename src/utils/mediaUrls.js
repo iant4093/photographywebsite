@@ -10,6 +10,9 @@ const DISPLAY_URL_FIELDS = [
 
 const PREVIEW_WIDTHS = [640, 1280]
 export const HERO_COVER_KEY = 'site/hero/home'
+export const HERO_MANIFEST_KEY = 'site/hero/manifest.json'
+const HERO_VERSION_PATTERN = /^[a-f0-9]{32}$/
+const ALBUM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 function safePreviewUrl(value) {
     if (typeof value !== 'string' || value.length > 4096 || /[\s,]/.test(value)) return ''
@@ -109,6 +112,102 @@ export function cdnUrl(key) {
 
 export function heroCoverUrl() {
     return cdnUrl(HERO_COVER_KEY)
+}
+
+export function heroManifestUrl() {
+    return cdnUrl(HERO_MANIFEST_KEY)
+}
+
+export function normalizeHeroManifest(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const version = typeof value.version === 'string' ? value.version.toLowerCase() : ''
+    if (value.schemaVersion !== 1 || !HERO_VERSION_PATTERN.test(version)) return null
+    const sourceWidth = Number(value.source?.width)
+    const sourceHeight = Number(value.source?.height)
+    if (!Number.isSafeInteger(sourceWidth) || sourceWidth < 1 || !Number.isSafeInteger(sourceHeight) || sourceHeight < 1) return null
+
+    const formats = { avif: '.avif', webp: '.webp', jpeg: '.jpg' }
+    const variants = {}
+    try {
+        for (const [format, extension] of Object.entries(formats)) {
+            const candidates = value.variants?.[format]
+            if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > 5) return null
+            let previousWidth = 0
+            variants[format] = candidates.map((candidate) => {
+                const width = Number(candidate?.width)
+                const height = Number(candidate?.height)
+                const key = candidate?.key
+                const expectedPrefix = `site/hero/versions/v1/${version}/hero-`
+                if (
+                    !Number.isSafeInteger(width)
+                    || width <= previousWidth
+                    || width > 2560
+                    || !Number.isSafeInteger(height)
+                    || height < 1
+                    || typeof key !== 'string'
+                    || !key.startsWith(expectedPrefix)
+                    || !key.endsWith(extension)
+                    || key !== `${expectedPrefix}${width}${extension}`
+                ) throw new TypeError('Invalid hero manifest')
+                previousWidth = width
+                return { width, height, url: cdnUrl(key) }
+            })
+            if (variants[format].some(({ url }) => !url)) return null
+        }
+    } catch {
+        return null
+    }
+    return {
+        version,
+        source: { width: sourceWidth, height: sourceHeight },
+        variants,
+    }
+}
+
+export async function fetchHeroManifest({ signal } = {}) {
+    const url = heroManifestUrl()
+    if (!url) return null
+    const response = await fetch(url, {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-cache',
+        signal,
+    })
+    if (!response.ok) return null
+    try {
+        return normalizeHeroManifest(await response.json())
+    } catch {
+        return null
+    }
+}
+
+export function heroManifestSrcSet(manifest, format) {
+    const candidates = manifest?.variants?.[format]
+    return Array.isArray(candidates)
+        ? candidates.map(({ width, url }) => `${url} ${width}w`).join(', ')
+        : ''
+}
+
+export async function albumCoverPreviewSrcSet(album) {
+    const albumId = typeof album?.albumId === 'string' ? album.albumId.toLowerCase() : ''
+    if (!ALBUM_ID_PATTERN.test(albumId) || !globalThis.crypto?.subtle) return ''
+    const cover = album?.coverImageUrl
+    if (typeof cover !== 'string' || !cover.startsWith('https://')) return ''
+    let rawKey
+    try {
+        const parsed = new URL(cover)
+        if (cdnDomain && parsed.hostname !== cdnDomain) return ''
+        rawKey = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''))
+    } catch {
+        return ''
+    }
+    if (!rawKey.startsWith('albums/') || rawKey.includes('\\') || rawKey.split('/').some((part) => !part || part === '.' || part === '..')) return ''
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawKey))
+    const mediaId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
+    return PREVIEW_WIDTHS
+        .map((width) => `${cdnUrl(`albums/${albumId}/preview/v2/${mediaId}-w${width}.webp`)} ${width}w`)
+        .join(', ')
 }
 
 export function albumCoverUrl(album) {

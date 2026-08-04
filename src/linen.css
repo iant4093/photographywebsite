@@ -849,6 +849,11 @@
   filter: saturate(0.86) contrast(0.96);
 }
 
+.linen-site .floating-card-image {
+  width: 100%;
+  height: 100%;
+}
+
 .linen-site .floating-frame-number {
   position: absolute;
   z-index: 2;

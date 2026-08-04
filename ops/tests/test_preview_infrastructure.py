@@ -91,12 +91,15 @@ class PreviewWorkerTests(unittest.TestCase):
             self.assertEqual(package["dependencies"][dependency], "3.1091.0")
         self.assertEqual(lock["packages"][""]["dependencies"], package["dependencies"])
 
-    def test_worker_has_no_media_delete_permission(self) -> None:
+    def test_worker_cannot_delete_album_media_and_confines_hero_cleanup(self) -> None:
         worker = resource_block("PreviewWorkerFunction")
         self.assertIn("s3:GetObjectVersion", worker)
         self.assertIn("s3:PutObjectTagging", worker)
         self.assertIn("/albums/*/preview/v2/*", worker)
-        self.assertNotIn("s3:DeleteObject", worker)
+        album_permissions = worker.split("Resource: !Sub '${ImagesBucket.Arn}/albums/*'", 1)[0]
+        self.assertNotIn("s3:DeleteObject", album_permissions)
+        self.assertIn("${ImagesBucket.Arn}/site/hero/versions/v1/*", worker)
+        self.assertIn("s3:DeleteObject", worker)
         self.assertNotIn("dynamodb:DeleteItem", worker)
 
     def test_exact_api_functions_receive_external_metadata_permissions(self) -> None:
@@ -184,6 +187,7 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
 
     def test_failures_are_metricized_and_alarmable(self) -> None:
         self.assertIn("preview_job_failed", resource_block("PreviewJobFailureMetricFilter"))
+        self.assertIn("hero_derivatives_failed", resource_block("PreviewJobFailureMetricFilter"))
         for logical_id in (
             "PreviewDeadLetterQueueAlarm",
             "PreviewQueueAgeAlarm",

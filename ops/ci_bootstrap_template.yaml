@@ -47,6 +47,11 @@ Parameters:
     Default: 180
     MinValue: 90
     MaxValue: 3650
+  CentralAccessLogBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$'
+    Description: Optional account-local S3 server-access-log destination.
 
 Rules:
   MustDeployInApplicationRegion:
@@ -66,6 +71,7 @@ Rules:
 
 Conditions:
   CreateGitHubOidcProvider: !Equals [!Ref GitHubOidcProviderMode, create]
+  EnableCentralAccessLogging: !Not [!Equals [!Ref CentralAccessLogBucketName, '']]
 
 Resources:
   GitHubOidcProvider:
@@ -148,6 +154,11 @@ Resources:
             NoncurrentVersionExpiration:
               NoncurrentDays: !Ref ReleaseArtifactNoncurrentRetentionDays
             ExpiredObjectDeleteMarker: false
+      LoggingConfiguration: !If
+        - EnableCentralAccessLogging
+        - DestinationBucketName: !Ref CentralAccessLogBucketName
+          LogFilePrefix: s3-account/ci-releases/
+        - !Ref AWS::NoValue
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -1092,21 +1103,6 @@ Resources:
                 aws:ResourceTag/Application: IanTruongPhotography
               Bool:
                 kms:GrantIsForAWSResource: 'true'
-          - Sid: UseTaggedApplicationKeysForDynamoDb
-            Effect: Allow
-            Action:
-              - kms:Decrypt
-              - kms:DescribeKey
-              - kms:Encrypt
-              - kms:GenerateDataKey
-              - kms:GenerateDataKeyWithoutPlaintext
-              - kms:ReEncryptFrom
-              - kms:ReEncryptTo
-            Resource: !Sub 'arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*'
-            Condition:
-              StringEquals:
-                aws:ResourceTag/Application: IanTruongPhotography
-                kms:ViaService: !Sub 'dynamodb.us-west-2.${AWS::URLSuffix}'
           - Sid: ManageApplicationLogsMetricsAndAlarms
             Effect: Allow
             Action:

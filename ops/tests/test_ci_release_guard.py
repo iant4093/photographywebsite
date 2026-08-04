@@ -294,7 +294,13 @@ class ReleaseIntentTests(unittest.TestCase):
         ]
         self.assertEqual(
             {rule["logicalId"] for rule in role_rules},
-            {"CreateAlbumFunctionRole", "UpdateAlbumFunctionRole", "CreateZipFunctionRole"},
+            {
+                "CreateAlbumFunctionRole",
+                "UpdateAlbumFunctionRole",
+                "CreateZipFunctionRole",
+                "HeroCoverFunctionRole",
+                "PreviewWorkerFunctionRole",
+            },
         )
         for rule in role_rules:
             self.assertEqual(rule["action"], "Modify")

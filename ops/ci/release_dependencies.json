@@ -38,9 +38,9 @@
     {"logicalId": "GetPublicAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "GetSharedAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "GetUploadUrlFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
-    {"logicalId": "HeroCoverFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn", "ImagesCloudFront.Id"]},
+    {"logicalId": "HeroCoverFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn", "PreviewQueue.Arn"]},
     {"logicalId": "GoogleDriveBackupFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
-    {"logicalId": "PreviewWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
+    {"logicalId": "PreviewWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "ImagesBucket.Arn", "ImagesCloudFront.Id", "PreviewDataKey.Arn", "PreviewMetadataTable.Arn", "PreviewQueue.QueueName"]},
     {"logicalId": "UpdateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "UpdateImageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "WorkerZipFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
@@ -49,7 +49,7 @@
     {"logicalId": "Api", "resourceType": "AWS::ApiGatewayV2::Api", "propertyPath": "Body", "causingEntities": ["AddImagesFunction.Arn", "CompleteChallengeFunction.Arn", "ContactFunction.Arn", "CreateAlbumFunction.Arn", "CreateUserFunction.Arn", "CreateZipFunction.Arn", "DeleteAlbumFunction.Arn", "DeleteImagesFunction.Arn", "DeleteUserFunction.Arn", "EditUserFunction.Arn", "GetAlbumFunction.Arn", "GetAlbumsFunction.Arn", "GetCostReportFunction.Arn", "GetDownloadUrlFunction.Arn", "GetGoogleDriveUsageFunction.Arn", "GetPublicAlbumFunction.Arn", "GetPublicAlbumsFunction.Arn", "GetSharedAlbumFunction.Arn", "GetUploadUrlFunction.Arn", "HeroCoverFunction.Arn", "ListUsersFunction.Arn", "LoginFunction.Arn", "UpdateAlbumFunction.Arn", "UpdateImageFunction.Arn"]},
     {"logicalId": "ImagesBucketPolicy", "resourceType": "AWS::S3::BucketPolicy", "propertyPath": "PolicyDocument", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "ImagesBucket", "resourceType": "AWS::S3::Bucket", "propertyPath": "NotificationConfiguration", "causingEntities": ["TagMediaObjectFunction.Arn"]},
-    {"logicalId": "ImagesCloudFront", "resourceType": "AWS::CloudFront::Distribution", "propertyPath": "DistributionConfig", "causingEntities": ["HeroMediaCachePolicy.Id", "HeroMediaResponseHeadersPolicy.Id", "ImagesBucket.RegionalDomainName"]},
-    {"logicalId": "MediaAccessLogsBucketPolicy", "resourceType": "AWS::S3::BucketPolicy", "propertyPath": "PolicyDocument", "causingEntities": ["ImagesBucket.Arn"]}
+    {"logicalId": "ImagesCloudFront", "resourceType": "AWS::CloudFront::Distribution", "propertyPath": "DistributionConfig", "causingEntities": ["HeroMediaCachePolicy.Id", "HeroMediaResponseHeadersPolicy.Id", "ImagesBucket.RegionalDomainName", "PreviewMediaCachePolicy.Id", "PreviewMediaResponseHeadersPolicy.Id"]},
+    {"logicalId": "MediaAccessLogsBucketPolicy", "resourceType": "AWS::S3::BucketPolicy", "propertyPath": "PolicyDocument", "causingEntities": ["ImagesBucket.Arn", "MediaAccessLogsBucket.Arn"]}
   ]
 }

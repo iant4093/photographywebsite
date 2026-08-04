@@ -40,8 +40,12 @@ describe('Home complete public catalog', () => {
     catalog.getCatalogSnapshot.mockReturnValue(null)
     scroll.isRevealed.mockReturnValue(false)
     window.matchMedia = vi.fn(() => ({ matches: true }))
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('managed hero unavailable')))
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
 
   it('renders every automatically fetched page grouped and sorted without a load-more affordance', async () => {
     catalog.loadCompleteCatalog.mockImplementation(async ({ fetchPage, onPage }) => {
@@ -181,6 +185,26 @@ describe('Home complete public catalog', () => {
     expect(fallback).toHaveAttribute('srcset')
     expect(fallback).toHaveClass('home-hero-media', 'parallax-hero')
     expect(container.querySelector('source[type="image/avif"]')).toBeTruthy()
+  })
+
+  it('switches to validated immutable responsive hero variants when the manifest is available', async () => {
+    const version = '0123456789abcdef0123456789abcdef'
+    const variants = Object.fromEntries(['avif', 'webp', 'jpeg'].map((format) => [format, [640, 1280].map((width) => ({
+      width,
+      height: Math.round(width * 0.6),
+      key: `site/hero/versions/v1/${version}/hero-${width}.${format === 'jpeg' ? 'jpg' : format}`,
+    }))]))
+    globalThis.fetch.mockResolvedValue(new Response(JSON.stringify({
+      schemaVersion: 1,
+      version,
+      source: { width: 3000, height: 1800 },
+      variants,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
+    routed(<Home />)
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Golden hour landscape' }))
+      .toHaveAttribute('src', expect.stringContaining(`/site/hero/versions/v1/${version}/hero-1280.jpg`)))
+    expect(screen.getByRole('img', { name: 'Golden hour landscape' })).toHaveAttribute('srcset')
   })
 })
 

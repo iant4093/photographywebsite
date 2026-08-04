@@ -551,37 +551,8 @@ fi
         for forbidden in ("kms:ListGrants", "kms:RevokeGrant", "kms:RetireGrant"):
             self.assertNotIn(forbidden, service_grants)
 
-        dynamodb_crypto = statement_block(
-            execution, "UseTaggedApplicationKeysForDynamoDb"
-        )
-        for action in (
-            "kms:Decrypt",
-            "kms:DescribeKey",
-            "kms:Encrypt",
-            "kms:GenerateDataKey",
-            "kms:GenerateDataKeyWithoutPlaintext",
-            "kms:ReEncryptFrom",
-            "kms:ReEncryptTo",
-        ):
-            self.assertIn(f"- {action}", dynamodb_crypto)
-        self.assertIn(
-            "aws:ResourceTag/Application: IanTruongPhotography", dynamodb_crypto
-        )
-        self.assertIn(
-            "kms:ViaService: !Sub 'dynamodb.us-west-2.${AWS::URLSuffix}'",
-            dynamodb_crypto,
-        )
-        self.assertIn(
-            "arn:${AWS::Partition}:kms:us-west-2:${AWS::AccountId}:key/*",
-            dynamodb_crypto,
-        )
-        for forbidden in (
-            "kms:CreateGrant",
-            "kms:ListGrants",
-            "kms:RevokeGrant",
-            "kms:RetireGrant",
-        ):
-            self.assertNotIn(forbidden, dynamodb_crypto)
+        self.assertNotIn("UseTaggedApplicationKeysForDynamoDb", execution)
+        self.assertNotIn("kms:ViaService: !Sub 'dynamodb.us-west-2.${AWS::URLSuffix}'", execution)
 
         transform = statement_block(execution, "InvokeExactSamTransform")
         self.assertIn("Action: cloudformation:CreateChangeSet", transform)

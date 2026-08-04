@@ -348,9 +348,12 @@ Resources:
 
   RateLimitTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'GoldenHour-RateLimits-${Stage}'
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
       # Keep the security telemetry recoverable and satisfy the account-wide
       # DynamoDB PITR posture rule. TTL still bounds normal record lifetime;
       # PITR is only for incident recovery from accidental or malicious writes.
@@ -938,6 +941,17 @@ Resources:
                 aws:SourceAccount: !Ref AWS::AccountId
               ArnEquals:
                 aws:SourceArn: !GetAtt ImagesBucket.Arn
+          - Sid: AllowAccountBucketServerAccessLogs
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${MediaAccessLogsBucket.Arn}/s3-account/*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:s3:::*'
 
   ImagesOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -972,6 +986,15 @@ Resources:
           ResponseHeadersPolicyId: !Ref MediaResponseHeadersPolicy
           Compress: true
         CacheBehaviors:
+          - PathPattern: 'site/hero/versions/*'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: !Ref PreviewMediaCachePolicy
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+            ResponseHeadersPolicyId: !Ref PreviewMediaResponseHeadersPolicy
+            Compress: false
           - PathPattern: 'site/hero/*'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
@@ -1944,6 +1967,7 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           MAX_PREVIEW_SOURCE_BYTES: '104857600'
           MAX_PREVIEW_OUTPUT_BYTES: '20971520'
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt PreviewQueue.QueueName
@@ -1964,10 +1988,39 @@ Resources:
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action:
+                - s3:GetObject
+                - s3:GetObjectVersion
+                - s3:DeleteObject
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/temp-zips/hero-pending'
+                - !Sub '${ImagesBucket.Arn}/site/hero/home'
+                - !Sub '${ImagesBucket.Arn}/site/hero/original'
+                - !Sub '${ImagesBucket.Arn}/site/hero/manifest.json'
+            - Effect: Allow
+              Action:
                 - s3:PutObject
                 - s3:GetObjectTagging
                 - s3:PutObjectTagging
               Resource: !Sub '${ImagesBucket.Arn}/albums/*/preview/v2/*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/site/hero/home'
+                - !Sub '${ImagesBucket.Arn}/site/hero/original'
+                - !Sub '${ImagesBucket.Arn}/site/hero/manifest.json'
+                - !Sub '${ImagesBucket.Arn}/site/hero/versions/v1/*'
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: site/hero/versions/v1/*
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
             - Effect: Allow
               Action: kms:Decrypt
               Resource: !GetAtt PreviewDataKey.Arn
@@ -2323,7 +2376,7 @@ Resources:
       Environment:
         Variables:
           IMAGES_BUCKET: !Ref ImagesBucket
-          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
+          HERO_DERIVATIVE_QUEUE_URL: !Ref PreviewQueue
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
@@ -2332,20 +2385,11 @@ Resources:
               Action:
                 - s3:GetObject
                 - s3:GetObjectTagging
-                - s3:DeleteObject
-                - s3:PutObject
-                - s3:PutObjectTagging
               Resource:
                 - !Sub '${ImagesBucket.Arn}/temp-zips/hero-pending'
             - Effect: Allow
-              Action:
-                - s3:PutObject
-                - s3:PutObjectTagging
-              Resource:
-                - !Sub '${ImagesBucket.Arn}/site/hero/home'
-            - Effect: Allow
-              Action: cloudfront:CreateInvalidation
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Action: sqs:SendMessage
+              Resource: !GetAtt PreviewQueue.Arn
       Events:
         HeroCoverOperation:
           Type: HttpApi
@@ -2644,7 +2688,7 @@ Resources:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref ApplicationLogGroup
-      FilterPattern: '"preview_job_failed"'
+      FilterPattern: '{ ($.event = "preview_job_failed") || ($.event = "hero_derivatives_failed") }'
       MetricTransformations:
         - MetricNamespace: IanTruongPhotography/PreviewV2
           MetricName: PreviewJobFailure

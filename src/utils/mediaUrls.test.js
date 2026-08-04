@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+    albumCoverPreviewSrcSet,
     albumCoverUrl,
     annotateMediaExpiry,
     cdnUrl,
+    fetchHeroManifest,
     heroCoverUrl,
+    heroManifestSrcSet,
     mediaDisplayUrl,
     mediaExpiresAt,
     mediaFileName,
@@ -12,11 +15,28 @@ import {
     mediaPreviewCandidates,
     mediaPreviewSrcSet,
     mediaThumbnailUrl,
+    normalizeHeroManifest,
     resolveMediaDownloadUrl,
     signedUrlExpiresAt,
 } from './mediaUrls'
 
+const HERO_VERSION = '0123456789abcdef0123456789abcdef'
+const heroManifest = {
+    schemaVersion: 1,
+    version: HERO_VERSION,
+    source: { width: 3000, height: 2000 },
+    variants: Object.fromEntries(['avif', 'webp', 'jpeg'].map((format) => [
+        format,
+        [640, 1280].map((width) => ({
+            width,
+            height: Math.round(width * (2 / 3)),
+            key: `site/hero/versions/v1/${HERO_VERSION}/hero-${width}.${format === 'jpeg' ? 'jpg' : format}`,
+        })),
+    ])),
+}
+
 describe('media URL compatibility', () => {
+    afterEach(() => vi.unstubAllGlobals())
     it('preserves absolute URLs and resolves legacy CDN keys', () => {
         expect(cdnUrl('https://example.com/signed')).toBe('https://example.com/signed')
         expect(cdnUrl('/albums/example.jpg')).toMatch(/\/albums\/example\.jpg$/)
@@ -36,6 +56,38 @@ describe('media URL compatibility', () => {
             .toBe('https://example.com/view')
         expect(mediaHlsUrl({ hlsUrl: 'https://example.com/stream.m3u8' }))
             .toBe('https://example.com/stream.m3u8')
+    })
+
+    it('accepts only complete immutable hero manifests and fetches without credentials', async () => {
+        const normalized = normalizeHeroManifest(heroManifest)
+        expect(normalized.version).toBe(HERO_VERSION)
+        expect(heroManifestSrcSet(normalized, 'webp')).toContain('hero-1280.webp 1280w')
+        expect(normalizeHeroManifest({ ...heroManifest, version: '../unsafe' })).toBeNull()
+        expect(normalizeHeroManifest({
+            ...heroManifest,
+            variants: { ...heroManifest.variants, avif: [{ ...heroManifest.variants.avif[0], key: 'https://evil.test/x' }] },
+        })).toBeNull()
+
+        const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(heroManifest), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        }))
+        vi.stubGlobal('fetch', fetch)
+        await expect(fetchHeroManifest()).resolves.toEqual(normalized)
+        expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/site/hero/manifest.json'), expect.objectContaining({
+            credentials: 'omit',
+            cache: 'no-cache',
+        }))
+    })
+
+    it('derives deterministic responsive album-cover previews only inside the album namespace', async () => {
+        const albumId = '123e4567-e89b-42d3-a456-426614174000'
+        const cover = cdnUrl(`albums/${albumId}/original/cover.jpg`)
+        const srcSet = await albumCoverPreviewSrcSet({ albumId, coverImageUrl: cover })
+        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v2/[a-f0-9]{24}-w640\\.webp 640w`))
+        expect(srcSet).toContain('-w1280.webp 1280w')
+        await expect(albumCoverPreviewSrcSet({ albumId, coverImageUrl: 'https://evil.test/cover.jpg' })).resolves.toBe('')
+        await expect(albumCoverPreviewSrcSet({ albumId: 'not-a-uuid', coverImageUrl: cover })).resolves.toBe('')
     })
 
     it('uses the opaque media id for API actions and derives a friendly filename', () => {

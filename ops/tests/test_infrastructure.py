@@ -247,6 +247,9 @@ class DataProtectionTests(unittest.TestCase):
 
     def test_rate_limit_security_telemetry_has_point_in_time_recovery(self) -> None:
         block = resource_block("RateLimitTable")
+        self.assertIn("DeletionPolicy: Retain", block)
+        self.assertIn("UpdateReplacePolicy: Retain", block)
+        self.assertIn("DeletionProtectionEnabled: true", block)
         self.assertIn("PointInTimeRecoverySpecification:", block)
         self.assertIn("PointInTimeRecoveryEnabled: true", block)
         self.assertIn("TimeToLiveSpecification:", block)
@@ -354,8 +357,9 @@ class DataProtectionTests(unittest.TestCase):
             bucket,
         )
 
-    def test_admin_hero_upload_is_fixed_key_unmodified_and_least_privilege(self) -> None:
+    def test_admin_hero_upload_queues_responsive_publication_with_least_privilege(self) -> None:
         function = resource_block("HeroCoverFunction")
+        worker = resource_block("PreviewWorkerFunction")
         distribution = resource_block("ImagesCloudFront")
         policy = resource_block("ImagesBucketPolicy")
         cache = resource_block("HeroMediaCachePolicy")
@@ -363,12 +367,17 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("Path: /admin/hero/{operation}", function)
         self.assertIn("ReservedConcurrentExecutions: 2", function)
         self.assertIn("${ImagesBucket.Arn}/temp-zips/hero-pending", function)
-        self.assertIn("${ImagesBucket.Arn}/site/hero/home", function)
+        self.assertIn("Action: sqs:SendMessage", function)
+        self.assertNotIn("${ImagesBucket.Arn}/site/hero/home", function)
         self.assertNotIn("GoogleDriveBackupFunction", function)
         self.assertNotIn("albums/*", function)
-        self.assertIn("cloudfront:CreateInvalidation", function)
+        self.assertNotIn("cloudfront:CreateInvalidation", function)
+        self.assertIn("${ImagesBucket.Arn}/site/hero/original", worker)
+        self.assertIn("${ImagesBucket.Arn}/site/hero/versions/v1/*", worker)
+        self.assertIn("cloudfront:CreateInvalidation", worker)
         self.assertIn("DenyCloudFrontTemporaryZipReads", policy)
         self.assertIn("PathPattern: 'site/hero/*'", distribution)
+        self.assertIn("PathPattern: 'site/hero/versions/*'", distribution)
         self.assertIn("Compress: false", distribution)
         self.assertIn("DefaultTTL: 86400", cache)
         self.assertIn("Value: public, max-age=0, must-revalidate", headers)

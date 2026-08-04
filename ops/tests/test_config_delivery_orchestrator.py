@@ -27,13 +27,6 @@ STACK_ID = (
 )
 TOKEN = "v1:" + hashlib.sha256(STACK_ID.encode("utf-8")).hexdigest()
 OWNED_ID = f"config-delivery-channel:{ACCOUNT}:{REGION}:{CHANNEL}:owned"
-RESOURCE_TYPES = [
-    "AWS::S3::Bucket",
-    "AWS::DynamoDB::Table",
-    "AWS::Lambda::Function",
-]
-
-
 def inline_handler_source() -> str:
     """Extract deployed ZipFile code so the behavior tests cannot drift from IaC."""
 
@@ -84,7 +77,8 @@ def properties(**overrides) -> dict:
         "ExpectedAccountId": ACCOUNT,
         "ExpectedRegion": REGION,
         "ExpectedRecorderRoleArn": ROLE,
-        "ExpectedResourceTypes": list(RESOURCE_TYPES),
+        "ExpectedAllSupported": True,
+        "ExpectedIncludeGlobalResourceTypes": False,
         "OwnershipParameterName": MARKER,
     }
     result.update(overrides)
@@ -107,9 +101,8 @@ def recorder(**overrides) -> dict:
         "name": CHANNEL,
         "roleARN": ROLE,
         "recordingGroup": {
-            "allSupported": False,
+            "allSupported": True,
             "includeGlobalResourceTypes": False,
-            "resourceTypes": list(RESOURCE_TYPES),
         },
     }
     result.update(overrides)
@@ -369,9 +362,10 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
         self.assertEqual(delete_config.delete_calls, [])
         self.assertEqual(marker.parameters[MARKER], TOKEN)
 
-    def test_resource_type_drift_also_blocks_rollback(self) -> None:
+    def test_recording_scope_drift_also_blocks_rollback(self) -> None:
         group = recorder()["recordingGroup"] | {
-            "resourceTypes": ["AWS::S3::Bucket"]
+            "allSupported": False,
+            "resourceTypes": ["AWS::S3::Bucket"],
         }
         config = ConfigClient(
             recorder_responses=[[recorder(recordingGroup=group)]],
@@ -434,7 +428,8 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
             properties(BucketName="INVALID_BUCKET"),
             properties(DeliveryFrequency="EveryMinute"),
             properties(ExpectedRecorderRoleArn="arn:aws:iam::999999999999:role/x"),
-            properties(ExpectedResourceTypes=[]),
+            properties(ExpectedAllSupported=False),
+            properties(ExpectedIncludeGlobalResourceTypes="false"),
             properties(OwnershipParameterName="/unrelated/marker"),
         )
         for bad in bad_values:

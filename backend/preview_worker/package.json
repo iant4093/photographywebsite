@@ -7,10 +7,11 @@
     "node": ">=22 <25"
   },
   "scripts": {
-    "test": "node --test contract.test.mjs telemetry.test.mjs workflow.test.mjs",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 contract.test.mjs telemetry.test.mjs workflow.test.mjs"
+    "test": "node --test contract.test.mjs hero.test.mjs telemetry.test.mjs workflow.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-branches=80 --test-coverage-functions=80 contract.test.mjs hero.test.mjs telemetry.test.mjs workflow.test.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudfront": "3.1091.0",
     "@aws-sdk/client-dynamodb": "3.1091.0",
     "@aws-sdk/client-s3": "3.1091.0",
     "@aws-sdk/lib-dynamodb": "3.1091.0",

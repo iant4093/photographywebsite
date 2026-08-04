@@ -39,6 +39,11 @@ Parameters:
     Default: skip
     AllowedValues: [skip, record-confirmed-home-region]
     Description: Record IAM and CloudFront resources only in the designated home region.
+  CentralAccessLogBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$'
+    Description: Optional account-local S3 server-access-log destination.
 
 Rules:
   ExactDeploymentScope:
@@ -53,6 +58,7 @@ Conditions:
   CreateSecurityHub: !Equals [!Ref SecurityHubDeploymentMode, create-confirmed-absent]
   CreateAccessAnalyzer: !Equals [!Ref AccessAnalyzerDeploymentMode, create-confirmed-absent]
   RecordGlobalResources: !Equals [!Ref GlobalResourceRecordingMode, record-confirmed-home-region]
+  EnableCentralAccessLogging: !Not [!Equals [!Ref CentralAccessLogBucketName, '']]
 
 Resources:
   AccountExternalAccessAnalyzer:
@@ -141,6 +147,11 @@ Resources:
             ExpirationInDays: 2555
             NoncurrentVersionExpiration:
               NoncurrentDays: 2555
+      LoggingConfiguration: !If
+        - EnableCentralAccessLogging
+        - DestinationBucketName: !Ref CentralAccessLogBucketName
+          LogFilePrefix: s3-account/config-history/
+        - !Ref AWS::NoValue
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -204,47 +215,13 @@ Resources:
               ArnLike:
                 aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:'
 
-  ConfigRole:
-    Type: AWS::IAM::Role
+  ConfigServiceLinkedRole:
+    Type: AWS::IAM::ServiceLinkedRole
     Condition: CreateConfig
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: config.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-              ArnLike:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:*'
-      ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWS_ConfigRole'
-      Policies:
-        - PolicyName: DeliverConfigurationHistory
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetBucketAcl
-                  - s3:ListBucket
-                Resource: !GetAtt ConfigDeliveryBucket.Arn
-              - Effect: Allow
-                Action: s3:PutObject
-                Resource: !Sub '${ConfigDeliveryBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*'
-                Condition:
-                  StringEquals:
-                    s3:x-amz-acl: bucket-owner-full-control
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
+      AWSServiceName: config.amazonaws.com
 
   ConfigDeliveryOrchestratorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -342,7 +319,6 @@ Resources:
           LOG.setLevel(logging.INFO)
           CHANNEL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
           BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
-          RESOURCE_TYPE = re.compile(r"^AWS::[A-Za-z0-9]+::[A-Za-z0-9]+$")
           FREQUENCIES = {
               "One_Hour",
               "Three_Hours",
@@ -359,7 +335,8 @@ Resources:
               expected_account = str(properties.get("ExpectedAccountId", ""))
               expected_region = str(properties.get("ExpectedRegion", ""))
               expected_role = str(properties.get("ExpectedRecorderRoleArn", ""))
-              expected_types = properties.get("ExpectedResourceTypes", [])
+              expected_all_supported = properties.get("ExpectedAllSupported")
+              expected_globals = properties.get("ExpectedIncludeGlobalResourceTypes")
               marker_name = str(properties.get("OwnershipParameterName", ""))
               arn_parts = context.invoked_function_arn.split(":")
               partition = arn_parts[1] if len(arn_parts) > 1 else ""
@@ -380,16 +357,10 @@ Resources:
               )
               if not expected_role.startswith(expected_role_prefix):
                   raise ValueError("invalid expected recorder role")
-              if (
-                  not isinstance(expected_types, list)
-                  or not expected_types
-                  or any(
-                      not isinstance(item, str) or not RESOURCE_TYPE.fullmatch(item)
-                      for item in expected_types
-                  )
-                  or len(set(expected_types)) != len(expected_types)
-              ):
-                  raise ValueError("invalid expected resource types")
+              if expected_all_supported is not True:
+                  raise ValueError("all-supported recording is required")
+              if not isinstance(expected_globals, bool):
+                  raise ValueError("invalid global resource recording setting")
               expected_marker = "/ian-photography/config-delivery/{}/owner".format(
                   name
               )
@@ -403,7 +374,8 @@ Resources:
                   "account": expected_account,
                   "region": expected_region,
                   "role": expected_role,
-                  "types": frozenset(expected_types),
+                  "all_supported": expected_all_supported,
+                  "include_globals": expected_globals,
                   "marker": marker_name,
               }
 
@@ -506,9 +478,10 @@ Resources:
               return (
                   recorder.get("name") == scope["name"]
                   and recorder.get("roleARN") == scope["role"]
-                  and group.get("allSupported") is False
-                  and not group.get("includeGlobalResourceTypes", False)
-                  and frozenset(group.get("resourceTypes", [])) == scope["types"]
+                  and group.get("allSupported") is scope["all_supported"]
+                  and group.get("includeGlobalResourceTypes", False)
+                  is scope["include_globals"]
+                  and not group.get("resourceTypes", [])
               )
 
 
@@ -787,27 +760,15 @@ Resources:
   ConfigRecorder:
     Type: AWS::Config::ConfigurationRecorder
     Condition: CreateConfig
+    DependsOn: ConfigServiceLinkedRole
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub 'ian-photography-${Stage}'
-      RoleARN: !GetAtt ConfigRole.Arn
+      RoleARN: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig'
       RecordingGroup:
-        AllSupported: false
-        ResourceTypes:
-          - AWS::S3::Bucket
-          - AWS::DynamoDB::Table
-          - AWS::Lambda::Function
-          - AWS::CloudTrail::Trail
-          - AWS::ApiGatewayV2::Api
-          - AWS::Cognito::UserPool
-          - AWS::SNS::Topic
-          - AWS::SQS::Queue
-          - AWS::KMS::Key
-          - !If [RecordGlobalResources, 'AWS::IAM::User', !Ref AWS::NoValue]
-          - !If [RecordGlobalResources, 'AWS::IAM::Role', !Ref AWS::NoValue]
-          - !If [RecordGlobalResources, 'AWS::IAM::Policy', !Ref AWS::NoValue]
-          - !If [RecordGlobalResources, 'AWS::CloudFront::Distribution', !Ref AWS::NoValue]
+        AllSupported: true
+        IncludeGlobalResourceTypes: !If [RecordGlobalResources, true, false]
 
   ConfigDeliveryChannel:
     Type: Custom::ConfigDeliveryChannel
@@ -823,21 +784,9 @@ Resources:
       DeliveryFrequency: TwentyFour_Hours
       ExpectedAccountId: !Ref AWS::AccountId
       ExpectedRegion: !Ref AWS::Region
-      ExpectedRecorderRoleArn: !GetAtt ConfigRole.Arn
-      ExpectedResourceTypes:
-        - AWS::S3::Bucket
-        - AWS::DynamoDB::Table
-        - AWS::Lambda::Function
-        - AWS::CloudTrail::Trail
-        - AWS::ApiGatewayV2::Api
-        - AWS::Cognito::UserPool
-        - AWS::SNS::Topic
-        - AWS::SQS::Queue
-        - AWS::KMS::Key
-        - !If [RecordGlobalResources, 'AWS::IAM::User', !Ref AWS::NoValue]
-        - !If [RecordGlobalResources, 'AWS::IAM::Role', !Ref AWS::NoValue]
-        - !If [RecordGlobalResources, 'AWS::IAM::Policy', !Ref AWS::NoValue]
-        - !If [RecordGlobalResources, 'AWS::CloudFront::Distribution', !Ref AWS::NoValue]
+      ExpectedRecorderRoleArn: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig'
+      ExpectedAllSupported: true
+      ExpectedIncludeGlobalResourceTypes: !If [RecordGlobalResources, true, false]
       OwnershipParameterName: !Sub '/ian-photography/config-delivery/ian-photography-${Stage}/owner'
 
   ConfigCloudTrailEnabled:

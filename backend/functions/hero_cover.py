@@ -1,10 +1,11 @@
-"""Authorize and activate an unmodified admin-managed homepage hero image."""
+"""Authorize a hero upload and queue safe responsive publication."""
 
 from __future__ import annotations
 
 import os
 import posixpath
 import re
+import json
 
 import boto3
 from botocore.exceptions import ClientError
@@ -17,13 +18,12 @@ from validation_helpers import ValidationError, parse_json_body, require_string
 
 
 s3 = boto3.client("s3")
-cloudfront = boto3.client("cloudfront")
+sqs = boto3.client("sqs")
 
 HERO_KEY = "site/hero/home"
+HERO_MANIFEST_KEY = "site/hero/manifest.json"
 PENDING_KEY = "temp-zips/hero-pending"
-PUBLIC_TAGGING = "visibility=public"
 PENDING_TAGGING = "visibility=pending"
-HERO_CACHE_CONTROL = "public,max-age=86400"
 MAX_HERO_BYTES = 50 * 1024 * 1024
 MIN_HERO_BYTES = 1024
 ETAG_PATTERN = re.compile(r"^[a-fA-F0-9]{32}$")
@@ -117,6 +117,16 @@ def _tag_value(response, name):
     return None
 
 
+def _queue_derivatives(expected_version):
+    sqs.send_message(
+        QueueUrl=os.environ["HERO_DERIVATIVE_QUEUE_URL"],
+        MessageBody=json.dumps(
+            {"kind": "hero", "sourceKey": PENDING_KEY, "version": expected_version},
+            separators=(",", ":"),
+        ),
+    )
+
+
 def _authorize_upload(event, context, body):
     content_type, size = _validate_upload_intent(body)
     try:
@@ -182,30 +192,17 @@ def _activate_upload(event, context, body):
         _audit(event, context, "complete", "denied", "uploaded_object_invalid")
         return error_response(400, "The uploaded hero image is invalid", code="invalid_upload")
 
-    s3.copy_object(
-        Bucket=bucket,
-        Key=HERO_KEY,
-        CopySource={"Bucket": bucket, "Key": PENDING_KEY},
-        ContentType=content_type,
-        CacheControl=HERO_CACHE_CONTROL,
-        MetadataDirective="REPLACE",
-        Tagging=PUBLIC_TAGGING,
-        TaggingDirective="REPLACE",
-    )
-    cloudfront.create_invalidation(
-        DistributionId=os.environ["IMAGES_DISTRIBUTION_ID"],
-        InvalidationBatch={
-            "Paths": {"Quantity": 1, "Items": [f"/{HERO_KEY}"]},
-            "CallerReference": f"hero-{expected_etag}",
+    _queue_derivatives(expected_etag)
+    domain = os.environ["CLOUDFRONT_DOMAIN"].strip().removeprefix("https://").rstrip("/")
+    _audit(event, context, "complete", "success", "hero_processing_queued")
+    return json_response(
+        202,
+        {
+            "status": "processing",
+            "heroUrl": f"https://{domain}/{HERO_KEY}",
+            "heroManifestUrl": f"https://{domain}/{HERO_MANIFEST_KEY}",
         },
     )
-    # Keep the validated source available until CloudFront accepts the
-    # invalidation. A transient CDN failure can then be retried without asking
-    # the admin to upload the original again.
-    s3.delete_object(Bucket=bucket, Key=PENDING_KEY)
-    domain = os.environ["CLOUDFRONT_DOMAIN"].strip().removeprefix("https://").rstrip("/")
-    _audit(event, context, "complete", "success", "hero_updated")
-    return json_response(200, {"heroUrl": f"https://{domain}/{HERO_KEY}"})
 
 
 def handler(event, context):

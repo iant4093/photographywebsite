@@ -84,6 +84,8 @@ class SecurityTemplateTests(unittest.TestCase):
 
     def test_foundation_retains_the_complete_cloudtrail_dependency_chain(self) -> None:
         for logical_id in (
+            "SecurityAuditKey",
+            "SecurityAuditKeyAlias",
             "SecurityAuditBucket",
             "SecurityAuditBucketPolicy",
             "SecurityAuditLogGroup",
@@ -93,8 +95,17 @@ class SecurityTemplateTests(unittest.TestCase):
             block = resource_block(FOUNDATION, logical_id)
             self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
-        self.assertEqual(FOUNDATION.count("aws:SourceArn:"), 3)
+        self.assertGreaterEqual(FOUNDATION.count("aws:SourceArn:"), 4)
         self.assertIn("cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/", FOUNDATION)
+        key = resource_block(FOUNDATION, "SecurityAuditKey")
+        self.assertIn("EnableKeyRotation: true", key)
+        self.assertIn("Service: cloudtrail.amazonaws.com", key)
+        self.assertIn("kms:GenerateDataKey*", key)
+        bucket = resource_block(FOUNDATION, "SecurityAuditBucket")
+        self.assertIn("SSEAlgorithm: aws:kms", bucket)
+        self.assertIn("KMSMasterKeyID: !GetAtt SecurityAuditKey.Arn", bucket)
+        trail = resource_block(FOUNDATION, "SecurityTrail")
+        self.assertIn("KMSKeyId: !GetAtt SecurityAuditKey.Arn", trail)
         bucket_policy = resource_block(FOUNDATION, "SecurityAuditBucketPolicy")
         self.assertNotIn("config.amazonaws.com", bucket_policy)
         self.assertNotIn("ConfigLogDelivery", bucket_policy)
@@ -215,15 +226,15 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("Features:", MANAGED)
         self.assertIn("Name: S3_DATA_EVENTS", MANAGED)
         self.assertIn("Name: RUNTIME_MONITORING", MANAGED)
-        self.assertIn("AllSupported: false", MANAGED)
-        self.assertNotIn("IncludeGlobalResourceTypes:", MANAGED)
+        self.assertIn("AllSupported: true", MANAGED)
+        self.assertIn("IncludeGlobalResourceTypes: !If [RecordGlobalResources, true, false]", MANAGED)
         delivery_channel = resource_block(MANAGED, "ConfigDeliveryChannel")
         self.assertNotIn("DependsOn: ConfigRecorder", delivery_channel)
         self.assertIn("Type: Custom::ConfigDeliveryChannel", delivery_channel)
         self.assertIn("DependsOn: ConfigDeliveryBucketPolicy", delivery_channel)
         recorder = resource_block(MANAGED, "ConfigRecorder")
         self.assertNotIn("DependsOn: ConfigDeliveryChannel", recorder)
-        self.assertIn("ResourceTypes:", MANAGED)
+        self.assertNotIn("\n        ResourceTypes:", recorder)
 
     def test_home_region_detection_is_exactly_guarded(self) -> None:
         self.assertIn("ExpectedAccountId:", MANAGED)
@@ -309,18 +320,19 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("logger.exception", function.lower())
         channel = resource_block(MANAGED, "ConfigDeliveryChannel")
         self.assertIn("ServiceTimeout: 660", channel)
-        self.assertIn("ExpectedRecorderRoleArn: !GetAtt ConfigRole.Arn", channel)
-        self.assertIn("ExpectedResourceTypes:", channel)
+        service_role = resource_block(MANAGED, "ConfigServiceLinkedRole")
+        self.assertIn("AWSServiceName: config.amazonaws.com", service_role)
+        self.assertIn("ExpectedRecorderRoleArn: !Sub", channel)
+        self.assertIn("ExpectedAllSupported: true", channel)
+        self.assertIn("ExpectedIncludeGlobalResourceTypes:", channel)
         self.assertIn(
             "OwnershipParameterName: !Sub '/ian-photography/config-delivery/ian-photography-${Stage}/owner'",
             channel,
         )
         recorder = resource_block(MANAGED, "ConfigRecorder")
-        type_pattern = r"(?:- |')(AWS::[A-Za-z0-9]+::[A-Za-z0-9]+)"
-        self.assertEqual(
-            set(re.findall(type_pattern, recorder)),
-            set(re.findall(type_pattern, channel)),
-        )
+        self.assertIn("AllSupported: true", recorder)
+        self.assertIn("IncludeGlobalResourceTypes:", recorder)
+        self.assertNotIn("\n        ResourceTypes:", recorder)
 
     def test_scheduled_backup_role_cannot_restore_and_arn_is_local(self) -> None:
         self.assertNotIn("AWSBackupServiceRolePolicyForRestores", BACKUP)

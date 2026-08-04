@@ -19,14 +19,69 @@ Parameters:
     ConstraintDescription: >-
       Leave empty to disable Config object data events, or provide one exact S3
       bucket name using 3-63 lowercase letters, digits, periods, or hyphens.
+  CentralAccessLogBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$'
+    Description: Optional account-local S3 server-access-log destination.
 
 Conditions:
   AuditConfigDeliveryObjectEvents: !Not
     - !Equals
       - !Ref ConfigDeliveryBucketName
       - ''
+  EnableCentralAccessLogging: !Not
+    - !Equals
+      - !Ref CentralAccessLogBucketName
+      - ''
 
 Resources:
+  SecurityAuditKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Encryption for immutable CloudTrail audit evidence
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableAccountIamPolicies
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowCloudTrailEncryption
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/ian-photography-security-${Stage}'
+              StringLike:
+                kms:EncryptionContext:aws:cloudtrail:arn: !Sub 'arn:${AWS::Partition}:cloudtrail:*:${AWS::AccountId}:trail/*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: SecurityAuditEvidence
+
+  SecurityAuditKeyAlias:
+    Type: AWS::KMS::Alias
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      AliasName: !Sub 'alias/ian-photography-security-audit-${Stage}'
+      TargetKeyId: !Ref SecurityAuditKey
+
   SecurityAuditBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: RetainExceptOnCreate
@@ -35,7 +90,9 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt SecurityAuditKey.Arn
+            BucketKeyEnabled: true
       ObjectLockEnabled: true
       ObjectLockConfiguration:
         ObjectLockEnabled: Enabled
@@ -66,6 +123,11 @@ Resources:
             ExpirationInDays: 2555
             NoncurrentVersionExpiration:
               NoncurrentDays: 2555
+      LoggingConfiguration: !If
+        - EnableCentralAccessLogging
+        - DestinationBucketName: !Ref CentralAccessLogBucketName
+          LogFilePrefix: s3-account/security-audit/
+        - !Ref AWS::NoValue
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -169,6 +231,7 @@ Resources:
     Properties:
       TrailName: !Sub 'ian-photography-security-${Stage}'
       S3BucketName: !Ref SecurityAuditBucket
+      KMSKeyId: !GetAtt SecurityAuditKey.Arn
       IncludeGlobalServiceEvents: true
       IsMultiRegionTrail: true
       EnableLogFileValidation: true
@@ -202,3 +265,5 @@ Outputs:
     Value: !GetAtt SecurityTrail.Arn
   CloudTrailName:
     Value: !Ref SecurityTrail
+  SecurityAuditKeyArn:
+    Value: !GetAtt SecurityAuditKey.Arn

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { albumCoverUrl } from '../utils/mediaUrls'
+import ProgressiveImage from './ProgressiveImage'
+import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
 
 const TILT_PATTERN = [-0.3, 0.14, 0.28, -0.12]
 const LANE_COUNT = 3
@@ -61,7 +62,7 @@ function buildGalleryLanes(albums, seed = PAGE_RANDOM_SEED) {
     })
 }
 
-function GalleryCard({ album, position, duplicate = false }) {
+function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = '' }) {
     return (
         <Link
             to={`/album/${album.albumId}`}
@@ -71,7 +72,16 @@ function GalleryCard({ album, position, duplicate = false }) {
             style={{ '--floating-tilt': `${TILT_PATTERN[position % TILT_PATTERN.length]}deg` }}
         >
             <span className="floating-frame-number">{String(position + 1).padStart(2, '0')}</span>
-            <img src={albumCoverUrl(album)} alt="" loading="lazy" decoding="async" />
+            <ProgressiveImage
+                src={albumCoverUrl(album)}
+                srcSet={responsiveSrcSet}
+                sizes="(max-width: 720px) 256px, (max-width: 1440px) 24vw, 352px"
+                blurhash={album.coverBlurhash}
+                alt=""
+                width={album.coverWidth || 4}
+                height={album.coverHeight || 3}
+                className="floating-card-image"
+            />
             <span className="floating-card-copy">
                 <strong data-title={album.title} />
                 <small data-category={album.category || 'Uncategorized'} />
@@ -80,7 +90,7 @@ function GalleryCard({ album, position, duplicate = false }) {
     )
 }
 
-function LoopGroup({ albums, copy = false, offset = 0 }) {
+function LoopGroup({ albums, copy = false, offset = 0, previewSets }) {
     return (
         <div className="floating-loop-group" aria-hidden={copy ? 'true' : undefined}>
             {albums.map((album, index) => (
@@ -89,21 +99,22 @@ function LoopGroup({ albums, copy = false, offset = 0 }) {
                     album={album}
                     position={index + offset}
                     duplicate={copy}
+                    responsiveSrcSet={previewSets.get(galleryAlbumKey(album, index)) || ''}
                 />
             ))}
         </div>
     )
 }
 
-function Lane({ albums, lane }) {
+function Lane({ albums, lane, previewSets }) {
     return (
         <div
             className={`floating-lane floating-lane-${lane}`}
             style={EDGE_FADE_STYLE}
         >
             <div className="floating-loop-track">
-                <LoopGroup albums={albums} offset={lane} />
-                <LoopGroup albums={albums} copy offset={lane} />
+                <LoopGroup albums={albums} offset={lane} previewSets={previewSets} />
+                <LoopGroup albums={albums} copy offset={lane} previewSets={previewSets} />
             </div>
         </div>
     )
@@ -111,10 +122,23 @@ function Lane({ albums, lane }) {
 
 export default function FloatingGallery({ albums }) {
     const stageRef = useRef(null)
+    const [previewSets, setPreviewSets] = useState(() => new Map())
     const albumLanes = useMemo(
         () => buildGalleryLanes(albums),
         [albums],
     )
+    useEffect(() => {
+        let active = true
+        const unique = new Map()
+        for (const album of albums) unique.set(galleryAlbumKey(album, unique.size), album)
+        Promise.all([...unique].map(async ([key, album]) => [
+            key,
+            await albumCoverPreviewSrcSet(album).catch(() => ''),
+        ])).then((entries) => {
+            if (active) setPreviewSets(new Map(entries.filter(([, value]) => value)))
+        })
+        return () => { active = false }
+    }, [albums])
     const setPlaybackRate = useCallback((rate) => {
         const stage = stageRef.current
         if (!stage) return
@@ -173,6 +197,7 @@ export default function FloatingGallery({ albums }) {
                         key={lane}
                         albums={laneAlbums}
                         lane={lane}
+                        previewSets={previewSets}
                     />
                 ))}
             </div>

@@ -1,13 +1,18 @@
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import {
+    CopyObjectCommand,
+    DeleteObjectCommand,
+    DeleteObjectsCommand,
     GetObjectCommand,
     GetObjectTaggingCommand,
     HeadObjectCommand,
+    ListObjectsV2Command,
     PutObjectCommand,
     PutObjectTaggingCommand,
     S3Client,
 } from '@aws-sdk/client-s3'
+import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 
@@ -30,8 +35,17 @@ import {
     safePreviewFailureTelemetry,
 } from './telemetry.mjs'
 import { validateReadyOrMarkPending } from './workflow.mjs'
+import {
+    HERO_CONTENT_TYPES,
+    HERO_FORMATS,
+    buildHeroManifest,
+    heroDerivativeKey,
+    heroWidthsFor,
+    parseHeroJob,
+} from './hero.mjs'
 
 const s3 = new S3Client({})
+const cloudfront = new CloudFrontClient({})
 const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
     marshallOptions: { removeUndefinedValues: true },
 })
@@ -112,6 +126,185 @@ async function generateOutputs(sourceBytes) {
         outputs[String(width)] = { bytes, width, height: outputMetadata.height }
     }
     return outputs
+}
+
+async function generateHeroOutput(sourceBytes, width, format) {
+    const image = sharp(sourceBytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
+        .rotate()
+        .toColourspace('srgb')
+        .resize({ width, withoutEnlargement: true })
+    if (format === 'avif') image.avif({ quality: 74, effort: 4 })
+    else if (format === 'webp') image.webp({ quality: 86, effort: 4 })
+    else image.jpeg({ quality: 90, progressive: true, mozjpeg: true })
+    const bytes = await image.toBuffer()
+    if (bytes.length < 1 || bytes.length > MAX_OUTPUT_BYTES) throw new Error('Generated hero size is invalid')
+    const metadata = await sharp(bytes, { failOn: 'error' }).metadata()
+    if (metadata.format !== format || metadata.width !== width || !metadata.height) {
+        throw new Error('Generated hero failed validation')
+    }
+    return { bytes, width, height: metadata.height, format }
+}
+
+async function processHeroJob(jobValue) {
+    const job = parseHeroJob(jobValue)
+    const { bytes: sourceBytes, head } = await readObjectBounded(job.sourceKey, MAX_SOURCE_BYTES)
+    const sourceEtag = String(head.ETag || '').replaceAll('"', '').toLowerCase()
+    if (sourceEtag !== job.version) return { status: 'superseded', manifest: null }
+    const metadata = await sharp(sourceBytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
+        .rotate()
+        .metadata()
+    if (!metadata.width || !metadata.height || !['jpeg', 'png', 'webp', 'avif'].includes(metadata.format)) {
+        throw new Error('Unsupported hero source image')
+    }
+    const sourceWidth = metadata.autoOrient?.width || metadata.width
+    const sourceHeight = metadata.autoOrient?.height || metadata.height
+    if (head.ContentType && !['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(head.ContentType.toLowerCase())) {
+        throw new Error('Hero source content type is invalid')
+    }
+
+    const outputs = []
+    for (const width of heroWidthsFor(sourceWidth)) {
+        for (const format of HERO_FORMATS) {
+            const output = await generateHeroOutput(sourceBytes, width, format)
+            const key = heroDerivativeKey(job.version, width, format)
+            await s3.send(new PutObjectCommand({
+                Bucket: requiredEnvironment('IMAGES_BUCKET'),
+                Key: key,
+                Body: output.bytes,
+                ContentType: HERO_CONTENT_TYPES[format],
+                CacheControl: 'public, max-age=31536000, immutable',
+                ServerSideEncryption: 'AES256',
+                Tagging: 'visibility=public',
+                Metadata: {
+                    'hero-version': job.version,
+                    'hero-width': String(width),
+                    generator: 'responsive-hero-v1',
+                },
+            }))
+            outputs.push({ ...output, key })
+        }
+    }
+    const manifest = buildHeroManifest({
+        version: job.version,
+        sourceWidth,
+        sourceHeight,
+        outputs,
+    })
+    const latest = await s3.send(new HeadObjectCommand({
+        Bucket: requiredEnvironment('IMAGES_BUCKET'),
+        Key: job.sourceKey,
+    }))
+    if (String(latest.ETag || '').replaceAll('"', '').toLowerCase() !== job.version) {
+        await deleteHeroVersion(job.version)
+        return { status: 'superseded', manifest: null }
+    }
+    await publishHero(job, manifest, head.ContentType || `image/${metadata.format}`)
+    return { status: 'completed', manifest }
+}
+
+async function currentHeroManifest() {
+    try {
+        const { bytes } = await readObjectBounded('site/hero/manifest.json', 64 * 1024)
+        const parsed = JSON.parse(bytes.toString('utf8'))
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+    } catch (error) {
+        if (['NoSuchKey', 'NotFound', 'NoSuchKeyException'].includes(errorCode(error)) || error?.$metadata?.httpStatusCode === 404) {
+            return null
+        }
+        if (error instanceof SyntaxError) return null
+        throw error
+    }
+}
+
+async function deleteHeroVersion(version) {
+    try {
+        parseHeroJob({ kind: 'hero', sourceKey: 'site/hero/original', version })
+    } catch {
+        return
+    }
+    const bucket = requiredEnvironment('IMAGES_BUCKET')
+    const prefix = `site/hero/versions/v1/${version}/`
+    let continuationToken
+    do {
+        const page = await s3.send(new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            MaxKeys: 1000,
+            ContinuationToken: continuationToken,
+        }))
+        if (page.Contents?.length) {
+            await s3.send(new DeleteObjectsCommand({
+                Bucket: bucket,
+                Delete: {
+                    Objects: page.Contents.map(({ Key }) => ({ Key })),
+                    Quiet: true,
+                },
+            }))
+        }
+        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
+    } while (continuationToken)
+}
+
+async function publishHero(job, manifest, sourceContentType) {
+    const bucket = requiredEnvironment('IMAGES_BUCKET')
+    const oldManifest = await currentHeroManifest()
+    manifest.previousVersion = typeof oldManifest?.version === 'string' ? oldManifest.version : null
+    manifest.publishedAt = new Date().toISOString()
+
+    await s3.send(new CopyObjectCommand({
+        Bucket: bucket,
+        Key: 'site/hero/original',
+        CopySource: `${bucket}/${job.sourceKey}`,
+        CopySourceIfMatch: `"${job.version}"`,
+        ContentType: sourceContentType,
+        CacheControl: 'private, no-store',
+        MetadataDirective: 'REPLACE',
+        Tagging: 'visibility=private',
+        TaggingDirective: 'REPLACE',
+        ServerSideEncryption: 'AES256',
+    }))
+    await s3.send(new CopyObjectCommand({
+        Bucket: bucket,
+        Key: 'site/hero/home',
+        CopySource: `${bucket}/${manifest.fallbackKey}`,
+        ContentType: 'image/jpeg',
+        CacheControl: 'public, max-age=0, must-revalidate',
+        MetadataDirective: 'REPLACE',
+        Tagging: 'visibility=public',
+        TaggingDirective: 'REPLACE',
+        ServerSideEncryption: 'AES256',
+    }))
+    await s3.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: 'site/hero/manifest.json',
+        Body: JSON.stringify(manifest),
+        ContentType: 'application/json',
+        CacheControl: 'public, max-age=0, must-revalidate',
+        Tagging: 'visibility=public',
+        ServerSideEncryption: 'AES256',
+    }))
+    await cloudfront.send(new CreateInvalidationCommand({
+        DistributionId: requiredEnvironment('IMAGES_DISTRIBUTION_ID'),
+        InvalidationBatch: {
+            CallerReference: `hero-${job.version}`,
+            Paths: {
+                Quantity: 2,
+                Items: ['/site/hero/home', '/site/hero/manifest.json'],
+            },
+        },
+    }))
+    await deleteHeroVersion(oldManifest?.previousVersion)
+    if (job.sourceKey === 'temp-zips/hero-pending') {
+        try {
+            await s3.send(new DeleteObjectCommand({
+                Bucket: bucket,
+                Key: job.sourceKey,
+                IfMatch: job.version,
+            }))
+        } catch (error) {
+            if (!isPreconditionFailure(error)) throw error
+        }
+    }
 }
 
 async function validateStoredPreview(key, expected, sourceDigest) {
@@ -357,6 +550,11 @@ function eventJobs(event) {
 }
 
 export async function handler(event) {
+    if (event?.kind === 'hero') {
+        const result = await processHeroJob(event)
+        console.log(JSON.stringify({ event: 'hero_derivatives_completed', status: result.status }))
+        return result
+    }
     const jobs = eventJobs(event)
     if (jobs.length === 1 && !jobs[0].id) {
         const result = await processJob(jobs[0].job)
@@ -367,16 +565,17 @@ export async function handler(event) {
     const failures = []
     for (const entry of jobs) {
         try {
-            const result = await processJob(entry.job)
+            const isHero = entry.job?.kind === 'hero'
+            const result = isHero ? await processHeroJob(entry.job) : await processJob(entry.job)
             console.log(JSON.stringify({
-                event: 'preview_job_completed',
+                event: isHero ? 'hero_derivatives_completed' : 'preview_job_completed',
                 status: result.status,
                 requestId: entry.id,
             }))
         } catch (error) {
             const telemetry = safePreviewFailureTelemetry(error)
             console.error(JSON.stringify({
-                event: 'preview_job_failed',
+                event: entry.job?.kind === 'hero' ? 'hero_derivatives_failed' : 'preview_job_failed',
                 errorType: 'PreviewStageError',
                 ...telemetry,
             }))

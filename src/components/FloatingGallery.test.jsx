@@ -124,6 +124,7 @@ describe('FloatingGallery', () => {
     it('starts observing when asynchronously loaded albums create the wall', () => {
         let intersectionCallback
         const observe = vi.fn()
+        const unobserve = vi.fn()
         const disconnect = vi.fn()
         vi.stubGlobal('IntersectionObserver', class {
             constructor(callback) {
@@ -131,6 +132,9 @@ describe('FloatingGallery', () => {
             }
             observe(element) {
                 observe(element)
+            }
+            unobserve(element) {
+                unobserve(element)
             }
             disconnect() {
                 disconnect()

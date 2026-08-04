@@ -14,7 +14,7 @@ import {
     setCatalogSnapshot,
 } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
-import { heroCoverUrl } from '../utils/mediaUrls'
+import { fetchHeroManifest, heroManifestSrcSet } from '../utils/mediaUrls'
 
 const CATALOG_KEY = 'public-photos'
 // Fetch the complete current public catalog in one compressed response while
@@ -24,7 +24,6 @@ const HERO_WIDTHS = [640, 960, 1280, 1920]
 const heroSet = (format) => HERO_WIDTHS
     .map((width) => `/images/heroes/photo-${width}.${format} ${width}w`)
     .join(', ')
-const MANAGED_HERO_URL = heroCoverUrl()
 
 function Home() {
     const navigationType = useNavigationType()
@@ -40,7 +39,21 @@ function Home() {
     const [loading, setLoading] = useState(!initialSnapshot)
     const [error, setError] = useState(null)
     const [loadAttempt, setLoadAttempt] = useState(0)
-    const [useStaticHero, setUseStaticHero] = useState(!MANAGED_HERO_URL)
+    const [managedHero, setManagedHero] = useState(null)
+    const [managedHeroFailed, setManagedHeroFailed] = useState(false)
+
+    useEffect(() => {
+        const controller = new AbortController()
+        fetchHeroManifest({ signal: controller.signal })
+            .then((manifest) => {
+                if (manifest && !controller.signal.aborted) {
+                    setManagedHero(manifest)
+                    setManagedHeroFailed(false)
+                }
+            })
+            .catch(() => {})
+        return () => controller.abort()
+    }, [])
 
     const handleExplorePhotos = useCallback((event) => {
         const target = document.getElementById('photo-albums')
@@ -111,7 +124,7 @@ function Home() {
             window.removeEventListener('scroll', onScroll)
             if (frame !== null) window.cancelAnimationFrame(frame)
         }
-    }, [useStaticHero])
+    }, [managedHero, managedHeroFailed])
 
     useEffect(() => {
         const elements = pageRef.current?.querySelectorAll('[data-reveal-id]') || []
@@ -154,7 +167,7 @@ function Home() {
         <div ref={pageRef} className="animate-fade-in">
             <section className="home-hero linen-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
-                    {useStaticHero ? (
+                    {!managedHero || managedHeroFailed ? (
                         <picture>
                             <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
                             <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
@@ -173,18 +186,24 @@ function Home() {
                             />
                         </picture>
                     ) : (
-                        <img
-                            ref={heroRef}
-                            src={MANAGED_HERO_URL}
-                            width="6000"
-                            height="4000"
-                            alt="Golden hour landscape"
-                            fetchPriority="high"
-                            loading="eager"
-                            decoding="async"
-                            onError={() => setUseStaticHero(true)}
-                            className="home-hero-media parallax-hero"
-                        />
+                        <picture>
+                            <source type="image/avif" srcSet={heroManifestSrcSet(managedHero, 'avif')} sizes="100vw" />
+                            <source type="image/webp" srcSet={heroManifestSrcSet(managedHero, 'webp')} sizes="100vw" />
+                            <img
+                                ref={heroRef}
+                                src={managedHero.variants.jpeg.at(-1).url}
+                                srcSet={heroManifestSrcSet(managedHero, 'jpeg')}
+                                sizes="100vw"
+                                width={managedHero.source.width}
+                                height={managedHero.source.height}
+                                alt="Golden hour landscape"
+                                fetchPriority="high"
+                                loading="eager"
+                                decoding="async"
+                                onError={() => setManagedHeroFailed(true)}
+                                className="home-hero-media parallax-hero"
+                            />
+                        </picture>
                     )}
                     <div className="home-hero-overlay absolute inset-0" />
                 </div>

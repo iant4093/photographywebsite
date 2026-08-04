@@ -121,16 +121,16 @@ class HeroActivationTests(unittest.TestCase):
 
     def setUp(self):
         self.s3_patcher = patch.object(hero_cover, "s3", Mock())
-        self.cloudfront_patcher = patch.object(hero_cover, "cloudfront", Mock())
+        self.sqs_patcher = patch.object(hero_cover, "sqs", Mock())
         self.s3_patcher.start()
-        self.cloudfront_patcher.start()
+        self.sqs_patcher.start()
         self.request = event("complete", {"etag": f'"{VALID_ETAG}"'})
 
     def tearDown(self):
-        self.cloudfront_patcher.stop()
+        self.sqs_patcher.stop()
         self.s3_patcher.stop()
 
-    def test_completion_validates_then_copies_original_bytes_and_invalidates_only_the_hero(self):
+    def test_completion_validates_then_queues_responsive_processing(self):
         self._arrange_valid_pending()
         with patch.object(hero_cover, "verify_front_door_request", return_value=None), patch.object(
             hero_cover, "require_admin", return_value=None
@@ -138,39 +138,30 @@ class HeroActivationTests(unittest.TestCase):
             "os.environ",
             {
                 "IMAGES_BUCKET": "images-test",
-                "IMAGES_DISTRIBUTION_ID": "DISTRIBUTION",
                 "CLOUDFRONT_DOMAIN": "media.example.test",
+                "HERO_DERIVATIVE_QUEUE_URL": "https://sqs.test/hero",
             },
             clear=False,
         ), patch.object(hero_cover, "emit_audit_event") as audit:
             response = hero_cover.handler(self.request, None)
 
-        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["statusCode"], 202)
         self.assertEqual(
             response_body(response)["heroUrl"],
-            f"https://media.example.test/{hero_cover.HERO_KEY}",
+            "https://media.example.test/site/hero/home",
         )
-        hero_cover.s3.copy_object.assert_called_once_with(
-            Bucket="images-test",
-            Key=hero_cover.HERO_KEY,
-            CopySource={"Bucket": "images-test", "Key": hero_cover.PENDING_KEY},
-            ContentType="image/jpeg",
-            CacheControl=hero_cover.HERO_CACHE_CONTROL,
-            MetadataDirective="REPLACE",
-            Tagging="visibility=public",
-            TaggingDirective="REPLACE",
-        )
-        hero_cover.s3.delete_object.assert_called_once_with(
-            Bucket="images-test", Key=hero_cover.PENDING_KEY
-        )
-        invalidation = hero_cover.cloudfront.create_invalidation.call_args.kwargs
-        self.assertEqual(invalidation["DistributionId"], "DISTRIBUTION")
-        self.assertEqual(
-            invalidation["InvalidationBatch"]["Paths"]["Items"],
-            [f"/{hero_cover.HERO_KEY}"],
-        )
+        queued = hero_cover.sqs.send_message.call_args.kwargs
+        self.assertEqual(queued["QueueUrl"], "https://sqs.test/hero")
+        self.assertEqual(json.loads(queued["MessageBody"]), {
+            "kind": "hero",
+            "sourceKey": hero_cover.PENDING_KEY,
+            "version": VALID_ETAG,
+        })
+        hero_cover.s3.copy_object.assert_not_called()
+        hero_cover.s3.delete_object.assert_not_called()
         self.assertEqual(audit.call_args.kwargs["event_name"], "admin.hero_cover_updated")
         self.assertEqual(audit.call_args.kwargs["outcome"], "success")
+        self.assertEqual(audit.call_args.kwargs["reason_code"], "hero_processing_queued")
 
     def test_bad_receipt_or_content_never_replaces_the_live_hero(self):
         self._arrange_valid_pending()
@@ -185,7 +176,7 @@ class HeroActivationTests(unittest.TestCase):
                 response = hero_cover.handler(request, None)
             self.assertIn(response["statusCode"], {400, 409})
         hero_cover.s3.copy_object.assert_not_called()
-        hero_cover.cloudfront.create_invalidation.assert_not_called()
+        hero_cover.sqs.send_message.assert_not_called()
 
         self._arrange_valid_pending()
         hero_cover.s3.get_object.return_value = {"Body": io.BytesIO(b"<html>" + b"x" * 26)}
@@ -196,24 +187,24 @@ class HeroActivationTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         hero_cover.s3.copy_object.assert_not_called()
 
-    def test_cdn_failure_keeps_the_verified_pending_upload_available_for_retry(self):
+    def test_queue_failure_keeps_the_verified_pending_upload_available_for_retry(self):
         self._arrange_valid_pending()
-        hero_cover.cloudfront.create_invalidation.side_effect = RuntimeError("temporary failure")
+        hero_cover.sqs.send_message.side_effect = RuntimeError("temporary failure")
         with patch.object(hero_cover, "verify_front_door_request", return_value=None), patch.object(
             hero_cover, "require_admin", return_value=None
         ), patch.dict(
             "os.environ",
             {
                 "IMAGES_BUCKET": "images-test",
-                "IMAGES_DISTRIBUTION_ID": "DISTRIBUTION",
                 "CLOUDFRONT_DOMAIN": "media.example.test",
+                "HERO_DERIVATIVE_QUEUE_URL": "https://sqs.test/hero",
             },
             clear=False,
         ), self.assertLogs("photography_api", level="ERROR"):
             response = hero_cover.handler(self.request, None)
 
         self.assertEqual(response["statusCode"], 500)
-        hero_cover.s3.copy_object.assert_called_once()
+        hero_cover.s3.copy_object.assert_not_called()
         hero_cover.s3.delete_object.assert_not_called()
 
     def test_missing_pending_upload_is_a_retryable_conflict_and_provider_errors_are_redacted(self):
