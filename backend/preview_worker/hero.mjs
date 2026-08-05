@@ -42,6 +42,11 @@ export function heroDerivativeKey(version, width, format) {
     return `site/hero/versions/v${HERO_DERIVATIVE_VERSION}/${parsed.version}/hero-${width}.${extension}`
 }
 
+export function heroOutputFormatMatches(requestedFormat, detectedFormat) {
+    if (!HERO_FORMATS.includes(requestedFormat) || typeof detectedFormat !== 'string') return false
+    return detectedFormat === (requestedFormat === 'avif' ? 'heif' : requestedFormat)
+}
+
 export function buildHeroManifest({ version, sourceWidth, sourceHeight, outputs }) {
     parseHeroJob({ kind: 'hero', sourceKey: 'temp-zips/hero-pending', version })
     if (!Number.isSafeInteger(sourceWidth) || sourceWidth < 1 || !Number.isSafeInteger(sourceHeight) || sourceHeight < 1) {

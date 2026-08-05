@@ -215,14 +215,6 @@ Resources:
               ArnLike:
                 aws:SourceArn: !Sub 'arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:'
 
-  ConfigServiceLinkedRole:
-    Type: AWS::IAM::ServiceLinkedRole
-    Condition: CreateConfig
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      AWSServiceName: config.amazonaws.com
-
   ConfigDeliveryOrchestratorLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: CreateConfig
@@ -329,6 +321,14 @@ Resources:
           }
 
 
+          def _boolean(value, label):
+              if value is True or value == "true":
+                  return True
+              if value is False or value == "false":
+                  return False
+              raise ValueError("invalid {} setting".format(label))
+
+
           def _scope(properties, context, allow_legacy_recording=False):
               name = str(properties.get("ChannelName", ""))
               bucket = str(properties.get("BucketName", ""))
@@ -359,8 +359,17 @@ Resources:
               )
               if not expected_role.startswith(expected_role_prefix):
                   raise ValueError("invalid expected recorder role")
-              if expected_all_supported is True and isinstance(expected_globals, bool):
-                  pass
+              if expected_all_supported is not None and expected_globals is not None:
+                  expected_all_supported = _boolean(
+                      expected_all_supported,
+                      "all-supported recording",
+                  )
+                  expected_globals = _boolean(
+                      expected_globals,
+                      "global resource recording",
+                  )
+                  if not expected_all_supported:
+                      raise ValueError("all-supported recording is required")
               elif allow_legacy_recording and (
                   expected_all_supported is None
                   and expected_globals is None
@@ -779,7 +788,6 @@ Resources:
   ConfigRecorder:
     Type: AWS::Config::ConfigurationRecorder
     Condition: CreateConfig
-    DependsOn: ConfigServiceLinkedRole
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
@@ -792,7 +800,9 @@ Resources:
   ConfigDeliveryChannel:
     Type: Custom::ConfigDeliveryChannel
     Condition: CreateConfig
-    DependsOn: ConfigDeliveryBucketPolicy
+    DependsOn:
+      - ConfigDeliveryBucketPolicy
+      - ConfigRecorder
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:

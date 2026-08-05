@@ -6,6 +6,7 @@ import {
     HERO_FORMATS,
     buildHeroManifest,
     heroDerivativeKey,
+    heroOutputFormatMatches,
     heroWidthsFor,
     parseHeroJob,
 } from './hero.mjs'
@@ -40,6 +41,11 @@ test('uses bounded no-upscale widths and deterministic immutable keys', () => {
     )
     assert.throws(() => heroWidthsFor(0), /source width/)
     assert.throws(() => heroDerivativeKey(version, 640, 'gif'), /format/)
+    assert.equal(heroOutputFormatMatches('avif', 'heif'), true)
+    assert.equal(heroOutputFormatMatches('webp', 'webp'), true)
+    assert.equal(heroOutputFormatMatches('jpeg', 'jpeg'), true)
+    assert.equal(heroOutputFormatMatches('avif', 'avif'), false)
+    assert.equal(heroOutputFormatMatches('gif', 'gif'), false)
 })
 
 test('builds a complete responsive manifest and rejects partial output', () => {

@@ -442,7 +442,7 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
             properties(DeliveryFrequency="EveryMinute"),
             properties(ExpectedRecorderRoleArn="arn:aws:iam::999999999999:role/x"),
             properties(ExpectedAllSupported=False),
-            properties(ExpectedIncludeGlobalResourceTypes="false"),
+            properties(ExpectedIncludeGlobalResourceTypes="FALSE"),
             legacy_properties(ExpectedResourceTypes=[]),
             properties(OwnershipParameterName="/unrelated/marker"),
         )
@@ -451,6 +451,15 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
                 with self.assertRaises((PermissionError, ValueError)):
                     self.module._scope(bad, Context())
         scope = self.module._scope(properties(), Context())
+        string_scope = self.module._scope(
+            properties(
+                ExpectedAllSupported="true",
+                ExpectedIncludeGlobalResourceTypes="false",
+            ),
+            Context(),
+        )
+        self.assertTrue(string_scope["all_supported"])
+        self.assertFalse(string_scope["include_globals"])
         legacy_scope = self.module._scope(
             legacy_properties(), Context(), allow_legacy_recording=True
         )

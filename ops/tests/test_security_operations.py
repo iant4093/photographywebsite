@@ -229,9 +229,9 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("AllSupported: true", MANAGED)
         self.assertIn("IncludeGlobalResourceTypes: !If [RecordGlobalResources, true, false]", MANAGED)
         delivery_channel = resource_block(MANAGED, "ConfigDeliveryChannel")
-        self.assertNotIn("DependsOn: ConfigRecorder", delivery_channel)
         self.assertIn("Type: Custom::ConfigDeliveryChannel", delivery_channel)
-        self.assertIn("DependsOn: ConfigDeliveryBucketPolicy", delivery_channel)
+        self.assertIn("- ConfigDeliveryBucketPolicy", delivery_channel)
+        self.assertIn("- ConfigRecorder", delivery_channel)
         recorder = resource_block(MANAGED, "ConfigRecorder")
         self.assertNotIn("DependsOn: ConfigDeliveryChannel", recorder)
         self.assertNotIn("\n        ResourceTypes:", recorder)
@@ -320,8 +320,7 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("logger.exception", function.lower())
         channel = resource_block(MANAGED, "ConfigDeliveryChannel")
         self.assertIn("ServiceTimeout: 660", channel)
-        service_role = resource_block(MANAGED, "ConfigServiceLinkedRole")
-        self.assertIn("AWSServiceName: config.amazonaws.com", service_role)
+        self.assertNotIn("ConfigServiceLinkedRole:", MANAGED)
         self.assertIn("ExpectedRecorderRoleArn: !Sub", channel)
         self.assertIn("ExpectedAllSupported: true", channel)
         self.assertIn("ExpectedIncludeGlobalResourceTypes:", channel)
@@ -330,6 +329,10 @@ class SecurityTemplateTests(unittest.TestCase):
             channel,
         )
         recorder = resource_block(MANAGED, "ConfigRecorder")
+        self.assertIn(
+            "role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig",
+            recorder,
+        )
         self.assertIn("AllSupported: true", recorder)
         self.assertIn("IncludeGlobalResourceTypes:", recorder)
         self.assertNotIn("\n        ResourceTypes:", recorder)

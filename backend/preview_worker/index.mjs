@@ -40,6 +40,7 @@ import {
     HERO_FORMATS,
     buildHeroManifest,
     heroDerivativeKey,
+    heroOutputFormatMatches,
     heroWidthsFor,
     parseHeroJob,
 } from './hero.mjs'
@@ -139,7 +140,7 @@ async function generateHeroOutput(sourceBytes, width, format) {
     const bytes = await image.toBuffer()
     if (bytes.length < 1 || bytes.length > MAX_OUTPUT_BYTES) throw new Error('Generated hero size is invalid')
     const metadata = await sharp(bytes, { failOn: 'error' }).metadata()
-    if (metadata.format !== format || metadata.width !== width || !metadata.height) {
+    if (!heroOutputFormatMatches(format, metadata.format) || metadata.width !== width || !metadata.height) {
         throw new Error('Generated hero failed validation')
     }
     return { bytes, width, height: metadata.height, format }
