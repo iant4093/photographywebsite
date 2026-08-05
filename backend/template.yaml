@@ -2006,6 +2006,7 @@ Resources:
               Action:
                 - s3:GetObject
                 - s3:PutObject
+                - s3:PutObjectTagging
                 - s3:DeleteObject
               Resource:
                 - !Sub '${ImagesBucket.Arn}/site/hero/home'

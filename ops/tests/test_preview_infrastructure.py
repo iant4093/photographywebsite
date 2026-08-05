@@ -100,6 +100,11 @@ class PreviewWorkerTests(unittest.TestCase):
         self.assertNotIn("s3:DeleteObject", album_permissions)
         self.assertIn("${ImagesBucket.Arn}/site/hero/versions/v1/*", worker)
         self.assertIn("s3:DeleteObject", worker)
+        hero_statement = worker.split(
+            "- !Sub '${ImagesBucket.Arn}/site/hero/versions/v1/*'",
+            1,
+        )[0].rsplit("- Effect: Allow", 1)[-1]
+        self.assertIn("s3:PutObjectTagging", hero_statement)
         self.assertNotIn("dynamodb:DeleteItem", worker)
 
     def test_exact_api_functions_receive_external_metadata_permissions(self) -> None:
