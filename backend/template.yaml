@@ -2018,7 +2018,9 @@ Resources:
               Resource: !GetAtt ImagesBucket.Arn
               Condition:
                 StringLike:
-                  s3:prefix: site/hero/versions/v1/*
+                  s3:prefix:
+                    - site/hero/manifest.json
+                    - site/hero/versions/v1/*
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'

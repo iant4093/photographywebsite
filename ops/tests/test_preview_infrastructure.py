@@ -99,6 +99,7 @@ class PreviewWorkerTests(unittest.TestCase):
         album_permissions = worker.split("Resource: !Sub '${ImagesBucket.Arn}/albums/*'", 1)[0]
         self.assertNotIn("s3:DeleteObject", album_permissions)
         self.assertIn("${ImagesBucket.Arn}/site/hero/versions/v1/*", worker)
+        self.assertIn("- site/hero/manifest.json", worker)
         self.assertIn("s3:DeleteObject", worker)
         hero_statement = worker.split(
             "- !Sub '${ImagesBucket.Arn}/site/hero/versions/v1/*'",
