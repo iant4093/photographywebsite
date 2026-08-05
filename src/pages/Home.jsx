@@ -14,7 +14,7 @@ import {
     setCatalogSnapshot,
 } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
-import { fetchHeroManifest, heroManifestSrcSet } from '../utils/mediaUrls'
+import { fetchHeroManifest, heroCoverUrl, heroManifestSrcSet } from '../utils/mediaUrls'
 
 const CATALOG_KEY = 'public-photos'
 // Fetch the complete current public catalog in one compressed response while
@@ -40,7 +40,8 @@ function Home() {
     const [error, setError] = useState(null)
     const [loadAttempt, setLoadAttempt] = useState(0)
     const [managedHero, setManagedHero] = useState(null)
-    const [managedHeroFailed, setManagedHeroFailed] = useState(false)
+    const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
+    const [managedHomeFailed, setManagedHomeFailed] = useState(false)
 
     useEffect(() => {
         const controller = new AbortController()
@@ -48,7 +49,7 @@ function Home() {
             .then((manifest) => {
                 if (manifest && !controller.signal.aborted) {
                     setManagedHero(manifest)
-                    setManagedHeroFailed(false)
+                    setResponsiveHeroFailed(false)
                 }
             })
             .catch(() => {})
@@ -124,7 +125,7 @@ function Home() {
             window.removeEventListener('scroll', onScroll)
             if (frame !== null) window.cancelAnimationFrame(frame)
         }
-    }, [managedHero, managedHeroFailed])
+    }, [managedHero, responsiveHeroFailed, managedHomeFailed])
 
     useEffect(() => {
         const elements = pageRef.current?.querySelectorAll('[data-reveal-id]') || []
@@ -148,6 +149,17 @@ function Home() {
     }, [albums])
 
     const photoAlbums = useMemo(() => albums.filter((album) => album.type !== 'video'), [albums])
+    const managedHomeUrl = heroCoverUrl()
+    const useResponsiveHero = Boolean(managedHero) && !responsiveHeroFailed
+    const useBundledHero = !useResponsiveHero && (!managedHomeUrl || managedHomeFailed)
+    const heroSrc = useResponsiveHero
+        ? managedHero.variants.jpeg.at(-1).url
+        : (useBundledHero ? '/images/heroes/photo-1280.jpg' : managedHomeUrl)
+    const heroSrcSet = useResponsiveHero
+        ? heroManifestSrcSet(managedHero, 'jpeg')
+        : (useBundledHero ? heroSet('jpg') : undefined)
+    const heroWidth = useResponsiveHero ? managedHero.source.width : (useBundledHero ? 6000 : 2560)
+    const heroHeight = useResponsiveHero ? managedHero.source.height : (useBundledHero ? 4000 : 1707)
     const { groupedPhotoAlbums, photoCategories } = useMemo(() => {
         const grouped = photoAlbums.reduce((result, album) => {
             const category = album.category || 'Uncategorized'
@@ -167,44 +179,36 @@ function Home() {
         <div ref={pageRef} className="animate-fade-in">
             <section className="home-hero linen-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
-                    {!managedHero || managedHeroFailed ? (
-                        <picture>
+                    <picture>
+                        {useResponsiveHero ? (
+                            <>
+                                <source type="image/avif" srcSet={heroManifestSrcSet(managedHero, 'avif')} sizes="100vw" />
+                                <source type="image/webp" srcSet={heroManifestSrcSet(managedHero, 'webp')} sizes="100vw" />
+                            </>
+                        ) : useBundledHero ? (
+                            <>
                             <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
                             <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
-                            <img
-                                ref={heroRef}
-                                src="/images/heroes/photo-1280.jpg"
-                                srcSet={heroSet('jpg')}
-                                sizes="100vw"
-                                width="6000"
-                                height="4000"
-                                alt="Golden hour landscape"
-                                fetchPriority="high"
-                                loading="eager"
-                                decoding="async"
-                                className="home-hero-media parallax-hero"
-                            />
-                        </picture>
-                    ) : (
-                        <picture>
-                            <source type="image/avif" srcSet={heroManifestSrcSet(managedHero, 'avif')} sizes="100vw" />
-                            <source type="image/webp" srcSet={heroManifestSrcSet(managedHero, 'webp')} sizes="100vw" />
-                            <img
-                                ref={heroRef}
-                                src={managedHero.variants.jpeg.at(-1).url}
-                                srcSet={heroManifestSrcSet(managedHero, 'jpeg')}
-                                sizes="100vw"
-                                width={managedHero.source.width}
-                                height={managedHero.source.height}
-                                alt="Golden hour landscape"
-                                fetchPriority="high"
-                                loading="eager"
-                                decoding="async"
-                                onError={() => setManagedHeroFailed(true)}
-                                className="home-hero-media parallax-hero"
-                            />
-                        </picture>
-                    )}
+                            </>
+                        ) : null}
+                        <img
+                            ref={heroRef}
+                            src={heroSrc}
+                            srcSet={heroSrcSet}
+                            sizes="100vw"
+                            width={heroWidth}
+                            height={heroHeight}
+                            alt="Golden hour landscape"
+                            fetchPriority="high"
+                            loading="eager"
+                            decoding="async"
+                            onError={() => {
+                                if (useResponsiveHero) setResponsiveHeroFailed(true)
+                                else if (!useBundledHero) setManagedHomeFailed(true)
+                            }}
+                            className="home-hero-media parallax-hero"
+                        />
+                    </picture>
                     <div className="home-hero-overlay absolute inset-0" />
                 </div>
 
