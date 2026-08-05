@@ -534,6 +534,32 @@ class ReleaseDependencyTests(unittest.TestCase):
                     release_dependencies=dependencies,
                 )
 
+    def test_exact_dynamic_dependency_can_allow_conditional_recreation(self):
+        dependencies = release_guard.load_release_dependencies(self.document())
+        intent = release_guard.load_release_intent(ReleaseIntentTests.intent())
+        item = self.dynamic_change()
+        item["ResourceChange"]["Replacement"] = "Conditional"
+        item["ResourceChange"]["Details"][0]["Target"][
+            "RequiresRecreation"
+        ] = "Always"
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": [item]}],
+                release_intent=intent,
+                release_dependencies=dependencies,
+            )["Total"],
+            1,
+        )
+        item["ResourceChange"]["Details"][0]["CausingEntity"] = (
+            "OtherFunction.Arn"
+        )
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set(
+                [{"Changes": [item]}],
+                release_intent=intent,
+                release_dependencies=dependencies,
+            )
+
     def test_dependency_never_authorizes_a_direct_protected_edit(self):
         dependencies = release_guard.load_release_dependencies(self.document())
         intent = release_guard.load_release_intent(ReleaseIntentTests.intent())

@@ -225,8 +225,6 @@ def gate_change_set(
             raise GateError("resource change has no logical ID")
         if not isinstance(resource_type, str) or not resource_type:
             raise GateError("resource change has no resource type")
-        if replacement not in SAFE_REPLACEMENTS:
-            raise GateError("resource replacement or unknown replacement state is not allowed")
         details = resource.get("Details", [])
         if not isinstance(details, list):
             raise GateError("resource change Details must be a list")
@@ -246,8 +244,6 @@ def gate_change_set(
             target = detail.get("Target", {})
             if not isinstance(target, dict):
                 raise GateError("resource change target is malformed")
-            if target.get("RequiresRecreation") not in SAFE_RECREATION:
-                raise GateError("resource property may require recreation")
             attribute = target.get("Attribute")
             name = target.get("Name")
             dependency_causes = (
@@ -261,6 +257,11 @@ def gate_change_set(
                 and detail.get("ChangeSource") == "ResourceAttribute"
                 and detail.get("CausingEntity") in dependency_causes
             )
+            recreation = target.get("RequiresRecreation")
+            if recreation not in SAFE_RECREATION and not (
+                recreation == "Always" and is_reviewed_dynamic
+            ):
+                raise GateError("resource property may require recreation")
             dynamic_details.append(is_reviewed_dynamic)
             if intended_properties is not None:
                 property_allowed = (
@@ -275,6 +276,10 @@ def gate_change_set(
                 if not property_allowed:
                     raise GateError("resource property is outside the versioned release intent")
         dependency_only = bool(details) and all(dynamic_details)
+        if replacement not in SAFE_REPLACEMENTS and not (
+            replacement == "Conditional" and dependency_only
+        ):
+            raise GateError("resource replacement or unknown replacement state is not allowed")
         protected = logical_id in protected_ids or resource_type in PROTECTED_RESOURCE_TYPES
         # Protected changes require either dependency-only evidence or an
         # explicit, exact versioned exception. Replacements remain impossible
