@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = (ROOT / "backend" / "template.yaml").read_text(encoding="utf-8")
 MAKEFILE = (ROOT / "backend" / "Makefile").read_text(encoding="utf-8")
 RUNBOOK = (ROOT / "ops" / "README.md").read_text(encoding="utf-8")
+WORKER_SOURCE = (ROOT / "backend" / "preview_worker" / "index.mjs").read_text(encoding="utf-8")
 
 
 def resource_block(logical_id: str) -> str:
@@ -59,6 +60,10 @@ class PreviewDataProtectionTests(unittest.TestCase):
 
 
 class PreviewWorkerTests(unittest.TestCase):
+    def test_responsive_hero_invalidations_have_a_migration_safe_namespace(self) -> None:
+        self.assertIn("CallerReference: `responsive-hero-v1-${job.version}`", WORKER_SOURCE)
+        self.assertNotIn("CallerReference: `hero-${job.version}`", WORKER_SOURCE)
+
     def test_worker_is_reproducibly_packaged_and_concurrency_bounded(self) -> None:
         worker = resource_block("PreviewWorkerFunction")
         for expected in (

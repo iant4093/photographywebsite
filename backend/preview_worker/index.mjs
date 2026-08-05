@@ -287,7 +287,7 @@ async function publishHero(job, manifest, sourceContentType) {
     await cloudfront.send(new CreateInvalidationCommand({
         DistributionId: requiredEnvironment('IMAGES_DISTRIBUTION_ID'),
         InvalidationBatch: {
-            CallerReference: `hero-${job.version}`,
+            CallerReference: `responsive-hero-v1-${job.version}`,
             Paths: {
                 Quantity: 2,
                 Items: ['/site/hero/home', '/site/hero/manifest.json'],
