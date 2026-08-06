@@ -108,7 +108,10 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      EnableDefaultStandards: !If [CreateConfig, true, false]
+      # Keep Security Hub opt-in and standards-free. Broad standards create
+      # hundreds of paid Config rule evaluations that are disproportionate for
+      # this single-workload account; the targeted rules below remain enabled.
+      EnableDefaultStandards: false
       ControlFindingGenerator: SECURITY_CONTROL
       Tags:
         Application: IanTruongPhotography

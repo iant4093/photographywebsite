@@ -249,9 +249,7 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("SecurityHubAggregationMode", MANAGED)
         self.assertNotIn("SecurityHubHomeRegion", MANAGED)
         hub = resource_block(MANAGED, "SecurityHub")
-        self.assertIn(
-            "EnableDefaultStandards: !If [CreateConfig, true, false]", hub
-        )
+        self.assertIn("EnableDefaultStandards: false", hub)
         self.assertIn("ControlFindingGenerator: SECURITY_CONTROL", hub)
 
     def test_config_adds_high_signal_rules_with_existing_dependencies(self) -> None:

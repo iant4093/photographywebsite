@@ -140,19 +140,11 @@
     },
     {
       "id": "waf-observation",
-      "logicalResourceIds": ["WafBlockedRequestAlarm", "WafRateObservationAlarm", "WafAlarmForwardRule"],
+      "logicalResourceIds": ["WafBlockedRequestAlarm", "WafAlarmForwardRule"],
       "severity": "high",
       "route": "security-notification-topic-via-cross-region-validated-signal-queue",
       "runbook": "ops/ALARM_REGISTRY.md#waf-observation",
       "autoClose": "CloudWatch metric state only; rule promotion or exclusions require review"
-    },
-    {
-      "id": "waf-managed-rule-diagnostics",
-      "logicalResourceIds": ["WafManagedObservationAlarm"],
-      "severity": "diagnostic",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#waf-observation",
-      "autoClose": "CloudWatch metric state only"
     }
   ]
 }

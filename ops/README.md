@@ -67,8 +67,8 @@ inventory digest across canary and full reconciliation; do not use a sorted
 `backend/template.yaml` owns the online path for versioned responsive previews:
 
 - a retained, deletion-protected, point-in-time-recoverable
-  `PreviewMetadataTable` encrypted with the dedicated rotating `PreviewDataKey`;
-- a KMS-encrypted `PreviewQueue` and 14-day dead-letter queue;
+  `PreviewMetadataTable` encrypted with DynamoDB's AWS-owned key;
+- an SSE-SQS encrypted `PreviewQueue` and 14-day dead-letter queue;
 - a Node.js 22 worker with reserved/event-source concurrency of two and partial
   SQS batch failure reporting; and
 - a preview-only CloudFront behavior that rechecks the S3 visibility tag at the

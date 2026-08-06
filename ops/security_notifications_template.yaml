@@ -356,7 +356,6 @@ Resources:
         detail:
           alarmName:
             - !Sub 'ian-photography-waf-blocked-${Stage}'
-            - !Sub 'ian-photography-waf-rate-${Stage}'
           state:
             value: [ALARM]
       State: ENABLED

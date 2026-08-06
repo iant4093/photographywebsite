@@ -283,37 +283,6 @@ Resources:
         - Key: DataClassification
           Value: PrivateCustomerData
 
-  PreviewDataKey:
-    Type: AWS::KMS::Key
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: !Sub 'Responsive preview metadata and queue encryption (${Stage})'
-      EnableKeyRotation: true
-      PendingWindowInDays: 30
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: EnableAccountIAMPermissions
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
-            Action: kms:*
-            Resource: '*'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-        - Key: DataClassification
-          Value: PrivateCustomerData
-
-  PreviewDataKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub 'alias/ian-photography-preview-${Stage}'
-      TargetKeyId: !Ref PreviewDataKey
-
   PreviewMetadataTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -326,8 +295,6 @@ Resources:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
         SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !GetAtt PreviewDataKey.Arn
       AttributeDefinitions:
         - AttributeName: albumId
           AttributeType: S
@@ -1222,8 +1189,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub 'ian-photography-preview-dlq-${Stage}'
-      KmsMasterKeyId: !GetAtt PreviewDataKey.Arn
-      KmsDataKeyReusePeriodSeconds: 300
+      SqsManagedSseEnabled: true
       MessageRetentionPeriod: 1209600
       ReceiveMessageWaitTimeSeconds: 20
       Tags:
@@ -1238,8 +1204,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub 'ian-photography-preview-${Stage}'
-      KmsMasterKeyId: !GetAtt PreviewDataKey.Arn
-      KmsDataKeyReusePeriodSeconds: 300
+      SqsManagedSseEnabled: true
       MessageRetentionPeriod: 1209600
       ReceiveMessageWaitTimeSeconds: 20
       VisibilityTimeout: 1080
@@ -1307,9 +1272,6 @@ Resources:
             - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
-            - Effect: Allow
-              Action: kms:Decrypt
-              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
@@ -1391,9 +1353,6 @@ Resources:
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
-              Action: kms:Decrypt
-              Resource: !GetAtt PreviewDataKey.Arn
-            - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
               Condition:
@@ -1439,9 +1398,6 @@ Resources:
             - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
-            - Effect: Allow
-              Action: kms:Decrypt
-              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
@@ -1721,11 +1677,6 @@ Resources:
               Action: sqs:SendMessage
               Resource: !GetAtt PreviewQueue.Arn
             - Effect: Allow
-              Action:
-                - kms:Decrypt
-                - kms:GenerateDataKey
-              Resource: !GetAtt PreviewDataKey.Arn
-            - Effect: Allow
               Action: cognito-idp:ListUsers
               Resource: !GetAtt UserPool.Arn
             - Effect: Allow
@@ -1802,9 +1753,6 @@ Resources:
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
-              Action: kms:Decrypt
-              Resource: !GetAtt PreviewDataKey.Arn
-            - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
               Condition:
@@ -1848,9 +1796,6 @@ Resources:
                 - dynamodb:BatchGetItem
                 - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
-            - Effect: Allow
-              Action: kms:Decrypt
-              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket
@@ -1906,11 +1851,6 @@ Resources:
             - Effect: Allow
               Action: sqs:SendMessage
               Resource: !GetAtt PreviewQueue.Arn
-            - Effect: Allow
-              Action:
-                - kms:Decrypt
-                - kms:GenerateDataKey
-              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -2024,9 +1964,6 @@ Resources:
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
-            - Effect: Allow
-              Action: kms:Decrypt
-              Resource: !GetAtt PreviewDataKey.Arn
       Events:
         PreviewJobs:
           Type: SQS
@@ -2179,9 +2116,6 @@ Resources:
                 - dynamodb:BatchGetItem
                 - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
-            - Effect: Allow
-              Action: kms:Decrypt
-              Resource: !GetAtt PreviewDataKey.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket

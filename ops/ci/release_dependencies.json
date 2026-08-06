@@ -46,7 +46,7 @@
     {"logicalId": "HeroCoverFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn", "PreviewQueue.Arn"]},
     {"logicalId": "GoogleDriveBackupFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "LoginFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["RateLimitTable.Arn"]},
-    {"logicalId": "PreviewWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "ImagesBucket.Arn", "ImagesCloudFront.Id", "PreviewDataKey.Arn", "PreviewMetadataTable.Arn", "PreviewQueue.QueueName"]},
+    {"logicalId": "PreviewWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "ImagesBucket.Arn", "ImagesCloudFront.Id", "PreviewMetadataTable.Arn", "PreviewQueue.QueueName"]},
     {"logicalId": "UpdateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "UpdateImageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "WorkerZipFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},

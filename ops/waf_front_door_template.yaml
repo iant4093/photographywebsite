@@ -1,19 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Retained us-east-1 CloudFront-scope WAF for the photography website single front door.
-  Common rules remain observable while high-confidence managed and rate rules block.
+  High-confidence managed rules block known-bad and reputation-listed traffic.
 
 Parameters:
   Stage:
     Type: String
     Default: prod
     AllowedPattern: '^[a-z0-9-]+$'
-  RateLimitPerFiveMinutes:
-    Type: Number
-    Default: 1000
-    MinValue: 100
-    MaxValue: 20000000
-    Description: Per-IP five-minute request threshold; the rule remains COUNT until separately promoted.
   WafLogRetentionDays:
     Type: Number
     Default: 30
@@ -40,7 +34,7 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       Name: !Sub 'IanPhotography-FrontDoor-${Stage}'
-      Description: Count-first protection for the canonical frontend and same-origin API
+      Description: Cost-conscious protection for the canonical frontend and same-origin API
       Scope: CLOUDFRONT
       DefaultAction:
         Allow: {}
@@ -49,18 +43,6 @@ Resources:
         MetricName: !Sub 'IanPhotographyFrontDoor-${Stage}'
         SampledRequestsEnabled: false
       Rules:
-        - Name: AWSManagedCommon
-          Priority: 10
-          OverrideAction:
-            Count: {}
-          Statement:
-            ManagedRuleGroupStatement:
-              VendorName: AWS
-              Name: AWSManagedRulesCommonRuleSet
-          VisibilityConfig:
-            CloudWatchMetricsEnabled: true
-            MetricName: AWSManagedCommonCount
-            SampledRequestsEnabled: false
         - Name: AWSManagedKnownBadInputs
           Priority: 20
           OverrideAction:
@@ -84,18 +66,6 @@ Resources:
           VisibilityConfig:
             CloudWatchMetricsEnabled: true
             MetricName: AWSManagedAmazonIpReputationCount
-            SampledRequestsEnabled: false
-        - Name: PerIpRateLimit
-          Priority: 40
-          Action:
-            Block: {}
-          Statement:
-            RateBasedStatement:
-              AggregateKeyType: IP
-              Limit: !Ref RateLimitPerFiveMinutes
-          VisibilityConfig:
-            CloudWatchMetricsEnabled: true
-            MetricName: PerIpRateLimit
             SampledRequestsEnabled: false
       Tags:
         - Key: Application
@@ -143,8 +113,6 @@ Resources:
             Conditions:
               - ActionCondition:
                   Action: BLOCK
-              - ActionCondition:
-                  Action: COUNT
 
   WafBlockedRequestAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -165,50 +133,6 @@ Resources:
       EvaluationPeriods: 3
       DatapointsToAlarm: 2
       Threshold: 25
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-
-  WafRateObservationAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-waf-rate-${Stage}'
-      AlarmDescription: Per-IP rate protection blocked a sustained request surge.
-      Namespace: AWS/WAFV2
-      MetricName: BlockedRequests
-      Dimensions:
-        - Name: WebACL
-          Value: !Sub 'IanPhotography-FrontDoor-${Stage}'
-        - Name: Region
-          Value: Global
-        - Name: Rule
-          Value: PerIpRateLimit
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 3
-      DatapointsToAlarm: 2
-      Threshold: 10
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-
-  WafManagedObservationAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-waf-managed-${Stage}'
-      AlarmDescription: Count-mode AWS managed rules observed a sudden request anomaly.
-      Namespace: AWS/WAFV2
-      MetricName: CountedRequests
-      Dimensions:
-        - Name: WebACL
-          Value: !Sub 'IanPhotography-FrontDoor-${Stage}'
-        - Name: Region
-          Value: Global
-        - Name: Rule
-          Value: AWSManagedCommon
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      DatapointsToAlarm: 1
-      Threshold: 50
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
@@ -246,7 +170,6 @@ Resources:
         detail:
           alarmName:
             - !Sub 'ian-photography-waf-blocked-${Stage}'
-            - !Sub 'ian-photography-waf-rate-${Stage}'
       State: ENABLED
       Targets:
         - Id: HomeRegionSecurityBus
@@ -260,10 +183,10 @@ Outputs:
   WebAclId:
     Value: !GetAtt FrontDoorWebAcl.Id
   WafLogGroupName:
-    Description: Privacy-filtered COUNT/BLOCK security telemetry with no request sampling.
+    Description: Privacy-filtered BLOCK security telemetry with no request sampling.
     Value: !Ref WafLogGroup
   WafDeploymentMode:
-    Description: Common rules count; known-bad input, IP reputation, and per-IP rate rules block.
+    Description: Known-bad input and IP reputation managed rules block.
     Value: SELECTIVE_BLOCK
   WafAlarmCrossRegionRouting:
     Description: Whether exact WAF alarm transitions are forwarded to the home-region security bus.

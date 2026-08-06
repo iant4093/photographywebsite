@@ -26,33 +26,27 @@ def resource_block(logical_id: str) -> str:
 
 
 class PreviewDataProtectionTests(unittest.TestCase):
-    def test_metadata_table_is_external_recoverable_and_customer_key_encrypted(self) -> None:
-        key = resource_block("PreviewDataKey")
+    def test_metadata_table_is_external_recoverable_and_aws_owned_key_encrypted(self) -> None:
         table = resource_block("PreviewMetadataTable")
-        for expected in (
-            "DeletionPolicy: Retain",
-            "UpdateReplacePolicy: Retain",
-            "EnableKeyRotation: true",
-            "PendingWindowInDays: 30",
-        ):
-            self.assertIn(expected, key)
         for expected in (
             "DeletionPolicy: Retain",
             "UpdateReplacePolicy: Retain",
             "DeletionProtectionEnabled: true",
             "PointInTimeRecoveryEnabled: true",
-            "SSEType: KMS",
-            "KMSMasterKeyId: !GetAtt PreviewDataKey.Arn",
+            "SSEEnabled: true",
             "AttributeName: albumId",
             "AttributeName: mediaId",
         ):
             self.assertIn(expected, table)
+        self.assertNotIn("KMSMasterKeyId", table)
+        self.assertNotIn("PreviewDataKey", TEMPLATE)
 
-    def test_queue_and_dlq_are_kms_encrypted_and_bounded(self) -> None:
+    def test_queue_and_dlq_use_sqs_managed_encryption_and_are_bounded(self) -> None:
         queue = resource_block("PreviewQueue")
         dlq = resource_block("PreviewDeadLetterQueue")
         for block in (queue, dlq):
-            self.assertIn("KmsMasterKeyId: !GetAtt PreviewDataKey.Arn", block)
+            self.assertIn("SqsManagedSseEnabled: true", block)
+            self.assertNotIn("KmsMasterKeyId", block)
             self.assertIn("MessageRetentionPeriod: 1209600", block)
         self.assertIn("VisibilityTimeout: 1080", queue)
         self.assertIn("deadLetterTargetArn: !GetAtt PreviewDeadLetterQueue.Arn", queue)
@@ -131,11 +125,11 @@ class PreviewWorkerTests(unittest.TestCase):
             block = resource_block(logical_id)
             self.assertIn("PREVIEW_QUEUE_URL: !Ref PreviewQueue", block)
             self.assertIn("sqs:SendMessage", block)
-            self.assertIn("kms:GenerateDataKey", block)
+            self.assertNotIn("kms:GenerateDataKey", block)
         for logical_id in ("DeleteAlbumFunction", "DeleteImagesFunction"):
             self.assertIn("dynamodb:BatchWriteItem", resource_block(logical_id))
 
-    def test_every_preview_metadata_consumer_can_decrypt_the_exact_table_key(self) -> None:
+    def test_every_preview_metadata_consumer_uses_no_customer_key_permissions(self) -> None:
         expected_consumers = {
             "GetPublicAlbumFunction",
             "GetAlbumFunction",
@@ -155,17 +149,9 @@ class PreviewWorkerTests(unittest.TestCase):
         }
         self.assertEqual(expected_consumers, actual_consumers)
 
-        exact_key_decrypt = re.compile(
-            r"(?ms)Action:(?P<actions>.*?)"
-            r"^\s+Resource: !GetAtt PreviewDataKey\.Arn$"
-        )
         for logical_id in sorted(expected_consumers):
             with self.subTest(function=logical_id):
-                key_statements = exact_key_decrypt.findall(resource_block(logical_id))
-                self.assertTrue(
-                    any("kms:Decrypt" in actions for actions in key_statements),
-                    f"{logical_id} must decrypt PreviewDataKey",
-                )
+                self.assertNotIn("PreviewDataKey", resource_block(logical_id))
 
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):

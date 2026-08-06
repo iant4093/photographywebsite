@@ -235,10 +235,8 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                     "ARN": web_acl_arn,
                     "DefaultAction": {"Allow": {}},
                     "Rules": [
-                        {"Name": "AWSManagedCommon", "OverrideAction": {"Count": {}}},
                         {"Name": "AWSManagedKnownBadInputs", "OverrideAction": {"None": {}}},
                         {"Name": "AWSManagedAmazonIpReputation", "OverrideAction": {"None": {}}},
-                        {"Name": "PerIpRateLimit", "Action": {"Block": {}}},
                     ],
                 }
             },
@@ -296,13 +294,10 @@ class WafAndPreflightTests(unittest.TestCase):
     def test_waf_is_retained_selectively_blocking_and_privacy_safe(self) -> None:
         self.assertIn("Scope: CLOUDFRONT", WAF_TEMPLATE)
         self.assertIn("DefaultAction:\n        Allow: {}", WAF_TEMPLATE)
-        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 5)
-        self.assertEqual(WAF_TEMPLATE.count("Count: {}"), 1)
+        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 3)
+        self.assertEqual(WAF_TEMPLATE.count("Count: {}"), 0)
         self.assertEqual(WAF_TEMPLATE.count("None: {}"), 2)
-        self.assertIn("Action:\n            Block: {}", WAF_TEMPLATE)
-        self.assertIn("Name: PerIpRateLimit", WAF_TEMPLATE)
         for managed_group in (
-            "AWSManagedRulesCommonRuleSet",
             "AWSManagedRulesKnownBadInputsRuleSet",
             "AWSManagedRulesAmazonIpReputationList",
         ):
@@ -311,26 +306,20 @@ class WafAndPreflightTests(unittest.TestCase):
             self.assertIn(redacted, WAF_TEMPLATE)
         self.assertIn("DefaultBehavior: DROP", WAF_TEMPLATE)
         self.assertIn("Action: BLOCK", WAF_TEMPLATE)
-        self.assertIn("Action: COUNT", WAF_TEMPLATE)
         self.assertIn("DeletionPolicy: Retain", WAF_TEMPLATE)
         self.assertIn("WafAlarmCrossRegionRule", WAF_TEMPLATE)
         self.assertIn("events:PutEvents", WAF_TEMPLATE)
         self.assertNotIn("AlarmTopicArn", WAF_TEMPLATE)
         self.assertNotIn("AlarmActions:", WAF_TEMPLATE)
         blocked_alarm = WAF_TEMPLATE.split("  WafBlockedRequestAlarm:", 1)[1].split(
-            "  WafRateObservationAlarm:", 1
-        )[0]
-        rate_alarm = WAF_TEMPLATE.split("  WafRateObservationAlarm:", 1)[1].split(
-            "  WafManagedObservationAlarm:", 1
+            "  WafAlarmForwardRole:", 1
         )[0]
         forward_rule = WAF_TEMPLATE.split("  WafAlarmCrossRegionRule:", 1)[1]
-        for block, threshold in ((blocked_alarm, 25), (rate_alarm, 10)):
-            self.assertIn("EvaluationPeriods: 3", block)
-            self.assertIn("DatapointsToAlarm: 2", block)
-            self.assertIn(f"Threshold: {threshold}", block)
+        self.assertIn("EvaluationPeriods: 3", blocked_alarm)
+        self.assertIn("DatapointsToAlarm: 2", blocked_alarm)
+        self.assertIn("Threshold: 25", blocked_alarm)
         self.assertIn("ian-photography-waf-blocked-${Stage}", forward_rule)
-        self.assertIn("ian-photography-waf-rate-${Stage}", forward_rule)
-        self.assertNotIn("ian-photography-waf-managed-${Stage}", forward_rule)
+        self.assertNotIn("ian-photography-waf-rate-${Stage}", forward_rule)
 
     def test_preflight_never_reads_or_returns_secret_value(self) -> None:
         account = "000000000000"

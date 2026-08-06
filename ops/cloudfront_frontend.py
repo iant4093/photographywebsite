@@ -557,10 +557,8 @@ def validate_front_door_resources(
         if isinstance(rule, dict)
     }
     expected_actions = {
-        "AWSManagedCommon": ("OverrideAction", "Count"),
         "AWSManagedKnownBadInputs": ("OverrideAction", "None"),
         "AWSManagedAmazonIpReputation": ("OverrideAction", "None"),
-        "PerIpRateLimit": ("Action", "Block"),
     }
     if set(actual_rules) != set(expected_actions) or any(
         action not in actual_rules[name].get(container, {})
