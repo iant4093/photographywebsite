@@ -253,6 +253,32 @@ class PreviewBackfillTests(unittest.TestCase):
         self.assertEqual(jobs, [])
         self.assertEqual(counts["alreadyCompleteCount"], 1)
 
+    def test_exact_previous_ready_contract_is_planned_as_an_additive_upgrade(self):
+        album = record(
+            albumId=ALBUM_ID,
+            type="photo",
+            status="active",
+            visibility="public",
+            images=[{"rawKey": RAW_KEY, "width": 3000, "height": 2000}],
+        )
+        metadata = record(
+            albumId=ALBUM_ID,
+            mediaId=backfill_preview_v2.media_id_for_key(RAW_KEY),
+            status="ready",
+            previewVersion=2,
+            previewKeys=backfill_preview_v2.previous_preview_keys(ALBUM_ID, RAW_KEY),
+        )
+
+        jobs, counts = backfill_preview_v2.build_backfill_plan([album], [metadata])
+
+        self.assertEqual(jobs, [{
+            "albumId": ALBUM_ID,
+            "rawKey": RAW_KEY,
+            "previewVersion": 2,
+        }])
+        self.assertEqual(counts["previousContractUpgradeCount"], 1)
+        self.assertEqual(counts["conflictingMetadataCount"], 0)
+
     def test_duplicate_manifest_media_produces_exactly_one_job(self):
         image = {"rawKey": RAW_KEY, "width": 3000, "height": 2000}
         album = record(

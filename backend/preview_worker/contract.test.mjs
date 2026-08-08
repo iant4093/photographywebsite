@@ -23,6 +23,7 @@ test('derives deterministic versioned keys', () => {
     const mediaId = mediaIdForKey(rawKey)
     assert.equal(mediaId.length, 24)
     assert.deepEqual(previewKeysFor(albumId, rawKey), {
+        480: `albums/${albumId}/preview/v2/${mediaId}-w480.webp`,
         640: `albums/${albumId}/preview/v2/${mediaId}-w640.webp`,
         1280: `albums/${albumId}/preview/v2/${mediaId}-w1280.webp`,
     })

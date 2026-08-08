@@ -93,7 +93,7 @@ class MediaAccessTests(unittest.TestCase):
         }
         with patch.object(media_access, "load_preview_metadata", return_value={media_id: metadata}):
             result = media_access.serialize_images(album, include_internal=True)[0]
-        self.assertEqual([item["width"] for item in result["previewSrcSet"]], [640, 1280])
+        self.assertEqual([item["width"] for item in result["previewSrcSet"]], [480, 640, 1280])
         self.assertTrue(all(item["url"].startswith("https://media.example.test/") for item in result["previewSrcSet"]))
         self.assertEqual(result["previewVersion"], 2)
         self.assertEqual(result["previewKeys"], keys)

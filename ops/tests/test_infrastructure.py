@@ -374,6 +374,7 @@ class DataProtectionTests(unittest.TestCase):
         self.assertNotIn("cloudfront:CreateInvalidation", function)
         self.assertIn("${ImagesBucket.Arn}/site/hero/original", worker)
         self.assertIn("${ImagesBucket.Arn}/site/hero/versions/v1/*", worker)
+        self.assertIn("${ImagesBucket.Arn}/site/hero/current/*", worker)
         self.assertIn("cloudfront:CreateInvalidation", worker)
         self.assertIn("DenyCloudFrontTemporaryZipReads", policy)
         self.assertIn("PathPattern: 'site/hero/*'", distribution)

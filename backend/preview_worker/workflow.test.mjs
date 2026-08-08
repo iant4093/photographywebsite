@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { previewKeysFor } from './contract.mjs'
-import { readyPreviewDescriptor, validateReadyOrMarkPending } from './workflow.mjs'
+import {
+    isPreviousPreviewContract,
+    readyPreviewDescriptor,
+    validateReadyOrMarkPending,
+} from './workflow.mjs'
 
 const albumId = '11111111-1111-4111-8111-111111111111'
 const rawKey = `albums/${albumId}/original/photo.jpg`
@@ -13,12 +17,13 @@ const metadata = {
     previewKeys: keys,
     sourceSha256: 'a'.repeat(64),
     dimensions: {
+        480: { width: 480, height: 320 },
         640: { width: 640, height: 427 },
         1280: { width: 1280, height: 853 },
     },
 }
 
-test('accepts a ready row only after both objects validate and are retagged', async () => {
+test('accepts a ready row only after every object validates and is retagged', async () => {
     const validated = []
     const tagged = []
     const accepted = await validateReadyOrMarkPending({
@@ -30,7 +35,7 @@ test('accepts a ready row only after both objects validate and are retagged', as
         markPending: async () => assert.fail('must not mark valid metadata pending'),
     })
     assert.equal(accepted, true)
-    assert.deepEqual(validated, [keys['640'], keys['1280']])
+    assert.deepEqual(validated, [keys['480'], keys['640'], keys['1280']])
     assert.deepEqual(tagged, validated)
 })
 
@@ -82,10 +87,32 @@ test('rejects every incomplete ready-metadata contract boundary', () => {
     assert.deepEqual(readyPreviewDescriptor(metadata, keys), {
         sourceDigest: 'a'.repeat(64),
         outputs: {
+            480: { width: 480, height: 320 },
             640: { width: 640, height: 427 },
             1280: { width: 1280, height: 853 },
         },
     })
+})
+
+test('recognizes only the exact previous ready contract for additive upgrades', () => {
+    const previousKeys = { 640: keys['640'], 1280: keys['1280'] }
+    assert.equal(isPreviousPreviewContract({
+        ...metadata,
+        previewKeys: previousKeys,
+        dimensions: {
+            640: metadata.dimensions['640'],
+            1280: metadata.dimensions['1280'],
+        },
+    }, keys), true)
+    for (const value of [
+        null,
+        { ...metadata, previewKeys: previousKeys, status: 'pending' },
+        { ...metadata, previewKeys: previousKeys, previewVersion: 1 },
+        { ...metadata, previewKeys: { ...previousKeys, 480: keys['480'] } },
+        { ...metadata, previewKeys: { ...previousKeys, 640: 'wrong' } },
+    ]) {
+        assert.equal(isPreviousPreviewContract(value, keys), false)
+    }
 })
 
 test('non-ready rows require neither validation nor a pending repair', async () => {

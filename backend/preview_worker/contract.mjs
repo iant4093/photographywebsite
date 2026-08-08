@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 
 export const PREVIEW_VERSION = 2
-export const PREVIEW_WIDTHS = Object.freeze([640, 1280])
+export const PREVIEW_WIDTHS = Object.freeze([480, 640, 1280])
+export const PREVIOUS_PREVIEW_WIDTHS = Object.freeze([640, 1280])
 export const PREVIEW_QUALITY = 80
 export const ALLOWED_VISIBILITIES = new Set(['public', 'private', 'unlisted'])
 export const SUPPORTED_SOURCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])

@@ -1915,6 +1915,7 @@ Resources:
                 - !Sub '${ImagesBucket.Arn}/site/hero/original'
                 - !Sub '${ImagesBucket.Arn}/site/hero/manifest.json'
                 - !Sub '${ImagesBucket.Arn}/site/hero/versions/v1/*'
+                - !Sub '${ImagesBucket.Arn}/site/hero/current/*'
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
@@ -1923,6 +1924,7 @@ Resources:
                   s3:prefix:
                     - site/hero/manifest.json
                     - site/hero/versions/v1/*
+                    - site/hero/current/*
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'

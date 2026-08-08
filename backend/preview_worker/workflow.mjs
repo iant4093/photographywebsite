@@ -1,4 +1,18 @@
-import { PREVIEW_VERSION, PREVIEW_WIDTHS } from './contract.mjs'
+import { PREVIEW_VERSION, PREVIEW_WIDTHS, PREVIOUS_PREVIEW_WIDTHS } from './contract.mjs'
+
+export function isPreviousPreviewContract(metadata, expectedKeys) {
+    if (!metadata || metadata.status !== 'ready' || Number(metadata.previewVersion) !== PREVIEW_VERSION) {
+        return false
+    }
+    if (!metadata.previewKeys || typeof metadata.previewKeys !== 'object') return false
+    const storedWidths = Object.keys(metadata.previewKeys).sort()
+    const previousWidths = PREVIOUS_PREVIEW_WIDTHS.map(String).sort()
+    if (storedWidths.length !== previousWidths.length
+        || storedWidths.some((width, index) => width !== previousWidths[index])) return false
+    return PREVIOUS_PREVIEW_WIDTHS.every((width) => (
+        metadata.previewKeys[String(width)] === expectedKeys[String(width)]
+    ))
+}
 
 export function readyPreviewDescriptor(metadata, expectedKeys) {
     if (!metadata || metadata.status !== 'ready' || Number(metadata.previewVersion) !== PREVIEW_VERSION) {

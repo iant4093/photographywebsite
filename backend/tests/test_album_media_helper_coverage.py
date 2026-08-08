@@ -471,7 +471,7 @@ class MediaAccessBranchTests(unittest.TestCase):
         }
         album = {**self.album, "images": [None, {"rawKey": "albums/other/x.jpg"}, {"rawKey": RAW_KEY}]}
         with patch.object(media_access, "load_preview_metadata", return_value=metadata):
-            self.assertEqual(len(media_access.preview_known_keys(album)), 2)
+            self.assertEqual(len(media_access.preview_known_keys(album)), 3)
         self.assertEqual(media_access._raw_key("key"), "key")
         self.assertEqual(media_access._raw_key(None), "")
         self.assertIsNone(media_access.find_image_by_media_id(self.album, 1))

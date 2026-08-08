@@ -23,7 +23,8 @@ from aws_stack import aws_json, stack_resource
 
 
 PREVIEW_VERSION = 2
-PREVIEW_WIDTHS = (640, 1280)
+PREVIEW_WIDTHS = (480, 640, 1280)
+PREVIOUS_PREVIEW_WIDTHS = (640, 1280)
 ALLOWED_VISIBILITIES = {"public", "private", "unlisted"}
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -93,6 +94,11 @@ def expected_preview_keys(album_id: str, raw_key: str) -> dict[str, str]:
     return {str(width): f"{prefix}{media_id}-w{width}.webp" for width in PREVIEW_WIDTHS}
 
 
+def previous_preview_keys(album_id: str, raw_key: str) -> dict[str, str]:
+    expected = expected_preview_keys(album_id, raw_key)
+    return {str(width): expected[str(width)] for width in PREVIOUS_PREVIEW_WIDTHS}
+
+
 def scan_all(
     table: str,
     projection: str,
@@ -154,6 +160,7 @@ def build_backfill_plan(
         "plannedJobCount": 0,
         "alreadyCompleteCount": 0,
         "pendingRetryCount": 0,
+        "previousContractUpgradeCount": 0,
         "smallSourceSkippedCount": 0,
         "unsupportedSourceSkippedCount": 0,
         "inactiveAlbumSkippedCount": 0,
@@ -219,8 +226,17 @@ def build_backfill_plan(
                     and existing.get("previewKeys") == preview_keys
                     and existing.get("status") in {"ready", "pending"}
                 )
-                if not valid_contract:
+                previous_ready_contract = (
+                    existing.get("previewVersion") == PREVIEW_VERSION
+                    and existing.get("previewKeys") == previous_preview_keys(album_id, raw_key)
+                    and existing.get("status") == "ready"
+                )
+                if not valid_contract and not previous_ready_contract:
                     counts["conflictingMetadataCount"] += 1
+                    continue
+                if previous_ready_contract:
+                    counts["previousContractUpgradeCount"] += 1
+                    jobs.append({"albumId": album_id, "rawKey": raw_key, "previewVersion": PREVIEW_VERSION})
                     continue
                 if existing["status"] == "ready":
                     counts["alreadyCompleteCount"] += 1

@@ -4,6 +4,7 @@ const SOURCE_KEY_PATTERN = /^(?:temp-zips\/hero-pending|site\/hero\/(?:home|orig
 export const HERO_DERIVATIVE_VERSION = 1
 export const HERO_WIDTHS = Object.freeze([640, 960, 1280, 1920, 2560])
 export const HERO_FORMATS = Object.freeze(['avif', 'webp', 'jpeg'])
+export const HERO_CURRENT_PREFIX = 'site/hero/current'
 export const HERO_CONTENT_TYPES = Object.freeze({
     avif: 'image/avif',
     webp: 'image/webp',
@@ -40,6 +41,21 @@ export function heroDerivativeKey(version, width, format) {
     if (!HERO_FORMATS.includes(format)) throw new Error('Invalid hero derivative format')
     const extension = format === 'jpeg' ? 'jpg' : format
     return `site/hero/versions/v${HERO_DERIVATIVE_VERSION}/${parsed.version}/hero-${width}.${extension}`
+}
+
+export function heroCurrentKey(width, format) {
+    if (!Number.isSafeInteger(width) || width < 1 || width > HERO_WIDTHS.at(-1)) {
+        throw new Error('Invalid current hero width')
+    }
+    if (!HERO_FORMATS.includes(format)) throw new Error('Invalid current hero format')
+    const extension = format === 'jpeg' ? 'jpg' : format
+    return `${HERO_CURRENT_PREFIX}/hero-${width}.${extension}`
+}
+
+export function heroCurrentFallbackKey(format = 'jpeg') {
+    if (!HERO_FORMATS.includes(format)) throw new Error('Invalid current hero format')
+    const extension = format === 'jpeg' ? 'jpg' : format
+    return `${HERO_CURRENT_PREFIX}/hero.${extension}`
 }
 
 export function heroOutputFormatMatches(requestedFormat, detectedFormat) {

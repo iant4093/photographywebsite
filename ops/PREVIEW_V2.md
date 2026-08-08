@@ -1,6 +1,6 @@
 # Responsive preview V2 guarded rollout
 
-This runbook is the production procedure for the 640w/1280w WebP preview
+This runbook is the production procedure for the 480w/640w/1280w WebP preview
 worker and historical backfill. It is intentionally fail closed. The current
 800-pixel JPEG thumbnail remains the fallback and is never overwritten or
 deleted by this workflow.
@@ -135,14 +135,14 @@ those fields as a diagnostic shortcut.
 ## 5. Verify the canary before expanding
 
 After the queue and in-flight count return to zero, require exactly five new
-ready metadata records, ten successful object writes, no pending records, no
+ready metadata records, fifteen successful object writes, no pending records, no
 DLQ message, and no worker/error/throttle alarm. Review these only through
 aggregate metrics or a protected operator session; do not export the selected
 identifiers. For all five selected cases verify:
 
 - exact ready/version/key metadata and absence of a pending job ID;
-- source SHA-256 consistency across the ready record and both S3 objects;
-- exact 640/1280 dimensions in metadata and actual WebP headers;
+- source SHA-256 consistency across the ready record and all three S3 objects;
+- exact 480/640/1280 dimensions in metadata and actual WebP headers;
 - valid object checksum/ETag evidence, size bounds, content type, immutable
   cache policy, generator/version/width metadata, and bucket-default encryption;
 - exact public/private/unlisted visibility tags;

@@ -34,11 +34,13 @@ import {
     previewStageFailure,
     safePreviewFailureTelemetry,
 } from './telemetry.mjs'
-import { validateReadyOrMarkPending } from './workflow.mjs'
+import { isPreviousPreviewContract, validateReadyOrMarkPending } from './workflow.mjs'
 import {
     HERO_CONTENT_TYPES,
     HERO_FORMATS,
     buildHeroManifest,
+    heroCurrentFallbackKey,
+    heroCurrentKey,
     heroDerivativeKey,
     heroOutputFormatMatches,
     heroWidthsFor,
@@ -252,6 +254,64 @@ async function publishHero(job, manifest, sourceContentType) {
     manifest.previousVersion = typeof oldManifest?.version === 'string' ? oldManifest.version : null
     manifest.publishedAt = new Date().toISOString()
 
+    const currentAliases = []
+    for (const format of HERO_FORMATS) {
+        for (const variant of manifest.variants[format]) {
+            const aliasKey = heroCurrentKey(variant.width, format)
+            await s3.send(new CopyObjectCommand({
+                Bucket: bucket,
+                Key: aliasKey,
+                CopySource: `${bucket}/${variant.key}`,
+                ContentType: HERO_CONTENT_TYPES[format],
+                CacheControl: 'public, max-age=0, must-revalidate',
+                MetadataDirective: 'REPLACE',
+                Tagging: 'visibility=public',
+                TaggingDirective: 'REPLACE',
+                ServerSideEncryption: 'AES256',
+            }))
+            currentAliases.push(aliasKey)
+        }
+    }
+
+    for (const format of HERO_FORMATS) {
+        const candidates = manifest.variants[format]
+        const preferred = candidates.find(({ width }) => width >= 1280) || candidates.at(-1)
+        const aliasKey = heroCurrentFallbackKey(format)
+        await s3.send(new CopyObjectCommand({
+            Bucket: bucket,
+            Key: aliasKey,
+            CopySource: `${bucket}/${preferred.key}`,
+            ContentType: HERO_CONTENT_TYPES[format],
+            CacheControl: 'public, max-age=0, must-revalidate',
+            MetadataDirective: 'REPLACE',
+            Tagging: 'visibility=public',
+            TaggingDirective: 'REPLACE',
+            ServerSideEncryption: 'AES256',
+        }))
+        currentAliases.push(aliasKey)
+    }
+
+    const existingAliases = []
+    let aliasContinuationToken
+    do {
+        const page = await s3.send(new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: 'site/hero/current/',
+            MaxKeys: 1000,
+            ContinuationToken: aliasContinuationToken,
+        }))
+        existingAliases.push(...(page.Contents || []).map(({ Key }) => Key).filter(Boolean))
+        aliasContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
+    } while (aliasContinuationToken)
+    const retainedAliases = new Set(currentAliases)
+    const staleAliases = existingAliases.filter((key) => !retainedAliases.has(key))
+    if (staleAliases.length) {
+        await s3.send(new DeleteObjectsCommand({
+            Bucket: bucket,
+            Delete: { Objects: staleAliases.map((Key) => ({ Key })), Quiet: true },
+        }))
+    }
+
     await s3.send(new CopyObjectCommand({
         Bucket: bucket,
         Key: 'site/hero/original',
@@ -284,13 +344,19 @@ async function publishHero(job, manifest, sourceContentType) {
         Tagging: 'visibility=public',
         ServerSideEncryption: 'AES256',
     }))
+    const invalidationPaths = [...new Set([
+        '/site/hero/home',
+        '/site/hero/manifest.json',
+        ...currentAliases.map((key) => `/${key}`),
+        ...existingAliases.map((key) => `/${key}`),
+    ])]
     await cloudfront.send(new CreateInvalidationCommand({
         DistributionId: requiredEnvironment('IMAGES_DISTRIBUTION_ID'),
         InvalidationBatch: {
-            CallerReference: `responsive-hero-v1-${job.version}`,
+            CallerReference: `responsive-hero-v2-${job.version}`,
             Paths: {
-                Quantity: 2,
-                Items: ['/site/hero/home', '/site/hero/manifest.json'],
+                Quantity: invalidationPaths.length,
+                Items: invalidationPaths,
             },
         },
     }))
@@ -429,6 +495,30 @@ async function markReadyMetadataPending(resolved, mediaId, jobId) {
     }))
 }
 
+async function upgradePreviousReadyMetadataPending(resolved, mediaId, jobId, previousKeys) {
+    await documentClient.send(new UpdateCommand({
+        TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
+        Key: { albumId: resolved.job.albumId, mediaId },
+        UpdateExpression: 'SET #status = :pending, #jobId = :jobId, #previewKeys = :newKeys, updatedAt = :updatedAt REMOVE sourceSha256, dimensions, completedAt',
+        ConditionExpression: '#status = :ready AND #previewVersion = :version AND #previewKeys = :previousKeys',
+        ExpressionAttributeNames: {
+            '#status': 'status',
+            '#jobId': 'jobId',
+            '#previewVersion': 'previewVersion',
+            '#previewKeys': 'previewKeys',
+        },
+        ExpressionAttributeValues: {
+            ':ready': 'ready',
+            ':pending': 'pending',
+            ':jobId': jobId,
+            ':updatedAt': new Date().toISOString(),
+            ':version': PREVIEW_VERSION,
+            ':newKeys': resolved.previewKeys,
+            ':previousKeys': previousKeys,
+        },
+    }))
+}
+
 async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, outputs) {
     await documentClient.send(new UpdateCommand({
         TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
@@ -481,11 +571,26 @@ async function processJob(jobValue) {
         async () => previewMetadata(job.albumId, mediaId),
     )
     const jobId = previewJobId(job)
+    let upgradedPreviousContract = false
     if (existingMetadata?.status === 'ready') {
-        const accepted = await atPreviewStage('existing_preview_invalid', async () => {
-            if (!isCompletePreview(existingMetadata, resolved.previewKeys)) {
-                throw new Error('Preview metadata conflicts')
+        if (!isCompletePreview(existingMetadata, resolved.previewKeys)) {
+            if (!isPreviousPreviewContract(existingMetadata, resolved.previewKeys)) {
+                throw previewStageFailure('existing_preview_invalid')
             }
+            await atPreviewStage(
+                'metadata_pending_failed',
+                async () => upgradePreviousReadyMetadataPending(
+                    resolved,
+                    mediaId,
+                    jobId,
+                    existingMetadata.previewKeys,
+                ),
+            )
+            upgradedPreviousContract = true
+        }
+    }
+    if (existingMetadata?.status === 'ready' && !upgradedPreviousContract) {
+        const accepted = await atPreviewStage('existing_preview_invalid', async () => {
             return validateReadyOrMarkPending({
                 metadata: existingMetadata,
                 expectedKeys: resolved.previewKeys,

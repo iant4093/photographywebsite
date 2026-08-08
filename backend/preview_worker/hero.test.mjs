@@ -5,6 +5,8 @@ import {
     HERO_DERIVATIVE_VERSION,
     HERO_FORMATS,
     buildHeroManifest,
+    heroCurrentFallbackKey,
+    heroCurrentKey,
     heroDerivativeKey,
     heroOutputFormatMatches,
     heroWidthsFor,
@@ -39,8 +41,12 @@ test('uses bounded no-upscale widths and deterministic immutable keys', () => {
         heroDerivativeKey(version, 1280, 'webp'),
         `site/hero/versions/v${HERO_DERIVATIVE_VERSION}/${version}/hero-1280.webp`,
     )
+    assert.equal(heroCurrentKey(960, 'avif'), 'site/hero/current/hero-960.avif')
+    assert.equal(heroCurrentFallbackKey('jpeg'), 'site/hero/current/hero.jpg')
     assert.throws(() => heroWidthsFor(0), /source width/)
     assert.throws(() => heroDerivativeKey(version, 640, 'gif'), /format/)
+    assert.throws(() => heroCurrentKey(0, 'avif'), /current hero width/)
+    assert.throws(() => heroCurrentFallbackKey('gif'), /current hero format/)
     assert.equal(heroOutputFormatMatches('avif', 'heif'), true)
     assert.equal(heroOutputFormatMatches('webp', 'webp'), true)
     assert.equal(heroOutputFormatMatches('jpeg', 'jpeg'), true)

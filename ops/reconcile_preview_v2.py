@@ -205,15 +205,20 @@ def validate_ready_metadata(
                 normalized_dimensions[str(width)] = height
     if len(normalized_dimensions) == len(backfill.PREVIEW_WIDTHS):
         # Sharp/libvips may round the height independently at each target
-        # width. Permit at most one 640w output pixel of ratio drift; this is
-        # equivalent to a two-pixel delta at 1280w and still rejects a changed
-        # crop or orientation.
-        ratio_delta = abs(
-            normalized_dimensions["1280"] * 640
-            - normalized_dimensions["640"] * 1280
-        )
-        if ratio_delta > 1280:
-            failures["metadataAspectRatioMismatch"] += 1
+        # width. Permit at most one pixel of scaled ratio drift while still
+        # rejecting a changed crop or orientation at any configured width.
+        base_width = 640
+        base_height = normalized_dimensions[str(base_width)]
+        for width in backfill.PREVIEW_WIDTHS:
+            if width == base_width:
+                continue
+            ratio_delta = abs(
+                normalized_dimensions[str(width)] * base_width
+                - base_height * width
+            )
+            if ratio_delta > max(base_width, width):
+                failures["metadataAspectRatioMismatch"] += 1
+                break
     if "jobId" in metadata:
         failures["readyMetadataRetainsJobId"] += 1
     return source_digest, normalized_dimensions or None, failures

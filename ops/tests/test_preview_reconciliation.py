@@ -96,21 +96,23 @@ class PreviewReconciliationTests(unittest.TestCase):
             "previewKeys": keys,
             "sourceSha256": "a" * 64,
             "dimensions": {
+                "480": {"width": 480, "height": 320},
                 "640": {"width": 640, "height": 427},
                 "1280": {"width": 1280, "height": 853},
             },
         }
         digest, dimensions, failures = reconcile_preview_v2.validate_ready_metadata(metadata, keys)
         self.assertEqual(digest, "a" * 64)
-        self.assertEqual(dimensions, {"640": 427, "1280": 853})
+        self.assertEqual(dimensions, {"480": 320, "640": 427, "1280": 853})
         self.assertFalse(failures)
 
         metadata["dimensions"] = {
+            "480": {"width": 480, "height": 721},
             "640": {"width": 640, "height": 961},
             "1280": {"width": 1280, "height": 1920},
         }
         _, dimensions, failures = reconcile_preview_v2.validate_ready_metadata(metadata, keys)
-        self.assertEqual(dimensions, {"640": 961, "1280": 1920})
+        self.assertEqual(dimensions, {"480": 721, "640": 961, "1280": 1920})
         self.assertFalse(failures)
 
         metadata["sourceSha256"] = "invalid"
@@ -228,6 +230,7 @@ class PreviewReconciliationTests(unittest.TestCase):
             previewKeys=backfill_preview_v2.expected_preview_keys(ALBUM_ID, RAW_KEY),
             sourceSha256="e" * 64,
             dimensions={
+                "480": {"width": 480, "height": 320},
                 "640": {"width": 640, "height": 427},
                 "1280": {"width": 1280, "height": 853},
             },
@@ -267,7 +270,7 @@ class PreviewReconciliationTests(unittest.TestCase):
         self.assertEqual(summary["status"], "pass")
         self.assertEqual(summary["account"], "verified")
         self.assertEqual(summary["stack"], "verified")
-        self.assertEqual(summary["objectValidatedCount"], 2)
+        self.assertEqual(summary["objectValidatedCount"], 3)
         self.assertNotIn('"account": "123"', rendered)
         self.assertNotIn('"stack": "ian-website"', rendered)
         self.assertNotIn(ALBUM_ID, rendered)
