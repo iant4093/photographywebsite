@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Inventory or explicitly enable Inspector Lambda and Lambda code scanning.
+"""Inventory or explicitly disable Inspector Lambda and Lambda code scanning.
 
-Dry-run is the default. Apply is permitted only when both protection types are
-currently DISABLED and every stale-state/account/region guard matches. The
-script never enables EC2 or ECR scanning and has no disable operation.
+Dry-run is the default. Apply is permitted only when both paid Lambda protection
+types are currently ENABLED and every stale-state/account/region guard matches.
+The script never changes EC2, ECR, or repository scanning.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from aws_stack import aws_json
 
 ACCOUNT_PATTERN = re.compile(r"^[0-9]{12}$")
 REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-[0-9]$")
-CONFIRMATION = "enable-inspector-lambda-code-scanning"
+CONFIRMATION = "disable-inspector-lambda-scanning"
 MIN_WAIT_TIMEOUT_SECONDS = 30
 MAX_WAIT_TIMEOUT_SECONDS = 900
 MIN_POLL_INTERVAL_SECONDS = 1
@@ -70,22 +70,22 @@ def validate_apply_guards(
         raise SystemExit("--expected-account-id must exactly match the active AWS account")
     if expected_region != region:
         raise SystemExit("--expected-region must exactly match --region")
-    if expected_lambda_state != current_lambda_state or expected_lambda_state != "DISABLED":
+    if expected_lambda_state != current_lambda_state or expected_lambda_state != "ENABLED":
         raise SystemExit(
-            "--expected-lambda-state must match the current state and both must be DISABLED"
+            "--expected-lambda-state must match the current state and both must be ENABLED"
         )
     if (
         expected_lambda_code_state != current_lambda_code_state
-        or expected_lambda_code_state != "DISABLED"
+        or expected_lambda_code_state != "ENABLED"
     ):
         raise SystemExit(
-            "--expected-lambda-code-state must match the current state and both must be DISABLED"
+            "--expected-lambda-code-state must match the current state and both must be ENABLED"
         )
     if confirmation != CONFIRMATION:
         raise SystemExit(f"--confirm must be exactly {CONFIRMATION}")
 
 
-def wait_until_lambda_scanning_enabled(
+def wait_until_lambda_scanning_disabled(
     *,
     account_id: str,
     profile: str | None,
@@ -93,27 +93,24 @@ def wait_until_lambda_scanning_enabled(
     timeout_seconds: int,
     poll_interval_seconds: int,
 ) -> tuple[str, str]:
-    """Wait for only the requested Inspector Lambda modes to become enabled."""
+    """Wait for only the requested Inspector Lambda modes to become disabled."""
     deadline = time.monotonic() + timeout_seconds
-    # Inspector can report the aggregate account as ENABLING before these
-    # resource-level statuses reflect the accepted request. DISABLED is only a
-    # bounded transitional state here; it never satisfies the postcondition.
-    accepted_states = {"ENABLED", "ENABLING", "DISABLED"}
+    accepted_states = {"ENABLED", "DISABLING", "DISABLED"}
     while True:
         account = get_account_status(account_id, profile, region)
         lambda_state = resource_status(account, "lambda")
         lambda_code_state = resource_status(account, "lambdaCode")
-        if lambda_state == lambda_code_state == "ENABLED":
+        if lambda_state == lambda_code_state == "DISABLED":
             return lambda_state, lambda_code_state
         if lambda_state not in accepted_states or lambda_code_state not in accepted_states:
             raise RuntimeError(
                 "Inspector entered an unexpected state before both requested "
-                "Lambda scanning modes were enabled"
+                "Lambda scanning modes were disabled"
             )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(
-                "Inspector did not enable both requested Lambda scanning modes "
+                "Inspector did not disable both requested Lambda scanning modes "
                 "before the bounded wait expired"
             )
         time.sleep(min(poll_interval_seconds, remaining))
@@ -126,8 +123,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expected-account-id")
     parser.add_argument("--expected-region")
-    parser.add_argument("--expected-lambda-state", choices=["DISABLED"])
-    parser.add_argument("--expected-lambda-code-state", choices=["DISABLED"])
+    parser.add_argument("--expected-lambda-state", choices=["ENABLED"])
+    parser.add_argument("--expected-lambda-code-state", choices=["ENABLED"])
     parser.add_argument("--confirm")
     parser.add_argument("--wait-timeout-seconds", type=int, default=300)
     parser.add_argument("--poll-interval-seconds", type=int, default=5)
@@ -167,8 +164,8 @@ def main() -> int:
             "lambdaCodeScanning": lambda_code_state,
         },
         "unchangedResourceTypes": ["EC2", "ECR"],
-        "readyForGuardedApply": lambda_state == lambda_code_state == "DISABLED",
-        "paidServiceApprovalRequired": True,
+        "readyForGuardedApply": lambda_state == lambda_code_state == "ENABLED",
+        "monthlyCostReductionRequested": True,
     }
     print(json.dumps(report, indent=2, sort_keys=True))
 
@@ -190,7 +187,7 @@ def main() -> int:
     aws_json(
         [
             "inspector2",
-            "enable",
+            "disable",
             "--account-ids",
             account_id,
             "--resource-types",
@@ -200,7 +197,7 @@ def main() -> int:
         args.profile,
         args.region,
     )
-    after_lambda, after_lambda_code = wait_until_lambda_scanning_enabled(
+    after_lambda, after_lambda_code = wait_until_lambda_scanning_disabled(
         account_id=account_id,
         profile=args.profile,
         region=args.region,
@@ -210,7 +207,7 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "result": "enabled",
+                "result": "disabled",
                 "lambdaScanning": after_lambda,
                 "lambdaCodeScanning": after_lambda_code,
             },

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import copy
 import datetime as dt
 from decimal import Decimal, InvalidOperation
@@ -170,23 +171,11 @@ def _cost_and_usage(today):
 
 
 def _forecast(today, current_total):
-    next_month = _shift_month(_month_start(today), 1)
-    try:
-        response = cost_explorer.get_cost_forecast(
-            TimePeriod={"Start": today.isoformat(), "End": next_month.isoformat()},
-            Metric="UNBLENDED_COST",
-            Granularity="MONTHLY",
-            PredictionIntervalLevel=80,
-        )
-        metric = response.get("Total") or {}
-        if str(metric.get("Unit", "USD")) != "USD":
-            return None
-        remaining = _amount(metric.get("Amount"))
-        return _json_amount(_amount(current_total) + remaining)
-    except Exception:
-        # Forecasting can be unavailable for accounts without enough history.
-        # Actual monthly/service costs remain useful and must still be returned.
-        return None
+    """Estimate the month locally so the daily report needs one paid CE call."""
+    elapsed_days = max(1, today.day - 1)
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+    projected = _amount(current_total) / Decimal(elapsed_days) * Decimal(days_in_month)
+    return _json_amount(projected)
 
 
 def _build_report(today):

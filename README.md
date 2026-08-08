@@ -36,7 +36,7 @@ Local security and performance review evidence lives in the ignored `website_rev
 
 - React 19, React Router 7, Vite 7, Tailwind CSS 4, and Vitest.
 - Python 3.12 Lambda functions managed with AWS SAM.
-- API Gateway, Cognito, DynamoDB, S3, CloudFront, MediaConvert, Route 53, WAF, AWS Backup, Config, GuardDuty, Security Hub, CloudWatch, KMS, and Secrets Manager.
+- API Gateway, Cognito, DynamoDB, S3, CloudFront, MediaConvert, Route 53, WAF, AWS Backup, Config, GuardDuty, Security Hub, CloudWatch, KMS, and SSM Parameter Store.
 - Resend for transactional email and Cloudflare Turnstile for bot protection.
 
 ## Local development

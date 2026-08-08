@@ -27,6 +27,13 @@ STACK_ID = (
 )
 TOKEN = "v1:" + hashlib.sha256(STACK_ID.encode("utf-8")).hexdigest()
 OWNED_ID = f"config-delivery-channel:{ACCOUNT}:{REGION}:{CHANNEL}:owned"
+RESOURCE_TYPES = [
+    "AWS::CloudTrail::Trail",
+    "AWS::DynamoDB::Table",
+    "AWS::KMS::Key",
+    "AWS::Lambda::Function",
+    "AWS::S3::Bucket",
+]
 def inline_handler_source() -> str:
     """Extract deployed ZipFile code so the behavior tests cannot drift from IaC."""
 
@@ -77,8 +84,9 @@ def properties(**overrides) -> dict:
         "ExpectedAccountId": ACCOUNT,
         "ExpectedRegion": REGION,
         "ExpectedRecorderRoleArn": ROLE,
-        "ExpectedAllSupported": True,
+        "ExpectedAllSupported": False,
         "ExpectedIncludeGlobalResourceTypes": False,
+        "ExpectedResourceTypes": RESOURCE_TYPES,
         "OwnershipParameterName": MARKER,
     }
     result.update(overrides)
@@ -87,13 +95,8 @@ def properties(**overrides) -> dict:
 
 def legacy_properties(**overrides) -> dict:
     result = properties()
-    result.pop("ExpectedAllSupported")
-    result.pop("ExpectedIncludeGlobalResourceTypes")
-    result["ExpectedResourceTypes"] = [
-        "AWS::S3::Bucket",
-        "AWS::DynamoDB::Table",
-        "AWS::Lambda::Function",
-    ]
+    result["ExpectedAllSupported"] = True
+    result.pop("ExpectedResourceTypes")
     result.update(overrides)
     return result
 
@@ -114,8 +117,9 @@ def recorder(**overrides) -> dict:
         "name": CHANNEL,
         "roleARN": ROLE,
         "recordingGroup": {
-            "allSupported": True,
+            "allSupported": False,
             "includeGlobalResourceTypes": False,
+            "resourceTypes": RESOURCE_TYPES,
         },
     }
     result.update(overrides)
@@ -441,9 +445,10 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
             properties(BucketName="INVALID_BUCKET"),
             properties(DeliveryFrequency="EveryMinute"),
             properties(ExpectedRecorderRoleArn="arn:aws:iam::999999999999:role/x"),
-            properties(ExpectedAllSupported=False),
-            properties(ExpectedIncludeGlobalResourceTypes="FALSE"),
-            legacy_properties(ExpectedResourceTypes=[]),
+            properties(ExpectedAllSupported=True),
+            properties(ExpectedIncludeGlobalResourceTypes="TRUE"),
+            properties(ExpectedResourceTypes=[]),
+            properties(ExpectedResourceTypes=["not-an-aws-resource"]),
             properties(OwnershipParameterName="/unrelated/marker"),
         )
         for bad in bad_values:
@@ -453,18 +458,19 @@ class ConfigDeliveryOrchestratorTests(unittest.TestCase):
         scope = self.module._scope(properties(), Context())
         string_scope = self.module._scope(
             properties(
-                ExpectedAllSupported="true",
+                ExpectedAllSupported="false",
                 ExpectedIncludeGlobalResourceTypes="false",
             ),
             Context(),
         )
-        self.assertTrue(string_scope["all_supported"])
+        self.assertFalse(string_scope["all_supported"])
         self.assertFalse(string_scope["include_globals"])
+        self.assertEqual(string_scope["resource_types"], sorted(RESOURCE_TYPES))
         legacy_scope = self.module._scope(
             legacy_properties(), Context(), allow_legacy_recording=True
         )
-        self.assertFalse(legacy_scope["all_supported"])
-        with self.assertRaisesRegex(ValueError, "all-supported"):
+        self.assertTrue(legacy_scope["all_supported"])
+        with self.assertRaisesRegex(ValueError, "scoped"):
             self.module._scope(legacy_properties(), Context())
         with self.assertRaisesRegex(PermissionError, "stack scope mismatch"):
             self.module._ownership_token("not-a-stack-arn", scope)

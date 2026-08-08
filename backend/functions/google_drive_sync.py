@@ -1,6 +1,5 @@
 """Asynchronous, idempotent S3-to-Google-Drive backup worker."""
 
-import base64
 import json
 import os
 import posixpath
@@ -18,7 +17,7 @@ from validation_helpers import ValidationError, require_string, validate_album_t
 
 s3 = boto3.client("s3")
 table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
-secrets_client = boto3.client("secretsmanager")
+ssm_client = boto3.client("ssm")
 DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive.file"]
 _credentials_cache = None
 
@@ -27,17 +26,13 @@ def _credential_payload():
     global _credentials_cache
     if _credentials_cache is not None:
         return _credentials_cache
-    secret_arn = os.environ.get("GOOGLE_OAUTH_SECRET_ARN", "").strip()
-    if secret_arn:
-        response = secrets_client.get_secret_value(SecretId=secret_arn)
-        if "SecretString" in response:
-            raw = response["SecretString"]
-        else:
-            binary = response["SecretBinary"]
-            raw = binary.decode("utf-8") if isinstance(binary, bytes) else base64.b64decode(binary).decode("utf-8")
+    parameter_name = os.environ.get("GOOGLE_OAUTH_PARAMETER", "").strip()
+    if parameter_name:
+        response = ssm_client.get_parameter(Name=parameter_name, WithDecryption=True)
+        raw = response.get("Parameter", {}).get("Value")
         payload = json.loads(raw)
         if not isinstance(payload, dict):
-            raise RuntimeError("Google credential secret must be a JSON object")
+            raise RuntimeError("Google credential parameter must be a JSON object")
         _credentials_cache = payload
         return payload
 
@@ -46,7 +41,7 @@ def _credential_payload():
     if os.environ.get("ALLOW_LEGACY_GOOGLE_CREDENTIAL_FILE") == "true":
         with open("google_oauth_token.json", "r", encoding="utf-8") as handle:
             return json.load(handle)
-    raise RuntimeError("Google credential secret is not configured")
+    raise RuntimeError("Google credential parameter is not configured")
 
 
 def get_drive_service():
@@ -62,7 +57,7 @@ def get_drive_service():
     elif payload.get("refresh_token"):
         credentials = Credentials.from_authorized_user_info(payload, scopes=DRIVE_SCOPE)
     else:
-        raise RuntimeError("Google credential secret has no supported credential payload")
+        raise RuntimeError("Google credential parameter has no supported credential payload")
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 

@@ -230,42 +230,41 @@ class SecretHelperBranchTests(unittest.TestCase):
         secret_helpers.clear_secret_cache()
         secret_helpers._client = None
 
-    def test_client_and_secret_binary_shapes(self):
+    def test_ssm_client_is_cached(self):
         fake = Mock()
         with patch.object(secret_helpers.boto3, "client", return_value=fake) as factory:
-            self.assertIs(secret_helpers._secrets_client(), fake)
-            self.assertIs(secret_helpers._secrets_client(), fake)
-        factory.assert_called_once_with("secretsmanager")
-        self.assertEqual(secret_helpers._secret_text({"SecretString": 123}), "123")
-        self.assertEqual(secret_helpers._secret_text({"SecretBinary": b"bytes"}), "bytes")
-        encoded = base64.b64encode(b"base64").decode()
-        self.assertEqual(secret_helpers._secret_text({"SecretBinary": encoded}), "base64")
-        with self.assertRaises(RuntimeError):
-            secret_helpers._secret_text({})
+            self.assertIs(secret_helpers._ssm_client(), fake)
+            self.assertIs(secret_helpers._ssm_client(), fake)
+        factory.assert_called_once_with("ssm")
 
     def test_raw_json_and_empty_secret_paths(self):
         fake = Mock()
-        with patch.dict(os.environ, {"ARN": "arn:test", "DIRECT": "fallback"}), patch.object(
-            secret_helpers, "_secrets_client", return_value=fake
+        with patch.dict(os.environ, {"PARAMETER": "/test", "DIRECT": "fallback"}), patch.object(
+            secret_helpers, "_ssm_client", return_value=fake
         ):
-            fake.get_secret_value.return_value = {"SecretString": " raw-value "}
+            fake.get_parameter.return_value = {"Parameter": {"Value": " raw-value "}}
             self.assertEqual(
-                secret_helpers.resolve_secret(direct_env="DIRECT", arn_env="ARN", json_keys=("key",)),
+                secret_helpers.resolve_secret(
+                    direct_env="DIRECT", parameter_env="PARAMETER", json_keys=("key",)
+                ),
                 "raw-value",
             )
             secret_helpers.clear_secret_cache()
-            fake.get_secret_value.return_value = {"SecretString": '{"wrong":"value"}'}
+            fake.get_parameter.return_value = {"Parameter": {"Value": '{"wrong":"value"}'}}
             with self.assertRaises(RuntimeError):
-                secret_helpers.resolve_secret(direct_env="DIRECT", arn_env="ARN", json_keys=("key",))
+                secret_helpers.resolve_secret(
+                    direct_env="DIRECT", parameter_env="PARAMETER", json_keys=("key",)
+                )
             secret_helpers.clear_secret_cache()
-            fake.get_secret_value.return_value = {"SecretString": "  "}
+            fake.get_parameter.return_value = {"Parameter": {"Value": "  "}}
             with self.assertRaises(RuntimeError):
-                secret_helpers.resolve_secret(direct_env="DIRECT", arn_env="ARN")
+                secret_helpers.resolve_secret(direct_env="DIRECT", parameter_env="PARAMETER")
 
     def test_direct_secret_is_trimmed(self):
-        with patch.dict(os.environ, {"DIRECT": " direct ", "ARN": ""}):
+        with patch.dict(os.environ, {"DIRECT": " direct ", "PARAMETER": ""}):
             self.assertEqual(
-                secret_helpers.resolve_secret(direct_env="DIRECT", arn_env="ARN"), "direct"
+                secret_helpers.resolve_secret(direct_env="DIRECT", parameter_env="PARAMETER"),
+                "direct",
             )
 
 

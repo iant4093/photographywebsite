@@ -84,7 +84,7 @@ remains confirmed without recording its endpoint.
 ## Security service change
 
 Check home-Region recorder/delivery status, the exact detector feature map and
-publishing frequency, both Security Hub standards, Inspector Lambda coverage,
+publishing frequency, both Security Hub standards, CI security coverage,
 and Access Analyzer state. Restore only through the owning templates, rerun the
 fail-closed home posture audit, and record why the service changed. This
 account-wide alarm is audit-only.
@@ -115,20 +115,13 @@ Use aggregate AWS Backup job state and resource type. Confirm the protected
 selection still has exactly the approved resource count, role access, vault
 encryption, and start/completion windows. Retry only after the cause is fixed.
 
-## Backup copy failure
-
-Verify source recovery point health, replica vault/key state, Region, copy
-permissions, and retention. A successful source backup does not close a failed
-replica copy; require later replica recovery-point evidence.
-
 ## Backup freshness
 
 Treat missing metric data as a failed control. Verify the scheduled freshness
 function ran, then compare aggregate expected, healthy, and failed counts. The
-expected count is exactly three source resources, or six when the configured
-replica vault is present. Do not print recovery-point ARNs or resource ARNs.
-Close only after every exact table and media bucket has a completed recovery
-point inside the approved age window in the source vault and configured replica.
+expected count is exactly two source resources. Do not print recovery-point
+ARNs or resource ARNs. Close only after both exact metadata tables have a
+completed recovery point inside the approved age window in the source vault.
 
 ## Edge health
 

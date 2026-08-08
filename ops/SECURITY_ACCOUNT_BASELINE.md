@@ -6,23 +6,22 @@ deletion cannot strand a retained CloudTrail while deleting its bucket policy,
 log group, or delivery role.
 
 Reading or validating this repository never creates an SNS subscription, sends
-email, deploys a stack, imports a resource, enables Inspector, or enables
-another paid account service. Those remain explicit owner decisions after
-inventory and a reviewed change set.
+email, deploys a stack, imports a resource, or enables a paid account service.
+Those remain explicit owner decisions after inventory and a reviewed change set.
 
 ## Files and ownership
 
 | Layer | File | Ownership and guard |
 | --- | --- | --- |
 | Audit foundation | `security_audit_foundation_template.yaml` | One home-region stack. The Object-Locked CloudTrail evidence bucket, bucket policy, log group, role, and multi-region trail are retained together. After Config is healthy, an opt-in parameter adds exact-bucket Config delivery object events. |
-| Notifications | `security_notifications_template.yaml` | Regional encrypted SNS/KMS routing for exact website alarms, encrypted SQS delivery guards, and audit-only account alarms. It creates no subscriber. |
+| Notifications | `security_notifications_template.yaml` | Regional SNS routing for privacy-safe website alarms, encrypted SQS delivery guards, and audit-only account alarms. It preserves the owner-approved subscriber without a dedicated monthly KMS key. |
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
 | Home detection posture | `ci/home_security_posture.py` | Aggregate-only, read-only verification of the exact home-Region GuardDuty and Security Hub contract. It fails closed and never prints provider identifiers, tags, findings, or Region names. |
-| Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained CMK-encrypted vault. Creation and Vault Lock default off. |
+| Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained AWS-managed-key vault. S3 relies on versioning and the existing external media backup. Creation and Vault Lock default off. |
 | Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One optional retained, console-only account budget. Creation defaults off and requires an owner-approved amount; it has no notification route. |
 | Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Complete source signal inventory, privacy contract, runbook routing, response ownership, and quarterly delivery-test state. |
 | Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors become `skip-inventory-incomplete`, never “absent.” |
-| Inspector | `enable_inspector_lambda_scanning.py` | Dry-run-by-default Inspector Lambda and Lambda code scanning enrollment with exact apply guards. |
+| Inspector | `disable_inspector_lambda_scanning.py` | Dry-run-by-default removal of the redundant paid Lambda scanners with exact apply guards. CI remains the code/dependency scanning control. |
 
 `us-west-2` is the reviewed home Region. The foundation trail already records
 multi-region and global management events, so do not deploy another foundation
@@ -289,10 +288,11 @@ channel and its ownership marker, delivery bucket, bucket policy, and recorder
 role on ordinary stack deletion, matching the rest of the account-security
 retention posture.
 
-Use `GlobalResourceRecordingMode=record-confirmed-home-region` only in the
-chosen home region. The explicit resource list conditionally adds IAM and
-CloudFront in that mode; it deliberately omits `IncludeGlobalResourceTypes`,
-whose behavior is ambiguous alongside explicit types.
+The recorder is deliberately scoped to CloudTrail trails, DynamoDB tables,
+customer-managed KMS keys, Lambda functions, and S3 buckets. It does not record
+every supported AWS resource or global IAM inventory. The periodic root-MFA and
+password-policy rules continue to evaluate without broad configuration-item
+recording.
 
 Before an enabled deployment, inventory must show no recorder and no delivery
 channel. Also require the fixed SSM ownership parameter to be absent; check its
@@ -393,34 +393,32 @@ ephemeral or log resources.
 
 ### 4. Inspector Lambda scanning
 
-Inspector cannot be enrolled through a normal CloudFormation resource. First
-run the helper without `--apply`:
+The CI pipeline already performs dependency, source, workflow, and credential
+scanning before deployment, so the recurring paid Inspector Lambda and Lambda
+code scanners are intentionally disabled. First inventory without `--apply`:
 
 ```bash
-python3 ops/enable_inspector_lambda_scanning.py --region us-west-2
+python3 ops/disable_inspector_lambda_scanning.py --region us-west-2
 ```
 
-It reports only status and never enables EC2 or ECR scanning. Apply only after
-the paid-service cost and code-retention implications are approved and both
-Lambda modes are exactly `DISABLED`:
+It reports only status and never changes EC2 or ECR scanning. Apply only when
+both Lambda modes are exactly `ENABLED`:
 
 ```bash
-python3 ops/enable_inspector_lambda_scanning.py \
+python3 ops/disable_inspector_lambda_scanning.py \
   --region us-west-2 \
   --apply \
   --expected-account-id EXPECTED_12_DIGIT_ACCOUNT \
   --expected-region us-west-2 \
-  --expected-lambda-state DISABLED \
-  --expected-lambda-code-state DISABLED \
-  --confirm enable-inspector-lambda-code-scanning
+  --expected-lambda-state ENABLED \
+  --expected-lambda-code-state ENABLED \
+  --confirm disable-inspector-lambda-scanning
 ```
 
-The helper rejects partial or preexisting enrollment instead of taking over an
-unknown configuration. It has no disable action. After an approved apply, it
-waits up to five minutes by default for both requested modes to move through
-the eventually consistent `DISABLED`/`ENABLING` transition and reach exactly
-`ENABLED`; any other state or a bounded-wait expiry fails the operation. A mode
-that remains `DISABLED` never satisfies the postcondition.
+The helper rejects partial or unexpected enrollment instead of mutating an
+unknown configuration. After an approved apply, it waits up to five minutes by
+default for both modes to move through `DISABLING` and reach exactly `DISABLED`;
+any other state or a bounded-wait expiry fails the operation.
 `--wait-timeout-seconds` accepts 30 through 900 seconds and
 `--poll-interval-seconds` accepts 1 through 30 seconds when a different bounded
 wait is operationally necessary. Review findings without exporting code or
@@ -432,16 +430,14 @@ is unacceptable.
 Pass exact names for both the Albums and PreviewMetadata DynamoDB tables. Their
 ARNs are constructed from the active partition, region, and account, so index,
 stream, cross-account, and cross-region ARNs cannot be supplied. Use
-`BackupDeploymentMode=create-confirmed-no-conflict` only when the vault, plan,
-and backup KMS alias are absent.
+`BackupDeploymentMode=create-confirmed-no-conflict` only after inventory.
 
-The retained vault uses a retained, rotating customer KMS key and retained
-alias. Its key policy limits AWS Backup use to the active account and regional
-Backup source ARN. The scheduled role includes backup-only managed policies;
-it cannot restore. Its trust policy keeps `aws:SourceAccount` exact and accepts
-AWS Backup source ARNs only from the home Region and the fixed replica Region.
-Both entries are required because AWS Backup assumes the same role while
-creating the cross-Region copy; a wildcard Region is not used.
+The retained metadata vault uses the AWS-managed Backup key, avoiding a monthly
+customer-managed key charge. The scheduled role includes the backup-only
+managed policy and cannot restore. Its trust policy keeps `aws:SourceAccount`
+and the home-Region Backup source ARN exact. Historical source/replica vaults,
+keys, and recovery points remain retained until their existing lifecycle dates;
+new backups do not extend them.
 
 Keep `VaultLockMode=unlocked` until a scheduled recovery point exists. Create a
 separate temporary least-privilege restore role, restore both tables under new
@@ -452,8 +448,8 @@ then may a reviewed update use
 by sufficiently privileged identities. Compliance mode requires a separate
 legal and retention decision because it can become irreversible.
 
-The primary backup stack also owns privacy-safe EventBridge failure signals for
-the exact website backup jobs and replica copy jobs. Restore operations stay
+The primary backup stack also owns a privacy-safe EventBridge failure signal for
+the exact website backup jobs. Restore operations stay
 visible in AWS Backup and CloudTrail but are not an account-wide website email
 source. Every routed target receives a fixed signal/stage/runbook payload
 instead of the AWS event, resource ARN, job ID, object key, provider error, or
@@ -466,19 +462,14 @@ rules before enabling them.
 
 A six-hour scheduled verifier reads recovery-point metadata only and publishes
 aggregate expected, healthy, and failed counts. It requires a fresh completed
-recovery point for the two tables and media bucket in the source vault and,
-when configured, the exact same-account replica vault. The alarm treats missing
+recovery point for the two metadata tables in the source vault. The alarm treats missing
 metrics as breaching, so a stopped verifier or stopped backup schedule cannot
 remain silently green. Neither logs nor metrics include resource or recovery-
 point ARNs.
 
-The replica vault is intentionally a separate `us-east-2` stack and has no
-invented cross-Region human route. After that exact same-account, same-stage
-stack is deployed, set
-`ReplicaBackupDeploymentMode=use-existing-same-account-stage`; the primary
-template derives its ARN rather than accepting a caller-supplied destination.
-Restore operations remain gated and are reviewed in AWS Backup; they do not
-produce account-wide website email.
+The historical `us-east-2` replica vault is no longer a copy destination. It is
+retained only so existing recovery points can age out normally; restore
+operations remain gated and reviewed in AWS Backup.
 
 ### 6. Cost budget and notification ownership
 
@@ -504,12 +495,12 @@ Data-event records can include Config object keys and request metadata, but not
 the delivered object body. Treat those records as security evidence: do not
 print event payloads or object keys in CI, deployment output, tickets, or chat.
 Review CloudTrail/CloudWatch ingestion and retention, Config items/rules,
-GuardDuty plans, Security Hub checks, Inspector Lambda/code coverage,
+GuardDuty plans, Security Hub checks, CI security coverage,
 KMS/SNS/SQS requests, AWS Backup storage and restore tests, and S3
 archive/retrieval.
 
 Quarterly, rerun preflight and drift detection. Check trail delivery and digest
-validation, Config status, detector/hub/analyzer ownership, Inspector coverage,
+validation, Config status, detector/hub/analyzer ownership, CI scan results,
 KMS rotation, DLQ depth, alarms, backup jobs, and a sample restore. Never put
 event payloads, finding bodies, tokens, table items, contact content, object
 keys, code findings, or backup contents in CI or runbook output.

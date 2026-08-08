@@ -270,7 +270,7 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("Path: /admin/costs", function)
         self.assertIn("Method: GET", function)
         self.assertIn("ce:GetCostAndUsage", function)
-        self.assertIn("ce:GetCostForecast", function)
+        self.assertNotIn("ce:GetCostForecast", function)
         self.assertNotIn("ce:*", function)
         for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
             self.assertIn(action, function)
@@ -300,13 +300,13 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("Schedule: cron(15 9 * * ? *)", refresh)
         self.assertIn("MaximumRetryAttempts: 2", refresh)
         self.assertIn("GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId", function)
-        self.assertIn("GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn", function)
+        self.assertIn("GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn", function)
         for action in ("dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"):
             self.assertIn(action, function)
-        for forbidden in ("dynamodb:Scan", "dynamodb:Query", "secretsmanager:*", "kms:*"):
+        for forbidden in ("dynamodb:Scan", "dynamodb:Query", "secretsmanager:", "kms:*"):
             self.assertNotIn(forbidden, function)
         self.assertIn("Resource: !GetAtt DriveUsageCacheTable.Arn", function)
-        self.assertIn("Action: secretsmanager:GetSecretValue", function)
+        self.assertIn("Action: ssm:GetParameter", function)
         self.assertIn("SOURCES_GetGoogleDriveUsageFunction :=", MAKEFILE)
         self.assertIn("DEPS_GetGoogleDriveUsageFunction := google-auth==", MAKEFILE)
         self.assertIn("SOURCES_RefreshGoogleDriveUsageFunction :=", MAKEFILE)
@@ -611,7 +611,10 @@ class IdentityAndSecretTests(unittest.TestCase):
         globals_section = TEMPLATE.split("Globals:", 1)[1].split("Resources:", 1)[0]
         self.assertIn("COGNITO_USER_POOL_ID: !Ref UserPool", globals_section)
         self.assertIn("COGNITO_CLIENT_ID: !Ref UserPoolClient", globals_section)
-        self.assertIn("FRONT_DOOR_CONFIG_ARN: !Ref FrontDoorOriginSecret", globals_section)
+        self.assertIn(
+            "FRONT_DOOR_CONFIG_PARAMETER: !Sub '/ian-website/${Stage}/front-door-config'",
+            globals_section,
+        )
         self.assertIn(
             "FRONT_DOOR_ENFORCEMENT_ENABLED: !Ref FrontDoorEnforcementEnabled",
             globals_section,
@@ -638,12 +641,13 @@ class IdentityAndSecretTests(unittest.TestCase):
             self.assertIsNotNone(match)
             self.assertIn("NoEcho: true", match.group("body"))
 
-    def test_rate_limit_identifiers_use_a_stack_generated_hmac_key(self) -> None:
-        secret = resource_block("RateLimitHashSecret")
-        self.assertIn("AWS::SecretsManager::Secret", secret)
-        self.assertIn("PasswordLength: 64", secret)
-        self.assertIn("DeletionPolicy: Retain", secret)
-        self.assertEqual(TEMPLATE.count("RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret"), 6)
+    def test_rate_limit_identifiers_use_one_exact_secure_parameter(self) -> None:
+        self.assertNotIn("AWS::SecretsManager::Secret", TEMPLATE)
+        self.assertEqual(
+            TEMPLATE.count("RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'"),
+            6,
+        )
+        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 16)
 
     def test_cognito_client_has_no_public_password_or_srp_flow(self) -> None:
         client = resource_block("UserPoolClient")

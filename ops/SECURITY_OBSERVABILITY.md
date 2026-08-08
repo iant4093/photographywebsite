@@ -116,7 +116,7 @@ Before execution:
 
 1. run the complete backend and infrastructure test suites;
 2. run `sam validate --lint` and `sam build`;
-3. create a non-executing change set using the current secret ARNs,
+3. create a non-executing change set using the current encrypted SSM parameter names,
    `AlbumIndexDeploymentPhase`, and `EnforcePrivateMediaCloudFrontDeny` values;
 4. pass the exact tested `ReleaseSha` and approved retention parameters;
 5. reject replacements/removals of data, identity, API, bucket, distribution,
@@ -162,7 +162,7 @@ clear.
 
 This application stack owns application logging, privacy-safe metrics, and its
 application alarms only. The account-level CloudTrail, GuardDuty, AWS Config,
-Security Hub, Inspector, WAF, AWS Backup, IAM Access Analyzer, KMS, and budget
+Security Hub, WAF, AWS Backup, IAM Access Analyzer, KMS, and budget
 controls are active in separate protected stacks so an application release
 cannot weaken or replace them.
 

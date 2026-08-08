@@ -124,11 +124,7 @@ class CostReportHandlerTests(unittest.TestCase):
             get_cost_report.cache_table, "put_item", return_value={}
         ) as store, patch.object(
             get_cost_report.cost_explorer, "get_cost_and_usage", side_effect=[page_one, page_two]
-        ) as usage, patch.object(
-            get_cost_report.cost_explorer,
-            "get_cost_forecast",
-            return_value={"Total": {"Amount": "6.50", "Unit": "USD"}},
-        ) as forecast, patch.object(get_cost_report, "emit_audit_event"):
+        ) as usage, patch.object(get_cost_report, "emit_audit_event"):
             response = get_cost_report.handler(ADMIN_EVENT, CONTEXT)
 
         self.assertEqual(response["statusCode"], 200)
@@ -141,29 +137,24 @@ class CostReportHandlerTests(unittest.TestCase):
         self.assertEqual(len(current["services"]), 9)
         self.assertEqual(current["services"][0]["name"], "Service 10")
         self.assertEqual(current["services"][-1], {"name": "Other", "amount": 3.0, "share": 5.45})
-        self.assertEqual(body["forecastTotal"], 61.5)
+        self.assertEqual(body["forecastTotal"], 852.5)
         self.assertEqual(usage.call_count, 2)
         self.assertNotIn("NextPageToken", usage.call_args_list[0].kwargs)
         self.assertEqual(usage.call_args_list[1].kwargs["NextPageToken"], "next")
         self.assertEqual(usage.call_args_list[0].kwargs["GroupBy"][0]["Key"], "SERVICE")
-        forecast.assert_called_once_with(
-            TimePeriod={"Start": "2026-08-03", "End": "2026-09-01"},
-            Metric="UNBLENDED_COST",
-            Granularity="MONTHLY",
-            PredictionIntervalLevel=80,
-        )
         claim.assert_called_once()
         stored = store.call_args.kwargs["Item"]
         self.assertEqual(stored["cacheDate"], TODAY.isoformat())
         self.assertNotIn("cacheStatus", json.loads(stored["payload"]))
 
-    def test_unavailable_forecast_does_not_hide_actual_costs(self):
-        with patch.object(get_cost_report.cost_explorer, "get_cost_and_usage", return_value=cost_page()), patch.object(
-            get_cost_report.cost_explorer, "get_cost_forecast", side_effect=RuntimeError("private")
-        ):
+    def test_local_forecast_does_not_require_a_second_provider_call(self):
+        with patch.object(
+            get_cost_report.cost_explorer, "get_cost_and_usage", return_value=cost_page()
+        ) as usage:
             report = get_cost_report._build_report(TODAY)
         self.assertEqual(report["months"][-1]["total"], 4.0)
-        self.assertIsNone(report["forecastTotal"])
+        self.assertEqual(report["forecastTotal"], 62.0)
+        usage.assert_called_once()
 
     def test_provider_failure_serves_stale_cache_without_leaking_error(self):
         stale = cache_item()
@@ -282,15 +273,12 @@ class CostReportContractTests(unittest.TestCase):
         with patch.object(get_cost_report.cost_explorer, "get_cost_and_usage", return_value=repeated), self.assertRaises(ValueError):
             get_cost_report._cost_and_usage(TODAY)
 
-    def test_mixed_currency_is_rejected_and_forecast_currency_is_optional(self):
+    def test_mixed_currency_is_rejected_and_forecast_is_local(self):
         page = cost_page(services=[("S3", "1"), ("Lambda", "2")])
         page["ResultsByTime"][0]["Groups"][1]["Metrics"]["UnblendedCost"]["Unit"] = "EUR"
         with patch.object(get_cost_report.cost_explorer, "get_cost_and_usage", return_value=page), self.assertRaises(ValueError):
             get_cost_report._cost_and_usage(TODAY)
-        with patch.object(
-            get_cost_report.cost_explorer, "get_cost_forecast", return_value={"Total": {"Amount": "1", "Unit": "EUR"}}
-        ):
-            self.assertIsNone(get_cost_report._forecast(TODAY, 2))
+        self.assertEqual(get_cost_report._forecast(TODAY, 2), 31.0)
 
     def test_daily_claim_only_swallows_conditional_conflicts(self):
         with patch.object(get_cost_report.cache_table, "update_item", side_effect=ConditionalFailure()):

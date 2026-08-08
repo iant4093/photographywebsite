@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Encrypted website-only notification routing and audit-only account alarms.
-  This stack creates no subscription; attach only an owner-approved monitored
-  destination later.
+  Website-only notification routing and audit-only account alarms. Alert payloads
+  are privacy-safe operational signals, so the topic avoids a dedicated monthly
+  KMS key. This stack preserves an existing owner-approved subscription.
 
 Parameters:
   Stage:
@@ -20,64 +20,10 @@ Parameters:
     Description: Exact CloudWatch log group name output by the audit foundation stack.
 
 Resources:
-  SecurityNotificationKey:
-    Type: AWS::KMS::Key
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: Encrypts the IanTruongPhotography security notification topic.
-      EnableKeyRotation: true
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AllowAccountAdministration
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
-            Action: kms:*
-            Resource: '*'
-          - Sid: AllowDirectNotificationPublishers
-            Effect: Allow
-            Principal:
-              Service:
-                - cloudwatch.amazonaws.com
-            Action:
-              - kms:Decrypt
-              - kms:GenerateDataKey*
-            Resource: '*'
-            Condition:
-              StringEquals:
-                kms:EncryptionContext:aws:sns:topicArn: !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
-                kms:ViaService: !Sub 'sns.${AWS::Region}.${AWS::URLSuffix}'
-          - Sid: AllowSnsUseForThisTopic
-            Effect: Allow
-            Principal:
-              Service: sns.amazonaws.com
-            Action:
-              - kms:Decrypt
-              - kms:GenerateDataKey*
-            Resource: '*'
-            Condition:
-              StringEquals:
-                kms:EncryptionContext:aws:sns:topicArn: !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
-                kms:ViaService: !Sub 'sns.${AWS::Region}.${AWS::URLSuffix}'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-
-  SecurityNotificationKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub 'alias/ian-photography-security-${Stage}'
-      TargetKeyId: !Ref SecurityNotificationKey
-
   SecurityNotifications:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub 'ian-photography-security-${Stage}'
-      KmsMasterKeyId: !GetAtt SecurityNotificationKey.Arn
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -152,7 +98,6 @@ Resources:
               ArnEquals:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
 
   SecurityEventDlq:
@@ -187,7 +132,6 @@ Resources:
               ArnEquals:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-copy-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
 
   SecuritySignalProcessorLogGroup:
@@ -230,15 +174,6 @@ Resources:
               - Effect: Allow
                 Action: sns:Publish
                 Resource: !Ref SecurityNotifications
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey*
-                Resource: !GetAtt SecurityNotificationKey.Arn
-                Condition:
-                  StringEquals:
-                    kms:EncryptionContext:aws:sns:topicArn: !Ref SecurityNotifications
-                    kms:ViaService: !Sub 'sns.${AWS::Region}.${AWS::URLSuffix}'
         - PolicyName: WriteSecuritySignalProcessorLogs
           PolicyDocument:
             Version: '2012-10-17'
@@ -286,7 +221,6 @@ Resources:
           STAGE = os.environ["STAGE"]
           CONTRACTS = {
               "backup.job.failed": ("high", "backup-job-failure"),
-              "backup.copy.failed": ("high", "backup-copy-failure"),
               "waf.alarm": ("high", "waf-observation"),
           }
           KEYS = {"schemaVersion", "eventName", "severity", "stage", "runbook"}
@@ -681,8 +615,6 @@ Outputs:
   SecurityNotificationTopicArn:
     Value: !Ref SecurityNotifications
     Description: Website-only responder topic; attach only an owner-approved monitored subscriber.
-  SecurityNotificationKeyArn:
-    Value: !GetAtt SecurityNotificationKey.Arn
   SecuritySignalQueueArn:
     Value: !GetAtt SecuritySignalQueue.Arn
     Description: Exact rule-scoped ingress for static privacy-safe security signals.

@@ -53,8 +53,8 @@ class FrontDoorVerifierTests(unittest.TestCase):
         current = secrets.token_urlsafe(48)
         previous = secrets.token_urlsafe(48)
         client = MagicMock()
-        client.get_secret_value.return_value = {
-            "SecretString": json.dumps({"current": current, "previous": previous})
+        client.get_parameter.return_value = {
+            "Parameter": {"Value": json.dumps({"current": current, "previous": previous})}
         }
         return current, previous, client
 
@@ -68,10 +68,10 @@ class FrontDoorVerifierTests(unittest.TestCase):
         current, previous, client = self._contract()
         environment = {
             "FRONT_DOOR_ENFORCEMENT_ENABLED": "true",
-            "FRONT_DOOR_CONFIG_ARN": "arn:aws:secretsmanager:us-west-2:000000000000:secret:test",
+            "FRONT_DOOR_CONFIG_PARAMETER": "/ian-website/prod/front-door-config",
             "FRONT_DOOR_SECRET_CACHE_TTL_SECONDS": "300",
         }
-        with patch.dict(os.environ, environment), patch.object(front_door, "_secrets_client", client):
+        with patch.dict(os.environ, environment), patch.object(front_door, "_ssm_client", client):
             self.assertIsNone(
                 front_door.verify_front_door_request(
                     {"headers": {"X-Origin-Verify": current}}, None
@@ -82,17 +82,19 @@ class FrontDoorVerifierTests(unittest.TestCase):
                     {"headers": {"x-origin-verify": previous}}, None
                 )
             )
-        client.get_secret_value.assert_called_once_with(SecretId=environment["FRONT_DOOR_CONFIG_ARN"])
+        client.get_parameter.assert_called_once_with(
+            Name=environment["FRONT_DOOR_CONFIG_PARAMETER"], WithDecryption=True
+        )
 
     def test_missing_and_invalid_values_are_fixed_privacy_safe_denials(self) -> None:
         current, previous, client = self._contract()
         environment = {
             "FRONT_DOOR_ENFORCEMENT_ENABLED": "true",
-            "FRONT_DOOR_CONFIG_ARN": "arn:aws:secretsmanager:us-west-2:000000000000:secret:test",
+            "FRONT_DOOR_CONFIG_PARAMETER": "/ian-website/prod/front-door-config",
         }
         supplied = secrets.token_urlsafe(48)
         with patch.dict(os.environ, environment), patch.object(
-            front_door, "_secrets_client", client
+            front_door, "_ssm_client", client
         ), self.assertLogs("photography_api.front_door", level="WARNING") as captured:
             missing = front_door.verify_front_door_request({"headers": {}}, None)
             invalid = front_door.verify_front_door_request(
@@ -109,7 +111,7 @@ class FrontDoorVerifierTests(unittest.TestCase):
                 {"error": "Forbidden", "code": "front_door_required"},
             )
         observable = "\n".join(captured.output) + missing["body"] + invalid["body"]
-        for sensitive in (current, previous, supplied, environment["FRONT_DOOR_CONFIG_ARN"]):
+        for sensitive in (current, previous, supplied, environment["FRONT_DOOR_CONFIG_PARAMETER"]):
             self.assertNotIn(sensitive, observable)
 
     def test_invalid_configuration_and_provider_failure_fail_closed(self) -> None:
@@ -119,13 +121,13 @@ class FrontDoorVerifierTests(unittest.TestCase):
             self.assertEqual(front_door.verify_front_door_request({}, None)["statusCode"], 403)
 
         client = MagicMock()
-        client.get_secret_value.side_effect = RuntimeError("provider details must be redacted")
+        client.get_parameter.side_effect = RuntimeError("provider details must be redacted")
         environment = {
             "FRONT_DOOR_ENFORCEMENT_ENABLED": "true",
-            "FRONT_DOOR_CONFIG_ARN": "arn:aws:secretsmanager:us-west-2:000000000000:secret:test",
+            "FRONT_DOOR_CONFIG_PARAMETER": "/ian-website/prod/front-door-config",
         }
         with patch.dict(os.environ, environment), patch.object(
-            front_door, "_secrets_client", client
+            front_door, "_ssm_client", client
         ), self.assertLogs("photography_api.front_door", level="WARNING") as captured:
             response = front_door.verify_front_door_request(
                 {"headers": {"X-Origin-Verify": secrets.token_urlsafe(48)}}, None
@@ -138,7 +140,7 @@ class FrontDoorVerifierTests(unittest.TestCase):
             os.environ,
             {
                 "FRONT_DOOR_ENFORCEMENT_ENABLED": "true",
-                "FRONT_DOOR_CONFIG_ARN": "arn:aws:secretsmanager:us-west-2:000000000000:secret:test",
+                "FRONT_DOOR_CONFIG_PARAMETER": "/ian-website/prod/front-door-config",
             },
         ), patch.object(get_public_albums, "_fetch_page") as fetch:
             denied = get_public_albums.handler({"queryStringParameters": {}}, None)
@@ -206,7 +208,6 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
         )
         blocks = _resource_blocks()
         for logical_id in (
-            "FrontDoorOriginSecret",
             "ApiFrontDoorCertificate",
             "ApiFrontDoorDomain",
             "ApiFrontDoorMapping",

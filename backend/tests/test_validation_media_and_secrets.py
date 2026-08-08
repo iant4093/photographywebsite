@@ -295,24 +295,38 @@ class SecretAndErrorTests(unittest.TestCase):
     def tearDown(self):
         secret_helpers.clear_secret_cache()
 
-    def test_arn_secret_is_preferred_and_cached(self):
+    def test_parameter_secret_is_preferred_and_cached(self):
         fake = Mock()
-        fake.get_secret_value.return_value = {"SecretString": json.dumps({"apiKey": "from-secret"})}
-        with patch.dict(os.environ, {"TEST_SECRET_ARN": "arn:test", "TEST_DIRECT": "legacy"}), patch.object(
-            secret_helpers, "_secrets_client", return_value=fake
+        fake.get_parameter.return_value = {
+            "Parameter": {"Value": json.dumps({"apiKey": "from-parameter"})}
+        }
+        with patch.dict(
+            os.environ, {"TEST_SECRET_PARAMETER": "/test", "TEST_DIRECT": "legacy"}
+        ), patch.object(
+            secret_helpers, "_ssm_client", return_value=fake
         ):
-            first = secret_helpers.resolve_secret(direct_env="TEST_DIRECT", arn_env="TEST_SECRET_ARN", json_keys=("apiKey",))
-            second = secret_helpers.resolve_secret(direct_env="TEST_DIRECT", arn_env="TEST_SECRET_ARN", json_keys=("apiKey",))
-        self.assertEqual(first, "from-secret")
-        self.assertEqual(second, "from-secret")
-        fake.get_secret_value.assert_called_once()
+            first = secret_helpers.resolve_secret(
+                direct_env="TEST_DIRECT",
+                parameter_env="TEST_SECRET_PARAMETER",
+                json_keys=("apiKey",),
+            )
+            second = secret_helpers.resolve_secret(
+                direct_env="TEST_DIRECT",
+                parameter_env="TEST_SECRET_PARAMETER",
+                json_keys=("apiKey",),
+            )
+        self.assertEqual(first, "from-parameter")
+        self.assertEqual(second, "from-parameter")
+        fake.get_parameter.assert_called_once_with(Name="/test", WithDecryption=True)
 
     def test_missing_secret_fails_closed(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MISSING_DIRECT", None)
-            os.environ.pop("MISSING_ARN", None)
+            os.environ.pop("MISSING_PARAMETER", None)
             with self.assertRaises(RuntimeError):
-                secret_helpers.resolve_secret(direct_env="MISSING_DIRECT", arn_env="MISSING_ARN")
+                secret_helpers.resolve_secret(
+                    direct_env="MISSING_DIRECT", parameter_env="MISSING_PARAMETER"
+                )
 
     def test_internal_error_does_not_echo_exception(self):
         response = response_helpers.internal_error(error=RuntimeError("token=secret-value"), operation="test")

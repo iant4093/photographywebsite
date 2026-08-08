@@ -516,7 +516,6 @@ fi
             "s3:::goldenhour-*",
             "table/GoldenHour-*",
             "ian-photography-*",
-            "secret:${ApplicationStackName}-*",
         ):
             self.assertIn(scope, execution)
         self.assertIn("ProtectRetainedApplicationData", execution)
@@ -596,12 +595,9 @@ fi
 
     def test_execution_role_can_inspect_exact_drift_detection_dependencies(self):
         execution = execution_permissions()
-        secrets = statement_block(execution, "ReadRateLimitSecretMetadata")
-        self.assertIn("Action: secretsmanager:DescribeSecret", secrets)
-        self.assertIn("secret:RateLimitHashSecret-*", secrets)
-        self.assertNotIn("secretsmanager:GetSecretValue", secrets)
-        self.assertNotIn("secretsmanager:PutSecretValue", secrets)
-        self.assertNotIn("Resource: '*'", secrets)
+        self.assertNotIn("Sid: ReadRateLimitSecretMetadata", execution)
+        self.assertNotIn("Sid: ManageApplicationSecrets", execution)
+        self.assertNotIn("Sid: GenerateApplicationSecretValues", execution)
 
         observability = statement_block(execution, "ReadGlobalObservabilityInventories")
         self.assertIn("logs:DescribeIndexPolicies", observability)
@@ -782,11 +778,8 @@ fi
         self.assertIn("aws:ResourceTag/Application: IanTruongPhotography", certificate)
         self.assertNotIn("acm:DeleteCertificate", execution)
 
-        secret = statement_block(execution, "ManageApplicationSecrets")
-        self.assertIn("secret:ian-photography/front-door/*", secret)
-        self.assertIn("secretsmanager:PutSecretValue", secret)
-        self.assertIn("secretsmanager:ListSecretVersionIds", secret)
-        self.assertNotIn("secretsmanager:DeleteSecret", secret)
+        self.assertNotIn("secretsmanager:PutSecretValue", execution)
+        self.assertNotIn("secretsmanager:ListSecretVersionIds", execution)
         managed = statement_block(execution, "ManageStackManagedPolicyVersions")
         for action in (
             "iam:CreatePolicy",
@@ -803,7 +796,6 @@ fi
         allowed = {
             "CreateStackEventSourceMappings",
             "ListEventSourceMappings",
-            "GenerateApplicationSecretValues",
             "RequestExactRegionalApiCertificate",
             "CreateTaggedUserPool",
             "CreateCloudFrontResources",

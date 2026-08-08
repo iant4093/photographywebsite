@@ -115,14 +115,6 @@
       "autoClose": "Never; require a later successful protected backup and recorded disposition"
     },
     {
-      "id": "backup-copy-failure",
-      "logicalResourceIds": ["BackupCopyFailureRule"],
-      "severity": "high",
-      "route": "security-notification-topic",
-      "runbook": "ops/ALARM_REGISTRY.md#backup-copy-failure",
-      "autoClose": "Never; require a later successful replica copy and recorded disposition"
-    },
-    {
       "id": "backup-freshness",
       "logicalResourceIds": ["BackupFreshnessAlarm"],
       "severity": "critical",

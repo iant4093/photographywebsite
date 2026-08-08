@@ -134,9 +134,9 @@ deployment output.
 - Legacy-prefix and owner backfill tools are retained for aggregate audit and
   exceptional recovery only. Never rerun an apply against already-migrated data
   without a new dry run, exact record count/digest guards, and recovery review.
-- Production provider credentials are referenced through Secrets Manager ARNs.
-  Legacy raw `NoEcho` transition parameters stay empty, and the rate-limit HMAC
-  secret is stack generated and retained.
+- Production provider credentials are referenced through exact encrypted SSM
+  SecureString parameter names. Legacy raw `NoEcho` transition parameters stay
+  empty, and the rate-limit HMAC value remains encrypted and access-scoped.
 - Provider-side credential rotation is a separate owner-authorized operation.
   Never rotate, revoke, reveal, or copy provider credentials as a release side
   effect.
@@ -234,14 +234,16 @@ traffic, privacy, and cost after 30 days.
   and runs known-bad input, IP reputation, and per-IP rate rules in BLOCK, with
   request sampling disabled and sensitive fields redacted. Return an individual
   rule to COUNT only for a verified false positive with a documented rollback.
-- Guarded CloudTrail, Config, GuardDuty, Security Hub, Access Analyzer, Inspector,
+- Guarded CloudTrail, scoped Config, GuardDuty, Security Hub, Access Analyzer,
   and AWS Backup controls are active and source controlled separately from the
-  application stack. Use the home-Region singleton inventory, scheduled posture
+  application stack. Paid Inspector Lambda scanning is disabled because CI
+  already performs source, dependency, workflow, and credential scans. Use the
+  home-Region singleton inventory, scheduled posture
   audit, and reviewed change sets in
   `SECURITY_ACCOUNT_BASELINE.md`; centralized multi-account archival remains a
   future organization-level decision.
-- CloudFront standard logs, CloudWatch logs/metrics/alarms, Secrets Manager,
-  DynamoDB PITR, S3 version storage, invalidations above the free allowance, and
+- CloudFront standard logs, CloudWatch logs/metrics/alarms, SSM SecureString API
+  usage, DynamoDB PITR, S3 version storage, invalidations above the free allowance, and
   retained backup/log objects all have usage or storage costs. Budget creation
   requires an owner-approved monthly amount. The budget remains console-only;
   it never creates a subscriber, sends website incident email, or automatically

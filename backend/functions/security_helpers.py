@@ -32,7 +32,7 @@ def _identifier_hash(identifier, action):
     normalized = str(identifier or "unknown").strip().lower().encode("utf-8")
     secret = resolve_secret(
         direct_env="RATE_LIMIT_HASH_SECRET",
-        arn_env="RATE_LIMIT_HASH_SECRET_ARN",
+        parameter_env="RATE_LIMIT_HASH_PARAMETER",
         json_keys=("secret", "hashSecret", "RATE_LIMIT_HASH_SECRET"),
     ).encode("utf-8")
     message = action.encode("utf-8") + b"\x00" + normalized
@@ -95,7 +95,7 @@ def verify_turnstile(token, ip_address=None, *, expected_action=None):
     try:
         secret = resolve_secret(
             direct_env="TURNSTILE_SECRET_KEY",
-            arn_env="TURNSTILE_SECRET_ARN",
+            parameter_env="TURNSTILE_SECRET_PARAMETER",
             json_keys=("secretKey", "turnstileSecret", "TURNSTILE_SECRET_KEY"),
         )
     except Exception:

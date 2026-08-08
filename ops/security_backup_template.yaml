@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Guarded scheduled DynamoDB and S3 backup plan. The vault starts unlocked so a
-  restore can be proven before an operator explicitly enables governance Vault Lock.
+  Guarded scheduled DynamoDB metadata backup plan using the AWS-managed Backup
+  encryption key. S3 recovery is provided by bucket versioning and the existing
+  external media backup rather than duplicate AWS Backup copies.
 
 Parameters:
   Stage:
@@ -22,17 +23,6 @@ Parameters:
     MaxLength: 255
     AllowedPattern: '^[A-Za-z0-9_.-]+$'
     Description: Exact preview metadata table name output by the application stack.
-  ImagesBucketName:
-    Type: String
-    MinLength: 3
-    MaxLength: 63
-    AllowedPattern: '^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$'
-    Description: Exact protected media bucket name output by the application stack.
-  ReplicaBackupDeploymentMode:
-    Type: String
-    Default: skip
-    AllowedValues: [skip, use-existing-same-account-stage]
-    Description: Enables copying to the exact retained us-east-2 vault derived for this account and stage.
   BackupDeploymentMode:
     Type: String
     Default: skip
@@ -54,83 +44,19 @@ Rules:
         AssertDescription: The primary backup and alert rules must be deployed in us-west-2.
 Conditions:
   CreateBackup: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
-  HasReplicaVault: !Equals [!Ref ReplicaBackupDeploymentMode, use-existing-same-account-stage]
   CreateBackupAlerts: !Equals [!Ref BackupDeploymentMode, create-confirmed-no-conflict]
   EnableGovernanceLock: !And
     - !Condition CreateBackup
     - !Equals [!Ref VaultLockMode, governance-confirmed-after-restore-test]
 
 Resources:
-  BackupVaultKey:
-    Type: AWS::KMS::Key
-    Condition: CreateBackup
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: Encrypts retained IanTruongPhotography AWS Backup recovery points.
-      EnableKeyRotation: true
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: AllowAccountAdministration
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
-            Action: kms:*
-            Resource: '*'
-          - Sid: AllowBackupVaultCryptographicUse
-            Effect: Allow
-            Principal:
-              Service: backup.amazonaws.com
-            Action:
-              - kms:Decrypt
-              - kms:DescribeKey
-              - kms:Encrypt
-              - kms:GenerateDataKey*
-              - kms:ReEncrypt*
-            Resource: '*'
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-                kms:ViaService: !Sub 'backup.${AWS::Region}.${AWS::URLSuffix}'
-              ArnLike:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
-          - Sid: AllowBackupServiceGrants
-            Effect: Allow
-            Principal:
-              Service: backup.amazonaws.com
-            Action: kms:CreateGrant
-            Resource: '*'
-            Condition:
-              Bool:
-                kms:GrantIsForAWSResource: true
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-              ArnLike:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-
-  BackupVaultKeyAlias:
-    Type: AWS::KMS::Alias
-    Condition: CreateBackup
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      AliasName: !Sub 'alias/ian-photography-backup-${Stage}'
-      TargetKeyId: !Ref BackupVaultKey
-
-  BackupVault:
+  MetadataBackupVault:
     Type: AWS::Backup::BackupVault
     Condition: CreateBackup
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      BackupVaultName: !Sub 'ian-photography-protected-${Stage}'
-      EncryptionKeyArn: !GetAtt BackupVaultKey.Arn
+      BackupVaultName: !Sub 'ian-photography-metadata-${Stage}'
       LockConfiguration: !If
         - EnableGovernanceLock
         - MinRetentionDays: 35
@@ -157,10 +83,8 @@ Resources:
               ArnLike:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*'
-                  - !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:*'
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup'
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AWSBackupServiceRolePolicyForS3Backup'
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -175,18 +99,12 @@ Resources:
         BackupPlanName: !Sub 'ian-photography-protected-data-${Stage}'
         BackupPlanRule:
           - RuleName: DailyProtectedMetadata
-            TargetBackupVault: !Ref BackupVault
+            TargetBackupVault: !Ref MetadataBackupVault
             ScheduleExpression: cron(0 8 * * ? *)
             StartWindowMinutes: 60
             CompletionWindowMinutes: 180
             Lifecycle:
               DeleteAfterDays: 35
-            CopyActions: !If
-              - HasReplicaVault
-              - - DestinationBackupVaultArn: !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
-                  Lifecycle:
-                    DeleteAfterDays: 35
-              - !Ref AWS::NoValue
       BackupPlanTags:
         Application: IanTruongPhotography
         Stage: !Ref Stage
@@ -202,7 +120,6 @@ Resources:
         Resources:
           - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTableName}'
           - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PreviewMetadataTableName}'
-          - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucketName}'
 
   BackupJobFailureRule:
     Type: AWS::Events::Rule
@@ -217,39 +134,13 @@ Resources:
         region: [!Ref AWS::Region]
         detail-type: [Backup Job State Change]
         detail:
-          backupVaultName: [!Ref BackupVault]
+          backupVaultName: [!Ref MetadataBackupVault]
           state: [ABORTED, EXPIRED, FAILED, PARTIAL]
       Targets:
         - Id: SecuritySignals
           Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
           Input: !Sub >-
             {"schemaVersion":1,"eventName":"backup.job.failed","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-job-failure"}
-          DeadLetterConfig:
-            Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
-          RetryPolicy:
-            MaximumEventAgeInSeconds: 3600
-            MaximumRetryAttempts: 10
-
-  BackupCopyFailureRule:
-    Type: AWS::Events::Rule
-    Condition: CreateBackupAlerts
-    Properties:
-      Name: !Sub 'ian-photography-backup-copy-failed-${Stage}'
-      Description: Privacy-safe alert for an unsuccessful cross-Region backup copy.
-      State: ENABLED
-      EventPattern:
-        source: [aws.backup]
-        account: [!Ref AWS::AccountId]
-        region: [!Ref AWS::Region]
-        detail-type: [Copy Job State Change]
-        detail:
-          sourceBackupVaultArn: [!GetAtt BackupVault.BackupVaultArn]
-          state: [FAILED, PARTIAL]
-      Targets:
-        - Id: SecuritySignals
-          Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-signals-${Stage}'
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"backup.copy.failed","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#backup-copy-failure"}
           DeadLetterConfig:
             Arn: !Sub 'arn:${AWS::Partition}:sqs:us-west-2:${AWS::AccountId}:ian-photography-security-events-${Stage}-dlq'
           RetryPolicy:
@@ -318,7 +209,7 @@ Resources:
     DependsOn: BackupFreshnessLogGroup
     Properties:
       FunctionName: !Sub 'ian-photography-backup-freshness-${Stage}'
-      Description: Publishes aggregate freshness for the exact protected source and replica resources.
+      Description: Publishes aggregate freshness for the exact protected DynamoDB resources.
       Runtime: python3.12
       Handler: index.handler
       Role: !GetAtt BackupFreshnessRole.Arn
@@ -331,13 +222,8 @@ Resources:
             - ','
             - - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTableName}'
               - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PreviewMetadataTableName}'
-              - !Sub 'arn:${AWS::Partition}:s3:::${ImagesBucketName}'
           FRESHNESS_MAX_AGE_HOURS: !Ref FreshnessMaximumAgeHours
-          REPLICA_VAULT_ARN: !If
-            - HasReplicaVault
-            - !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
-            - ''
-          SOURCE_VAULT_NAME: !Ref BackupVault
+          SOURCE_VAULT_NAME: !Ref MetadataBackupVault
           STAGE: !Ref Stage
       Code:
         ZipFile: |
@@ -376,15 +262,6 @@ Resources:
               return latest
 
 
-          def _replica_scope(arn):
-              if not arn:
-                  return None
-              parts = arn.split(":", 5)
-              if len(parts) != 6 or parts[2] != "backup" or not parts[5].startswith("backup-vault:"):
-                  raise RuntimeError("invalid replica vault scope")
-              return parts[3], parts[5].split("backup-vault:", 1)[1]
-
-
           def _metric(name, value, stage, now):
               return {
                   "MetricName": name,
@@ -398,7 +275,7 @@ Resources:
           def handler(event, context):
               try:
                   expected = frozenset(filter(None, os.environ["EXPECTED_RESOURCE_ARNS"].split(",")))
-                  if len(expected) != 3:
+                  if len(expected) != 2:
                       raise RuntimeError("invalid expected backup coverage")
                   maximum_age = int(os.environ["FRESHNESS_MAX_AGE_HOURS"])
                   if maximum_age < 25 or maximum_age > 168:
@@ -409,15 +286,6 @@ Resources:
                       boto3.client("backup"), os.environ["SOURCE_VAULT_NAME"], expected
                   )
                   checks = [source.get(resource) for resource in expected]
-                  replica_scope = _replica_scope(os.environ.get("REPLICA_VAULT_ARN", ""))
-                  if replica_scope is not None:
-                      replica_region, replica_vault = replica_scope
-                      replica = _completed(
-                          boto3.client("backup", region_name=replica_region),
-                          replica_vault,
-                          expected,
-                      )
-                      checks.extend(replica.get(resource) for resource in expected)
                   failures = sum(value is None or value < cutoff for value in checks)
                   healthy = len(checks) - failures
                   stage = os.environ["STAGE"]
@@ -430,11 +298,10 @@ Resources:
                       ],
                   )
                   LOG.info(
-                      "backup_freshness_check outcome=complete expected=%d healthy=%d failed=%d replica=%s",
+                      "backup_freshness_check outcome=complete expected=%d healthy=%d failed=%d",
                       len(checks),
                       healthy,
                       failures,
-                      "enabled" if replica_scope is not None else "disabled",
                   )
                   return {"expected": len(checks), "healthy": healthy, "failed": failures}
               except Exception as error:
@@ -497,15 +364,9 @@ Outputs:
     Value: !If [CreateBackup, 'true', 'false']
   BackupVaultName:
     Condition: CreateBackup
-    Value: !Ref BackupVault
+    Value: !Ref MetadataBackupVault
   AlbumsBackupPlanId:
     Condition: CreateBackup
     Value: !Ref ProtectedDataBackupPlan
-  ReplicaBackupVaultArn:
-    Condition: HasReplicaVault
-    Value: !Sub 'arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:backup-vault:ian-photography-replica-${Stage}'
-  BackupVaultKeyArn:
-    Condition: CreateBackup
-    Value: !GetAtt BackupVaultKey.Arn
   BackupFailureAlertsEnabled:
     Value: !If [CreateBackupAlerts, 'true', 'false']

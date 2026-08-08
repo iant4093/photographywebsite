@@ -289,11 +289,11 @@ class DriveUsageProviderTests(unittest.TestCase):
         self.assertEqual(value["websiteBackup"]["totalBytes"], 0)
         self.assertEqual(value["rawPhotoBackup"]["totalBytes"], 0)
 
-    def test_credentials_support_nested_oauth_service_account_and_binary_secret(self):
+    def test_credentials_support_nested_oauth_and_service_account_parameters(self):
         credential = Mock(valid=False, token="token")
         with patch.object(
-            get_google_drive_usage.secrets_client, "get_secret_value",
-            return_value={"SecretBinary": json.dumps({"oauth": {"refresh_token": "x"}}).encode()},
+            get_google_drive_usage.ssm_client, "get_parameter",
+            return_value={"Parameter": {"Value": json.dumps({"oauth": {"refresh_token": "x"}})}},
         ) as secret, patch.object(
             get_google_drive_usage.Credentials, "from_authorized_user_info", return_value=credential
         ) as oauth:
@@ -307,7 +307,7 @@ class DriveUsageProviderTests(unittest.TestCase):
         service_credentials = Mock(valid=True, token="service-token")
         payload = {"service_account": {"type": "service_account", "client_email": "test@example.test"}}
         with patch.object(
-            get_google_drive_usage.secrets_client, "get_secret_value", return_value={"SecretString": json.dumps(payload)}
+            get_google_drive_usage.ssm_client, "get_parameter", return_value={"Parameter": {"Value": json.dumps(payload)}}
         ), patch.object(
             get_google_drive_usage.service_account.Credentials, "from_service_account_info", return_value=service_credentials
         ) as service:
@@ -320,7 +320,7 @@ class DriveUsageProviderTests(unittest.TestCase):
         raw_credentials = Mock(valid=False, token="raw-token")
         payload["raw_photo_backup_folder_id"] = "raw-folder"
         with patch.object(
-            get_google_drive_usage.secrets_client, "get_secret_value", return_value={"SecretString": json.dumps(payload)}
+            get_google_drive_usage.ssm_client, "get_parameter", return_value={"Parameter": {"Value": json.dumps(payload)}}
         ), patch.object(
             get_google_drive_usage.service_account.Credentials,
             "from_service_account_info",
@@ -333,14 +333,14 @@ class DriveUsageProviderTests(unittest.TestCase):
 
     def test_credential_contract_rejects_missing_invalid_and_unsupported_secrets(self):
         cases = [
-            ({}, {"GOOGLE_OAUTH_SECRET_ARN": ""}),
-            ({"SecretString": "not-json"}, None),
-            ({"SecretString": "[]"}, None),
-            ({"SecretString": "{}"}, None),
+            ({}, {"GOOGLE_OAUTH_PARAMETER": ""}),
+            ({"Parameter": {"Value": "not-json"}}, None),
+            ({"Parameter": {"Value": "[]"}}, None),
+            ({"Parameter": {"Value": "{}"}}, None),
         ]
         for response, environment in cases:
             with self.subTest(response=response), patch.object(
-                get_google_drive_usage.secrets_client, "get_secret_value", return_value=response
+                get_google_drive_usage.ssm_client, "get_parameter", return_value=response
             ), patch.dict(get_google_drive_usage.os.environ, environment or {}, clear=False), self.assertRaises(
                 get_google_drive_usage.ProviderContractError
             ):

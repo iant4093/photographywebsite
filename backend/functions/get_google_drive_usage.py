@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import copy
 import datetime as dt
 import json
@@ -49,7 +48,7 @@ SCHEDULED_REFRESH_HOUR_UTC = 9
 SCHEDULED_REFRESH_MINUTE_UTC = 15
 
 cache_table = boto3.resource("dynamodb").Table(os.environ["DRIVE_USAGE_CACHE_TABLE"])
-secrets_client = boto3.client("secretsmanager")
+ssm_client = boto3.client("ssm")
 _credential_payload_cache = None
 _credentials_cache = None
 _raw_backup_credentials_cache = None
@@ -75,23 +74,19 @@ def _credential_payload():
     global _credential_payload_cache
     if _credential_payload_cache is not None:
         return _credential_payload_cache
-    secret_arn = os.environ.get("GOOGLE_OAUTH_SECRET_ARN", "").strip()
-    if not secret_arn:
-        raise ProviderContractError("Google credential secret is unavailable")
-    response = secrets_client.get_secret_value(SecretId=secret_arn)
-    if "SecretString" in response:
-        raw = response["SecretString"]
-    else:
-        binary = response.get("SecretBinary")
-        raw = binary.decode("utf-8") if isinstance(binary, bytes) else base64.b64decode(binary).decode("utf-8")
+    parameter_name = os.environ.get("GOOGLE_OAUTH_PARAMETER", "").strip()
+    if not parameter_name:
+        raise ProviderContractError("Google credential parameter is unavailable")
+    response = ssm_client.get_parameter(Name=parameter_name, WithDecryption=True)
+    raw = response.get("Parameter", {}).get("Value")
     if not isinstance(raw, str) or not 2 <= len(raw) <= 64_000:
-        raise ProviderContractError("Google credential secret is invalid")
+        raise ProviderContractError("Google credential parameter is invalid")
     try:
         payload = json.loads(raw)
     except (TypeError, ValueError):
-        raise ProviderContractError("Google credential secret is invalid") from None
+        raise ProviderContractError("Google credential parameter is invalid") from None
     if not isinstance(payload, dict):
-        raise ProviderContractError("Google credential secret is invalid")
+        raise ProviderContractError("Google credential parameter is invalid")
     _credential_payload_cache = payload
     return payload
 

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OPS = ROOT / "ops"
 sys.path.insert(0, str(OPS))
 import security_preflight  # noqa: E402
-import enable_inspector_lambda_scanning as inspector_helper  # noqa: E402
+import disable_inspector_lambda_scanning as inspector_helper  # noqa: E402
 
 
 FOUNDATION = (OPS / "security_audit_foundation_template.yaml").read_text(encoding="utf-8")
@@ -134,11 +134,12 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertEqual(trail.count("Type: AWS::S3::Object"), 1)
         self.assertEqual(trail.count("DataResources:"), 1)
 
-    def test_notifications_use_customer_key_exact_publishers_and_delivery_guards(self) -> None:
+    def test_notifications_use_privacy_safe_topic_exact_publishers_and_delivery_guards(self) -> None:
         self.assertNotIn("alias/aws/sns", NOTIFICATIONS)
         self.assertNotIn("AWS::SNS::Subscription", NOTIFICATIONS)
         self.assertNotIn("NotificationEmail", NOTIFICATIONS)
-        self.assertIn("AWS::KMS::Key", NOTIFICATIONS)
+        self.assertNotIn("AWS::KMS::Key", NOTIFICATIONS)
+        self.assertNotIn("KmsMasterKeyId", NOTIFICATIONS)
         self.assertIn("events.amazonaws.com", NOTIFICATIONS)
         self.assertIn("cloudwatch.amazonaws.com", NOTIFICATIONS)
         self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 1)
@@ -197,9 +198,6 @@ class SecurityTemplateTests(unittest.TestCase):
         queue_policy = resource_block(NOTIFICATIONS, "SecuritySignalQueuePolicy")
         self.assertIn("aws:SourceAccount: !Ref AWS::AccountId", queue_policy)
         self.assertIn("aws:SourceArn:", queue_policy)
-        key = resource_block(NOTIFICATIONS, "SecurityNotificationKey")
-        self.assertIn("kms:EncryptionContext:aws:sns:topicArn", key)
-        self.assertIn("kms:ViaService", key)
         self.assertIn("ArnEquals:\n                aws:SourceArn:", NOTIFICATIONS)
         for logical_id in (
             "RootActivityAlarm",
@@ -221,20 +219,20 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("region: [us-east-1]", waf_forward)
 
     def test_singletons_require_explicit_confirmed_absent_modes(self) -> None:
-        self.assertEqual(MANAGED.count("Default: skip"), 5)
+        self.assertEqual(MANAGED.count("Default: skip"), 4)
         self.assertEqual(MANAGED.count("create-confirmed-absent"), 8)
         self.assertIn("Features:", MANAGED)
         self.assertIn("Name: S3_DATA_EVENTS", MANAGED)
         self.assertIn("Name: RUNTIME_MONITORING", MANAGED)
-        self.assertIn("AllSupported: true", MANAGED)
-        self.assertIn("IncludeGlobalResourceTypes: !If [RecordGlobalResources, true, false]", MANAGED)
+        self.assertIn("AllSupported: false", MANAGED)
+        self.assertIn("IncludeGlobalResourceTypes: false", MANAGED)
         delivery_channel = resource_block(MANAGED, "ConfigDeliveryChannel")
         self.assertIn("Type: Custom::ConfigDeliveryChannel", delivery_channel)
         self.assertIn("- ConfigDeliveryBucketPolicy", delivery_channel)
         self.assertIn("- ConfigRecorder", delivery_channel)
         recorder = resource_block(MANAGED, "ConfigRecorder")
         self.assertNotIn("DependsOn: ConfigDeliveryChannel", recorder)
-        self.assertNotIn("\n        ResourceTypes:", recorder)
+        self.assertIn("\n        ResourceTypes:", recorder)
 
     def test_home_region_detection_is_exactly_guarded(self) -> None:
         self.assertIn("ExpectedAccountId:", MANAGED)
@@ -320,8 +318,9 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("ServiceTimeout: 660", channel)
         self.assertNotIn("ConfigServiceLinkedRole:", MANAGED)
         self.assertIn("ExpectedRecorderRoleArn: !Sub", channel)
-        self.assertIn("ExpectedAllSupported: true", channel)
-        self.assertIn("ExpectedIncludeGlobalResourceTypes:", channel)
+        self.assertIn("ExpectedAllSupported: false", channel)
+        self.assertIn("ExpectedIncludeGlobalResourceTypes: false", channel)
+        self.assertIn("ExpectedResourceTypes:", channel)
         self.assertIn(
             "OwnershipParameterName: !Sub '/ian-photography/config-delivery/ian-photography-${Stage}/owner'",
             channel,
@@ -331,30 +330,33 @@ class SecurityTemplateTests(unittest.TestCase):
             "role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig",
             recorder,
         )
-        self.assertIn("AllSupported: true", recorder)
-        self.assertIn("IncludeGlobalResourceTypes:", recorder)
-        self.assertNotIn("\n        ResourceTypes:", recorder)
+        self.assertIn("AllSupported: false", recorder)
+        self.assertIn("IncludeGlobalResourceTypes: false", recorder)
+        for resource_type in (
+            "AWS::CloudTrail::Trail",
+            "AWS::DynamoDB::Table",
+            "AWS::KMS::Key",
+            "AWS::Lambda::Function",
+            "AWS::S3::Bucket",
+        ):
+            self.assertIn(resource_type, recorder)
 
     def test_scheduled_backup_role_cannot_restore_and_arn_is_local(self) -> None:
         self.assertNotIn("AWSBackupServiceRolePolicyForRestores", BACKUP)
         self.assertIn("AWSBackupServiceRolePolicyForBackup", BACKUP)
-        self.assertIn("AWSBackupServiceRolePolicyForS3Backup", BACKUP)
+        self.assertNotIn("AWSBackupServiceRolePolicyForS3Backup", BACKUP)
         backup_role = resource_block(BACKUP, "BackupRole")
         self.assertIn("aws:SourceAccount: !Ref AWS::AccountId", backup_role)
         self.assertIn(
             "arn:${AWS::Partition}:backup:${AWS::Region}:${AWS::AccountId}:*",
             backup_role,
         )
-        self.assertIn(
-            "arn:${AWS::Partition}:backup:us-east-2:${AWS::AccountId}:*",
-            backup_role,
-        )
+        self.assertNotIn("us-east-2", backup_role)
         self.assertNotIn("arn:${AWS::Partition}:backup:*:${AWS::AccountId}:*", backup_role)
         self.assertIn("Default: skip", BACKUP)
         self.assertIn("governance-confirmed-after-restore-test", BACKUP)
-        self.assertIn("AWS::KMS::Key", BACKUP)
-        self.assertIn("EnableKeyRotation: true", BACKUP)
-        self.assertIn("EncryptionKeyArn: !GetAtt BackupVaultKey.Arn", BACKUP)
+        self.assertNotIn("AWS::KMS::Key", BACKUP)
+        self.assertNotIn("EncryptionKeyArn:", BACKUP)
         self.assertIn(
             "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AlbumsTableName}",
             BACKUP,
@@ -363,14 +365,13 @@ class SecurityTemplateTests(unittest.TestCase):
             "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PreviewMetadataTableName}",
             BACKUP,
         )
-        self.assertIn("arn:${AWS::Partition}:s3:::${ImagesBucketName}", BACKUP)
-        self.assertIn("ReplicaBackupVaultArn", BACKUP)
-        self.assertIn("ReplicaBackupDeploymentMode", BACKUP)
-        self.assertIn("use-existing-same-account-stage", BACKUP)
+        self.assertNotIn("arn:${AWS::Partition}:s3:::${ImagesBucketName}", BACKUP)
+        self.assertNotIn("ReplicaBackupVaultArn", BACKUP)
+        self.assertNotIn("ReplicaBackupDeploymentMode", BACKUP)
         rules = BACKUP.split("Rules:", 1)[1].split("Conditions:", 1)[0]
         self.assertNotIn("!Sub", rules)
         self.assertNotIn("Fn::Sub", rules)
-        self.assertIn("CopyActions:", BACKUP)
+        self.assertNotIn("CopyActions:", BACKUP)
         self.assertIn("AWS::Backup::BackupVault", BACKUP_REPLICA)
         self.assertIn("MustDeployInReplicaRegion", BACKUP_REPLICA)
         self.assertIn("us-east-2", BACKUP_REPLICA)
@@ -388,7 +389,6 @@ class SecurityTemplateTests(unittest.TestCase):
     def test_backup_failure_events_are_static_privacy_safe_and_reliably_routed(self) -> None:
         for logical_id, event_name, detail_type in (
             ("BackupJobFailureRule", "backup.job.failed", "Backup Job State Change"),
-            ("BackupCopyFailureRule", "backup.copy.failed", "Copy Job State Change"),
         ):
             block = resource_block(BACKUP, logical_id)
             self.assertIn("Type: AWS::Events::Rule", block)
@@ -412,7 +412,7 @@ class SecurityTemplateTests(unittest.TestCase):
                 "restoreJobId",
             ):
                 self.assertNotIn(forbidden, block)
-        self.assertEqual(BACKUP.count("DeadLetterConfig:"), 2)
+        self.assertEqual(BACKUP.count("DeadLetterConfig:"), 1)
         self.assertNotIn("BackupRestoreFailureRule", BACKUP)
         self.assertNotIn("backup.restore.failed", BACKUP)
         for removed_input in (
@@ -489,7 +489,6 @@ class SecurityTemplateTests(unittest.TestCase):
         expected = {
             "arn:aws:dynamodb:us-west-2:123:table/albums",
             "arn:aws:dynamodb:us-west-2:123:table/previews",
-            "arn:aws:s3:::media",
         }
         metrics = []
 
@@ -530,7 +529,6 @@ class SecurityTemplateTests(unittest.TestCase):
         environment = {
             "EXPECTED_RESOURCE_ARNS": ",".join(sorted(expected)),
             "FRESHNESS_MAX_AGE_HOURS": "36",
-            "REPLICA_VAULT_ARN": "",
             "SOURCE_VAULT_NAME": "source",
             "STAGE": "prod",
         }
@@ -540,13 +538,13 @@ class SecurityTemplateTests(unittest.TestCase):
         ):
             exec(compile(inline_python(BACKUP, "BackupFreshnessFunction"), "<freshness>", "exec"), namespace)
             result = namespace["handler"]({}, types.SimpleNamespace())
-        self.assertEqual(result, {"expected": 3, "healthy": 3, "failed": 0})
+        self.assertEqual(result, {"expected": 2, "healthy": 2, "failed": 0})
         metric_values = {
             item["MetricName"]: item["Value"]
             for item in metrics[0]["MetricData"]
         }
-        self.assertEqual(metric_values["BackupExpectedCoverageCount"], 3)
-        self.assertEqual(metric_values["BackupHealthyCoverageCount"], 3)
+        self.assertEqual(metric_values["BackupExpectedCoverageCount"], 2)
+        self.assertEqual(metric_values["BackupHealthyCoverageCount"], 2)
         self.assertEqual(metric_values["BackupFreshnessFailureCount"], 0)
 
 
@@ -681,18 +679,18 @@ class SecurityPreflightTests(unittest.TestCase):
 
 
 class InspectorHelperTests(unittest.TestCase):
-    def test_apply_guards_require_exact_absent_state(self) -> None:
+    def test_apply_guards_require_exact_enabled_state(self) -> None:
         inspector_helper.validate_apply_guards(
             apply=True,
             account_id="123456789012",
             region="us-west-2",
             expected_account_id="123456789012",
             expected_region="us-west-2",
-            current_lambda_state="DISABLED",
-            current_lambda_code_state="DISABLED",
-            expected_lambda_state="DISABLED",
-            expected_lambda_code_state="DISABLED",
-            confirmation="enable-inspector-lambda-code-scanning",
+            current_lambda_state="ENABLED",
+            current_lambda_code_state="ENABLED",
+            expected_lambda_state="ENABLED",
+            expected_lambda_code_state="ENABLED",
+            confirmation="disable-inspector-lambda-scanning",
         )
         with self.assertRaises(SystemExit):
             inspector_helper.validate_apply_guards(
@@ -701,11 +699,11 @@ class InspectorHelperTests(unittest.TestCase):
                 region="us-west-2",
                 expected_account_id="123456789012",
                 expected_region="us-west-2",
-                current_lambda_state="ENABLED",
-                current_lambda_code_state="DISABLED",
-                expected_lambda_state="DISABLED",
-                expected_lambda_code_state="DISABLED",
-                confirmation="enable-inspector-lambda-code-scanning",
+                current_lambda_state="DISABLED",
+                current_lambda_code_state="ENABLED",
+                expected_lambda_state="ENABLED",
+                expected_lambda_code_state="ENABLED",
+                confirmation="disable-inspector-lambda-scanning",
             )
 
     def test_dry_run_bypasses_mutation_guards(self) -> None:
@@ -731,34 +729,34 @@ class InspectorHelperTests(unittest.TestCase):
         )
         self.assertEqual(inspector_helper.resource_status({}, "lambdaCode"), "UNKNOWN")
 
-    def test_waits_through_enabling_until_both_modes_are_enabled(self) -> None:
+    def test_waits_through_disabling_until_both_modes_are_disabled(self) -> None:
         statuses = [
-            {
-                "accountId": "123456789012",
-                "resourceState": {
-                    "lambda": {"status": "DISABLED"},
-                    "lambdaCode": {"status": "DISABLED"},
-                },
-            },
-            {
-                "accountId": "123456789012",
-                "resourceState": {
-                    "lambda": {"status": "ENABLING"},
-                    "lambdaCode": {"status": "ENABLING"},
-                },
-            },
-            {
-                "accountId": "123456789012",
-                "resourceState": {
-                    "lambda": {"status": "ENABLED"},
-                    "lambdaCode": {"status": "ENABLING"},
-                },
-            },
             {
                 "accountId": "123456789012",
                 "resourceState": {
                     "lambda": {"status": "ENABLED"},
                     "lambdaCode": {"status": "ENABLED"},
+                },
+            },
+            {
+                "accountId": "123456789012",
+                "resourceState": {
+                    "lambda": {"status": "DISABLING"},
+                    "lambdaCode": {"status": "DISABLING"},
+                },
+            },
+            {
+                "accountId": "123456789012",
+                "resourceState": {
+                    "lambda": {"status": "DISABLED"},
+                    "lambdaCode": {"status": "DISABLING"},
+                },
+            },
+            {
+                "accountId": "123456789012",
+                "resourceState": {
+                    "lambda": {"status": "DISABLED"},
+                    "lambdaCode": {"status": "DISABLED"},
                 },
             },
         ]
@@ -767,28 +765,28 @@ class InspectorHelperTests(unittest.TestCase):
         ), patch.object(inspector_helper.time, "monotonic", return_value=0), patch.object(
             inspector_helper.time, "sleep"
         ) as sleep:
-            result = inspector_helper.wait_until_lambda_scanning_enabled(
+            result = inspector_helper.wait_until_lambda_scanning_disabled(
                 account_id="123456789012",
                 profile=None,
                 region="us-west-2",
                 timeout_seconds=30,
                 poll_interval_seconds=5,
             )
-        self.assertEqual(result, ("ENABLED", "ENABLED"))
+        self.assertEqual(result, ("DISABLED", "DISABLED"))
         self.assertEqual(sleep.call_count, 3)
 
     def test_wait_fails_closed_on_unexpected_state_and_timeout(self) -> None:
         failed = {
             "accountId": "123456789012",
             "resourceState": {
-                "lambda": {"status": "ENABLING"},
+                "lambda": {"status": "DISABLING"},
                 "lambdaCode": {"status": "FAILED"},
             },
         }
         with patch.object(
             inspector_helper, "get_account_status", return_value=failed
         ), self.assertRaises(RuntimeError):
-            inspector_helper.wait_until_lambda_scanning_enabled(
+            inspector_helper.wait_until_lambda_scanning_disabled(
                 account_id="123456789012",
                 profile=None,
                 region="us-west-2",
@@ -796,19 +794,19 @@ class InspectorHelperTests(unittest.TestCase):
                 poll_interval_seconds=5,
             )
 
-        still_disabled = {
+        still_enabled = {
             "accountId": "123456789012",
             "resourceState": {
-                "lambda": {"status": "DISABLED"},
-                "lambdaCode": {"status": "DISABLED"},
+                "lambda": {"status": "ENABLED"},
+                "lambdaCode": {"status": "ENABLED"},
             },
         }
         with patch.object(
-            inspector_helper, "get_account_status", return_value=still_disabled
+            inspector_helper, "get_account_status", return_value=still_enabled
         ), patch.object(
             inspector_helper.time, "monotonic", side_effect=[0, 31]
         ), self.assertRaises(TimeoutError):
-            inspector_helper.wait_until_lambda_scanning_enabled(
+            inspector_helper.wait_until_lambda_scanning_disabled(
                 account_id="123456789012",
                 profile=None,
                 region="us-west-2",

@@ -512,13 +512,15 @@ def _arn_account(arn: str) -> str:
 
 
 def validate_front_door_resources(
-    *, domain: str, certificate_arn: str, secret_arn: str, web_acl_arn: str,
+    *, domain: str, certificate_arn: str, parameter_name: str, web_acl_arn: str,
     account: str, region: str, profile: str | None,
 ) -> None:
-    if _arn_account(certificate_arn) != account or _arn_account(secret_arn) != account or _arn_account(web_acl_arn) != account:
-        raise SystemExit("Refusing front door: certificate, secret, and WAF must belong to the active account")
-    if certificate_arn.split(":")[3] != region or secret_arn.split(":")[3] != region:
-        raise SystemExit("Refusing front door: API certificate and origin secret must be regional with the API")
+    if _arn_account(certificate_arn) != account or _arn_account(web_acl_arn) != account:
+        raise SystemExit("Refusing front door: certificate and WAF must belong to the active account")
+    if certificate_arn.split(":")[3] != region:
+        raise SystemExit("Refusing front door: API certificate must be regional with the API")
+    if not parameter_name.startswith("/ian-website/") or not parameter_name.endswith("/front-door-config"):
+        raise SystemExit("Refusing front door: origin parameter name is outside the approved path")
     if web_acl_arn.split(":")[3] != "us-east-1" or ":global/webacl/" not in web_acl_arn:
         raise SystemExit("Refusing front door: CloudFront WAF must be a global web ACL in us-east-1")
 
@@ -532,12 +534,15 @@ def validate_front_door_resources(
     if certificate.get("Status") != "ISSUED" or not certificate_covers(domain, certificate_names):
         raise SystemExit("Refusing front door: issued regional certificate does not cover the API origin domain")
 
-    secret = aws_json(
-        ["secretsmanager", "describe-secret", "--secret-id", secret_arn, "--region", region],
+    parameters = aws_json(
+        [
+            "ssm", "describe-parameters", "--parameter-filters",
+            f"Key=Name,Option=Equals,Values={parameter_name}", "--region", region,
+        ],
         profile=profile,
-    )
-    if secret.get("ARN") != secret_arn:
-        raise SystemExit("Refusing front door: origin secret metadata did not match the exact ARN")
+    ).get("Parameters", [])
+    if len(parameters) != 1 or parameters[0].get("Name") != parameter_name or parameters[0].get("Type") != "SecureString":
+        raise SystemExit("Refusing front door: origin parameter metadata did not match")
 
     resource = web_acl_arn.split(":", 5)[5]
     _, _, name, identifier = resource.split("/", 3)
@@ -585,7 +590,7 @@ def validate_front_door_apply_guards(
     frontend_origin_id: str, expected_frontend_origin_domain: str | None,
     frontend_origin_domain: str, expected_api_domain: str | None, api_domain: str,
     expected_certificate_arn: str | None, certificate_arn: str,
-    expected_secret_arn: str | None, secret_arn: str,
+    expected_parameter_name: str | None, parameter_name: str,
     expected_web_acl_arn: str | None, web_acl_arn: str,
 ) -> None:
     if not apply:
@@ -595,7 +600,7 @@ def validate_front_door_apply_guards(
         (expected_frontend_origin_domain, frontend_origin_domain),
         (expected_api_domain, api_domain),
         (expected_certificate_arn, certificate_arn),
-        (expected_secret_arn, secret_arn),
+        (expected_parameter_name, parameter_name),
         (expected_web_acl_arn, web_acl_arn),
     )
     if any(expected != actual for expected, actual in checks):
@@ -604,16 +609,16 @@ def validate_front_door_apply_guards(
         raise SystemExit(f"Refusing front-door apply: --confirm-front-door must equal {FRONT_DOOR_CONFIRMATION}")
 
 
-def load_origin_verification_value(secret_arn: str, *, region: str, profile: str | None) -> str:
+def load_origin_verification_value(parameter_name: str, *, region: str, profile: str | None) -> str:
     response = aws_json(
-        ["secretsmanager", "get-secret-value", "--secret-id", secret_arn, "--region", region],
+        ["ssm", "get-parameter", "--name", parameter_name, "--with-decryption", "--region", region],
         profile=profile,
     )
     try:
-        contract = json.loads(response["SecretString"])
+        contract = json.loads(response["Parameter"]["Value"])
         current = contract["current"]
     except (KeyError, TypeError, json.JSONDecodeError):
-        raise SystemExit("Refusing front door: origin secret does not satisfy the current/previous JSON contract") from None
+        raise SystemExit("Refusing front door: origin parameter does not satisfy the current/previous JSON contract") from None
     if (
         not isinstance(current, str)
         or not 32 <= len(current) <= 512
@@ -621,7 +626,7 @@ def load_origin_verification_value(secret_arn: str, *, region: str, profile: str
         or "\r" in current
         or "\n" in current
     ):
-        raise SystemExit("Refusing front door: origin secret current value is invalid")
+        raise SystemExit("Refusing front door: origin parameter current value is invalid")
     previous = contract.get("previous")
     if previous not in (None, "") and (
         not isinstance(previous, str)
@@ -630,7 +635,7 @@ def load_origin_verification_value(secret_arn: str, *, region: str, profile: str
         or "\r" in previous
         or "\n" in previous
     ):
-        raise SystemExit("Refusing front door: origin secret previous value is invalid")
+        raise SystemExit("Refusing front door: origin parameter previous value is invalid")
     return current
 
 
@@ -765,13 +770,17 @@ def main() -> int:
     parser.add_argument("--include-www", action="store_true")
     parser.add_argument("--include-api-front-door", action="store_true")
     parser.add_argument("--api-certificate-arn")
-    parser.add_argument("--origin-secret-arn")
+    parser.add_argument("--origin-parameter-name", "--origin-secret-arn", dest="origin_parameter_name")
     parser.add_argument("--web-acl-arn")
     parser.add_argument("--expected-frontend-origin-id")
     parser.add_argument("--expected-frontend-origin-domain")
     parser.add_argument("--expected-api-origin-domain")
     parser.add_argument("--expected-api-certificate-arn")
-    parser.add_argument("--expected-origin-secret-arn")
+    parser.add_argument(
+        "--expected-origin-parameter-name",
+        "--expected-origin-secret-arn",
+        dest="expected_origin_parameter_name",
+    )
     parser.add_argument("--expected-web-acl-arn")
     parser.add_argument("--confirm-front-door")
     parser.add_argument("--logging-bucket-domain", help="Opt-in standard-log S3 domain; never inferred")
@@ -845,7 +854,7 @@ def main() -> int:
     if args.include_api_front_door:
         required = {
             "--api-certificate-arn": args.api_certificate_arn,
-            "--origin-secret-arn": args.origin_secret_arn,
+            "--origin-parameter-name": args.origin_parameter_name,
             "--web-acl-arn": args.web_acl_arn,
         }
         missing = [name for name, value in required.items() if not value]
@@ -856,7 +865,7 @@ def main() -> int:
         validate_front_door_resources(
             domain=api_settings["origin_domain"],
             certificate_arn=args.api_certificate_arn,
-            secret_arn=args.origin_secret_arn,
+            parameter_name=args.origin_parameter_name,
             web_acl_arn=args.web_acl_arn,
             account=account,
             region=args.region,
@@ -873,8 +882,8 @@ def main() -> int:
             api_domain=api_settings["origin_domain"],
             expected_certificate_arn=args.expected_api_certificate_arn,
             certificate_arn=args.api_certificate_arn,
-            expected_secret_arn=args.expected_origin_secret_arn,
-            secret_arn=args.origin_secret_arn,
+            expected_parameter_name=args.expected_origin_parameter_name,
+            parameter_name=args.origin_parameter_name,
             expected_web_acl_arn=args.expected_web_acl_arn,
             web_acl_arn=args.web_acl_arn,
         )
@@ -1001,7 +1010,7 @@ def main() -> int:
     origin_verification_value = None
     if args.include_api_front_door:
         origin_verification_value = load_origin_verification_value(
-            args.origin_secret_arn, region=args.region, profile=args.profile
+            args.origin_parameter_name, region=args.region, profile=args.profile
         )
         upsert_exact_api_origin(desired_distribution, api_settings, origin_verification_value)
         desired_distribution["WebACLId"] = args.web_acl_arn

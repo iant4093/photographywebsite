@@ -34,11 +34,6 @@ Parameters:
     Type: String
     Default: skip
     AllowedValues: [skip, create-confirmed-absent]
-  GlobalResourceRecordingMode:
-    Type: String
-    Default: skip
-    AllowedValues: [skip, record-confirmed-home-region]
-    Description: Record IAM and CloudFront resources only in the designated home region.
   CentralAccessLogBucketName:
     Type: String
     Default: ''
@@ -57,7 +52,6 @@ Conditions:
   CreateGuardDuty: !Equals [!Ref GuardDutyDeploymentMode, create-confirmed-absent]
   CreateSecurityHub: !Equals [!Ref SecurityHubDeploymentMode, create-confirmed-absent]
   CreateAccessAnalyzer: !Equals [!Ref AccessAnalyzerDeploymentMode, create-confirmed-absent]
-  RecordGlobalResources: !Equals [!Ref GlobalResourceRecordingMode, record-confirmed-home-region]
   EnableCentralAccessLogging: !Not [!Equals [!Ref CentralAccessLogBucketName, '']]
 
 Resources:
@@ -371,8 +365,21 @@ Resources:
                       expected_globals,
                       "global resource recording",
                   )
-                  if not expected_all_supported:
-                      raise ValueError("all-supported recording is required")
+                  if expected_all_supported:
+                      if not allow_legacy_recording or expected_types:
+                          raise ValueError("scoped resource recording is required")
+                      expected_types = []
+                  elif (
+                      expected_globals
+                      or not isinstance(expected_types, list)
+                      or not expected_types
+                      or not all(
+                          isinstance(item, str) and RESOURCE_TYPE.fullmatch(item)
+                          for item in expected_types
+                      )
+                      or len(set(expected_types)) != len(expected_types)
+                  ):
+                      raise ValueError("invalid scoped resource recording")
               elif allow_legacy_recording and (
                   expected_all_supported is None
                   and expected_globals is None
@@ -387,7 +394,7 @@ Resources:
                   expected_all_supported = False
                   expected_globals = False
               else:
-                  raise ValueError("all-supported recording is required")
+                  raise ValueError("scoped resource recording is required")
               expected_marker = "/ian-photography/config-delivery/{}/owner".format(
                   name
               )
@@ -403,6 +410,7 @@ Resources:
                   "role": expected_role,
                   "all_supported": expected_all_supported,
                   "include_globals": expected_globals,
+                  "resource_types": sorted(expected_types),
                   "marker": marker_name,
               }
 
@@ -508,7 +516,8 @@ Resources:
                   and group.get("allSupported") is scope["all_supported"]
                   and group.get("includeGlobalResourceTypes", False)
                   is scope["include_globals"]
-                  and not group.get("resourceTypes", [])
+                  and sorted(group.get("resourceTypes", []))
+                  == scope["resource_types"]
               )
 
 
@@ -797,8 +806,14 @@ Resources:
       Name: !Sub 'ian-photography-${Stage}'
       RoleARN: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig'
       RecordingGroup:
-        AllSupported: true
-        IncludeGlobalResourceTypes: !If [RecordGlobalResources, true, false]
+        AllSupported: false
+        IncludeGlobalResourceTypes: false
+        ResourceTypes:
+          - AWS::CloudTrail::Trail
+          - AWS::DynamoDB::Table
+          - AWS::KMS::Key
+          - AWS::Lambda::Function
+          - AWS::S3::Bucket
 
   ConfigDeliveryChannel:
     Type: Custom::ConfigDeliveryChannel
@@ -817,8 +832,14 @@ Resources:
       ExpectedAccountId: !Ref AWS::AccountId
       ExpectedRegion: !Ref AWS::Region
       ExpectedRecorderRoleArn: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig'
-      ExpectedAllSupported: true
-      ExpectedIncludeGlobalResourceTypes: !If [RecordGlobalResources, true, false]
+      ExpectedAllSupported: false
+      ExpectedIncludeGlobalResourceTypes: false
+      ExpectedResourceTypes:
+        - AWS::CloudTrail::Trail
+        - AWS::DynamoDB::Table
+        - AWS::KMS::Key
+        - AWS::Lambda::Function
+        - AWS::S3::Bucket
       OwnershipParameterName: !Sub '/ian-photography/config-delivery/ian-photography-${Stage}/owner'
 
   ConfigCloudTrailEnabled:

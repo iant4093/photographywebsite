@@ -1,4 +1,3 @@
-import base64
 import json
 import os
 from unittest.mock import Mock, mock_open, patch
@@ -20,49 +19,37 @@ class GoogleCredentialTests(unittest.TestCase):
     def tearDown(self):
         google_drive_sync._credentials_cache = None
 
-    def test_secret_string_is_cached_and_must_be_an_object(self):
+    def test_secure_parameter_is_cached_and_must_be_an_object(self):
         client = Mock()
-        client.get_secret_value.return_value = {
-            "SecretString": json.dumps({"oauth": {"refresh_token": "token"}})
+        client.get_parameter.return_value = {
+            "Parameter": {"Value": json.dumps({"oauth": {"refresh_token": "token"}})}
         }
-        with patch.dict(os.environ, {"GOOGLE_OAUTH_SECRET_ARN": "arn:secret"}), patch.object(
-            google_drive_sync, "secrets_client", client
+        with patch.dict(os.environ, {"GOOGLE_OAUTH_PARAMETER": "/google"}), patch.object(
+            google_drive_sync, "ssm_client", client
         ):
             first = google_drive_sync._credential_payload()
             second = google_drive_sync._credential_payload()
         self.assertIs(first, second)
-        client.get_secret_value.assert_called_once_with(SecretId="arn:secret")
+        client.get_parameter.assert_called_once_with(Name="/google", WithDecryption=True)
 
         google_drive_sync._credentials_cache = None
-        client.get_secret_value.return_value = {"SecretString": "[]"}
-        with patch.dict(os.environ, {"GOOGLE_OAUTH_SECRET_ARN": "arn:secret"}), patch.object(
-            google_drive_sync, "secrets_client", client
+        client.get_parameter.return_value = {"Parameter": {"Value": "[]"}}
+        with patch.dict(os.environ, {"GOOGLE_OAUTH_PARAMETER": "/google"}), patch.object(
+            google_drive_sync, "ssm_client", client
         ), self.assertRaises(RuntimeError):
             google_drive_sync._credential_payload()
-
-    def test_binary_secret_accepts_bytes_and_base64_string(self):
-        payload = {"type": "service_account", "private_key": "redacted"}
-        raw = json.dumps(payload).encode()
-        for binary in (raw, base64.b64encode(raw).decode()):
-            google_drive_sync._credentials_cache = None
-            client = Mock()
-            client.get_secret_value.return_value = {"SecretBinary": binary}
-            with self.subTest(kind=type(binary).__name__), patch.dict(
-                os.environ, {"GOOGLE_OAUTH_SECRET_ARN": "arn:secret"}
-            ), patch.object(google_drive_sync, "secrets_client", client):
-                self.assertEqual(google_drive_sync._credential_payload(), payload)
 
     def test_legacy_file_requires_explicit_opt_in(self):
         with patch.dict(
             os.environ,
-            {"GOOGLE_OAUTH_SECRET_ARN": "", "ALLOW_LEGACY_GOOGLE_CREDENTIAL_FILE": "true"},
+            {"GOOGLE_OAUTH_PARAMETER": "", "ALLOW_LEGACY_GOOGLE_CREDENTIAL_FILE": "true"},
         ), patch("builtins.open", mock_open(read_data='{"refresh_token":"legacy"}')) as handle:
             self.assertEqual(google_drive_sync._credential_payload()["refresh_token"], "legacy")
         handle.assert_called_once_with("google_oauth_token.json", "r", encoding="utf-8")
 
         with patch.dict(
             os.environ,
-            {"GOOGLE_OAUTH_SECRET_ARN": "", "ALLOW_LEGACY_GOOGLE_CREDENTIAL_FILE": "false"},
+            {"GOOGLE_OAUTH_PARAMETER": "", "ALLOW_LEGACY_GOOGLE_CREDENTIAL_FILE": "false"},
         ), self.assertRaises(RuntimeError):
             google_drive_sync._credential_payload()
 

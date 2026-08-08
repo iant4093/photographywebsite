@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only verification for the CloudFront/WAF/API single-front-door boundary.
 
-This command never calls Secrets Manager GetSecretValue and never prints custom
+This command never decrypts the SSM parameter and never prints custom
 origin header values.  It is suitable before and after each staged change set.
 """
 
@@ -26,6 +26,13 @@ def _stack_parameters(stack_name: str, profile: str | None, region: str) -> dict
         ["cloudformation", "describe-stacks", "--stack-name", stack_name], profile, region
     )["Stacks"][0]
     return {item["ParameterKey"]: item.get("ParameterValue", "") for item in stack.get("Parameters", [])}
+
+
+def _stack_outputs(stack_name: str, profile: str | None, region: str) -> dict[str, str]:
+    stack = aws_json(
+        ["cloudformation", "describe-stacks", "--stack-name", stack_name], profile, region
+    )["Stacks"][0]
+    return {item["OutputKey"]: item.get("OutputValue", "") for item in stack.get("Outputs", [])}
 
 
 def inspect(args: argparse.Namespace) -> dict[str, Any]:
@@ -75,16 +82,23 @@ def inspect(args: argparse.Namespace) -> dict[str, Any]:
     certificate_arn = stack_resource(
         args.stack_name, "ApiFrontDoorCertificate", args.profile, args.region
     )
-    secret_arn = stack_resource(args.stack_name, "FrontDoorOriginSecret", args.profile, args.region)
+    parameter_name = _stack_outputs(args.stack_name, args.profile, args.region).get(
+        "FrontDoorConfigParameterName", ""
+    )
     if certificate_arn != args.expected_certificate_arn:
         raise RuntimeError("regional certificate ARN differs")
-    if secret_arn != args.expected_secret_arn:
-        raise RuntimeError("origin secret ARN differs")
-    secret = aws_json(
-        ["secretsmanager", "describe-secret", "--secret-id", secret_arn], args.profile, args.region
-    )
-    if secret.get("ARN") != secret_arn:
-        raise RuntimeError("origin secret metadata differs")
+    if parameter_name != args.expected_parameter_name:
+        raise RuntimeError("origin parameter name differs")
+    parameters = aws_json(
+        [
+            "ssm", "describe-parameters", "--parameter-filters",
+            f"Key=Name,Option=Equals,Values={parameter_name}",
+        ],
+        args.profile,
+        args.region,
+    ).get("Parameters", [])
+    if len(parameters) != 1 or parameters[0].get("Name") != parameter_name or parameters[0].get("Type") != "SecureString":
+        raise RuntimeError("origin parameter metadata differs")
 
     parameters = _stack_parameters(args.stack_name, args.profile, args.region)
     return {
@@ -95,7 +109,7 @@ def inspect(args: argparse.Namespace) -> dict[str, Any]:
         "apiBehaviorsPresent": True,
         "wafAssociated": True,
         "originHeaderPresent": True,
-        "originSecretValueRead": False,
+        "originParameterValueRead": False,
         "originEnforcementEnabled": parameters.get("FrontDoorEnforcementEnabled") == "true",
         "executeApiEndpointDisabled": bool(api.get("DisableExecuteApiEndpoint")),
     }
@@ -106,7 +120,12 @@ def main() -> int:
     parser.add_argument("--stack-name", required=True)
     parser.add_argument("--expected-account-id", required=True)
     parser.add_argument("--expected-certificate-arn", required=True)
-    parser.add_argument("--expected-secret-arn", required=True)
+    parser.add_argument(
+        "--expected-parameter-name",
+        "--expected-secret-arn",
+        dest="expected_parameter_name",
+        required=True,
+    )
     parser.add_argument("--expected-web-acl-arn", required=True)
     parser.add_argument("--canonical-domain", default="iantruongphotography.com")
     parser.add_argument("--api-origin-domain", default="origin-api.iantruongphotography.com")

@@ -1,6 +1,6 @@
 """Verify that HTTP API requests arrived through the approved CloudFront origin.
 
-The verification value is generated and stored in Secrets Manager.  It is
+The verification value is stored in an encrypted SSM parameter.  It is
 never accepted from query/body data and is never written to logs.  Enforcement
 is deliberately staged off by default; when enabled, any configuration or
 provider failure denies the request.
@@ -22,8 +22,8 @@ logger = logging.getLogger("photography_api.front_door")
 
 HEADER_NAME = "x-origin-verify"
 _CACHE_LOCK = threading.Lock()
-_CACHE = {"arn": None, "current": None, "previous": None, "expires_at": 0.0}
-_secrets_client = None
+_CACHE = {"name": None, "current": None, "previous": None, "expires_at": 0.0}
+_ssm_client = None
 
 
 def _enforcement_enabled():
@@ -45,10 +45,10 @@ def _cache_ttl_seconds():
 
 
 def _client():
-    global _secrets_client
-    if _secrets_client is None:
-        _secrets_client = boto3.client("secretsmanager")
-    return _secrets_client
+    global _ssm_client
+    if _ssm_client is None:
+        _ssm_client = boto3.client("ssm")
+    return _ssm_client
 
 
 def _parse_secret(payload):
@@ -80,16 +80,16 @@ def _parse_secret(payload):
     return current, previous
 
 
-def _secret_values(secret_arn):
+def _secret_values(parameter_name):
     now = time.monotonic()
     with _CACHE_LOCK:
-        if _CACHE["arn"] == secret_arn and now < _CACHE["expires_at"]:
+        if _CACHE["name"] == parameter_name and now < _CACHE["expires_at"]:
             return _CACHE["current"], _CACHE["previous"]
 
-        response = _client().get_secret_value(SecretId=secret_arn)
-        current, previous = _parse_secret(response.get("SecretString"))
+        response = _client().get_parameter(Name=parameter_name, WithDecryption=True)
+        current, previous = _parse_secret(response.get("Parameter", {}).get("Value"))
         _CACHE.update(
-            arn=secret_arn,
+            name=parameter_name,
             current=current,
             previous=previous,
             expires_at=now + _cache_ttl_seconds(),
@@ -137,15 +137,15 @@ def verify_front_door_request(event, _context=None):
     if enabled is None:
         return _deny("invalid_configuration")
 
-    secret_arn = os.environ.get("FRONT_DOOR_CONFIG_ARN", "").strip()
+    parameter_name = os.environ.get("FRONT_DOOR_CONFIG_PARAMETER", "").strip()
     supplied = _request_header(event)
-    if not secret_arn:
+    if not parameter_name:
         return _deny("secret_not_configured")
     if not supplied:
         return _deny("verification_missing")
 
     try:
-        current, previous = _secret_values(secret_arn)
+        current, previous = _secret_values(parameter_name)
     except Exception:
         return _deny("secret_unavailable")
 

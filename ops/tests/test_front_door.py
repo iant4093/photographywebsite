@@ -198,8 +198,8 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
             "api_domain": SETTINGS["origin_domain"],
             "expected_certificate_arn": "certificate",
             "certificate_arn": "certificate",
-            "expected_secret_arn": "secret",
-            "secret_arn": "secret",
+            "expected_parameter_name": "/ian-website/prod/front-door-config",
+            "parameter_name": "/ian-website/prod/front-door-config",
             "expected_web_acl_arn": "waf",
             "web_acl_arn": "waf",
         }
@@ -219,7 +219,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
     def test_resource_validation_reads_only_metadata_and_requires_count_mode(self) -> None:
         account = "000000000000"
         certificate_arn = f"arn:aws:acm:us-west-2:{account}:certificate/certificate-id"
-        secret_arn = f"arn:aws:secretsmanager:us-west-2:{account}:secret:front-door"
+        parameter_name = "/ian-website/prod/front-door-config"
         web_acl_arn = f"arn:aws:wafv2:us-east-1:{account}:global/webacl/front-door/web-acl-id"
         responses = [
             {
@@ -229,7 +229,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                     "SubjectAlternativeNames": [SETTINGS["origin_domain"]],
                 }
             },
-            {"ARN": secret_arn},
+            {"Parameters": [{"Name": parameter_name, "Type": "SecureString"}]},
             {
                 "WebACL": {
                     "ARN": web_acl_arn,
@@ -261,15 +261,15 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
             cloudfront_frontend.validate_front_door_resources(
                 domain=SETTINGS["origin_domain"],
                 certificate_arn=certificate_arn,
-                secret_arn=secret_arn,
+                parameter_name=parameter_name,
                 web_acl_arn=web_acl_arn,
                 account=account,
                 region="us-west-2",
                 profile=None,
             )
         serialized_calls = json.dumps(calls)
-        self.assertIn("describe-secret", serialized_calls)
-        self.assertNotIn("get-secret-value", serialized_calls)
+        self.assertIn("describe-parameters", serialized_calls)
+        self.assertNotIn("get-parameter", serialized_calls)
 
     def test_secret_value_loader_never_prints_the_value(self) -> None:
         runtime_value = secrets.token_urlsafe(48)
@@ -278,11 +278,11 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
             cloudfront_frontend,
             "aws_json",
             return_value={
-                "SecretString": json.dumps({"current": runtime_value, "previous": ""})
+                "Parameter": {"Value": json.dumps({"current": runtime_value, "previous": ""})}
             },
         ), contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             loaded = cloudfront_frontend.load_origin_verification_value(
-                "arn:aws:secretsmanager:us-west-2:000000000000:secret:test",
+                "/ian-website/prod/front-door-config",
                 region="us-west-2",
                 profile=None,
             )
@@ -324,7 +324,7 @@ class WafAndPreflightTests(unittest.TestCase):
     def test_preflight_never_reads_or_returns_secret_value(self) -> None:
         account = "000000000000"
         certificate_arn = f"arn:aws:acm:us-west-2:{account}:certificate/certificate-id"
-        secret_arn = f"arn:aws:secretsmanager:us-west-2:{account}:secret:front-door"
+        parameter_name = "/ian-website/prod/front-door-config"
         web_acl_arn = f"arn:aws:wafv2:us-east-1:{account}:global/webacl/front-door/web-acl-id"
         runtime_value = secrets.token_urlsafe(48)
         calls = []
@@ -368,8 +368,8 @@ class WafAndPreflightTests(unittest.TestCase):
                 return {"DisableExecuteApiEndpoint": True}
             if (service, operation) == ("apigatewayv2", "get-api-mappings"):
                 return {"Items": [{"ApiId": "api-id", "ApiMappingKey": "api"}]}
-            if (service, operation) == ("secretsmanager", "describe-secret"):
-                return {"ARN": secret_arn}
+            if (service, operation) == ("ssm", "describe-parameters"):
+                return {"Parameters": [{"Name": parameter_name, "Type": "SecureString"}]}
             if (service, operation) == ("cloudformation", "describe-stacks"):
                 return {
                     "Stacks": [
@@ -379,7 +379,13 @@ class WafAndPreflightTests(unittest.TestCase):
                                     "ParameterKey": "FrontDoorEnforcementEnabled",
                                     "ParameterValue": "true",
                                 }
-                            ]
+                            ],
+                            "Outputs": [
+                                {
+                                    "OutputKey": "FrontDoorConfigParameterName",
+                                    "OutputValue": parameter_name,
+                                }
+                            ],
                         }
                     ]
                 }
@@ -388,7 +394,6 @@ class WafAndPreflightTests(unittest.TestCase):
         resources = {
             "Api": "api-id",
             "ApiFrontDoorCertificate": certificate_arn,
-            "FrontDoorOriginSecret": secret_arn,
         }
         arguments = type(
             "Args",
@@ -402,7 +407,7 @@ class WafAndPreflightTests(unittest.TestCase):
                 "expected_web_acl_arn": web_acl_arn,
                 "stack_name": "stack",
                 "expected_certificate_arn": certificate_arn,
-                "expected_secret_arn": secret_arn,
+                "expected_parameter_name": parameter_name,
             },
         )()
         with patch.object(front_door_preflight, "aws_json", side_effect=fake_aws), patch.object(
@@ -416,9 +421,9 @@ class WafAndPreflightTests(unittest.TestCase):
         ):
             report = front_door_preflight.inspect(arguments)
         self.assertTrue(report["originHeaderPresent"])
-        self.assertFalse(report["originSecretValueRead"])
+        self.assertFalse(report["originParameterValueRead"])
         self.assertNotIn(runtime_value, json.dumps(report))
-        self.assertNotIn("get-secret-value", json.dumps(calls))
+        self.assertNotIn("get-parameter", json.dumps(calls))
 
     def test_validation_entrypoints_include_waf_template(self) -> None:
         for path in (

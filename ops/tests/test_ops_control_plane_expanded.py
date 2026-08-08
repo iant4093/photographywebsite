@@ -18,7 +18,7 @@ if str(OPS) not in sys.path:
 import aws_stack
 import check_album_indexes
 import dns_hardening
-import enable_inspector_lambda_scanning as inspector
+import disable_inspector_lambda_scanning as inspector
 import invalidate_media_cache
 import security_preflight
 import set_lambda_log_retention
@@ -464,10 +464,10 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
             "region": "us-west-2",
             "expected_account_id": "123456789012",
             "expected_region": "us-west-2",
-            "current_lambda_state": "DISABLED",
-            "current_lambda_code_state": "DISABLED",
-            "expected_lambda_state": "DISABLED",
-            "expected_lambda_code_state": "DISABLED",
+            "current_lambda_state": "ENABLED",
+            "current_lambda_code_state": "ENABLED",
+            "expected_lambda_state": "ENABLED",
+            "expected_lambda_code_state": "ENABLED",
             "confirmation": inspector.CONFIRMATION,
         }
         inspector.validate_apply_guards(**guards)
@@ -475,8 +475,8 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
         variants = (
             {"expected_account_id": "wrong"},
             {"expected_region": "us-east-1"},
-            {"current_lambda_state": "ENABLED"},
-            {"current_lambda_code_state": "ENABLED"},
+            {"current_lambda_state": "DISABLED"},
+            {"current_lambda_code_state": "DISABLED"},
             {"confirmation": "wrong"},
         )
         for changes in variants:
@@ -489,10 +489,10 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
             nonlocal status_calls
             if arguments[:2] == ["sts", "get-caller-identity"]:
                 return {"Account": "123456789012"}
-            if arguments[:2] == ["inspector2", "enable"]:
+            if arguments[:2] == ["inspector2", "disable"]:
                 return {}
             status_calls += 1
-            state = "DISABLED" if status_calls == 1 else "FAILED"
+            state = "ENABLED" if status_calls == 1 else "FAILED"
             return {
                 "accounts": [{
                     "accountId": "123456789012",
@@ -513,8 +513,8 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
                 "--apply",
                 "--expected-account-id", "123456789012",
                 "--expected-region", "us-west-2",
-                "--expected-lambda-state", "DISABLED",
-                "--expected-lambda-code-state", "DISABLED",
+                "--expected-lambda-state", "ENABLED",
+                "--expected-lambda-code-state", "ENABLED",
                 "--confirm", inspector.CONFIRMATION,
             )
 
@@ -525,8 +525,8 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
                     {
                         "accountId": "123456789012",
                         "resourceState": {
-                            "lambda": {"status": "DISABLED"},
-                            "lambdaCode": {"status": "DISABLED"},
+                            "lambda": {"status": "ENABLED"},
+                            "lambdaCode": {"status": "ENABLED"},
                         },
                     }
                 ],
@@ -556,10 +556,10 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
             calls.append(arguments)
             if arguments[:2] == ["sts", "get-caller-identity"]:
                 return {"Account": "123456789012"}
-            if arguments[:2] == ["inspector2", "enable"]:
+            if arguments[:2] == ["inspector2", "disable"]:
                 return {}
             account_status_calls += 1
-            state = "DISABLED" if account_status_calls == 1 else "ENABLED"
+            state = "ENABLED" if account_status_calls == 1 else "DISABLED"
             return {
                 "accounts": [
                     {
@@ -584,15 +584,15 @@ class InspectorAndPreflightTests(MainMixin, unittest.TestCase):
                 "--expected-region",
                 "us-west-2",
                 "--expected-lambda-state",
-                "DISABLED",
+                "ENABLED",
                 "--expected-lambda-code-state",
-                "DISABLED",
+                "ENABLED",
                 "--confirm",
                 inspector.CONFIRMATION,
             )
         self.assertEqual(result, 0)
-        self.assertTrue(any(call[:2] == ["inspector2", "enable"] for call in calls))
-        self.assertIn('"result": "enabled"', output)
+        self.assertTrue(any(call[:2] == ["inspector2", "disable"] for call in calls))
+        self.assertIn('"result": "disabled"', output)
 
         for arguments in (
             ("--wait-timeout-seconds", "29"),

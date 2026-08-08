@@ -20,7 +20,7 @@ DEFAULT_ENV = {
     "COST_REPORT_CACHE_TABLE": "cost-report-test",
     "DRIVE_USAGE_CACHE_TABLE": "drive-usage-test",
     "GOOGLE_DRIVE_FOLDER_ID": "drive-root-test",
-    "GOOGLE_OAUTH_SECRET_ARN": "arn:aws:secretsmanager:us-west-2:000000000000:secret:google-test",
+    "GOOGLE_OAUTH_PARAMETER": "/ian-website/prod/google-drive-credentials",
     "RATE_LIMIT_HASH_SECRET": "unit-test-rate-hash-secret",
     "IMAGES_BUCKET": "images-test",
     "CLOUDFRONT_DOMAIN": "media.example.test",

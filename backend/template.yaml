@@ -30,19 +30,19 @@ Parameters:
   ResendApiKeySecretArn:
     Type: String
     Default: ''
-    Description: Optional Secrets Manager ARN containing the Resend API key.
+    Description: Legacy-named parameter containing the encrypted SSM parameter name for the Resend API key.
   TurnstileSecretArn:
     Type: String
     Default: ''
-    Description: Optional Secrets Manager ARN containing the Turnstile secret.
+    Description: Legacy-named parameter containing the encrypted SSM parameter name for the Turnstile secret.
   GoogleOAuthSecretArn:
     Type: String
     Default: ''
-    Description: Optional Secrets Manager ARN containing the Google OAuth authorized-user JSON.
+    Description: Legacy-named parameter containing the encrypted SSM parameter name for the Google credential JSON.
   ApplicationSecretsKmsKeyArn:
     Type: String
     Default: ''
-    Description: Optional customer-managed KMS key ARN used by the application secrets.
+    Description: Deprecated compatibility parameter; standard SSM parameters use the AWS-managed SSM key.
   GoogleDriveFolderId:
     Type: String
     Default: ''
@@ -172,7 +172,7 @@ Globals:
         COGNITO_CLIENT_ID: !Ref UserPoolClient
         APPLICATION_STAGE: !Ref Stage
         RELEASE_SHA: !Ref ReleaseSha
-        FRONT_DOOR_CONFIG_ARN: !Ref FrontDoorOriginSecret
+        FRONT_DOOR_CONFIG_PARAMETER: !Sub '/ian-website/${Stage}/front-door-config'
         FRONT_DOOR_ENFORCEMENT_ENABLED: !Ref FrontDoorEnforcementEnabled
         FRONT_DOOR_SECRET_CACHE_TTL_SECONDS: !Ref FrontDoorSecretCacheTtlSeconds
     Tracing: Active
@@ -393,61 +393,23 @@ Resources:
         - Key: DataClassification
           Value: AccountStorageMetadata
 
-  # Per-stack random key used to HMAC privacy-sensitive rate-limit identifiers.
-  RateLimitHashSecret:
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: !Sub 'HMAC key for privacy-preserving rate limits (${Stage})'
-      GenerateSecretString:
-        PasswordLength: 64
-        ExcludePunctuation: true
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-        - Key: DataClassification
-          Value: SecuritySecret
-
-  # Generated JSON contract: {"current":"<generated>","previous":""}.
-  # Rotation first moves the old current value into previous, then changes
-  # current.  Remove previous only after CloudFront and every Lambda cache have
-  # used the new current value for longer than the configured cache TTL.
-  FrontDoorOriginSecret:
-    Type: AWS::SecretsManager::Secret
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      Name: !Sub 'ian-photography/front-door/${Stage}'
-      Description: !Sub 'CloudFront to HTTP API origin verification (${Stage})'
-      GenerateSecretString:
-        SecretStringTemplate: '{"previous":""}'
-        GenerateStringKey: current
-        PasswordLength: 64
-        ExcludePunctuation: true
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-        - Key: DataClassification
-          Value: SecuritySecret
-
+  # The rate-limit and front-door values are retained as standard encrypted
+  # SSM parameters created by the guarded migration. CloudFormation cannot
+  # create SecureString parameters without a custom resource, so consumers
+  # receive only their deterministic names and least-privilege read access.
   FrontDoorOriginSecretReadPolicy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      Description: Read-only access to the exact generated CloudFront origin-verification secret
+      Description: Read-only access to the exact CloudFront origin-verification SSM parameter
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Sid: ReadExactFrontDoorOriginSecret
+          - Sid: ReadExactFrontDoorOriginParameter
             Effect: Allow
-            Action: secretsmanager:GetSecretValue
-            Resource: !Ref FrontDoorOriginSecret
+            Action: ssm:GetParameter
+            Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/front-door-config'
 
   ApiFrontDoorCertificate:
     Type: AWS::CertificateManager::Certificate
@@ -1384,10 +1346,10 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           RATE_LIMIT_TABLE: !Ref RateLimitTable
-          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
-          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_SECRET_PARAMETER: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
@@ -1402,8 +1364,8 @@ Resources:
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
             - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref RateLimitHashSecret
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
             - Effect: Allow
               Action: s3:GetObject
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
@@ -1411,8 +1373,8 @@ Resources:
           - HasTurnstileSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref TurnstileSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TurnstileSecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -1441,11 +1403,11 @@ Resources:
       Environment:
         Variables:
           RATE_LIMIT_TABLE: !Ref RateLimitTable
-          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
-          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_SECRET_PARAMETER: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
@@ -1454,8 +1416,8 @@ Resources:
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
             - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref RateLimitHashSecret
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
             - Effect: Allow
               Action:
                 - cognito-idp:AdminInitiateAuth
@@ -1464,8 +1426,8 @@ Resources:
           - HasTurnstileSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref TurnstileSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TurnstileSecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -1494,11 +1456,11 @@ Resources:
       Environment:
         Variables:
           RATE_LIMIT_TABLE: !Ref RateLimitTable
-          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
-          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_SECRET_PARAMETER: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
@@ -1507,8 +1469,8 @@ Resources:
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
             - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref RateLimitHashSecret
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
             - Effect: Allow
               Action: cognito-idp:AdminRespondToAuthChallenge
               Resource: !GetAtt UserPool.Arn
@@ -1516,8 +1478,8 @@ Resources:
           - HasTurnstileSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref TurnstileSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TurnstileSecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -1546,12 +1508,12 @@ Resources:
       Environment:
         Variables:
           RATE_LIMIT_TABLE: !Ref RateLimitTable
-          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
-          TURNSTILE_SECRET_ARN: !Ref TurnstileSecretArn
+          TURNSTILE_SECRET_PARAMETER: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
           RESEND_API_KEY: !Ref ResendApiKey
-          RESEND_API_KEY_SECRET_ARN: !Ref ResendApiKeySecretArn
+          RESEND_API_KEY_PARAMETER: !Ref ResendApiKeySecretArn
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -1559,21 +1521,21 @@ Resources:
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
             - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref RateLimitHashSecret
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
         - !If
           - HasTurnstileSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref TurnstileSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TurnstileSecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasResendSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref ResendApiKeySecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ResendApiKeySecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -1611,7 +1573,7 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           IMAGES_BUCKET: !Ref ImagesBucket
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
-          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+          GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
       Policies:
         - Statement:
             - Effect: Allow
@@ -1627,8 +1589,8 @@ Resources:
           - HasGoogleOAuthSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref GoogleOAuthSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GoogleOAuthSecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -1658,7 +1620,7 @@ Resources:
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
           RESEND_API_KEY: !Ref ResendApiKey
-          RESEND_API_KEY_SECRET_ARN: !Ref ResendApiKeySecretArn
+          RESEND_API_KEY_PARAMETER: !Ref ResendApiKeySecretArn
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
       Policies:
@@ -1709,8 +1671,8 @@ Resources:
           - HasResendSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref ResendApiKeySecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ResendApiKeySecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -1992,7 +1954,7 @@ Resources:
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
           RATE_LIMIT_TABLE: !Ref RateLimitTable
-          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
           WORKER_FUNCTION_NAME: !Ref WorkerZipFunction
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
@@ -2007,8 +1969,8 @@ Resources:
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
             - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref RateLimitHashSecret
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
@@ -2190,7 +2152,7 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           IMAGES_BUCKET: !Ref ImagesBucket
           RATE_LIMIT_TABLE: !Ref RateLimitTable
-          RATE_LIMIT_HASH_SECRET_ARN: !Ref RateLimitHashSecret
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
       Policies:
@@ -2206,8 +2168,8 @@ Resources:
               Action: dynamodb:UpdateItem
               Resource: !GetAtt RateLimitTable.Arn
             - Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref RateLimitHashSecret
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
             - Effect: Allow
               Action: s3:GetObject
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
@@ -2399,7 +2361,6 @@ Resources:
             - Effect: Allow
               Action:
                 - ce:GetCostAndUsage
-                - ce:GetCostForecast
               Resource: '*'
             - Effect: Allow
               Action:
@@ -2427,7 +2388,7 @@ Resources:
         Variables:
           DRIVE_USAGE_CACHE_TABLE: !Ref DriveUsageCacheTable
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
-          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+          GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -2441,8 +2402,8 @@ Resources:
           - HasGoogleOAuthSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref GoogleOAuthSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GoogleOAuthSecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -2471,7 +2432,7 @@ Resources:
         Variables:
           DRIVE_USAGE_CACHE_TABLE: !Ref DriveUsageCacheTable
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
-          GOOGLE_OAUTH_SECRET_ARN: !Ref GoogleOAuthSecretArn
+          GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
       Policies:
         - Statement:
             - Effect: Allow
@@ -2484,8 +2445,8 @@ Resources:
           - HasGoogleOAuthSecret
           - Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref GoogleOAuthSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GoogleOAuthSecretArn}'
           - !Ref AWS::NoValue
         - !If
           - HasApplicationSecretsKmsKey
@@ -2983,8 +2944,11 @@ Outputs:
     Description: Regional ACM certificate ARN used by guarded CloudFront preflight checks.
     Value: !Ref ApiFrontDoorCertificate
   FrontDoorOriginSecretArn:
-    Description: Secrets Manager identifier only; this output never contains the verification value.
-    Value: !Ref FrontDoorOriginSecret
+    Description: Compatibility output containing the SSM parameter name only; it never contains the verification value.
+    Value: !Sub '/ian-website/${Stage}/front-door-config'
+  FrontDoorConfigParameterName:
+    Description: Encrypted SSM parameter containing the current/previous origin-verification contract.
+    Value: !Sub '/ian-website/${Stage}/front-door-config'
   FrontDoorEnforcementEnabled:
     Description: Current staged origin-verification enforcement state.
     Value: !Ref FrontDoorEnforcementEnabled
