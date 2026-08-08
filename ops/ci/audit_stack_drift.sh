@@ -176,9 +176,9 @@ python3 ops/ci/home_security_posture.py \
 }
 jq -e '
   .detectorCount == 1
-  and (.providerTransitionCount | type == "number" and . >= 0 and . <= 2)
+  and .providerTransitionCount == 0
   and .securityHubCount == 1
-  and .standardCount == 2
+  and .standardCount == 0
   and .status == "IN_SYNC"
 ' "$home_security_path" >/dev/null || {
   echo 'Home security posture audit returned an invalid report.' >&2

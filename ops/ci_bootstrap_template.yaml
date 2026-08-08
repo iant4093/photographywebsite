@@ -697,11 +697,15 @@ Resources:
               - iam:UntagRole
               - iam:UpdateAssumeRolePolicy
               - iam:UpdateRoleDescription
-            Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-security--SecuritySignalProcessorRo-*'
           - Sid: PassStackRolesOnlyToRuntimeServices
             Effect: Allow
             Action: iam:PassRole
-            Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-security--SecuritySignalProcessorRo-*'
             Condition:
               StringEquals:
                 iam:PassedToService:
@@ -740,7 +744,9 @@ Resources:
               - lambda:UntagResource
               - lambda:UpdateFunctionCode
               - lambda:UpdateFunctionConfiguration
-            Resource: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-*'
+              - !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:ian-photography-security-signal-processor-prod'
           - Sid: CreateStackEventSourceMappings
             Effect: Allow
             Action: lambda:CreateEventSourceMapping
@@ -1098,6 +1104,22 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/apigateway/ian-photography-*'
               - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/ian-photography/application/*'
               - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:${ApplicationStackName}-*'
+          - Sid: ReadExactNotificationStackDriftResources
+            Effect: Allow
+            Action:
+              - cloudwatch:ListTagsForResource
+              - events:DescribeRule
+              - events:ListTagsForResource
+              - events:ListTargetsByRule
+              - logs:DescribeMetricFilters
+              - logs:ListTagsForResource
+              - logs:ListTagsLogGroup
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-*'
+              - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/ian-photography-*'
+              - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'
+              - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/lambda/ian-photography-security-signal-processor-prod'
+              - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/lambda/ian-photography-security-signal-processor-prod:*'
           - Sid: ManageApiGatewayAccessLogDeliveries
             Effect: Allow
             Action:

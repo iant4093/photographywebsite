@@ -367,7 +367,7 @@ fi
                 """#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1" == "ops/ci/home_security_posture.py" ]]; then
-  printf '%s\\n' '{"detectorCount":1,"providerTransitionCount":0,"securityHubCount":1,"standardCount":2,"status":"IN_SYNC"}'
+  printf '%s\\n' '{"detectorCount":1,"providerTransitionCount":0,"securityHubCount":1,"standardCount":0,"status":"IN_SYNC"}'
 else
   exec "$REAL_PYTHON" "$@"
 fi
@@ -513,6 +513,8 @@ fi
         for scope in (
             "role/${ApplicationStackName}-*",
             "function:${ApplicationStackName}-*",
+            "role/ian-photography-security--SecuritySignalProcessorRo-*",
+            "function:ian-photography-security-signal-processor-prod",
             "s3:::goldenhour-*",
             "table/GoldenHour-*",
             "ian-photography-*",
@@ -531,6 +533,30 @@ fi
         self.assertIn("iam:PassedToService", execution)
         self.assertIn("lambda.amazonaws.com", execution)
         self.assertIn("mediaconvert.amazonaws.com", execution)
+        notification_drift = statement_block(
+            execution, "ReadExactNotificationStackDriftResources"
+        )
+        for action in (
+            "cloudwatch:ListTagsForResource",
+            "events:DescribeRule",
+            "events:ListTagsForResource",
+            "events:ListTargetsByRule",
+            "logs:DescribeMetricFilters",
+            "logs:ListTagsForResource",
+            "logs:ListTagsLogGroup",
+        ):
+            self.assertIn(action, notification_drift)
+        self.assertIn("alarm:ian-photography-*", notification_drift)
+        self.assertIn("rule/ian-photography-*", notification_drift)
+        self.assertIn("log-group:/aws/security/ian-photography-prod:*", notification_drift)
+        self.assertIn(
+            "log-group:/aws/lambda/ian-photography-security-signal-processor-prod'",
+            notification_drift,
+        )
+        self.assertIn(
+            "log-group:/aws/lambda/ian-photography-security-signal-processor-prod:*",
+            notification_drift,
+        )
 
         service_grants = statement_block(
             execution, "CreateAwsServiceGrantsForTaggedApplicationKeys"

@@ -44,26 +44,7 @@ def hub():
 
 
 def standards():
-    return {
-        "StandardsSubscriptions": [
-            {
-                "StandardsArn": (
-                    f"arn:aws:securityhub:{REGION}::standards/"
-                    "aws-foundational-security-best-practices/v/1.0.0"
-                ),
-                "StandardsControlsUpdatable": "READY_FOR_UPDATES",
-                "StandardsStatus": "READY",
-            },
-            {
-                "StandardsArn": (
-                    "arn:aws:securityhub:::ruleset/"
-                    "cis-aws-foundations-benchmark/v/1.2.0"
-                ),
-                "StandardsControlsUpdatable": "READY_FOR_UPDATES",
-                "StandardsStatus": "READY",
-            },
-        ]
-    }
+    return {"StandardsSubscriptions": []}
 
 
 def valid_responses():
@@ -108,7 +89,7 @@ class HomeSecurityPostureTests(unittest.TestCase):
                 "detectorCount": 1,
                 "providerTransitionCount": 0,
                 "securityHubCount": 1,
-                "standardCount": 2,
+                "standardCount": 0,
                 "status": "IN_SYNC",
             },
         )
@@ -175,24 +156,6 @@ class HomeSecurityPostureTests(unittest.TestCase):
         tags = valid_responses()
         tags[("securityhub", "list-tags-for-resource")]["Tags"].pop("Stage")
         mutations.append(tags)
-        incomplete = valid_responses()
-        incomplete[("securityhub", "get-enabled-standards")]["StandardsSubscriptions"][0][
-            "StandardsStatus"
-        ] = "INCOMPLETE"
-        mutations.append(incomplete)
-        nonupdatable = valid_responses()
-        nonupdatable[("securityhub", "get-enabled-standards")]["StandardsSubscriptions"][0][
-            "StandardsControlsUpdatable"
-        ] = "NOT_READY_FOR_UPDATES"
-        mutations.append(nonupdatable)
-        reason = valid_responses()
-        reason[("securityhub", "get-enabled-standards")]["StandardsSubscriptions"][0][
-            "StandardsStatusReason"
-        ] = {"StatusReasonCode": "INTERNAL_ERROR"}
-        mutations.append(reason)
-        missing = valid_responses()
-        missing[("securityhub", "get-enabled-standards")]["StandardsSubscriptions"].pop()
-        mutations.append(missing)
         extra = valid_responses()
         extra[("securityhub", "get-enabled-standards")]["StandardsSubscriptions"].append(
             {
@@ -204,15 +167,6 @@ class HomeSecurityPostureTests(unittest.TestCase):
             }
         )
         mutations.append(extra)
-        duplicate = valid_responses()
-        duplicate[("securityhub", "get-enabled-standards")]["StandardsSubscriptions"].append(
-            copy.deepcopy(
-                duplicate[("securityhub", "get-enabled-standards")][
-                    "StandardsSubscriptions"
-                ][0]
-            )
-        )
-        mutations.append(duplicate)
         for index, responses in enumerate(mutations):
             with self.subTest(index=index), self.assertRaises(posture.PostureError):
                 self.audit(responses)
@@ -298,12 +252,18 @@ class HomeSecurityPostureTests(unittest.TestCase):
         malformed_standard = valid_responses()
         malformed_standard[("securityhub", "get-enabled-standards")][
             "StandardsSubscriptions"
-        ][0] = None
+        ] = [None]
         mutations.append(malformed_standard)
         out_of_scope_standard = valid_responses()
         out_of_scope_standard[("securityhub", "get-enabled-standards")][
             "StandardsSubscriptions"
-        ][0]["StandardsArn"] = "arn:aws:securityhub:invalid"
+        ] = [
+            {
+                "StandardsArn": "arn:aws:securityhub:invalid",
+                "StandardsControlsUpdatable": "READY_FOR_UPDATES",
+                "StandardsStatus": "READY",
+            }
+        ]
         mutations.append(out_of_scope_standard)
         for index, responses in enumerate(mutations):
             with self.subTest(index=index), self.assertRaises(posture.PostureError):
@@ -314,7 +274,7 @@ class HomeSecurityPostureTests(unittest.TestCase):
             "detectorCount": 1,
             "providerTransitionCount": 0,
             "securityHubCount": 1,
-            "standardCount": 2,
+            "standardCount": 0,
             "status": "IN_SYNC",
         }
         stdout = io.StringIO()
@@ -324,16 +284,20 @@ class HomeSecurityPostureTests(unittest.TestCase):
             self.assertEqual(posture.main(), 0)
         self.assertEqual(json.loads(stdout.getvalue()), expected)
 
-    def test_provider_control_expansion_is_reported_only_when_still_updatable(self):
+    def test_any_reenabled_standard_fails_closed(self):
         responses = valid_responses()
-        subscriptions = responses[("securityhub", "get-enabled-standards")][
-            "StandardsSubscriptions"
+        responses[("securityhub", "get-enabled-standards")]["StandardsSubscriptions"] = [
+            {
+                "StandardsArn": (
+                    f"arn:aws:securityhub:{REGION}::standards/"
+                    "aws-foundational-security-best-practices/v/1.0.0"
+                ),
+                "StandardsControlsUpdatable": "READY_FOR_UPDATES",
+                "StandardsStatus": "READY",
+            }
         ]
-        for subscription in subscriptions:
-            subscription["StandardsStatus"] = "PENDING"
-        report, _caller = self.audit(responses)
-        self.assertEqual(report["providerTransitionCount"], 2)
-        self.assertEqual(report["status"], "IN_SYNC")
+        with self.assertRaises(posture.PostureError):
+            self.audit(responses)
 
 
 if __name__ == "__main__":

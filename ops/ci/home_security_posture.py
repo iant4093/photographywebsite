@@ -39,12 +39,7 @@ EXPECTED_GUARDDUTY_FEATURES = {
     "AI_PROTECTION": "DISABLED",
     "EKS_RUNTIME_MONITORING": "DISABLED",
 }
-EXPECTED_SECURITY_HUB_STANDARDS = frozenset(
-    {
-        "aws-foundational-security-best-practices/v/1.0.0",
-        "cis-aws-foundations-benchmark/v/1.2.0",
-    }
-)
+EXPECTED_SECURITY_HUB_STANDARDS = frozenset()
 
 AwsCaller = Callable[[list[str], str | None, str], dict[str, Any]]
 
