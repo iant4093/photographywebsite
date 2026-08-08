@@ -7,10 +7,12 @@ const api = vi.hoisted(() => ({
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processVideo: vi.fn() }))
+const dates = vi.hoisted(() => ({ currentLocalDateInputValue: vi.fn(() => '2026-08-31') }))
 
 vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/mediaUtils', () => media)
+vi.mock('../utils/date', () => dates)
 vi.mock('../utils/concurrency', () => ({
   mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)),
 }))
@@ -51,6 +53,13 @@ describe('UploadVideo', () => {
       createObjectURL: vi.fn((file) => `blob:${file.name}`),
       revokeObjectURL: vi.fn(),
     })
+  })
+
+  it('defaults the album date from the browser local calendar date', () => {
+    const { container } = mounted()
+
+    expect(container.querySelector('input[type="date"]')).toHaveValue('2026-08-31')
+    expect(dates.currentLocalDateInputValue).toHaveBeenCalled()
   })
 
   it('loads categories and private users, adjusts thumbnail times, and creates a private video album', async () => {

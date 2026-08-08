@@ -6,6 +6,7 @@ import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { mapWithConcurrency } from '../utils/concurrency'
 import { processImage } from '../utils/mediaUtils'
+import { currentLocalDateInputValue } from '../utils/date'
 
 // Upload page — create album for main gallery or specific user
 function Upload() {
@@ -18,7 +19,7 @@ function Upload() {
     const [photoFiles, setPhotoFiles] = useState([])
     const [visibility, setVisibility] = useState('public')
     const [ownerEmail, setOwnerEmail] = useState('')
-    const [albumDate, setAlbumDate] = useState(() => new Date().toISOString().split('T')[0])
+    const [albumDate, setAlbumDate] = useState(currentLocalDateInputValue)
     const [category, setCategory] = useState('')
     const [users, setUsers] = useState([])
     const [usersLoaded, setUsersLoaded] = useState(false)
@@ -149,7 +150,7 @@ function Upload() {
             setDescription('')
             setPhotoFiles([])
             setOwnerEmail('')
-            setAlbumDate(new Date().toISOString().split('T')[0])
+            setAlbumDate(currentLocalDateInputValue())
             // Reset file input so browser clears the selection display
             if (fileInputRef.current) fileInputRef.current.value = ''
         } catch (err) {

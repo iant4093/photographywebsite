@@ -5,6 +5,7 @@ import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { processVideo } from '../utils/mediaUtils'
 import { mapWithConcurrency } from '../utils/concurrency'
+import { currentLocalDateInputValue } from '../utils/date'
 
 // Helper component for picking a thumbnail time for a video
 function VideoThumbnailScrubber({ file, time, onTimeChange }) {
@@ -74,7 +75,7 @@ export default function UploadVideo() {
     const [videoFiles, setVideoFiles] = useState([]) // [{ file, time }]
     const [visibility, setVisibility] = useState('public')
     const [ownerEmail, setOwnerEmail] = useState('')
-    const [albumDate, setAlbumDate] = useState(() => new Date().toISOString().split('T')[0])
+    const [albumDate, setAlbumDate] = useState(currentLocalDateInputValue)
     const [category, setCategory] = useState('')
     const [users, setUsers] = useState([])
     const [usersLoaded, setUsersLoaded] = useState(false)
@@ -216,6 +217,7 @@ export default function UploadVideo() {
             setDescription('')
             setVideoFiles([])
             setOwnerEmail('')
+            setAlbumDate(currentLocalDateInputValue())
             if (fileInputRef.current) fileInputRef.current.value = ''
 
         } catch (err) {

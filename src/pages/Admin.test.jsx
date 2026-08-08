@@ -7,10 +7,12 @@ const api = vi.hoisted(() => ({
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processImage: vi.fn() }))
+const dates = vi.hoisted(() => ({ currentLocalDateInputValue: vi.fn(() => '2026-08-31') }))
 
 vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/mediaUtils', () => media)
+vi.mock('../utils/date', () => dates)
 vi.mock('../utils/concurrency', () => ({
   mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)),
 }))
@@ -53,6 +55,13 @@ describe('Admin photo upload', () => {
       key: variant === 'original' ? `stored/${key.split('/').pop()}` : `stored/thumb-${key.split('/').pop()}`,
       requiredHeaders: { 'x-test': variant },
     }))
+  })
+
+  it('defaults the album date from the browser local calendar date', () => {
+    mounted()
+
+    expect(screen.getByLabelText('Album Date')).toHaveValue('2026-08-31')
+    expect(dates.currentLocalDateInputValue).toHaveBeenCalled()
   })
 
   it('loads users/categories and creates a private album with processed image metadata', async () => {
