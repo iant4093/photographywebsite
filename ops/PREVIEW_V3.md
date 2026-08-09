@@ -1,6 +1,6 @@
-# Responsive preview V2 guarded rollout
+# Responsive preview V3 guarded rollout
 
-This runbook is the production procedure for the 480w/640w/1280w WebP preview
+This runbook is the production procedure for the 640w/960w/1440w/1920w WebP preview
 worker and historical backfill. It is intentionally fail closed. The current
 800-pixel JPEG thumbnail remains the fallback and is never overwritten or
 deleted by this workflow.
@@ -12,9 +12,9 @@ digests only.
 
 ## Safety contract
 
-- `ops/backfill_preview_v2.py` is dry-run by default. Only `--apply` can send
+- `ops/backfill_preview_v3.py` is dry-run by default. Only `--apply` can send
   queue messages. It cannot update DynamoDB, write media, or delete anything.
-- `ops/reconcile_preview_v2.py` has no apply mode and uses only read/list/HEAD,
+- `ops/reconcile_preview_v3.py` has no apply mode and uses only read/list/HEAD,
   a 64-byte S3 ranged read, object-tag reads, and CloudFront HEAD requests.
 - The representative canary contains five distinct items: public, private,
   unlisted/share-gated (`protected`), portrait, and a source of at least 25 MiB
@@ -56,7 +56,7 @@ Before dispatching anything:
 Run the default aggregate dry run:
 
 ```bash
-python3 ops/backfill_preview_v2.py \
+python3 ops/backfill_preview_v3.py \
   --stack-name STACK_NAME \
   --region us-west-2
 ```
@@ -78,7 +78,7 @@ The following command HEAD-validates the complete eligible source inventory,
 then selects five distinct cases without printing their identifiers:
 
 ```bash
-python3 ops/backfill_preview_v2.py \
+python3 ops/backfill_preview_v3.py \
   --stack-name STACK_NAME \
   --region us-west-2 \
   --representative-canary \
@@ -103,7 +103,7 @@ reconciliation.
 Rerun the same selection with every independent guard copied from that dry run:
 
 ```bash
-python3 ops/backfill_preview_v2.py \
+python3 ops/backfill_preview_v3.py \
   --stack-name STACK_NAME \
   --region us-west-2 \
   --representative-canary \
@@ -116,7 +116,7 @@ python3 ops/backfill_preview_v2.py \
   --expected-full-plan-digest FULL_PLAN_DIGEST \
   --expected-canary-digest CANARY_SELECTION_DIGEST \
   --confirm-stack-name STACK_NAME \
-  --confirm backfill-preview-v2 \
+  --confirm backfill-preview-v3 \
   --apply
 ```
 
@@ -135,14 +135,14 @@ those fields as a diagnostic shortcut.
 ## 5. Verify the canary before expanding
 
 After the queue and in-flight count return to zero, require exactly five new
-ready metadata records, fifteen successful object writes, no pending records, no
+ready metadata records, twenty successful object writes, no pending records, no
 DLQ message, and no worker/error/throttle alarm. Review these only through
 aggregate metrics or a protected operator session; do not export the selected
 identifiers. For all five selected cases verify:
 
 - exact ready/version/key metadata and absence of a pending job ID;
-- source SHA-256 consistency across the ready record and all three S3 objects;
-- exact 480/640/1280 dimensions in metadata and actual WebP headers;
+- source SHA-256 consistency across the ready record and all four S3 objects;
+- exact 640/960/1440/1920 dimensions in metadata and actual WebP headers;
 - valid object checksum/ETag evidence, size bounds, content type, immutable
   cache policy, generator/version/width metadata, and bucket-default encryption;
 - exact public/private/unlisted visibility tags;
@@ -169,7 +169,7 @@ and plan digest, then apply the complete pending plan without `--max-jobs` or
 `--representative-canary`:
 
 ```bash
-python3 ops/backfill_preview_v2.py \
+python3 ops/backfill_preview_v3.py \
   --stack-name STACK_NAME \
   --region us-west-2 \
   --expected-account-id AWS_ACCOUNT_ID \
@@ -178,7 +178,7 @@ python3 ops/backfill_preview_v2.py \
   --expected-job-count REMAINING_PLANNED_JOB_COUNT \
   --expected-plan-digest REMAINING_PLAN_DIGEST \
   --confirm-stack-name STACK_NAME \
-  --confirm backfill-preview-v2 \
+  --confirm backfill-preview-v3 \
   --apply
 ```
 
@@ -192,7 +192,7 @@ After all queue and in-flight counts are zero, run full reconciliation using
 the original stable inventory guards:
 
 ```bash
-python3 ops/reconcile_preview_v2.py \
+python3 ops/reconcile_preview_v3.py \
   --stack-name STACK_NAME \
   --region us-west-2 \
   --expected-account-id AWS_ACCOUNT_ID \

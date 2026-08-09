@@ -253,7 +253,7 @@ def handler(event, context):
                 enqueue_preview_jobs(album_id, images)
             except Exception as error:
                 # V1 JPEG thumbnails remain authoritative until asynchronous
-                # V2 generation succeeds, so queue outages cannot break upload.
+                # Responsive preview generation succeeds, so queue outages cannot break upload.
                 logger.error("preview_dispatch_failed error_type=%s", type(error).__name__)
 
         if visibility == "private" and owner_email:

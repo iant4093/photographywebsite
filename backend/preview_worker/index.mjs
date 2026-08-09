@@ -20,11 +20,13 @@ import {
     PREVIEW_QUALITY,
     PREVIEW_VERSION,
     PREVIEW_WIDTHS,
+    PREVIOUS_PREVIEW_VERSION,
     SUPPORTED_SOURCE_TYPES,
     isCompletePreview,
     mediaIdForKey,
     parseJob,
     parsePositiveLimit,
+    previousPreviewKeysFor,
     previewJobId,
     resolveManifestImage,
 } from './contract.mjs'
@@ -404,7 +406,7 @@ async function ensurePreviewObject(key, output, sourceDigest) {
                 'preview-version': String(PREVIEW_VERSION),
                 'preview-width': String(output.width),
                 'source-sha256': sourceDigest,
-                generator: 'responsive-preview-v2',
+                generator: 'responsive-preview-v3',
             },
         }))
     } catch (error) {
@@ -499,8 +501,8 @@ async function upgradePreviousReadyMetadataPending(resolved, mediaId, jobId, pre
     await documentClient.send(new UpdateCommand({
         TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
         Key: { albumId: resolved.job.albumId, mediaId },
-        UpdateExpression: 'SET #status = :pending, #jobId = :jobId, #previewKeys = :newKeys, updatedAt = :updatedAt REMOVE sourceSha256, dimensions, completedAt',
-        ConditionExpression: '#status = :ready AND #previewVersion = :version AND #previewKeys = :previousKeys',
+        UpdateExpression: 'SET #status = :pending, #jobId = :jobId, #previewVersion = :version, #previewKeys = :newKeys, updatedAt = :updatedAt REMOVE sourceSha256, dimensions, completedAt',
+        ConditionExpression: '#status = :ready AND #previewVersion = :previousVersion AND #previewKeys = :previousKeys',
         ExpressionAttributeNames: {
             '#status': 'status',
             '#jobId': 'jobId',
@@ -513,6 +515,7 @@ async function upgradePreviousReadyMetadataPending(resolved, mediaId, jobId, pre
             ':jobId': jobId,
             ':updatedAt': new Date().toISOString(),
             ':version': PREVIEW_VERSION,
+            ':previousVersion': PREVIOUS_PREVIEW_VERSION,
             ':newKeys': resolved.previewKeys,
             ':previousKeys': previousKeys,
         },
@@ -574,7 +577,8 @@ async function processJob(jobValue) {
     let upgradedPreviousContract = false
     if (existingMetadata?.status === 'ready') {
         if (!isCompletePreview(existingMetadata, resolved.previewKeys)) {
-            if (!isPreviousPreviewContract(existingMetadata, resolved.previewKeys)) {
+            const previousKeys = previousPreviewKeysFor(job.albumId, job.rawKey)
+            if (!isPreviousPreviewContract(existingMetadata, previousKeys)) {
                 throw previewStageFailure('existing_preview_invalid')
             }
             await atPreviewStage(
@@ -583,7 +587,7 @@ async function processJob(jobValue) {
                     resolved,
                     mediaId,
                     jobId,
-                    existingMetadata.previewKeys,
+                    previousKeys,
                 ),
             )
             upgradedPreviousContract = true

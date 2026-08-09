@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan or dispatch the guarded responsive-preview V2 backfill.
+"""Plan or dispatch the guarded responsive-preview V3 backfill.
 
 Dry-run is the default. The script prints aggregate counts and a deterministic
 plan digest, never album IDs or object keys. Apply sends the exact in-memory
@@ -22,9 +22,10 @@ import uuid
 from aws_stack import aws_json, stack_resource
 
 
-PREVIEW_VERSION = 2
-PREVIEW_WIDTHS = (480, 640, 1280)
-PREVIOUS_PREVIEW_WIDTHS = (640, 1280)
+PREVIEW_VERSION = 3
+PREVIEW_WIDTHS = (640, 960, 1440, 1920)
+PREVIOUS_PREVIEW_VERSION = 2
+PREVIOUS_PREVIEW_WIDTHS = (480, 640, 1280)
 ALLOWED_VISIBILITIES = {"public", "private", "unlisted"}
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -95,8 +96,9 @@ def expected_preview_keys(album_id: str, raw_key: str) -> dict[str, str]:
 
 
 def previous_preview_keys(album_id: str, raw_key: str) -> dict[str, str]:
-    expected = expected_preview_keys(album_id, raw_key)
-    return {str(width): expected[str(width)] for width in PREVIOUS_PREVIEW_WIDTHS}
+    media_id = media_id_for_key(raw_key)
+    prefix = f"albums/{album_id}/preview/v{PREVIOUS_PREVIEW_VERSION}/"
+    return {str(width): f"{prefix}{media_id}-w{width}.webp" for width in PREVIOUS_PREVIEW_WIDTHS}
 
 
 def scan_all(
@@ -227,7 +229,7 @@ def build_backfill_plan(
                     and existing.get("status") in {"ready", "pending"}
                 )
                 previous_ready_contract = (
-                    existing.get("previewVersion") == PREVIEW_VERSION
+                    existing.get("previewVersion") == PREVIOUS_PREVIEW_VERSION
                     and existing.get("previewKeys") == previous_preview_keys(album_id, raw_key)
                     and existing.get("status") == "ready"
                 )
@@ -413,7 +415,7 @@ def representative_canary_digest(
     large_source_bytes: int,
 ) -> str:
     payload = {
-        "algorithm": "representative-preview-v2-canary-v1",
+        "algorithm": "representative-preview-v3-canary-v1",
         "assignments": assignments,
         "fullPlanDigest": full_plan_digest,
         "largeSourceBytes": large_source_bytes,
@@ -435,7 +437,7 @@ def validate_apply_guards(args: argparse.Namespace, account: str, counts: dict[s
         (args.expected_job_count == counts["plannedJobCount"], "--expected-job-count does not match"),
         (args.expected_plan_digest == digest, "--expected-plan-digest does not match"),
         (args.confirm_stack_name == args.stack_name, "--confirm-stack-name must exactly match"),
-        (args.confirm == "backfill-preview-v2", "--confirm must be exactly backfill-preview-v2"),
+        (args.confirm == "backfill-preview-v3", "--confirm must be exactly backfill-preview-v3"),
         (counts["conflictingMetadataCount"] == 0, "conflicting preview metadata exists"),
         (counts.get("sourceValidationFailureCount", 0) == 0, "source HEAD validation failed"),
     ]

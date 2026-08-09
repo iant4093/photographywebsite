@@ -1,4 +1,4 @@
-"""Focused source-level checks for the responsive-preview V2 stack."""
+"""Focused source-level checks for the responsive-preview V3 stack."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ class PreviewWorkerTests(unittest.TestCase):
         worker = resource_block("PreviewWorkerFunction")
         self.assertIn("s3:GetObjectVersion", worker)
         self.assertIn("s3:PutObjectTagging", worker)
-        self.assertIn("/albums/*/preview/v2/*", worker)
+        self.assertIn("/albums/*/preview/v3/*", worker)
         album_permissions = worker.split("Resource: !Sub '${ImagesBucket.Arn}/albums/*'", 1)[0]
         self.assertNotIn("s3:DeleteObject", album_permissions)
         self.assertIn("${ImagesBucket.Arn}/site/hero/versions/v1/*", worker)
@@ -161,14 +161,16 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
         policy = resource_block("ImagesBucketPolicy")
         cache = resource_block("PreviewMediaCachePolicy")
         distribution = resource_block("ImagesCloudFront")
-        self.assertIn("DenyCloudFrontNonPublicPreviewV2", policy)
+        self.assertIn("DenyCloudFrontNonPublicResponsivePreviews", policy)
         self.assertIn("s3:ExistingObjectTag/visibility: public", policy)
         self.assertIn("/albums/*/preview/v2/*", policy)
+        self.assertIn("/albums/*/preview/v3/*", policy)
         for expected in ("DefaultTTL: 0", "MaxTTL: 0", "MinTTL: 0"):
             self.assertIn(expected, cache)
         self.assertIn("EnableAcceptEncodingBrotli: false", cache)
         self.assertIn("EnableAcceptEncodingGzip: false", cache)
         self.assertIn("PathPattern: 'albums/*/preview/v2/*'", distribution)
+        self.assertIn("PathPattern: 'albums/*/preview/v3/*'", distribution)
         self.assertIn("CachePolicyId: !Ref PreviewMediaCachePolicy", distribution)
 
     def test_media_origin_access_logs_use_scoped_existing_audit_bucket_policy(self) -> None:
@@ -213,7 +215,7 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
         self.assertIn("dry-run by default", RUNBOOK)
         self.assertIn("SendMessageBatch", RUNBOOK)
         self.assertIn("--expected-plan-digest", RUNBOOK)
-        self.assertIn("--confirm backfill-preview-v2", RUNBOOK)
+        self.assertIn("--confirm backfill-preview-v3", RUNBOOK)
 
 
 if __name__ == "__main__":

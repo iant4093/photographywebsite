@@ -35,7 +35,7 @@ class PreviewJobTests(unittest.TestCase):
             self.assertEqual(preview_jobs.enqueue_preview_jobs(ALBUM_ID, images), 11)
         self.assertEqual(client.send_message_batch.call_count, 2)
         body = json.loads(client.send_message_batch.call_args_list[0].kwargs["Entries"][0]["MessageBody"])
-        self.assertEqual(body["previewVersion"], 2)
+        self.assertEqual(body["previewVersion"], 3)
         self.assertNotIn("visibility", body)
         self.assertNotIn("ownerEmail", body)
 
@@ -95,7 +95,7 @@ class PreviewLifecycleTests(unittest.TestCase):
             "albumId": ALBUM_ID,
             "mediaId": media_id,
             "status": "ready",
-            "previewVersion": 2,
+            "previewVersion": 3,
             "previewKeys": preview_keys,
         }
         event = {"pathParameters": {"albumId": ALBUM_ID}, "body": json.dumps({"keys": [raw_key]})}

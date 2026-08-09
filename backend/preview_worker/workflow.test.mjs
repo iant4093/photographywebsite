@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { previewKeysFor } from './contract.mjs'
+import { previousPreviewKeysFor, previewKeysFor } from './contract.mjs'
 import {
     isPreviousPreviewContract,
     readyPreviewDescriptor,
@@ -13,13 +13,14 @@ const rawKey = `albums/${albumId}/original/photo.jpg`
 const keys = previewKeysFor(albumId, rawKey)
 const metadata = {
     status: 'ready',
-    previewVersion: 2,
+    previewVersion: 3,
     previewKeys: keys,
     sourceSha256: 'a'.repeat(64),
     dimensions: {
-        480: { width: 480, height: 320 },
         640: { width: 640, height: 427 },
-        1280: { width: 1280, height: 853 },
+        960: { width: 960, height: 640 },
+        1440: { width: 1440, height: 960 },
+        1920: { width: 1920, height: 1280 },
     },
 }
 
@@ -35,7 +36,7 @@ test('accepts a ready row only after every object validates and is retagged', as
         markPending: async () => assert.fail('must not mark valid metadata pending'),
     })
     assert.equal(accepted, true)
-    assert.deepEqual(validated, [keys['480'], keys['640'], keys['1280']])
+    assert.deepEqual(validated, [keys['640'], keys['960'], keys['1440'], keys['1920']])
     assert.deepEqual(tagged, validated)
 })
 
@@ -73,7 +74,7 @@ test('rejects every incomplete ready-metadata contract boundary', () => {
         { ...metadata, status: 'pending' },
         { ...metadata, previewVersion: 1 },
         { ...metadata, previewKeys: null },
-        { ...metadata, previewKeys: { ...keys, 1280: 'wrong' } },
+        { ...metadata, previewKeys: { ...keys, 1920: 'wrong' } },
         { ...metadata, sourceSha256: null },
         { ...metadata, sourceSha256: 'g'.repeat(64) },
         { ...metadata, dimensions: null },
@@ -87,31 +88,34 @@ test('rejects every incomplete ready-metadata contract boundary', () => {
     assert.deepEqual(readyPreviewDescriptor(metadata, keys), {
         sourceDigest: 'a'.repeat(64),
         outputs: {
-            480: { width: 480, height: 320 },
             640: { width: 640, height: 427 },
-            1280: { width: 1280, height: 853 },
+            960: { width: 960, height: 640 },
+            1440: { width: 1440, height: 960 },
+            1920: { width: 1920, height: 1280 },
         },
     })
 })
 
 test('recognizes only the exact previous ready contract for additive upgrades', () => {
-    const previousKeys = { 640: keys['640'], 1280: keys['1280'] }
+    const previousKeys = previousPreviewKeysFor(albumId, rawKey)
     assert.equal(isPreviousPreviewContract({
         ...metadata,
+        previewVersion: 2,
         previewKeys: previousKeys,
         dimensions: {
-            640: metadata.dimensions['640'],
-            1280: metadata.dimensions['1280'],
+            480: { width: 480, height: 320 },
+            640: { width: 640, height: 427 },
+            1280: { width: 1280, height: 853 },
         },
-    }, keys), true)
+    }, previousKeys), true)
     for (const value of [
         null,
-        { ...metadata, previewKeys: previousKeys, status: 'pending' },
-        { ...metadata, previewKeys: previousKeys, previewVersion: 1 },
-        { ...metadata, previewKeys: { ...previousKeys, 480: keys['480'] } },
-        { ...metadata, previewKeys: { ...previousKeys, 640: 'wrong' } },
+        { ...metadata, previewVersion: 2, previewKeys: previousKeys, status: 'pending' },
+        { ...metadata, previewKeys: previousKeys, previewVersion: 3 },
+        { ...metadata, previewVersion: 2, previewKeys: { ...previousKeys, 960: keys['960'] } },
+        { ...metadata, previewVersion: 2, previewKeys: { ...previousKeys, 640: 'wrong' } },
     ]) {
-        assert.equal(isPreviousPreviewContract(value, keys), false)
+        assert.equal(isPreviousPreviewContract(value, previousKeys), false)
     }
 })
 

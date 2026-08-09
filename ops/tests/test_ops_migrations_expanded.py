@@ -15,7 +15,7 @@ if str(OPS) not in sys.path:
 
 import backfill_album_owner_sub as owner_backfill
 import backfill_legacy_media_prefix as legacy_backfill
-import backfill_preview_v2 as preview_backfill
+import backfill_preview_v3 as preview_backfill
 import tag_existing_media
 
 
@@ -468,7 +468,7 @@ class PreviewBackfillHelperTests(unittest.TestCase):
 
     def test_source_head_validation_and_dispatch_fail_closed(self):
         keys = ("valid.jpg", "large.jpg", "wrong.jpg", "bad-length.jpg", "error.jpg")
-        jobs = [{"albumId": ALBUM_ID, "rawKey": key, "previewVersion": 2} for key in keys]
+        jobs = [{"albumId": ALBUM_ID, "rawKey": key, "previewVersion": preview_backfill.PREVIEW_VERSION} for key in keys]
 
         def head(arguments, profile, region):
             key = arguments[-1]

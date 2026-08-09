@@ -88,14 +88,14 @@ class MediaAccessTests(unittest.TestCase):
             "albumId": ALBUM_ID,
             "mediaId": media_id,
             "status": "ready",
-            "previewVersion": 2,
+            "previewVersion": 3,
             "previewKeys": keys,
         }
         with patch.object(media_access, "load_preview_metadata", return_value={media_id: metadata}):
             result = media_access.serialize_images(album, include_internal=True)[0]
-        self.assertEqual([item["width"] for item in result["previewSrcSet"]], [480, 640, 1280])
+        self.assertEqual([item["width"] for item in result["previewSrcSet"]], [640, 960, 1440, 1920])
         self.assertTrue(all(item["url"].startswith("https://media.example.test/") for item in result["previewSrcSet"]))
-        self.assertEqual(result["previewVersion"], 2)
+        self.assertEqual(result["previewVersion"], 3)
         self.assertEqual(result["previewKeys"], keys)
 
     def test_partial_or_non_deterministic_preview_metadata_is_ignored(self):
@@ -105,8 +105,8 @@ class MediaAccessTests(unittest.TestCase):
             "albumId": ALBUM_ID,
             "mediaId": media_id,
             "status": "ready",
-            "previewVersion": 2,
-            "previewKeys": {"640": f"albums/{ALBUM_ID}/preview/v2/wrong-w640.webp"},
+            "previewVersion": 3,
+            "previewKeys": {"640": f"albums/{ALBUM_ID}/preview/v3/wrong-w640.webp"},
         }
         with patch.object(media_access, "load_preview_metadata", return_value={media_id: malformed}):
             result = media_access.serialize_images(album)[0]
@@ -121,7 +121,7 @@ class MediaAccessTests(unittest.TestCase):
             "albumId": ALBUM_ID,
             "mediaId": media_id,
             "status": "pending",
-            "previewVersion": 2,
+            "previewVersion": 3,
             "previewKeys": keys,
         }
         with patch.object(media_access, "load_preview_metadata", return_value={media_id: metadata}):

@@ -57,10 +57,10 @@ domain. Account IDs and current ETags are deliberately runtime guard values and
 are never committed. `us-west-2` is the application-region default; the DNSSEC
 KMS stack must be deployed in `us-east-1`.
 
-## Responsive preview V2 rollout
+## Responsive preview V3 rollout
 
 The exact canary, dispatch, reconciliation, monitoring, and rollback sequence is
-documented in [`PREVIEW_V2.md`](PREVIEW_V2.md). Preserve its stable eligible
+documented in [`PREVIEW_V3.md`](PREVIEW_V3.md). Preserve its stable eligible
 inventory digest across canary and full reconciliation; do not use a sorted
 `--max-jobs` slice as the production canary.
 
@@ -91,18 +91,18 @@ sam build --template-file backend/template.yaml
 ```
 
 Preview metadata is additive derivative state. New photo album creates/appends
-enqueue V2 work only after the existing JPEG fallback is committed and tagged.
-An absent, delayed, or failed V2 never removes or modifies the raw image or
+enqueue V3 work only after the existing JPEG fallback is committed and tagged.
+An absent, delayed, or failed V3 never removes or modifies the raw image or
 current 800px JPEG.
 
 Historical-media backfill is dry-run by default and may only dispatch the exact
 digest-bound plan reviewed by an operator. The complete canary, apply,
 reconciliation, monitoring, partial-batch, and rollback procedure lives only in
-[`PREVIEW_V2.md`](PREVIEW_V2.md); do not duplicate or abbreviate its guards in a
+[`PREVIEW_V3.md`](PREVIEW_V3.md); do not duplicate or abbreviate its guards in a
 change ticket. The online path remains additive, and the existing JPEG is the
-fallback whenever a complete ready V2 record is unavailable. Dispatch uses
+fallback whenever a complete ready V3 record is unavailable. Dispatch uses
 bounded `SendMessageBatch` calls and requires the reviewed
-`--expected-plan-digest` plus `--confirm backfill-preview-v2` guards.
+`--expected-plan-digest` plus `--confirm backfill-preview-v3` guards.
 
 ## Production change boundary
 

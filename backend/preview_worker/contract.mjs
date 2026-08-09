@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 
-export const PREVIEW_VERSION = 2
-export const PREVIEW_WIDTHS = Object.freeze([480, 640, 1280])
-export const PREVIOUS_PREVIEW_WIDTHS = Object.freeze([640, 1280])
-export const PREVIEW_QUALITY = 80
+export const PREVIEW_VERSION = 3
+export const PREVIEW_WIDTHS = Object.freeze([640, 960, 1440, 1920])
+export const PREVIOUS_PREVIEW_VERSION = 2
+export const PREVIOUS_PREVIEW_WIDTHS = Object.freeze([480, 640, 1280])
+export const PREVIEW_QUALITY = 84
 export const ALLOWED_VISIBILITIES = new Set(['public', 'private', 'unlisted'])
 export const SUPPORTED_SOURCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 export const PREVIEW_FAILURE_REASON_CODES = Object.freeze([
@@ -47,13 +48,21 @@ export function mediaIdForKey(rawKey) {
     return createHash('sha256').update(normalizeObjectKey(rawKey), 'utf8').digest('hex').slice(0, 24)
 }
 
-export function previewKeysFor(albumId, rawKey) {
+function previewKeysForVersion(albumId, rawKey, version, widths) {
     const normalizedAlbumId = normalizeAlbumId(albumId)
     const mediaId = mediaIdForKey(rawKey)
-    return Object.fromEntries(PREVIEW_WIDTHS.map((width) => [
+    return Object.fromEntries(widths.map((width) => [
         String(width),
-        `albums/${normalizedAlbumId}/preview/v${PREVIEW_VERSION}/${mediaId}-w${width}.webp`,
+        `albums/${normalizedAlbumId}/preview/v${version}/${mediaId}-w${width}.webp`,
     ]))
+}
+
+export function previewKeysFor(albumId, rawKey) {
+    return previewKeysForVersion(albumId, rawKey, PREVIEW_VERSION, PREVIEW_WIDTHS)
+}
+
+export function previousPreviewKeysFor(albumId, rawKey) {
+    return previewKeysForVersion(albumId, rawKey, PREVIOUS_PREVIEW_VERSION, PREVIOUS_PREVIEW_WIDTHS)
 }
 
 export function parseJob(value) {

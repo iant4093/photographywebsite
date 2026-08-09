@@ -69,6 +69,7 @@ class GetAlbumBranchTests(unittest.TestCase):
             {"Key": RAW_KEY},
             {"Key": f"albums/{ALBUM_ID}/"},
             {"Key": f"albums/{ALBUM_ID}/preview/v2/x.webp"},
+            {"Key": f"albums/{ALBUM_ID}/preview/v3/x.webp"},
             {"Key": f"albums/{ALBUM_ID}/thumbnail/thumb_x.jpg"},
             {"Key": f"albums/{ALBUM_ID}/movie_hls/part.ts"},
             {},

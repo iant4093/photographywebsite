@@ -264,6 +264,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
                     {"Key": f"albums/{ALBUM_ID}/original/"},
                     {"Key": f"albums/{ALBUM_ID}/thumbnail/thumb.jpg"},
                     {"Key": f"albums/{ALBUM_ID}/preview/v2/photo.webp"},
+                    {"Key": f"albums/{ALBUM_ID}/preview/v3/photo.webp"},
                     {"Key": f"albums/{ALBUM_ID}/original/thumb_legacy.jpg"},
                     {"Key": f"albums/{ALBUM_ID}/original/photo.jpg"},
                     {"Key": f"albums/{ALBUM_ID}/original/photo.jpg"},

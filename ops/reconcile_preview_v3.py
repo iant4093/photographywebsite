@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, aggregate-only reconciliation for responsive preview V2.
+"""Read-only, aggregate-only reconciliation for responsive preview V3.
 
 The command verifies the digest-bound eligible inventory, ready metadata,
 stored preview bytes/properties/tags, and public-versus-protected CloudFront
@@ -23,11 +23,11 @@ import urllib.parse
 import urllib.request
 
 from aws_stack import aws_json, stack_resource
-import backfill_preview_v2 as backfill
+import backfill_preview_v3 as backfill
 
 
 EXPECTED_CACHE_CONTROL = "public, max-age=31536000, immutable"
-EXPECTED_GENERATOR = "responsive-preview-v2"
+EXPECTED_GENERATOR = "responsive-preview-v3"
 CHECKSUM_FIELDS = (
     "ChecksumCRC32",
     "ChecksumCRC32C",
@@ -94,7 +94,7 @@ def read_object_prefix(
     region: str | None,
 ) -> bytes:
     """Read only the bounded bytes required for WebP dimension validation."""
-    with tempfile.TemporaryDirectory(prefix="preview-v2-reconcile-") as directory:
+    with tempfile.TemporaryDirectory(prefix="preview-v3-reconcile-") as directory:
         destination = pathlib.Path(directory) / "header.bin"
         command = ["aws"]
         if profile:
@@ -119,7 +119,7 @@ def edge_head(domain: str, key: str, timeout_seconds: float) -> tuple[int, dict[
     request = urllib.request.Request(
         f"https://{domain}/{path}",
         method="HEAD",
-        headers={"User-Agent": "preview-v2-reconcile/1"},
+        headers={"User-Agent": "preview-v3-reconcile/1"},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:

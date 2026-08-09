@@ -1,7 +1,12 @@
-import { PREVIEW_VERSION, PREVIEW_WIDTHS, PREVIOUS_PREVIEW_WIDTHS } from './contract.mjs'
+import {
+    PREVIEW_VERSION,
+    PREVIEW_WIDTHS,
+    PREVIOUS_PREVIEW_VERSION,
+    PREVIOUS_PREVIEW_WIDTHS,
+} from './contract.mjs'
 
-export function isPreviousPreviewContract(metadata, expectedKeys) {
-    if (!metadata || metadata.status !== 'ready' || Number(metadata.previewVersion) !== PREVIEW_VERSION) {
+export function isPreviousPreviewContract(metadata, previousKeys) {
+    if (!metadata || metadata.status !== 'ready' || Number(metadata.previewVersion) !== PREVIOUS_PREVIEW_VERSION) {
         return false
     }
     if (!metadata.previewKeys || typeof metadata.previewKeys !== 'object') return false
@@ -10,7 +15,7 @@ export function isPreviousPreviewContract(metadata, expectedKeys) {
     if (storedWidths.length !== previousWidths.length
         || storedWidths.some((width, index) => width !== previousWidths[index])) return false
     return PREVIOUS_PREVIEW_WIDTHS.every((width) => (
-        metadata.previewKeys[String(width)] === expectedKeys[String(width)]
+        metadata.previewKeys[String(width)] === previousKeys[String(width)]
     ))
 }
 

@@ -592,15 +592,17 @@ Resources:
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
-          # Preview V2 is always tag-enforced, independently of the guarded
-          # legacy-media rollout switch. Its zero-TTL edge policy makes every
+          # Preview V2 and V3 are always tag-enforced, independently of the guarded
+          # legacy-media rollout switch. Their zero-TTL edge policy makes every
           # uncached browser request re-evaluate this origin authorization.
-          - Sid: DenyCloudFrontNonPublicPreviewV2
+          - Sid: DenyCloudFrontNonPublicResponsivePreviews
             Effect: Deny
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub '${ImagesBucket.Arn}/albums/*/preview/v2/*'
+            Resource:
+              - !Sub '${ImagesBucket.Arn}/albums/*/preview/v2/*'
+              - !Sub '${ImagesBucket.Arn}/albums/*/preview/v3/*'
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
@@ -932,6 +934,15 @@ Resources:
             CachePolicyId: !Ref HeroMediaCachePolicy
             OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
             ResponseHeadersPolicyId: !Ref HeroMediaResponseHeadersPolicy
+            Compress: false
+          - PathPattern: 'albums/*/preview/v3/*'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: !Ref PreviewMediaCachePolicy
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+            ResponseHeadersPolicyId: !Ref PreviewMediaResponseHeadersPolicy
             Compress: false
           - PathPattern: 'albums/*/preview/v2/*'
             TargetOriginId: S3Origin
@@ -1903,7 +1914,7 @@ Resources:
                 - s3:PutObject
                 - s3:GetObjectTagging
                 - s3:PutObjectTagging
-              Resource: !Sub '${ImagesBucket.Arn}/albums/*/preview/v2/*'
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*/preview/v3/*'
             - Effect: Allow
               Action:
                 - s3:GetObject
