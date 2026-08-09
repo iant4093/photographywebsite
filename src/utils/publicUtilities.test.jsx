@@ -33,14 +33,16 @@ describe('media URL edge cases and browser download behavior', () => {
     expect(mediaPreviewCandidates({ previewSrcSet: 'nope' })).toEqual([])
     expect(mediaPreviewCandidates({ previewSrcSet: [] })).toEqual([])
     expect(mediaPreviewCandidates({ previewSrcSet: [
-      { width: 480, url: 'https://ok.test/480.webp' },
       { width: 640, url: 'https://ok.test/a.webp whitespace' },
-      { width: 1280, url: 'https://ok.test/b.webp' },
+      { width: 960, url: 'https://ok.test/960.webp' },
+      { width: 1440, url: 'https://ok.test/1440.webp' },
+      { width: 1920, url: 'https://ok.test/1920.webp' },
     ] })).toEqual([])
     expect(mediaPreviewCandidates({ previewSrcSet: [
-      { width: 480, url: 'https://ok.test/480.webp' },
       { width: 640, url: 'not-a-url' },
-      { width: 1280, url: 'https://ok.test/b.webp' },
+      { width: 960, url: 'https://ok.test/960.webp' },
+      { width: 1440, url: 'https://ok.test/1440.webp' },
+      { width: 1920, url: 'https://ok.test/1920.webp' },
     ] })).toEqual([])
     expect(signedUrlExpiresAt(null)).toBeNull()
     expect(signedUrlExpiresAt('mailto:test@example.com')).toBeNull()

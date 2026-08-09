@@ -61,7 +61,7 @@ const albums = [
   { albumId: 'other', title: 'Other owner', type: 'photo', ownerEmail: 'other@example.com' },
 ]
 const images = [
-  { id: 'one', url: 'https://x.test/one-full', thumbnailUrl: 'https://x.test/one-thumb', width: 1600, height: 1200, exif: { model: 'Camera', lens: 'Lens', focalLength: '50mm', focalRatio: 'f/2', shutterSpeed: '1/100', iso: 'ISO 100' }, previewSrcSet: [{ width: 480, url: 'https://x.test/480' }, { width: 640, url: 'https://x.test/640' }, { width: 1280, url: 'https://x.test/1280' }] },
+  { id: 'one', url: 'https://x.test/one-full', thumbnailUrl: 'https://x.test/one-thumb', width: 2400, height: 1800, exif: { model: 'Camera', lens: 'Lens', focalLength: '50mm', focalRatio: 'f/2', shutterSpeed: '1/100', iso: 'ISO 100' }, previewSrcSet: [{ width: 640, url: 'https://x.test/640' }, { width: 960, url: 'https://x.test/960' }, { width: 1440, url: 'https://x.test/1440' }, { width: 1920, url: 'https://x.test/1920' }] },
   { id: 'two', url: 'https://x.test/two-full', thumbnailUrl: 'https://x.test/two-thumb' },
 ]
 

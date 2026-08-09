@@ -58,7 +58,7 @@ function renderShared(path = '/sharedalbum') {
 const photoData = {
   album: { title: 'Shared Photos', description: 'Private gallery', type: 'photo', createdAt: '2026-02-01' },
   images: [
-    { id: 'p1', url: 'https://x.test/p1-full', thumbnailUrl: 'https://x.test/p1-thumb', width: 1600, height: 1200, exif: { model: 'Camera', lens: 'Lens', focalLength: '35mm', focalRatio: 'f/4', shutterSpeed: '1/250', iso: 'ISO 200' }, previewSrcSet: [{ width: 480, url: 'https://x.test/480' }, { width: 640, url: 'https://x.test/640' }, { width: 1280, url: 'https://x.test/1280' }] },
+    { id: 'p1', url: 'https://x.test/p1-full', thumbnailUrl: 'https://x.test/p1-thumb', width: 2400, height: 1800, exif: { model: 'Camera', lens: 'Lens', focalLength: '35mm', focalRatio: 'f/4', shutterSpeed: '1/250', iso: 'ISO 200' }, previewSrcSet: [{ width: 640, url: 'https://x.test/640' }, { width: 960, url: 'https://x.test/960' }, { width: 1440, url: 'https://x.test/1440' }, { width: 1920, url: 'https://x.test/1920' }] },
     { id: 'p2', url: 'https://x.test/p2-full', thumbnailUrl: 'https://x.test/p2-thumb' },
   ],
 }

@@ -8,7 +8,8 @@ const DISPLAY_URL_FIELDS = [
     'coverThumbnailUrl',
 ]
 
-const PREVIEW_WIDTHS = [480, 640, 1280]
+const PREVIEW_VERSION = 3
+const PREVIEW_WIDTHS = [640, 960, 1440, 1920]
 export const HERO_COVER_KEY = 'site/hero/home'
 export const HERO_MANIFEST_KEY = 'site/hero/manifest.json'
 export const HERO_CURRENT_PREFIX = 'site/hero/current'
@@ -222,7 +223,7 @@ export async function albumCoverPreviewSrcSet(album) {
     const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawKey))
     const mediaId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
     return PREVIEW_WIDTHS
-        .map((width) => `${cdnUrl(`albums/${albumId}/preview/v2/${mediaId}-w${width}.webp`)} ${width}w`)
+        .map((width) => `${cdnUrl(`albums/${albumId}/preview/v${PREVIEW_VERSION}/${mediaId}-w${width}.webp`)} ${width}w`)
         .join(', ')
 }
 

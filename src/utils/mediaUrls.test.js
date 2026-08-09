@@ -90,9 +90,10 @@ describe('media URL compatibility', () => {
         const albumId = '123e4567-e89b-42d3-a456-426614174000'
         const cover = cdnUrl(`albums/${albumId}/original/cover.jpg`)
         const srcSet = await albumCoverPreviewSrcSet({ albumId, coverImageUrl: cover })
-        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v2/[a-f0-9]{24}-w480\\.webp 480w`))
-        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v2/[a-f0-9]{24}-w640\\.webp 640w`))
-        expect(srcSet).toContain('-w1280.webp 1280w')
+        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v3/[a-f0-9]{24}-w640\\.webp 640w`))
+        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v3/[a-f0-9]{24}-w960\\.webp 960w`))
+        expect(srcSet).toContain('-w1440.webp 1440w')
+        expect(srcSet).toContain('-w1920.webp 1920w')
         await expect(albumCoverPreviewSrcSet({ albumId, coverImageUrl: 'https://evil.test/cover.jpg' })).resolves.toBe('')
         await expect(albumCoverPreviewSrcSet({ albumId: 'not-a-uuid', coverImageUrl: cover })).resolves.toBe('')
     })
@@ -124,37 +125,40 @@ describe('media URL compatibility', () => {
         expect(mediaExpiresAt({ expiresAt: 1_800_000_000 })).toBe(1_800_000_000_000)
     })
 
-    it('uses only a complete validated 480w, 640w, and 1280w preview set', () => {
+    it('uses only a complete validated 640w, 960w, 1440w, and 1920w preview set', () => {
         const candidates = [
-            { width: 1280, url: 'https://media.example.test/photo-1280.webp' },
-            { width: 480, url: 'https://media.example.test/photo-480.webp' },
+            { width: 1920, url: 'https://media.example.test/photo-1920.webp' },
             { width: 640, url: 'https://media.example.test/photo-640.webp' },
+            { width: 1440, url: 'https://media.example.test/photo-1440.webp' },
+            { width: 960, url: 'https://media.example.test/photo-960.webp' },
         ]
         expect(mediaPreviewCandidates({ previewSrcSet: candidates })).toEqual([
-            { width: 480, url: 'https://media.example.test/photo-480.webp' },
             { width: 640, url: 'https://media.example.test/photo-640.webp' },
-            { width: 1280, url: 'https://media.example.test/photo-1280.webp' },
+            { width: 960, url: 'https://media.example.test/photo-960.webp' },
+            { width: 1440, url: 'https://media.example.test/photo-1440.webp' },
+            { width: 1920, url: 'https://media.example.test/photo-1920.webp' },
         ])
         expect(mediaPreviewSrcSet({ previewSrcSet: candidates })).toBe(
-            'https://media.example.test/photo-480.webp 480w, https://media.example.test/photo-640.webp 640w, https://media.example.test/photo-1280.webp 1280w',
+            'https://media.example.test/photo-640.webp 640w, https://media.example.test/photo-960.webp 960w, https://media.example.test/photo-1440.webp 1440w, https://media.example.test/photo-1920.webp 1920w',
         )
         expect(mediaPreviewSrcSet({ previewSrcSet: [candidates[0]] })).toBe('')
         expect(mediaPreviewSrcSet({ previewSrcSet: [candidates[1], candidates[1]] })).toBe('')
         expect(mediaPreviewSrcSet({ previewSrcSet: [
-            candidates[1], candidates[2],
-            { width: 1280, url: 'javascript:alert(1)' },
+            candidates[1], candidates[2], candidates[3],
+            { width: 1920, url: 'javascript:alert(1)' },
         ] })).toBe('')
     })
 
     it('refreshes protected media before the earliest preview candidate expires', () => {
         const early = 'https://bucket.example/640.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=300'
-        const late = 'https://bucket.example/1280.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=600'
+        const late = 'https://bucket.example/1920.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=600'
         expect(mediaExpiresAt({
             url: late,
             previewSrcSet: [
-                { width: 480, url: early },
-                { width: 640, url: late },
-                { width: 1280, url: late },
+                { width: 640, url: early },
+                { width: 960, url: late },
+                { width: 1440, url: late },
+                { width: 1920, url: late },
             ],
         })).toBe(Date.UTC(2026, 6, 20, 12, 5, 0))
     })
