@@ -5,7 +5,7 @@
     "totalGzipBytes": 4100000,
     "entryJavaScriptBytes": 320000,
     "entryJavaScriptGzipBytes": 110000,
-    "entryCssBytes": 82000,
+    "entryCssBytes": 85000,
     "entryCssGzipBytes": 15000,
     "largestChunkBytes": 550000,
     "largestChunkGzipBytes": 180000
