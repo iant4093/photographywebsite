@@ -8,9 +8,11 @@ const DISPLAY_URL_FIELDS = [
     'coverThumbnailUrl',
 ]
 
-const PREVIEW_WIDTHS = [640, 1280]
+const PREVIEW_WIDTHS = [480, 640, 1280]
 export const HERO_COVER_KEY = 'site/hero/home'
 export const HERO_MANIFEST_KEY = 'site/hero/manifest.json'
+export const HERO_CURRENT_PREFIX = 'site/hero/current'
+export const HERO_CURRENT_WIDTHS = Object.freeze([640, 960, 1280, 1920, 2560])
 const HERO_VERSION_PATTERN = /^[a-f0-9]{32}$/
 const ALBUM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -112,6 +114,20 @@ export function cdnUrl(key) {
 
 export function heroCoverUrl() {
     return cdnUrl(HERO_COVER_KEY)
+}
+
+export function currentHeroUrl(format = 'jpeg') {
+    const extension = format === 'jpeg' ? 'jpg' : format
+    if (!['avif', 'webp', 'jpg'].includes(extension)) return ''
+    return cdnUrl(`${HERO_CURRENT_PREFIX}/hero.${extension}`)
+}
+
+export function currentHeroSrcSet(format = 'jpeg') {
+    const extension = format === 'jpeg' ? 'jpg' : format
+    if (!['avif', 'webp', 'jpg'].includes(extension)) return ''
+    return HERO_CURRENT_WIDTHS
+        .map((width) => `${cdnUrl(`${HERO_CURRENT_PREFIX}/hero-${width}.${extension}`)} ${width}w`)
+        .join(', ')
 }
 
 export function heroManifestUrl() {

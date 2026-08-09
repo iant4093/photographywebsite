@@ -14,7 +14,7 @@ import {
     setCatalogSnapshot,
 } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
-import { fetchHeroManifest, heroCoverUrl, heroManifestSrcSet } from '../utils/mediaUrls'
+import { currentHeroSrcSet, currentHeroUrl, heroCoverUrl } from '../utils/mediaUrls'
 
 const CATALOG_KEY = 'public-photos'
 // Fetch the complete current public catalog in one compressed response while
@@ -39,22 +39,8 @@ function Home() {
     const [loading, setLoading] = useState(!initialSnapshot)
     const [error, setError] = useState(null)
     const [loadAttempt, setLoadAttempt] = useState(0)
-    const [managedHero, setManagedHero] = useState(null)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
     const [managedHomeFailed, setManagedHomeFailed] = useState(false)
-
-    useEffect(() => {
-        const controller = new AbortController()
-        fetchHeroManifest({ signal: controller.signal })
-            .then((manifest) => {
-                if (manifest && !controller.signal.aborted) {
-                    setManagedHero(manifest)
-                    setResponsiveHeroFailed(false)
-                }
-            })
-            .catch(() => {})
-        return () => controller.abort()
-    }, [])
 
     const handleExplorePhotos = useCallback((event) => {
         const target = document.getElementById('photo-albums')
@@ -125,7 +111,7 @@ function Home() {
             window.removeEventListener('scroll', onScroll)
             if (frame !== null) window.cancelAnimationFrame(frame)
         }
-    }, [managedHero, responsiveHeroFailed, managedHomeFailed])
+    }, [responsiveHeroFailed, managedHomeFailed])
 
     useEffect(() => {
         const elements = pageRef.current?.querySelectorAll('[data-reveal-id]') || []
@@ -150,16 +136,17 @@ function Home() {
 
     const photoAlbums = useMemo(() => albums.filter((album) => album.type !== 'video'), [albums])
     const managedHomeUrl = heroCoverUrl()
-    const useResponsiveHero = Boolean(managedHero) && !responsiveHeroFailed
+    const responsiveHomeUrl = currentHeroUrl()
+    const useResponsiveHero = Boolean(responsiveHomeUrl) && !responsiveHeroFailed
     const useBundledHero = !useResponsiveHero && (!managedHomeUrl || managedHomeFailed)
     const heroSrc = useResponsiveHero
-        ? managedHero.variants.jpeg.at(-1).url
+        ? responsiveHomeUrl
         : (useBundledHero ? '/images/heroes/photo-1280.jpg' : managedHomeUrl)
     const heroSrcSet = useResponsiveHero
-        ? heroManifestSrcSet(managedHero, 'jpeg')
+        ? currentHeroSrcSet('jpeg')
         : (useBundledHero ? heroSet('jpg') : undefined)
-    const heroWidth = useResponsiveHero ? managedHero.source.width : (useBundledHero ? 6000 : 2560)
-    const heroHeight = useResponsiveHero ? managedHero.source.height : (useBundledHero ? 4000 : 1707)
+    const heroWidth = useResponsiveHero ? 1280 : (useBundledHero ? 6000 : 2560)
+    const heroHeight = useResponsiveHero ? 853 : (useBundledHero ? 4000 : 1707)
     const { groupedPhotoAlbums, photoCategories } = useMemo(() => {
         const grouped = photoAlbums.reduce((result, album) => {
             const category = album.category || 'Uncategorized'
@@ -176,14 +163,14 @@ function Home() {
     }, [photoAlbums])
 
     return (
-        <div ref={pageRef} className="animate-fade-in">
+        <div ref={pageRef}>
             <section className="home-hero linen-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>
                         {useResponsiveHero ? (
                             <>
-                                <source type="image/avif" srcSet={heroManifestSrcSet(managedHero, 'avif')} sizes="100vw" />
-                                <source type="image/webp" srcSet={heroManifestSrcSet(managedHero, 'webp')} sizes="100vw" />
+                                <source type="image/avif" srcSet={currentHeroSrcSet('avif')} sizes="100vw" />
+                                <source type="image/webp" srcSet={currentHeroSrcSet('webp')} sizes="100vw" />
                             </>
                         ) : useBundledHero ? (
                             <>

@@ -75,7 +75,7 @@ function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = ''
             <ProgressiveImage
                 src={albumCoverUrl(album)}
                 srcSet={responsiveSrcSet}
-                sizes="(max-width: 720px) 256px, (max-width: 1440px) 24vw, 352px"
+                sizes="(max-width: 720px) 208px, (max-width: 1440px) 24vw, 352px"
                 blurhash={album.coverBlurhash}
                 alt=""
                 width={album.coverWidth || 4}

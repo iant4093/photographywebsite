@@ -175,12 +175,19 @@ describe('Home complete public catalog', () => {
     expect(window.cancelAnimationFrame).toHaveBeenCalledWith(9)
   })
 
-  it('falls back to the bundled responsive hero if the managed CDN object is unavailable', async () => {
+  it('falls back through the legacy managed hero before using the bundled responsive hero', async () => {
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     const { container } = routed(<Home />)
+    const responsive = screen.getByRole('img', { name: 'Golden hour landscape' })
+    expect(responsive).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
+    expect(responsive).toHaveAttribute('srcset', expect.stringContaining('/site/hero/current/hero-960.jpg 960w'))
+    expect(container.querySelector('source[type="image/avif"]')).toHaveAttribute(
+      'srcset',
+      expect.stringContaining('/site/hero/current/hero-960.avif 960w'),
+    )
+    fireEvent.error(responsive)
     const managed = screen.getByRole('img', { name: 'Golden hour landscape' })
     expect(managed).toHaveAttribute('src', expect.stringContaining('/site/hero/home'))
-    expect(managed).not.toHaveAttribute('src', '/images/heroes/photo-1280.jpg')
     expect(container.querySelector('source[type="image/avif"]')).toBeNull()
     fireEvent.error(managed)
     const fallback = screen.getByRole('img', { name: 'Golden hour landscape' })
@@ -190,24 +197,13 @@ describe('Home complete public catalog', () => {
     expect(container.querySelector('source[type="image/avif"]')).toBeTruthy()
   })
 
-  it('switches to validated immutable responsive hero variants when the manifest is available', async () => {
-    const version = '0123456789abcdef0123456789abcdef'
-    const variants = Object.fromEntries(['avif', 'webp', 'jpeg'].map((format) => [format, [640, 1280].map((width) => ({
-      width,
-      height: Math.round(width * 0.6),
-      key: `site/hero/versions/v1/${version}/hero-${width}.${format === 'jpeg' ? 'jpg' : format}`,
-    }))]))
-    globalThis.fetch.mockResolvedValue(new Response(JSON.stringify({
-      schemaVersion: 1,
-      version,
-      source: { width: 3000, height: 1800 },
-      variants,
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  it('paints the stable responsive hero without waiting for a manifest request', async () => {
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     routed(<Home />)
-    await waitFor(() => expect(screen.getByRole('img', { name: 'Golden hour landscape' }))
-      .toHaveAttribute('src', expect.stringContaining(`/site/hero/versions/v1/${version}/hero-1280.jpg`)))
-    expect(screen.getByRole('img', { name: 'Golden hour landscape' })).toHaveAttribute('srcset')
+    const hero = screen.getByRole('img', { name: 'Golden hour landscape' })
+    expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
+    expect(hero).toHaveAttribute('fetchpriority', 'high')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 })
 

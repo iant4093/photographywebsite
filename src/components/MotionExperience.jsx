@@ -184,23 +184,18 @@ export default function MotionExperience() {
             const motionKick = clamp(velocity, -24, 24)
             const pageTravel = Math.max(document.documentElement.scrollHeight - viewportHeight, 0)
             const pageProgress = clamp(scrollY / Math.max(pageTravel, 1), 0, 1)
+            let progressThumb = null
+            let isScrollable = false
+            let thumbTravel = 0
             if (progressRail) {
-                const progressThumb = progressRail.firstElementChild
-                const isScrollable = pageTravel > 1
-                progressRail.hidden = !isScrollable
-                progressRail.setAttribute('aria-valuenow', String(Math.round(pageProgress * 100)))
-                if (isScrollable && progressThumb) {
-                    const thumbTravel = Math.max(progressRail.clientHeight - progressThumb.offsetHeight, 0)
-                    progressRail.style.setProperty(
-                        '--editorial-progress-offset',
-                        `${(pageProgress * thumbTravel).toFixed(2)}px`,
-                    )
-                }
+                progressThumb = progressRail.firstElementChild
+                isScrollable = pageTravel > 1
+                thumbTravel = isScrollable && progressThumb
+                    ? Math.max(progressRail.clientHeight - progressThumb.offsetHeight, 0)
+                    : 0
             }
 
-            root.style.setProperty('--editorial-progress', pageProgress.toFixed(5))
-            root.style.setProperty('--editorial-speed', clamp(Math.abs(velocity) / 42, 0, 1).toFixed(4))
-
+            const measurements = []
             activeTargets.forEach((target) => {
                 const bounds = target.getBoundingClientRect()
                 const measuredHeight = Math.min(Math.max(bounds.height, 1), viewportHeight)
@@ -213,6 +208,23 @@ export default function MotionExperience() {
                 const isMedia = target.classList.contains('editorial-motion-media')
                 const amplitude = isMedia ? 1 : 0.76
 
+                measurements.push({ target, position, presence, phase, amplitude })
+            })
+
+            if (progressRail) {
+                progressRail.hidden = !isScrollable
+                progressRail.setAttribute('aria-valuenow', String(Math.round(pageProgress * 100)))
+                if (isScrollable && progressThumb) {
+                    progressRail.style.setProperty(
+                        '--editorial-progress-offset',
+                        `${(pageProgress * thumbTravel).toFixed(2)}px`,
+                    )
+                }
+            }
+            root.style.setProperty('--editorial-progress', pageProgress.toFixed(5))
+            root.style.setProperty('--editorial-speed', clamp(Math.abs(velocity) / 42, 0, 1).toFixed(4))
+
+            measurements.forEach(({ target, position, presence, phase, amplitude }) => {
                 target.style.setProperty('--editorial-x', `${(position * (1 - presence) * 36 * amplitude).toFixed(2)}px`)
                 target.style.setProperty('--editorial-y', `${(phase * -52 * amplitude - motionKick * 0.1).toFixed(2)}px`)
                 target.style.setProperty('--editorial-card-y', `${(phase * -16 - motionKick * 0.08).toFixed(2)}px`)

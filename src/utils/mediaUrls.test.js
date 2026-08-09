@@ -4,6 +4,8 @@ import {
     albumCoverUrl,
     annotateMediaExpiry,
     cdnUrl,
+    currentHeroSrcSet,
+    currentHeroUrl,
     fetchHeroManifest,
     heroCoverUrl,
     heroManifestSrcSet,
@@ -41,6 +43,10 @@ describe('media URL compatibility', () => {
         expect(cdnUrl('https://example.com/signed')).toBe('https://example.com/signed')
         expect(cdnUrl('/albums/example.jpg')).toMatch(/\/albums\/example\.jpg$/)
         expect(heroCoverUrl()).toMatch(/\/site\/hero\/home$/)
+        expect(currentHeroUrl('avif')).toMatch(/\/site\/hero\/current\/hero\.avif$/)
+        expect(currentHeroSrcSet('webp')).toContain('/site/hero/current/hero-960.webp 960w')
+        expect(currentHeroUrl('gif')).toBe('')
+        expect(currentHeroSrcSet('gif')).toBe('')
     })
 
     it('prefers the safe API fields while retaining legacy fallbacks', () => {
@@ -84,6 +90,7 @@ describe('media URL compatibility', () => {
         const albumId = '123e4567-e89b-42d3-a456-426614174000'
         const cover = cdnUrl(`albums/${albumId}/original/cover.jpg`)
         const srcSet = await albumCoverPreviewSrcSet({ albumId, coverImageUrl: cover })
+        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v2/[a-f0-9]{24}-w480\\.webp 480w`))
         expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v2/[a-f0-9]{24}-w640\\.webp 640w`))
         expect(srcSet).toContain('-w1280.webp 1280w')
         await expect(albumCoverPreviewSrcSet({ albumId, coverImageUrl: 'https://evil.test/cover.jpg' })).resolves.toBe('')
@@ -117,22 +124,24 @@ describe('media URL compatibility', () => {
         expect(mediaExpiresAt({ expiresAt: 1_800_000_000 })).toBe(1_800_000_000_000)
     })
 
-    it('uses only a complete validated 640w and 1280w preview pair', () => {
+    it('uses only a complete validated 480w, 640w, and 1280w preview set', () => {
         const candidates = [
             { width: 1280, url: 'https://media.example.test/photo-1280.webp' },
+            { width: 480, url: 'https://media.example.test/photo-480.webp' },
             { width: 640, url: 'https://media.example.test/photo-640.webp' },
         ]
         expect(mediaPreviewCandidates({ previewSrcSet: candidates })).toEqual([
+            { width: 480, url: 'https://media.example.test/photo-480.webp' },
             { width: 640, url: 'https://media.example.test/photo-640.webp' },
             { width: 1280, url: 'https://media.example.test/photo-1280.webp' },
         ])
         expect(mediaPreviewSrcSet({ previewSrcSet: candidates })).toBe(
-            'https://media.example.test/photo-640.webp 640w, https://media.example.test/photo-1280.webp 1280w',
+            'https://media.example.test/photo-480.webp 480w, https://media.example.test/photo-640.webp 640w, https://media.example.test/photo-1280.webp 1280w',
         )
         expect(mediaPreviewSrcSet({ previewSrcSet: [candidates[0]] })).toBe('')
         expect(mediaPreviewSrcSet({ previewSrcSet: [candidates[1], candidates[1]] })).toBe('')
         expect(mediaPreviewSrcSet({ previewSrcSet: [
-            candidates[1],
+            candidates[1], candidates[2],
             { width: 1280, url: 'javascript:alert(1)' },
         ] })).toBe('')
     })
@@ -142,7 +151,11 @@ describe('media URL compatibility', () => {
         const late = 'https://bucket.example/1280.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=600'
         expect(mediaExpiresAt({
             url: late,
-            previewSrcSet: [{ width: 640, url: early }, { width: 1280, url: late }],
+            previewSrcSet: [
+                { width: 480, url: early },
+                { width: 640, url: late },
+                { width: 1280, url: late },
+            ],
         })).toBe(Date.UTC(2026, 6, 20, 12, 5, 0))
     })
 
