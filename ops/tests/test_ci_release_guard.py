@@ -318,6 +318,20 @@ class ReleaseIntentTests(unittest.TestCase):
         self.assertTrue(api_rules[0]["allowProtectedModify"])
         self.assertFalse(api_rules[0]["allowNoDetails"])
 
+        bucket_policy_rules = [
+            rule for rule in document["rules"]
+            if rule["resourceType"] == "AWS::S3::BucketPolicy"
+            and rule["action"] == "Modify"
+        ]
+        self.assertEqual(
+            {rule["logicalId"] for rule in bucket_policy_rules},
+            {"ImagesBucketPolicy", "MediaAccessLogsBucketPolicy"},
+        )
+        for rule in bucket_policy_rules:
+            self.assertEqual(rule["propertyPaths"], ["PolicyDocument"])
+            self.assertTrue(rule["allowProtectedModify"])
+            self.assertFalse(rule["allowNoDetails"])
+
         add_rules = {
             (rule["logicalId"], rule["resourceType"])
             for rule in document["rules"]

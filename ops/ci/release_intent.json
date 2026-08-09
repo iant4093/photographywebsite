@@ -20,6 +20,7 @@
     {"logicalId": "ApiAuthorizationDeniedAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "RateLimitTable", "resourceType": "AWS::DynamoDB::Table", "action": "Modify", "propertyPaths": ["DeletionPolicy", "DeletionProtectionEnabled", "UpdateReplacePolicy"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "MediaAccessLogsBucketPolicy", "resourceType": "AWS::S3::BucketPolicy", "action": "Modify", "propertyPaths": ["PolicyDocument"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "ImagesBucketPolicy", "resourceType": "AWS::S3::BucketPolicy", "action": "Modify", "propertyPaths": ["PolicyDocument"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "ImagesCloudFront", "resourceType": "AWS::CloudFront::Distribution", "action": "Modify", "propertyPaths": ["DistributionConfig"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "PreviewJobFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["FilterPattern"], "allowNoDetails": false},
     {"logicalId": "GetPublicAlbumsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
