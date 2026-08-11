@@ -9,7 +9,6 @@
     border-bottom: 1px solid var(--color-charcoal);
 }
 
-.photo-stats-kicker,
 .photo-stats-eyebrow,
 .photo-stats-section-index,
 .photo-stats-section-detail {
@@ -20,13 +19,10 @@
 }
 
 .photo-stats-title-row {
-    display: grid;
-    gap: 2rem;
-    margin-top: 1.5rem;
+    margin: 0;
 }
 
 .photo-stats-title-row h1 {
-    max-width: 12ch;
     color: var(--color-charcoal);
     font-family: var(--font-serif);
     font-size: clamp(3.6rem, 9vw, 8.5rem);
@@ -38,15 +34,6 @@
 .photo-stats-title-row h1 em {
     color: var(--color-amber-dark);
     font-weight: 400;
-}
-
-.photo-stats-title-row > p {
-    max-width: 31rem;
-    align-self: end;
-    color: var(--color-charcoal-light);
-    font-family: var(--font-serif);
-    font-size: clamp(1.15rem, 2vw, 1.65rem);
-    line-height: 1.5;
 }
 
 .photo-stats-content {
@@ -100,7 +87,7 @@
 
 .photo-stats-card {
     position: relative;
-    min-height: 12.5rem;
+    min-height: 10.75rem;
     padding: 1.35rem;
 }
 
@@ -130,17 +117,10 @@
     line-height: 1;
 }
 
-.photo-stats-note,
-.photo-stats-storage-card > p:last-child,
-.photo-stats-kept-ratio,
-.photo-stats-methodology {
+.photo-stats-kept-ratio {
     color: var(--color-warm-gray);
     font-size: 0.78rem;
     line-height: 1.6;
-}
-
-.photo-stats-note {
-    margin-top: 1rem;
 }
 
 .photo-stats-kept-grid {
@@ -183,7 +163,7 @@
 
 .photo-stats-storage-card {
     display: flex;
-    min-height: 16rem;
+    min-height: 12rem;
     flex-direction: column;
     justify-content: space-between;
     padding: clamp(1.5rem, 4vw, 2.5rem);
@@ -319,12 +299,6 @@
     overflow-wrap: anywhere;
 }
 
-.photo-stats-methodology {
-    margin-top: 1.5rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--color-warm-border);
-}
-
 .photo-stats-loading,
 .photo-stats-error {
     display: flex;
@@ -377,13 +351,12 @@
 @keyframes stats-reveal { from { opacity: 0; transform: translateY(12px); } }
 
 @media (min-width: 48rem) {
-    .photo-stats-title-row { grid-template-columns: minmax(0, 1.5fr) minmax(16rem, 0.5fr); }
     .photo-stats-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .photo-stats-kept-grid,
     .photo-stats-highlights,
     .photo-stats-gear-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .photo-stats-scale-grid { grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
-    .photo-stats-scale-grid .photo-stats-card { min-height: 16rem; }
+    .photo-stats-scale-grid .photo-stats-card { min-height: 12rem; }
 }
 
 @media (min-width: 75rem) {

@@ -19,13 +19,12 @@ function dateLabel(value) {
     }).format(parsed)
 }
 
-function StatCard({ index, label, value, note }) {
+function StatCard({ index, label, value }) {
     return (
         <article className="photo-stats-card">
             <span className="photo-stats-card-index" aria-hidden="true">{String(index).padStart(2, '0')}</span>
             <p className="photo-stats-eyebrow">{label}</p>
             <p className="photo-stats-value">{value}</p>
-            <p className="photo-stats-note">{note}</p>
         </article>
     )
 }
@@ -114,13 +113,8 @@ export default function Stats() {
     return (
         <div className="photo-stats-page">
             <header className="photo-stats-hero">
-                <p className="photo-stats-kicker">Field notes · The numbers behind the photographs</p>
                 <div className="photo-stats-title-row">
-                    <h1>The Archive,<br /><em>by the numbers.</em></h1>
-                    <p>
-                        A living record of photographs made, films captured, work kept,
-                        and the tools that shaped it.
-                    </p>
+                    <h1>Photography <em>Stats</em></h1>
                 </div>
             </header>
 
@@ -151,12 +145,12 @@ export default function Stats() {
             {!loading && !error && report && (
                 <div className="photo-stats-content">
                     <section aria-labelledby="stats-at-a-glance">
-                        <SectionHeading id="stats-at-a-glance" index={1} eyebrow="At a glance" title="From shutter to screen" detail={`Updated ${dateLabel(report.generatedAt)}`} />
+                        <SectionHeading id="stats-at-a-glance" index={1} eyebrow="At a glance" title="Capture Stats" detail={`Updated ${dateLabel(report.generatedAt)}`} />
                         <div className="photo-stats-card-grid">
-                            <StatCard index={1} label="Photos taken" value={number(report.taken?.photos)} note="Image files in the raw archive" />
-                            <StatCard index={2} label="Videos taken" value={number(report.taken?.videos)} note="Video files in the raw archive" />
-                            <StatCard index={3} label="Photos edited / published" value={number(report.kept?.photos)} note="Public photographs on this website" />
-                            <StatCard index={4} label="Videos edited / published" value={number(report.kept?.videos)} note="Public videos on this website" />
+                            <StatCard index={1} label="Photos taken" value={number(report.taken?.photos)} />
+                            <StatCard index={2} label="Videos taken" value={number(report.taken?.videos)} />
+                            <StatCard index={3} label="Photos edited / published" value={number(report.kept?.photos)} />
+                            <StatCard index={4} label="Videos edited / published" value={number(report.kept?.videos)} />
                         </div>
                         <div className="photo-stats-kept-grid">
                             <KeptMeter label="Photos kept" kept={report.kept?.photos} taken={report.taken?.photos} percent={report.kept?.photoPercent} />
@@ -165,15 +159,14 @@ export default function Stats() {
                     </section>
 
                     <section aria-labelledby="archive-scale-heading">
-                        <SectionHeading id="archive-scale-heading" index={2} eyebrow="The collection" title="The scale of the archive" />
+                        <SectionHeading id="archive-scale-heading" index={2} eyebrow="The collection" title="Total Storage Used" />
                         <div className="photo-stats-scale-grid">
                             <article className="photo-stats-storage-card">
                                 <p className="photo-stats-eyebrow">Total space taken</p>
                                 <p className="photo-stats-storage-value">{formatBytes(report.storage?.totalBytes)}</p>
-                                <p>All photo and video files across the raw archive and website backup, including both original and edited copies.</p>
                             </article>
-                            <StatCard index={5} label="Photo albums" value={number(report.albums?.photos)} note="Public photographic series" />
-                            <StatCard index={6} label="Video albums" value={number(report.albums?.videos)} note="Public moving-image collections" />
+                            <StatCard index={5} label="Photo albums" value={number(report.albums?.photos)} />
+                            <StatCard index={6} label="Video albums" value={number(report.albums?.videos)} />
                         </div>
                     </section>
 
@@ -239,16 +232,11 @@ export default function Stats() {
                     </section>
 
                     <section aria-labelledby="gear-heading">
-                        <SectionHeading id="gear-heading" index={5} eyebrow="Tools of the trade" title="Gear represented in the archive" detail="Based on published-photo EXIF" />
+                        <SectionHeading id="gear-heading" index={5} eyebrow="Tools of the trade" title="Gear" detail="Based on published-photo EXIF" />
                         <div className="photo-stats-gear-grid">
                             <GearList title="Cameras" items={report.gear?.cameras || []} />
                             <GearList title="Lenses" items={report.gear?.lenses || []} />
                         </div>
-                        <p className="photo-stats-methodology">
-                            Photos without lens metadata are attributed to the {report.gear?.manualLensFallback || 'manual lens'}.
-                            “Taken” counts files in Raw Photo Backup; “edited / published” and “kept” count public website media.
-                            Total storage combines photo and video bytes in Raw Photo Backup and Website Backup, so retained copies are intentionally included.
-                        </p>
                     </section>
                 </div>
             )}

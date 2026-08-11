@@ -45,6 +45,10 @@ describe('photography statistics page', () => {
 
         expect(screen.getByRole('status', { name: 'Loading photography statistics' })).toBeInTheDocument()
         expect(await screen.findByText('63,900')).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 1, name: 'Photography Stats' })).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 2, name: 'Capture Stats' })).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 2, name: 'Total Storage Used' })).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 2, name: 'Gear' })).toBeInTheDocument()
         expect(screen.getByText('Photos taken')).toBeInTheDocument()
         expect(screen.getByText('Videos taken')).toBeInTheDocument()
         expect(screen.getByRole('progressbar', { name: 'Photos kept: 4.5 percent' })).toHaveAttribute('aria-valuenow', '4.5')
@@ -55,8 +59,13 @@ describe('photography statistics page', () => {
         expect(screen.getAllByText('Hikes')).toHaveLength(2)
         expect(screen.getByText('Canon EOS R7')).toBeInTheDocument()
         expect(screen.getByText('Sirui Nightwalker 75mm T1.2')).toBeInTheDocument()
-        expect(screen.getByText(/Photos without lens metadata are attributed to the Sirui Nightwalker 75mm T1.2/)).toBeInTheDocument()
-        expect(screen.getByText(/“Taken” counts files in Raw Photo Backup/)).toBeInTheDocument()
+        expect(screen.queryByText(/Image files in the raw archive/)).toBeNull()
+        expect(screen.queryByText(/A living record of photographs/)).toBeNull()
+        expect(screen.queryByText(/Field notes · The numbers behind the photographs/)).toBeNull()
+        expect(screen.queryByText(/All photo and video files across the raw archive/)).toBeNull()
+        expect(screen.queryByText(/Public photographic series/)).toBeNull()
+        expect(screen.queryByText(/Public moving-image collections/)).toBeNull()
+        expect(screen.queryByText(/Photos without lens metadata are attributed/)).toBeNull()
     })
 
     it('shows a safe failure and retries successfully', async () => {
