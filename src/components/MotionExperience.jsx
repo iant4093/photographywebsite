@@ -262,8 +262,6 @@ export default function MotionExperience() {
     return (
         <>
             <div className="editorial-motion-overlay" aria-hidden="true">
-                <div className="editorial-light-leak" />
-                <div className="editorial-exposure-sweep" />
                 <div className="editorial-gate"><i /><i /><i /><i /></div>
             </div>
             <div

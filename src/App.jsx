@@ -49,7 +49,7 @@ function App() {
     const navigationType = useNavigationType()
     const isAdminRoute = location.pathname.startsWith('/admin')
     const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)
-    const theme = isAdminRoute ? 'light' : preferredTheme
+    const theme = preferredTheme
 
     useEffect(() => {
         applyDocumentTheme(theme)
@@ -80,7 +80,7 @@ function App() {
             <Navbar
                 theme={theme}
                 onToggleTheme={toggleTheme}
-                showThemeToggle={!isAdminRoute}
+                showThemeToggle
             />
             <main id="main-content" tabIndex={-1} className="flex-1">
                 <Suspense fallback={<PageLoading />}>

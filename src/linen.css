@@ -757,37 +757,6 @@
 .linen-site .editorial-gate i:nth-child(3) { right: -1px; bottom: -1px; border-right: 1px solid; border-bottom: 1px solid; }
 .linen-site .editorial-gate i:nth-child(4) { bottom: -1px; left: -1px; border-bottom: 1px solid; border-left: 1px solid; }
 
-.linen-site .editorial-light-leak {
-  position: absolute;
-  top: calc(-18vw + var(--editorial-progress, 0) * 72vh);
-  left: calc(-16vw + var(--editorial-progress, 0) * 58vw);
-  width: 42vw;
-  height: 42vw;
-  border-radius: 50%;
-  opacity: 0.28;
-  background: radial-gradient(circle, rgba(177, 103, 47, 0.18), rgba(177, 103, 47, 0) 68%);
-}
-
-.linen-site .editorial-exposure-sweep {
-  position: absolute;
-  top: -20%;
-  bottom: -20%;
-  left: calc(-24vw + var(--editorial-progress, 0) * 138vw);
-  width: clamp(10rem, 24vw, 28rem);
-  opacity: calc(0.12 + var(--editorial-speed, 0) * 0.2);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(210, 154, 98, 0.06) 28%,
-    rgba(255, 240, 209, 0.16) 50%,
-    rgba(181, 112, 62, 0.06) 72%,
-    transparent
-  );
-  filter: blur(22px);
-  transform: skewX(-8deg);
-  mix-blend-mode: multiply;
-}
-
 /* Floating print wall — homepage only. */
 .linen-site .floating-print-wall {
   --floating-gap: clamp(0.8rem, 1.5vw, 1.4rem);

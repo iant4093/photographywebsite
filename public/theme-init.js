@@ -1,7 +1,7 @@
 (function initializeTheme() {
   var theme = 'light'
   try {
-    if (!window.location.pathname.startsWith('/admin') && window.localStorage.getItem('ian-photography-theme') === 'dark') {
+    if (window.localStorage.getItem('ian-photography-theme') === 'dark') {
       theme = 'dark'
     }
   } catch {

@@ -82,13 +82,13 @@ describe('App routing shell', () => {
     })
   })
 
-  it('uses the editorial admin shell on protected admin routes', async () => {
+  it('uses the stored theme and exposes its toggle on protected admin routes', async () => {
     localStorage.setItem('ian-photography-theme', 'dark')
     const { container } = render(<MemoryRouter initialEntries={['/admin']}><App /></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Admin route' })).toBeInTheDocument())
     expect(container.firstElementChild).toHaveClass('linen-site', 'linen-admin')
-    expect(container.firstElementChild).toHaveAttribute('data-theme', 'light')
-    expect(screen.queryByRole('button', { name: 'Theme' })).toBeNull()
+    expect(container.firstElementChild).toHaveAttribute('data-theme', 'dark')
+    expect(screen.getByRole('button', { name: 'Theme' })).toBeInTheDocument()
   })
 
   it('defaults to light mode and persists an explicit public dark preference', () => {

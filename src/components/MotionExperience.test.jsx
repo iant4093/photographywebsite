@@ -65,6 +65,9 @@ describe('MotionExperience film-strip scrollbar', () => {
 
     flushFrames()
     expect(document.documentElement).toHaveClass('editorial-motion-active', 'editorial-scrollbar-active')
+    expect(view.container.querySelector('.editorial-light-leak')).toBeNull()
+    expect(view.container.querySelector('.editorial-exposure-sweep')).toBeNull()
+    expect(view.container.querySelector('.editorial-gate')).toBeInTheDocument()
     expect(rail).toHaveAttribute('aria-valuemin', '0')
     expect(rail).toHaveAttribute('aria-valuemax', '100')
     expect(rail).toHaveAttribute('aria-valuenow', '0')
