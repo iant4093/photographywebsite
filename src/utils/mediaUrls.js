@@ -223,7 +223,7 @@ export async function albumCoverPreviewSrcSet(album) {
     const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawKey))
     const mediaId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
     return PREVIEW_WIDTHS
-        .map((width) => `${cdnUrl(`albums/${albumId}/preview/v${PREVIEW_VERSION}/${mediaId}-w${width}.webp`)} ${width}w`)
+        .map((width) => `${cdnUrl(`public-previews/${albumId}/v${PREVIEW_VERSION}/${mediaId}-w${width}.webp`)} ${width}w`)
         .join(', ')
 }
 

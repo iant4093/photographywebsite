@@ -11,8 +11,12 @@ import { annotateMediaExpiry } from './mediaUrls'
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const DEFAULT_TIMEOUT_MS = 15_000
 const PUBLIC_CATALOG_TTL_MS = 5 * 60_000
+const PUBLIC_ALBUM_TTL_MS = 5 * 60_000
+const PUBLIC_ALBUM_CACHE_LIMIT = 5
 const catalogCache = new Map()
 const catalogRequests = new Map()
+const publicAlbumCache = new Map()
+const publicAlbumRequests = new Map()
 
 export class ApiError extends Error {
     constructor(message, { status = 0, code = 'API_ERROR', retryAfterMs = 0 } = {}) {
@@ -223,6 +227,9 @@ export function clearApiCache() {
     catalogCache.clear()
     for (const record of catalogRequests.values()) record.controller.abort()
     catalogRequests.clear()
+    publicAlbumCache.clear()
+    for (const record of publicAlbumRequests.values()) record.controller.abort()
+    publicAlbumRequests.clear()
 }
 
 function invalidateAlbumCatalog({ album, deletedAlbumId } = {}) {
@@ -325,12 +332,7 @@ export function fetchAlbumsFiltered(params = {}, token = null, options = {}) {
     return fetchAllAlbums(params, { ...options, token })
 }
 
-export function fetchAlbum(albumId, token = null, options = {}) {
-    const albumPath = token ? '/albums' : '/public/albums'
-    return apiFetch(`${albumPath}/${encodeURIComponent(albumId)}`, {
-        headers: authHeaders(token),
-        signal: options.signal,
-    }).then((data) => {
+function normalizeAlbumDetail(data) {
         if (!data || Array.isArray(data)) return data
         const mediaItems = Array.isArray(data.images)
             ? data.images
@@ -340,7 +342,67 @@ export function fetchAlbum(albumId, token = null, options = {}) {
         return Array.isArray(mediaItems)
             ? { ...data, images: mediaItems.map(annotateMediaExpiry) }
             : data
+}
+
+function setCachedPublicAlbum(albumId, value) {
+    publicAlbumCache.delete(albumId)
+    publicAlbumCache.set(albumId, { value, expiresAt: Date.now() + PUBLIC_ALBUM_TTL_MS })
+    while (publicAlbumCache.size > PUBLIC_ALBUM_CACHE_LIMIT) {
+        publicAlbumCache.delete(publicAlbumCache.keys().next().value)
+    }
+}
+
+export function readCachedPublicAlbum(albumId) {
+    const key = String(albumId || '')
+    const cached = publicAlbumCache.get(key)
+    if (!cached || cached.expiresAt <= Date.now()) {
+        publicAlbumCache.delete(key)
+        return null
+    }
+    // Refresh LRU recency without extending the freshness contract.
+    publicAlbumCache.delete(key)
+    publicAlbumCache.set(key, cached)
+    return cached.value
+}
+
+export function fetchAlbum(albumId, token = null, options = {}) {
+    const key = String(albumId || '')
+    const albumPath = token ? '/albums' : '/public/albums'
+    if (token) {
+        return apiFetch(`${albumPath}/${encodeURIComponent(key)}`, {
+            headers: authHeaders(token),
+            signal: options.signal,
+        }).then(normalizeAlbumDetail)
+    }
+
+    if (!options.force) {
+        const cached = readCachedPublicAlbum(key)
+        if (cached) return Promise.resolve(cached)
+        const existing = publicAlbumRequests.get(key)
+        if (existing && !existing.controller.signal.aborted) {
+            return subscribeToCatalogRequest(existing, options.signal)
+        }
+    }
+
+    const prior = publicAlbumRequests.get(key)
+    if (prior?.controller.signal.aborted) publicAlbumRequests.delete(key)
+    const controller = new AbortController()
+    const record = { controller, subscribers: 0, promise: null }
+    record.promise = apiFetch(`${albumPath}/${encodeURIComponent(key)}`, {
+        signal: controller.signal,
+    }).then(normalizeAlbumDetail).then((data) => {
+        setCachedPublicAlbum(key, data)
+        return data
+    }).finally(() => {
+        if (publicAlbumRequests.get(key) === record) publicAlbumRequests.delete(key)
     })
+    record.promise.catch(() => {})
+    publicAlbumRequests.set(key, record)
+    return subscribeToCatalogRequest(record, options.signal)
+}
+
+export function prefetchPublicAlbum(albumId) {
+    return fetchAlbum(albumId).catch(() => null)
 }
 
 export function requestAlbumZip(albumId, token = null, options = {}) {

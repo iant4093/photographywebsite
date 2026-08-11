@@ -6,6 +6,7 @@ import boto3
 
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
+from cache_invalidation import invalidate_public_api, invalidate_public_previews
 from deletion_helpers import DeletionTooLargeError, delete_prefix_all_versions, preflight_deletion
 from media_access import album_media_prefixes, delete_preview_metadata, load_preview_metadata
 from response_helpers import error_response, internal_error, json_response
@@ -49,6 +50,12 @@ def handler(event, context):
             return error_response(404, "Album not found", code="not_found")
 
         album["albumId"] = album_id
+        if album.get("visibility") == "public":
+            invalidate_public_previews(
+                album_id,
+                reason="album-deleted",
+                strict=True,
+            )
         # Strictly resolve external derivative state before the first mutation.
         # A metadata outage must not leave an anonymously readable derivative
         # behind while its album is deleted.
@@ -63,6 +70,12 @@ def handler(event, context):
             Key={"albumId": album_id},
             ConditionExpression="attribute_exists(albumId)",
         )
+        if album.get("visibility") == "public":
+            invalidate_public_api(
+                album_id=album_id,
+                catalog=True,
+                reason="album-deleted",
+            )
         _audit(event, context, "success", "album_deleted", deleted_version_count=deleted_versions)
         return json_response(
             200,

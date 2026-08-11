@@ -7,8 +7,9 @@ import BackToTop from './components/BackToTop'
 import DocumentMetadata from './components/DocumentMetadata'
 import MotionExperience from './components/MotionExperience'
 import Home from './pages/Home'
+import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 
-const AlbumGallery = lazy(() => import('./pages/AlbumGallery'))
+const AlbumGallery = lazy(loadAlbumGalleryRoute)
 const Search = lazy(() => import('./pages/Search'))
 const SharedAlbum = lazy(() => import('./pages/SharedAlbum'))
 const Contact = lazy(() => import('./pages/Contact'))
@@ -28,7 +29,7 @@ const DeleteUser = lazy(() => import('./pages/DeleteUser'))
 const EditUser = lazy(() => import('./pages/EditUser'))
 const UserDashboard = lazy(() => import('./pages/UserDashboard'))
 const NotFound = lazy(() => import('./pages/NotFound'))
-const VideoGallery = lazy(() => import('./pages/VideoGallery'))
+const VideoGallery = lazy(loadVideoGalleryRoute)
 const Videos = lazy(() => import('./pages/Videos'))
 
 if (typeof window !== 'undefined') window.history.scrollRestoration = 'manual'

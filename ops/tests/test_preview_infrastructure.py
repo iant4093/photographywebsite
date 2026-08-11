@@ -157,21 +157,58 @@ class PreviewWorkerTests(unittest.TestCase):
 
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):
-    def test_public_preview_delivery_always_rechecks_visibility_at_origin(self) -> None:
+    def test_protected_preview_delivery_rechecks_visibility_while_public_aliases_are_cached(self) -> None:
         policy = resource_block("ImagesBucketPolicy")
-        cache = resource_block("PreviewMediaCachePolicy")
+        protected_cache = resource_block("PreviewMediaCachePolicy")
+        public_cache = resource_block("PublicPreviewCachePolicy")
+        public_headers = resource_block("PublicPreviewResponseHeadersPolicy")
+        rewrite = resource_block("PublicPreviewRewriteFunction")
         distribution = resource_block("ImagesCloudFront")
         self.assertIn("DenyCloudFrontNonPublicResponsivePreviews", policy)
         self.assertIn("s3:ExistingObjectTag/visibility: public", policy)
         self.assertIn("/albums/*/preview/v2/*", policy)
         self.assertIn("/albums/*/preview/v3/*", policy)
         for expected in ("DefaultTTL: 0", "MaxTTL: 0", "MinTTL: 0"):
-            self.assertIn(expected, cache)
-        self.assertIn("EnableAcceptEncodingBrotli: false", cache)
-        self.assertIn("EnableAcceptEncodingGzip: false", cache)
+            self.assertIn(expected, protected_cache)
+        for expected in ("DefaultTTL: 86400", "MaxTTL: 86400", "MinTTL: 1"):
+            self.assertIn(expected, public_cache)
+        self.assertIn("EnableAcceptEncodingBrotli: false", protected_cache)
+        self.assertIn("EnableAcceptEncodingGzip: false", protected_cache)
+        self.assertIn("parts[1] !== 'public-previews'", rewrite)
+        self.assertIn("request.uri = '/albums/'", rewrite)
+        self.assertIn("statusCode: 404", rewrite)
+        self.assertIn("private, no-store", rewrite)
+        self.assertNotIn("Cache-Control", public_headers)
+        self.assertIn("CustomErrorResponses:", distribution)
+        self.assertIn("ErrorCode: 403", distribution)
+        self.assertIn("ErrorCode: 404", distribution)
+        self.assertGreaterEqual(distribution.count("ErrorCachingMinTTL: 0"), 2)
+        self.assertIn("PathPattern: 'public-previews/*'", distribution)
+        self.assertIn("CachePolicyId: !Ref PublicPreviewCachePolicy", distribution)
+        self.assertIn("ResponseHeadersPolicyId: !Ref PublicPreviewResponseHeadersPolicy", distribution)
+        self.assertIn("FunctionARN: !GetAtt PublicPreviewRewriteFunction.FunctionMetadata.FunctionARN", distribution)
+        self.assertNotIn("EventType: viewer-response", distribution)
         self.assertIn("PathPattern: 'albums/*/preview/v2/*'", distribution)
         self.assertIn("PathPattern: 'albums/*/preview/v3/*'", distribution)
         self.assertIn("CachePolicyId: !Ref PreviewMediaCachePolicy", distribution)
+
+    def test_public_mutations_have_least_privilege_invalidation_permissions(self) -> None:
+        frontend_only = (
+            "CreateAlbumFunction",
+            "AddImagesFunction",
+            "UpdateGalleryOrderFunction",
+            "UpdateImageFunction",
+        )
+        for logical_id in frontend_only:
+            block = resource_block(logical_id)
+            self.assertIn("cloudfront:CreateInvalidation", block)
+            self.assertIn("distribution/EIOCCNR8XGQ1B", block)
+        for logical_id in ("UpdateAlbumFunction", "DeleteAlbumFunction", "DeleteImagesFunction"):
+            block = resource_block(logical_id)
+            self.assertIn("IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront", block)
+            self.assertIn("cloudfront:CreateInvalidation", block)
+            self.assertIn("distribution/${ImagesCloudFront}", block)
+            self.assertNotIn("Resource: '*'", block)
 
     def test_media_origin_access_logs_use_scoped_existing_audit_bucket_policy(self) -> None:
         source = resource_block("ImagesBucket")

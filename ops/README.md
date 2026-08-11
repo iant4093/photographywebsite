@@ -71,10 +71,15 @@ inventory digest across canary and full reconciliation; do not use a sorted
 - an SSE-SQS encrypted `PreviewQueue` and 14-day dead-letter queue;
 - a Node.js 22 worker with reserved/event-source concurrency of two and partial
   SQS batch failure reporting; and
-- a preview-only CloudFront behavior that rechecks the S3 visibility tag at the
-  origin for every uncached browser request. The versioned WebP response remains
-  immutable in the browser, while the edge cannot continue serving an object
-  after a public-to-private transition without re-evaluating the bucket policy.
+- a protected preview behavior that rechecks the S3 visibility tag at the
+  origin, plus a strictly validated `public-previews/{albumId}/v3/...` alias
+  that edge-caches public WebP responses for one day. The alias rewrites to the
+  same tagged canonical S3 object (no duplicate media storage), never applies
+  to private/unlisted serializers, and public visibility/deletion mutations
+  submit narrow album-level invalidations. Malformed aliases are `no-store`,
+  origin 403/404 responses have zero edge TTL, and the public response policy
+  does not override errors with immutable browser caching, so a preview
+  requested before generation can recover.
 
 The worker is an independent locked Node package under
 `backend/preview_worker/`. The SAM make build installs exact Linux x86_64 native

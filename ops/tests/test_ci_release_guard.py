@@ -296,8 +296,12 @@ class ReleaseIntentTests(unittest.TestCase):
             {rule["logicalId"] for rule in role_rules},
             {
                 "CreateAlbumFunctionRole",
+                "AddImagesFunctionRole",
+                "DeleteAlbumFunctionRole",
+                "DeleteImagesFunctionRole",
                 "UpdateAlbumFunctionRole",
                 "UpdateGalleryOrderFunctionRole",
+                "UpdateImageFunctionRole",
                 "CreateZipFunctionRole",
                 "GetAlbumsFunctionRole",
                 "GetPublicAlbumsFunctionRole",
@@ -359,6 +363,9 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("UpdateGalleryOrderFunction", "AWS::Lambda::Function"),
                 ("UpdateGalleryOrderFunctionRole", "AWS::IAM::Role"),
                 ("UpdateGalleryOrderFunctionUpdateGalleryOrderPermission", "AWS::Lambda::Permission"),
+                ("PublicPreviewCachePolicy", "AWS::CloudFront::CachePolicy"),
+                ("PublicPreviewResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
+                ("PublicPreviewRewriteFunction", "AWS::CloudFront::Function"),
             },
         )
         for rule in document["rules"]:
@@ -1665,7 +1672,8 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("get-public-access-block", frontend)
         self.assertIn("OriginAccessControlId", frontend)
         self.assertLess(frontend.index('"$root/index.html"'), frontend.index("create-invalidation"))
-        self.assertIn("--paths '/*'", frontend)
+        self.assertIn("--paths '/' '/index.html' '/images/heroes/*' '/favicon.svg'", frontend)
+        self.assertNotIn("--paths '/*'", frontend)
         self.assertIn('if [[ "$api" == "/api" ]]', smoke)
         self.assertIn('api="${site}${api}"', smoke)
         self.assertIn('elif [[ "$api" != https://* ]]', smoke)

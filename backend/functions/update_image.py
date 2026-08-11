@@ -6,6 +6,7 @@ import boto3
 
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
+from cache_invalidation import invalidate_public_api
 from deletion_helpers import DeletionTooLargeError, delete_keys_all_versions, preflight_deletion
 from media_access import tag_keys_visibility, validate_album_media_key
 from response_helpers import error_response, internal_error, json_response
@@ -108,6 +109,12 @@ def handler(event, context):
         )
         if obsolete_thumb:
             delete_keys_all_versions([obsolete_thumb])
+        if album.get("visibility") == "public":
+            invalidate_public_api(
+                album_id=album_id,
+                catalog=is_cover,
+                reason="album-media-updated",
+            )
         _audit(event, context, "success", "media_updated")
         return json_response(200, {"message": "Media metadata updated", "mediaId": raw_key})
     except DeletionTooLargeError:

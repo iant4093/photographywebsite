@@ -1,9 +1,32 @@
+import { useCallback, useEffect, useRef } from 'react'
 import { Link } from 'react-router'
 import ProgressiveImage from './ProgressiveImage'
 import { albumCoverUrl } from '../utils/mediaUrls'
+import { prefetchPublicAlbum } from '../utils/api'
+import { preloadAlbumRoute } from '../utils/routePreload'
 
 // Shared album card used by public, video, and signed-in catalogs.
 function AlbumCard({ album, onOpen, onImageError, onMouseEnter }) {
+    const intentTimer = useRef(null)
+    const canPrefetch = !onOpen && album?.visibility === 'public'
+    const prefetch = useCallback(() => {
+        if (!canPrefetch) return
+        void preloadAlbumRoute(album)
+        void prefetchPublicAlbum(album.albumId)
+    }, [album, canPrefetch])
+    const schedulePrefetch = useCallback(() => {
+        if (!canPrefetch || intentTimer.current !== null) return
+        intentTimer.current = window.setTimeout(() => {
+            intentTimer.current = null
+            prefetch()
+        }, 140)
+    }, [canPrefetch, prefetch])
+    const cancelPrefetch = useCallback(() => {
+        if (intentTimer.current !== null) window.clearTimeout(intentTimer.current)
+        intentTimer.current = null
+    }, [])
+    useEffect(() => cancelPrefetch, [cancelPrefetch])
+
     // Determine the route: jump directly to video player if only 1 video
     const isSingleVideo = album.type === 'video' && album.imageCount === 1
     const targetRoute = isSingleVideo
@@ -88,7 +111,15 @@ function AlbumCard({ album, onOpen, onImageError, onMouseEnter }) {
     }
 
     return (
-        <Link to={targetRoute} onMouseEnter={onMouseEnter} className={className}>
+        <Link
+            to={targetRoute}
+            onMouseEnter={(event) => { onMouseEnter?.(event); schedulePrefetch() }}
+            onMouseLeave={cancelPrefetch}
+            onFocus={schedulePrefetch}
+            onBlur={cancelPrefetch}
+            onTouchStart={prefetch}
+            className={className}
+        >
             {content}
         </Link>
     )

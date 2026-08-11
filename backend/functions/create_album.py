@@ -15,6 +15,7 @@ from audit_helpers import actor_context, emit_audit_event
 from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import get_caller_claims, require_admin
+from cache_invalidation import invalidate_public_api
 from dynamodb_helpers import ensure_album_item_budget
 from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
@@ -302,6 +303,8 @@ def handler(event, context):
                     context=context, actor_type="service", auth_method="service",
                 )
 
+        if visibility == "public":
+            invalidate_public_api(catalog=True, reason="album-created")
         _audit(event, context, "success", "album_created", media_count=len(images), visibility=visibility)
         return json_response(201, serialize_album_summary(item, include_admin=True))
     except ValidationError as error:

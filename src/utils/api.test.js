@@ -1,5 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearApiCache, fetchAlbumsPage } from './api'
+import {
+    clearApiCache,
+    fetchAlbum,
+    fetchAlbumsPage,
+    prefetchPublicAlbum,
+    readCachedPublicAlbum,
+} from './api'
+
+function jsonResponse(body) {
+    return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+    })
+}
 
 describe('fetchAlbumsPage cancellation', () => {
     beforeEach(() => {
@@ -54,5 +67,71 @@ describe('fetchAlbumsPage cancellation', () => {
             nextCursor: null,
         })
         expect(requestCount).toBe(2)
+    })
+})
+
+describe('public album detail cache', () => {
+    beforeEach(() => {
+        clearApiCache()
+        vi.stubGlobal('window', {
+            setTimeout: globalThis.setTimeout,
+            clearTimeout: globalThis.clearTimeout,
+        })
+    })
+
+    afterEach(() => {
+        clearApiCache()
+        vi.useRealTimers()
+        vi.unstubAllGlobals()
+    })
+
+    it('deduplicates in-flight requests and reuses a fresh public response', async () => {
+        let resolveRequest
+        const request = vi.fn(() => new Promise((resolve) => { resolveRequest = resolve }))
+        vi.stubGlobal('fetch', request)
+
+        const first = fetchAlbum('album-one')
+        const second = fetchAlbum('album-one')
+        expect(request).toHaveBeenCalledOnce()
+        resolveRequest(jsonResponse({ albumId: 'album-one', images: [] }))
+
+        await expect(first).resolves.toMatchObject({ albumId: 'album-one' })
+        await expect(second).resolves.toMatchObject({ albumId: 'album-one' })
+        await expect(fetchAlbum('album-one')).resolves.toMatchObject({ albumId: 'album-one' })
+        expect(request).toHaveBeenCalledOnce()
+        expect(readCachedPublicAlbum('album-one')).toMatchObject({ albumId: 'album-one' })
+    })
+
+    it('expires entries, bounds the LRU to five albums, and supports forced refresh', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+        const request = vi.fn((url) => Promise.resolve(jsonResponse({ albumId: url.split('/').pop(), images: [] })))
+        vi.stubGlobal('fetch', request)
+
+        for (let index = 1; index <= 6; index += 1) await fetchAlbum(`album-${index}`)
+        expect(readCachedPublicAlbum('album-1')).toBeNull()
+        expect(readCachedPublicAlbum('album-6')).toMatchObject({ albumId: 'album-6' })
+
+        await fetchAlbum('album-6', null, { force: true })
+        expect(request).toHaveBeenCalledTimes(7)
+        vi.advanceTimersByTime(5 * 60_000 + 1)
+        expect(readCachedPublicAlbum('album-6')).toBeNull()
+    })
+
+    it('never caches authenticated album data and hides speculative failures', async () => {
+        const request = vi.fn()
+            .mockResolvedValueOnce(jsonResponse({ albumId: 'private', images: [] }))
+            .mockResolvedValueOnce(jsonResponse({ albumId: 'private', images: [] }))
+            .mockResolvedValueOnce(new Response('', { status: 404 }))
+        vi.stubGlobal('fetch', request)
+
+        await fetchAlbum('private', 'secret-token')
+        await fetchAlbum('private', 'secret-token')
+        expect(request).toHaveBeenNthCalledWith(1, expect.stringMatching(/\/albums\/private$/), expect.objectContaining({
+            headers: { Authorization: 'Bearer secret-token' },
+        }))
+        expect(request).toHaveBeenCalledTimes(2)
+        await expect(prefetchPublicAlbum('missing')).resolves.toBeNull()
+        expect(request).toHaveBeenCalledTimes(3)
     })
 })

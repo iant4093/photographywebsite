@@ -716,6 +716,93 @@ Resources:
               Value: public, max-age=31536000, immutable
               Override: true
 
+  PublicPreviewCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'GoldenHour-PublicPreview-${Stage}'
+        Comment: Cache immutable public previews at the edge with bounded revocation time
+        DefaultTTL: 86400
+        MaxTTL: 86400
+        MinTTL: 1
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  PublicPreviewResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub 'GoldenHour-PublicPreview-Headers-${Stage}'
+        Comment: Harden public preview responses without making origin errors immutable
+        CorsConfig:
+          AccessControlAllowCredentials: false
+          AccessControlAllowHeaders:
+            Items:
+              - Content-Type
+              - Range
+          AccessControlAllowMethods:
+            Items:
+              - GET
+              - HEAD
+              - OPTIONS
+          AccessControlAllowOrigins:
+            Items:
+              - !Ref FrontendUrl
+          AccessControlExposeHeaders:
+            Items:
+              - Accept-Ranges
+              - Content-Length
+              - Content-Range
+              - ETag
+          AccessControlMaxAgeSec: 600
+          OriginOverride: true
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
+
+  PublicPreviewRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      AutoPublish: true
+      Name: !Sub 'GoldenHour-PublicPreview-${Stage}'
+      FunctionConfig:
+        Comment: Strictly map the cacheable public namespace to tagged canonical previews
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var parts = request.uri.split('/');
+          var albumPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+          var filePattern = /^[a-f0-9]{24}-w(640|960|1440|1920)\.webp$/;
+          if (parts.length !== 5 || parts[1] !== 'public-previews' || !albumPattern.test(parts[2]) || parts[3] !== 'v3' || !filePattern.test(parts[4])) {
+            return {
+              statusCode: 404,
+              statusDescription: 'Not Found',
+              headers: { 'cache-control': { value: 'private, no-store' } }
+            };
+          }
+          request.uri = '/albums/' + parts[2] + '/preview/v3/' + parts[4];
+          return request;
+        }
+
   HeroMediaCachePolicy:
     Type: AWS::CloudFront::CachePolicy
     Properties:
@@ -927,6 +1014,11 @@ Resources:
         IPV6Enabled: true
         HttpVersion: http2and3
         Comment: !Sub 'GoldenHour Images CDN - ${Stage}'
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ErrorCachingMinTTL: 0
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt ImagesBucket.RegionalDomainName
@@ -943,6 +1035,18 @@ Resources:
           ResponseHeadersPolicyId: !Ref MediaResponseHeadersPolicy
           Compress: true
         CacheBehaviors:
+          - PathPattern: 'public-previews/*'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: !Ref PublicPreviewCachePolicy
+            OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+            ResponseHeadersPolicyId: !Ref PublicPreviewResponseHeadersPolicy
+            Compress: false
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt PublicPreviewRewriteFunction.FunctionMetadata.FunctionARN
           - PathPattern: 'site/hero/versions/*'
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
@@ -1710,6 +1814,9 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
         - !If
           - HasResendSecret
           - Statement:
@@ -1746,6 +1853,7 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -1769,6 +1877,11 @@ Resources:
                 - s3:GetObjectTagging
                 - s3:PutObjectTagging
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
       Events:
         UpdateAlbum:
           Type: HttpApi
@@ -1797,6 +1910,9 @@ Resources:
             - Effect: Allow
               Action: dynamodb:UpdateItem
               Resource: !GetAtt GallerySettingsTable.Arn
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         UpdateGalleryOrder:
           Type: HttpApi
@@ -1816,6 +1932,7 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -1846,6 +1963,11 @@ Resources:
               Resource:
                 - !Sub '${ImagesBucket.Arn}/albums/*'
                 - !Sub '${ImagesBucket.Arn}/temp-zips/*'
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
       Events:
         DeleteAlbum:
           Type: HttpApi
@@ -1910,6 +2032,9 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         AddImages:
           Type: HttpApi
@@ -1938,9 +2063,9 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           MAX_PREVIEW_SOURCE_BYTES: '104857600'
           MAX_PREVIEW_OUTPUT_BYTES: '20971520'
-          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt PreviewQueue.QueueName
@@ -2138,6 +2263,7 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -2164,6 +2290,11 @@ Resources:
                 - s3:DeleteObject
                 - s3:DeleteObjectVersion
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
+                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
       Events:
         DeleteImages:
           Type: HttpApi
@@ -2303,6 +2434,9 @@ Resources:
                 - s3:GetObjectTagging
                 - s3:PutObjectTagging
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         UpdateImage:
           Type: HttpApi

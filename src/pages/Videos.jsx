@@ -40,7 +40,7 @@ export default function Videos() {
     }, [])
 
     useEffect(() => {
-        if (initialSnapshot) return undefined
+        if (initialSnapshot && !initialSnapshot.stale) return undefined
         const controller = new AbortController()
         fetchAlbumsPage({ visibility: 'public', type: 'video', limit: PAGE_SIZE }, { signal: controller.signal })
             .then((page) => savePage(page.items, page.nextCursor))

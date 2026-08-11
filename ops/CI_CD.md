@@ -63,9 +63,10 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   frontend deployment. Empty backend changes are an explicit safe no-op.
 - Frontend deployment never deletes S3 objects. Fingerprinted assets receive
   immutable caching, other static files receive short caching, `index.html` is
-  uploaded last with no-cache metadata, and a full `/*` CloudFront invalidation
-  is awaited. This covers SPA HTML plus every non-fingerprinted public path,
-  including `/.well-known/security.txt`.
+  uploaded last with no-cache metadata, and an exact invalidation for `/`,
+  `/index.html`, hero assets, and the favicon is awaited. Fingerprinted
+  `/assets/*` objects intentionally survive deploys in edge caches; other
+  non-fingerprinted files naturally revalidate on their five-minute metadata.
 - A manual workflow can only redeploy independently attested artifacts from a
   successful `main` production workflow path whose exact SHA remains in `main`
   history. Guard, deploy, and smoke scripts stay at the current trusted control

@@ -679,9 +679,12 @@ fi
         managed = statement_block(execution, "ManageApplicationCloudFront")
         for action in (
             "cloudfront:DeleteCachePolicy",
+            "cloudfront:DeleteFunction",
             "cloudfront:DeleteOriginAccessControl",
             "cloudfront:DeleteResponseHeadersPolicy",
             "cloudfront:GetCachePolicy",
+            "cloudfront:GetFunction",
+            "cloudfront:DescribeFunction",
             "cloudfront:GetDistribution",
             "cloudfront:GetDistributionConfig",
             "cloudfront:GetOriginAccessControl",
@@ -691,6 +694,8 @@ fi
             "cloudfront:UntagResource",
             "cloudfront:UpdateCachePolicy",
             "cloudfront:UpdateDistribution",
+            "cloudfront:UpdateFunction",
+            "cloudfront:PublishFunction",
             "cloudfront:UpdateOriginAccessControl",
             "cloudfront:UpdateResponseHeadersPolicy",
         ):
@@ -698,6 +703,7 @@ fi
         for resource_family in (
             "distribution/*",
             "cache-policy/*",
+            "function/*",
             "origin-access-control/*",
             "response-headers-policy/*",
         ):
@@ -709,10 +715,12 @@ fi
         for action in (
             "cloudfront:CreateCachePolicy",
             "cloudfront:CreateDistribution",
+            "cloudfront:CreateFunction",
             "cloudfront:CreateOriginAccessControl",
             "cloudfront:CreateResponseHeadersPolicy",
             "cloudfront:ListCachePolicies",
             "cloudfront:ListDistributions",
+            "cloudfront:ListFunctions",
             "cloudfront:ListOriginAccessControls",
             "cloudfront:ListResponseHeadersPolicies",
         ):

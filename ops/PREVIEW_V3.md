@@ -16,6 +16,12 @@ digests only.
   queue messages. It cannot update DynamoDB, write media, or delete anything.
 - `ops/reconcile_preview_v3.py` has no apply mode and uses only read/list/HEAD,
   a 64-byte S3 ranged read, object-tag reads, and CloudFront HEAD requests.
+- Public API serializers expose ready derivatives through the validated
+  `public-previews/{albumId}/v3/...` viewer namespace. CloudFront rewrites that
+  alias to the canonical tagged object and caches successful public responses
+  for at most one day. Protected serializers retain canonical signed URLs with
+  zero edge TTL. Public visibility and deletion handlers issue narrow CDN
+  invalidations; they never invalidate the complete distribution.
 - The representative canary contains five distinct items: public, private,
   unlisted/share-gated (`protected`), portrait, and a source of at least 25 MiB
   by default. The tool fails if all five distinct cases cannot be satisfied.

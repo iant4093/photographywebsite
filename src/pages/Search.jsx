@@ -55,7 +55,7 @@ export default function Search() {
     const [albumsByType, setAlbumsByType] = useState(initialCatalogs)
     const [loading, setLoading] = useState(() => CATALOGS.some(({ key }) => {
         const snapshot = getCatalogSnapshot(key)
-        return !snapshot || Boolean(snapshot.nextCursor)
+        return !snapshot || snapshot.stale || Boolean(snapshot.nextCursor)
     }))
     const [error, setError] = useState(null)
     const [loadAttempt, setLoadAttempt] = useState(0)
@@ -65,6 +65,7 @@ export default function Search() {
 
         const loadCatalog = async ({ key, type }) => {
             const snapshot = getCatalogSnapshot(key)
+            const hasFreshSnapshot = Boolean(snapshot && !snapshot.stale)
             const save = ({ items, nextCursor }) => {
                 const reconciled = reconcilePublicCatalogItems(items, type)
                 setCatalogSnapshot(key, { items: reconciled, nextCursor })
@@ -79,9 +80,9 @@ export default function Search() {
                         limit: PAGE_SIZE,
                         cursor,
                     }, { signal: controller.signal }),
-                    initialItems: snapshot?.items,
-                    initialCursor: snapshot?.nextCursor,
-                    hasInitialPage: Boolean(snapshot),
+                    initialItems: hasFreshSnapshot ? snapshot.items : [],
+                    initialCursor: hasFreshSnapshot ? snapshot.nextCursor : null,
+                    hasInitialPage: hasFreshSnapshot,
                     signal: controller.signal,
                     onPage: save,
                 })

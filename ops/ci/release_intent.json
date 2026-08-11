@@ -60,6 +60,10 @@
     {"logicalId": "CreateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "UpdateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "UpdateGalleryOrderFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "DeleteAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "AddImagesFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "DeleteImagesFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "UpdateImageFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "CreateZipFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "Api", "resourceType": "AWS::ApiGatewayV2::Api", "action": "Modify", "propertyPaths": ["Body"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "CostReportCacheTable", "resourceType": "AWS::DynamoDB::Table", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
@@ -77,6 +81,9 @@
     {"logicalId": "GallerySettingsTable", "resourceType": "AWS::DynamoDB::Table", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "UpdateGalleryOrderFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "UpdateGalleryOrderFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "UpdateGalleryOrderFunctionUpdateGalleryOrderPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true}
+    {"logicalId": "UpdateGalleryOrderFunctionUpdateGalleryOrderPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "PublicPreviewCachePolicy", "resourceType": "AWS::CloudFront::CachePolicy", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "PublicPreviewResponseHeadersPolicy", "resourceType": "AWS::CloudFront::ResponseHeadersPolicy", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "PublicPreviewRewriteFunction", "resourceType": "AWS::CloudFront::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true}
   ]
 }

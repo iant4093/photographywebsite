@@ -10,6 +10,7 @@ from audit_helpers import actor_context, emit_audit_event
 from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import require_admin
+from cache_invalidation import invalidate_public_api, invalidate_public_previews
 from media_access import serialize_album_summary, tag_album_visibility, tag_preview_visibility, validate_album_media_key
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import (
@@ -132,6 +133,14 @@ def handler(event, context):
         # than anonymously exposed) if the second operation fails.
         if old_visibility == "public" and new_visibility != "public":
             tag_album_visibility(updated, new_visibility, include_derivatives=True)
+            # Submit the edge purge before committing a restrictive transition.
+            # A purge failure therefore leaves media unavailable, not silently
+            # less private than the requested album state.
+            invalidate_public_previews(
+                album_id,
+                reason="album-visibility-restricted",
+                strict=True,
+            )
 
         condition = (
             "attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) "
@@ -161,6 +170,15 @@ def handler(event, context):
         # that registered derivatives while this visibility change was in
         # flight. The worker also re-reads visibility after tagging.
         tag_preview_visibility(updated, new_visibility)
+        if old_visibility != "public" and new_visibility == "public":
+            # Clear any cached denial produced while the source was protected.
+            invalidate_public_previews(album_id, reason="album-visibility-public")
+        if old_visibility == "public" or new_visibility == "public":
+            invalidate_public_api(
+                album_id=album_id,
+                catalog=True,
+                reason="album-updated",
+            )
         _audit(
             event,
             context,

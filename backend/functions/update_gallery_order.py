@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
+from cache_invalidation import invalidate_public_api
 from front_door import verify_front_door_request
 from gallery_order import SETTING_ID
 from response_helpers import error_response, internal_error, json_response
@@ -160,6 +161,7 @@ def handler(event, context):
             UpdateExpression="SET " + ", ".join(assignments),
             ExpressionAttributeValues=values,
         )
+        invalidate_public_api(catalog=True, reason=f"{album_type}-gallery-order")
         _audit(
             event,
             context,

@@ -23,6 +23,7 @@ PROTECTED_VISIBILITIES = {"private", "unlisted", PENDING_VISIBILITY}
 LEGACY_PREFIX_SEGMENT = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?$")
 PREVIEW_VERSION = 3
 PREVIEW_WIDTHS = (640, 960, 1440, 1920)
+PUBLIC_PREVIEW_PREFIX = "public-previews"
 
 _s3 = None
 _dynamodb = None
@@ -183,6 +184,24 @@ def expected_preview_keys(album_id, raw_key):
     return {str(width): f"{prefix}{media_id}-w{width}.webp" for width in PREVIEW_WIDTHS}
 
 
+def public_preview_key(album_id, preview_key):
+    """Map a validated canonical preview to the cacheable public namespace.
+
+    CloudFront rewrites this viewer path to the canonical, visibility-tagged
+    S3 object. Protected serializers never call this helper, so private and
+    link-only previews retain the origin-authorized delivery path.
+    """
+    album_id = validate_uuid(album_id)
+    preview_key = normalize_object_key(preview_key)
+    canonical_prefix = f"{canonical_album_prefix(album_id)}preview/v{PREVIEW_VERSION}/"
+    if not preview_key.startswith(canonical_prefix):
+        raise ValidationError("Preview key is outside the public preview namespace")
+    filename = preview_key.removeprefix(canonical_prefix)
+    if not re.fullmatch(r"[a-f0-9]{24}-w(?:640|960|1440|1920)\.webp", filename):
+        raise ValidationError("Preview key does not match the public preview contract")
+    return f"{PUBLIC_PREVIEW_PREFIX}/{album_id}/v{PREVIEW_VERSION}/{filename}"
+
+
 def validated_preview_keys(image, album, metadata=None, *, allow_pending=False):
     """Return only a complete deterministic v2 derivative set.
 
@@ -325,7 +344,14 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
     preview_keys = validated_preview_keys(source, album, preview_metadata) if album else {}
     if preview_keys:
         result["previewSrcSet"] = [
-            {"width": width, "url": media_url(preview_keys[str(width)], visibility)}
+            {
+                "width": width,
+                "url": (
+                    public_url(public_preview_key(album.get("albumId"), preview_keys[str(width)]))
+                    if visibility == "public"
+                    else media_url(preview_keys[str(width)], visibility)
+                ),
+            }
             for width in PREVIEW_WIDTHS
         ]
     if visibility == "public":

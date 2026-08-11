@@ -3,8 +3,13 @@ import { isSafeCursor, mergeUniqueById } from './apiResponse'
 const catalogSnapshots = new Map()
 const pendingCatalogMutations = new Map()
 const MAX_SNAPSHOT_AGE_MS = 5 * 60_000
+const MAX_STALE_SNAPSHOT_AGE_MS = 30 * 60_000
 const MAX_PENDING_MUTATION_AGE_MS = 10 * 60_000
 const MAX_CATALOG_PAGES = 100
+const MAX_PERSISTED_ITEMS = 500
+const SNAPSHOT_SCHEMA_VERSION = 2
+const SNAPSHOT_STORAGE_PREFIX = 'ian:public-catalog:v2:'
+const PERSISTED_CATALOG_KEYS = ['public-photos', 'public-videos']
 const PUBLIC_ALBUM_FIELDS = [
     'albumId',
     'type',
@@ -47,27 +52,123 @@ function throwIfAborted(signal) {
     throw new DOMException('Request aborted', 'AbortError')
 }
 
+function snapshotStorage() {
+    try {
+        return typeof window !== 'undefined' ? window.sessionStorage : null
+    } catch {
+        return null
+    }
+}
+
+function storageKey(key) {
+    return `${SNAPSHOT_STORAGE_PREFIX}${key}`
+}
+
+function validatedSnapshot(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    if (value.version !== SNAPSHOT_SCHEMA_VERSION) return null
+    if (!Number.isFinite(value.savedAt) || value.savedAt <= 0) return null
+    if (!Array.isArray(value.items) || value.items.length > MAX_PERSISTED_ITEMS) return null
+    if (!isSafeCursor(value.nextCursor ?? null)) return null
+    if (value.items.some((album) => (
+        !album
+        || typeof album !== 'object'
+        || Array.isArray(album)
+        || typeof album.albumId !== 'string'
+        || !album.albumId
+    ))) return null
+    return {
+        items: value.items.map((album) => Object.fromEntries(
+            PUBLIC_ALBUM_FIELDS
+                .filter((field) => album[field] !== undefined)
+                .map((field) => [field, album[field]]),
+        )),
+        nextCursor: value.nextCursor ?? null,
+        savedAt: value.savedAt,
+    }
+}
+
+function readPersistedSnapshot(key) {
+    if (!PERSISTED_CATALOG_KEYS.includes(key)) return null
+    const storage = snapshotStorage()
+    if (!storage) return null
+    try {
+        const parsed = validatedSnapshot(JSON.parse(storage.getItem(storageKey(key)) || 'null'))
+        if (!parsed || Date.now() - parsed.savedAt > MAX_STALE_SNAPSHOT_AGE_MS) {
+            storage.removeItem(storageKey(key))
+            return null
+        }
+        return parsed
+    } catch {
+        storage.removeItem(storageKey(key))
+        return null
+    }
+}
+
+function persistSnapshot(key, snapshot) {
+    if (!PERSISTED_CATALOG_KEYS.includes(key)) return
+    const storage = snapshotStorage()
+    if (!storage || !Array.isArray(snapshot.items) || snapshot.items.length > MAX_PERSISTED_ITEMS) return
+    try {
+        const items = snapshot.items.map((album) => Object.fromEntries(
+            PUBLIC_ALBUM_FIELDS
+                .filter((field) => album?.[field] !== undefined)
+                .map((field) => [field, album[field]]),
+        ))
+        storage.setItem(storageKey(key), JSON.stringify({
+            version: SNAPSHOT_SCHEMA_VERSION,
+            items,
+            nextCursor: snapshot.nextCursor ?? null,
+            savedAt: snapshot.savedAt,
+        }))
+    } catch {
+        // Storage can be disabled or full. The in-memory cache remains valid.
+    }
+}
+
+function removePersistedSnapshot(key) {
+    try {
+        snapshotStorage()?.removeItem(storageKey(key))
+    } catch {
+        // Storage cleanup is best effort.
+    }
+}
+
 export function getCatalogSnapshot(key) {
-    const snapshot = catalogSnapshots.get(key)
-    if (!snapshot || Date.now() - snapshot.savedAt > MAX_SNAPSHOT_AGE_MS) return null
-    return snapshot
+    let snapshot = catalogSnapshots.get(key)
+    if (!snapshot) {
+        snapshot = readPersistedSnapshot(key)
+        if (snapshot) catalogSnapshots.set(key, snapshot)
+    }
+    if (!snapshot) return null
+    const age = Date.now() - snapshot.savedAt
+    if (age > MAX_STALE_SNAPSHOT_AGE_MS) {
+        catalogSnapshots.delete(key)
+        removePersistedSnapshot(key)
+        return null
+    }
+    return { ...snapshot, stale: age > MAX_SNAPSHOT_AGE_MS }
 }
 
 export function setCatalogSnapshot(key, value) {
-    catalogSnapshots.set(key, { ...value, savedAt: Date.now() })
+    const snapshot = { ...value, savedAt: Date.now() }
+    catalogSnapshots.set(key, snapshot)
+    persistSnapshot(key, snapshot)
 }
 
 export function invalidateCatalogSnapshots() {
     catalogSnapshots.clear()
+    for (const key of PERSISTED_CATALOG_KEYS) removePersistedSnapshot(key)
 }
 
 export function clearCatalogSnapshots() {
-    catalogSnapshots.clear()
+    invalidateCatalogSnapshots()
     pendingCatalogMutations.clear()
 }
 
 export function deleteCatalogSnapshot(key) {
     catalogSnapshots.delete(key)
+    removePersistedSnapshot(key)
 }
 
 export function recordPublicCatalogUpsert(album) {

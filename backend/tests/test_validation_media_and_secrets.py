@@ -94,9 +94,46 @@ class MediaAccessTests(unittest.TestCase):
         with patch.object(media_access, "load_preview_metadata", return_value={media_id: metadata}):
             result = media_access.serialize_images(album, include_internal=True)[0]
         self.assertEqual([item["width"] for item in result["previewSrcSet"]], [640, 960, 1440, 1920])
-        self.assertTrue(all(item["url"].startswith("https://media.example.test/") for item in result["previewSrcSet"]))
+        self.assertTrue(all(
+            item["url"].startswith(f"https://media.example.test/public-previews/{ALBUM_ID}/v3/")
+            for item in result["previewSrcSet"]
+        ))
         self.assertEqual(result["previewVersion"], 3)
         self.assertEqual(result["previewKeys"], keys)
+
+    def test_protected_previews_never_use_the_public_cache_namespace(self):
+        album = {"albumId": ALBUM_ID, "visibility": "private", "images": [self.image]}
+        media_id = media_access.media_id_for_key(self.image["rawKey"])
+        keys = media_access.expected_preview_keys(ALBUM_ID, self.image["rawKey"])
+        metadata = {
+            "albumId": ALBUM_ID,
+            "mediaId": media_id,
+            "status": "ready",
+            "previewVersion": 3,
+            "previewKeys": keys,
+        }
+        with patch.object(media_access, "load_preview_metadata", return_value={media_id: metadata}), patch.object(
+            media_access,
+            "presigned_get_url",
+            side_effect=lambda key, **_kwargs: f"signed:{key}",
+        ):
+            result = media_access.serialize_images(album)[0]
+        self.assertTrue(all(item["url"].startswith("signed:albums/") for item in result["previewSrcSet"]))
+        self.assertTrue(all("public-previews" not in item["url"] for item in result["previewSrcSet"]))
+
+    def test_public_preview_namespace_rejects_cross_album_and_malformed_keys(self):
+        valid = media_access.expected_preview_keys(ALBUM_ID, self.image["rawKey"])["640"]
+        self.assertEqual(
+            media_access.public_preview_key(ALBUM_ID, valid),
+            f"public-previews/{ALBUM_ID}/v3/{media_access.media_id_for_key(self.image['rawKey'])}-w640.webp",
+        )
+        for invalid in (
+            valid.replace(ALBUM_ID, "22222222-2222-4222-8222-222222222222"),
+            valid.replace("-w640.webp", "-w641.webp"),
+            valid.replace("preview/v3", "preview/v2"),
+        ):
+            with self.subTest(key=invalid), self.assertRaises(validation_helpers.ValidationError):
+                media_access.public_preview_key(ALBUM_ID, invalid)
 
     def test_partial_or_non_deterministic_preview_metadata_is_ignored(self):
         album = {"albumId": ALBUM_ID, "visibility": "public", "images": [self.image]}

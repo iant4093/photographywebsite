@@ -17,19 +17,72 @@ describe('loadCompleteCatalog', () => {
         vi.useRealTimers()
     })
 
-    it('stores, expires, deletes, and clears catalog snapshots', () => {
+    it('stores, marks stale, expires, deletes, and clears catalog snapshots', () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
         setCatalogSnapshot('one', { items: [{ albumId: 'one' }], nextCursor: null })
         expect(getCatalogSnapshot('one')).toMatchObject({ items: [{ albumId: 'one' }], savedAt: Date.now() })
+        expect(getCatalogSnapshot('one').stale).toBe(false)
         deleteCatalogSnapshot('one')
         expect(getCatalogSnapshot('one')).toBeNull()
         setCatalogSnapshot('old', { items: [] })
         vi.advanceTimersByTime(5 * 60_000 + 1)
+        expect(getCatalogSnapshot('old')).toMatchObject({ items: [], stale: true })
+        vi.advanceTimersByTime(25 * 60_000)
         expect(getCatalogSnapshot('old')).toBeNull()
         setCatalogSnapshot('clear', { items: [] })
         clearCatalogSnapshots()
         expect(getCatalogSnapshot('clear')).toBeNull()
+    })
+
+    it('persists only bounded public catalog DTO fields for tab reloads', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+        sessionStorage.clear()
+        setCatalogSnapshot('public-photos', {
+            items: [{
+                albumId: 'album-one',
+                title: 'Visible',
+                visibility: 'public',
+                ownerEmail: 'must-not-persist@example.test',
+                rawKey: 'must-not-persist',
+            }],
+            nextCursor: null,
+        })
+
+        const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v2:public-photos'))
+        expect(stored).toMatchObject({
+            version: 2,
+            items: [{ albumId: 'album-one', title: 'Visible', visibility: 'public' }],
+            nextCursor: null,
+        })
+        expect(stored.items[0]).not.toHaveProperty('ownerEmail')
+        expect(stored.items[0]).not.toHaveProperty('rawKey')
+
+        // Clearing only memory is intentionally unavailable: deletion removes
+        // the persisted copy too, preventing stale data from being resurrected.
+        deleteCatalogSnapshot('public-photos')
+        expect(sessionStorage.getItem('ian:public-catalog:v2:public-photos')).toBeNull()
+    })
+
+    it('hydrates a valid tab snapshot and rejects malformed persisted state', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+        sessionStorage.setItem('ian:public-catalog:v2:public-videos', JSON.stringify({
+            version: 2,
+            savedAt: Date.now(),
+            nextCursor: null,
+            items: [{ albumId: 'video-one', title: 'Film', ownerEmail: 'discard@example.test' }],
+        }))
+        expect(getCatalogSnapshot('public-videos')).toMatchObject({
+            items: [{ albumId: 'video-one', title: 'Film' }],
+            stale: false,
+        })
+        expect(getCatalogSnapshot('public-videos').items[0]).not.toHaveProperty('ownerEmail')
+
+        sessionStorage.setItem('ian:public-catalog:v2:public-photos', '{bad-json')
+        expect(getCatalogSnapshot('public-photos')).toBeNull()
+        expect(sessionStorage.getItem('ian:public-catalog:v2:public-photos')).toBeNull()
     })
 
     it('reconciles recent public mutations over a stale edge catalog', () => {

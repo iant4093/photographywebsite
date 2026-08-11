@@ -90,8 +90,8 @@ describe('media URL compatibility', () => {
         const albumId = '123e4567-e89b-42d3-a456-426614174000'
         const cover = cdnUrl(`albums/${albumId}/original/cover.jpg`)
         const srcSet = await albumCoverPreviewSrcSet({ albumId, coverImageUrl: cover })
-        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v3/[a-f0-9]{24}-w640\\.webp 640w`))
-        expect(srcSet).toMatch(new RegExp(`albums/${albumId}/preview/v3/[a-f0-9]{24}-w960\\.webp 960w`))
+        expect(srcSet).toMatch(new RegExp(`public-previews/${albumId}/v3/[a-f0-9]{24}-w640\\.webp 640w`))
+        expect(srcSet).toMatch(new RegExp(`public-previews/${albumId}/v3/[a-f0-9]{24}-w960\\.webp 960w`))
         expect(srcSet).toContain('-w1440.webp 1440w')
         expect(srcSet).toContain('-w1920.webp 1920w')
         await expect(albumCoverPreviewSrcSet({ albumId, coverImageUrl: 'https://evil.test/cover.jpg' })).resolves.toBe('')

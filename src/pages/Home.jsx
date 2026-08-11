@@ -60,6 +60,7 @@ function Home() {
     useEffect(() => {
         const controller = new AbortController()
         const snapshot = catalogSnapshotRef.current
+        const hasFreshSnapshot = Boolean(snapshot && !snapshot.stale)
 
         loadCompleteCatalog({
             fetchPage: (cursor) => fetchAlbumsPage({
@@ -68,9 +69,9 @@ function Home() {
                 limit: PAGE_SIZE,
                 cursor,
             }, { signal: controller.signal }),
-            initialItems: snapshot?.items,
-            initialCursor: snapshot?.nextCursor,
-            hasInitialPage: Boolean(snapshot),
+            initialItems: hasFreshSnapshot ? snapshot.items : [],
+            initialCursor: hasFreshSnapshot ? snapshot.nextCursor : null,
+            hasInitialPage: hasFreshSnapshot,
             signal: controller.signal,
             onPage: ({ items, nextCursor: cursor }) => {
                 if (controller.signal.aborted) return

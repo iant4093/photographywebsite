@@ -8,6 +8,7 @@ import boto3
 
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
+from cache_invalidation import invalidate_public_api
 from create_album import _extract_exif, _normalize_images, _start_video_jobs
 from media_access import album_known_keys, tag_keys_visibility
 from preview_jobs import enqueue_preview_jobs
@@ -133,6 +134,12 @@ def handler(event, context):
                     resource_type="provider", reason_code="dispatch_failed", event=event,
                     context=context, actor_type="service", auth_method="service",
                 )
+        if album.get("visibility") == "public" and fresh_images:
+            invalidate_public_api(
+                album_id=album_id,
+                catalog=True,
+                reason="album-media-added",
+            )
         _audit(event, context, "success", "media_added", media_count=len(fresh_images))
         return json_response(200, {"message": "Images appended successfully", "added": len(fresh_images)})
     except ValidationError as error:
