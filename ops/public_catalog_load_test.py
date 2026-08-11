@@ -32,6 +32,7 @@ SUMMARY_FIELDS = {
     "coverThumbnailUrl",
     "coverBlurhash",
 }
+SUMMARY_OPTIONAL_FIELDS = {"galleryCategoryOrder"}
 DETAIL_FIELDS = SUMMARY_FIELDS - {"imageCount"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl", "downloadUrl"}
 IMAGE_OPTIONAL_FIELDS = {
@@ -147,7 +148,14 @@ def _exact_fields(value: object, allowed: set[str], label: str) -> dict:
 
 
 def validate_summary(value: object) -> dict:
-    item = _exact_fields(value, SUMMARY_FIELDS, "album summary")
+    if not isinstance(value, dict):
+        raise ProbeError("album summary is not an object")
+    fields = set(value)
+    if not SUMMARY_FIELDS <= fields or fields - SUMMARY_FIELDS - SUMMARY_OPTIONAL_FIELDS:
+        raise ProbeError("album summary does not match the public field allowlist")
+    if fields & FORBIDDEN_PUBLIC_FIELDS:
+        raise ProbeError("album summary contains a forbidden field")
+    item = value
     try:
         uuid.UUID(item["albumId"])
     except (AttributeError, TypeError, ValueError) as error:
@@ -156,6 +164,12 @@ def validate_summary(value: object) -> dict:
         raise ProbeError("album summary has an invalid public classification")
     if isinstance(item["imageCount"], bool) or not isinstance(item["imageCount"], int) or item["imageCount"] < 0:
         raise ProbeError("album summary has an invalid image count")
+    if "galleryCategoryOrder" in item and (
+        isinstance(item["galleryCategoryOrder"], bool)
+        or not isinstance(item["galleryCategoryOrder"], int)
+        or item["galleryCategoryOrder"] < 0
+    ):
+        raise ProbeError("album summary has an invalid gallery category order")
     for name in ("title", "description", "category", "createdAt", "coverBlurhash"):
         if not isinstance(item[name], str):
             raise ProbeError("album summary has an invalid text field")

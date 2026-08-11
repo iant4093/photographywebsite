@@ -342,11 +342,15 @@ class PublicCatalogProbeTests(unittest.TestCase):
                     )
 
     def test_public_schema_rejects_private_fields_signed_urls_and_exif_expansion(self):
+        ordered_summary = summary() | {"galleryCategoryOrder": 2}
+        self.assertEqual(public_load.validate_summary(ordered_summary), ordered_summary)
         invalid_summaries = [
             summary() | {"ownerEmail": "private@example.test"},
             summary() | {"visibility": "private"},
             summary() | {"albumId": "bad"},
             summary() | {"imageCount": True},
+            summary() | {"galleryCategoryOrder": True},
+            summary() | {"galleryCategoryOrder": -1},
             summary() | {"coverImageUrl": "https://media.test/x?X-Amz-Signature=secret"},
         ]
         for value in invalid_summaries:
