@@ -122,16 +122,17 @@ describe('AuthProvider', () => {
     vi.stubGlobal('fetch', vi.fn())
   })
 
-  it('removes legacy persistent credentials and starts signed out without session state', () => {
-    localStorage.setItem(clientStorageKey, 'legacy')
+  it('migrates an open tab session to persistent storage', async () => {
+    sessionStorage.setItem(clientStorageKey, 'open-tab-session')
     mount()
-    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
-    expect(localStorage.getItem(clientStorageKey)).toBeNull()
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out'))
+    expect(localStorage.getItem(clientStorageKey)).toBe('open-tab-session')
+    expect(sessionStorage.getItem(clientStorageKey)).toBeNull()
+    expect(cognito.pools.at(-1).options.Storage).toBe(localStorage)
   })
 
   it('restores a valid browser session and ignores invalid/unavailable users', async () => {
-    sessionStorage.setItem(clientStorageKey, 'present')
-    localStorage.setItem(clientStorageKey, 'legacy')
+    localStorage.setItem(clientStorageKey, 'present')
     cognito.currentUser = {
       getSession: (callback) => callback(null, {
         isValid: () => true,
@@ -186,6 +187,7 @@ describe('AuthProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'login' }))
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('viewer@example.com|viewer|signed'))
     expect(cognito.users.at(-1).setSignInUserSession).toHaveBeenCalled()
+    expect(cognito.users.at(-1).options.Storage).toBe(localStorage)
     fireEvent.click(screen.getByRole('button', { name: 'login' }))
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|signed'))
   })
@@ -274,7 +276,7 @@ describe('AuthProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'token' }))
     await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent('No active user session'))
 
-    sessionStorage.setItem(clientStorageKey, 'present')
+    localStorage.setItem(clientStorageKey, 'present')
     cognito.currentUser = null
     fireEvent.click(screen.getByRole('button', { name: 'token' }))
     await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent('No active user session'))
@@ -293,6 +295,7 @@ describe('AuthProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'logout' }))
     expect(apiCache.clearApiCache).toHaveBeenCalled()
     expect(apiCache.clearCatalogSnapshots).toHaveBeenCalled()
+    expect(localStorage.getItem(clientStorageKey)).toBeNull()
     expect(sessionStorage.getItem(clientStorageKey)).toBeNull()
     await waitFor(() => expect(signOut).toHaveBeenCalled())
   })

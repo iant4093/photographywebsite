@@ -117,7 +117,16 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                             <Link to="/sharedalbum" {...activeAttributes(sharedActive)}>Find Album</Link>
                             <Link to="/contact" {...activeAttributes(contactActive)}>Contact</Link>
                             {user ? (
-                                <Link to={isAdmin ? '/admin' : '/dashboard'} {...activeAttributes(accountActive)}>Dashboard</Link>
+                                <>
+                                    <Link to={isAdmin ? '/admin' : '/dashboard'} {...activeAttributes(accountActive)}>Dashboard</Link>
+                                    <button
+                                        type="button"
+                                        className="linen-desktop-signout"
+                                        onClick={logout}
+                                    >
+                                        Sign Out
+                                    </button>
+                                </>
                             ) : (
                                 <Link to="/login" {...activeAttributes(accountActive)}>Sign In</Link>
                             )}
@@ -183,7 +192,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                                 onClick={() => { logout(); setIsMenuOpen(false); }}
                                 className="linen-menu-action mt-8 font-sans text-lg font-medium px-8 py-3 rounded-xl bg-charcoal text-cream hover:bg-charcoal-light transition-colors duration-300 cursor-pointer"
                             >
-                                Log Out
+                                Sign Out
                             </button>
                         </>
                     ) : (

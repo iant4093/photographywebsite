@@ -155,7 +155,8 @@
   gap: clamp(1rem, 2vw, 2.2rem);
 }
 
-.linen-site .linen-desktop-links a {
+.linen-site .linen-desktop-links a,
+.linen-site .linen-desktop-links button {
   position: relative;
   color: var(--color-charcoal);
   font-size: 0.67rem;
@@ -164,7 +165,15 @@
   text-transform: uppercase;
 }
 
-.linen-site .linen-desktop-links a::after {
+.linen-site .linen-desktop-links button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.linen-site .linen-desktop-links a::after,
+.linen-site .linen-desktop-links button::after {
   content: "";
   position: absolute;
   right: 100%;
@@ -175,7 +184,8 @@
   transition: right 220ms ease;
 }
 
-.linen-site .linen-desktop-links a:hover::after {
+.linen-site .linen-desktop-links a:hover::after,
+.linen-site .linen-desktop-links button:hover::after {
   right: 0;
 }
 

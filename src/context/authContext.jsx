@@ -19,6 +19,26 @@ const storagePrefix = `CognitoIdentityServiceProvider.${POOL_DATA.ClientId}`
 let cognitoModulePromise
 let userPoolPromise
 
+function cognitoStorageKeys(storage) {
+    if (!storage) return []
+    return Object.keys(storage).filter((key) => key.startsWith(storagePrefix))
+}
+
+function clearCognitoCredentials(storage) {
+    cognitoStorageKeys(storage).forEach((key) => storage.removeItem(key))
+}
+
+function migrateTabSessionToPersistentStorage() {
+    if (typeof window === 'undefined') return
+    const sessionKeys = cognitoStorageKeys(window.sessionStorage)
+    sessionKeys.forEach((key) => {
+        if (window.localStorage.getItem(key) === null) {
+            window.localStorage.setItem(key, window.sessionStorage.getItem(key))
+        }
+    })
+    clearCognitoCredentials(window.sessionStorage)
+}
+
 function loadCognitoModule() {
     if (!cognitoModulePromise) {
         cognitoModulePromise = import('amazon-cognito-identity-js')
@@ -30,22 +50,20 @@ async function getUserPool() {
     if (!isCognitoConfigured || typeof window === 'undefined') return null
     if (!userPoolPromise) {
         userPoolPromise = loadCognitoModule().then(({ CognitoUserPool }) => (
-            new CognitoUserPool({ ...POOL_DATA, Storage: window.sessionStorage })
+            new CognitoUserPool({ ...POOL_DATA, Storage: window.localStorage })
         ))
     }
     return userPoolPromise
 }
 
-function hasSessionCredentials() {
+function hasPersistentCredentials() {
     if (typeof window === 'undefined') return false
-    return Object.keys(window.sessionStorage).some((key) => key.startsWith(storagePrefix))
+    return cognitoStorageKeys(window.localStorage).length > 0
 }
 
-function removeLegacyPersistentCredentials() {
-    if (typeof window === 'undefined') return
-    Object.keys(window.localStorage)
-        .filter((key) => key.startsWith(storagePrefix))
-        .forEach((key) => window.localStorage.removeItem(key))
+function hasRestorableCredentials() {
+    if (typeof window === 'undefined') return false
+    return hasPersistentCredentials() || cognitoStorageKeys(window.sessionStorage).length > 0
 }
 
 function decodeJwt(token) {
@@ -93,7 +111,7 @@ function hasSoftwareTokenMfa(data) {
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null)
-    const [loading, setLoading] = useState(() => isCognitoConfigured && hasSessionCredentials())
+    const [loading, setLoading] = useState(() => isCognitoConfigured && hasRestorableCredentials())
     const [isAdmin, setIsAdmin] = useState(false)
     const [userEmail, setUserEmail] = useState('')
     const [adminMfaStatus, setAdminMfaStatus] = useState('not-required')
@@ -108,9 +126,9 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         let active = true
-        removeLegacyPersistentCredentials()
+        migrateTabSessionToPersistentStorage()
 
-        if (!isCognitoConfigured || !hasSessionCredentials()) {
+        if (!isCognitoConfigured || !hasPersistentCredentials()) {
             return () => { active = false }
         }
 
@@ -222,9 +240,8 @@ export function AuthProvider({ children }) {
         clearApiCache()
         clearCatalogSnapshots()
         if (typeof window !== 'undefined') {
-            Object.keys(window.sessionStorage)
-                .filter((key) => key.startsWith(storagePrefix))
-                .forEach((key) => window.sessionStorage.removeItem(key))
+            clearCognitoCredentials(window.localStorage)
+            clearCognitoCredentials(window.sessionStorage)
         }
         return { globallySignedOut }
     }, [isAdmin, user])
@@ -244,7 +261,7 @@ export function AuthProvider({ children }) {
         const cognitoUser = new cognito.CognitoUser({
             Username: email,
             Pool: pool,
-            Storage: window.sessionStorage,
+            Storage: window.localStorage,
         })
 
         cognitoUser.setSignInUserSession(session)
@@ -349,14 +366,13 @@ export function AuthProvider({ children }) {
         clearApiCache()
         clearCatalogSnapshots()
         if (typeof window !== 'undefined') {
-            Object.keys(window.sessionStorage)
-                .filter((key) => key.startsWith(storagePrefix))
-                .forEach((key) => window.sessionStorage.removeItem(key))
+            clearCognitoCredentials(window.localStorage)
+            clearCognitoCredentials(window.sessionStorage)
         }
     }, [user])
 
     const getIdToken = useCallback(async () => {
-        if (!hasSessionCredentials()) throw new Error('No active user session.')
+        if (!hasPersistentCredentials()) throw new Error('No active user session.')
         const pool = await getUserPool()
         const cognitoUser = pool?.getCurrentUser()
         if (!cognitoUser) throw new Error('No active user session.')
