@@ -298,6 +298,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 "CreateAlbumFunctionRole",
                 "UpdateAlbumFunctionRole",
                 "CreateZipFunctionRole",
+                "GetAlbumsFunctionRole",
+                "GetPublicAlbumsFunctionRole",
                 "HeroCoverFunctionRole",
                 "PreviewWorkerFunctionRole",
             },
@@ -352,6 +354,10 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("RefreshGoogleDriveUsageFunctionRole", "AWS::IAM::Role"),
                 ("RefreshGoogleDriveUsageFunctionDriveUsageDailyRefresh", "AWS::Events::Rule"),
                 ("RefreshGoogleDriveUsageFunctionDriveUsageDailyRefreshPermission", "AWS::Lambda::Permission"),
+                ("GallerySettingsTable", "AWS::DynamoDB::Table"),
+                ("UpdateGalleryOrderFunction", "AWS::Lambda::Function"),
+                ("UpdateGalleryOrderFunctionRole", "AWS::IAM::Role"),
+                ("UpdateGalleryOrderFunctionUpdateGalleryOrderPermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:

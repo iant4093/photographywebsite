@@ -37,6 +37,11 @@ def album(visibility="public", **overrides):
 
 
 class CatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.gallery_order = patch.object(get_albums, "load_gallery_order", return_value={})
+        self.gallery_order.start()
+        self.addCleanup(self.gallery_order.stop)
+
     def test_public_summary_query_uses_additive_include_index(self):
         projected = album()
         projected.pop("images")
@@ -204,7 +209,7 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(captured["public_summary_only"])
         self.assertEqual(response_body(response)["items"][0]["imageCount"], 37)
 
-    def test_admin_public_query_keeps_full_visibility_index_path(self):
+    def test_admin_public_query_uses_summary_index_path(self):
         captured = {}
 
         def fetch(**kwargs):
@@ -217,7 +222,18 @@ class CatalogTests(unittest.TestCase):
         ):
             response = get_albums.handler(event, None)
         self.assertEqual(response["statusCode"], 200)
-        self.assertFalse(captured["public_summary_only"])
+        self.assertTrue(captured["public_summary_only"])
+
+    def test_public_photo_response_includes_configured_gallery_order(self):
+        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
+            get_albums, "_fetch_page", return_value=([album()], None)
+        ), patch.object(
+            get_albums, "load_gallery_order", return_value={ALBUM_ID: 4}
+        ):
+            response = get_albums.handler(
+                {"queryStringParameters": {"limit": "10", "type": "photo"}}, None
+            )
+        self.assertEqual(response_body(response)["items"][0]["galleryOrder"], 4)
 
     def test_photo_filter_includes_legacy_records_without_type(self):
         built = ConditionExpressionBuilder().build_expression(get_albums._type_filter("photo"))

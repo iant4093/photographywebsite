@@ -15,6 +15,7 @@ import {
 } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 import { currentHeroSrcSet, currentHeroUrl, heroCoverUrl } from '../utils/mediaUrls'
+import { sortGalleryAlbums } from '../utils/galleryOrder'
 
 const CATALOG_KEY = 'public-photos'
 // Fetch the complete current public catalog in one compressed response while
@@ -154,6 +155,9 @@ function Home() {
             result[category].push(album)
             return result
         }, {})
+        for (const category of Object.keys(grouped)) {
+            grouped[category] = sortGalleryAlbums(grouped[category])
+        }
         const categories = Object.keys(grouped).sort((a, b) => {
             if (a === 'Uncategorized') return 1
             if (b === 'Uncategorized') return -1

@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 
 from album_access import decode_cursor, encode_cursor
 from auth_helpers import AuthError, auth_error_response, get_verified_claims, is_admin
+from gallery_order import apply_gallery_order, load_gallery_order
 from media_access import serialize_album_summary
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_album_type, validate_email, validate_limit
@@ -19,6 +20,7 @@ from validation_helpers import ValidationError, validate_album_type, validate_em
 logger = logging.getLogger("photography_api.catalog")
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
+settings_table = dynamodb.Table(os.environ["GALLERY_SETTINGS_TABLE"])
 
 
 def _index_enabled(kind):
@@ -236,10 +238,15 @@ def handler(event, context):
             owner_email=owner_email,
             admin_all=admin_all,
             admin_owner_email=admin_owner_email,
-            public_summary_only=not admin and visibility == "public",
+            public_summary_only=visibility == "public" and not admin_owner_email,
         )
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
+        gallery_order = (
+            load_gallery_order(settings_table, logger)
+            if visibility == "public" and album_type in {None, "photo"}
+            else {}
+        )
         items = []
         for record in records:
             # Malformed visibility records fail closed and disappear from lists.
@@ -255,7 +262,7 @@ def handler(event, context):
                 image_count = record.get("imageCount")
                 if "images" not in record and _valid_image_count(image_count):
                     summary["imageCount"] = max(0, int(image_count))
-                items.append(summary)
+                items.append(apply_gallery_order(summary, gallery_order))
             except ValidationError:
                 continue
 

@@ -6,6 +6,7 @@ import {
     fetchAlbumsFiltered,
     listUsers,
     updateAlbum,
+    updateGalleryOrder,
     deleteAlbum,
     deleteImages,
     requestUploadUrl,
@@ -16,6 +17,7 @@ import {
 } from '../utils/api'
 import { mediaDisplayUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
 import { mapWithConcurrency } from '../utils/concurrency'
+import { sortGalleryAlbums } from '../utils/galleryOrder'
 
 function urlPathMatchesKey(value, key) {
     if (!value || !key) return false
@@ -198,6 +200,7 @@ function ManageAlbums() {
 
     const [actionError, setActionError] = useState('')
     const [actionSuccess, setActionSuccess] = useState('')
+    const [savingOrder, setSavingOrder] = useState(false)
 
     // Load users on mount
     useEffect(() => {
@@ -219,7 +222,7 @@ function ManageAlbums() {
         setExpandedAlbumId(null)
         setAlbumImages([])
         try {
-            let params = { type: typeFilter }
+            let params = { type: typeFilter, limit: 100 }
             if (scope === 'public') {
                 params = { ...params, visibility: 'public' }
             } else if (scope === 'unlisted') {
@@ -246,6 +249,47 @@ function ManageAlbums() {
             setLoading(false)
         }
     }, [getIdToken, scope, typeFilter])
+
+    const canReorderGallery = scope === 'public' && typeFilter === 'photo'
+
+    async function moveAlbum(album, direction) {
+        if (!canReorderGallery || savingOrder) return
+        const category = album.category || 'Uncategorized'
+        const categoryAlbums = sortGalleryAlbums(
+            albums.filter((item) => (item.category || 'Uncategorized') === category),
+        )
+        const currentIndex = categoryAlbums.findIndex((item) => item.albumId === album.albumId)
+        const targetIndex = currentIndex + direction
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= categoryAlbums.length) return
+
+        const reorderedCategory = [...categoryAlbums]
+        const movingAlbum = reorderedCategory[currentIndex]
+        reorderedCategory[currentIndex] = reorderedCategory[targetIndex]
+        reorderedCategory[targetIndex] = movingAlbum
+        const orderedIds = sortedCategories.flatMap((name) => (
+            name === category ? reorderedCategory : groupedAlbums[name]
+        )).map((item) => item.albumId)
+        const positions = new Map(orderedIds.map((albumId, index) => [albumId, index]))
+        const previousAlbums = albums
+
+        setActionError('')
+        setSavingOrder(true)
+        setAlbums((current) => current.map((item) => ({
+            ...item,
+            galleryOrder: positions.get(item.albumId),
+        })))
+        try {
+            const token = await getIdToken()
+            await updateGalleryOrder(token, orderedIds)
+            setActionSuccess('Main gallery order updated!')
+            window.setTimeout(() => setActionSuccess(''), 3000)
+        } catch (error) {
+            setAlbums(previousAlbums)
+            setActionError(error.message)
+        } finally {
+            setSavingOrder(false)
+        }
+    }
 
     // Load albums when the owner scope or media type changes.
     useEffect(() => {
@@ -562,6 +606,10 @@ function ManageAlbums() {
             return acc;
         }, {});
 
+        for (const category of Object.keys(grouped)) {
+            grouped[category] = sortGalleryAlbums(grouped[category])
+        }
+
         const sorted = Object.keys(grouped).sort((a, b) => {
             if (a === 'Uncategorized') return 1;
             if (b === 'Uncategorized') return -1;
@@ -586,7 +634,7 @@ function ManageAlbums() {
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">
                         Manage {typeFilter === 'video' ? 'Video' : 'Photo'} Albums
                     </h1>
-                    <p className="mt-2 text-warm-gray">Edit, add photos, remove photos, or delete albums.</p>
+                    <p className="mt-2 text-warm-gray">Edit, add photos, remove photos, delete albums, or arrange the main gallery.</p>
                 </div>
 
                 {/* Alerts */}
@@ -651,6 +699,12 @@ function ManageAlbums() {
                     )}
                 </div>
 
+                {canReorderGallery && !loading && albums.length > 0 && (
+                    <div className="mb-8 rounded-2xl border border-amber/20 bg-amber/5 px-5 py-4 text-sm text-warm-gray">
+                        Use the arrow buttons to arrange albums within each category. Albums are alphabetical until you customize their order.
+                    </div>
+                )}
+
                 {/* Albums list */}
                 {loading ? (
                     <div className="flex justify-center py-20">
@@ -669,7 +723,7 @@ function ManageAlbums() {
                                     <div className="h-px bg-warm-border flex-1"></div>
                                 </div>
                                 <div className="space-y-4">
-                                    {groupedAlbums[cat].map((album) => (
+                                    {groupedAlbums[cat].map((album, albumIndex) => (
                                         <div key={album.albumId}>
                                             {/* Album card */}
                                             <div className="bg-white rounded-2xl p-5 shadow-warm-sm border border-warm-border hover:shadow-warm transition-all">
@@ -713,7 +767,7 @@ function ManageAlbums() {
                                                     </div>
                                                 ) : (
                                                     /* View mode */
-                                                    <div className="flex items-start justify-between">
+                                                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                                                         <div className="flex-1">
                                                             <div className="flex items-center gap-3">
                                                                 <h3 className="font-serif text-lg font-semibold text-charcoal">{album.title}</h3>
@@ -723,7 +777,31 @@ function ManageAlbums() {
                                                                 {new Date(album.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
                                                             </p>
                                                         </div>
-                                                        <div className="flex gap-2 shrink-0">
+                                                        <div className="flex flex-wrap justify-end gap-2 shrink-0">
+                                                            {canReorderGallery && (
+                                                                <>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => moveAlbum(album, -1)}
+                                                                        disabled={albumIndex === 0 || savingOrder}
+                                                                        aria-label={`Move ${album.title} earlier`}
+                                                                        title="Move earlier"
+                                                                        className="h-8 w-8 rounded-lg bg-cream text-charcoal text-sm font-medium cursor-pointer hover:bg-cream-dark disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+                                                                    >
+                                                                        ↑
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => moveAlbum(album, 1)}
+                                                                        disabled={albumIndex === groupedAlbums[cat].length - 1 || savingOrder}
+                                                                        aria-label={`Move ${album.title} later`}
+                                                                        title="Move later"
+                                                                        className="h-8 w-8 rounded-lg bg-cream text-charcoal text-sm font-medium cursor-pointer hover:bg-cream-dark disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+                                                                    >
+                                                                        ↓
+                                                                    </button>
+                                                                </>
+                                                            )}
                                                             <button
                                                                 onClick={() => toggleAlbumImages(album)}
                                                                 className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors ${expandedAlbumId === album.albumId

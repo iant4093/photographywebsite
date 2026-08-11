@@ -110,6 +110,7 @@ describe('public API client behavior', () => {
     await api.completeHeroUpload('token', '0123456789abcdef0123456789abcdef', { signal })
     await api.createAlbum('token', { title: 'A' }, { signal })
     await api.updateAlbum('token', 'a/b', { title: 'B' }, { signal })
+    await api.updateGalleryOrder('token', ['one', 'two'], { signal })
     await api.addImagesToAlbum('token', 'a/b', [{ id: 'one' }], { signal })
     await api.deleteAlbum('token', 'a/b', { signal })
     await api.deleteImages('token', 'a/b', ['key'], { signal })
@@ -117,10 +118,15 @@ describe('public API client behavior', () => {
     await api.createUser('token', 'user+one@example.com', { signal })
     await api.deleteUser('token', 'user+one@example.com', { signal })
     await api.editUser('token', 'user+one@example.com', { enabled: true }, { signal })
-    expect(fetchMock).toHaveBeenCalledTimes(17)
+    expect(fetchMock).toHaveBeenCalledTimes(18)
     expect(fetchMock.mock.calls.some(([url]) => url.includes('a%2Fb'))).toBe(true)
     expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/admin/hero/upload-url'))).toBe(true)
     expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/admin/hero/complete'))).toBe(true)
+    expect(fetchMock.mock.calls.some(([url, options]) => (
+      url.endsWith('/admin/gallery-order')
+      && options.method === 'POST'
+      && options.body === JSON.stringify({ albumIds: ['one', 'two'] })
+    ))).toBe(true)
     expect(fetchMock.mock.calls.every(([, options]) => options.signal)).toBe(true)
 
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))

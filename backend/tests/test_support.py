@@ -16,6 +16,7 @@ DEFAULT_ENV = {
     "AWS_DEFAULT_REGION": "us-west-2",
     "AWS_REGION": "us-west-2",
     "ALBUMS_TABLE": "albums-test",
+    "GALLERY_SETTINGS_TABLE": "gallery-settings-test",
     "RATE_LIMIT_TABLE": "rate-test",
     "COST_REPORT_CACHE_TABLE": "cost-report-test",
     "DRIVE_USAGE_CACHE_TABLE": "drive-usage-test",

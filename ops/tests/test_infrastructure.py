@@ -113,6 +113,7 @@ expected_routes = {
     ("GET", "/users"),
     ("GET", "/admin/costs"),
     ("GET", "/admin/drive-usage"),
+    ("POST", "/admin/gallery-order"),
     ("DELETE", "/users/{email}"),
     ("PUT", "/users/{email}"),
 }
@@ -245,6 +246,34 @@ class DataProtectionTests(unittest.TestCase):
             self.assertIn(expected, block)
         self.assertNotRegex(block, r"(?m)^\s+SSESpecification:")
 
+    def test_gallery_order_is_retained_recoverable_and_least_privilege(self) -> None:
+        table = resource_block("GallerySettingsTable")
+        update = resource_block("UpdateGalleryOrderFunction")
+        for expected in (
+            "DeletionPolicy: Retain",
+            "UpdateReplacePolicy: Retain",
+            "DeletionProtectionEnabled: true",
+            "PointInTimeRecoveryEnabled: true",
+            "DataClassification",
+            "PortfolioConfiguration",
+        ):
+            self.assertIn(expected, table)
+        self.assertNotRegex(table, r"(?m)^\s+SSESpecification:")
+        self.assertIn("Path: /admin/gallery-order", update)
+        self.assertIn("Method: POST", update)
+        self.assertIn("Action: dynamodb:BatchGetItem", update)
+        self.assertIn("Action: dynamodb:PutItem", update)
+        for forbidden in ("dynamodb:Scan", "dynamodb:Query", "dynamodb:DeleteItem", "dynamodb:*"):
+            self.assertNotIn(forbidden, update)
+        self.assertIn("Resource: !GetAtt AlbumsTable.Arn", update)
+        self.assertIn("Resource: !GetAtt GallerySettingsTable.Arn", update)
+        self.assertIn("SOURCES_UpdateGalleryOrderFunction :=", MAKEFILE)
+
+        for logical_id in ("GetPublicAlbumsFunction", "GetAlbumsFunction"):
+            block = resource_block(logical_id)
+            self.assertIn("GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable", block)
+            self.assertIn("TableName: !Ref GallerySettingsTable", block)
+
     def test_rate_limit_security_telemetry_has_point_in_time_recovery(self) -> None:
         block = resource_block("RateLimitTable")
         self.assertIn("DeletionPolicy: Retain", block)
@@ -316,7 +345,7 @@ class DataProtectionTests(unittest.TestCase):
         # DynamoDB always encrypts tables at rest. Explicitly adding/removing an
         # AWS-owned-key SSESpecification on these existing resources needlessly
         # consumes the service's guarded encryption-mode update quota.
-        for logical_id in ("AlbumsTable", "RateLimitTable", "CostReportCacheTable", "DriveUsageCacheTable"):
+        for logical_id in ("AlbumsTable", "GallerySettingsTable", "RateLimitTable", "CostReportCacheTable", "DriveUsageCacheTable"):
             self.assertNotRegex(resource_block(logical_id), r"(?m)^\s+SSESpecification:")
 
     def test_media_bucket_is_private_versioned_and_tls_only(self) -> None:

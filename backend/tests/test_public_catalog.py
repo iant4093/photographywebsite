@@ -35,6 +35,11 @@ def public_album(**overrides):
 
 
 class PublicCatalogListTests(unittest.TestCase):
+    def setUp(self):
+        self.gallery_order = patch.object(get_public_albums, "load_gallery_order", return_value={})
+        self.gallery_order.start()
+        self.addCleanup(self.gallery_order.stop)
+
     def test_valid_base64_json_nonobjects_are_rejected_as_invalid_cursors(self):
         for payload in ([], None, 1, "x"):
             encoded = base64.urlsafe_b64encode(
@@ -195,6 +200,18 @@ class PublicCatalogListTests(unittest.TestCase):
         for private_field in ("ownerEmail", "ownerSub", "shareCode", "s3Prefix", "images"):
             self.assertNotIn(private_field, body["items"][0])
         fetch.assert_called_once_with(album_type="photo", limit=100, start_key=None)
+
+    def test_handler_applies_configured_order_only_to_photo_summaries(self):
+        photo = public_album()
+        with patch.object(
+            get_public_albums, "_fetch_page", return_value=([photo], None)
+        ), patch.object(
+            get_public_albums, "load_gallery_order", return_value={ALBUM_ID: 2}
+        ):
+            response = get_public_albums.handler(
+                {"queryStringParameters": {"type": "photo"}}, None
+            )
+        self.assertEqual(response_body(response)["items"][0]["galleryOrder"], 2)
 
     def test_handler_rejects_mixed_boundary_parameters_and_redacts_provider_errors(self):
         for params in ({"visibility": "private"}, {"ownerEmail": "owner@example.test"}, ["bad"]):

@@ -283,6 +283,32 @@ Resources:
         - Key: DataClassification
           Value: PrivateCustomerData
 
+  # A single small configuration record keeps gallery presentation separate
+  # from album/media manifests and avoids rebuilding an existing summary GSI.
+  GallerySettingsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'GoldenHour-GallerySettings-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: settingId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: settingId
+          KeyType: HASH
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: PortfolioConfiguration
+
   PreviewMetadataTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -1205,6 +1231,7 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
@@ -1214,6 +1241,8 @@ Resources:
         - !Ref FrontDoorOriginSecretReadPolicy
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref GallerySettingsTable
       Events:
         GetPublicAlbums:
           Type: HttpApi
@@ -1272,6 +1301,7 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
@@ -1282,6 +1312,8 @@ Resources:
         - !Ref FrontDoorOriginSecretReadPolicy
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref GallerySettingsTable
         - Statement:
             - Effect: Allow
               Action: s3:ListBucket
@@ -1744,6 +1776,34 @@ Resources:
             ApiId: !Ref Api
             Path: /albums/{albumId}
             Method: PUT
+
+  UpdateGalleryOrderFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: update_gallery_order.handler
+      ReservedConcurrentExecutions: 2
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt GallerySettingsTable.Arn
+      Events:
+        UpdateGalleryOrder:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/gallery-order
+            Method: POST
 
   DeleteAlbumFunction:
     Type: AWS::Serverless::Function

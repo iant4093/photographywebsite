@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  fetchAlbumsFiltered: vi.fn(), listUsers: vi.fn(), updateAlbum: vi.fn(), deleteAlbum: vi.fn(), deleteImages: vi.fn(),
+  fetchAlbumsFiltered: vi.fn(), listUsers: vi.fn(), updateAlbum: vi.fn(), updateGalleryOrder: vi.fn(), deleteAlbum: vi.fn(), deleteImages: vi.fn(),
   requestUploadUrl: vi.fn(), uploadFileToS3: vi.fn(), fetchAlbum: vi.fn(), addImagesToAlbum: vi.fn(), updateImageThumbnail: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
@@ -35,6 +35,7 @@ describe('ManageAlbums', () => {
     api.listUsers.mockResolvedValue([{ email: 'client@example.com' }, { email: 'other@example.com' }])
     api.fetchAlbumsFiltered.mockResolvedValue(albums)
     api.updateAlbum.mockResolvedValue({})
+    api.updateGalleryOrder.mockResolvedValue({})
     api.deleteAlbum.mockResolvedValue({})
     api.fetchAlbum.mockResolvedValue({ images: [] })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
@@ -48,21 +49,45 @@ describe('ManageAlbums', () => {
     expect(screen.queryByText('Film')).toBeNull()
     expect(screen.getByText('Travel')).toBeInTheDocument()
     expect(screen.getByText('Uncategorized')).toBeInTheDocument()
-    expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', visibility: 'public' }, 'admin-token')
+    expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', limit: 100, visibility: 'public' }, 'admin-token')
 
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
-    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', visibility: 'unlisted' }, 'admin-token'))
+    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', limit: 100, visibility: 'unlisted' }, 'admin-token'))
 
     fireEvent.change(screen.getByPlaceholderText('Search users…'), { target: { value: 'client@' } })
     fireEvent.click(await screen.findByRole('button', { name: 'client@example.com' }))
     expect(await screen.findByText('Viewing albums for: client@example.com')).toBeInTheDocument()
-    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', visibility: 'private', ownerEmail: 'client@example.com' }, 'admin-token'))
+    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', limit: 100, visibility: 'private', ownerEmail: 'client@example.com' }, 'admin-token'))
     expect(screen.queryByText('Other Client')).toBeNull()
 
     fireEvent.change(screen.getByPlaceholderText('Search users…'), { target: { value: 'missing' } })
     expect(screen.getByText('No users found')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
-    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenLastCalledWith({ type: 'photo', visibility: 'public' }, 'admin-token'))
+    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenLastCalledWith({ type: 'photo', limit: 100, visibility: 'public' }, 'admin-token'))
+  })
+
+  it('persists main-gallery photo order within a category and hides controls elsewhere', async () => {
+    api.fetchAlbumsFiltered.mockResolvedValue([
+      { ...albums[0], albumId: 'z-album', title: 'Zulu', galleryOrder: 1 },
+      { ...albums[0], albumId: 'a-album', title: 'Alpha', galleryOrder: 0 },
+    ])
+    mounted()
+    await screen.findByText('Alpha')
+    const titlesBefore = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+    expect(titlesBefore).toEqual(['Alpha', 'Zulu'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Zulu earlier' }))
+    await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
+      'admin-token', ['z-album', 'a-album'],
+    ))
+    const titlesAfter = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+    expect(titlesAfter).toEqual(['Zulu', 'Alpha'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
+    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenLastCalledWith(
+      { type: 'photo', limit: 100, visibility: 'unlisted' }, 'admin-token',
+    ))
+    expect(screen.queryByRole('button', { name: /Move .* earlier/ })).toBeNull()
   })
 
   it('supports metadata editing, cancellation, delete confirmation, and load failures', async () => {

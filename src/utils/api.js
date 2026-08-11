@@ -487,6 +487,18 @@ export async function updateAlbum(token, albumId, data, options = {}) {
     return album
 }
 
+export async function updateGalleryOrder(token, albumIds, options = {}) {
+    const result = await apiFetch('/admin/gallery-order', {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({ albumIds }),
+        signal: options.signal,
+    })
+    clearApiCache()
+    invalidateCatalogSnapshots()
+    return result
+}
+
 export async function addImagesToAlbum(token, albumId, images, options = {}) {
     const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
         method: 'POST',
