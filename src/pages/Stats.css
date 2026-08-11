@@ -56,6 +56,10 @@
     animation: stats-reveal 500ms ease-out both;
 }
 
+.photo-stats-content > section {
+    min-width: 0;
+}
+
 .photo-stats-section-heading {
     display: grid;
     grid-template-columns: 2rem minmax(0, 1fr) auto;
@@ -193,6 +197,7 @@
 }
 
 .photo-stats-table-wrap {
+    max-width: 100%;
     overflow-x: auto;
     border: 1px solid var(--color-warm-border);
 }
