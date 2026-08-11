@@ -124,6 +124,32 @@
   font-weight: 500;
 }
 
+.linen-site .linen-theme-toggle {
+  position: relative;
+  width: 31px;
+  height: 31px;
+  flex: none;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-warm-border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.linen-site .linen-theme-toggle:hover {
+  color: var(--color-amber-dark);
+  border-color: currentColor;
+}
+
+.linen-site .linen-theme-icon {
+  position: absolute;
+  inset: 6px;
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .linen-site .linen-desktop-links {
   align-items: center;
   gap: clamp(1rem, 2vw, 2.2rem);

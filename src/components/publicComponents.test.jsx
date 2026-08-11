@@ -85,6 +85,24 @@ describe('navigation and metadata', () => {
     expect(document.body.style.overflow).toBe('unset')
   })
 
+  it('offers an accessible theme toggle beside the brand on public routes', () => {
+    const toggleTheme = vi.fn()
+    const light = routed(<Navbar theme="light" onToggleTheme={toggleTheme} />)
+    const toggle = screen.getByRole('button', { name: 'Switch to dark mode' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    expect(toggle.closest('.linen-brand-cluster')).toContainElement(screen.getByRole('link', { name: /Ian Truong/ }))
+    fireEvent.click(toggle)
+    expect(toggleTheme).toHaveBeenCalledOnce()
+    light.unmount()
+
+    const dark = routed(<Navbar theme="dark" onToggleTheme={toggleTheme} />)
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toHaveAttribute('aria-pressed', 'true')
+    dark.unmount()
+
+    routed(<Navbar theme="dark" onToggleTheme={toggleTheme} showThemeToggle={false} />, undefined, '/admin')
+    expect(screen.queryByRole('button', { name: /Switch to .* mode/ })).toBeNull()
+  })
+
   it.each([
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Route, Routes, useLocation, useNavigationType } from 'react-router'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
@@ -8,6 +8,7 @@ import DocumentMetadata from './components/DocumentMetadata'
 import MotionExperience from './components/MotionExperience'
 import Home from './pages/Home'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
+import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
 const Search = lazy(() => import('./pages/Search'))
@@ -47,6 +48,19 @@ function App() {
     const location = useLocation()
     const navigationType = useNavigationType()
     const isAdminRoute = location.pathname.startsWith('/admin')
+    const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)
+    const theme = isAdminRoute ? 'light' : preferredTheme
+
+    useEffect(() => {
+        applyDocumentTheme(theme)
+    }, [theme])
+
+    const toggleTheme = () => {
+        const nextTheme = preferredTheme === 'dark' ? 'light' : 'dark'
+        setPreferredTheme(nextTheme)
+        storeTheme(nextTheme)
+        applyDocumentTheme(nextTheme)
+    }
 
     useEffect(() => {
         if (location.hash) {
@@ -60,10 +74,14 @@ function App() {
     }, [location.hash, location.pathname, navigationType])
 
     return (
-        <div className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} min-h-screen flex flex-col bg-cream`}>
+        <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
             <a className="linen-skip-link" href="#main-content">Skip to main content</a>
-            <Navbar />
+            <Navbar
+                theme={theme}
+                onToggleTheme={toggleTheme}
+                showThemeToggle={!isAdminRoute}
+            />
             <main id="main-content" tabIndex={-1} className="flex-1">
                 <Suspense fallback={<PageLoading />}>
                     <Routes location={location}>

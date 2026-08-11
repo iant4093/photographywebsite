@@ -4,7 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./components/Navbar', async () => {
   const { Link } = await import('react-router')
-  return { default: () => <nav><Link to="/videos">Videos nav</Link></nav> }
+  return {
+    default: ({ theme, onToggleTheme, showThemeToggle }) => (
+      <nav data-testid="mock-navbar" data-theme={theme}>
+        <Link to="/videos">Videos nav</Link>
+        {showThemeToggle && <button type="button" onClick={onToggleTheme}>Theme</button>}
+      </nav>
+    ),
+  }
 })
 vi.mock('./components/Footer', () => ({ default: () => <footer>Footer</footer> }))
 vi.mock('./components/BackToTop', () => ({ default: () => <button>Top</button> }))
@@ -38,7 +45,10 @@ vi.mock('./pages/Videos', () => ({ default: () => <h1>Videos route</h1> }))
 import App from './App'
 
 describe('App routing shell', () => {
-  beforeEach(() => vi.spyOn(window, 'scrollTo').mockImplementation(() => {}))
+  beforeEach(() => {
+    localStorage.clear()
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  })
 
   it('renders the eager home route and persistent shell', () => {
     const { container } = render(<MemoryRouter><App /></MemoryRouter>)
@@ -73,9 +83,25 @@ describe('App routing shell', () => {
   })
 
   it('uses the editorial admin shell on protected admin routes', async () => {
+    localStorage.setItem('ian-photography-theme', 'dark')
     const { container } = render(<MemoryRouter initialEntries={['/admin']}><App /></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Admin route' })).toBeInTheDocument())
     expect(container.firstElementChild).toHaveClass('linen-site', 'linen-admin')
+    expect(container.firstElementChild).toHaveAttribute('data-theme', 'light')
+    expect(screen.queryByRole('button', { name: 'Theme' })).toBeNull()
+  })
+
+  it('defaults to light mode and persists an explicit public dark preference', () => {
+    const first = render(<MemoryRouter><App /></MemoryRouter>)
+    expect(first.container.firstElementChild).toHaveAttribute('data-theme', 'light')
+    fireEvent.click(screen.getByRole('button', { name: 'Theme' }))
+    expect(first.container.firstElementChild).toHaveAttribute('data-theme', 'dark')
+    expect(localStorage.getItem('ian-photography-theme')).toBe('dark')
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    first.unmount()
+
+    const restored = render(<MemoryRouter><App /></MemoryRouter>)
+    expect(restored.container.firstElementChild).toHaveAttribute('data-theme', 'dark')
   })
 
   it.each([

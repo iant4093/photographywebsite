@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router'
 import { useAuth } from '../context/auth'
 
 // Navigation bar with role-based links
-function Navbar() {
+function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = true }) {
     const { user, isAdmin, logout } = useAuth()
     const { pathname } = useLocation()
 
@@ -76,14 +76,37 @@ function Navbar() {
             <nav className={`linen-nav fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'menu-is-open bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
                 <div className="linen-nav-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
-                    <Link to="/" onClick={() => setIsMenuOpen(false)} className="linen-brand flex items-center gap-3 group z-50 relative">
-                        <div className="linen-logo-tile w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
-                            <span className="text-cream font-serif font-bold text-sm tracking-tight">IT</span>
-                        </div>
-                        <span className="font-serif text-xl font-semibold text-charcoal tracking-tight">
-                            Ian Truong
-                        </span>
-                    </Link>
+                    <div className="linen-brand-cluster flex items-center gap-3 z-50 relative">
+                        <Link to="/" onClick={() => setIsMenuOpen(false)} className="linen-brand flex items-center gap-3 group relative">
+                            <div className="linen-logo-tile w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
+                                <span className="text-cream font-serif font-bold text-sm tracking-tight">IT</span>
+                            </div>
+                            <span className="font-serif text-xl font-semibold text-charcoal tracking-tight">
+                                Ian Truong
+                            </span>
+                        </Link>
+                        {showThemeToggle && (
+                            <button
+                                type="button"
+                                className="linen-theme-toggle"
+                                onClick={onToggleTheme}
+                                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                                aria-pressed={theme === 'dark'}
+                                title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                            >
+                                {theme === 'dark' ? (
+                                    <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                        <circle cx="12" cy="12" r="3.5" />
+                                        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                                    </svg>
+                                ) : (
+                                    <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                        <path d="M20.4 15.5A8.5 8.5 0 0 1 8.5 3.6 8.5 8.5 0 1 0 20.4 15.5Z" />
+                                    </svg>
+                                )}
+                            </button>
+                        )}
+                    </div>
 
                     {/* Navigation Container */}
                     <div className="flex items-center gap-6 relative z-50">

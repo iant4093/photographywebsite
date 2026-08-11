@@ -49,7 +49,7 @@ aws s3 cp "$root/index.html" "s3://${FRONTEND_BUCKET}/index.html" \
 
 invalidation_id="$(aws cloudfront create-invalidation \
   --distribution-id "$FRONTEND_DISTRIBUTION_ID" \
-  --paths '/' '/index.html' '/images/heroes/*' '/favicon.svg' \
+  --paths '/' '/index.html' '/theme-init.js' '/dark-theme.css' '/images/heroes/*' '/favicon.svg' \
   --query 'Invalidation.Id' \
   --output text)"
 aws cloudfront wait invalidation-completed \

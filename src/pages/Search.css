@@ -161,6 +161,23 @@
   color: var(--color-warm-gray);
 }
 
+.linen-site[data-theme="dark"]:not(.linen-admin) .archive-search-controls,
+.linen-site[data-theme="dark"]:not(.linen-admin) .archive-search-loading,
+.linen-site[data-theme="dark"]:not(.linen-admin) .archive-search-empty {
+  background: rgba(38, 35, 30, 0.7);
+  box-shadow: 7px 8px 0 rgba(0, 0, 0, 0.2);
+}
+
+.linen-site[data-theme="dark"]:not(.linen-admin) .archive-search-input-wrap {
+  background: rgba(45, 41, 35, 0.78);
+}
+
+.linen-site[data-theme="dark"]:not(.linen-admin) .archive-search-error {
+  color: #f2a7a0;
+  border-left-color: #d66f66;
+  background: rgba(91, 36, 32, 0.28);
+}
+
 @media (max-width: 720px) {
   .linen-site .archive-search-header .linen-section-heading,
   .linen-site .archive-search-controls {

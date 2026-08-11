@@ -1672,7 +1672,10 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("get-public-access-block", frontend)
         self.assertIn("OriginAccessControlId", frontend)
         self.assertLess(frontend.index('"$root/index.html"'), frontend.index("create-invalidation"))
-        self.assertIn("--paths '/' '/index.html' '/images/heroes/*' '/favicon.svg'", frontend)
+        self.assertIn(
+            "--paths '/' '/index.html' '/theme-init.js' '/dark-theme.css' '/images/heroes/*' '/favicon.svg'",
+            frontend,
+        )
         self.assertNotIn("--paths '/*'", frontend)
         self.assertIn('if [[ "$api" == "/api" ]]', smoke)
         self.assertIn('api="${site}${api}"', smoke)
