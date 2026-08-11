@@ -235,6 +235,23 @@ describe('Videos paginated catalog', () => {
     expect(screen.queryByRole('button', { name: /load more/i })).toBeNull()
   })
 
+  it('honors configured video category and album order', () => {
+    catalog.getCatalogSnapshot.mockReturnValue({
+      items: [
+        { albumId: 'v2', title: 'Film Second', type: 'video', category: 'Films', galleryOrder: 1, galleryCategoryOrder: 1 },
+        { albumId: 'v1', title: 'Film First', type: 'video', category: 'Films', galleryOrder: 0, galleryCategoryOrder: 1 },
+        { albumId: 's1', title: 'Sports First', type: 'video', category: 'Sports', galleryCategoryOrder: 0 },
+      ],
+      nextCursor: null,
+    })
+    routed(<Videos />)
+
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(['Sports', 'Films'])
+    expect(screen.getByTestId('videos-Films').textContent)
+      .toBe('Film FirstFilm Second')
+  })
+
   it('renders initial and load-more failures and blocks duplicate load clicks', async () => {
     api.fetchAlbumsPage.mockRejectedValueOnce(new Error('Initial videos failed'))
     const first = routed(<Videos />)

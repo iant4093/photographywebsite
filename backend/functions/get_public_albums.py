@@ -155,10 +155,10 @@ def handler(event, context):
         )
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
-        album_order, category_order = (
+        gallery_settings = (
             load_gallery_settings(settings_table, logger)
-            if album_type in {None, "photo"}
-            else ({}, {})
+            if album_type in {None, "photo", "video"}
+            else {}
         )
         items = []
         for record in records:
@@ -169,7 +169,7 @@ def handler(event, context):
                 image_count = record.get("imageCount")
                 if "images" not in record and _valid_image_count(image_count):
                     summary["imageCount"] = int(image_count)
-                items.append(apply_gallery_order(summary, album_order, category_order))
+                items.append(apply_gallery_order(summary, gallery_settings))
             except ValidationError:
                 continue
 

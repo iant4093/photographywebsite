@@ -37,7 +37,7 @@ def public_album(**overrides):
 class PublicCatalogListTests(unittest.TestCase):
     def setUp(self):
         self.gallery_order = patch.object(
-            get_public_albums, "load_gallery_settings", return_value=({}, {})
+            get_public_albums, "load_gallery_settings", return_value={}
         )
         self.gallery_order.start()
         self.addCleanup(self.gallery_order.stop)
@@ -203,20 +203,46 @@ class PublicCatalogListTests(unittest.TestCase):
             self.assertNotIn(private_field, body["items"][0])
         fetch.assert_called_once_with(album_type="photo", limit=100, start_key=None)
 
-    def test_handler_applies_configured_order_only_to_photo_summaries(self):
+    def test_handler_applies_configured_photo_gallery_order(self):
         photo = public_album()
         with patch.object(
             get_public_albums, "_fetch_page", return_value=([photo], None)
         ), patch.object(
             get_public_albums,
             "load_gallery_settings",
-            return_value=({ALBUM_ID: 2}, {"Portraits": 3}),
+            return_value={
+                "photo": {
+                    "albums": {ALBUM_ID: 2},
+                    "categories": {"Portraits": 3},
+                }
+            },
         ):
             response = get_public_albums.handler(
                 {"queryStringParameters": {"type": "photo"}}, None
             )
         self.assertEqual(response_body(response)["items"][0]["galleryOrder"], 2)
         self.assertEqual(response_body(response)["items"][0]["galleryCategoryOrder"], 3)
+
+    def test_handler_applies_independent_video_gallery_order(self):
+        video = public_album(type="video", category="Films")
+        with patch.object(
+            get_public_albums, "_fetch_page", return_value=([video], None)
+        ), patch.object(
+            get_public_albums,
+            "load_gallery_settings",
+            return_value={
+                "video": {
+                    "albums": {ALBUM_ID: 1},
+                    "categories": {"Films": 4},
+                }
+            },
+        ):
+            response = get_public_albums.handler(
+                {"queryStringParameters": {"type": "video"}}, None
+            )
+        item = response_body(response)["items"][0]
+        self.assertEqual(item["galleryOrder"], 1)
+        self.assertEqual(item["galleryCategoryOrder"], 4)
 
     def test_handler_rejects_mixed_boundary_parameters_and_redacts_provider_errors(self):
         for params in ({"visibility": "private"}, {"ownerEmail": "owner@example.test"}, ["bad"]):

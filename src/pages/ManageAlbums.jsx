@@ -250,7 +250,7 @@ function ManageAlbums() {
         }
     }, [getIdToken, scope, typeFilter])
 
-    const canReorderGallery = scope === 'public' && typeFilter === 'photo'
+    const canReorderGallery = scope === 'public'
 
     async function moveAlbum(album, direction) {
         if (!canReorderGallery || savingOrder) return
@@ -280,7 +280,7 @@ function ManageAlbums() {
         })))
         try {
             const token = await getIdToken()
-            await updateGalleryOrder(token, { albumIds: orderedIds })
+            await updateGalleryOrder(token, { albumType: typeFilter, albumIds: orderedIds })
             setActionSuccess('Album order updated!')
             window.setTimeout(() => setActionSuccess(''), 3000)
         } catch (error) {
@@ -312,7 +312,10 @@ function ManageAlbums() {
         })))
         try {
             const token = await getIdToken()
-            await updateGalleryOrder(token, { categoryNames: reorderedCategories })
+            await updateGalleryOrder(token, {
+                albumType: typeFilter,
+                categoryNames: reorderedCategories,
+            })
             setActionSuccess('Category order updated!')
             window.setTimeout(() => setActionSuccess(''), 3000)
         } catch (error) {

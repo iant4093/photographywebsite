@@ -6,6 +6,7 @@ import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbumsPage } from '../utils/api'
 import { mergeUniqueById } from '../utils/apiResponse'
 import { getCatalogSnapshot, reconcilePublicCatalogItems, setCatalogSnapshot } from '../utils/catalogState'
+import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 
 const CATALOG_KEY = 'public-videos'
@@ -95,11 +96,10 @@ export default function Videos() {
             result[category].push(album)
             return result
         }, {})
-        const categories = Object.keys(grouped).sort((a, b) => {
-            if (a === 'Uncategorized') return 1
-            if (b === 'Uncategorized') return -1
-            return a.localeCompare(b)
-        })
+        for (const category of Object.keys(grouped)) {
+            grouped[category] = sortGalleryAlbums(grouped[category])
+        }
+        const categories = sortGalleryCategories(Object.keys(grouped), grouped)
         return { groupedVideoAlbums: grouped, videoCategories: categories }
     }, [videoAlbums])
 

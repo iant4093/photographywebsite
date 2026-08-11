@@ -78,7 +78,7 @@ describe('ManageAlbums', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Move Zulu earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
-      'admin-token', { albumIds: ['z-album', 'a-album'] },
+      'admin-token', { albumType: 'photo', albumIds: ['z-album', 'a-album'] },
     ))
     const titlesAfter = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
     expect(titlesAfter).toEqual(['Zulu', 'Alpha'])
@@ -102,10 +102,37 @@ describe('ManageAlbums', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Move Hikes category earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
-      'admin-token', { categoryNames: ['Hikes', 'Astro'] },
+      'admin-token', { albumType: 'photo', categoryNames: ['Hikes', 'Astro'] },
     ))
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
       .toEqual(['Hikes', 'Astro'])
+  })
+
+  it('supports independent video category and album ordering on the optimized list', async () => {
+    api.fetchAlbumsFiltered.mockResolvedValue([
+      { ...albums[3], albumId: 'film-b', title: 'Film B', category: 'Films', galleryOrder: 1, galleryCategoryOrder: 0 },
+      { ...albums[3], albumId: 'film-a', title: 'Film A', category: 'Films', galleryOrder: 0, galleryCategoryOrder: 0 },
+      { ...albums[3], albumId: 'sport', title: 'Sports Film', category: 'Sports', galleryCategoryOrder: 1 },
+    ])
+    mounted('/admin/albums?type=video')
+    await screen.findByText('Film B')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Film B earlier' }))
+    await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
+      'admin-token',
+      { albumType: 'video', albumIds: ['film-b', 'film-a', 'sport'] },
+    ))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Sports category earlier' }))
+    await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
+      'admin-token',
+      { albumType: 'video', categoryNames: ['Sports', 'Films'] },
+    ))
+    expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith(
+      { type: 'video', limit: 100, visibility: 'public' },
+      'admin-token',
+    )
+    expect(api.fetchAlbum).not.toHaveBeenCalled()
   })
 
   it('supports metadata editing, cancellation, delete confirmation, and load failures', async () => {

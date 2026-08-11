@@ -26,31 +26,33 @@ def album(album_id, **overrides):
 
 
 class GalleryOrderHelperTests(unittest.TestCase):
-    def test_load_deduplicates_and_applies_photo_positions(self):
+    def test_load_deduplicates_and_applies_independent_gallery_positions(self):
         table = MagicMock()
         table.get_item.return_value = {
             "Item": {
                 "albumIds": [ALBUM_TWO, ALBUM_TWO, "", ALBUM_ONE, 3],
                 "categoryNames": ["Hikes", "Hikes", "", "Astro", 3],
+                "videoAlbumIds": [ALBUM_ONE],
+                "videoCategoryNames": ["Films"],
             }
         }
-        album_positions, category_positions = gallery_order.load_gallery_settings(table)
-        self.assertEqual(album_positions, {ALBUM_TWO: 0, ALBUM_ONE: 1})
-        self.assertEqual(category_positions, {"Hikes": 0, "Astro": 1})
+        settings = gallery_order.load_gallery_settings(table)
+        self.assertEqual(settings["photo"]["albums"], {ALBUM_TWO: 0, ALBUM_ONE: 1})
+        self.assertEqual(settings["photo"]["categories"], {"Hikes": 0, "Astro": 1})
+        self.assertEqual(settings["video"]["albums"], {ALBUM_ONE: 0})
+        self.assertEqual(settings["video"]["categories"], {"Films": 0})
         summary = gallery_order.apply_gallery_order(
             {"albumId": ALBUM_ONE, "type": "photo", "category": "Astro"},
-            album_positions,
-            category_positions,
+            settings,
         )
         self.assertEqual(summary["galleryOrder"], 1)
         self.assertEqual(summary["galleryCategoryOrder"], 1)
         video = gallery_order.apply_gallery_order(
-            {"albumId": ALBUM_TWO, "type": "video", "category": "Hikes"},
-            album_positions,
-            category_positions,
+            {"albumId": ALBUM_ONE, "type": "video", "category": "Films"},
+            settings,
         )
-        self.assertNotIn("galleryOrder", video)
-        self.assertNotIn("galleryCategoryOrder", video)
+        self.assertEqual(video["galleryOrder"], 0)
+        self.assertEqual(video["galleryCategoryOrder"], 0)
 
     def test_read_errors_and_invalid_records_fall_back_safely(self):
         table = MagicMock()
@@ -58,12 +60,14 @@ class GalleryOrderHelperTests(unittest.TestCase):
             {"Error": {"Code": "InternalServerError", "Message": "private"}}, "GetItem"
         )
         logger = MagicMock()
-        self.assertEqual(gallery_order.load_gallery_settings(table, logger), ({}, {}))
+        self.assertEqual(gallery_order.load_gallery_settings(table, logger), {})
         logger.warning.assert_called_once_with("gallery_order_unavailable")
 
         table.get_item.side_effect = None
         table.get_item.return_value = {"Item": {"albumIds": "invalid"}}
-        self.assertEqual(gallery_order.load_gallery_settings(table, logger), ({}, {}))
+        settings = gallery_order.load_gallery_settings(table, logger)
+        self.assertEqual(settings["photo"], {"albums": {}, "categories": {}})
+        self.assertEqual(settings["video"], {"albums": {}, "categories": {}})
 
 
 class UpdateGalleryOrderTests(unittest.TestCase):
@@ -81,6 +85,7 @@ class UpdateGalleryOrderTests(unittest.TestCase):
             response = update_gallery_order.handler(self.event([ALBUM_TWO, ALBUM_ONE]), None)
 
         self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response_body(response)["albumType"], "photo")
         self.assertEqual(response_body(response)["albumIds"], [ALBUM_TWO, ALBUM_ONE])
         request = update.call_args.kwargs
         self.assertEqual(request["Key"], {"settingId": gallery_order.SETTING_ID})
@@ -102,6 +107,7 @@ class UpdateGalleryOrderTests(unittest.TestCase):
             response = update_gallery_order.handler(event, None)
 
         self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response_body(response)["albumType"], "photo")
         self.assertEqual(response_body(response)["categoryNames"], ["Hikes", "Astro"])
         load.assert_not_called()
         request = update.call_args.kwargs
@@ -112,6 +118,30 @@ class UpdateGalleryOrderTests(unittest.TestCase):
             ["Hikes", "Astro"],
         )
 
+    def test_video_order_uses_separate_fields_and_validates_video_albums(self):
+        event = {
+            "body": json.dumps({
+                "albumType": "video",
+                "albumIds": [ALBUM_TWO, ALBUM_ONE],
+                "categoryNames": ["Films", "Sports"],
+            })
+        }
+        records = [album(ALBUM_ONE, type="video"), album(ALBUM_TWO, type="video")]
+        with patch.object(update_gallery_order, "verify_front_door_request", return_value=None), patch.object(
+            update_gallery_order, "require_admin", return_value=None
+        ), patch.object(
+            update_gallery_order, "_load_albums", return_value=records
+        ), patch.object(update_gallery_order.settings_table, "update_item") as update:
+            response = update_gallery_order.handler(event, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        body = response_body(response)
+        self.assertEqual(body["albumType"], "video")
+        self.assertEqual(body["albumIds"], [ALBUM_TWO, ALBUM_ONE])
+        request = update.call_args.kwargs
+        self.assertIn("videoAlbumIds = :album_ids", request["UpdateExpression"])
+        self.assertIn("videoCategoryNames = :category_names", request["UpdateExpression"])
+
     def test_rejects_duplicates_unknown_nonpublic_video_and_extra_fields(self):
         invalid_cases = (
             (self.event([ALBUM_ONE, ALBUM_ONE]), []),
@@ -121,6 +151,8 @@ class UpdateGalleryOrderTests(unittest.TestCase):
             ({"body": json.dumps({"albumIds": [], "extra": True})}, []),
             ({"body": json.dumps({"categoryNames": ["Hikes", "Hikes"]})}, []),
             ({"body": json.dumps({"categoryNames": [""]})}, []),
+            ({"body": json.dumps({"albumType": "audio", "albumIds": []})}, []),
+            ({"body": json.dumps({"albumType": "video"})}, []),
         )
         for event, records in invalid_cases:
             with self.subTest(event=event), patch.object(

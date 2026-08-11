@@ -1,4 +1,4 @@
-"""Admin-only updates to public photo gallery album and category ordering."""
+"""Admin-only updates to public photo/video gallery presentation ordering."""
 
 from datetime import datetime, timezone
 import logging
@@ -16,6 +16,7 @@ from validation_helpers import (
     ValidationError,
     parse_json_body,
     require_string,
+    validate_album_type,
     validate_list,
     validate_uuid,
 )
@@ -27,9 +28,24 @@ albums_table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
 settings_table = dynamodb.Table(os.environ["GALLERY_SETTINGS_TABLE"])
 
 
-def _audit(event, context, outcome, reason_code, *, album_count=None):
+def _audit(
+    event,
+    context,
+    outcome,
+    reason_code,
+    *,
+    album_type=None,
+    album_count=None,
+    category_count=None,
+):
     actor_type, auth_method = actor_context(event)
-    details = {"album_count": album_count} if album_count is not None else None
+    details = {}
+    if album_type is not None:
+        details["album_type"] = album_type
+    if album_count is not None:
+        details["album_count"] = album_count
+    if category_count is not None:
+        details["category_count"] = category_count
     emit_audit_event(
         event_name="admin.gallery_order_updated",
         outcome=outcome,
@@ -40,7 +56,7 @@ def _audit(event, context, outcome, reason_code, *, album_count=None):
         context=context,
         actor_type=actor_type,
         auth_method=auth_method,
-        details=details,
+        details=details or None,
     )
 
 
@@ -89,17 +105,19 @@ def _load_albums(album_ids):
     return records
 
 
-def _verify_public_photo_albums(album_ids):
+def _verify_public_albums(album_ids, album_type):
     records = _load_albums(album_ids)
     valid_ids = {
         record.get("albumId")
         for record in records
         if record.get("status", "active") == "active"
         and record.get("visibility") == "public"
-        and record.get("type", "photo") == "photo"
+        and record.get("type", "photo") == album_type
     }
     if valid_ids != set(album_ids):
-        raise ValidationError("albumIds must contain only active main-gallery photo albums")
+        raise ValidationError(
+            f"albumIds must contain only active main-gallery {album_type} albums"
+        )
 
 
 def handler(event, context):
@@ -112,22 +130,30 @@ def handler(event, context):
 
     try:
         body = parse_json_body(event)
-        allowed_fields = {"albumIds", "categoryNames"}
+        allowed_fields = {"albumType", "albumIds", "categoryNames"}
         if not body or not set(body).issubset(allowed_fields):
-            raise ValidationError("Request must contain albumIds or categoryNames only")
+            raise ValidationError(
+                "Request must contain albumType, albumIds, or categoryNames only"
+            )
 
+        album_type = validate_album_type(body.get("albumType"), default="photo")
         album_ids = _validated_album_ids(body) if "albumIds" in body else None
         category_names = _validated_category_names(body) if "categoryNames" in body else None
+        if album_ids is None and category_names is None:
+            raise ValidationError("Request must contain albumIds or categoryNames")
         if album_ids is not None:
-            _verify_public_photo_albums(album_ids)
+            _verify_public_albums(album_ids, album_type)
+
+        album_field = "albumIds" if album_type == "photo" else "videoAlbumIds"
+        category_field = "categoryNames" if album_type == "photo" else "videoCategoryNames"
 
         assignments = ["updatedAt = :updated_at"]
         values = {":updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         if album_ids is not None:
-            assignments.append("albumIds = :album_ids")
+            assignments.append(f"{album_field} = :album_ids")
             values[":album_ids"] = album_ids
         if category_names is not None:
-            assignments.append("categoryNames = :category_names")
+            assignments.append(f"{category_field} = :category_names")
             values[":category_names"] = category_names
         settings_table.update_item(
             Key={"settingId": SETTING_ID},
@@ -139,9 +165,13 @@ def handler(event, context):
             context,
             "success",
             "gallery_order_updated",
+            album_type=album_type,
             album_count=len(album_ids) if album_ids is not None else None,
+            category_count=(
+                len(category_names) if category_names is not None else None
+            ),
         )
-        response = {}
+        response = {"albumType": album_type}
         if album_ids is not None:
             response["albumIds"] = album_ids
         if category_names is not None:
