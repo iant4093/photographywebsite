@@ -17,6 +17,7 @@ const Login = lazy(() => import('./pages/Login'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AwsCosts = lazy(() => import('./pages/AwsCosts'))
 const GoogleDriveUsage = lazy(() => import('./pages/GoogleDriveUsage'))
+const AdminSecurity = lazy(() => import('./pages/AdminSecurity'))
 const Upload = lazy(() => import('./pages/Admin'))
 const UploadVideo = lazy(() => import('./pages/UploadVideo'))
 const ManageHero = lazy(() => import('./pages/ManageHero'))
@@ -77,6 +78,7 @@ function App() {
                         <Route path="/login" element={<Login />} />
 
                         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+                        <Route path="/admin/security" element={<ProtectedRoute adminOnly allowMfaSetup><AdminSecurity /></ProtectedRoute>} />
                         <Route path="/admin/costs" element={<ProtectedRoute adminOnly><AwsCosts /></ProtectedRoute>} />
                         <Route path="/admin/drive-usage" element={<ProtectedRoute adminOnly><GoogleDriveUsage /></ProtectedRoute>} />
                         <Route path="/admin/upload" element={<ProtectedRoute adminOnly><Upload /></ProtectedRoute>} />

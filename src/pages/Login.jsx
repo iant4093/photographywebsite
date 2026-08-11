@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../context/auth'
 import { Turnstile } from '@marsidev/react-turnstile'
 import { motion as Motion } from 'framer-motion'
@@ -8,6 +8,7 @@ import { motion as Motion } from 'framer-motion'
 function Login() {
     const { login, completeNewPassword, completeMfa, user, isAdmin } = useAuth()
     const navigate = useNavigate()
+    const location = useLocation()
     const turnstileRef = useRef()
 
     const [email, setEmail] = useState('')
@@ -147,6 +148,11 @@ function Login() {
                     onSubmit={handleSubmit}
                     className="bg-white rounded-2xl p-8 shadow-warm-lg border border-warm-border"
                 >
+                    {location.state?.mfaEnabled && (
+                        <div className="mb-6 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800" role="status">
+                            Two-factor authentication is enabled. Sign in again using your authenticator code.
+                        </div>
+                    )}
                     {/* Error message */}
                     {error && (
                         <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">

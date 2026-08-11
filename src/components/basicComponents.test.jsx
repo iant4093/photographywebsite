@@ -73,11 +73,11 @@ describe('small presentational and routing components', () => {
 
     const admin = routed(<AdminDashboard />)
     expect(screen.getByText('Studio controls')).toBeInTheDocument()
-    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(8)
+    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(9)
     expect(Array.from(
       admin.container.querySelectorAll('.linen-admin-card-index'),
       (index) => index.textContent,
-    )).toEqual(['01', '02', '03', '04', '05', '06', '07', '08'])
+    )).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09'])
     expect(screen.getByRole('link', { name: /Upload Photos/ })).toHaveAttribute('href', '/admin/upload')
     expect(screen.getByRole('link', { name: /Upload Videos/ })).toHaveAttribute('href', '/admin/upload-video')
     expect(screen.getByRole('link', { name: /Change Hero Cover/ })).toHaveAttribute('href', '/admin/hero')
@@ -86,6 +86,7 @@ describe('small presentational and routing components', () => {
     expect(screen.getByRole('link', { name: /Manage Users/ })).toHaveAttribute('href', '/admin/users')
     expect(screen.getByRole('link', { name: /AWS Costs/ })).toHaveAttribute('href', '/admin/costs')
     expect(screen.getByRole('link', { name: /Google Drive Usage/ })).toHaveAttribute('href', '/admin/drive-usage')
+    expect(screen.getByRole('link', { name: /Admin Security/ })).toHaveAttribute('href', '/admin/security')
   })
 
   it('requires an auth provider and exposes the provided value', () => {
@@ -102,14 +103,16 @@ describe('small presentational and routing components', () => {
     [{ user: null, loading: true, isAdmin: false }, 'loading'],
     [{ user: null, loading: false, isAdmin: false }, 'login'],
     [{ user: { name: 'Viewer' }, loading: false, isAdmin: false }, 'dashboard'],
-    [{ user: { name: 'Admin' }, loading: false, isAdmin: true }, 'content'],
+    [{ user: { name: 'Admin' }, loading: false, isAdmin: true, adminMfaStatus: 'required' }, 'security'],
+    [{ user: { name: 'Admin' }, loading: false, isAdmin: true, adminMfaStatus: 'enabled' }, 'content'],
   ])('enforces the protected-route state %#', (auth, expected) => {
-    const adminOnly = expected === 'dashboard' || expected === 'content'
+    const adminOnly = ['dashboard', 'security', 'content'].includes(expected)
     const { container } = routed(
       <AuthContext.Provider value={auth}>
         <Routes>
           <Route path="/login" element={<Location />} />
           <Route path="/dashboard" element={<Location />} />
+          <Route path="/admin/security" element={<Location />} />
           <Route
             path="/private"
             element={<ProtectedRoute adminOnly={adminOnly}><div>protected content</div></ProtectedRoute>}

@@ -66,16 +66,44 @@ function safeLoginError(status) {
     return 'Sign in is temporarily unavailable. Please try again.'
 }
 
+function getFreshUserData(cognitoUser) {
+    return new Promise((resolve, reject) => {
+        cognitoUser.getUserData((error, data) => {
+            if (error) reject(error)
+            else resolve(data || {})
+        }, { bypassCache: true })
+    })
+}
+
+function ensureValidSession(cognitoUser) {
+    return new Promise((resolve, reject) => {
+        cognitoUser.getSession((error, session) => {
+            if (error || !session?.isValid()) {
+                reject(new Error('Your session has expired. Please sign in again.'))
+                return
+            }
+            resolve(session)
+        })
+    })
+}
+
+function hasSoftwareTokenMfa(data) {
+    return (data?.UserMFASettingList || []).includes('SOFTWARE_TOKEN_MFA')
+}
+
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null)
     const [loading, setLoading] = useState(() => isCognitoConfigured && hasSessionCredentials())
     const [isAdmin, setIsAdmin] = useState(false)
     const [userEmail, setUserEmail] = useState('')
+    const [adminMfaStatus, setAdminMfaStatus] = useState('not-required')
 
     const extractUserInfo = useCallback((session) => {
         const claims = decodeJwt(session.getIdToken().getJwtToken())
-        setIsAdmin((claims['cognito:groups'] || []).includes('Admins'))
+        const admin = (claims['cognito:groups'] || []).includes('Admins')
+        setIsAdmin(admin)
         setUserEmail(claims.email || '')
+        return { admin, email: claims.email || '' }
     }, [])
 
     useEffect(() => {
@@ -94,7 +122,20 @@ export function AuthProvider({ children }) {
                     cognitoUser.getSession((error, session) => {
                         if (active && !error && session?.isValid()) {
                             setUser(cognitoUser)
-                            extractUserInfo(session)
+                            const { admin } = extractUserInfo(session)
+                            if (admin) {
+                                setAdminMfaStatus('checking')
+                                getFreshUserData(cognitoUser)
+                                    .then((data) => {
+                                        if (active) setAdminMfaStatus(hasSoftwareTokenMfa(data) ? 'enabled' : 'required')
+                                    })
+                                    .catch(() => {
+                                        if (active) setAdminMfaStatus('error')
+                                    })
+                                    .finally(resolve)
+                                return
+                            }
+                            setAdminMfaStatus('not-required')
                         }
                         resolve()
                     })
@@ -109,6 +150,84 @@ export function AuthProvider({ children }) {
 
         return () => { active = false }
     }, [extractUserInfo])
+
+    const refreshAdminMfaStatus = useCallback(async () => {
+        if (!user || !isAdmin) {
+            setAdminMfaStatus('not-required')
+            return 'not-required'
+        }
+
+        await Promise.resolve()
+        setAdminMfaStatus('checking')
+        try {
+            await ensureValidSession(user)
+            const data = await getFreshUserData(user)
+            const status = hasSoftwareTokenMfa(data) ? 'enabled' : 'required'
+            setAdminMfaStatus(status)
+            return status
+        } catch (error) {
+            setAdminMfaStatus('error')
+            throw error
+        }
+    }, [isAdmin, user])
+
+    const beginAdminMfaSetup = useCallback(async () => {
+        if (!user || !isAdmin) throw new Error('Administrator access is required.')
+        await ensureValidSession(user)
+        return new Promise((resolve, reject) => {
+            user.associateSoftwareToken({
+                associateSecretCode: (secretCode) => resolve(secretCode),
+                onFailure: () => reject(new Error('Authenticator setup could not be started. Please try again.')),
+            })
+        })
+    }, [isAdmin, user])
+
+    const completeAdminMfaSetup = useCallback(async (code) => {
+        if (!user || !isAdmin) throw new Error('Administrator access is required.')
+        if (!/^[0-9]{6}$/.test(code || '')) {
+            throw new Error('Enter the 6-digit code from your authenticator app.')
+        }
+
+        await ensureValidSession(user)
+        await new Promise((resolve, reject) => {
+            user.verifySoftwareToken(code, 'Ian Truong Photography admin', {
+                onSuccess: resolve,
+                onFailure: () => reject(new Error('That verification code was not accepted. Try a fresh code.')),
+            })
+        })
+        await new Promise((resolve, reject) => {
+            user.setUserMfaPreference(null, { Enabled: true, PreferredMfa: true }, (error) => {
+                if (error) reject(new Error('Two-factor authentication could not be activated. Please try again.'))
+                else resolve()
+            })
+        })
+
+        setAdminMfaStatus('enabled')
+        let globallySignedOut = true
+        await new Promise((resolve) => {
+            user.globalSignOut({
+                onSuccess: resolve,
+                onFailure: () => {
+                    globallySignedOut = false
+                    user.signOut()
+                    resolve()
+                },
+            })
+        })
+
+        setUser(null)
+        setIsAdmin(false)
+        setUserEmail('')
+        setAdminMfaStatus('not-required')
+        clearApiCache()
+        clearCatalogSnapshots()
+        if (typeof window !== 'undefined') {
+            Object.keys(window.sessionStorage)
+                .filter((key) => key.startsWith(storagePrefix))
+                .forEach((key) => window.sessionStorage.removeItem(key))
+        }
+        return { globallySignedOut }
+    }, [isAdmin, user])
 
     const establishSession = useCallback(async (email, authResult) => {
         const [pool, cognito] = await Promise.all([getUserPool(), loadCognitoModule()])
@@ -129,8 +248,17 @@ export function AuthProvider({ children }) {
         })
 
         cognitoUser.setSignInUserSession(session)
+        const { admin } = extractUserInfo(session)
+        setAdminMfaStatus(admin ? 'checking' : 'not-required')
         setUser(cognitoUser)
-        extractUserInfo(session)
+        if (admin) {
+            try {
+                const data = await getFreshUserData(cognitoUser)
+                setAdminMfaStatus(hasSoftwareTokenMfa(data) ? 'enabled' : 'required')
+            } catch {
+                setAdminMfaStatus('error')
+            }
+        }
         return session
     }, [extractUserInfo])
 
@@ -208,20 +336,24 @@ export function AuthProvider({ children }) {
     }, [establishSession])
 
     const logout = useCallback(() => {
+        if (user) user.signOut()
+        else {
+            getUserPool()
+                .then((pool) => pool?.getCurrentUser()?.signOut())
+                .catch(() => {})
+        }
         setUser(null)
         setIsAdmin(false)
         setUserEmail('')
+        setAdminMfaStatus('not-required')
         clearApiCache()
         clearCatalogSnapshots()
-        getUserPool()
-            .then((pool) => pool?.getCurrentUser()?.signOut())
-            .catch(() => {})
         if (typeof window !== 'undefined') {
             Object.keys(window.sessionStorage)
                 .filter((key) => key.startsWith(storagePrefix))
                 .forEach((key) => window.sessionStorage.removeItem(key))
         }
-    }, [])
+    }, [user])
 
     const getIdToken = useCallback(async () => {
         if (!hasSessionCredentials()) throw new Error('No active user session.')
@@ -244,12 +376,30 @@ export function AuthProvider({ children }) {
         loading,
         isAdmin,
         userEmail,
+        adminMfaStatus,
         login,
         completeNewPassword,
         completeMfa,
+        refreshAdminMfaStatus,
+        beginAdminMfaSetup,
+        completeAdminMfaSetup,
         logout,
         getIdToken,
-    }), [completeMfa, completeNewPassword, getIdToken, isAdmin, loading, login, logout, user, userEmail])
+    }), [
+        adminMfaStatus,
+        beginAdminMfaSetup,
+        completeAdminMfaSetup,
+        completeMfa,
+        completeNewPassword,
+        getIdToken,
+        isAdmin,
+        loading,
+        login,
+        logout,
+        refreshAdminMfaStatus,
+        user,
+        userEmail,
+    ])
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -2,7 +2,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiCache = vi.hoisted(() => ({ clearApiCache: vi.fn(), clearCatalogSnapshots: vi.fn() }))
-const cognito = vi.hoisted(() => ({ currentUser: null, pools: [], users: [], sessions: [] }))
+const cognito = vi.hoisted(() => ({
+  currentUser: null,
+  pools: [],
+  users: [],
+  sessions: [],
+  userData: { UserMFASettingList: [] },
+  secret: 'ABCDEF234567',
+  userDataError: null,
+  associateError: null,
+  verifyError: null,
+  preferenceError: null,
+  globalSignOutError: null,
+}))
 
 vi.mock('../utils/api', () => ({ clearApiCache: apiCache.clearApiCache }))
 vi.mock('../utils/catalogState', () => ({ clearCatalogSnapshots: apiCache.clearCatalogSnapshots }))
@@ -14,6 +26,7 @@ vi.mock('amazon-cognito-identity-js', () => {
   class CognitoUserSession {
     constructor(tokens) { this.tokens = tokens; cognito.sessions.push(this) }
     getIdToken() { return this.tokens.IdToken }
+    getAccessToken() { return this.tokens.AccessToken }
     isValid() { return true }
   }
   class CognitoUserPool {
@@ -21,7 +34,24 @@ vi.mock('amazon-cognito-identity-js', () => {
     getCurrentUser() { return cognito.currentUser }
   }
   class CognitoUser {
-    constructor(options) { this.options = options; this.setSignInUserSession = vi.fn(); cognito.users.push(this) }
+    constructor(options) {
+      this.options = options
+      this.setSignInUserSession = vi.fn((session) => { this.session = session })
+      this.getSession = vi.fn((callback) => callback(null, this.session))
+      this.getUserData = vi.fn((callback) => callback(cognito.userDataError, cognito.userData))
+      this.associateSoftwareToken = vi.fn((callbacks) => (
+        cognito.associateError ? callbacks.onFailure(cognito.associateError) : callbacks.associateSecretCode(cognito.secret)
+      ))
+      this.verifySoftwareToken = vi.fn((code, name, callbacks) => (
+        cognito.verifyError ? callbacks.onFailure(cognito.verifyError) : callbacks.onSuccess({ Status: 'SUCCESS' })
+      ))
+      this.setUserMfaPreference = vi.fn((sms, software, callback) => callback(cognito.preferenceError, cognito.preferenceError ? null : 'SUCCESS'))
+      this.globalSignOut = vi.fn((callbacks) => (
+        cognito.globalSignOutError ? callbacks.onFailure(cognito.globalSignOutError) : callbacks.onSuccess('SUCCESS')
+      ))
+      this.signOut = vi.fn()
+      cognito.users.push(this)
+    }
   }
   return {
     CognitoIdToken: Token,
@@ -53,13 +83,16 @@ function response(body, status = 200, brokenJson = false) {
 function Harness() {
   const auth = useAuth()
   const [result, setResult] = useState('')
-  const invoke = (promise) => promise.then((value) => setResult(value?.challengeName || 'ok')).catch((error) => setResult(`${error.code || ''}:${error.message}`))
+  const invoke = (promise) => promise.then((value) => setResult(typeof value === 'string' ? value : value?.challengeName || 'ok')).catch((error) => setResult(`${error.code || ''}:${error.message}`))
   return <div>
-    <span data-testid="state">{auth.loading ? 'loading' : 'ready'}|{auth.userEmail}|{auth.isAdmin ? 'admin' : 'viewer'}|{auth.user ? 'signed' : 'out'}</span>
+    <span data-testid="state">{auth.loading ? 'loading' : 'ready'}|{auth.userEmail}|{auth.isAdmin ? 'admin' : 'viewer'}|{auth.user ? 'signed' : 'out'}|{auth.adminMfaStatus}</span>
     <span data-testid="result">{result}</span>
     <button onClick={() => invoke(auth.login('viewer@example.com', 'Password1!', 'turn'))}>login</button>
     <button onClick={() => invoke(auth.completeNewPassword({ email: 'viewer@example.com', newPassword: 'NewPassword1!', challengeSession: 'session', turnstileToken: 'turn' }))}>new-password</button>
     <button onClick={() => invoke(auth.completeMfa({ email: 'viewer@example.com', code: '123456', challengeSession: 'session', turnstileToken: 'turn' }))}>mfa</button>
+    <button onClick={() => invoke(auth.beginAdminMfaSetup())}>begin-mfa-setup</button>
+    <button onClick={() => invoke(auth.completeAdminMfaSetup('123456'))}>complete-mfa-setup</button>
+    <button onClick={() => invoke(auth.refreshAdminMfaStatus())}>refresh-mfa-status</button>
     <button onClick={() => invoke(auth.getIdToken())}>token</button>
     <button onClick={auth.logout}>logout</button>
   </div>
@@ -79,6 +112,13 @@ describe('AuthProvider', () => {
     cognito.currentUser = null
     cognito.users.length = 0
     cognito.sessions.length = 0
+    cognito.userData = { UserMFASettingList: [] }
+    cognito.secret = 'ABCDEF234567'
+    cognito.userDataError = null
+    cognito.associateError = null
+    cognito.verifyError = null
+    cognito.preferenceError = null
+    cognito.globalSignOutError = null
     vi.stubGlobal('fetch', vi.fn())
   })
 
@@ -177,6 +217,56 @@ describe('AuthProvider', () => {
       await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent(expected))
     }
     expect(screen.getByTestId('state')).toHaveTextContent('mfa@example.com|admin|signed')
+  })
+
+  it('requires and completes authenticator enrollment for an admin account', async () => {
+    fetch.mockResolvedValueOnce(response({
+      AuthenticationResult: {
+        IdToken: jwt({ email: 'admin@example.com', 'cognito:groups': ['Admins'] }),
+        AccessToken: 'access',
+        RefreshToken: 'refresh',
+      },
+    }))
+    mount()
+
+    fireEvent.click(screen.getByRole('button', { name: 'login' }))
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('admin@example.com|admin|signed|required'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'begin-mfa-setup' }))
+    await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent('ABCDEF234567'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'complete-mfa-setup' }))
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out|not-required'))
+    const adminUser = cognito.users.at(-1)
+    expect(adminUser.verifySoftwareToken).toHaveBeenCalledWith('123456', 'Ian Truong Photography admin', expect.any(Object))
+    expect(adminUser.setUserMfaPreference).toHaveBeenCalledWith(null, { Enabled: true, PreferredMfa: true }, expect.any(Function))
+    expect(adminUser.globalSignOut).toHaveBeenCalled()
+  })
+
+  it('recognizes an existing software-token factor and fails closed on status errors', async () => {
+    cognito.userData = { UserMFASettingList: ['SOFTWARE_TOKEN_MFA'] }
+    fetch.mockResolvedValueOnce(response({
+      AuthenticationResult: {
+        IdToken: jwt({ email: 'admin@example.com', 'cognito:groups': ['Admins'] }),
+        AccessToken: 'access',
+        RefreshToken: 'refresh',
+      },
+    }))
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: 'login' }))
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('admin@example.com|admin|signed|enabled'))
+
+    cognito.userDataError = new Error('unavailable')
+    fireEvent.click(screen.getByRole('button', { name: 'refresh-mfa-status' }))
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('admin@example.com|admin|signed|error'))
+  })
+
+  it('rejects enrollment helpers for non-admin users', async () => {
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: 'begin-mfa-setup' }))
+    await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent('Administrator access is required'))
+    fireEvent.click(screen.getByRole('button', { name: 'complete-mfa-setup' }))
+    await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent('Administrator access is required'))
   })
 
   it('validates current sessions, returns a token, and logs out defensively', async () => {

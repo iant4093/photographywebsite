@@ -1,9 +1,9 @@
 import { Link } from 'react-router'
 import { motion } from 'framer-motion'
 
-// Admin dashboard — hub with widget cards for Upload, Manage, and Add Users
+// Admin dashboard — hub for portfolio, account, and service controls
 function AdminDashboard() {
-    // Widget data for the three admin actions
+    // Widget data for the available admin actions
     const widgets = [
         {
             title: 'Upload Photos',
@@ -92,6 +92,17 @@ function AdminDashboard() {
             ),
             link: '/admin/drive-usage',
             color: 'from-green-600 to-blue-600',
+        },
+        {
+            title: 'Admin Security',
+            description: 'Confirm that authenticator-app protection is active for your administrator account.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3l7 3v5c0 4.5-2.8 8.6-7 10-4.2-1.4-7-5.5-7-10V6l7-3zm-3 9l2 2 4-4" />
+                </svg>
+            ),
+            link: '/admin/security',
+            color: 'from-charcoal to-amber-dark',
         },
     ]
 
