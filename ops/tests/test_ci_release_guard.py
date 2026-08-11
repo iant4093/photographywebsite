@@ -297,6 +297,7 @@ class ReleaseIntentTests(unittest.TestCase):
             {
                 "CreateAlbumFunctionRole",
                 "UpdateAlbumFunctionRole",
+                "UpdateGalleryOrderFunctionRole",
                 "CreateZipFunctionRole",
                 "GetAlbumsFunctionRole",
                 "GetPublicAlbumsFunctionRole",

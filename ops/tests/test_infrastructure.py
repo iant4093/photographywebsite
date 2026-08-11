@@ -262,8 +262,14 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("Path: /admin/gallery-order", update)
         self.assertIn("Method: POST", update)
         self.assertIn("Action: dynamodb:BatchGetItem", update)
-        self.assertIn("Action: dynamodb:PutItem", update)
-        for forbidden in ("dynamodb:Scan", "dynamodb:Query", "dynamodb:DeleteItem", "dynamodb:*"):
+        self.assertIn("Action: dynamodb:UpdateItem", update)
+        for forbidden in (
+            "dynamodb:Scan",
+            "dynamodb:Query",
+            "dynamodb:PutItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:*",
+        ):
             self.assertNotIn(forbidden, update)
         self.assertIn("Resource: !GetAtt AlbumsTable.Arn", update)
         self.assertIn("Resource: !GetAtt GallerySettingsTable.Arn", update)

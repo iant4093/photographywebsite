@@ -19,6 +19,7 @@ const PUBLIC_ALBUM_FIELDS = [
     'coverThumbnailUrl',
     'coverBlurhash',
     'galleryOrder',
+    'galleryCategoryOrder',
 ]
 
 function prunePendingCatalogMutations() {

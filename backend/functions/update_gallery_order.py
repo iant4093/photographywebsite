@@ -1,4 +1,4 @@
-"""Admin-only replacement of the public photo gallery's album order."""
+"""Admin-only updates to public photo gallery album and category ordering."""
 
 from datetime import datetime, timezone
 import logging
@@ -12,7 +12,13 @@ from auth_helpers import require_admin
 from front_door import verify_front_door_request
 from gallery_order import SETTING_ID
 from response_helpers import error_response, internal_error, json_response
-from validation_helpers import ValidationError, parse_json_body, validate_list, validate_uuid
+from validation_helpers import (
+    ValidationError,
+    parse_json_body,
+    require_string,
+    validate_list,
+    validate_uuid,
+)
 
 
 logger = logging.getLogger("photography_api.gallery_order")
@@ -44,6 +50,17 @@ def _validated_album_ids(body):
     if len(album_ids) != len(set(album_ids)):
         raise ValidationError("albumIds must not contain duplicates")
     return album_ids
+
+
+def _validated_category_names(body):
+    raw_names = validate_list(body.get("categoryNames"), "categoryNames", maximum=200)
+    names = [
+        require_string(value, f"categoryNames[{index}]", maximum=100)
+        for index, value in enumerate(raw_names)
+    ]
+    if len(names) != len(set(names)):
+        raise ValidationError("categoryNames must not contain duplicates")
+    return names
 
 
 def _load_albums(album_ids):
@@ -95,19 +112,41 @@ def handler(event, context):
 
     try:
         body = parse_json_body(event)
-        if set(body) != {"albumIds"}:
-            raise ValidationError("Request must contain only albumIds")
-        album_ids = _validated_album_ids(body)
-        _verify_public_photo_albums(album_ids)
-        settings_table.put_item(
-            Item={
-                "settingId": SETTING_ID,
-                "albumIds": album_ids,
-                "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            }
+        allowed_fields = {"albumIds", "categoryNames"}
+        if not body or not set(body).issubset(allowed_fields):
+            raise ValidationError("Request must contain albumIds or categoryNames only")
+
+        album_ids = _validated_album_ids(body) if "albumIds" in body else None
+        category_names = _validated_category_names(body) if "categoryNames" in body else None
+        if album_ids is not None:
+            _verify_public_photo_albums(album_ids)
+
+        assignments = ["updatedAt = :updated_at"]
+        values = {":updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        if album_ids is not None:
+            assignments.append("albumIds = :album_ids")
+            values[":album_ids"] = album_ids
+        if category_names is not None:
+            assignments.append("categoryNames = :category_names")
+            values[":category_names"] = category_names
+        settings_table.update_item(
+            Key={"settingId": SETTING_ID},
+            UpdateExpression="SET " + ", ".join(assignments),
+            ExpressionAttributeValues=values,
         )
-        _audit(event, context, "success", "gallery_order_updated", album_count=len(album_ids))
-        return json_response(200, {"albumIds": album_ids}, cache_control="no-store")
+        _audit(
+            event,
+            context,
+            "success",
+            "gallery_order_updated",
+            album_count=len(album_ids) if album_ids is not None else None,
+        )
+        response = {}
+        if album_ids is not None:
+            response["albumIds"] = album_ids
+        if category_names is not None:
+            response["categoryNames"] = category_names
+        return json_response(200, response, cache_control="no-store")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_gallery_order")
         return error_response(400, str(error), code="invalid_gallery_order")

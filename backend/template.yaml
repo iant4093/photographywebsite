@@ -1795,7 +1795,7 @@ Resources:
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
-              Action: dynamodb:PutItem
+              Action: dynamodb:UpdateItem
               Resource: !GetAtt GallerySettingsTable.Arn
       Events:
         UpdateGalleryOrder:

@@ -1,4 +1,4 @@
-"""Read and apply the administrator-defined public photo gallery order."""
+"""Read and apply administrator-defined public photo gallery presentation order."""
 
 from botocore.exceptions import ClientError
 
@@ -6,35 +6,46 @@ from botocore.exceptions import ClientError
 SETTING_ID = "public-photo-gallery-order"
 
 
-def load_gallery_order(settings_table, logger=None):
-    """Return album-id positions, failing open to the alphabetical UI default."""
+def _positions(values):
+    if not isinstance(values, list):
+        return None
+    positions = {}
+    for value in values:
+        if isinstance(value, str) and value and value not in positions:
+            positions[value] = len(positions)
+    return positions
+
+
+def load_gallery_settings(settings_table, logger=None):
+    """Return album/category positions, failing open to client-side defaults."""
     try:
         item = settings_table.get_item(
             Key={"settingId": SETTING_ID},
             ConsistentRead=False,
-            ProjectionExpression="albumIds",
+            ProjectionExpression="albumIds, categoryNames",
         ).get("Item", {})
     except ClientError:
         if logger:
             logger.warning("gallery_order_unavailable")
-        return {}
+        return {}, {}
 
-    album_ids = item.get("albumIds", [])
-    if not isinstance(album_ids, list):
+    album_positions = _positions(item.get("albumIds", []))
+    category_positions = _positions(item.get("categoryNames", []))
+    if album_positions is None or category_positions is None:
         if logger:
             logger.warning("gallery_order_invalid")
-        return {}
-
-    positions = {}
-    for album_id in album_ids:
-        if isinstance(album_id, str) and album_id and album_id not in positions:
-            positions[album_id] = len(positions)
-    return positions
+        return album_positions or {}, category_positions or {}
+    return album_positions, category_positions
 
 
-def apply_gallery_order(summary, positions):
-    """Attach an order only to public photo summaries present in the setting."""
+def apply_gallery_order(summary, album_positions, category_positions):
+    """Attach configured presentation positions to a public photo summary."""
     album_id = summary.get("albumId")
-    if summary.get("type", "photo") == "photo" and album_id in positions:
-        summary["galleryOrder"] = positions[album_id]
+    if summary.get("type", "photo") != "photo":
+        return summary
+    if album_id in album_positions:
+        summary["galleryOrder"] = album_positions[album_id]
+    category = summary.get("category") or "Uncategorized"
+    if category in category_positions:
+        summary["galleryCategoryOrder"] = category_positions[category]
     return summary

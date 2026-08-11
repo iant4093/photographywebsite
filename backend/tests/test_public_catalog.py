@@ -36,7 +36,9 @@ def public_album(**overrides):
 
 class PublicCatalogListTests(unittest.TestCase):
     def setUp(self):
-        self.gallery_order = patch.object(get_public_albums, "load_gallery_order", return_value={})
+        self.gallery_order = patch.object(
+            get_public_albums, "load_gallery_settings", return_value=({}, {})
+        )
         self.gallery_order.start()
         self.addCleanup(self.gallery_order.stop)
 
@@ -206,12 +208,15 @@ class PublicCatalogListTests(unittest.TestCase):
         with patch.object(
             get_public_albums, "_fetch_page", return_value=([photo], None)
         ), patch.object(
-            get_public_albums, "load_gallery_order", return_value={ALBUM_ID: 2}
+            get_public_albums,
+            "load_gallery_settings",
+            return_value=({ALBUM_ID: 2}, {"Portraits": 3}),
         ):
             response = get_public_albums.handler(
                 {"queryStringParameters": {"type": "photo"}}, None
             )
         self.assertEqual(response_body(response)["items"][0]["galleryOrder"], 2)
+        self.assertEqual(response_body(response)["items"][0]["galleryCategoryOrder"], 3)
 
     def test_handler_rejects_mixed_boundary_parameters_and_redacts_provider_errors(self):
         for params in ({"visibility": "private"}, {"ownerEmail": "owner@example.test"}, ["bad"]):

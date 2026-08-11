@@ -78,7 +78,7 @@ describe('ManageAlbums', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Move Zulu earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
-      'admin-token', ['z-album', 'a-album'],
+      'admin-token', { albumIds: ['z-album', 'a-album'] },
     ))
     const titlesAfter = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
     expect(titlesAfter).toEqual(['Zulu', 'Alpha'])
@@ -88,6 +88,24 @@ describe('ManageAlbums', () => {
       { type: 'photo', limit: 100, visibility: 'unlisted' }, 'admin-token',
     ))
     expect(screen.queryByRole('button', { name: /Move .* earlier/ })).toBeNull()
+  })
+
+  it('persists category order independently from album order', async () => {
+    api.fetchAlbumsFiltered.mockResolvedValue([
+      { ...albums[0], albumId: 'hike', title: 'Trail', category: 'Hikes', galleryCategoryOrder: 1 },
+      { ...albums[0], albumId: 'astro', title: 'Stars', category: 'Astro', galleryCategoryOrder: 0 },
+    ])
+    mounted()
+    await screen.findByText('Trail')
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
+      .toEqual(['Astro', 'Hikes'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Hikes category earlier' }))
+    await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
+      'admin-token', { categoryNames: ['Hikes', 'Astro'] },
+    ))
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
+      .toEqual(['Hikes', 'Astro'])
   })
 
   it('supports metadata editing, cancellation, delete confirmation, and load failures', async () => {

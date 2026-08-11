@@ -9,7 +9,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from cursor_helpers import decode_cursor, encode_cursor
-from gallery_order import apply_gallery_order, load_gallery_order
+from gallery_order import apply_gallery_order, load_gallery_settings
 from media_access import serialize_album_summary
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_album_type, validate_limit
@@ -155,7 +155,11 @@ def handler(event, context):
         )
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
-        gallery_order = load_gallery_order(settings_table, logger) if album_type in {None, "photo"} else {}
+        album_order, category_order = (
+            load_gallery_settings(settings_table, logger)
+            if album_type in {None, "photo"}
+            else ({}, {})
+        )
         items = []
         for record in records:
             if record.get("status", "active") != "active" or record.get("visibility") != "public":
@@ -165,7 +169,7 @@ def handler(event, context):
                 image_count = record.get("imageCount")
                 if "images" not in record and _valid_image_count(image_count):
                     summary["imageCount"] = int(image_count)
-                items.append(apply_gallery_order(summary, gallery_order))
+                items.append(apply_gallery_order(summary, album_order, category_order))
             except ValidationError:
                 continue
 

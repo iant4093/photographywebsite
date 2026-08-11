@@ -11,7 +11,7 @@ from botocore.exceptions import ClientError
 
 from album_access import decode_cursor, encode_cursor
 from auth_helpers import AuthError, auth_error_response, get_verified_claims, is_admin
-from gallery_order import apply_gallery_order, load_gallery_order
+from gallery_order import apply_gallery_order, load_gallery_settings
 from media_access import serialize_album_summary
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_album_type, validate_email, validate_limit
@@ -242,10 +242,10 @@ def handler(event, context):
         )
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
-        gallery_order = (
-            load_gallery_order(settings_table, logger)
+        album_order, category_order = (
+            load_gallery_settings(settings_table, logger)
             if visibility == "public" and album_type in {None, "photo"}
-            else {}
+            else ({}, {})
         )
         items = []
         for record in records:
@@ -262,7 +262,7 @@ def handler(event, context):
                 image_count = record.get("imageCount")
                 if "images" not in record and _valid_image_count(image_count):
                     summary["imageCount"] = max(0, int(image_count))
-                items.append(apply_gallery_order(summary, gallery_order))
+                items.append(apply_gallery_order(summary, album_order, category_order))
             except ValidationError:
                 continue
 

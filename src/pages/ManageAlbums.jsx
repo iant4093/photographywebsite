@@ -17,7 +17,7 @@ import {
 } from '../utils/api'
 import { mediaDisplayUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
 import { mapWithConcurrency } from '../utils/concurrency'
-import { sortGalleryAlbums } from '../utils/galleryOrder'
+import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 
 function urlPathMatchesKey(value, key) {
     if (!value || !key) return false
@@ -280,8 +280,40 @@ function ManageAlbums() {
         })))
         try {
             const token = await getIdToken()
-            await updateGalleryOrder(token, orderedIds)
-            setActionSuccess('Main gallery order updated!')
+            await updateGalleryOrder(token, { albumIds: orderedIds })
+            setActionSuccess('Album order updated!')
+            window.setTimeout(() => setActionSuccess(''), 3000)
+        } catch (error) {
+            setAlbums(previousAlbums)
+            setActionError(error.message)
+        } finally {
+            setSavingOrder(false)
+        }
+    }
+
+    async function moveCategory(category, direction) {
+        if (!canReorderGallery || savingOrder) return
+        const currentIndex = sortedCategories.indexOf(category)
+        const targetIndex = currentIndex + direction
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= sortedCategories.length) return
+
+        const reorderedCategories = [...sortedCategories]
+        const movingCategory = reorderedCategories[currentIndex]
+        reorderedCategories[currentIndex] = reorderedCategories[targetIndex]
+        reorderedCategories[targetIndex] = movingCategory
+        const positions = new Map(reorderedCategories.map((name, index) => [name, index]))
+        const previousAlbums = albums
+
+        setActionError('')
+        setSavingOrder(true)
+        setAlbums((current) => current.map((item) => ({
+            ...item,
+            galleryCategoryOrder: positions.get(item.category || 'Uncategorized'),
+        })))
+        try {
+            const token = await getIdToken()
+            await updateGalleryOrder(token, { categoryNames: reorderedCategories })
+            setActionSuccess('Category order updated!')
             window.setTimeout(() => setActionSuccess(''), 3000)
         } catch (error) {
             setAlbums(previousAlbums)
@@ -610,11 +642,7 @@ function ManageAlbums() {
             grouped[category] = sortGalleryAlbums(grouped[category])
         }
 
-        const sorted = Object.keys(grouped).sort((a, b) => {
-            if (a === 'Uncategorized') return 1;
-            if (b === 'Uncategorized') return -1;
-            return a.localeCompare(b);
-        });
+        const sorted = sortGalleryCategories(Object.keys(grouped), grouped)
 
         return { groupedAlbums: grouped, sortedCategories: sorted };
     }, [albums]);
@@ -701,7 +729,7 @@ function ManageAlbums() {
 
                 {canReorderGallery && !loading && albums.length > 0 && (
                     <div className="mb-8 rounded-2xl border border-amber/20 bg-amber/5 px-5 py-4 text-sm text-warm-gray">
-                        Use the arrow buttons to arrange albums within each category. Albums are alphabetical until you customize their order.
+                        Use the category arrows to arrange sections and the album arrows to arrange cards within a section. Albums default to newest first until you customize their order.
                     </div>
                 )}
 
@@ -716,10 +744,34 @@ function ManageAlbums() {
                     </div>
                 ) : (
                     <div className="space-y-12">
-                        {sortedCategories.map((cat) => (
+                        {sortedCategories.map((cat, categoryIndex) => (
                             <div key={cat} className="animate-fade-in">
                                 <div className="flex items-center gap-4 mb-6">
                                     <h2 className="font-serif text-2xl font-medium text-charcoal">{cat}</h2>
+                                    {canReorderGallery && (
+                                        <div className="flex gap-2 shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => moveCategory(cat, -1)}
+                                                disabled={categoryIndex === 0 || savingOrder}
+                                                aria-label={`Move ${cat} category earlier`}
+                                                title="Move category earlier"
+                                                className="h-8 w-8 rounded-lg bg-amber/10 text-amber-dark text-sm font-medium cursor-pointer hover:bg-amber/20 disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+                                            >
+                                                ↑
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => moveCategory(cat, 1)}
+                                                disabled={categoryIndex === sortedCategories.length - 1 || savingOrder}
+                                                aria-label={`Move ${cat} category later`}
+                                                title="Move category later"
+                                                className="h-8 w-8 rounded-lg bg-amber/10 text-amber-dark text-sm font-medium cursor-pointer hover:bg-amber/20 disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+                                            >
+                                                ↓
+                                            </button>
+                                        </div>
+                                    )}
                                     <div className="h-px bg-warm-border flex-1"></div>
                                 </div>
                                 <div className="space-y-4">

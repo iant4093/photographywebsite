@@ -487,11 +487,11 @@ export async function updateAlbum(token, albumId, data, options = {}) {
     return album
 }
 
-export async function updateGalleryOrder(token, albumIds, options = {}) {
+export async function updateGalleryOrder(token, ordering, options = {}) {
     const result = await apiFetch('/admin/gallery-order', {
         method: 'POST',
         headers: authHeaders(token),
-        body: JSON.stringify({ albumIds }),
+        body: JSON.stringify(ordering),
         signal: options.signal,
     })
     clearApiCache()

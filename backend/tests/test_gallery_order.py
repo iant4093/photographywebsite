@@ -29,18 +29,28 @@ class GalleryOrderHelperTests(unittest.TestCase):
     def test_load_deduplicates_and_applies_photo_positions(self):
         table = MagicMock()
         table.get_item.return_value = {
-            "Item": {"albumIds": [ALBUM_TWO, ALBUM_TWO, "", ALBUM_ONE, 3]}
+            "Item": {
+                "albumIds": [ALBUM_TWO, ALBUM_TWO, "", ALBUM_ONE, 3],
+                "categoryNames": ["Hikes", "Hikes", "", "Astro", 3],
+            }
         }
-        positions = gallery_order.load_gallery_order(table)
-        self.assertEqual(positions, {ALBUM_TWO: 0, ALBUM_ONE: 1})
+        album_positions, category_positions = gallery_order.load_gallery_settings(table)
+        self.assertEqual(album_positions, {ALBUM_TWO: 0, ALBUM_ONE: 1})
+        self.assertEqual(category_positions, {"Hikes": 0, "Astro": 1})
         summary = gallery_order.apply_gallery_order(
-            {"albumId": ALBUM_ONE, "type": "photo"}, positions
+            {"albumId": ALBUM_ONE, "type": "photo", "category": "Astro"},
+            album_positions,
+            category_positions,
         )
         self.assertEqual(summary["galleryOrder"], 1)
+        self.assertEqual(summary["galleryCategoryOrder"], 1)
         video = gallery_order.apply_gallery_order(
-            {"albumId": ALBUM_TWO, "type": "video"}, positions
+            {"albumId": ALBUM_TWO, "type": "video", "category": "Hikes"},
+            album_positions,
+            category_positions,
         )
         self.assertNotIn("galleryOrder", video)
+        self.assertNotIn("galleryCategoryOrder", video)
 
     def test_read_errors_and_invalid_records_fall_back_safely(self):
         table = MagicMock()
@@ -48,12 +58,12 @@ class GalleryOrderHelperTests(unittest.TestCase):
             {"Error": {"Code": "InternalServerError", "Message": "private"}}, "GetItem"
         )
         logger = MagicMock()
-        self.assertEqual(gallery_order.load_gallery_order(table, logger), {})
+        self.assertEqual(gallery_order.load_gallery_settings(table, logger), ({}, {}))
         logger.warning.assert_called_once_with("gallery_order_unavailable")
 
         table.get_item.side_effect = None
         table.get_item.return_value = {"Item": {"albumIds": "invalid"}}
-        self.assertEqual(gallery_order.load_gallery_order(table, logger), {})
+        self.assertEqual(gallery_order.load_gallery_settings(table, logger), ({}, {}))
 
 
 class UpdateGalleryOrderTests(unittest.TestCase):
@@ -66,17 +76,41 @@ class UpdateGalleryOrderTests(unittest.TestCase):
         ), patch.object(
             update_gallery_order, "_load_albums", return_value=[album(ALBUM_ONE), album(ALBUM_TWO)]
         ), patch.object(
-            update_gallery_order.settings_table, "put_item"
-        ) as put, patch.object(update_gallery_order, "emit_audit_event") as audit:
+            update_gallery_order.settings_table, "update_item"
+        ) as update, patch.object(update_gallery_order, "emit_audit_event") as audit:
             response = update_gallery_order.handler(self.event([ALBUM_TWO, ALBUM_ONE]), None)
 
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response_body(response)["albumIds"], [ALBUM_TWO, ALBUM_ONE])
-        saved = put.call_args.kwargs["Item"]
-        self.assertEqual(saved["settingId"], gallery_order.SETTING_ID)
-        self.assertEqual(saved["albumIds"], [ALBUM_TWO, ALBUM_ONE])
-        self.assertIn("updatedAt", saved)
+        request = update.call_args.kwargs
+        self.assertEqual(request["Key"], {"settingId": gallery_order.SETTING_ID})
+        self.assertIn("albumIds = :album_ids", request["UpdateExpression"])
+        self.assertEqual(
+            request["ExpressionAttributeValues"][":album_ids"],
+            [ALBUM_TWO, ALBUM_ONE],
+        )
+        self.assertIn(":updated_at", request["ExpressionAttributeValues"])
         self.assertTrue(audit.called)
+
+    def test_admin_can_replace_category_order_without_rewriting_album_order(self):
+        event = {"body": json.dumps({"categoryNames": ["Hikes", "Astro"]})}
+        with patch.object(update_gallery_order, "verify_front_door_request", return_value=None), patch.object(
+            update_gallery_order, "require_admin", return_value=None
+        ), patch.object(update_gallery_order, "_load_albums") as load, patch.object(
+            update_gallery_order.settings_table, "update_item"
+        ) as update:
+            response = update_gallery_order.handler(event, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response_body(response)["categoryNames"], ["Hikes", "Astro"])
+        load.assert_not_called()
+        request = update.call_args.kwargs
+        self.assertIn("categoryNames = :category_names", request["UpdateExpression"])
+        self.assertNotIn("albumIds", request["UpdateExpression"])
+        self.assertEqual(
+            request["ExpressionAttributeValues"][":category_names"],
+            ["Hikes", "Astro"],
+        )
 
     def test_rejects_duplicates_unknown_nonpublic_video_and_extra_fields(self):
         invalid_cases = (
@@ -85,6 +119,8 @@ class UpdateGalleryOrderTests(unittest.TestCase):
             (self.event([ALBUM_ONE]), [album(ALBUM_ONE, visibility="private")]),
             (self.event([ALBUM_ONE]), [album(ALBUM_ONE, type="video")]),
             ({"body": json.dumps({"albumIds": [], "extra": True})}, []),
+            ({"body": json.dumps({"categoryNames": ["Hikes", "Hikes"]})}, []),
+            ({"body": json.dumps({"categoryNames": [""]})}, []),
         )
         for event, records in invalid_cases:
             with self.subTest(event=event), patch.object(
@@ -93,27 +129,27 @@ class UpdateGalleryOrderTests(unittest.TestCase):
                 update_gallery_order, "require_admin", return_value=None
             ), patch.object(
                 update_gallery_order, "_load_albums", return_value=records
-            ), patch.object(update_gallery_order.settings_table, "put_item") as put:
+            ), patch.object(update_gallery_order.settings_table, "update_item") as update:
                 response = update_gallery_order.handler(event, None)
             self.assertEqual(response["statusCode"], 400)
-            put.assert_not_called()
+            update.assert_not_called()
 
     def test_empty_order_resets_and_provider_failures_are_redacted(self):
         with patch.object(update_gallery_order, "verify_front_door_request", return_value=None), patch.object(
             update_gallery_order, "require_admin", return_value=None
-        ), patch.object(update_gallery_order.settings_table, "put_item") as put:
+        ), patch.object(update_gallery_order.settings_table, "update_item") as update:
             response = update_gallery_order.handler(self.event([]), None)
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(put.call_args.kwargs["Item"]["albumIds"], [])
+        self.assertEqual(update.call_args.kwargs["ExpressionAttributeValues"][":album_ids"], [])
 
         error = ClientError(
-            {"Error": {"Code": "InternalServerError", "Message": "sensitive"}}, "PutItem"
+            {"Error": {"Code": "InternalServerError", "Message": "sensitive"}}, "UpdateItem"
         )
         with patch.object(update_gallery_order, "verify_front_door_request", return_value=None), patch.object(
             update_gallery_order, "require_admin", return_value=None
         ), patch.object(
             update_gallery_order, "_load_albums", return_value=[]
-        ), patch.object(update_gallery_order.settings_table, "put_item", side_effect=error):
+        ), patch.object(update_gallery_order.settings_table, "update_item", side_effect=error):
             response = update_gallery_order.handler(self.event([]), None)
         self.assertEqual(response["statusCode"], 500)
         self.assertNotIn("sensitive", response["body"])

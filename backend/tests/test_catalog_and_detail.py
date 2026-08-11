@@ -38,7 +38,7 @@ def album(visibility="public", **overrides):
 
 class CatalogTests(unittest.TestCase):
     def setUp(self):
-        self.gallery_order = patch.object(get_albums, "load_gallery_order", return_value={})
+        self.gallery_order = patch.object(get_albums, "load_gallery_settings", return_value=({}, {}))
         self.gallery_order.start()
         self.addCleanup(self.gallery_order.stop)
 
@@ -228,12 +228,13 @@ class CatalogTests(unittest.TestCase):
         with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
             get_albums, "_fetch_page", return_value=([album()], None)
         ), patch.object(
-            get_albums, "load_gallery_order", return_value={ALBUM_ID: 4}
+            get_albums, "load_gallery_settings", return_value=({ALBUM_ID: 4}, {"Portraits": 2})
         ):
             response = get_albums.handler(
                 {"queryStringParameters": {"limit": "10", "type": "photo"}}, None
             )
         self.assertEqual(response_body(response)["items"][0]["galleryOrder"], 4)
+        self.assertEqual(response_body(response)["items"][0]["galleryCategoryOrder"], 2)
 
     def test_photo_filter_includes_legacy_records_without_type(self):
         built = ConditionExpressionBuilder().build_expression(get_albums._type_filter("photo"))

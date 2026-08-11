@@ -50,6 +50,7 @@
     {"logicalId": "LoginFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["RateLimitTable.Arn"]},
     {"logicalId": "PreviewWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "ImagesBucket.Arn", "ImagesCloudFront.Id", "PreviewMetadataTable.Arn", "PreviewQueue.QueueName"]},
     {"logicalId": "UpdateAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
+    {"logicalId": "UpdateGalleryOrderFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "GallerySettingsTable.Arn"]},
     {"logicalId": "UpdateImageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "WorkerZipFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
     {"logicalId": "MediaConvertRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},

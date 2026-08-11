@@ -110,7 +110,7 @@ describe('public API client behavior', () => {
     await api.completeHeroUpload('token', '0123456789abcdef0123456789abcdef', { signal })
     await api.createAlbum('token', { title: 'A' }, { signal })
     await api.updateAlbum('token', 'a/b', { title: 'B' }, { signal })
-    await api.updateGalleryOrder('token', ['one', 'two'], { signal })
+    await api.updateGalleryOrder('token', { albumIds: ['one', 'two'] }, { signal })
     await api.addImagesToAlbum('token', 'a/b', [{ id: 'one' }], { signal })
     await api.deleteAlbum('token', 'a/b', { signal })
     await api.deleteImages('token', 'a/b', ['key'], { signal })
