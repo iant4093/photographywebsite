@@ -24,6 +24,7 @@
     {"logicalId": "GoogleDriveBackupFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["GoogleDriveBackupFunctionRole.Arn"]},
     {"logicalId": "PreviewWorkerFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["PreviewWorkerFunctionRole.Arn"]},
     {"logicalId": "UpdateAlbumFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["UpdateAlbumFunctionRole.Arn"]},
+    {"logicalId": "UpdateGalleryOrderFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["UpdateGalleryOrderFunctionRole.Arn"]},
     {"logicalId": "UpdateImageFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["UpdateImageFunctionRole.Arn"]},
     {"logicalId": "WorkerZipFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["WorkerZipFunctionRole.Arn"]},
 
