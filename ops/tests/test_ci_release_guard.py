@@ -307,6 +307,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "GetPublicAlbumsFunctionRole",
                 "HeroCoverFunctionRole",
                 "PreviewWorkerFunctionRole",
+                "RefreshGoogleDriveUsageFunctionRole",
             },
         )
         for rule in role_rules:
@@ -355,6 +356,9 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("GetGoogleDriveUsageFunction", "AWS::Lambda::Function"),
                 ("GetGoogleDriveUsageFunctionRole", "AWS::IAM::Role"),
                 ("GetGoogleDriveUsageFunctionGetGoogleDriveUsagePermission", "AWS::Lambda::Permission"),
+                ("GetPhotographyStatsFunction", "AWS::Lambda::Function"),
+                ("GetPhotographyStatsFunctionRole", "AWS::IAM::Role"),
+                ("GetPhotographyStatsFunctionGetPhotographyStatsPermission", "AWS::Lambda::Permission"),
                 ("RefreshGoogleDriveUsageFunction", "AWS::Lambda::Function"),
                 ("RefreshGoogleDriveUsageFunctionRole", "AWS::IAM::Role"),
                 ("RefreshGoogleDriveUsageFunctionDriveUsageDailyRefresh", "AWS::Events::Rule"),
@@ -1392,6 +1396,25 @@ class PublicPostureSmokeTests(unittest.TestCase):
                 return self.response(404, b'{"message":"Not Found"}')
             if url == "https://site.test/api/users":
                 return self.response(401, b'{"error":"Unauthorized"}', cache="private,no-store")
+            if url == "https://site.test/api/public/stats":
+                stats = {
+                    "schemaVersion": 1,
+                    "generatedAt": "2026-08-11T10:00:00Z",
+                    "sourceGeneratedAt": "2026-08-11T09:15:00Z",
+                    "taken": {"photos": 10, "videos": 2},
+                    "kept": {"photos": 4, "videos": 1, "photoPercent": 40.0, "videoPercent": 50.0},
+                    "storage": {"totalBytes": 1000},
+                    "albums": {"photos": 1, "videos": 1},
+                    "outputByYear": [],
+                    "categories": [],
+                    "mostActive": {"year": None, "category": None},
+                    "gear": {"cameras": [], "lenses": [], "manualLensFallback": "Sirui Nightwalker 75mm T1.2"},
+                }
+                return public_posture_smoke.RawResponse(
+                    200,
+                    {**public_headers, "cache-control": "public, max-age=300, s-maxage=86400"},
+                    json.dumps(stats).encode(),
+                )
             if url.startswith("https://site.test/api/public/albums?"):
                 response_headers = dict(public_headers)
                 if hostile_allow_origin and headers and headers.get("Origin"):
@@ -1414,8 +1437,26 @@ class PublicPostureSmokeTests(unittest.TestCase):
             self.config(), requester=self.requester()
         )
         self.assertEqual(metrics["albumCount"], 1)
-        self.assertEqual(metrics["privacyRouteChecks"], 4)
+        self.assertEqual(metrics["privacyRouteChecks"], 5)
         self.assertEqual(metrics["mediaAuthorizationChecks"], 2)
+        self.assertEqual(metrics["publicStatsChecks"], 1)
+        self.assertTrue(metrics["publicStatsReady"])
+
+    def test_public_stats_allows_exact_initial_bootstrap_response(self):
+        response = self.response(
+            503,
+            b'{"error":"Photography statistics are being prepared","code":"stats_preparing"}',
+            cache="private,no-store",
+        )
+        self.assertFalse(public_posture_smoke._require_public_stats(response))
+
+        invalid = self.response(
+            503,
+            b'{"error":"Service unavailable","code":"unexpected"}',
+            cache="private,no-store",
+        )
+        with self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke._require_public_stats(invalid)
 
     def test_smoke_retry_is_bounded_and_only_for_availability_failures(self):
         calls = []

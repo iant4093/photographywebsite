@@ -15,6 +15,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const photoActive = pathname === '/' || pathname.startsWith('/album/')
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/')
     const searchActive = pathname === '/search'
+    const statsActive = pathname === '/stats'
     const sharedActive = pathname.startsWith('/sharedalbum')
     const contactActive = pathname === '/contact'
     const accountActive = pathname === '/login' || pathname === '/dashboard' || pathname.startsWith('/admin')
@@ -114,6 +115,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                             <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
                             <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
                             <Link to="/search" {...activeAttributes(searchActive)}>Search</Link>
+                            <Link to="/stats" {...activeAttributes(statsActive)}>Stats</Link>
                             <Link to="/sharedalbum" {...activeAttributes(sharedActive)}>Find Album</Link>
                             <Link to="/contact" {...activeAttributes(contactActive)}>Contact</Link>
                             {user ? (
@@ -168,6 +170,10 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
 
                     <Link to="/search" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(searchActive)} aria-current={searchActive ? 'page' : undefined}>
                         Search
+                    </Link>
+
+                    <Link to="/stats" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(statsActive)} aria-current={statsActive ? 'page' : undefined}>
+                        Stats
                     </Link>
 
                     <Link to="/sharedalbum" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(sharedActive)} aria-current={sharedActive ? 'page' : undefined}>

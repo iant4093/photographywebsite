@@ -91,6 +91,7 @@ actual_routes = {
 expected_routes = {
     ("GET", "/public/albums"),
     ("GET", "/public/albums/{albumId}"),
+    ("GET", "/public/stats"),
     ("GET", "/albums"),
     ("GET", "/albums/{albumId}"),
     ("GET", "/shared/{shareCode}"),

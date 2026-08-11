@@ -670,3 +670,9 @@ export function fetchGoogleDriveUsage(token, options = {}) {
         signal: options.signal,
     }, { timeoutMs: 60_000, retries: 0 })
 }
+
+export function fetchPhotographyStats(options = {}) {
+    return apiFetch('/public/stats', {
+        signal: options.signal,
+    }, { timeoutMs: 15_000, retries: 1 })
+}

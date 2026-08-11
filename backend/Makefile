@@ -37,7 +37,8 @@ SOURCES_CreateUserFunction := audit_helpers.py auth_helpers.py create_user.py fr
 SOURCES_ListUsersFunction := audit_helpers.py auth_helpers.py front_door.py list_users.py response_helpers.py validation_helpers.py
 SOURCES_GetCostReportFunction := audit_helpers.py auth_helpers.py front_door.py get_cost_report.py response_helpers.py
 SOURCES_GetGoogleDriveUsageFunction := audit_helpers.py auth_helpers.py front_door.py get_google_drive_usage.py response_helpers.py
-SOURCES_RefreshGoogleDriveUsageFunction := audit_helpers.py auth_helpers.py front_door.py get_google_drive_usage.py refresh_google_drive_usage.py response_helpers.py
+SOURCES_GetPhotographyStatsFunction := front_door.py photography_stats.py response_helpers.py
+SOURCES_RefreshGoogleDriveUsageFunction := audit_helpers.py auth_helpers.py front_door.py get_google_drive_usage.py photography_stats.py refresh_google_drive_usage.py response_helpers.py
 SOURCES_DeleteUserFunction := audit_helpers.py auth_helpers.py delete_user.py deletion_helpers.py front_door.py media_access.py owner_helpers.py response_helpers.py validation_helpers.py
 SOURCES_EditUserFunction := audit_helpers.py auth_helpers.py edit_user.py front_door.py owner_helpers.py response_helpers.py validation_helpers.py
 

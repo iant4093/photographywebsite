@@ -2627,6 +2627,32 @@ Resources:
             Path: /admin/drive-usage
             Method: GET
 
+  GetPhotographyStatsFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: photography_stats.handler
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_USAGE_CACHE_TABLE: !Ref DriveUsageCacheTable
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt DriveUsageCacheTable.Arn
+      Events:
+        GetPhotographyStats:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /public/stats
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
   RefreshGoogleDriveUsageFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -2637,6 +2663,7 @@ Resources:
       MemorySize: 512
       Environment:
         Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
           DRIVE_USAGE_CACHE_TABLE: !Ref DriveUsageCacheTable
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
           GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
@@ -2648,6 +2675,9 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt DriveUsageCacheTable.Arn
+            - Effect: Allow
+              Action: dynamodb:Scan
+              Resource: !GetAtt AlbumsTable.Arn
         - !If
           - HasGoogleOAuthSecret
           - Statement:

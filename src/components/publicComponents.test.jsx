@@ -107,6 +107,7 @@ describe('navigation and metadata', () => {
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],
     ['Search', '/search'],
+    ['Stats', '/stats'],
     ['Contact', '/contact'],
     ['Sign In', '/login'],
   ])('closes the guest menu through %s', (name, destination) => {

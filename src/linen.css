@@ -911,7 +911,7 @@
   to { transform: translateX(0); }
 }
 
-@media (min-width: 900px) {
+@media (min-width: 1080px) {
   .linen-site .linen-desktop-links {
     display: flex;
   }

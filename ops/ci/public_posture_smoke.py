@@ -37,7 +37,7 @@ MEDIA_FIELDS = {
     "thumbnailUrl": 1,
     "url": 3,
 }
-SENSITIVE_ROUTES = ("/login", "/admin", "/dashboard", "/sharedalbum/ci-posture-probe")
+SENSITIVE_ROUTES = ("/login", "/admin", "/dashboard", "/sharedalbum/ci-posture-probe", "/stats")
 
 
 class PostureError(ValueError):
@@ -212,6 +212,48 @@ def _require_security_headers(response: RawResponse) -> None:
         raise PostureError("public site route unexpectedly set a cookie")
 
 
+def _require_public_stats(response: RawResponse) -> bool:
+    # A brand-new deployment can briefly precede the first daily aggregate.
+    # Accept only the endpoint's exact, non-cacheable bootstrap response; once
+    # populated, the stronger public payload contract below remains mandatory.
+    if response.status == 503:
+        payload = _require_json(response, 503)
+        if not isinstance(payload, dict) or payload.get("code") != "stats_preparing":
+            raise PostureError("public statistics endpoint returned an invalid bootstrap response")
+        cache = response.headers.get("cache-control", "").lower()
+        if "no-store" not in cache or "set-cookie" in response.headers:
+            raise PostureError("public statistics bootstrap response is not safely non-cacheable")
+        return False
+
+    payload = _require_json(response, 200)
+    if not isinstance(payload, dict):
+        raise PostureError("public statistics response is invalid")
+    required = {
+        "schemaVersion", "generatedAt", "sourceGeneratedAt", "taken", "kept",
+        "storage", "albums", "outputByYear", "categories", "mostActive", "gear",
+    }
+    if set(payload) != required:
+        raise PostureError("public statistics response is invalid")
+    for group, fields in {
+        "taken": ("photos", "videos"),
+        "kept": ("photos", "videos", "photoPercent", "videoPercent"),
+        "storage": ("totalBytes",),
+        "albums": ("photos", "videos"),
+    }.items():
+        value = payload.get(group)
+        if not isinstance(value, dict) or any(
+            isinstance(value.get(field), bool)
+            or not isinstance(value.get(field), (int, float))
+            or value[field] < 0
+            for field in fields
+        ):
+            raise PostureError("public statistics response is invalid")
+    cache = response.headers.get("cache-control", "").lower()
+    if "public" not in cache or "s-maxage=" not in cache or "set-cookie" in response.headers:
+        raise PostureError("public statistics response is not safely cacheable")
+    return True
+
+
 def _inspect_media_urls(value: object, expected_host: str, candidates: list[tuple[int, str]]) -> None:
     if isinstance(value, list):
         for item in value:
@@ -298,6 +340,14 @@ def run_posture(
     if hostile.headers.get("access-control-allow-origin"):
         raise PostureError("hostile origin received an allow-origin response")
 
+    stats = requester(
+        _join(config.api_base_url, "/public/stats"),
+        config.timeout,
+        {"Accept": "application/json"},
+        MAX_JSON_BYTES,
+    )
+    stats_ready = _require_public_stats(stats)
+
     protected = requester(
         _join(config.api_base_url, "/users"),
         config.timeout,
@@ -361,6 +411,8 @@ def run_posture(
         "directEndpointChecks": 2,
         "mediaAuthorizationChecks": 2,
         "privacyRouteChecks": privacy_routes,
+        "publicStatsChecks": 1,
+        "publicStatsReady": stats_ready,
     }
 
 
