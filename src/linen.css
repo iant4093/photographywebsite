@@ -99,6 +99,7 @@
 
 .linen-site .linen-nav-inner {
   height: 100%;
+  max-width: 104rem;
   padding-block: 0;
 }
 

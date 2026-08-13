@@ -38,6 +38,7 @@ describe('small presentational and routing components', () => {
     const { container } = routed(<Footer />)
     expect(container.querySelector('.linen-footer-identity')).toBeInTheDocument()
     expect(container.querySelector('.linen-footer-links')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Stats' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy')
     for (const name of ['Instagram', 'Source Code']) {
       const link = screen.getByRole('link', { name })

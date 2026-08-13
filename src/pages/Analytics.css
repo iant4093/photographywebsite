@@ -1,7 +1,7 @@
 .analytics-page { width: min(1600px, calc(100% - 2rem)); margin: 0 auto; padding: 7.5rem 0 5rem; color: var(--color-charcoal, #2d2925); }
 .analytics-header { display: flex; justify-content: space-between; align-items: end; gap: 2rem; padding-bottom: 2rem; border-bottom: 1px solid color-mix(in srgb, currentColor 24%, transparent); }
 .analytics-header a { display: inline-block; margin-bottom: 1.5rem; color: var(--color-warm-gray, #7a7067); font-size: .78rem; text-transform: uppercase; letter-spacing: .14em; }
-.analytics-header div > span,.analytics-panel-heading span { color: var(--color-warm-gray, #7a7067); font-size: .68rem; font-weight: 650; text-transform: uppercase; letter-spacing: .18em; }
+.analytics-panel-heading span { color: var(--color-warm-gray, #7a7067); font-size: .68rem; font-weight: 650; text-transform: uppercase; letter-spacing: .18em; }
 .analytics-header h1 { margin: .3rem 0; font-family: var(--font-serif); font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 500; line-height: 1; }
 .analytics-header p { color: var(--color-warm-gray, #7a7067); }
 .analytics-header label { display: grid; gap: .5rem; min-width: 10rem; color: var(--color-warm-gray, #7a7067); font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; }

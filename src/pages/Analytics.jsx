@@ -156,7 +156,6 @@ export default function Analytics() {
             <header className="analytics-header">
                 <div>
                     <Link to="/admin">← Dashboard</Link>
-                    <span>Anonymous aggregate telemetry</span>
                     <h1>Website Analytics</h1>
                     <p>Visits, portfolio engagement, audience shape, and frontend health in one view.</p>
                 </div>

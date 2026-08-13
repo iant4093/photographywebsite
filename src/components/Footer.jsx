@@ -15,12 +15,6 @@ function Footer({ editorial = true }) {
                 )}
                 <div className="linen-footer-links flex items-center gap-6">
                     <Link
-                        to="/stats"
-                        className="text-sm text-warm-gray hover:text-amber-dark transition-colors duration-300"
-                    >
-                        Stats
-                    </Link>
-                    <Link
                         to="/privacy"
                         className="text-sm text-warm-gray hover:text-amber-dark transition-colors duration-300"
                     >

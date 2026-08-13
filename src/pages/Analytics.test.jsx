@@ -38,6 +38,7 @@ describe('Website Analytics admin page', () => {
         render(<MemoryRouter><Analytics /></MemoryRouter>)
         expect(screen.getByRole('status', { name: 'Loading website analytics' })).toBeInTheDocument()
         expect(await screen.findByRole('heading', { name: 'Website Analytics' })).toBeInTheDocument()
+        expect(screen.queryByText('Anonymous aggregate telemetry')).not.toBeInTheDocument()
         expect(screen.getByText('Mountain Day')).toBeInTheDocument()
         expect(screen.getByText('Trail Film')).toBeInTheDocument()
         expect(screen.getByText('Individual photo downloads')).toBeInTheDocument()
