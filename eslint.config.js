@@ -35,7 +35,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['ops/cloudfront_www_redirect.js'],
+    files: ['ops/cloudfront_www_redirect.js', 'ops/cloudfront_social_router.js'],
     languageOptions: {
       sourceType: 'script',
     },

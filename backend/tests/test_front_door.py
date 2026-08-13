@@ -161,7 +161,7 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
         self.assertEqual(len(handlers), 28)
         self.assertEqual(
             len(re.findall(r"(?m)^          Type: HttpApi$", TEMPLATE_TEXT)),
-            30,
+            31,
         )
         for logical_id, module_name in handlers.items():
             with self.subTest(function=logical_id, module=module_name):

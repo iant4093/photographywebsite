@@ -355,6 +355,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("GetAnalyticsReportFunction", "AWS::Lambda::Function"),
                 ("GetAnalyticsReportFunctionRole", "AWS::IAM::Role"),
                 ("GetAnalyticsReportFunctionGetAnalyticsReportPermission", "AWS::Lambda::Permission"),
+                ("GetPublicAlbumFunctionGetAlbumSocialPreviewPermission", "AWS::Lambda::Permission"),
                 ("CostReportCacheTable", "AWS::DynamoDB::Table"),
                 ("GetCostReportFunction", "AWS::Lambda::Function"),
                 ("GetCostReportFunctionRole", "AWS::IAM::Role"),

@@ -25,6 +25,7 @@ from aws_stack import discover_distribution_by_alias, stack_resource  # noqa: E4
 
 DEFAULT_BASELINE = HERE / "frontend_cloudfront_baseline.json"
 WWW_REDIRECT_SOURCE = HERE / "cloudfront_www_redirect.js"
+SOCIAL_ROUTER_SOURCE = HERE / "cloudfront_social_router.js"
 FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
 LEGACY_SPA_ERROR_CODES = frozenset({403, 404})
 
@@ -156,8 +157,9 @@ def validate_cache_policy_ids(baseline: dict[str, Any], profile: str | None) -> 
 
 
 def assert_no_foreign_viewer_request_function(
-    config: dict[str, Any], managed_name: str
+    config: dict[str, Any], managed_names: str | set[str]
 ) -> None:
+    allowed = {managed_names} if isinstance(managed_names, str) else managed_names
     behaviors = [config["DefaultCacheBehavior"]]
     behaviors.extend(config.get("CacheBehaviors", {}).get("Items", []) or [])
     for behavior in behaviors:
@@ -166,7 +168,7 @@ def assert_no_foreign_viewer_request_function(
             if association.get("EventType") != "viewer-request":
                 continue
             arn = association.get("FunctionARN", "")
-            if not arn.endswith(f":function/{managed_name}"):
+            if not any(arn.endswith(f":function/{name}") for name in allowed):
                 raise RuntimeError(
                     "Refusing www redirect: an unmanaged viewer-request function is already associated"
                 )
@@ -179,11 +181,13 @@ def associate_viewer_request(behavior: dict[str, Any], function_arn: str) -> Non
     behavior["FunctionAssociations"] = {"Quantity": len(retained), "Items": retained}
 
 
-def ensure_www_redirect_function(
+def ensure_edge_function(
     *,
     name: str,
     apex: str,
     www: str,
+    source_path: Path,
+    comment: str,
     apply: bool,
     profile: str | None,
 ) -> tuple[str | None, str]:
@@ -195,7 +199,7 @@ def ensure_www_redirect_function(
     ]
     if len(matches) > 1:
         raise RuntimeError("Multiple CloudFront Functions have the managed redirect name")
-    source = WWW_REDIRECT_SOURCE.read_text(encoding="utf-8")
+    source = source_path.read_text(encoding="utf-8")
     source = source.replace("__APEX_HOST__", apex).replace("__WWW_HOST__", www)
     if not apply:
         arn = matches[0].get("FunctionMetadata", {}).get("FunctionARN") if matches else None
@@ -206,7 +210,7 @@ def ensure_www_redirect_function(
         handle.flush()
         config_argument = json.dumps(
             {
-                "Comment": "Canonical www redirect and API-safe frontend SPA routing",
+                "Comment": comment,
                 "Runtime": "cloudfront-js-1.0",
             },
             separators=(",", ":"),
@@ -250,6 +254,20 @@ def ensure_www_redirect_function(
         profile=profile,
     )
     return published["FunctionSummary"]["FunctionMetadata"]["FunctionARN"], "published"
+
+
+def ensure_www_redirect_function(
+    *, name: str, apex: str, www: str, apply: bool, profile: str | None
+) -> tuple[str | None, str]:
+    return ensure_edge_function(
+        name=name,
+        apex=apex,
+        www=www,
+        source_path=WWW_REDIRECT_SOURCE,
+        comment="Canonical www redirect and API-safe frontend SPA routing",
+        apply=apply,
+        profile=profile,
+    )
 
 
 def policy_config(name: str, baseline: dict[str, Any], cache_control: str) -> dict[str, Any]:
@@ -905,11 +923,12 @@ def main() -> int:
         )
 
     redirect_name = f"{baseline['canonical_alias'].replace('.', '-')}-www-redirect-v1"
+    social_router_name = f"{baseline['canonical_alias'].replace('.', '-')}-social-router-v1"
     redirect_arn: str | None = None
     redirect_action = "disabled"
     request_router_enabled = args.include_www or args.include_api_front_door
     if request_router_enabled:
-        assert_no_foreign_viewer_request_function(config, redirect_name)
+        assert_no_foreign_viewer_request_function(config, {redirect_name, social_router_name})
     if args.include_www:
         certificate_arn = config.get("ViewerCertificate", {}).get("ACMCertificateArn")
         if not certificate_arn:
@@ -936,6 +955,18 @@ def main() -> int:
             name=redirect_name,
             apex=baseline["canonical_alias"],
             www=baseline["optional_www_alias"],
+            apply=args.apply,
+            profile=args.profile,
+        )
+    social_router_arn: str | None = None
+    social_router_action = "disabled"
+    if args.include_api_front_door:
+        social_router_arn, social_router_action = ensure_edge_function(
+            name=social_router_name,
+            apex=baseline["canonical_alias"],
+            www=baseline["optional_www_alias"],
+            source_path=SOCIAL_ROUTER_SOURCE,
+            comment="Canonical www redirect and public album social document routing",
             apply=args.apply,
             profile=args.profile,
         )
@@ -966,6 +997,7 @@ def main() -> int:
             "immutable": immutable_action,
         },
         "wwwRedirect": redirect_action,
+        "socialPreviewRouter": social_router_action,
         "apiFrontDoor": {
             "enabled": args.include_api_front_door,
             "originDomain": api_settings.get("origin_domain") if args.include_api_front_door else None,
@@ -1021,6 +1053,7 @@ def main() -> int:
     managed_patterns.update(baseline.get("static_path_patterns", []))
     if args.include_api_front_door:
         managed_patterns.update({api_settings["public_path_pattern"], api_settings["private_path_pattern"]})
+        managed_patterns.update(api_settings.get("social_path_patterns", []))
     preserved = [item for item in existing_behaviors if item.get("PathPattern") not in managed_patterns]
     immutable = [
         cache_behavior(default, pattern, immutable_id, baseline)
@@ -1060,6 +1093,20 @@ def main() -> int:
                 public=False,
             ),
         ]
+        assert social_router_arn
+        for pattern in api_settings.get("social_path_patterns", []):
+            social_behavior = api_cache_behavior(
+                default,
+                settings=api_settings,
+                path_pattern=pattern,
+                cache_policy_id=baseline["cache_policies"]["html"],
+                origin_request_policy_id=public_api_origin_request_id,
+                response_policy_id=html_id,
+                public=True,
+            )
+            social_behavior["ViewerProtocolPolicy"] = "redirect-to-https"
+            associate_viewer_request(social_behavior, social_router_arn)
+            api_behaviors.append(social_behavior)
     # CloudFront selects the first matching ordered behavior, so the narrow
     # public cache path must precede the cache-disabled catch-all API path.
     managed = api_behaviors + immutable + static

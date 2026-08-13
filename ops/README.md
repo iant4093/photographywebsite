@@ -171,6 +171,11 @@ download, ZIP, expired-URL, and anonymous-guess behavior.
 The frontend distribution uses the private S3 REST origin with Origin Access
 Control, hardened response headers, immutable fingerprinted assets, short-lived
 HTML, SPA navigation rewriting, and the path-preserving `www` redirect. The
+dedicated `/album/*` and `/video/*` behaviors return the current SPA shell from
+the existing public API origin with server-visible, public-only social metadata;
+private, unlisted, missing, or malformed identifiers receive the generic shell
+without record details. The homepage metadata uses the stable current-hero alias.
+The
 completed S3-website-origin migration is not a routine operation and must not be
 replayed.
 

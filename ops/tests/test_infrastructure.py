@@ -82,6 +82,9 @@ assert servers[0]["url"] == "/"
 assert servers[0]["x-amazon-apigateway-endpoint-configuration"][
     "disableExecuteApiEndpoint"
 ] == {"Fn::If": ["DisableDefaultApiEndpoint", True, False]}
+social_route = body["paths"]["/public/social/{albumType}/{albumId}"]
+assert set(social_route) == {"x-amazon-apigateway-any-method"}
+assert social_route["x-amazon-apigateway-any-method"]["security"] == [{"NONE": []}]
 actual_routes = {
     (method.upper(), path)
     for path, operations in body["paths"].items()
@@ -592,6 +595,53 @@ class BrowserBoundaryTests(unittest.TestCase):
                 },
                 "managed",
             )
+
+    def test_homepage_and_album_social_metadata_are_server_visible(self) -> None:
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        for marker in (
+            'property="og:title"',
+            'property="og:description"',
+            'property="og:image"',
+            'name="twitter:card" content="summary_large_image"',
+            '/site/hero/current/hero.jpg',
+        ):
+            self.assertIn(marker, index)
+        template = (ROOT / "backend" / "template.yaml").read_text(encoding="utf-8")
+        self.assertIn("Path: /public/social/{albumType}/{albumId}", template)
+        baseline = json.loads(
+            (ROOT / "ops" / "frontend_cloudfront_baseline.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            baseline["api_front_door"]["social_path_patterns"],
+            ["album/*", "video/*"],
+        )
+
+    def test_edge_social_router_maps_only_album_documents_and_preserves_www(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is required to execute the CloudFront Function regression")
+        source = (ROOT / "ops" / "cloudfront_social_router.js").read_text(encoding="utf-8")
+        source = source.replace("__APEX_HOST__", "example.test").replace(
+            "__WWW_HOST__", "www.example.test"
+        )
+        album_id = "11111111-1111-4111-8111-111111111111"
+        requests = [
+            {"method": "GET", "uri": f"/album/{album_id}", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "HEAD", "uri": f"/video/{album_id}/", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "GET", "uri": "/album/not-a-uuid", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "GET", "uri": f"/album/{album_id}", "headers": {"host": {"value": "www.example.test"}}, "querystring": {"view": {"value": "grid"}}},
+        ]
+        runner = source + "\nprocess.stdout.write(JSON.stringify(" + json.dumps(requests) + ".map(function(request) { return handler({request: request}); })));"
+        results = json.loads(subprocess.run(
+            [node, "-e", runner], check=True, text=True, capture_output=True
+        ).stdout)
+        self.assertEqual(results[0]["uri"], f"/api/public/social/album/{album_id}")
+        self.assertEqual(results[1]["uri"], f"/api/public/social/video/{album_id}")
+        self.assertEqual(results[2]["uri"], "/api/public/social/album/invalid")
+        self.assertEqual(
+            results[3]["headers"]["location"]["value"],
+            f"https://example.test/album/{album_id}?view=grid",
+        )
 
     def test_edge_request_router_preserves_api_and_rewrites_only_spa_navigation(self) -> None:
         node = shutil.which("node")

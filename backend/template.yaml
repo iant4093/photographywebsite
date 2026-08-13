@@ -1424,6 +1424,14 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetAlbumSocialPreview:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /public/social/{albumType}/{albumId}
+            Method: ANY
+            Auth:
+              Authorizer: NONE
 
   # Compatibility route: supports public, owner, and admin catalog views.
   GetAlbumsFunction:

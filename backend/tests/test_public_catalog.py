@@ -269,6 +269,56 @@ class PublicCatalogListTests(unittest.TestCase):
 
 
 class PublicAlbumDetailTests(unittest.TestCase):
+    SHELL = """<!doctype html><html><head>
+    <meta name="description" content="generic">
+    <link rel="canonical" href="https://iantruongphotography.com/">
+    <meta property="og:title" content="Old">
+    <meta property="og:image" content="https://media.example.test/old.jpg">
+    <meta name="twitter:title" content="Old">
+    <title>Ian Truong Photography</title>
+    </head><body><div id="root"></div><script src="/assets/app.js"></script></body></html>"""
+
+    def setUp(self):
+        get_public_album._shell_cache.update(html=None, expires_at=0.0)
+
+    def tearDown(self):
+        get_public_album._shell_cache.update(html=None, expires_at=0.0)
+
+    def test_social_shell_fetch_is_bounded_cached_and_uses_the_current_document(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.headers.get_content_type.return_value = "text/html"
+        response.read.return_value = self.SHELL.encode("utf-8")
+        with patch.object(
+            get_public_album.urllib.request, "urlopen", return_value=response
+        ) as urlopen, patch.object(
+            get_public_album.time, "monotonic", side_effect=[100.0, 101.0]
+        ):
+            self.assertEqual(get_public_album._base_shell(), self.SHELL)
+            self.assertEqual(get_public_album._base_shell(), self.SHELL)
+        urlopen.assert_called_once()
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://iantruongphotography.com/index.html")
+        response.read.assert_called_once_with(get_public_album.MAX_SHELL_BYTES + 1)
+
+    def test_social_shell_refresh_failure_uses_only_a_previously_valid_shell(self):
+        get_public_album._shell_cache.update(html=self.SHELL, expires_at=0.0)
+        with patch.object(
+            get_public_album.urllib.request, "urlopen", side_effect=RuntimeError("provider detail")
+        ):
+            self.assertEqual(get_public_album._base_shell(), self.SHELL)
+
+        get_public_album._shell_cache.update(html=None, expires_at=0.0)
+        with patch.object(
+            get_public_album, "_base_shell", side_effect=RuntimeError("provider detail")
+        ):
+            response = get_public_album.handler(
+                {"pathParameters": {"albumType": "album", "albumId": ALBUM_ID}},
+                None,
+            )
+        self.assertEqual(response["statusCode"], 500)
+        self.assertNotIn("provider detail", response["body"])
+
     def test_public_detail_returns_cacheable_allowlisted_body(self):
         stored = public_album(ownerEmail="private@example.test", shareCode="private-code")
         with patch.object(
@@ -301,6 +351,99 @@ class PublicAlbumDetailTests(unittest.TestCase):
                 )
                 self.assertEqual(response["statusCode"], 404)
                 serialize.assert_not_called()
+
+    def test_social_document_uses_escaped_public_album_metadata_and_cover(self):
+        stored = public_album(
+            title='Misty <script>alert("x")</script>',
+            description='Portraits & friends',
+            coverImageUrl=f"albums/{ALBUM_ID}/original/photo.jpg",
+            coverThumbKey=f"albums/{ALBUM_ID}/thumbnail/photo.jpg",
+        )
+        event = {
+            "pathParameters": {"albumType": "album", "albumId": ALBUM_ID},
+            "queryStringParameters": None,
+        }
+        with patch.object(get_public_album, "_base_shell", return_value=self.SHELL), patch.object(
+            get_public_album.table, "get_item", return_value={"Item": stored}
+        ):
+            response = get_public_album.handler(event, None)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["headers"]["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("default-src 'self'", response["headers"]["Content-Security-Policy"])
+        self.assertIn("Portraits &amp; friends", response["body"])
+        self.assertIn("Misty &lt;script&gt;", response["body"])
+        self.assertNotIn('<script>alert("x")</script>', response["body"])
+        self.assertIn(
+            f"https://media.example.test/albums/{ALBUM_ID}/thumbnail/photo.jpg",
+            response["body"],
+        )
+        self.assertIn(
+            f'<link rel="canonical" href="https://iantruongphotography.com/album/{ALBUM_ID}"',
+            response["body"],
+        )
+        self.assertEqual(response["body"].count('property="og:title"'), 1)
+        self.assertEqual(response["body"].count('name="twitter:title"'), 1)
+        self.assertEqual(response["body"].count('name="description"'), 1)
+
+    def test_social_document_never_uses_a_large_original_when_thumbnail_is_missing(self):
+        stored = public_album(
+            coverImageUrl=f"albums/{ALBUM_ID}/original/photo.jpg",
+            coverThumbKey="",
+        )
+        with patch.object(get_public_album, "_base_shell", return_value=self.SHELL), patch.object(
+            get_public_album.table, "get_item", return_value={"Item": stored}
+        ):
+            response = get_public_album.handler(
+                {"pathParameters": {"albumType": "album", "albumId": ALBUM_ID}},
+                None,
+            )
+        self.assertNotIn(f"albums/{ALBUM_ID}/original/photo.jpg", response["body"])
+        self.assertIn("/site/hero/current/hero.jpg", response["body"])
+
+    def test_social_document_falls_back_without_disclosing_nonpublic_or_wrong_type_records(self):
+        records = (
+            public_album(visibility="private", title="Private title"),
+            public_album(type="video", title="Wrong type title"),
+            None,
+        )
+        for stored in records:
+            with self.subTest(stored=stored), patch.object(
+                get_public_album, "_base_shell", return_value=self.SHELL
+            ), patch.object(
+                get_public_album.table,
+                "get_item",
+                return_value={} if stored is None else {"Item": stored},
+            ):
+                response = get_public_album.handler(
+                    {"pathParameters": {"albumType": "album", "albumId": ALBUM_ID}},
+                    None,
+                )
+            self.assertEqual(response["statusCode"], 200)
+            self.assertIn("Ian Truong Photography portfolio cover", response["body"])
+            self.assertNotIn("Private title", response["body"])
+            self.assertNotIn("Wrong type title", response["body"])
+            self.assertIn('href="https://iantruongphotography.com/"', response["body"])
+
+    def test_social_document_invalid_id_and_lookup_failure_remain_generic(self):
+        events = [
+            ({"albumType": "album", "albumId": "bad"}, None),
+            ({"albumType": "unsupported", "albumId": ALBUM_ID}, None),
+            ({"albumType": "video", "albumId": ALBUM_ID}, RuntimeError("sensitive")),
+        ]
+        for params, failure in events:
+            with self.subTest(params=params), patch.object(
+                get_public_album, "_base_shell", return_value=self.SHELL
+            ), patch.object(
+                get_public_album.table,
+                "get_item",
+                side_effect=failure,
+            ) as get_item:
+                response = get_public_album.handler({"pathParameters": params}, None)
+            self.assertEqual(response["statusCode"], 200)
+            self.assertIn("Ian Truong Photography portfolio cover", response["body"])
+            self.assertNotIn("sensitive", response["body"])
+            if params["albumId"] == "bad" or params["albumType"] == "unsupported":
+                get_item.assert_not_called()
 
     def test_legacy_listing_filters_derivatives_duplicates_and_empty_keys(self):
         album = public_album(images=[])
