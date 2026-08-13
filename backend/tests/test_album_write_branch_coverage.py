@@ -409,6 +409,39 @@ class UpdateAlbumBranchTests(unittest.TestCase):
         self.assertEqual(self._call({"shareCode": "x"}, album())[0]["statusCode"], 400)
         self.assertEqual(self._call({"title": "x"}, album(), tag_error=RuntimeError("s3"))[0]["statusCode"], 500)
 
+    def test_album_title_and_category_changes_reconcile_existing_drive_folder(self):
+        record = album(backupToGoogleDrive=False, title="Old", category="Old category")
+        lambda_client = Mock()
+        with patch.dict(
+            os.environ,
+            {"GOOGLE_DRIVE_SYNC_FUNCTION_NAME": "drive-worker"},
+        ), patch.object(update_album.boto3, "client", return_value=lambda_client):
+            response, _, _, _ = self._call(
+                {"title": "New", "category": "New category"},
+                record,
+            )
+        self.assertEqual(response["statusCode"], 200)
+        lambda_client.invoke.assert_called_once()
+        payload = json.loads(lambda_client.invoke.call_args.kwargs["Payload"])
+        self.assertEqual(payload["albumId"], ALBUM_ID)
+        self.assertEqual(payload["keys"], [])
+
+    def test_drive_reconciliation_failure_does_not_undo_metadata_edit(self):
+        record = album(backupToGoogleDrive=True, title="Old")
+        lambda_client = Mock()
+        lambda_client.invoke.side_effect = RuntimeError("offline")
+        with patch.dict(
+            os.environ,
+            {"GOOGLE_DRIVE_SYNC_FUNCTION_NAME": "drive-worker"},
+        ), patch.object(
+            update_album.boto3,
+            "client",
+            return_value=lambda_client,
+        ), patch.object(update_album, "emit_audit_event") as emit:
+            response, _, _, _ = self._call({"title": "New"}, record)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(any(call.kwargs.get("event_name") == "provider.drive_backup" for call in emit.call_args_list))
+
 
 class UpdateImageBranchTests(unittest.TestCase):
     def _call(self, body, record=None, **extra):

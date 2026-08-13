@@ -1,5 +1,6 @@
 """Validated album metadata/visibility update with derivative retagging."""
 
+import json
 import os
 import secrets
 
@@ -26,6 +27,25 @@ from validation_helpers import (
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
+
+
+def _sync_drive_folder(album):
+    function_name = os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME", "").strip()
+    if not function_name:
+        return
+    boto3.client("lambda").invoke(
+        FunctionName=function_name,
+        InvocationType="Event",
+        Payload=json.dumps(
+            {
+                "albumId": album["albumId"],
+                "albumType": album.get("type", "photo"),
+                "albumTitle": album["title"],
+                "bucket": os.environ["IMAGES_BUCKET"],
+                "keys": [],
+            }
+        ),
+    )
 
 
 def _audit(event, context, outcome, reason_code, *, previous_visibility=None, visibility=None):
@@ -179,6 +199,23 @@ def handler(event, context):
                 catalog=True,
                 reason="album-updated",
             )
+        if album.get("title") != updated.get("title") or album.get("category") != updated.get("category"):
+            try:
+                _sync_drive_folder(updated)
+            except Exception:
+                # Metadata is already committed. Keep edits idempotent and let
+                # the next upload or edit reconcile the Drive folder again.
+                emit_audit_event(
+                    event_name="provider.drive_backup",
+                    outcome="failure",
+                    action="provider.backup.dispatch",
+                    resource_type="provider",
+                    reason_code="dispatch_failed",
+                    event=event,
+                    context=context,
+                    actor_type="service",
+                    auth_method="service",
+                )
         _audit(
             event,
             context,

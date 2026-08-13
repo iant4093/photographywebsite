@@ -1854,6 +1854,7 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
+          GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -1882,6 +1883,9 @@ Resources:
               Resource:
                 - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
                 - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt GoogleDriveBackupFunction.Arn
       Events:
         UpdateAlbum:
           Type: HttpApi

@@ -12,13 +12,23 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 from media_access import validate_album_media_key
-from validation_helpers import ValidationError, require_string, validate_album_type, validate_list, validate_uuid
+from validation_helpers import (
+    ValidationError,
+    optional_string,
+    require_string,
+    validate_album_type,
+    validate_list,
+    validate_uuid,
+)
 
 
 s3 = boto3.client("s3")
 table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
 ssm_client = boto3.client("ssm")
 DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive.file"]
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+APP_KIND_KEY = "ianPhotographyKind"
+APP_ALBUM_ID_KEY = "ianPhotographyAlbumId"
 _credentials_cache = None
 
 
@@ -65,18 +75,115 @@ def _drive_literal(value):
     return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
 
-def find_or_create_folder(service, folder_name, parent_id=None):
-    query = f"mimeType='application/vnd.google-apps.folder' and name='{_drive_literal(folder_name)}' and trashed=false"
+def find_or_create_folder(service, folder_name, parent_id=None, app_properties=None):
+    query = f"mimeType='{FOLDER_MIME_TYPE}' and name='{_drive_literal(folder_name)}' and trashed=false"
     if parent_id:
         query += f" and '{_drive_literal(parent_id)}' in parents"
-    results = service.files().list(q=query, spaces="drive", fields="files(id,name)", pageSize=2).execute()
+    for key, value in sorted((app_properties or {}).items()):
+        query += (
+            " and appProperties has "
+            f"{{ key='{_drive_literal(key)}' and value='{_drive_literal(value)}' }}"
+        )
+    results = service.files().list(
+        q=query,
+        spaces="drive",
+        fields="files(id,name,parents,appProperties)",
+        pageSize=2,
+    ).execute()
     items = results.get("files", [])
     if items:
         return items[0]["id"]
-    metadata = {"name": folder_name, "mimeType": "application/vnd.google-apps.folder"}
+    metadata = {"name": folder_name, "mimeType": FOLDER_MIME_TYPE}
     if parent_id:
         metadata["parents"] = [parent_id]
+    if app_properties:
+        metadata["appProperties"] = dict(app_properties)
     return service.files().create(body=metadata, fields="id").execute()["id"]
+
+
+def _folder_query(service, query, *, page_size=10):
+    response = service.files().list(
+        q=f"mimeType='{FOLDER_MIME_TYPE}' and trashed=false and {query}",
+        spaces="drive",
+        fields="files(id,name,parents,appProperties)",
+        pageSize=page_size,
+    ).execute()
+    files = response.get("files", [])
+    return files if isinstance(files, list) else []
+
+
+def _album_folder_by_id(service, album_id):
+    matches = _folder_query(
+        service,
+        "appProperties has "
+        f"{{ key='{APP_ALBUM_ID_KEY}' and value='{_drive_literal(album_id)}' }}",
+        page_size=2,
+    )
+    if len(matches) > 1:
+        raise RuntimeError("Google Drive contains duplicate album folder identities")
+    return matches[0] if matches else None
+
+
+def _legacy_album_folder(service, album_title, type_folder_id, category_folder_id):
+    candidates = []
+    seen = set()
+    for parent_id in (category_folder_id, type_folder_id):
+        matches = _folder_query(
+            service,
+            f"name='{_drive_literal(album_title)}' and '{_drive_literal(parent_id)}' in parents",
+        )
+        for match in matches:
+            app_properties = match.get("appProperties") or {}
+            if app_properties.get(APP_KIND_KEY) == "category" or match.get("id") in seen:
+                continue
+            seen.add(match.get("id"))
+            candidates.append(match)
+    if len(candidates) > 1:
+        raise RuntimeError("Google Drive contains ambiguous legacy album folders")
+    return candidates[0] if candidates else None
+
+
+def find_or_create_album_folder(
+    service,
+    album_id,
+    album_title,
+    type_folder_id,
+    category_folder_id,
+):
+    folder = _album_folder_by_id(service, album_id)
+    if folder is None:
+        folder = _legacy_album_folder(
+            service,
+            album_title,
+            type_folder_id,
+            category_folder_id,
+        )
+    properties = {
+        APP_KIND_KEY: "album",
+        APP_ALBUM_ID_KEY: album_id,
+    }
+    if folder is None:
+        return find_or_create_folder(
+            service,
+            album_title,
+            category_folder_id,
+            app_properties=properties,
+        )
+
+    folder_id = folder["id"]
+    current_parents = [parent for parent in folder.get("parents", []) if isinstance(parent, str)]
+    update = {
+        "fileId": folder_id,
+        "body": {"name": album_title, "appProperties": properties},
+        "fields": "id,parents",
+        "supportsAllDrives": True,
+    }
+    if category_folder_id not in current_parents:
+        update["addParents"] = category_folder_id
+        if current_parents:
+            update["removeParents"] = ",".join(current_parents)
+    service.files().update(**update).execute()
+    return folder_id
 
 
 def _existing_file_id(service, filename, parent_id):
@@ -93,24 +200,52 @@ def handler(event, context):
     if not root_folder_id:
         raise RuntimeError("Google Drive destination is not configured")
 
-    album_type = validate_album_type((event or {}).get("albumType"))
+    requested_album_type = validate_album_type((event or {}).get("albumType"))
     album_id = validate_uuid((event or {}).get("albumId"))
     album_descriptor = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
-    if (
-        not album_descriptor
-        or album_descriptor.get("status", "active") != "active"
-        or album_descriptor.get("backupToGoogleDrive") is not True
-    ):
+    if not album_descriptor or album_descriptor.get("status", "active") != "active":
         raise ValidationError("Album is not eligible for Google Drive backup")
-    album_title = require_string((event or {}).get("albumTitle"), "albumTitle", maximum=200)
+    album_type = validate_album_type(album_descriptor.get("type", requested_album_type))
+    if album_type != requested_album_type:
+        raise ValidationError("Album type does not match the stored album")
+    album_title = require_string(album_descriptor.get("title"), "albumTitle", maximum=200)
+    album_category = (
+        optional_string(
+            album_descriptor.get("category"),
+            "albumCategory",
+            maximum=100,
+            default="Uncategorized",
+        )
+        or "Uncategorized"
+    )
     bucket = require_string((event or {}).get("bucket"), "bucket", maximum=255)
     if bucket != os.environ.get("IMAGES_BUCKET"):
         raise ValidationError("Unexpected source bucket")
-    keys = validate_list((event or {}).get("keys"), "keys", maximum=500, required=True)
+    keys = validate_list((event or {}).get("keys"), "keys", maximum=500)
+    backup_enabled = album_descriptor.get("backupToGoogleDrive") is True
+    if keys and not backup_enabled:
+        raise ValidationError("Album is not eligible for Google Drive backup")
 
     service = get_drive_service()
+    # Metadata-only reconciliation is also used for historical backups whose
+    # ongoing backup toggle is now off. Only a folder tagged by the migration's
+    # stable album ID is eligible; never create a backup for an opted-out album.
+    if not backup_enabled and _album_folder_by_id(service, album_id) is None:
+        return {"status": "success", "uploadedCount": 0, "folderReconciled": False}
     type_folder = find_or_create_folder(service, "Photos" if album_type == "photo" else "Videos", root_folder_id)
-    album_folder = find_or_create_folder(service, album_title, type_folder)
+    category_folder = find_or_create_folder(
+        service,
+        album_category,
+        type_folder,
+        app_properties={APP_KIND_KEY: "category"},
+    )
+    album_folder = find_or_create_album_folder(
+        service,
+        album_id,
+        album_title,
+        type_folder,
+        category_folder,
+    )
     uploaded = 0
 
     for raw_key in keys:

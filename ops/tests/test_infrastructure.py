@@ -187,6 +187,9 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("dynamodb:GetItem", update_album)
         self.assertIn("dynamodb:PutItem", update_album)
         self.assertNotIn("dynamodb:UpdateItem", update_album)
+        self.assertIn("GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction", update_album)
+        self.assertIn("Action: lambda:InvokeFunction", update_album)
+        self.assertIn("Resource: !GetAtt GoogleDriveBackupFunction.Arn", update_album)
 
         create_zip = resource_block("CreateZipFunction")
         self.assertIn("Action: s3:ListBucket", create_zip)

@@ -116,8 +116,76 @@ class GoogleDriveProviderHelperTests(unittest.TestCase):
         self.assertNotIn("parents", files.create.call_args.kwargs["body"])
 
         files.create.return_value.execute.return_value = {"id": "child"}
-        self.assertEqual(google_drive_sync.find_or_create_folder(service, "Album", "parent"), "child")
+        self.assertEqual(
+            google_drive_sync.find_or_create_folder(
+                service,
+                "Album",
+                "parent",
+                app_properties={google_drive_sync.APP_KIND_KEY: "category"},
+            ),
+            "child",
+        )
         self.assertEqual(files.create.call_args.kwargs["body"]["parents"], ["parent"])
+        self.assertEqual(
+            files.create.call_args.kwargs["body"]["appProperties"],
+            {google_drive_sync.APP_KIND_KEY: "category"},
+        )
+        self.assertIn("appProperties has", files.list.call_args.kwargs["q"])
+
+    def test_existing_legacy_album_folder_is_moved_and_given_stable_identity(self):
+        service = Mock()
+        files = service.files.return_value
+        files.list.return_value.execute.side_effect = [
+            {"files": []},
+            {"files": []},
+            {"files": [{"id": "legacy", "name": "Album", "parents": ["photos"]}]},
+        ]
+        files.update.return_value.execute.return_value = {"id": "legacy", "parents": ["category"]}
+
+        result = google_drive_sync.find_or_create_album_folder(
+            service,
+            ALBUM_ID,
+            "Album",
+            "photos",
+            "category",
+        )
+
+        self.assertEqual(result, "legacy")
+        files.update.assert_called_once_with(
+            fileId="legacy",
+            body={
+                "name": "Album",
+                "appProperties": {
+                    google_drive_sync.APP_KIND_KEY: "album",
+                    google_drive_sync.APP_ALBUM_ID_KEY: ALBUM_ID,
+                },
+            },
+            fields="id,parents",
+            supportsAllDrives=True,
+            addParents="category",
+            removeParents="photos",
+        )
+
+    def test_album_identity_prevents_duplicate_folders_and_handles_renames(self):
+        service = Mock()
+        files = service.files.return_value
+        files.list.return_value.execute.return_value = {
+            "files": [{"id": "identified", "name": "Old title", "parents": ["old-category"]}]
+        }
+        files.update.return_value.execute.return_value = {"id": "identified", "parents": ["new-category"]}
+
+        result = google_drive_sync.find_or_create_album_folder(
+            service,
+            ALBUM_ID,
+            "New title",
+            "photos",
+            "new-category",
+        )
+
+        self.assertEqual(result, "identified")
+        files.create.assert_not_called()
+        self.assertEqual(files.update.call_args.kwargs["addParents"], "new-category")
+        self.assertEqual(files.update.call_args.kwargs["removeParents"], "old-category")
 
     def test_existing_file_lookup(self):
         service = Mock()
@@ -134,6 +202,9 @@ class GoogleDriveHandlerTests(unittest.TestCase):
             "albumId": ALBUM_ID,
             "status": "active",
             "backupToGoogleDrive": True,
+            "type": "photo",
+            "title": "Album",
+            "category": "Portraits",
         }
         self.event = {
             "albumType": "photo",
@@ -195,8 +266,10 @@ class GoogleDriveHandlerTests(unittest.TestCase):
         ), patch.object(google_drive_sync, "s3", s3), patch.object(
             google_drive_sync, "get_drive_service", return_value=service
         ), patch.object(
-            google_drive_sync, "find_or_create_folder", side_effect=["photos", "album"]
+            google_drive_sync, "find_or_create_folder", side_effect=["photos", "category"]
         ) as folder, patch.object(
+            google_drive_sync, "find_or_create_album_folder", return_value="album"
+        ) as album_folder, patch.object(
             google_drive_sync, "_existing_file_id", return_value=None
         ), patch.object(
             google_drive_sync.tempfile, "NamedTemporaryFile", return_value=temporary
@@ -210,6 +283,21 @@ class GoogleDriveHandlerTests(unittest.TestCase):
             result = google_drive_sync.handler(self.event, None)
         self.assertEqual(result, {"status": "success", "uploadedCount": 1})
         self.assertEqual(folder.call_args_list[0].args, (service, "Photos", "root"))
+        self.assertEqual(
+            folder.call_args_list[1].args,
+            (service, "Portraits", "photos"),
+        )
+        self.assertEqual(
+            folder.call_args_list[1].kwargs,
+            {"app_properties": {google_drive_sync.APP_KIND_KEY: "category"}},
+        )
+        album_folder.assert_called_once_with(
+            service,
+            ALBUM_ID,
+            "Album",
+            "photos",
+            "category",
+        )
         s3.download_file.assert_called_once_with(DEFAULT_ENV["IMAGES_BUCKET"], RAW_KEY, temporary.name)
         self.assertEqual(media.call_args.kwargs["mimetype"], "image/jpeg")
         self.assertTrue(media.call_args.kwargs["resumable"])
@@ -217,7 +305,7 @@ class GoogleDriveHandlerTests(unittest.TestCase):
         remove.assert_called_once_with(temporary.name)
 
     def test_existing_video_file_is_updated_and_missing_temp_is_not_removed(self):
-        album = {**self.album, "albumId": ALBUM_ID}
+        album = {**self.album, "albumId": ALBUM_ID, "type": "video"}
         table = Mock()
         table.get_item.return_value = {"Item": album}
         service = Mock()
@@ -231,8 +319,10 @@ class GoogleDriveHandlerTests(unittest.TestCase):
         ), patch.object(google_drive_sync, "s3", Mock(head_object=Mock(return_value={}))), patch.object(
             google_drive_sync, "get_drive_service", return_value=service
         ), patch.object(
-            google_drive_sync, "find_or_create_folder", side_effect=["videos", "album"]
+            google_drive_sync, "find_or_create_folder", side_effect=["videos", "category"]
         ) as folder, patch.object(
+            google_drive_sync, "find_or_create_album_folder", return_value="album"
+        ), patch.object(
             google_drive_sync, "_existing_file_id", return_value="existing"
         ), patch.object(
             google_drive_sync.tempfile, "NamedTemporaryFile", return_value=temporary
@@ -259,7 +349,9 @@ class GoogleDriveHandlerTests(unittest.TestCase):
         ), patch.object(google_drive_sync, "s3", s3), patch.object(
             google_drive_sync, "get_drive_service", return_value=Mock()
         ), patch.object(
-            google_drive_sync, "find_or_create_folder", side_effect=["photos", "album"]
+            google_drive_sync, "find_or_create_folder", side_effect=["photos", "category"]
+        ), patch.object(
+            google_drive_sync, "find_or_create_album_folder", return_value="album"
         ), patch.object(
             google_drive_sync.tempfile, "NamedTemporaryFile", return_value=temporary
         ), patch.object(
@@ -269,6 +361,64 @@ class GoogleDriveHandlerTests(unittest.TestCase):
         ):
             google_drive_sync.handler(self.event, None)
         remove.assert_called_once_with(temporary.name)
+
+    def test_empty_key_list_reconciles_folders_without_uploading(self):
+        table = Mock()
+        table.get_item.return_value = {"Item": self.album}
+        service = Mock()
+        event = {**self.event, "keys": []}
+        with patch.dict(os.environ, {"GOOGLE_DRIVE_FOLDER_ID": "root"}), patch.object(
+            google_drive_sync, "table", table
+        ), patch.object(
+            google_drive_sync, "get_drive_service", return_value=service
+        ), patch.object(
+            google_drive_sync, "find_or_create_folder", side_effect=["photos", "category"]
+        ), patch.object(
+            google_drive_sync, "find_or_create_album_folder", return_value="album"
+        ) as album_folder, patch.object(google_drive_sync, "s3") as s3:
+            result = google_drive_sync.handler(event, None)
+        self.assertEqual(result, {"status": "success", "uploadedCount": 0})
+        album_folder.assert_called_once()
+        s3.head_object.assert_not_called()
+
+    def test_opted_out_legacy_album_only_reconciles_an_identified_folder(self):
+        table = Mock()
+        table.get_item.return_value = {
+            "Item": {**self.album, "backupToGoogleDrive": False}
+        }
+        service = Mock()
+        event = {**self.event, "keys": []}
+        with patch.dict(os.environ, {"GOOGLE_DRIVE_FOLDER_ID": "root"}), patch.object(
+            google_drive_sync, "table", table
+        ), patch.object(
+            google_drive_sync, "get_drive_service", return_value=service
+        ), patch.object(
+            google_drive_sync, "_album_folder_by_id", return_value=None
+        ), patch.object(
+            google_drive_sync, "find_or_create_folder"
+        ) as folder:
+            result = google_drive_sync.handler(event, None)
+        self.assertEqual(
+            result,
+            {"status": "success", "uploadedCount": 0, "folderReconciled": False},
+        )
+        folder.assert_not_called()
+
+        identified = {"id": "legacy", "parents": ["photos"]}
+        with patch.dict(os.environ, {"GOOGLE_DRIVE_FOLDER_ID": "root"}), patch.object(
+            google_drive_sync, "table", table
+        ), patch.object(
+            google_drive_sync, "get_drive_service", return_value=service
+        ), patch.object(
+            google_drive_sync, "_album_folder_by_id", return_value=identified
+        ), patch.object(
+            google_drive_sync, "find_or_create_folder", side_effect=["photos", "category"]
+        ), patch.object(
+            google_drive_sync, "find_or_create_album_folder", return_value="legacy"
+        ) as album_folder:
+            result = google_drive_sync.handler(event, None)
+        self.assertEqual(result, {"status": "success", "uploadedCount": 0})
+        album_folder.assert_called_once()
 
 
 if __name__ == "__main__":
