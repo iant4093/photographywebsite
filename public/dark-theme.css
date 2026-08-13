@@ -13,9 +13,7 @@ html[data-theme="dark"] body {
   --color-amber-light: #9d7c61;
   --color-warm-gray: #aaa094;
   --color-warm-border: #514b43;
-  background:
-    repeating-linear-gradient(90deg, rgba(235, 224, 207, 0.022) 0 1px, transparent 1px 7px),
-    var(--color-cream);
+  background: var(--color-cream);
 }
 
 .linen-site[data-theme="dark"] .linen-nav {
@@ -125,9 +123,7 @@ html[data-theme="dark"] body {
 }
 
 html[data-theme="dark"] .linen-site.linen-admin {
-  background:
-    repeating-linear-gradient(90deg, rgba(235, 224, 207, 0.022) 0 1px, transparent 1px 7px),
-    var(--color-cream);
+  background: var(--color-cream);
 }
 
 html[data-theme="dark"] .linen-site.linen-admin :is(

@@ -260,30 +260,25 @@ export default function MotionExperience() {
     if (isAdmin) return null
 
     return (
-        <>
-            <div className="editorial-motion-overlay" aria-hidden="true">
-                <div className="editorial-gate"><i /><i /><i /><i /></div>
-            </div>
-            <div
-                ref={progressRef}
-                className="editorial-progress"
-                role="scrollbar"
-                aria-label="Page scroll position"
-                aria-controls="root"
-                aria-orientation="vertical"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-valuenow="0"
-                tabIndex={0}
-                onKeyDown={handleScrollKey}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={endPointerDrag}
-                onPointerCancel={endPointerDrag}
-                onLostPointerCapture={endPointerDrag}
-            >
-                <i aria-hidden="true" />
-            </div>
-        </>
+        <div
+            ref={progressRef}
+            className="editorial-progress"
+            role="scrollbar"
+            aria-label="Page scroll position"
+            aria-controls="root"
+            aria-orientation="vertical"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            tabIndex={0}
+            onKeyDown={handleScrollKey}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={endPointerDrag}
+            onPointerCancel={endPointerDrag}
+            onLostPointerCapture={endPointerDrag}
+        >
+            <i aria-hidden="true" />
+        </div>
     )
 }
