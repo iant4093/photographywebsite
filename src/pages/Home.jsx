@@ -16,6 +16,7 @@ import {
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 import { currentHeroSrcSet, currentHeroUrl, heroCoverUrl } from '../utils/mediaUrls'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
+import { trackHeroExplore } from '../utils/analytics'
 
 const CATALOG_KEY = 'public-photos'
 // Fetch the complete current public catalog in one compressed response while
@@ -47,6 +48,7 @@ function Home() {
         const target = document.getElementById('photo-albums')
         if (!target) return
         event.preventDefault()
+        trackHeroExplore('photo')
         target.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, [])
 
@@ -218,7 +220,7 @@ function Home() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
                             </a>
-                            <Link to="/videos" className="linen-text-link inline-flex items-center gap-2 px-1 py-3 text-white font-medium transition-all duration-300">
+                            <Link to="/videos" onClick={() => trackHeroExplore('video')} className="linen-text-link inline-flex items-center gap-2 px-1 py-3 text-white font-medium transition-all duration-300">
                                 Explore Videos
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />

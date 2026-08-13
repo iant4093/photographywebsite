@@ -12,7 +12,7 @@
     "private_path_pattern": "/api/*",
     "public_query_strings": ["cursor", "limit", "type"],
     "public_forward_headers": ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
-    "private_forward_headers": ["Authorization", "Content-Type", "Origin", "X-Turnstile-Token", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
+    "private_forward_headers": ["Authorization", "CloudFront-Viewer-Country", "Content-Type", "Origin", "X-Turnstile-Token", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
     "public_cache_policy_name": "IanTruong-API-Public-Catalog-v1",
     "public_origin_request_policy_name": "IanTruong-API-Public-Origin-v1",
     "private_origin_request_policy_name": "IanTruong-API-Private-Origin-v1",

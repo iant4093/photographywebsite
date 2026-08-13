@@ -86,7 +86,8 @@ describe('small presentational and routing components', () => {
     expect(screen.getByRole('link', { name: /Manage Users/ })).toHaveAttribute('href', '/admin/users')
     expect(screen.getByRole('link', { name: /AWS Costs/ })).toHaveAttribute('href', '/admin/costs')
     expect(screen.getByRole('link', { name: /Google Drive Usage/ })).toHaveAttribute('href', '/admin/drive-usage')
-    expect(screen.getByRole('link', { name: /Admin Security/ })).toHaveAttribute('href', '/admin/security')
+    expect(screen.getByRole('link', { name: /Website Analytics/ })).toHaveAttribute('href', '/admin/analytics')
+    expect(screen.queryByRole('link', { name: /Admin Security/ })).toBeNull()
   })
 
   it('requires an auth provider and exposes the provided value', () => {

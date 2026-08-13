@@ -395,6 +395,37 @@ Resources:
         - Key: DataClassification
           Value: AccountBillingMetadata
 
+  AnalyticsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'GoldenHour-Analytics-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: bucket
+          AttributeType: S
+        - AttributeName: metric
+          AttributeType: S
+      KeySchema:
+        - AttributeName: bucket
+          KeyType: HASH
+        - AttributeName: metric
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: AnonymousAggregateTelemetry
+
   DriveUsageCacheTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -2587,6 +2618,74 @@ Resources:
             Path: /admin/costs
             Method: GET
 
+  AnalyticsIngestFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: analytics.handler
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+          ALBUMS_TABLE: !Ref AlbumsTable
+          ANALYTICS_TIMEZONE: America/Los_Angeles
+          FRONTEND_URL: !Ref FrontendUrl
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt AnalyticsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
+      Events:
+        IngestAnalytics:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /analytics/events
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  GetAnalyticsReportFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_analytics_report.handler
+      Environment:
+        Variables:
+          ANALYTICS_TABLE: !Ref AnalyticsTable
+          ALBUMS_TABLE: !Ref AlbumsTable
+          ANALYTICS_TIMEZONE: America/Los_Angeles
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !GetAtt AnalyticsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt AlbumsTable.Arn
+      Events:
+        GetAnalyticsReport:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/analytics
+            Method: GET
+
   GetGoogleDriveUsageFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -3229,6 +3328,9 @@ Outputs:
   AlbumIndexDeploymentPhase:
     Description: Current conditional GSI rollout phase
     Value: !Ref AlbumIndexDeploymentPhase
+  AnalyticsTableName:
+    Description: Daily anonymous aggregate analytics table.
+    Value: !Ref AnalyticsTable
   PrivateMediaCloudFrontDenyEnforced:
     Description: Guard state for non-public object-tag enforcement at the media CDN origin
     Value: !Ref EnforcePrivateMediaCloudFrontDeny

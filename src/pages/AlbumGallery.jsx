@@ -19,6 +19,7 @@ import {
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import { navigateBackOr } from '../utils/navigation'
+import { trackAlbumView, trackPhotoDownload, trackZipRequest } from '../utils/analytics'
 
 
 
@@ -41,6 +42,7 @@ function AlbumGallery() {
     const [zipError, setZipError] = useState('')
     const [zipStatus, setZipStatus] = useState('')
     const zipControllerRef = useRef(null)
+    const trackedAlbumRef = useRef(null)
     const { getIdToken } = useAuth()
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -92,6 +94,13 @@ function AlbumGallery() {
 
     useEffect(() => () => zipControllerRef.current?.abort(), [])
 
+    useEffect(() => {
+        if (album?.visibility === 'public' && trackedAlbumRef.current !== albumId) {
+            trackedAlbumRef.current = albumId
+            trackAlbumView(albumId)
+        }
+    }, [album, albumId])
+
     const refreshMedia = useCallback(
         () => loadAlbum({ background: true }),
         [loadAlbum],
@@ -127,6 +136,7 @@ function AlbumGallery() {
                 img,
             )
             startBrowserDownload(downloadUrl, mediaFileName(img, 'photo.jpg'))
+            if (album?.visibility === 'public') trackPhotoDownload(albumId)
         } catch (err) {
             console.error('Download failed:', err)
             alert('The photo could not be downloaded. Please try again.')
@@ -140,6 +150,7 @@ function AlbumGallery() {
         const controller = new AbortController()
         zipControllerRef.current = controller
         setDownloading(true)
+        if (album.visibility === 'public') trackZipRequest(albumId)
         setZipError('')
         setZipStatus('starting')
         try {

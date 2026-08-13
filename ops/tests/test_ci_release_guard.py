@@ -348,6 +348,13 @@ class ReleaseIntentTests(unittest.TestCase):
         self.assertEqual(
             add_rules,
             {
+                ("AnalyticsTable", "AWS::DynamoDB::Table"),
+                ("AnalyticsIngestFunction", "AWS::Lambda::Function"),
+                ("AnalyticsIngestFunctionRole", "AWS::IAM::Role"),
+                ("AnalyticsIngestFunctionIngestAnalyticsPermission", "AWS::Lambda::Permission"),
+                ("GetAnalyticsReportFunction", "AWS::Lambda::Function"),
+                ("GetAnalyticsReportFunctionRole", "AWS::IAM::Role"),
+                ("GetAnalyticsReportFunctionGetAnalyticsReportPermission", "AWS::Lambda::Permission"),
                 ("CostReportCacheTable", "AWS::DynamoDB::Table"),
                 ("GetCostReportFunction", "AWS::Lambda::Function"),
                 ("GetCostReportFunctionRole", "AWS::IAM::Role"),

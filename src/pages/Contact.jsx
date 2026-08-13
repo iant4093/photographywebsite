@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Turnstile } from '@marsidev/react-turnstile'
 import { Link } from 'react-router'
 import { sendContactMessage } from '../utils/api'
+import { trackContactSubmission } from '../utils/analytics'
 
 export default function Contact() {
     const turnstileRef = useRef(null)
@@ -30,6 +31,7 @@ export default function Contact() {
 
         try {
             await sendContactMessage({ name, email, message, turnstileToken })
+            trackContactSubmission()
             setStatus({ type: 'success', message: 'Thanks—your message was sent.' })
             setName('')
             setEmail('')

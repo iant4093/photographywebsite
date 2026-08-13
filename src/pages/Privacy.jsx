@@ -1,10 +1,25 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import {
+    analyticsPreference,
+    setAnalyticsPreference,
+    subscribeToAnalyticsPreference,
+} from '../utils/analytics'
 
 export default function Privacy() {
+    const [analytics, setAnalytics] = useState(analyticsPreference)
+
+    useEffect(() => subscribeToAnalyticsPreference(() => setAnalytics(analyticsPreference())), [])
+
+    const chooseAnalytics = (enabled) => {
+        setAnalyticsPreference(enabled)
+        setAnalytics(analyticsPreference())
+    }
+
     return (
         <div className="max-w-3xl mx-auto px-6 py-16 pt-[104px] md:pt-[120px] animate-fade-in">
             <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-6">Privacy Notice</h1>
-            <p className="text-sm text-warm-gray mb-10">Last updated July 20, 2026</p>
+            <p className="text-sm text-warm-gray mb-10">Last updated August 13, 2026</p>
 
             <div className="space-y-8 text-charcoal-light leading-relaxed">
                 <section>
@@ -12,8 +27,36 @@ export default function Privacy() {
                     <p>
                         If you contact me, the site processes the name, email address, and message you submit so I can respond.
                         Client accounts use an email address for sign-in and access to assigned private galleries. Galleries may
-                        contain photos, videos, dates, and camera metadata selected for delivery to a client.
+                        contain photos, videos, dates, and camera metadata selected for delivery to a client. The browser stores
+                        sign-in and appearance preferences locally so sessions and theme choices can persist.
                     </p>
+                </section>
+
+                <section>
+                    <h2 className="font-serif text-2xl font-semibold text-charcoal mb-3">Aggregate website analytics</h2>
+                    <p>
+                        This site uses first-party, cookie-free analytics to count public page loads, album views, downloads,
+                        contact-form completions, homepage exploration clicks, approximate traffic-source categories, device
+                        class, country, Core Web Vitals, and frontend errors. Analytics records do not store cookies, visitor or
+                        session identifiers, raw IP addresses, precise location, complete referrer URLs, user-agent strings,
+                        form contents, or private-gallery activity. Country is reduced to a country code at the website edge,
+                        and daily aggregate counters expire after 400 days. AWS may separately retain limited network and
+                        security logs, including source IP addresses, to operate and protect the website.
+                    </p>
+                    <div className="mt-5 rounded-xl border border-warm-border bg-white/50 p-5">
+                        <p className="text-sm text-warm-gray">
+                            Current setting: <strong className="text-charcoal">{analytics.enabled ? 'Aggregate analytics allowed' : 'Aggregate analytics disabled'}</strong>
+                            {analytics.source === 'privacy-signal' ? ' (your browser privacy signal is being honored)' : ''}.
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-3">
+                            <button type="button" onClick={() => chooseAnalytics(true)} className="rounded-lg border border-charcoal px-4 py-2 text-sm text-charcoal hover:bg-charcoal hover:text-white transition-colors">
+                                Allow aggregate analytics
+                            </button>
+                            <button type="button" onClick={() => chooseAnalytics(false)} className="rounded-lg border border-warm-border px-4 py-2 text-sm text-charcoal hover:border-charcoal transition-colors">
+                                Opt out
+                            </button>
+                        </div>
+                    </div>
                 </section>
 
                 <section>

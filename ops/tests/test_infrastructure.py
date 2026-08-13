@@ -113,6 +113,8 @@ expected_routes = {
     ("POST", "/users"),
     ("GET", "/users"),
     ("GET", "/admin/costs"),
+    ("POST", "/analytics/events"),
+    ("GET", "/admin/analytics"),
     ("GET", "/admin/drive-usage"),
     ("POST", "/admin/gallery-order"),
     ("DELETE", "/users/{email}"),
@@ -317,6 +319,32 @@ class DataProtectionTests(unittest.TestCase):
             self.assertNotIn(forbidden, function)
         self.assertIn("Resource: !GetAtt CostReportCacheTable.Arn", function)
         self.assertIn("SOURCES_GetCostReportFunction :=", MAKEFILE)
+
+    def test_analytics_is_aggregate_expiring_and_least_privilege(self) -> None:
+        table = resource_block("AnalyticsTable")
+        ingest = resource_block("AnalyticsIngestFunction")
+        report = resource_block("GetAnalyticsReportFunction")
+        for expected in (
+            "DeletionPolicy: Retain",
+            "UpdateReplacePolicy: Retain",
+            "DeletionProtectionEnabled: true",
+            "PointInTimeRecoveryEnabled: true",
+            "TimeToLiveSpecification:",
+            "AnonymousAggregateTelemetry",
+        ):
+            self.assertIn(expected, table)
+        self.assertIn("Path: /analytics/events", ingest)
+        self.assertIn("Authorizer: NONE", ingest)
+        self.assertIn("Action: dynamodb:UpdateItem", ingest)
+        self.assertIn("Action: dynamodb:GetItem", ingest)
+        self.assertIn("RATE_LIMIT_TABLE: !Ref RateLimitTable", ingest)
+        self.assertIn("RATE_LIMIT_HASH_PARAMETER:", ingest)
+        self.assertNotIn("dynamodb:Scan", ingest)
+        self.assertIn("Path: /admin/analytics", report)
+        self.assertIn("Action: dynamodb:Query", report)
+        self.assertIn("Action: dynamodb:BatchGetItem", report)
+        self.assertIn("SOURCES_AnalyticsIngestFunction :=", MAKEFILE)
+        self.assertIn("SOURCES_GetAnalyticsReportFunction :=", MAKEFILE)
 
     def test_drive_usage_is_daily_cached_admin_only_and_least_privilege(self) -> None:
         table = resource_block("DriveUsageCacheTable")
@@ -685,9 +713,9 @@ class IdentityAndSecretTests(unittest.TestCase):
         self.assertNotIn("AWS::SecretsManager::Secret", TEMPLATE)
         self.assertEqual(
             TEMPLATE.count("RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'"),
-            6,
+            7,
         )
-        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 16)
+        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 17)
 
     def test_cognito_client_has_no_public_password_or_srp_flow(self) -> None:
         client = resource_block("UserPoolClient")

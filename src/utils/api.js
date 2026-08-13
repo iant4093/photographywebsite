@@ -664,6 +664,22 @@ export function fetchCostReport(token, options = {}) {
     }, { timeoutMs: 30_000, retries: 0 })
 }
 
+export function fetchAnalyticsReport(token, range = 30, options = {}) {
+    return apiFetch(`/admin/analytics?range=${encodeURIComponent(range)}`, {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }, { timeoutMs: 30_000, retries: 0 })
+}
+
+export function sendAnalyticsEvents(events) {
+    return apiFetch('/analytics/events', {
+        method: 'POST',
+        credentials: 'omit',
+        keepalive: true,
+        body: JSON.stringify({ events }),
+    }, { timeoutMs: 8_000, retries: 0 })
+}
+
 export function fetchGoogleDriveUsage(token, options = {}) {
     return apiFetch('/admin/drive-usage', {
         headers: authHeaders(token),

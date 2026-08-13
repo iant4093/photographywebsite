@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router'
 import { fetchAlbum, requestAlbumMediaDownload } from '../utils/api'
 import { useAuth } from '../context/auth'
@@ -15,6 +15,7 @@ import {
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { navigateBackOr } from '../utils/navigation'
+import { trackAlbumView } from '../utils/analytics'
 
 export default function VideoGallery() {
     const { albumId } = useParams()
@@ -27,6 +28,7 @@ export default function VideoGallery() {
     const [mediaError, setMediaError] = useState('')
     const { getIdToken } = useAuth()
     const autoPlayFirst = searchParams.get('play') === '1'
+    const trackedAlbumRef = useRef(null)
 
     // Lightbox state — null means gallery view, a number is the index in the player
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -86,6 +88,13 @@ export default function VideoGallery() {
         [loadAlbum],
     )
     const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)
+
+    useEffect(() => {
+        if (album?.visibility === 'public' && trackedAlbumRef.current !== albumId) {
+            trackedAlbumRef.current = albumId
+            trackAlbumView(albumId)
+        }
+    }, [album, albumId])
 
     const goNext = useCallback(() => {
         setLightboxIndex((i) => (i + 1) % images.length)

@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import BackToTop from './components/BackToTop'
 import DocumentMetadata from './components/DocumentMetadata'
 import MotionExperience from './components/MotionExperience'
+import AnalyticsTracker from './components/AnalyticsTracker'
 import Home from './pages/Home'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
@@ -19,6 +20,7 @@ const Privacy = lazy(() => import('./pages/Privacy'))
 const Login = lazy(() => import('./pages/Login'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AwsCosts = lazy(() => import('./pages/AwsCosts'))
+const Analytics = lazy(() => import('./pages/Analytics'))
 const GoogleDriveUsage = lazy(() => import('./pages/GoogleDriveUsage'))
 const AdminSecurity = lazy(() => import('./pages/AdminSecurity'))
 const Upload = lazy(() => import('./pages/Admin'))
@@ -77,6 +79,7 @@ function App() {
     return (
         <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
+            <AnalyticsTracker />
             <a className="linen-skip-link" href="#main-content">Skip to main content</a>
             <Navbar
                 theme={theme}
@@ -101,6 +104,7 @@ function App() {
                         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
                         <Route path="/admin/security" element={<ProtectedRoute adminOnly allowMfaSetup><AdminSecurity /></ProtectedRoute>} />
                         <Route path="/admin/costs" element={<ProtectedRoute adminOnly><AwsCosts /></ProtectedRoute>} />
+                        <Route path="/admin/analytics" element={<ProtectedRoute adminOnly><Analytics /></ProtectedRoute>} />
                         <Route path="/admin/drive-usage" element={<ProtectedRoute adminOnly><GoogleDriveUsage /></ProtectedRoute>} />
                         <Route path="/admin/upload" element={<ProtectedRoute adminOnly><Upload /></ProtectedRoute>} />
                         <Route path="/admin/upload-video" element={<ProtectedRoute adminOnly><UploadVideo /></ProtectedRoute>} />

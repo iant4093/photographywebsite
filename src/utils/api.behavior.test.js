@@ -202,12 +202,30 @@ describe('public API client behavior', () => {
       headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    await expect(api.fetchPhotographyStats({ signal })).resolves.toEqual(report)
-    expect(fetchMock.mock.calls[2][0]).toMatch(/\/public\/stats$/)
+    await expect(api.fetchAnalyticsReport('admin-token', 90, { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[2][0]).toMatch(/\/admin\/analytics\?range=90$/)
     expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    expect(fetchMock.mock.calls[2][1].headers).toEqual({})
+    await expect(api.fetchPhotographyStats({ signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[3][0]).toMatch(/\/public\/stats$/)
+    expect(fetchMock.mock.calls[3][1]).toEqual(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
+    expect(fetchMock.mock.calls[3][1].headers).toEqual({})
+  })
+
+  it('submits anonymous analytics without credentials or retries', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: 1 }, { status: 202 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(api.sendAnalyticsEvents([{ name: 'page_view' }])).resolves.toEqual({ accepted: 1 })
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/analytics\/events$/)
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      method: 'POST', credentials: 'omit', keepalive: true,
+      body: JSON.stringify({ events: [{ name: 'page_view' }] }),
+      headers: { 'Content-Type': 'application/json' },
+    }))
   })
 
   it.each([

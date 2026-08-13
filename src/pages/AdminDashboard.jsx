@@ -94,14 +94,14 @@ function AdminDashboard() {
             color: 'from-green-600 to-blue-600',
         },
         {
-            title: 'Admin Security',
-            description: 'Confirm that authenticator-app protection is active for your administrator account.',
+            title: 'Website Analytics',
+            description: 'Review visits, popular albums, downloads, traffic sources, devices, countries, and site health.',
             icon: (
                 <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3l7 3v5c0 4.5-2.8 8.6-7 10-4.2-1.4-7-5.5-7-10V6l7-3zm-3 9l2 2 4-4" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 19V9m5 10v-5m5 5V5m5 14v-8M3 21h18" />
                 </svg>
             ),
-            link: '/admin/security',
+            link: '/admin/analytics',
             color: 'from-charcoal to-amber-dark',
         },
     ]

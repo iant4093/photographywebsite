@@ -88,6 +88,8 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         for forbidden in ("Authorization", "Cookie", "Host", "X-Origin-Verify"):
             self.assertNotIn(forbidden, public_headers)
         self.assertIn("Authorization", private_headers)
+        self.assertIn("CloudFront-Viewer-Country", private_headers)
+        self.assertNotIn("CloudFront-Viewer-Country", public_headers)
         self.assertNotIn("Cookie", private_headers)
         self.assertNotIn("Host", private_headers)
 

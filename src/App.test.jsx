@@ -16,6 +16,7 @@ vi.mock('./components/Navbar', async () => {
 vi.mock('./components/Footer', () => ({ default: () => <footer>Footer</footer> }))
 vi.mock('./components/BackToTop', () => ({ default: () => <button>Top</button> }))
 vi.mock('./components/DocumentMetadata', () => ({ default: () => null }))
+vi.mock('./components/AnalyticsTracker', () => ({ default: () => null }))
 vi.mock('./components/ProtectedRoute', () => ({ default: ({ children }) => <>{children}</> }))
 vi.mock('./pages/Home', () => ({ default: () => <h1>Home route</h1> }))
 
@@ -28,6 +29,7 @@ vi.mock('./pages/Privacy', () => ({ default: () => <h1>Privacy route</h1> }))
 vi.mock('./pages/Login', () => ({ default: () => <h1>Login route</h1> }))
 vi.mock('./pages/AdminDashboard', () => ({ default: () => <h1>Admin route</h1> }))
 vi.mock('./pages/AwsCosts', () => ({ default: () => <h1>AWS costs route</h1> }))
+vi.mock('./pages/Analytics', () => ({ default: () => <h1>Website analytics route</h1> }))
 vi.mock('./pages/GoogleDriveUsage', () => ({ default: () => <h1>Google Drive usage route</h1> }))
 vi.mock('./pages/AdminSecurity', () => ({ default: () => <h1>Admin security route</h1> }))
 vi.mock('./pages/Admin', () => ({ default: () => <h1>Upload route</h1> }))
@@ -109,7 +111,7 @@ describe('App routing shell', () => {
     ['/album/id', 'Album route'], ['/video/id', 'Video route'], ['/sharedalbum/code', 'Shared route'],
     ['/contact', 'Contact route'], ['/privacy', 'Privacy route'], ['/login', 'Login route'],
     ['/search', 'Search route'], ['/stats', 'Stats route'],
-    ['/admin', 'Admin route'], ['/admin/security', 'Admin security route'], ['/admin/costs', 'AWS costs route'], ['/admin/drive-usage', 'Google Drive usage route'],
+    ['/admin', 'Admin route'], ['/admin/security', 'Admin security route'], ['/admin/costs', 'AWS costs route'], ['/admin/analytics', 'Website analytics route'], ['/admin/drive-usage', 'Google Drive usage route'],
     ['/admin/upload', 'Upload route'], ['/admin/upload-video', 'Upload video route'],
     ['/admin/hero', 'Hero route'],
     ['/admin/manage', 'Manage route'], ['/admin/users', 'Users route'], ['/admin/users/add', 'Add user route'],
