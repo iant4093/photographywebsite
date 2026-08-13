@@ -477,6 +477,8 @@
  * without changing the replaced image's intrinsic sizing or aspect ratio.
  */
 .linen-lightbox-photo {
+  width: auto;
+  height: auto;
   border-radius: 0;
   outline: 1px solid rgba(54, 45, 37, 0.52);
   outline-offset: -1px;
