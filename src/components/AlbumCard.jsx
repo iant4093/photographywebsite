@@ -1,13 +1,25 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import ProgressiveImage from './ProgressiveImage'
-import { albumCoverUrl } from '../utils/mediaUrls'
+import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
 import { prefetchPublicAlbum } from '../utils/api'
 import { preloadAlbumRoute } from '../utils/routePreload'
 
 // Shared album card used by public, video, and signed-in catalogs.
-function AlbumCard({ album, onOpen, onImageError, onMouseEnter }) {
+function AlbumCard({
+    album,
+    onOpen,
+    onImageError,
+    onMouseEnter,
+    imageSizes = '(min-width: 768px) 360px, (min-width: 640px) 320px, 280px',
+}) {
     const intentTimer = useRef(null)
+    const [coverPreview, setCoverPreview] = useState({ identity: '', srcSet: '' })
+    const albumId = album?.albumId || ''
+    const coverImageUrl = album?.coverImageUrl || ''
+    const usesResponsiveCover = album?.type !== 'video' && album?.visibility === 'public'
+    const previewIdentity = usesResponsiveCover ? `${albumId}\n${coverImageUrl}` : ''
+    const coverPreviewSrcSet = coverPreview.identity === previewIdentity ? coverPreview.srcSet : ''
     const canPrefetch = !onOpen && album?.visibility === 'public'
     const prefetch = useCallback(() => {
         if (!canPrefetch) return
@@ -27,6 +39,19 @@ function AlbumCard({ album, onOpen, onImageError, onMouseEnter }) {
     }, [])
     useEffect(() => cancelPrefetch, [cancelPrefetch])
 
+    useEffect(() => {
+        if (!previewIdentity) return undefined
+        let active = true
+        albumCoverPreviewSrcSet({ albumId, coverImageUrl })
+            .then((srcSet) => {
+                if (active) setCoverPreview({ identity: previewIdentity, srcSet })
+            })
+            .catch(() => {
+                if (active) setCoverPreview({ identity: previewIdentity, srcSet: '' })
+            })
+        return () => { active = false }
+    }, [albumId, coverImageUrl, previewIdentity])
+
     // Determine the route: jump directly to video player if only 1 video
     const isSingleVideo = album.type === 'video' && album.imageCount === 1
     const targetRoute = isSingleVideo
@@ -40,12 +65,13 @@ function AlbumCard({ album, onOpen, onImageError, onMouseEnter }) {
                 {albumCoverUrl(album) ? (
                     <ProgressiveImage
                         src={albumCoverUrl(album)}
+                        srcSet={coverPreviewSrcSet || undefined}
                         blurhash={album.coverBlurhash}
                         alt={album.title}
                         width={album.coverWidth || 4}
                         height={album.coverHeight || 3}
                         onError={onImageError}
-                        sizes="(min-width: 768px) 360px, (min-width: 640px) 320px, 280px"
+                        sizes={imageSizes}
                         className="w-full h-full"
                     />
                 ) : (

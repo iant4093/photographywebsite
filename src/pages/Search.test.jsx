@@ -22,7 +22,15 @@ vi.mock('../utils/catalogState', () => ({
     setCatalogSnapshot: catalog.setCatalogSnapshot,
 }))
 vi.mock('../components/AlbumCard', () => ({
-    default: ({ album }) => <a href={`/${album.type === 'video' ? 'video' : 'album'}/${album.albumId}`} data-testid="search-result">{album.title}</a>,
+    default: ({ album, imageSizes }) => (
+        <a
+            href={`/${album.type === 'video' ? 'video' : 'album'}/${album.albumId}`}
+            data-testid="search-result"
+            data-image-sizes={imageSizes}
+        >
+            {album.title}
+        </a>
+    ),
 }))
 vi.mock('../components/SkeletonGrid', () => ({
     default: () => <div role="status">Loading test archive</div>,
@@ -92,6 +100,8 @@ describe('Search', () => {
         renderSearch('/search?q=bird&type=photo')
 
         expect(screen.getByRole('link', { name: 'Finley Birds' })).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Finley Birds' }))
+            .toHaveAttribute('data-image-sizes', expect.stringContaining('(min-width: 1440px) 520px'))
         expect(screen.queryByRole('link', { name: 'Bird in Flight' })).toBeNull()
         expect(screen.getByText((_content, node) => node?.tagName === 'P' && node.textContent.includes('1 album matching')))
             .toBeInTheDocument()
