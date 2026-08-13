@@ -462,7 +462,7 @@ export default function SharedAlbum() {
                                                 animate={{ opacity: 1 }}
                                                 exit={{ opacity: 0 }}
                                                 transition={{ duration: 0.4, delay: 0.1 }}
-                                                className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl relative z-20"
+                                                className="linen-lightbox-photo max-w-full max-h-full object-contain relative z-20"
                                                 style={{ willChange: "opacity" }}
                                             />
 

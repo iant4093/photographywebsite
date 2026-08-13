@@ -471,6 +471,22 @@
   inset: 4px;
 }
 
+/*
+ * Lightboxes are portalled directly into document.body, so this frame cannot
+ * be scoped beneath .linen-site. It echoes the gallery's mounted-print edge
+ * while keeping the image's maximum box (and therefore its controls) stable.
+ */
+.linen-lightbox-photo {
+  box-sizing: border-box;
+  padding: 4px;
+  border: 1px solid rgba(54, 45, 37, 0.82);
+  border-radius: 0;
+  background: rgba(248, 244, 235, 0.94);
+  box-shadow:
+    0 0 0 1px rgba(255, 252, 245, 0.72) inset,
+    4px 5px 0 rgba(0, 0, 0, 0.2);
+}
+
 .linen-site .linen-user-dashboard > div {
   max-width: 80rem;
 }

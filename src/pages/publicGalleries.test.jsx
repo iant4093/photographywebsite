@@ -104,6 +104,7 @@ describe('AlbumGallery', () => {
     expect(screen.getByRole('dialog', { name: 'Photo viewer for Wild Album' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close photo viewer' })).toHaveFocus()
     expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/one-full')
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveClass('linen-lightbox-photo')
     expect(screen.getByText('Camera')).toBeInTheDocument()
     expect(screen.getByText('Lens')).toBeInTheDocument()
     expect(screen.getByText('1 / 2')).toBeInTheDocument()

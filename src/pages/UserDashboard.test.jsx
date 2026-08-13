@@ -131,6 +131,7 @@ describe('UserDashboard', () => {
 
     fireEvent.click(screen.getByRole('img', { name: 'Photo 1 from Portraits' }))
     expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/one-full')
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveClass('linen-lightbox-photo')
     expect(screen.getByText('Camera')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'ArrowRight' })
     expect(screen.getByText('2 / 2')).toBeInTheDocument()

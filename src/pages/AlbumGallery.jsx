@@ -377,7 +377,7 @@ function AlbumGallery() {
                                                             width={activeImg.width}
                                                             height={activeImg.height}
                                                             decoding="async"
-                                                            className="max-w-full max-h-full object-contain rounded-lg shadow-warm-xl relative z-20 animate-fade-in"
+                                                            className="linen-lightbox-photo max-w-full max-h-full object-contain relative z-20 animate-fade-in"
                                                         />
 
                                                         {/* Placeholder thumbnail for instant visual feedback */}

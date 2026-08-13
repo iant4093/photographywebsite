@@ -99,6 +99,7 @@ describe('SharedAlbum access and gallery', () => {
     expect(refresh.request).toHaveBeenCalledWith('media-error')
     fireEvent.click(first)
     expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/p1-full')
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveClass('linen-lightbox-photo')
     expect(screen.getByText('Camera')).toBeInTheDocument()
     const overlay = screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed')
     fireEvent.click(overlay.querySelector('button.absolute.right-4'))
