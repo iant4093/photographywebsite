@@ -88,6 +88,25 @@ class AlbumQrBackfillTests(unittest.TestCase):
         with patch.object(module, "write_album_qr", return_value=candidates[0]["key"]):
             self.assertEqual(module.apply_plan(candidates, table, s3, "bucket", module.DEFAULT_FRONTEND_ORIGIN), (0, 1))
 
+    def test_photo_condition_accepts_legacy_records_without_type(self):
+        legacy_photo = album()
+        legacy_photo.pop("type")
+        candidates, _ = module.eligible_albums([legacy_photo], module.DEFAULT_FRONTEND_ORIGIN)
+
+        condition, _, values = module.condition_for(candidates[0])
+
+        self.assertIn("attribute_not_exists(#type) OR #type = :type", condition)
+        self.assertEqual(values[":type"], "photo")
+
+    def test_video_condition_still_requires_explicit_type(self):
+        candidates, _ = module.eligible_albums([album(type="video")], module.DEFAULT_FRONTEND_ORIGIN)
+
+        condition, _, values = module.condition_for(candidates[0])
+
+        self.assertIn("AND #type = :type", condition)
+        self.assertNotIn("attribute_not_exists(#type)", condition)
+        self.assertEqual(values[":type"], "video")
+
     def test_scan_paginates_and_rejects_repeated_tokens(self):
         table = Mock()
         table.scan.side_effect = [

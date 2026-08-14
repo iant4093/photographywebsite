@@ -167,9 +167,14 @@ def condition_for(candidate: dict[str, Any]) -> tuple[str, dict[str, str], dict[
         ":type": album.get("type", "photo"),
         ":key": candidate["key"],
     }
+    type_condition = "#type = :type"
+    if values[":type"] == "photo":
+        # Photo albums created before the type field was introduced use the
+        # same legacy default as the application serializers.
+        type_condition = "(attribute_not_exists(#type) OR #type = :type)"
     condition = (
         "(attribute_not_exists(#status) OR #status = :active) "
-        "AND #visibility = :visibility AND #type = :type"
+        f"AND #visibility = :visibility AND {type_condition}"
     )
     if candidate["visibility"] == "unlisted":
         names["#shared"] = "isShared"
