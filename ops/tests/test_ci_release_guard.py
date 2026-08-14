@@ -626,6 +626,27 @@ class ReleaseDependencyTests(unittest.TestCase):
         )
         rules = release_guard.load_release_dependencies(document)
         self.assertEqual(len(rules), len(document["rules"]))
+        for logical_id in (
+            "CompleteChallengeFunctionRole",
+            "CreateUserFunctionRole",
+            "DeleteUserFunctionRole",
+            "EditUserFunctionRole",
+            "ListUsersFunctionRole",
+            "LoginFunctionRole",
+        ):
+            self.assertIn(
+                "UserPool.Arn",
+                rules[(logical_id, "AWS::IAM::Role", "Policies")],
+            )
+        for logical_id, role_id in (
+            ("CreateUserFunction", "CreateUserFunctionRole"),
+            ("EditUserFunction", "EditUserFunctionRole"),
+            ("ListUsersFunction", "ListUsersFunctionRole"),
+        ):
+            self.assertEqual(
+                rules[(logical_id, "AWS::Lambda::Function", "Role")],
+                frozenset({f"{role_id}.Arn"}),
+            )
         base = self.document()
         cases = [
             {},
