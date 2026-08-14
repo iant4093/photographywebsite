@@ -28,7 +28,7 @@ logger = logging.getLogger("photography_api.public_album")
 SITE_ORIGIN = "https://iantruongphotography.com"
 SITE_TITLE = "Ian Truong Photography"
 SITE_DESCRIPTION = (
-    "A photography portfolio showcasing albums captured during the golden hour and beyond."
+    "Ian Truong Photography — a portfolio of wildlife, portraits, sports, travel, and landscapes."
 )
 HERO_IMAGE_URL = "https://{}/site/hero/current/hero.jpg"
 MAX_SHELL_BYTES = 512 * 1024

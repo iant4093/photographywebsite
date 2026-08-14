@@ -159,7 +159,7 @@ describe('Home complete public catalog', () => {
     fireEvent.scroll(window)
     expect(window.requestAnimationFrame).toHaveBeenCalledOnce()
     act(() => frameCallback())
-    const hero = screen.getByRole('img', { name: 'Golden hour landscape' })
+    const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(hero).toHaveClass('home-hero-media', 'parallax-hero')
     expect(hero.style.transform).toBe('translateY(-24px)')
     expect(container.querySelector('section.home-hero')).toBeTruthy()
@@ -178,7 +178,7 @@ describe('Home complete public catalog', () => {
   it('falls back through the legacy managed hero before using the bundled responsive hero', async () => {
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     const { container } = routed(<Home />)
-    const responsive = screen.getByRole('img', { name: 'Golden hour landscape' })
+    const responsive = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(responsive).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
     expect(responsive).toHaveAttribute('srcset', expect.stringContaining('/site/hero/current/hero-960.jpg 960w'))
     expect(container.querySelector('source[type="image/avif"]')).toHaveAttribute(
@@ -186,11 +186,11 @@ describe('Home complete public catalog', () => {
       expect.stringContaining('/site/hero/current/hero-960.avif 960w'),
     )
     fireEvent.error(responsive)
-    const managed = screen.getByRole('img', { name: 'Golden hour landscape' })
+    const managed = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(managed).toHaveAttribute('src', expect.stringContaining('/site/hero/home'))
     expect(container.querySelector('source[type="image/avif"]')).toBeNull()
     fireEvent.error(managed)
-    const fallback = screen.getByRole('img', { name: 'Golden hour landscape' })
+    const fallback = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(fallback).toHaveAttribute('src', '/images/heroes/photo-1280.jpg')
     expect(fallback).toHaveAttribute('srcset')
     expect(fallback).toHaveClass('home-hero-media', 'parallax-hero')
@@ -200,7 +200,7 @@ describe('Home complete public catalog', () => {
   it('paints the stable responsive hero without waiting for a manifest request', async () => {
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     routed(<Home />)
-    const hero = screen.getByRole('img', { name: 'Golden hour landscape' })
+    const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
     expect(hero).toHaveAttribute('fetchpriority', 'high')
     expect(globalThis.fetch).not.toHaveBeenCalled()

@@ -188,7 +188,7 @@ function Home() {
                             sizes="100vw"
                             width={heroWidth}
                             height={heroHeight}
-                            alt="Golden hour landscape"
+                            alt="Ian Truong Photography portfolio cover"
                             fetchPriority="high"
                             loading="eager"
                             decoding="async"

@@ -47,7 +47,7 @@ The protected `/admin/costs` page provides an account-wide Cost Explorer
 summary without granting the browser AWS credentials or billing permissions.
 Its Lambda accepts no billing query parameters and can call only
 `ce:GetCostAndUsage`, `ce:GetCostForecast`, and item operations on the dedicated
-`GoldenHour-CostReportCache-prod` table. The stored and returned payload contains
+legacy physical `GoldenHour-CostReportCache-prod` table. The stored and returned payload contains
 aggregate month/service amounts only—never account IDs, resources, tags,
 invoices, payment details, or provider errors.
 
@@ -75,7 +75,8 @@ Photo Backup totals use the nested service account with metadata-only Drive
 access; Google Drive ACLs limit that identity to folders explicitly shared with
 it. The secret also stores the fixed Raw Photo Backup folder ID so the report
 does not depend on a mutable folder name. The Lambda can read only this fixed
-credential secret and its dedicated `GoldenHour-DriveUsageCache-prod` table.
+credential secret and its dedicated legacy physical
+`GoldenHour-DriveUsageCache-prod` table.
 
 An EventBridge rule refreshes one aggregate snapshot daily at 09:15 UTC. The
 Lambda has a bounded five-minute background runtime because the raw archive can

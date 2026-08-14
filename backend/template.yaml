@@ -186,6 +186,10 @@ Globals:
       Stage: !Ref Stage
 
 Resources:
+  # The original DynamoDB table, S3 bucket, IAM namespace, and edge-function
+  # physical identifiers are retained intentionally. Renaming those resources
+  # would require replacement and a guarded data/traffic migration; public and
+  # in-place-updatable display names use the current Ian Truong Photography brand.
   # DynamoDB: retain album data, protect deletion, and enable point-in-time recovery.
   AlbumsTable:
     Type: AWS::DynamoDB::Table
@@ -684,7 +688,7 @@ Resources:
     Type: AWS::CloudFront::CachePolicy
     Properties:
       CachePolicyConfig:
-        Name: !Sub 'GoldenHour-PreviewV2-OriginAuth-${Stage}'
+        Name: !Sub 'IanTruongPhotography-PreviewV2-OriginAuth-${Stage}'
         Comment: Recheck S3 visibility tags while browsers retain immutable versioned previews
         DefaultTTL: 0
         MaxTTL: 0
@@ -703,7 +707,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: !Sub 'GoldenHour-PreviewV2-Headers-${Stage}'
+        Name: !Sub 'IanTruongPhotography-PreviewV2-Headers-${Stage}'
         Comment: Exact-origin CORS, hardening, and immutable browser caching for versioned previews
         CorsConfig:
           AccessControlAllowCredentials: false
@@ -751,7 +755,7 @@ Resources:
     Type: AWS::CloudFront::CachePolicy
     Properties:
       CachePolicyConfig:
-        Name: !Sub 'GoldenHour-PublicPreview-${Stage}'
+        Name: !Sub 'IanTruongPhotography-PublicPreview-${Stage}'
         Comment: Cache immutable public previews at the edge with bounded revocation time
         DefaultTTL: 86400
         MaxTTL: 86400
@@ -770,7 +774,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: !Sub 'GoldenHour-PublicPreview-Headers-${Stage}'
+        Name: !Sub 'IanTruongPhotography-PublicPreview-Headers-${Stage}'
         Comment: Harden public preview responses without making origin errors immutable
         CorsConfig:
           AccessControlAllowCredentials: false
@@ -813,6 +817,8 @@ Resources:
     Type: AWS::CloudFront::Function
     Properties:
       AutoPublish: true
+      # This existing physical function name is retained to avoid replacement
+      # of an actively associated viewer-request function.
       Name: !Sub 'GoldenHour-PublicPreview-${Stage}'
       FunctionConfig:
         Comment: Strictly map the cacheable public namespace to tagged canonical previews
@@ -838,7 +844,7 @@ Resources:
     Type: AWS::CloudFront::CachePolicy
     Properties:
       CachePolicyConfig:
-        Name: !Sub 'GoldenHour-Hero-${Stage}'
+        Name: !Sub 'IanTruongPhotography-Hero-${Stage}'
         Comment: Cache the fixed hero at the edge while browsers revalidate after admin overwrites
         DefaultTTL: 86400
         MaxTTL: 86400
@@ -857,7 +863,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: !Sub 'GoldenHour-Hero-Headers-${Stage}'
+        Name: !Sub 'IanTruongPhotography-Hero-Headers-${Stage}'
         Comment: Harden hero responses and force browser revalidation after path invalidation
         CorsConfig:
           AccessControlAllowCredentials: false
@@ -905,7 +911,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: !Sub 'GoldenHour-Media-Headers-${Stage}'
+        Name: !Sub 'IanTruongPhotography-Media-Headers-${Stage}'
         Comment: Exact-origin media CORS and browser hardening
         CorsConfig:
           AccessControlAllowCredentials: false
@@ -1044,7 +1050,7 @@ Resources:
         Enabled: true
         IPV6Enabled: true
         HttpVersion: http2and3
-        Comment: !Sub 'GoldenHour Images CDN - ${Stage}'
+        Comment: !Sub 'Ian Truong Photography Images CDN - ${Stage}'
         CustomErrorResponses:
           - ErrorCode: 403
             ErrorCachingMinTTL: 0
@@ -1169,7 +1175,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      UserPoolName: !Sub 'GoldenHour-Users-${Stage}'
+      UserPoolName: !Sub 'IanTruongPhotography-Users-${Stage}'
       DeletionProtection: ACTIVE
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
@@ -1202,7 +1208,7 @@ Resources:
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
-      ClientName: !Sub 'GoldenHour-WebClient-${Stage}'
+      ClientName: !Sub 'IanTruongPhotography-WebClient-${Stage}'
       UserPoolId: !Ref UserPool
       ExplicitAuthFlows:
         - ALLOW_ADMIN_USER_PASSWORD_AUTH

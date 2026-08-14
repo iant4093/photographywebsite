@@ -821,6 +821,8 @@ Resources:
               - s3:PutBucketVersioning
               - s3:PutEncryptionConfiguration
               - s3:PutLifecycleConfiguration
+            # These patterns intentionally match the application's retained
+            # legacy physical bucket namespace.
             Resource:
               - !Sub 'arn:${AWS::Partition}:s3:::goldenhour-*'
               - !Sub 'arn:${AWS::Partition}:s3:::goldenhour-*/*'
@@ -855,6 +857,8 @@ Resources:
               - dynamodb:UpdateContinuousBackups
               - dynamodb:UpdateTable
               - dynamodb:UpdateTimeToLive
+            # This pattern intentionally matches the application's retained
+            # legacy physical table namespace.
             Resource: !Sub 'arn:${AWS::Partition}:dynamodb:us-west-2:${AWS::AccountId}:table/GoldenHour-*'
           - Sid: ManageApplicationQueuesAndTopics
             Effect: Allow

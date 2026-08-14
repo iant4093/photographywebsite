@@ -34,6 +34,38 @@ def resource_block(logical_id: str) -> str:
 
 
 class TemplateValidationTests(unittest.TestCase):
+    def test_current_brand_replaces_retired_public_and_in_place_aws_labels(self) -> None:
+        public_sources = (
+            (ROOT / "index.html").read_text(encoding="utf-8"),
+            (ROOT / "src" / "pages" / "Home.jsx").read_text(encoding="utf-8"),
+            (ROOT / "backend" / "functions" / "get_public_album.py").read_text(
+                encoding="utf-8"
+            ),
+        )
+        for source in public_sources:
+            self.assertNotIn("golden hour", source.lower())
+            self.assertIn("Ian Truong Photography", source)
+
+        for retired_label in (
+            "GoldenHour-PreviewV2-OriginAuth",
+            "GoldenHour-PreviewV2-Headers",
+            "GoldenHour-PublicPreview-Headers",
+            "GoldenHour-Hero-Headers",
+            "GoldenHour-Media-Headers",
+            "GoldenHour Images CDN",
+            "GoldenHour-Users",
+            "GoldenHour-WebClient",
+        ):
+            self.assertNotIn(retired_label, TEMPLATE)
+
+        # These are physical compatibility identifiers, not public branding.
+        for retained_identifier in (
+            "GoldenHour-Albums-${Stage}",
+            "goldenhour-images-${AWS::AccountId}-${Stage}",
+            "GoldenHour-PublicPreview-${Stage}",
+        ):
+            self.assertIn(retained_identifier, TEMPLATE)
+
     def test_sam_lint(self) -> None:
         subprocess.run(
             ["sam", "validate", "--lint", "--template-file", str(ROOT / "backend" / "template.yaml")],
