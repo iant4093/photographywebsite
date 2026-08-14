@@ -34,6 +34,7 @@ MEDIA_FIELDS = {
     "coverThumbnailUrl": 1,
     "downloadUrl": 3,
     "hlsUrl": 3,
+    "qrCodeUrl": 4,
     "thumbnailUrl": 1,
     "url": 3,
 }

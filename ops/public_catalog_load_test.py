@@ -33,7 +33,7 @@ SUMMARY_FIELDS = {
     "coverBlurhash",
 }
 SUMMARY_OPTIONAL_FIELDS = {"galleryCategoryOrder"}
-DETAIL_FIELDS = SUMMARY_FIELDS - {"imageCount"}
+DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl", "downloadUrl"}
 IMAGE_OPTIONAL_FIELDS = {
     "previewSrcSet",
@@ -182,7 +182,11 @@ def validate_detail(payload: object, expected_album_id: str) -> int:
     root = _exact_fields(payload, {"album", "images"}, "album detail response")
     album = _exact_fields(root["album"], DETAIL_FIELDS, "album detail")
     # Reuse every summary value check; imageCount is the only list-only field.
-    validate_summary({**album, "imageCount": 0})
+    validate_summary({
+        **{key: value for key, value in album.items() if key != "qrCodeUrl"},
+        "imageCount": 0,
+    })
+    _public_url(album["qrCodeUrl"])
     if album.get("albumId") != expected_album_id or album.get("visibility") != "public":
         raise ProbeError("album detail does not match its public summary")
     if not isinstance(root["images"], list):

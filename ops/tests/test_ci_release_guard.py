@@ -1396,7 +1396,10 @@ class PublicPostureSmokeTests(unittest.TestCase):
             "coverBlurhash": "",
         }
         detail = {
-            "album": {key: value for key, value in summary.items() if key != "imageCount"},
+            "album": {
+                **{key: value for key, value in summary.items() if key != "imageCount"},
+                "qrCodeUrl": "https://media.test/public/album-qr.svg",
+            },
             "images": [
                 {
                     "id": "public-image",

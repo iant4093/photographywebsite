@@ -47,6 +47,7 @@ def summary(album_id=ALBUM_ONE, count=1):
 def detail(album_id=ALBUM_ONE, count=1):
     album = summary(album_id, count)
     album.pop("imageCount")
+    album["qrCodeUrl"] = "https://media.example.test/album-qr.svg"
     images = [
         {
             "id": f"image-{index}",
@@ -362,6 +363,10 @@ class PublicCatalogProbeTests(unittest.TestCase):
             public_load.validate_detail(payload, ALBUM_ONE)
         payload = detail()
         payload["images"][0]["previewSrcSet"] = [{"width": True, "url": "https://media.test/x"}]
+        with self.assertRaises(public_load.ProbeError):
+            public_load.validate_detail(payload, ALBUM_ONE)
+        payload = detail()
+        payload["album"]["qrCodeUrl"] = "https://media.example.test/qr.svg?X-Amz-Signature=secret"
         with self.assertRaises(public_load.ProbeError):
             public_load.validate_detail(payload, ALBUM_ONE)
 
