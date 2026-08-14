@@ -24,6 +24,7 @@ LEGACY_PREFIX_SEGMENT = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?$")
 PREVIEW_VERSION = 3
 PREVIEW_WIDTHS = (640, 960, 1440, 1920)
 PUBLIC_PREVIEW_PREFIX = "public-previews"
+ALBUM_QR_KEY_PATTERN = re.compile(r"^albums/([0-9a-f-]{36})/qr/v1/[a-f0-9]{24}\.svg$")
 
 _s3 = None
 _dynamodb = None
@@ -465,9 +466,35 @@ def serialize_album_summary(album, *, include_admin=False):
 def serialize_album_detail(album, *, include_admin=False):
     summary = serialize_album_summary(album, include_admin=include_admin)
     summary.pop("imageCount", None)
+    qr_key = validated_album_qr_key(album)
+    if qr_key and album.get("status", "active") == "active" and (
+        album.get("visibility") == "public"
+        or (
+            album.get("visibility") == "unlisted"
+            and bool(album.get("isShared"))
+            and isinstance(album.get("shareCode"), str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{8,128}", album["shareCode"])
+        )
+    ):
+        summary["qrCodeUrl"] = media_url(qr_key, album["visibility"])
     if include_admin:
         summary["backupToGoogleDrive"] = bool(album.get("backupToGoogleDrive", False))
     return summary
+
+
+def validated_album_qr_key(album):
+    if not isinstance(album, dict):
+        return ""
+    value = album.get("qrCodeKey")
+    if not isinstance(value, str):
+        return ""
+    match = ALBUM_QR_KEY_PATTERN.fullmatch(value)
+    if not match or match.group(1) != album.get("albumId"):
+        return ""
+    try:
+        return validate_album_media_key(value, album=album)
+    except ValidationError:
+        return ""
 
 
 def _merge_visibility_tag(key, visibility):
@@ -517,7 +544,7 @@ def tag_keys_visibility(keys, visibility):
 
 
 def album_known_keys(album):
-    keys = [album.get("coverImageUrl", ""), album.get("coverThumbKey", "")]
+    keys = [album.get("coverImageUrl", ""), album.get("coverThumbKey", ""), validated_album_qr_key(album)]
     for image in album.get("images", []):
         if isinstance(image, dict):
             keys.extend((image.get("rawKey", ""), image.get("key", ""), image.get("thumbKey", ""), image.get("hlsUrl", "")))

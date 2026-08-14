@@ -62,6 +62,8 @@ class PreviewLifecycleTests(unittest.TestCase):
         with patch.object(update_album, "require_admin", return_value=None), patch.object(
             update_album.table, "get_item", return_value={"Item": album}
         ), patch.object(update_album, "_updated_album", return_value=updated), patch.object(
+            update_album, "_reconcile_album_qr", return_value=None
+        ), patch.object(
             update_album.table, "put_item"
         ), patch.object(update_album, "tag_album_visibility"), patch.object(
             update_album, "tag_preview_visibility"
@@ -78,6 +80,8 @@ class PreviewLifecycleTests(unittest.TestCase):
         with patch.object(update_album, "require_admin", return_value=None), patch.object(
             update_album.table, "get_item", return_value={"Item": album}
         ), patch.object(update_album, "_updated_album", return_value=updated), patch.object(
+            update_album, "_reconcile_album_qr", return_value=None
+        ), patch.object(
             update_album.table, "put_item", side_effect=conflict
         ) as put, patch.object(update_album, "tag_album_visibility"), patch.object(update_album, "_audit"):
             response = update_album.handler(event, None)

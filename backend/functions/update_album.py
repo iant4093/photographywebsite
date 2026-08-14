@@ -12,7 +12,15 @@ from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import require_admin
 from cache_invalidation import invalidate_public_api, invalidate_public_previews
-from media_access import serialize_album_summary, tag_album_visibility, tag_preview_visibility, validate_album_media_key
+from album_qr import album_qr_key, write_album_qr
+from media_access import (
+    serialize_album_summary,
+    tag_album_visibility,
+    tag_keys_visibility,
+    tag_preview_visibility,
+    validate_album_media_key,
+    validated_album_qr_key,
+)
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import (
     ValidationError,
@@ -124,6 +132,19 @@ def _updated_album(album, body):
     return updated
 
 
+def _reconcile_album_qr(updated):
+    desired_key = album_qr_key(updated)
+    if not desired_key:
+        updated.pop("qrCodeKey", None)
+        return None
+    if updated.get("qrCodeKey") != desired_key:
+        written_key = write_album_qr(updated)
+        if written_key != desired_key:
+            raise RuntimeError("Album QR reconciliation failed")
+        updated["qrCodeKey"] = written_key
+    return desired_key
+
+
 from front_door import verify_front_door_request
 
 
@@ -145,13 +166,18 @@ def handler(event, context):
             _audit(event, context, "denied", "album_not_found")
             return error_response(404, "Album not found", code="not_found")
         updated = _updated_album(album, body)
+        _reconcile_album_qr(updated)
         old_visibility = album.get("visibility")
         new_visibility = updated["visibility"]
+        old_qr_key = validated_album_qr_key(album)
+        new_qr_key = validated_album_qr_key(updated)
 
         # Restrictive transitions tag first; release-to-public transitions update
         # authorization metadata first. Both orders fail safe (unavailable rather
         # than anonymously exposed) if the second operation fails.
         if old_visibility == "public" and new_visibility != "public":
+            if old_qr_key and old_qr_key != new_qr_key:
+                tag_keys_visibility([old_qr_key], new_visibility)
             tag_album_visibility(updated, new_visibility, include_derivatives=True)
             # Submit the edge purge before committing a restrictive transition.
             # A purge failure therefore leaves media unavailable, not silently

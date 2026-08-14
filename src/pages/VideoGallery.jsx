@@ -6,6 +6,7 @@ import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 import AccessibleLightbox from '../components/AccessibleLightbox'
+import AlbumQrCode from '../components/AlbumQrCode'
 import {
     mediaFileName,
     mediaId,
@@ -183,15 +184,18 @@ export default function VideoGallery() {
                 Back to Videos
             </button>
 
-            <div className="linen-gallery-header mb-12">
-                <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
-                    {album.title}
-                </h1>
-                {album.description && (
-                    <p className="text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap">
-                        {album.description}
-                    </p>
-                )}
+            <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
+                <div>
+                    <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
+                        {album.title}
+                    </h1>
+                    {album.description && (
+                        <p className="text-lg text-warm-gray max-w-2xl leading-relaxed whitespace-pre-wrap">
+                            {album.description}
+                        </p>
+                    )}
+                </div>
+                <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
             </div>
 
             {mediaError && (

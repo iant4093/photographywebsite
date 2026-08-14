@@ -116,6 +116,23 @@ in [`CI_CD.md`](CI_CD.md). Operator helpers remain dry-run-first for recovery or
 an explicitly reviewed infrastructure operation; they are not an alternative
 deployment path.
 
+## Album QR-code reconciliation
+
+New public and actively shared link-only albums receive a deterministic SVG QR
+asset during the guarded pending-to-active album transition. The asset stays in
+the album's canonical S3 prefix and uses the same `visibility` tag authorization
+boundary as the rest of the album. Private and revoked albums never receive a
+QR URL from an API serializer.
+
+`backfill_album_qr_codes.py` reconciles historical eligible albums. It is
+dry-run by default and emits aggregate counts plus a deterministic plan digest;
+it never prints album IDs, titles, share codes, or object keys. Apply requires
+the exact AWS account, plan count, plan digest, and confirmation phrase reported
+by the immediately preceding dry run. Each repair writes a pending-tagged object,
+conditionally commits its DynamoDB key against the current visibility/share
+state, and only then applies its final public or unlisted tag. Rerun the dry run
+after apply and require `plannedRepairCount` to be zero.
+
 Before any manual mutation:
 
 1. run the complete repository tests and infrastructure validation;

@@ -16,6 +16,7 @@ import {
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
+import AlbumQrCode from '../components/AlbumQrCode'
 
 export default function SharedAlbum() {
     const { code } = useParams()
@@ -308,27 +309,35 @@ export default function SharedAlbum() {
                         </p>
                     </div>
 
-                    {/* Download All Button */}
-                    {images.length > 0 && album.type !== 'video' && (
-                        <button
-                            onClick={downloadAll}
-                            disabled={downloading}
-                            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark shrink-0 mb-1 cursor-pointer"
-                        >
-                            {downloading ? (
-                                <>
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    {zipStatus === 'rate_limited' ? 'Waiting...' : 'Preparing...'}
-                                </>
-                            ) : (
-                                <>
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                    Download All
-                                </>
+                    {(album.qrCodeUrl || (images.length > 0 && album.type !== 'video')) && (
+                        <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                            <AlbumQrCode
+                                albumTitle={album.title}
+                                qrCodeUrl={album.qrCodeUrl}
+                                onLoadError={requireFreshVerification}
+                            />
+                            {images.length > 0 && album.type !== 'video' && (
+                                <button
+                                    onClick={downloadAll}
+                                    disabled={downloading}
+                                    className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark cursor-pointer"
+                                >
+                                    {downloading ? (
+                                        <>
+                                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                            {zipStatus === 'rate_limited' ? 'Waiting...' : 'Preparing...'}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                            Download All
+                                        </>
+                                    )}
+                                </button>
                             )}
-                        </button>
+                        </div>
                     )}
                 </div>
 

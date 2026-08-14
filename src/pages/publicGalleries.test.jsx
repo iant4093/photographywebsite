@@ -65,7 +65,7 @@ function gallery(ui, path) {
 }
 
 const photoData = {
-  album: { albumId: 'a1', title: 'Wild Album', description: 'Description', createdAt: '2026-01-03' },
+  album: { albumId: 'a1', title: 'Wild Album', description: 'Description', createdAt: '2026-01-03', qrCodeUrl: 'https://x.test/photo-qr.svg' },
   images: [
     { id: 'one', url: 'https://x.test/one-full', thumbnailUrl: 'https://x.test/one-thumb', width: 2400, height: 1800, exif: { model: 'Camera', lens: 'Lens', focalLength: '50mm', focalRatio: 'f/2', shutterSpeed: '1/100', iso: 'ISO 100' }, previewSrcSet: [{ width: 640, url: 'https://x.test/640' }, { width: 960, url: 'https://x.test/960' }, { width: 1440, url: 'https://x.test/1440' }, { width: 1920, url: 'https://x.test/1920' }] },
     { id: 'two', url: 'https://x.test/two-full', thumbnailUrl: 'https://x.test/two-thumb', width: 800, height: 600 },
@@ -149,6 +149,15 @@ describe('AlbumGallery', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Worker failed')
   })
 
+  it('shows the public album QR action above the ZIP action', async () => {
+    gallery(<AlbumGallery />, '/album/a1')
+    const qr = await screen.findByRole('button', { name: 'Show QR code for Wild Album' })
+    const download = screen.getByRole('button', { name: 'Download All' })
+    expect(qr.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(qr)
+    expect(screen.getByRole('img', { name: 'QR code linking to Wild Album' })).toHaveAttribute('src', 'https://x.test/photo-qr.svg')
+  })
+
   it('uses a public token fallback and reports initial/background/download failures', async () => {
     auth.getIdToken.mockRejectedValue(new Error('anonymous'))
     api.fetchAlbum.mockRejectedValueOnce(new Error('missing'))
@@ -199,7 +208,7 @@ describe('AlbumGallery', () => {
 
 describe('VideoGallery', () => {
   const videoData = {
-    album: { title: 'Video Album', description: 'Films' },
+    album: { title: 'Video Album', description: 'Films', qrCodeUrl: 'https://x.test/video-qr.svg' },
     images: [
       { id: 'v1', url: 'https://x.test/v1.mp4', thumbnailUrl: 'https://x.test/v1.jpg' },
       { id: 'v2', url: 'https://x.test/v2.mp4', thumbnailUrl: 'https://x.test/v2.jpg' },
@@ -229,6 +238,12 @@ describe('VideoGallery', () => {
     expect(screen.getByText('Playing v1')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByText('Playing v1')).toBeNull()
+  })
+
+  it('offers a QR lightbox for a public video album', async () => {
+    gallery(<VideoGallery />, '/video/v-album')
+    fireEvent.click(await screen.findByRole('button', { name: 'Show QR code for Video Album' }))
+    expect(screen.getByRole('img', { name: 'QR code linking to Video Album' })).toHaveAttribute('src', 'https://x.test/video-qr.svg')
   })
 
   it('opens from a thumbnail, refreshes media, downloads, closes, and goes back', async () => {

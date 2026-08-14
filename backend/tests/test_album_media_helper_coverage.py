@@ -522,11 +522,33 @@ class MediaAccessBranchTests(unittest.TestCase):
             detail = media_access.serialize_album_detail(
                 {**self.album, "visibility": "private", "backupToGoogleDrive": True}, include_admin=True
             )
+            qr_detail = media_access.serialize_album_detail({
+                **self.album,
+                "qrCodeKey": f"albums/{ALBUM_ID}/qr/v1/{'a' * 24}.svg",
+            })
         self.assertEqual(absolute["coverImageUrl"], "https://media.example.test/legacy.jpg")
         self.assertEqual(private_admin["ownerEmail"], "x")
         self.assertIn("expiresIn", private_admin)
         self.assertNotIn("imageCount", detail)
         self.assertTrue(detail["backupToGoogleDrive"])
+        self.assertEqual(qr_detail["qrCodeUrl"], f"public:albums/{ALBUM_ID}/qr/v1/{'a' * 24}.svg")
+
+        protected = {
+            **self.album,
+            "visibility": "unlisted",
+            "isShared": True,
+            "shareCode": "valid-share-code",
+            "qrCodeKey": f"albums/{ALBUM_ID}/qr/v1/{'b' * 24}.svg",
+        }
+        with patch.object(media_access, "media_url", return_value="signed"):
+            self.assertEqual(media_access.serialize_album_detail(protected)["qrCodeUrl"], "signed")
+        for invalid in (
+            {**protected, "isShared": False},
+            {**protected, "shareCode": "bad"},
+            {**protected, "visibility": "private"},
+            {**protected, "qrCodeKey": f"albums/{ALBUM_ID}/qr/v1/not-a-digest.svg"},
+        ):
+            self.assertNotIn("qrCodeUrl", media_access.serialize_album_detail(invalid))
 
     def test_visibility_tag_failures_dedup_and_derivative_enumeration(self):
         with self.assertRaises(media_access.ValidationError):

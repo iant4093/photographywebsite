@@ -56,7 +56,7 @@ function renderShared(path = '/sharedalbum') {
 }
 
 const photoData = {
-  album: { title: 'Shared Photos', description: 'Private gallery', type: 'photo', createdAt: '2026-02-01' },
+  album: { title: 'Shared Photos', description: 'Private gallery', type: 'photo', createdAt: '2026-02-01', qrCodeUrl: 'https://x.test/shared-qr.svg' },
   images: [
     { id: 'p1', url: 'https://x.test/p1-full', thumbnailUrl: 'https://x.test/p1-thumb', width: 2400, height: 1800, exif: { model: 'Camera', lens: 'Lens', focalLength: '35mm', focalRatio: 'f/4', shutterSpeed: '1/250', iso: 'ISO 200' }, previewSrcSet: [{ width: 640, url: 'https://x.test/640' }, { width: 960, url: 'https://x.test/960' }, { width: 1440, url: 'https://x.test/1440' }, { width: 1920, url: 'https://x.test/1920' }] },
     { id: 'p2', url: 'https://x.test/p2-full', thumbnailUrl: 'https://x.test/p2-thumb' },
@@ -149,6 +149,16 @@ describe('SharedAlbum access and gallery', () => {
     zip.pollZipJob.mockRejectedValueOnce(new Error('ZIP failed'))
     fireEvent.click(screen.getByRole('button', { name: 'Download All' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('ZIP failed')
+  })
+
+  it('shows the protected QR action above the ZIP action', async () => {
+    renderShared('/sharedalbum/code-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
+    const qr = await screen.findByRole('button', { name: 'Show QR code for Shared Photos' })
+    const download = screen.getByRole('button', { name: 'Download All' })
+    expect(qr.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(qr)
+    expect(screen.getByRole('img', { name: 'QR code linking to Shared Photos' })).toHaveAttribute('src', 'https://x.test/shared-qr.svg')
   })
 
   it('handles security-widget and album errors and returns to code entry', async () => {

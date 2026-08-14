@@ -129,6 +129,7 @@ class CreateAlbumBranchTests(unittest.TestCase):
             patch.object(create_album, "_extract_exif"),
             patch.object(create_album, "tag_album_visibility", return_value=1),
             patch.object(create_album, "enqueue_preview_jobs", return_value=1),
+            patch.object(create_album, "_ensure_album_qr", return_value=None),
             patch.object(create_album, "ensure_album_item_budget"),
             patch.object(create_album, "_audit"),
             patch.object(create_album, "table", table),
@@ -207,7 +208,8 @@ class CreateAlbumBranchTests(unittest.TestCase):
         ), patch.object(create_album, "_extract_exif"), patch.object(
             create_album, "tag_album_visibility"
         ), patch.object(create_album, "enqueue_preview_jobs"), patch.object(
-            create_album, "ensure_album_item_budget"
+            create_album, "_ensure_album_qr"
+        ), patch.object(create_album, "ensure_album_item_budget"
         ), patch.object(create_album, "_audit"), patch.object(create_album, "table", table):
             response = create_album.handler({"body": json.dumps(create_body())}, None)
         self.assertEqual(response["statusCode"], 201)
@@ -219,7 +221,8 @@ class CreateAlbumBranchTests(unittest.TestCase):
         with patch.object(create_album, "require_admin", return_value=None), patch.object(
             create_album, "get_caller_claims", return_value=claims()
         ), patch.object(create_album, "_extract_exif"), patch.object(
-            create_album, "ensure_album_item_budget"
+            create_album, "_ensure_album_qr"
+        ), patch.object(create_album, "ensure_album_item_budget"
         ), patch.object(create_album, "_audit"), patch.object(create_album, "table", table):
             self.assertEqual(create_album.handler({"body": json.dumps(create_body())}, None)["statusCode"], 409)
 
@@ -371,6 +374,7 @@ class UpdateAlbumBranchTests(unittest.TestCase):
         table.put_item.side_effect = put_error
         with patch.object(update_album, "require_admin", return_value=None), patch.object(
             update_album, "table", table
+        ), patch.object(update_album, "_reconcile_album_qr", return_value=None
         ), patch.object(update_album, "tag_album_visibility", side_effect=tag_error) as tag, patch.object(
             update_album, "tag_preview_visibility"
         ) as preview, patch.object(update_album, "_audit"):

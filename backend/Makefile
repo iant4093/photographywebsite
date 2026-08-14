@@ -20,11 +20,11 @@ SOURCES_LoginFunction := audit_helpers.py front_door.py login.py response_helper
 SOURCES_CompleteChallengeFunction := audit_helpers.py complete_challenge.py front_door.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py
 SOURCES_ContactFunction := audit_helpers.py contact.py email_helpers.py front_door.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py
 SOURCES_GoogleDriveBackupFunction := google_drive_sync.py media_access.py validation_helpers.py
-SOURCES_CreateAlbumFunction := album_mutation_helpers.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py preview_jobs.py response_helpers.py secret_helpers.py validation_helpers.py
-SOURCES_UpdateAlbumFunction := album_mutation_helpers.py audit_helpers.py auth_helpers.py cache_invalidation.py front_door.py media_access.py response_helpers.py update_album.py validation_helpers.py
+SOURCES_CreateAlbumFunction := album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py preview_jobs.py response_helpers.py secret_helpers.py validation_helpers.py
+SOURCES_UpdateAlbumFunction := album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py front_door.py media_access.py response_helpers.py update_album.py validation_helpers.py
 SOURCES_UpdateGalleryOrderFunction := audit_helpers.py auth_helpers.py cache_invalidation.py front_door.py gallery_order.py response_helpers.py update_gallery_order.py validation_helpers.py
 SOURCES_DeleteAlbumFunction := audit_helpers.py auth_helpers.py cache_invalidation.py delete_album.py deletion_helpers.py front_door.py media_access.py response_helpers.py validation_helpers.py
-SOURCES_AddImagesFunction := add_images.py album_mutation_helpers.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py preview_jobs.py response_helpers.py secret_helpers.py validation_helpers.py
+SOURCES_AddImagesFunction := add_images.py album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py preview_jobs.py response_helpers.py secret_helpers.py validation_helpers.py
 SOURCES_CreateZipFunction := album_access.py audit_helpers.py auth_helpers.py create_zip.py cursor_helpers.py front_door.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py
 SOURCES_WorkerZipFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py media_access.py validation_helpers.py worker_zip.py zip_helpers.py
 SOURCES_DeleteImagesFunction := audit_helpers.py auth_helpers.py cache_invalidation.py delete_images.py deletion_helpers.py front_door.py media_access.py response_helpers.py validation_helpers.py
@@ -49,8 +49,9 @@ DEPS_GetAlbumsFunction := PyJWT==2.13.0 cryptography==50.0.0
 DEPS_CreateZipFunction := PyJWT==2.13.0 cryptography==50.0.0
 DEPS_GetDownloadUrlFunction := PyJWT==2.13.0 cryptography==50.0.0
 DEPS_ContactFunction := resend==2.34.0
-DEPS_CreateAlbumFunction := ExifRead==3.5.1 resend==2.34.0
-DEPS_AddImagesFunction := ExifRead==3.5.1 resend==2.34.0
+DEPS_CreateAlbumFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6
+DEPS_UpdateAlbumFunction := segno==1.6.6
+DEPS_AddImagesFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6
 DEPS_GoogleDriveBackupFunction := google-api-python-client==2.198.0 google-auth==2.56.0 google-auth-httplib2==0.4.0
 DEPS_GetGoogleDriveUsageFunction := google-auth==2.56.0 requests==2.34.2
 DEPS_RefreshGoogleDriveUsageFunction := google-auth==2.56.0 requests==2.34.2

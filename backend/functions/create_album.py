@@ -40,6 +40,34 @@ table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
 logger = logging.getLogger("photography_api.album_write")
 
 
+def _ensure_album_qr(item, creator_sub):
+    # AddImages reuses normalization helpers from this module. Importing here
+    # avoids loading the renderer during append-media cold starts.
+    from album_qr import write_album_qr
+
+    key = write_album_qr(item)
+    if not key:
+        item.pop("qrCodeKey", None)
+        return None
+    candidate = dict(item)
+    candidate["qrCodeKey"] = key
+    ensure_album_item_budget(candidate)
+    table.update_item(
+        Key={"albumId": item["albumId"]},
+        UpdateExpression="SET qrCodeKey = :key",
+        ConditionExpression="createdBySub = :creator AND (#status = :pending OR #status = :active)",
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues={
+            ":key": key,
+            ":creator": creator_sub,
+            ":pending": "pending",
+            ":active": "active",
+        },
+    )
+    item["qrCodeKey"] = key
+    return key
+
+
 def _audit(event, context, outcome, reason_code, *, media_count=None, visibility=None):
     actor_type, auth_method = actor_context(event)
     details = {}
@@ -225,6 +253,8 @@ def handler(event, context):
                 ExpressionAttributeValues={":images": images, ":count": len(images)},
             )
             item["images"] = images
+
+        _ensure_album_qr(item, claims["sub"])
 
         # Releasing media to anonymous CDN access happens only after an active
         # album record exists. Restrictive visibilities are tagged first. Both
