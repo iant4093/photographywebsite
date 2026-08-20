@@ -150,6 +150,9 @@
 }
 
 .photo-stats-timeline-year strong {
+    position: sticky;
+    left: 0.8rem;
+    display: inline-block;
     color: var(--color-charcoal);
     font-family: var(--font-serif);
     font-size: clamp(1.85rem, 3vw, 2.8rem);
@@ -166,6 +169,9 @@
 }
 
 .photo-stats-timeline-month > span {
+    position: sticky;
+    left: 0.65rem;
+    display: inline-block;
     color: var(--color-amber-dark);
     font-size: clamp(0.82rem, 1.2vw, 1rem);
     font-weight: 600;
