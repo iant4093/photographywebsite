@@ -496,14 +496,6 @@
     background: color-mix(in srgb, var(--color-cream-dark) 45%, transparent);
 }
 
-.photo-stats-motion-item {
-    --editorial-hover-scale: 0;
-}
-
-.photo-stats-motion-item:hover {
-    --editorial-hover-scale: 0.008;
-}
-
 .photo-stats-card {
     position: relative;
     min-height: 10.75rem;

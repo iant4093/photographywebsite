@@ -691,8 +691,7 @@
 .linen-site .home-hero.editorial-motion-frame,
 .linen-site .linen-video-hero.editorial-motion-frame,
 .linen-site .photo-stats-hero.editorial-motion-frame,
-.linen-site .photo-stats-timeline-heading.editorial-motion-frame,
-.linen-site .photo-stats-section-heading.editorial-motion-frame {
+.linen-site .photo-stats-motion-section.editorial-motion-frame {
   filter: saturate(var(--editorial-saturation));
   transform:
     translate3d(var(--editorial-x), var(--editorial-y), 0)
@@ -701,8 +700,7 @@
 }
 
 .linen-site .album-card.editorial-motion-media,
-.linen-site .linen-media-frame.editorial-motion-media,
-.linen-site .photo-stats-motion-item.editorial-motion-media {
+.linen-site .linen-media-frame.editorial-motion-media {
   transform:
     translate3d(var(--editorial-x), var(--editorial-card-y), 0)
     rotate(var(--editorial-card-rotation))

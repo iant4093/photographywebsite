@@ -29,7 +29,7 @@ function dateLabel(value) {
 
 function StatCard({ index, label, value }) {
     return (
-        <article className="photo-stats-card photo-stats-motion-item">
+        <article className="photo-stats-card">
             <span className="photo-stats-card-index" aria-hidden="true">{String(index).padStart(2, '0')}</span>
             <p className="photo-stats-eyebrow">{label}</p>
             <p className="photo-stats-value">{value}</p>
@@ -40,7 +40,7 @@ function StatCard({ index, label, value }) {
 function KeptMeter({ label, kept, taken, percent }) {
     const bounded = Math.max(0, Math.min(100, Number(percent) || 0))
     return (
-        <article className="photo-stats-kept-card photo-stats-motion-item">
+        <article className="photo-stats-kept-card">
             <div className="photo-stats-kept-heading">
                 <div>
                     <p className="photo-stats-eyebrow">{label}</p>
@@ -77,7 +77,7 @@ function SectionHeading({ id, index, eyebrow, title, detail }) {
 
 function GearList({ title, items }) {
     return (
-        <section className="photo-stats-gear-list photo-stats-motion-item" aria-labelledby={`gear-${title.toLowerCase()}`}>
+        <section className="photo-stats-gear-list" aria-labelledby={`gear-${title.toLowerCase()}`}>
             <h3 id={`gear-${title.toLowerCase()}`}>{title}</h3>
             <ol>
                 {items.map((item, index) => (
@@ -226,7 +226,7 @@ function TimelineCard({ album, index, position }) {
     const [imageFailed, setImageFailed] = useState(false)
     return (
         <Link
-            className="photo-stats-timeline-card photo-stats-motion-item"
+            className="photo-stats-timeline-card"
             data-timeline-position={position}
             to={albumRoute(album)}
             aria-label={`View ${album.title}`}
@@ -306,7 +306,7 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
     }
 
     return (
-        <section className="photo-stats-timeline-section" aria-labelledby="album-timeline-heading">
+        <section className="photo-stats-timeline-section photo-stats-motion-section" aria-labelledby="album-timeline-heading">
             <div className="photo-stats-timeline-heading">
                 <h2 id="album-timeline-heading">Album Timeline</h2>
                 <div className="photo-stats-timeline-controls" aria-label="Album timeline controls">
@@ -511,7 +511,7 @@ export default function Stats() {
                         }}
                     />
 
-                    <section aria-labelledby="stats-at-a-glance">
+                    <section className="photo-stats-motion-section" aria-labelledby="stats-at-a-glance">
                         <SectionHeading id="stats-at-a-glance" index={1} eyebrow="At a glance" title="Capture Stats" detail={`Updated ${dateLabel(report.generatedAt)}`} />
                         <div className="photo-stats-card-grid">
                             <StatCard index={1} label="Photos taken" value={number(report.taken?.photos)} />
@@ -525,10 +525,10 @@ export default function Stats() {
                         </div>
                     </section>
 
-                    <section aria-labelledby="archive-scale-heading">
+                    <section className="photo-stats-motion-section" aria-labelledby="archive-scale-heading">
                         <SectionHeading id="archive-scale-heading" index={2} eyebrow="The collection" title="Total Storage Used" />
                         <div className="photo-stats-scale-grid">
-                            <article className="photo-stats-storage-card photo-stats-motion-item">
+                            <article className="photo-stats-storage-card">
                                 <p className="photo-stats-eyebrow">Total space taken</p>
                                 <p className="photo-stats-storage-value">{formatBytes(report.storage?.totalBytes)}</p>
                             </article>
@@ -537,7 +537,7 @@ export default function Stats() {
                         </div>
                     </section>
 
-                    <section aria-labelledby="output-heading">
+                    <section className="photo-stats-motion-section" aria-labelledby="output-heading">
                         <SectionHeading id="output-heading" index={3} eyebrow="Timeline" title="Output by year" detail="Public work only" />
                         <div className="photo-stats-table-wrap">
                             <table className="photo-stats-table">
@@ -564,12 +564,12 @@ export default function Stats() {
                             </table>
                         </div>
                         <div className="photo-stats-highlights">
-                            <article className="photo-stats-motion-item">
+                            <article>
                                 <p className="photo-stats-eyebrow">Most active year</p>
                                 <strong>{report.mostActive?.year?.year || '—'}</strong>
                                 <span>{number(report.mostActive?.year?.photos)} photos · {number(report.mostActive?.year?.videos)} videos</span>
                             </article>
-                            <article className="photo-stats-motion-item">
+                            <article>
                                 <p className="photo-stats-eyebrow">Most active category</p>
                                 <strong>{report.mostActive?.category?.category || '—'}</strong>
                                 <span>{number(report.mostActive?.category?.albums)} albums</span>
@@ -577,13 +577,13 @@ export default function Stats() {
                         </div>
                     </section>
 
-                    <section aria-labelledby="categories-heading">
+                    <section className="photo-stats-motion-section" aria-labelledby="categories-heading">
                         <SectionHeading id="categories-heading" index={4} eyebrow="Subjects" title="Category distribution" detail="Ranked by work kept" />
                         <ol className="photo-stats-categories">
                             {(report.categories || []).map((category, index) => {
                                 const mediaCount = Number(category.photos || 0) + Number(category.videos || 0)
                                 return (
-                                    <li key={category.category} className="photo-stats-motion-item">
+                                    <li key={category.category}>
                                         <div className="photo-stats-category-copy">
                                             <span className="photo-stats-category-rank">{String(index + 1).padStart(2, '0')}</span>
                                             <strong>{category.category}</strong>
@@ -598,7 +598,7 @@ export default function Stats() {
                         </ol>
                     </section>
 
-                    <section aria-labelledby="gear-heading">
+                    <section className="photo-stats-motion-section" aria-labelledby="gear-heading">
                         <SectionHeading id="gear-heading" index={5} eyebrow="Tools of the trade" title="Gear" detail="Based on published-photo EXIF" />
                         <div className="photo-stats-gear-grid">
                             <GearList title="Cameras" items={report.gear?.cameras || []} />

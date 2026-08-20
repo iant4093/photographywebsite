@@ -7,10 +7,8 @@ const TARGET_SELECTOR = [
     'main .linen-section-heading',
     'main .catalog-section',
     'main .photo-stats-hero',
-    'main .photo-stats-timeline-heading',
-    'main .photo-stats-section-heading',
+    'main .photo-stats-motion-section',
     'main .album-card',
-    'main .photo-stats-motion-item',
     'main .linen-gallery-page [data-page-scroll-media]',
 ].join(', ')
 
@@ -18,7 +16,6 @@ const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, v
 
 function isMediaTarget(element) {
     return element.classList.contains('album-card')
-        || element.classList.contains('photo-stats-motion-item')
         || element.hasAttribute('data-page-scroll-media')
 }
 

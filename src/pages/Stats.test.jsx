@@ -98,7 +98,10 @@ describe('photography statistics page', () => {
         expect(view.container.querySelector('[data-active-timeline-year]')).toBeNull()
         expect(view.container.querySelectorAll('.photo-stats-timeline-progressive-image')).toHaveLength(3)
         const firstTimelineCard = screen.getAllByRole('link')[0]
-        expect(firstTimelineCard).toHaveClass('photo-stats-motion-item')
+        expect(firstTimelineCard).not.toHaveClass('photo-stats-motion-item')
+        expect(firstTimelineCard.closest('.photo-stats-timeline-section')).toHaveClass('photo-stats-motion-section')
+        expect(view.container.querySelectorAll('.photo-stats-motion-section')).toHaveLength(6)
+        expect(view.container.querySelector('.photo-stats-motion-item')).toBeNull()
         fireEvent.error(firstTimelineCard.querySelector('img'))
         await waitFor(() => expect(firstTimelineCard.querySelector('.photo-stats-timeline-image-fallback')).toBeInTheDocument())
         expect(api.fetchAlbums).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))

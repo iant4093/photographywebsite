@@ -11,8 +11,10 @@ function renderExperience(path = '/') {
         <section className="home-hero" />
         <div className="album-card" />
         <header className="photo-stats-hero" />
-        <div className="photo-stats-section-heading" />
-        <article className="photo-stats-motion-item" />
+        <section className="photo-stats-motion-section">
+          <article className="photo-stats-card" />
+          <article className="photo-stats-card" />
+        </section>
       </main>
       <MotionExperience />
     </MemoryRouter>,
@@ -142,15 +144,17 @@ describe('MotionExperience film-strip scrollbar', () => {
     for (const path of ['/', '/search', '/videos', '/stats']) {
       const view = renderExperience(path)
       flushFrames()
-      const card = view.container.querySelector(path === '/stats' ? '.photo-stats-motion-item' : '.album-card')
+      const card = view.container.querySelector(path === '/stats' ? '.photo-stats-motion-section' : '.album-card')
       expect(card.style.getPropertyValue('--editorial-x')).toBe('0px')
       expect(card.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
-      expect(Math.abs(Number.parseFloat(card.style.getPropertyValue('--editorial-card-y')))).toBeGreaterThan(28)
-      expect(Number.parseFloat(card.style.getPropertyValue('--editorial-card-scale'))).toBeLessThan(0.98)
       if (path === '/stats') {
-        const heading = view.container.querySelector('.photo-stats-section-heading')
-        expect(heading).toHaveClass('editorial-motion-frame')
-        expect(Math.abs(Number.parseFloat(heading.style.getPropertyValue('--editorial-y')))).toBeGreaterThan(38)
+        expect(card).toHaveClass('editorial-motion-frame')
+        expect(card).not.toHaveClass('editorial-motion-media')
+        expect(Math.abs(Number.parseFloat(card.style.getPropertyValue('--editorial-y')))).toBeGreaterThan(38)
+        expect(view.container.querySelectorAll('.photo-stats-card.editorial-motion-frame')).toHaveLength(0)
+      } else {
+        expect(Math.abs(Number.parseFloat(card.style.getPropertyValue('--editorial-card-y')))).toBeGreaterThan(28)
+        expect(Number.parseFloat(card.style.getPropertyValue('--editorial-card-scale'))).toBeLessThan(0.98)
       }
       view.unmount()
     }
