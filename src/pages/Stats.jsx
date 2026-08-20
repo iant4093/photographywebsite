@@ -3,10 +3,16 @@ import { Link } from 'react-router'
 import { fetchAlbums, fetchPhotographyStats } from '../utils/api'
 import { formatBytes } from '../utils/formatBytes'
 import { albumCoverUrl } from '../utils/mediaUrls'
+import ProgressiveImage from '../components/ProgressiveImage'
 import './Stats.css'
 
 
 const numberFormatter = new Intl.NumberFormat('en-US')
+const timelineMonthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' })
+const DAY_MS = 24 * 60 * 60 * 1000
+const TIMELINE_REM_PER_DAY = 2.25
+const TIMELINE_MIN_POINT_GAP_REM = 18.5
+const TIMELINE_EDGE_PADDING_REM = 11
 
 function number(value) {
     const parsed = Number(value)
@@ -103,18 +109,121 @@ function timelineDate(value) {
     }).format(parsed)
 }
 
-function timelineDateKey(album) {
-    const parsed = new Date(album?.createdAt)
-    if (Number.isNaN(parsed.getTime())) return `unknown-${album?.albumId || 'album'}`
-    return [
+function timelineCalendarDay(value) {
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return null
+    const parts = [
         parsed.getFullYear(),
         String(parsed.getMonth() + 1).padStart(2, '0'),
         String(parsed.getDate()).padStart(2, '0'),
-    ].join('-')
+    ]
+    return {
+        key: parts.join('-'),
+        ordinal: Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()) / DAY_MS,
+        year: parsed.getFullYear(),
+        month: parsed.getMonth(),
+    }
+}
+
+function timelineMonthStartOrdinal(year, month) {
+    return Date.UTC(year, month, 1) / DAY_MS
+}
+
+function timelinePositionForOrdinal(groups, ordinal) {
+    if (groups.length === 0) return 0
+    if (ordinal >= groups[0].ordinal) return groups[0].x
+    if (ordinal <= groups[groups.length - 1].ordinal) return groups[groups.length - 1].x
+
+    for (let index = 0; index < groups.length - 1; index += 1) {
+        const newer = groups[index]
+        const older = groups[index + 1]
+        if (ordinal > newer.ordinal || ordinal < older.ordinal) continue
+        const daySpan = newer.ordinal - older.ordinal
+        if (daySpan <= 0) return newer.x
+        const progress = (newer.ordinal - ordinal) / daySpan
+        return newer.x + progress * (older.x - newer.x)
+    }
+    return groups[groups.length - 1].x
+}
+
+function buildTimelineLayout(groups) {
+    if (groups.length === 0) return { groups: [], months: [], years: [], stageWidth: 0 }
+
+    let previousOrdinal = null
+    let x = 0
+    const positionedGroups = groups.map((group, index) => {
+        const ordinal = Number.isFinite(group.ordinal)
+            ? group.ordinal
+            : (previousOrdinal === null ? -index : previousOrdinal - 1)
+        if (previousOrdinal !== null) {
+            const elapsedDays = Math.max(previousOrdinal - ordinal, 1)
+            x += Math.max(
+                TIMELINE_MIN_POINT_GAP_REM,
+                elapsedDays * TIMELINE_REM_PER_DAY,
+            )
+        }
+        previousOrdinal = ordinal
+        return { ...group, ordinal, x }
+    })
+
+    const referenceGroups = positionedGroups.filter((group) => Number.isFinite(group.calendarOrdinal))
+    const months = []
+    const years = []
+
+    if (referenceGroups.length > 0) {
+        const newest = referenceGroups[0]
+        const oldest = referenceGroups[referenceGroups.length - 1]
+
+        for (
+            let year = newest.year, month = newest.month;
+            year > oldest.year || (year === oldest.year && month >= oldest.month);
+        ) {
+            const monthStart = timelineMonthStartOrdinal(year, month)
+            const nextMonthStart = timelineMonthStartOrdinal(year, month + 1)
+            const newerBoundary = Math.min(newest.ordinal, nextMonthStart)
+            const olderBoundary = Math.max(oldest.ordinal, monthStart)
+            const left = timelinePositionForOrdinal(referenceGroups, newerBoundary)
+            const right = timelinePositionForOrdinal(referenceGroups, olderBoundary)
+            months.push({
+                key: `${year}-${String(month + 1).padStart(2, '0')}`,
+                label: timelineMonthFormatter.format(new Date(Date.UTC(year, month, 15))),
+                left,
+                width: Math.max(right - left, 0.1),
+            })
+
+            month -= 1
+            if (month < 0) {
+                month = 11
+                year -= 1
+            }
+        }
+
+        for (let year = newest.year; year >= oldest.year; year -= 1) {
+            const yearStart = timelineMonthStartOrdinal(year, 0)
+            const nextYearStart = timelineMonthStartOrdinal(year + 1, 0)
+            const newerBoundary = Math.min(newest.ordinal, nextYearStart)
+            const olderBoundary = Math.max(oldest.ordinal, yearStart)
+            const left = timelinePositionForOrdinal(referenceGroups, newerBoundary)
+            const right = timelinePositionForOrdinal(referenceGroups, olderBoundary)
+            years.push({
+                year,
+                left,
+                width: Math.max(right - left, 0.1),
+            })
+        }
+    }
+
+    return {
+        groups: positionedGroups,
+        months,
+        years,
+        stageWidth: positionedGroups[positionedGroups.length - 1].x + (TIMELINE_EDGE_PADDING_REM * 2),
+    }
 }
 
 function TimelineCard({ album, index, position }) {
     const cover = album.coverThumbnailUrl || albumCoverUrl(album)
+    const [imageFailed, setImageFailed] = useState(false)
     return (
         <Link
             className="photo-stats-timeline-card"
@@ -126,15 +235,20 @@ function TimelineCard({ album, index, position }) {
                 {String(index + 1).padStart(2, '0')}
             </span>
             <span className="photo-stats-timeline-image">
-                {cover ? (
-                    <img
+                {cover && !imageFailed ? (
+                    <ProgressiveImage
                         src={cover}
                         alt=""
-                        loading={index < 3 ? 'eager' : 'lazy'}
-                        decoding="async"
+                        blurhash={album.coverBlurhash}
+                        width={album.coverWidth || 4}
+                        height={album.coverHeight || 3}
+                        eager={index < 8}
+                        sizes="(min-width: 768px) 288px, 72vw"
+                        className="photo-stats-timeline-progressive-image"
+                        onError={() => setImageFailed(true)}
                     />
                 ) : (
-                    <span aria-hidden="true">IT</span>
+                    <span className="photo-stats-timeline-image-fallback" aria-hidden="true">IT</span>
                 )}
             </span>
             <strong>{album.title}</strong>
@@ -154,13 +268,18 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
         const groupByDate = new Map()
 
         orderedAlbums.forEach((album, index) => {
-            const key = timelineDateKey(album)
+            const calendarDay = timelineCalendarDay(album.createdAt)
+            const key = calendarDay?.key || `unknown-${album?.albumId || index}`
             let group = groupByDate.get(key)
             if (!group) {
                 group = {
                     key,
                     createdAt: album.createdAt,
                     label: timelineDate(album.createdAt),
+                    calendarOrdinal: calendarDay?.ordinal,
+                    ordinal: calendarDay?.ordinal,
+                    year: calendarDay?.year,
+                    month: calendarDay?.month,
                     albums: [],
                 }
                 groupByDate.set(key, group)
@@ -171,6 +290,7 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
 
         return groups
     }, [orderedAlbums])
+    const timelineLayout = useMemo(() => buildTimelineLayout(timelineGroups), [timelineGroups])
 
     const scrollTimeline = (direction) => {
         const scroller = scrollerRef.current
@@ -214,55 +334,91 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                     tabIndex={0}
                     aria-label="Public albums, newest to oldest"
                 >
-                    <ol className="photo-stats-timeline-track">
-                        {timelineGroups.map((group, groupIndex) => {
-                            const fallbackPosition = groupIndex % 2 === 0 ? 'above' : 'below'
-                            const positionedAlbums = group.albums.map((entry, index) => ({
-                                ...entry,
-                                position: group.albums.length === 1
-                                    ? fallbackPosition
-                                    : (index % 2 === 0 ? 'above' : 'below'),
-                            }))
-                            const above = positionedAlbums.filter(({ position }) => position === 'above')
-                            const below = positionedAlbums.filter(({ position }) => position === 'below')
-                            const columns = Math.max(above.length, below.length, 1)
-                            const groupWidth = `calc(${columns} * var(--timeline-card-width) + ${Math.max(columns - 1, 0)} * var(--timeline-group-card-gap))`
-                            return (
-                                <li
-                                    key={group.key}
-                                    className={`photo-stats-timeline-item is-date-${fallbackPosition}`}
-                                    data-timeline-date={group.key}
-                                    data-timeline-album-count={group.albums.length}
-                                    style={{ '--timeline-group-width': groupWidth }}
+                    <div
+                        className="photo-stats-timeline-stage"
+                        style={{ '--timeline-stage-width': `${timelineLayout.stageWidth}rem` }}
+                    >
+                        <div className="photo-stats-timeline-ruler" aria-hidden="true">
+                            {timelineLayout.years.map((year) => (
+                                <span
+                                    key={year.year}
+                                    className="photo-stats-timeline-year"
+                                    data-timeline-year={year.year}
+                                    style={{
+                                        '--timeline-period-left': `${TIMELINE_EDGE_PADDING_REM + year.left}rem`,
+                                        '--timeline-period-width': `${year.width}rem`,
+                                    }}
                                 >
-                                    {above.length > 0 && (
-                                        <>
-                                            <div className="photo-stats-timeline-row is-above">
-                                                {above.map(({ album, index, position }) => (
-                                                    <TimelineCard key={album.albumId} album={album} index={index} position={position} />
-                                                ))}
-                                            </div>
-                                            <span className="photo-stats-timeline-branch is-above" aria-hidden="true" />
-                                        </>
-                                    )}
-                                    {below.length > 0 && (
-                                        <>
-                                            <div className="photo-stats-timeline-row is-below">
-                                                {below.map(({ album, index, position }) => (
-                                                    <TimelineCard key={album.albumId} album={album} index={index} position={position} />
-                                                ))}
-                                            </div>
-                                            <span className="photo-stats-timeline-branch is-below" aria-hidden="true" />
-                                        </>
-                                    )}
-                                    <span className="photo-stats-timeline-node">
-                                        <span aria-hidden="true" />
-                                        <time dateTime={group.createdAt || undefined}>{group.label}</time>
-                                    </span>
-                                </li>
-                            )
-                        })}
-                    </ol>
+                                    <strong>{year.year}</strong>
+                                </span>
+                            ))}
+                            {timelineLayout.months.map((month) => (
+                                <span
+                                    key={month.key}
+                                    className="photo-stats-timeline-month"
+                                    data-timeline-month={month.key}
+                                    style={{
+                                        '--timeline-period-left': `${TIMELINE_EDGE_PADDING_REM + month.left}rem`,
+                                        '--timeline-period-width': `${month.width}rem`,
+                                    }}
+                                >
+                                    <span>{month.label}</span>
+                                </span>
+                            ))}
+                        </div>
+                        <ol className="photo-stats-timeline-track">
+                            {timelineLayout.groups.map((group, groupIndex) => {
+                                const fallbackPosition = groupIndex % 2 === 0 ? 'above' : 'below'
+                                const positionedAlbums = group.albums.map((entry, index) => ({
+                                    ...entry,
+                                    position: group.albums.length === 1
+                                        ? fallbackPosition
+                                        : (index % 2 === 0 ? 'above' : 'below'),
+                                }))
+                                const above = positionedAlbums.filter(({ position }) => position === 'above')
+                                const below = positionedAlbums.filter(({ position }) => position === 'below')
+                                const columns = Math.max(above.length, below.length, 1)
+                                const groupWidth = `calc(${columns} * var(--timeline-card-width) + ${Math.max(columns - 1, 0)} * var(--timeline-group-card-gap))`
+                                return (
+                                    <li
+                                        key={group.key}
+                                        className={`photo-stats-timeline-item is-date-${fallbackPosition}`}
+                                        data-timeline-date={group.key}
+                                        data-timeline-album-count={group.albums.length}
+                                        style={{
+                                            '--timeline-group-width': groupWidth,
+                                            '--timeline-x': `${group.x}rem`,
+                                        }}
+                                    >
+                                        {above.length > 0 && (
+                                            <>
+                                                <div className="photo-stats-timeline-row is-above">
+                                                    {above.map(({ album, index, position }) => (
+                                                        <TimelineCard key={album.albumId} album={album} index={index} position={position} />
+                                                    ))}
+                                                </div>
+                                                <span className="photo-stats-timeline-branch is-above" aria-hidden="true" />
+                                            </>
+                                        )}
+                                        {below.length > 0 && (
+                                            <>
+                                                <div className="photo-stats-timeline-row is-below">
+                                                    {below.map(({ album, index, position }) => (
+                                                        <TimelineCard key={album.albumId} album={album} index={index} position={position} />
+                                                    ))}
+                                                </div>
+                                                <span className="photo-stats-timeline-branch is-below" aria-hidden="true" />
+                                            </>
+                                        )}
+                                        <span className="photo-stats-timeline-node">
+                                            <span aria-hidden="true" />
+                                            <time dateTime={group.createdAt || undefined}>{group.label}</time>
+                                        </span>
+                                    </li>
+                                )
+                            })}
+                        </ol>
+                    </div>
                 </div>
             )}
         </section>

@@ -64,7 +64,7 @@ describe('photography statistics page', () => {
 
     it('renders the available aggregate archive, timeline, category, and EXIF data', async () => {
         api.fetchPhotographyStats.mockResolvedValue(report)
-        renderStats()
+        const view = renderStats()
 
         expect(screen.getByRole('status', { name: 'Loading photography statistics' })).toBeInTheDocument()
         expect(await screen.findByText('63,900')).toBeInTheDocument()
@@ -87,6 +87,16 @@ describe('photography statistics page', () => {
         expect(screen.getAllByRole('link')[0].closest('li')).toBe(screen.getAllByRole('link')[1].closest('li'))
         expect(screen.getAllByRole('link')[0].closest('li')).toHaveAttribute('data-timeline-album-count', '2')
         expect(screen.getAllByText('Jul 4, 2026')).toHaveLength(1)
+        const timelinePoints = view.container.querySelectorAll('.photo-stats-timeline-item')
+        expect(timelinePoints[0].style.getPropertyValue('--timeline-x')).toBe('0rem')
+        expect(Number.parseFloat(timelinePoints[1].style.getPropertyValue('--timeline-x'))).toBeGreaterThan(1000)
+        expect(view.container.querySelector('[data-timeline-month="2026-07"]')).toBeInTheDocument()
+        expect(view.container.querySelector('[data-timeline-year="2026"]')).toBeInTheDocument()
+        expect(view.container.querySelector('[data-timeline-year="2025"]')).toBeInTheDocument()
+        expect(view.container.querySelectorAll('.photo-stats-timeline-progressive-image')).toHaveLength(3)
+        const firstTimelineCard = screen.getAllByRole('link')[0]
+        fireEvent.error(firstTimelineCard.querySelector('img'))
+        await waitFor(() => expect(firstTimelineCard.querySelector('.photo-stats-timeline-image-fallback')).toBeInTheDocument())
         expect(api.fetchAlbums).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
         expect(screen.getByRole('heading', { level: 2, name: 'Total Storage Used' })).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 2, name: 'Gear' })).toBeInTheDocument()
