@@ -93,6 +93,14 @@ describe('photography statistics page', () => {
         expect(view.container.querySelector('[data-timeline-month="2026-07"]')).toBeInTheDocument()
         expect(view.container.querySelector('[data-timeline-year="2026"]')).toBeInTheDocument()
         expect(view.container.querySelector('[data-timeline-year="2025"]')).toBeInTheDocument()
+        await waitFor(() => expect(view.container.querySelector('[data-active-timeline-year="2026"]'))
+            .toHaveAttribute('data-active-timeline-month', 'Jul'))
+        const timelineScroller = screen.getByLabelText('Public albums, newest to oldest')
+        Object.defineProperty(timelineScroller, 'clientWidth', { configurable: true, value: 1000 })
+        timelineScroller.scrollLeft = 1_000_000
+        fireEvent.scroll(timelineScroller)
+        await waitFor(() => expect(view.container.querySelector('[data-active-timeline-year="2025"]'))
+            .toHaveAttribute('data-active-timeline-month', 'Feb'))
         expect(view.container.querySelectorAll('.photo-stats-timeline-progressive-image')).toHaveLength(3)
         const firstTimelineCard = screen.getAllByRole('link')[0]
         fireEvent.error(firstTimelineCard.querySelector('img'))
