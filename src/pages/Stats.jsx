@@ -390,9 +390,7 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                                             '--timeline-period-left': `${TIMELINE_EDGE_PADDING_REM + year.left}rem`,
                                             '--timeline-period-width': `${year.width}rem`,
                                         }}
-                                    >
-                                        <strong>{year.year}</strong>
-                                    </span>
+                                    />
                                 ))}
                                 {timelineLayout.months.map((month) => (
                                     <span
@@ -403,9 +401,7 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                                             '--timeline-period-left': `${TIMELINE_EDGE_PADDING_REM + month.left}rem`,
                                             '--timeline-period-width': `${month.width}rem`,
                                         }}
-                                    >
-                                        <span>{month.label}</span>
-                                    </span>
+                                    />
                                 ))}
                             </div>
                             <ol className="photo-stats-timeline-track">
