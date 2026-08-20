@@ -103,12 +103,74 @@ function timelineDate(value) {
     }).format(parsed)
 }
 
+function timelineDateKey(album) {
+    const parsed = new Date(album?.createdAt)
+    if (Number.isNaN(parsed.getTime())) return `unknown-${album?.albumId || 'album'}`
+    return [
+        parsed.getFullYear(),
+        String(parsed.getMonth() + 1).padStart(2, '0'),
+        String(parsed.getDate()).padStart(2, '0'),
+    ].join('-')
+}
+
+function TimelineCard({ album, index, position }) {
+    const cover = album.coverThumbnailUrl || albumCoverUrl(album)
+    return (
+        <Link
+            className="photo-stats-timeline-card"
+            data-timeline-position={position}
+            to={albumRoute(album)}
+            aria-label={`View ${album.title}`}
+        >
+            <span className="photo-stats-timeline-index" aria-hidden="true">
+                {String(index + 1).padStart(2, '0')}
+            </span>
+            <span className="photo-stats-timeline-image">
+                {cover ? (
+                    <img
+                        src={cover}
+                        alt=""
+                        loading={index < 3 ? 'eager' : 'lazy'}
+                        decoding="async"
+                    />
+                ) : (
+                    <span aria-hidden="true">IT</span>
+                )}
+            </span>
+            <strong>{album.title}</strong>
+            <small>{album.type === 'video' ? 'Video' : 'Photo'} · {album.category || 'Uncategorized'}</small>
+        </Link>
+    )
+}
+
 function AlbumTimeline({ albums, loading, error, onRetry }) {
     const scrollerRef = useRef(null)
     const orderedAlbums = useMemo(() => [...albums].sort((left, right) => (
         albumTimestamp(right) - albumTimestamp(left)
         || String(left.title || '').localeCompare(String(right.title || ''))
     )), [albums])
+    const timelineGroups = useMemo(() => {
+        const groups = []
+        const groupByDate = new Map()
+
+        orderedAlbums.forEach((album, index) => {
+            const key = timelineDateKey(album)
+            let group = groupByDate.get(key)
+            if (!group) {
+                group = {
+                    key,
+                    createdAt: album.createdAt,
+                    label: timelineDate(album.createdAt),
+                    albums: [],
+                }
+                groupByDate.set(key, group)
+                groups.push(group)
+            }
+            group.albums.push({ album, index })
+        })
+
+        return groups
+    }, [orderedAlbums])
 
     const scrollTimeline = (direction) => {
         const scroller = scrollerRef.current
@@ -153,41 +215,49 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                     aria-label="Public albums, newest to oldest"
                 >
                     <ol className="photo-stats-timeline-track">
-                        {orderedAlbums.map((album, index) => {
-                            const cover = album.coverThumbnailUrl || albumCoverUrl(album)
-                            const position = index % 2 === 0 ? 'above' : 'below'
+                        {timelineGroups.map((group, groupIndex) => {
+                            const fallbackPosition = groupIndex % 2 === 0 ? 'above' : 'below'
+                            const positionedAlbums = group.albums.map((entry, index) => ({
+                                ...entry,
+                                position: group.albums.length === 1
+                                    ? fallbackPosition
+                                    : (index % 2 === 0 ? 'above' : 'below'),
+                            }))
+                            const above = positionedAlbums.filter(({ position }) => position === 'above')
+                            const below = positionedAlbums.filter(({ position }) => position === 'below')
+                            const columns = Math.max(above.length, below.length, 1)
+                            const groupWidth = `calc(${columns} * var(--timeline-card-width) + ${Math.max(columns - 1, 0)} * var(--timeline-group-card-gap))`
                             return (
                                 <li
-                                    key={album.albumId}
-                                    className={`photo-stats-timeline-item is-${position}`}
-                                    data-timeline-position={position}
+                                    key={group.key}
+                                    className={`photo-stats-timeline-item is-date-${fallbackPosition}`}
+                                    data-timeline-date={group.key}
+                                    data-timeline-album-count={group.albums.length}
+                                    style={{ '--timeline-group-width': groupWidth }}
                                 >
-                                    <Link
-                                        className="photo-stats-timeline-card"
-                                        to={albumRoute(album)}
-                                        aria-label={`View ${album.title}`}
-                                    >
-                                        <span className="photo-stats-timeline-index" aria-hidden="true">
-                                            {String(index + 1).padStart(2, '0')}
-                                        </span>
-                                        <span className="photo-stats-timeline-image">
-                                            {cover ? (
-                                                <img
-                                                    src={cover}
-                                                    alt=""
-                                                    loading={index < 3 ? 'eager' : 'lazy'}
-                                                    decoding="async"
-                                                />
-                                            ) : (
-                                                <span aria-hidden="true">IT</span>
-                                            )}
-                                        </span>
-                                        <strong>{album.title}</strong>
-                                        <small>{album.type === 'video' ? 'Video' : 'Photo'} · {album.category || 'Uncategorized'}</small>
-                                    </Link>
+                                    {above.length > 0 && (
+                                        <>
+                                            <div className="photo-stats-timeline-row is-above">
+                                                {above.map(({ album, index, position }) => (
+                                                    <TimelineCard key={album.albumId} album={album} index={index} position={position} />
+                                                ))}
+                                            </div>
+                                            <span className="photo-stats-timeline-branch is-above" aria-hidden="true" />
+                                        </>
+                                    )}
+                                    {below.length > 0 && (
+                                        <>
+                                            <div className="photo-stats-timeline-row is-below">
+                                                {below.map(({ album, index, position }) => (
+                                                    <TimelineCard key={album.albumId} album={album} index={index} position={position} />
+                                                ))}
+                                            </div>
+                                            <span className="photo-stats-timeline-branch is-below" aria-hidden="true" />
+                                        </>
+                                    )}
                                     <span className="photo-stats-timeline-node">
                                         <span aria-hidden="true" />
-                                        <time dateTime={album.createdAt || undefined}>{timelineDate(album.createdAt)}</time>
+                                        <time dateTime={group.createdAt || undefined}>{group.label}</time>
                                     </span>
                                 </li>
                             )

@@ -45,6 +45,10 @@ const timelineAlbums = [
         albumId: 'newer-video', type: 'video', title: 'Newer Video Album', category: 'Hikes',
         createdAt: '2026-07-04T12:00:00Z', coverThumbnailUrl: 'https://media.test/newer.jpg',
     },
+    {
+        albumId: 'same-day-photo', type: 'photo', title: 'Same Day Photo Album', category: 'Hikes',
+        createdAt: '2026-07-04T08:00:00Z', coverThumbnailUrl: 'https://media.test/same-day.jpg',
+    },
 ]
 
 function renderStats() {
@@ -72,13 +76,17 @@ describe('photography statistics page', () => {
         expect(screen.getAllByRole('link').map((link) => link.textContent))
             .toEqual(expect.arrayContaining([
                 expect.stringContaining('Newer Video Album'),
+                expect.stringContaining('Same Day Photo Album'),
                 expect.stringContaining('Older Photo Album'),
             ]))
         expect(screen.getAllByRole('link')[0]).toHaveAttribute('href', '/video/newer-video')
-        expect(screen.getAllByRole('link')[1]).toHaveAttribute('href', '/album/older-photo')
-        expect(screen.getAllByRole('link')[0].closest('li')).toHaveAttribute('data-timeline-position', 'above')
-        expect(screen.getAllByRole('link')[1].closest('li')).toHaveAttribute('data-timeline-position', 'below')
-        expect(screen.getByText('Jul 4, 2026')).toBeInTheDocument()
+        expect(screen.getAllByRole('link')[1]).toHaveAttribute('href', '/album/same-day-photo')
+        expect(screen.getAllByRole('link')[2]).toHaveAttribute('href', '/album/older-photo')
+        expect(screen.getAllByRole('link')[0]).toHaveAttribute('data-timeline-position', 'above')
+        expect(screen.getAllByRole('link')[1]).toHaveAttribute('data-timeline-position', 'below')
+        expect(screen.getAllByRole('link')[0].closest('li')).toBe(screen.getAllByRole('link')[1].closest('li'))
+        expect(screen.getAllByRole('link')[0].closest('li')).toHaveAttribute('data-timeline-album-count', '2')
+        expect(screen.getAllByText('Jul 4, 2026')).toHaveLength(1)
         expect(api.fetchAlbums).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
         expect(screen.getByRole('heading', { level: 2, name: 'Total Storage Used' })).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 2, name: 'Gear' })).toBeInTheDocument()
