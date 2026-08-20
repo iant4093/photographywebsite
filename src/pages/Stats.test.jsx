@@ -142,6 +142,28 @@ describe('photography statistics page', () => {
         expect(scroller.scrollTo).toHaveBeenCalledWith({ left: 390, behavior: 'smooth' })
     })
 
+    it('scales timeline spacing with elapsed days while retaining a card-safe minimum', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        api.fetchAlbums.mockResolvedValue([
+            { albumId: 'aug-10', type: 'photo', title: 'August 10', createdAt: '2026-08-10T12:00:00Z' },
+            { albumId: 'aug-09', type: 'photo', title: 'August 9', createdAt: '2026-08-09T12:00:00Z' },
+            { albumId: 'aug-04', type: 'photo', title: 'August 4', createdAt: '2026-08-04T12:00:00Z' },
+            { albumId: 'jul-20', type: 'photo', title: 'July 20', createdAt: '2026-07-20T12:00:00Z' },
+        ])
+        const view = renderStats()
+
+        await screen.findByRole('link', { name: 'View July 20' })
+        const positions = [...view.container.querySelectorAll('.photo-stats-timeline-item')]
+            .map((point) => Number.parseFloat(point.style.getPropertyValue('--timeline-x')))
+        const gaps = positions.slice(1).map((position, index) => position - positions[index])
+
+        expect(gaps[0]).toBeCloseTo(18.5)
+        expect(gaps[1]).toBeCloseTo(27.5)
+        expect(gaps[2]).toBeCloseTo(50)
+        expect(gaps[0]).toBeLessThan(gaps[1])
+        expect(gaps[1]).toBeLessThan(gaps[2])
+    })
+
     it('shows a safe failure and retries successfully', async () => {
         api.fetchPhotographyStats
             .mockRejectedValueOnce(new Error('Service unavailable'))

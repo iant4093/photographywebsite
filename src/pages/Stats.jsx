@@ -157,10 +157,8 @@ function buildTimelineLayout(groups) {
             : (previousOrdinal === null ? -index : previousOrdinal - 1)
         if (previousOrdinal !== null) {
             const elapsedDays = Math.max(previousOrdinal - ordinal, 1)
-            x += Math.max(
-                TIMELINE_MIN_POINT_GAP_REM,
-                elapsedDays * TIMELINE_REM_PER_DAY,
-            )
+            x += TIMELINE_MIN_POINT_GAP_REM
+                + Math.max(elapsedDays - 1, 0) * TIMELINE_REM_PER_DAY
         }
         previousOrdinal = ordinal
         return { ...group, ordinal, x }
