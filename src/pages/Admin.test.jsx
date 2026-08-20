@@ -61,6 +61,8 @@ describe('Admin photo upload', () => {
     mounted()
 
     expect(screen.getByLabelText('Album Date')).toHaveValue('2026-08-31')
+    expect(screen.getByRole('button', { name: 'Main Gallery' })).toHaveClass('admin-upload-choice')
+    expect(screen.getByRole('button', { name: 'Create Album' })).toHaveClass('admin-upload-submit')
     expect(dates.currentLocalDateInputValue).toHaveBeenCalled()
   })
 

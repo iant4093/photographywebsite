@@ -698,7 +698,8 @@
 }
 
 .linen-site .album-card.editorial-motion-media,
-.linen-site .linen-media-frame.editorial-motion-media {
+.linen-site .linen-media-frame.editorial-motion-media,
+.linen-site .photo-stats-motion-item.editorial-motion-media {
   transform:
     translate3d(var(--editorial-x), var(--editorial-card-y), 0)
     rotate(var(--editorial-card-rotation))

@@ -10,6 +10,7 @@ function renderExperience(path = '/') {
       <main>
         <section className="home-hero" />
         <div className="album-card" />
+        <article className="photo-stats-motion-item" />
       </main>
       <MotionExperience />
     </MemoryRouter>,
@@ -133,5 +134,28 @@ describe('MotionExperience film-strip scrollbar', () => {
     renderExperience('/admin')
     expect(screen.queryByRole('scrollbar')).toBeNull()
     expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
+  })
+
+  it('uses consistent restrained motion on home, search, and stats targets', () => {
+    for (const path of ['/', '/search', '/stats']) {
+      const view = renderExperience(path)
+      flushFrames()
+      const card = view.container.querySelector('.album-card')
+      const statsItem = view.container.querySelector('.photo-stats-motion-item')
+      expect(card.style.getPropertyValue('--editorial-x')).toBe('0px')
+      expect(card.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
+      expect(statsItem).toHaveClass('editorial-motion-media')
+      expect(statsItem.style.getPropertyValue('--editorial-x')).toBe('0px')
+      expect(statsItem.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
+      view.unmount()
+    }
+  })
+
+  it('preserves the expressive card motion inside album routes', () => {
+    const view = renderExperience('/album/example')
+    flushFrames()
+    const card = view.container.querySelector('.album-card')
+    expect(card.style.getPropertyValue('--editorial-x')).not.toBe('0px')
+    expect(card.style.getPropertyValue('--editorial-card-rotation')).not.toBe('0deg')
   })
 })

@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchPhotographyStats } from '../utils/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
+import { fetchAlbums, fetchPhotographyStats } from '../utils/api'
 import { formatBytes } from '../utils/formatBytes'
+import { albumCoverUrl } from '../utils/mediaUrls'
 import './Stats.css'
 
 
@@ -21,7 +23,7 @@ function dateLabel(value) {
 
 function StatCard({ index, label, value }) {
     return (
-        <article className="photo-stats-card">
+        <article className="photo-stats-card photo-stats-motion-item">
             <span className="photo-stats-card-index" aria-hidden="true">{String(index).padStart(2, '0')}</span>
             <p className="photo-stats-eyebrow">{label}</p>
             <p className="photo-stats-value">{value}</p>
@@ -32,7 +34,7 @@ function StatCard({ index, label, value }) {
 function KeptMeter({ label, kept, taken, percent }) {
     const bounded = Math.max(0, Math.min(100, Number(percent) || 0))
     return (
-        <article className="photo-stats-kept-card">
+        <article className="photo-stats-kept-card photo-stats-motion-item">
             <div className="photo-stats-kept-heading">
                 <div>
                     <p className="photo-stats-eyebrow">{label}</p>
@@ -69,7 +71,7 @@ function SectionHeading({ id, index, eyebrow, title, detail }) {
 
 function GearList({ title, items }) {
     return (
-        <section className="photo-stats-gear-list" aria-labelledby={`gear-${title.toLowerCase()}`}>
+        <section className="photo-stats-gear-list photo-stats-motion-item" aria-labelledby={`gear-${title.toLowerCase()}`}>
             <h3 id={`gear-${title.toLowerCase()}`}>{title}</h3>
             <ol>
                 {items.map((item, index) => (
@@ -84,10 +86,117 @@ function GearList({ title, items }) {
     )
 }
 
+function albumTimestamp(album) {
+    const timestamp = Date.parse(album?.createdAt || '')
+    return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function albumRoute(album) {
+    return `/${album?.type === 'video' ? 'video' : 'album'}/${album?.albumId}`
+}
+
+function timelineDate(value) {
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return 'Date unavailable'
+    return new Intl.DateTimeFormat('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+    }).format(parsed)
+}
+
+function AlbumTimeline({ albums, loading, error, onRetry }) {
+    const scrollerRef = useRef(null)
+    const orderedAlbums = useMemo(() => [...albums].sort((left, right) => (
+        albumTimestamp(right) - albumTimestamp(left)
+        || String(left.title || '').localeCompare(String(right.title || ''))
+    )), [albums])
+
+    const scrollTimeline = (direction) => {
+        const scroller = scrollerRef.current
+        if (!scroller) return
+        const nextLeft = Math.max(
+            0,
+            scroller.scrollLeft + direction * Math.max(scroller.clientWidth * 0.78, 280),
+        )
+        scroller.scrollTo({
+            left: nextLeft,
+            behavior: 'smooth',
+        })
+    }
+
+    return (
+        <section className="photo-stats-timeline-section" aria-labelledby="album-timeline-heading">
+            <div className="photo-stats-timeline-heading">
+                <div>
+                    <p className="photo-stats-eyebrow">Public archive · newest first</p>
+                    <h2 id="album-timeline-heading">Album Timeline</h2>
+                </div>
+                <div className="photo-stats-timeline-controls" aria-label="Album timeline controls">
+                    <button type="button" onClick={() => scrollTimeline(-1)} aria-label="Scroll timeline toward newer albums">←</button>
+                    <button type="button" onClick={() => scrollTimeline(1)} aria-label="Scroll timeline toward older albums">→</button>
+                </div>
+            </div>
+
+            {loading && (
+                <div className="photo-stats-timeline-status" role="status">Loading the album timeline…</div>
+            )}
+            {!loading && error && (
+                <div className="photo-stats-timeline-status photo-stats-timeline-error" role="alert">
+                    <span>The album timeline could not be loaded.</span>
+                    <button type="button" onClick={onRetry}>Try again</button>
+                </div>
+            )}
+            {!loading && !error && orderedAlbums.length === 0 && (
+                <p className="photo-stats-timeline-status">No public albums are available yet.</p>
+            )}
+            {!error && orderedAlbums.length > 0 && (
+                <div
+                    ref={scrollerRef}
+                    className="photo-stats-timeline-scroll"
+                    tabIndex={0}
+                    aria-label="Public albums, newest to oldest"
+                >
+                    <ol className="photo-stats-timeline-track">
+                        {orderedAlbums.map((album, index) => {
+                            const cover = album.coverThumbnailUrl || albumCoverUrl(album)
+                            return (
+                                <li key={album.albumId} className="photo-stats-timeline-item photo-stats-motion-item">
+                                    <Link to={albumRoute(album)} aria-label={`View ${album.title}`}>
+                                        <span className="photo-stats-timeline-index" aria-hidden="true">
+                                            {String(index + 1).padStart(2, '0')}
+                                        </span>
+                                        <span className="photo-stats-timeline-image">
+                                            {cover ? (
+                                                <img
+                                                    src={cover}
+                                                    alt=""
+                                                    loading={index < 3 ? 'eager' : 'lazy'}
+                                                    decoding="async"
+                                                />
+                                            ) : (
+                                                <span aria-hidden="true">IT</span>
+                                            )}
+                                        </span>
+                                        <time dateTime={album.createdAt || undefined}>{timelineDate(album.createdAt)}</time>
+                                        <strong>{album.title}</strong>
+                                        <small>{album.type === 'video' ? 'Video' : 'Photo'} · {album.category || 'Uncategorized'}</small>
+                                    </Link>
+                                </li>
+                            )
+                        })}
+                    </ol>
+                </div>
+            )}
+        </section>
+    )
+}
+
 export default function Stats() {
     const [report, setReport] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
+    const [timelineAlbums, setTimelineAlbums] = useState([])
+    const [timelineLoading, setTimelineLoading] = useState(true)
+    const [timelineError, setTimelineError] = useState('')
     const [requestVersion, setRequestVersion] = useState(0)
 
     useEffect(() => {
@@ -101,6 +210,16 @@ export default function Stats() {
             })
             .finally(() => {
                 if (!controller.signal.aborted) setLoading(false)
+            })
+        fetchAlbums({ signal: controller.signal })
+            .then(setTimelineAlbums)
+            .catch((requestError) => {
+                if (requestError?.name !== 'AbortError') {
+                    setTimelineError(requestError?.message || 'The album timeline could not be loaded.')
+                }
+            })
+            .finally(() => {
+                if (!controller.signal.aborted) setTimelineLoading(false)
             })
         return () => controller.abort()
     }, [requestVersion])
@@ -144,6 +263,17 @@ export default function Stats() {
 
             {!loading && !error && report && (
                 <div className="photo-stats-content">
+                    <AlbumTimeline
+                        albums={timelineAlbums}
+                        loading={timelineLoading}
+                        error={timelineError}
+                        onRetry={() => {
+                            setTimelineError('')
+                            setTimelineLoading(true)
+                            setRequestVersion((version) => version + 1)
+                        }}
+                    />
+
                     <section aria-labelledby="stats-at-a-glance">
                         <SectionHeading id="stats-at-a-glance" index={1} eyebrow="At a glance" title="Capture Stats" detail={`Updated ${dateLabel(report.generatedAt)}`} />
                         <div className="photo-stats-card-grid">
@@ -161,7 +291,7 @@ export default function Stats() {
                     <section aria-labelledby="archive-scale-heading">
                         <SectionHeading id="archive-scale-heading" index={2} eyebrow="The collection" title="Total Storage Used" />
                         <div className="photo-stats-scale-grid">
-                            <article className="photo-stats-storage-card">
+                            <article className="photo-stats-storage-card photo-stats-motion-item">
                                 <p className="photo-stats-eyebrow">Total space taken</p>
                                 <p className="photo-stats-storage-value">{formatBytes(report.storage?.totalBytes)}</p>
                             </article>
@@ -197,12 +327,12 @@ export default function Stats() {
                             </table>
                         </div>
                         <div className="photo-stats-highlights">
-                            <article>
+                            <article className="photo-stats-motion-item">
                                 <p className="photo-stats-eyebrow">Most active year</p>
                                 <strong>{report.mostActive?.year?.year || '—'}</strong>
                                 <span>{number(report.mostActive?.year?.photos)} photos · {number(report.mostActive?.year?.videos)} videos</span>
                             </article>
-                            <article>
+                            <article className="photo-stats-motion-item">
                                 <p className="photo-stats-eyebrow">Most active category</p>
                                 <strong>{report.mostActive?.category?.category || '—'}</strong>
                                 <span>{number(report.mostActive?.category?.albums)} albums</span>
@@ -216,7 +346,7 @@ export default function Stats() {
                             {(report.categories || []).map((category, index) => {
                                 const mediaCount = Number(category.photos || 0) + Number(category.videos || 0)
                                 return (
-                                    <li key={category.category}>
+                                    <li key={category.category} className="photo-stats-motion-item">
                                         <div className="photo-stats-category-copy">
                                             <span className="photo-stats-category-rank">{String(index + 1).padStart(2, '0')}</span>
                                             <strong>{category.category}</strong>

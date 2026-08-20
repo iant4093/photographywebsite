@@ -116,7 +116,8 @@ html[data-theme="dark"] body {
   .photo-stats-kept-card,
   .photo-stats-storage-card,
   .photo-stats-highlights article,
-  .photo-stats-gear-list
+  .photo-stats-gear-list,
+  .photo-stats-timeline-item
 ) {
   background: rgba(38, 35, 30, 0.72);
   border-color: var(--color-warm-border);
@@ -149,6 +150,29 @@ html[data-theme="dark"] .linen-site.linen-admin main :is(
   box-shadow:
     0 0 0 1px rgba(255, 248, 235, 0.06) inset,
     7px 8px 0 rgba(0, 0, 0, 0.2);
+}
+
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-amber,
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit {
+  color: #fffaf2;
+  border-color: #d8c6b3;
+  background: #6f5038;
+}
+
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-amber:hover,
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit:hover {
+  color: #ffffff;
+  background: #896548;
+}
+
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-cream {
+  color: #c9beb0;
+  background: #24211d;
+}
+
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-cream:hover {
+  color: #f2eadf;
+  background: #302b25;
 }
 
 html[data-theme="dark"] .linen-site.linen-admin [class~="bg-green-50"] {

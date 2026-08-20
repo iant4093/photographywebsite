@@ -274,7 +274,7 @@ export default function UploadVideo() {
                                     key={v}
                                     type="button"
                                     onClick={() => setVisibility(v)}
-                                    className={`flex-1 py-3 px-2 text-sm font-medium capitalize transition-all duration-200 cursor-pointer ${visibility === v ? 'bg-amber text-white' : 'bg-cream text-warm-gray hover:bg-cream-dark'}`}
+                                    className={`admin-upload-choice flex-1 py-3 px-2 text-sm font-medium capitalize transition-all duration-200 cursor-pointer ${visibility === v ? 'bg-amber text-white' : 'bg-cream text-warm-gray hover:bg-cream-dark'}`}
                                 >
                                     {v === 'unlisted' ? 'Link Only' : v === 'public' ? 'Main Gallery' : 'Specific User'}
                                 </button>
@@ -410,7 +410,7 @@ export default function UploadVideo() {
                     <button
                         type="submit"
                         disabled={uploading}
-                        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber to-amber-dark text-white font-semibold hover:from-amber-dark transition-all disabled:opacity-60 cursor-pointer"
+                        className="admin-upload-submit w-full py-3.5 rounded-xl bg-gradient-to-r from-amber to-amber-dark text-white font-semibold hover:from-amber-dark transition-all disabled:opacity-60 cursor-pointer"
                     >
                         {uploading ? 'Processing & Uploading…' : 'Upload Video(s)'}
                     </button>

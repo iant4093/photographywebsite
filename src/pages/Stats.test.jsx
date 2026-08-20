@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const api = vi.hoisted(() => ({ fetchPhotographyStats: vi.fn() }))
+const api = vi.hoisted(() => ({ fetchAlbums: vi.fn(), fetchPhotographyStats: vi.fn() }))
 vi.mock('../utils/api', () => api)
 
 import Stats from './Stats'
@@ -35,18 +36,46 @@ const report = {
     },
 }
 
+const timelineAlbums = [
+    {
+        albumId: 'older-photo', type: 'photo', title: 'Older Photo Album', category: 'Portraits',
+        createdAt: '2025-02-01T12:00:00Z', coverThumbnailUrl: 'https://media.test/older.jpg',
+    },
+    {
+        albumId: 'newer-video', type: 'video', title: 'Newer Video Album', category: 'Hikes',
+        createdAt: '2026-07-04T12:00:00Z', coverThumbnailUrl: 'https://media.test/newer.jpg',
+    },
+]
+
+function renderStats() {
+    return render(<MemoryRouter><Stats /></MemoryRouter>)
+}
+
 describe('photography statistics page', () => {
-    beforeEach(() => vi.clearAllMocks())
+    beforeEach(() => {
+        vi.clearAllMocks()
+        api.fetchAlbums.mockResolvedValue(timelineAlbums)
+    })
     afterEach(() => vi.restoreAllMocks())
 
     it('renders the available aggregate archive, timeline, category, and EXIF data', async () => {
         api.fetchPhotographyStats.mockResolvedValue(report)
-        render(<Stats />)
+        renderStats()
 
         expect(screen.getByRole('status', { name: 'Loading photography statistics' })).toBeInTheDocument()
         expect(await screen.findByText('63,900')).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 1, name: 'Photography Stats' })).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 2, name: 'Capture Stats' })).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 2, name: 'Album Timeline' })).toBeInTheDocument()
+        expect(screen.getByLabelText('Public albums, newest to oldest')).toBeInTheDocument()
+        expect(screen.getAllByRole('link').map((link) => link.textContent))
+            .toEqual(expect.arrayContaining([
+                expect.stringContaining('Newer Video Album'),
+                expect.stringContaining('Older Photo Album'),
+            ]))
+        expect(screen.getAllByRole('link')[0]).toHaveAttribute('href', '/video/newer-video')
+        expect(screen.getAllByRole('link')[1]).toHaveAttribute('href', '/album/older-photo')
+        expect(api.fetchAlbums).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
         expect(screen.getByRole('heading', { level: 2, name: 'Total Storage Used' })).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 2, name: 'Gear' })).toBeInTheDocument()
         expect(screen.getByText('Photos taken')).toBeInTheDocument()
@@ -68,11 +97,27 @@ describe('photography statistics page', () => {
         expect(screen.queryByText(/Photos without lens metadata are attributed/)).toBeNull()
     })
 
+    it('moves the album timeline with its visible navigation controls', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        renderStats()
+
+        const scroller = await screen.findByLabelText('Public albums, newest to oldest')
+        Object.defineProperties(scroller, {
+            clientWidth: { configurable: true, value: 500 },
+            scrollLeft: { configurable: true, value: 0, writable: true },
+        })
+        scroller.scrollTo = vi.fn()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Scroll timeline toward older albums' }))
+
+        expect(scroller.scrollTo).toHaveBeenCalledWith({ left: 390, behavior: 'smooth' })
+    })
+
     it('shows a safe failure and retries successfully', async () => {
         api.fetchPhotographyStats
             .mockRejectedValueOnce(new Error('Service unavailable'))
             .mockResolvedValueOnce(report)
-        render(<Stats />)
+        renderStats()
 
         expect(await screen.findByRole('alert')).toHaveTextContent('Service unavailable')
         fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
@@ -86,10 +131,20 @@ describe('photography statistics page', () => {
             rejectRequest = () => reject(new DOMException('Aborted', 'AbortError'))
             signal.addEventListener('abort', rejectRequest, { once: true })
         }))
-        const view = render(<Stats />)
+        const view = renderStats()
         view.unmount()
         await act(async () => rejectRequest())
         expect(screen.queryByRole('alert')).toBeNull()
         await waitFor(() => expect(api.fetchPhotographyStats).toHaveBeenCalledOnce())
+    })
+
+    it('keeps aggregate statistics available when the album timeline cannot load', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        api.fetchAlbums.mockRejectedValue(new Error('Timeline unavailable'))
+        renderStats()
+
+        expect(await screen.findByText('63,900')).toBeInTheDocument()
+        expect(screen.getByRole('alert')).toHaveTextContent('The album timeline could not be loaded.')
+        expect(screen.getByRole('heading', { level: 2, name: 'Capture Stats' })).toBeInTheDocument()
     })
 })

@@ -59,6 +59,8 @@ describe('UploadVideo', () => {
     const { container } = mounted()
 
     expect(container.querySelector('input[type="date"]')).toHaveValue('2026-08-31')
+    expect(screen.getByRole('button', { name: 'Main Gallery' })).toHaveClass('admin-upload-choice')
+    expect(screen.getByRole('button', { name: 'Upload Video(s)' })).toHaveClass('admin-upload-submit')
     expect(dates.currentLocalDateInputValue).toHaveBeenCalled()
   })
 

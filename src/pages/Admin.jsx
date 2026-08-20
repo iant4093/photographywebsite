@@ -218,7 +218,7 @@ function Upload() {
                             <button
                                 type="button"
                                 onClick={() => handleVisibilityChange('public')}
-                                className={`flex-1 py-3 px-2 text-sm font-medium transition-all duration-200 cursor-pointer ${visibility === 'public'
+                                className={`admin-upload-choice flex-1 py-3 px-2 text-sm font-medium transition-all duration-200 cursor-pointer ${visibility === 'public'
                                     ? 'bg-amber text-white'
                                     : 'bg-cream text-warm-gray hover:bg-cream-dark'
                                     }`}
@@ -228,7 +228,7 @@ function Upload() {
                             <button
                                 type="button"
                                 onClick={() => handleVisibilityChange('private')}
-                                className={`flex-1 py-3 px-2 text-sm border-t sm:border-t-0 sm:border-l border-warm-border font-medium transition-all duration-200 cursor-pointer ${visibility === 'private'
+                                className={`admin-upload-choice flex-1 py-3 px-2 text-sm border-t sm:border-t-0 sm:border-l border-warm-border font-medium transition-all duration-200 cursor-pointer ${visibility === 'private'
                                     ? 'bg-amber text-white'
                                     : 'bg-cream text-warm-gray hover:bg-cream-dark'
                                     }`}
@@ -238,7 +238,7 @@ function Upload() {
                             <button
                                 type="button"
                                 onClick={() => handleVisibilityChange('unlisted')}
-                                className={`flex-1 py-3 px-2 text-sm border-t sm:border-t-0 sm:border-l border-warm-border font-medium transition-all duration-200 cursor-pointer ${visibility === 'unlisted'
+                                className={`admin-upload-choice flex-1 py-3 px-2 text-sm border-t sm:border-t-0 sm:border-l border-warm-border font-medium transition-all duration-200 cursor-pointer ${visibility === 'unlisted'
                                     ? 'bg-amber text-white'
                                     : 'bg-cream text-warm-gray hover:bg-cream-dark'
                                     }`}
@@ -388,7 +388,7 @@ function Upload() {
                     <button
                         type="submit"
                         disabled={uploading}
-                        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber to-amber-dark text-white font-semibold hover:from-amber-dark hover:to-amber-dark transition-all duration-300 shadow-warm hover:shadow-warm-lg disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                        className="admin-upload-submit w-full py-3.5 rounded-xl bg-gradient-to-r from-amber to-amber-dark text-white font-semibold hover:from-amber-dark hover:to-amber-dark transition-all duration-300 shadow-warm hover:shadow-warm-lg disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                     >
                         {uploading ? (
                             <span className="flex items-center justify-center gap-2">
