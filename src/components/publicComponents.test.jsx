@@ -107,6 +107,7 @@ describe('navigation and metadata', () => {
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],
     ['Search', '/search'],
+    ['Editor', '/editor'],
     ['Stats', '/stats'],
     ['Contact', '/contact'],
     ['Sign In', '/login'],

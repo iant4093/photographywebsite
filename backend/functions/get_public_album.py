@@ -219,7 +219,7 @@ def _html_response(body):
     )
     content_security_policy = (
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        "form-action 'self'; script-src 'self' https://challenges.cloudflare.com; "
+        "form-action 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' data: https://fonts.gstatic.com; "
         f"img-src 'self' data: blob: {media_origin} {s3_origins}; "

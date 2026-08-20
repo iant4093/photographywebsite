@@ -8,6 +8,9 @@ export default defineConfig({
   define: {
     global: 'globalThis',
   },
+  optimizeDeps: {
+    exclude: ['rawconvert-wasm'],
+  },
   build: {
     target: 'es2020',
     cssCodeSplit: true,
