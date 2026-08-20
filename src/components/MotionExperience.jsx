@@ -35,7 +35,8 @@ function clearMotionStyles(target) {
 export default function MotionExperience() {
     const { pathname } = useLocation()
     const isAdmin = pathname.startsWith('/admin')
-    const usesRestrainedMotion = ['/', '/search', '/stats'].includes(pathname)
+    const usesCatalogMotion = ['/', '/search', '/videos'].includes(pathname)
+    const usesStatsMotion = pathname === '/stats'
     const progressRef = useRef(null)
     const dragRef = useRef(null)
 
@@ -228,7 +229,19 @@ export default function MotionExperience() {
             root.style.setProperty('--editorial-speed', clamp(Math.abs(velocity) / 42, 0, 1).toFixed(4))
 
             measurements.forEach(({ target, position, presence, phase, amplitude }) => {
-                if (usesRestrainedMotion) {
+                if (usesCatalogMotion) {
+                    target.style.setProperty('--editorial-x', '0px')
+                    target.style.setProperty('--editorial-y', `${(phase * -44 - motionKick * 0.085).toFixed(2)}px`)
+                    target.style.setProperty('--editorial-card-y', `${(phase * -32 - motionKick * 0.075).toFixed(2)}px`)
+                    target.style.setProperty('--editorial-card-rotation', '0deg')
+                    target.style.setProperty('--editorial-card-scale', (0.87 + presence * 0.13).toFixed(5))
+                    target.style.setProperty('--editorial-scale', (0.93 + presence * 0.07).toFixed(5))
+                    target.style.setProperty('--editorial-rotation', '0deg')
+                    target.style.setProperty('--editorial-saturation', (0.88 + presence * 0.12).toFixed(4))
+                    return
+                }
+
+                if (usesStatsMotion) {
                     target.style.setProperty('--editorial-x', '0px')
                     target.style.setProperty('--editorial-y', `${(phase * -18 - motionKick * 0.035).toFixed(2)}px`)
                     target.style.setProperty('--editorial-card-y', `${(phase * -9 - motionKick * 0.03).toFixed(2)}px`)
@@ -270,7 +283,7 @@ export default function MotionExperience() {
             root.style.removeProperty('--editorial-speed')
             progressRail?.style.removeProperty('--editorial-progress-offset')
         }
-    }, [isAdmin, pathname, usesRestrainedMotion])
+    }, [isAdmin, pathname, usesCatalogMotion, usesStatsMotion])
 
     if (isAdmin) return null
 

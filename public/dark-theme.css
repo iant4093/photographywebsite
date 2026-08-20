@@ -117,7 +117,7 @@ html[data-theme="dark"] body {
   .photo-stats-storage-card,
   .photo-stats-highlights article,
   .photo-stats-gear-list,
-  .photo-stats-timeline-item
+  .photo-stats-timeline-card
 ) {
   background: rgba(38, 35, 30, 0.72);
   border-color: var(--color-warm-border);

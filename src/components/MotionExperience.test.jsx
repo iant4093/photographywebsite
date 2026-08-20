@@ -136,19 +136,28 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
   })
 
-  it('uses consistent restrained motion on home, search, and stats targets', () => {
-    for (const path of ['/', '/search', '/stats']) {
+  it('uses stronger consistent catalog motion on home, search, and videos', () => {
+    for (const path of ['/', '/search', '/videos']) {
       const view = renderExperience(path)
       flushFrames()
       const card = view.container.querySelector('.album-card')
-      const statsItem = view.container.querySelector('.photo-stats-motion-item')
       expect(card.style.getPropertyValue('--editorial-x')).toBe('0px')
       expect(card.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
-      expect(statsItem).toHaveClass('editorial-motion-media')
-      expect(statsItem.style.getPropertyValue('--editorial-x')).toBe('0px')
-      expect(statsItem.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
+      expect(Math.abs(Number.parseFloat(card.style.getPropertyValue('--editorial-card-y')))).toBeGreaterThan(28)
+      expect(Number.parseFloat(card.style.getPropertyValue('--editorial-card-scale'))).toBeLessThan(0.98)
       view.unmount()
     }
+  })
+
+  it('keeps the statistics motion restrained', () => {
+    const view = renderExperience('/stats')
+    flushFrames()
+    const statsItem = view.container.querySelector('.photo-stats-motion-item')
+    expect(statsItem).toHaveClass('editorial-motion-media')
+    expect(statsItem.style.getPropertyValue('--editorial-x')).toBe('0px')
+    expect(statsItem.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
+    expect(Math.abs(Number.parseFloat(statsItem.style.getPropertyValue('--editorial-card-y')))).toBeLessThan(12)
+    view.unmount()
   })
 
   it('preserves the expressive card motion inside album routes', () => {

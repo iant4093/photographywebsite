@@ -126,10 +126,7 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
     return (
         <section className="photo-stats-timeline-section" aria-labelledby="album-timeline-heading">
             <div className="photo-stats-timeline-heading">
-                <div>
-                    <p className="photo-stats-eyebrow">Public archive · newest first</p>
-                    <h2 id="album-timeline-heading">Album Timeline</h2>
-                </div>
+                <h2 id="album-timeline-heading">Album Timeline</h2>
                 <div className="photo-stats-timeline-controls" aria-label="Album timeline controls">
                     <button type="button" onClick={() => scrollTimeline(-1)} aria-label="Scroll timeline toward newer albums">←</button>
                     <button type="button" onClick={() => scrollTimeline(1)} aria-label="Scroll timeline toward older albums">→</button>
@@ -158,9 +155,18 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                     <ol className="photo-stats-timeline-track">
                         {orderedAlbums.map((album, index) => {
                             const cover = album.coverThumbnailUrl || albumCoverUrl(album)
+                            const position = index % 2 === 0 ? 'above' : 'below'
                             return (
-                                <li key={album.albumId} className="photo-stats-timeline-item photo-stats-motion-item">
-                                    <Link to={albumRoute(album)} aria-label={`View ${album.title}`}>
+                                <li
+                                    key={album.albumId}
+                                    className={`photo-stats-timeline-item is-${position}`}
+                                    data-timeline-position={position}
+                                >
+                                    <Link
+                                        className="photo-stats-timeline-card"
+                                        to={albumRoute(album)}
+                                        aria-label={`View ${album.title}`}
+                                    >
                                         <span className="photo-stats-timeline-index" aria-hidden="true">
                                             {String(index + 1).padStart(2, '0')}
                                         </span>
@@ -176,10 +182,13 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                                                 <span aria-hidden="true">IT</span>
                                             )}
                                         </span>
-                                        <time dateTime={album.createdAt || undefined}>{timelineDate(album.createdAt)}</time>
                                         <strong>{album.title}</strong>
                                         <small>{album.type === 'video' ? 'Video' : 'Photo'} · {album.category || 'Uncategorized'}</small>
                                     </Link>
+                                    <span className="photo-stats-timeline-node">
+                                        <span aria-hidden="true" />
+                                        <time dateTime={album.createdAt || undefined}>{timelineDate(album.createdAt)}</time>
+                                    </span>
                                 </li>
                             )
                         })}

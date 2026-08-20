@@ -67,6 +67,7 @@ describe('photography statistics page', () => {
         expect(screen.getByRole('heading', { level: 1, name: 'Photography Stats' })).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 2, name: 'Capture Stats' })).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 2, name: 'Album Timeline' })).toBeInTheDocument()
+        expect(screen.queryByText(/Public archive · newest first/i)).toBeNull()
         expect(screen.getByLabelText('Public albums, newest to oldest')).toBeInTheDocument()
         expect(screen.getAllByRole('link').map((link) => link.textContent))
             .toEqual(expect.arrayContaining([
@@ -75,6 +76,9 @@ describe('photography statistics page', () => {
             ]))
         expect(screen.getAllByRole('link')[0]).toHaveAttribute('href', '/video/newer-video')
         expect(screen.getAllByRole('link')[1]).toHaveAttribute('href', '/album/older-photo')
+        expect(screen.getAllByRole('link')[0].closest('li')).toHaveAttribute('data-timeline-position', 'above')
+        expect(screen.getAllByRole('link')[1].closest('li')).toHaveAttribute('data-timeline-position', 'below')
+        expect(screen.getByText('Jul 4, 2026')).toBeInTheDocument()
         expect(api.fetchAlbums).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
         expect(screen.getByRole('heading', { level: 2, name: 'Total Storage Used' })).toBeInTheDocument()
         expect(screen.getByRole('heading', { level: 2, name: 'Gear' })).toBeInTheDocument()
