@@ -123,6 +123,12 @@
 
 .photo-stats-timeline-shell {
     position: relative;
+    padding: clamp(0.45rem, 0.8vw, 0.75rem);
+    border: 1px solid color-mix(in srgb, var(--color-warm-border) 82%, var(--color-charcoal));
+    background: color-mix(in srgb, var(--color-cream-dark) 70%, var(--color-cream));
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--color-cream) 72%, transparent) inset,
+        7px 8px 0 rgba(35, 31, 26, 0.09);
 }
 
 .photo-stats-timeline-stage {
