@@ -10,6 +10,8 @@ function renderExperience(path = '/') {
       <main>
         <section className="home-hero" />
         <div className="album-card" />
+        <header className="photo-stats-hero" />
+        <div className="photo-stats-section-heading" />
         <article className="photo-stats-motion-item" />
       </main>
       <MotionExperience />
@@ -136,28 +138,22 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
   })
 
-  it('uses stronger consistent catalog motion on home, search, and videos', () => {
-    for (const path of ['/', '/search', '/videos']) {
+  it('uses stronger consistent catalog motion on home, search, videos, and stats', () => {
+    for (const path of ['/', '/search', '/videos', '/stats']) {
       const view = renderExperience(path)
       flushFrames()
-      const card = view.container.querySelector('.album-card')
+      const card = view.container.querySelector(path === '/stats' ? '.photo-stats-motion-item' : '.album-card')
       expect(card.style.getPropertyValue('--editorial-x')).toBe('0px')
       expect(card.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
       expect(Math.abs(Number.parseFloat(card.style.getPropertyValue('--editorial-card-y')))).toBeGreaterThan(28)
       expect(Number.parseFloat(card.style.getPropertyValue('--editorial-card-scale'))).toBeLessThan(0.98)
+      if (path === '/stats') {
+        const heading = view.container.querySelector('.photo-stats-section-heading')
+        expect(heading).toHaveClass('editorial-motion-frame')
+        expect(Math.abs(Number.parseFloat(heading.style.getPropertyValue('--editorial-y')))).toBeGreaterThan(38)
+      }
       view.unmount()
     }
-  })
-
-  it('keeps the statistics motion restrained', () => {
-    const view = renderExperience('/stats')
-    flushFrames()
-    const statsItem = view.container.querySelector('.photo-stats-motion-item')
-    expect(statsItem).toHaveClass('editorial-motion-media')
-    expect(statsItem.style.getPropertyValue('--editorial-x')).toBe('0px')
-    expect(statsItem.style.getPropertyValue('--editorial-card-rotation')).toBe('0deg')
-    expect(Math.abs(Number.parseFloat(statsItem.style.getPropertyValue('--editorial-card-y')))).toBeLessThan(12)
-    view.unmount()
   })
 
   it('preserves the expressive card motion inside album routes', () => {

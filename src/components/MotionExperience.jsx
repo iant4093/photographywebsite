@@ -6,6 +6,9 @@ const TARGET_SELECTOR = [
     'main .linen-video-hero',
     'main .linen-section-heading',
     'main .catalog-section',
+    'main .photo-stats-hero',
+    'main .photo-stats-timeline-heading',
+    'main .photo-stats-section-heading',
     'main .album-card',
     'main .photo-stats-motion-item',
     'main .linen-gallery-page [data-page-scroll-media]',
@@ -35,8 +38,7 @@ function clearMotionStyles(target) {
 export default function MotionExperience() {
     const { pathname } = useLocation()
     const isAdmin = pathname.startsWith('/admin')
-    const usesCatalogMotion = ['/', '/search', '/videos'].includes(pathname)
-    const usesStatsMotion = pathname === '/stats'
+    const usesCatalogMotion = ['/', '/search', '/videos', '/stats'].includes(pathname)
     const progressRef = useRef(null)
     const dragRef = useRef(null)
 
@@ -241,18 +243,6 @@ export default function MotionExperience() {
                     return
                 }
 
-                if (usesStatsMotion) {
-                    target.style.setProperty('--editorial-x', '0px')
-                    target.style.setProperty('--editorial-y', `${(phase * -18 - motionKick * 0.035).toFixed(2)}px`)
-                    target.style.setProperty('--editorial-card-y', `${(phase * -9 - motionKick * 0.03).toFixed(2)}px`)
-                    target.style.setProperty('--editorial-card-rotation', '0deg')
-                    target.style.setProperty('--editorial-card-scale', (0.99 + presence * 0.01).toFixed(5))
-                    target.style.setProperty('--editorial-scale', (0.982 + presence * 0.018).toFixed(5))
-                    target.style.setProperty('--editorial-rotation', '0deg')
-                    target.style.setProperty('--editorial-saturation', (0.96 + presence * 0.04).toFixed(4))
-                    return
-                }
-
                 target.style.setProperty('--editorial-x', `${(position * (1 - presence) * 36 * amplitude).toFixed(2)}px`)
                 target.style.setProperty('--editorial-y', `${(phase * -52 * amplitude - motionKick * 0.1).toFixed(2)}px`)
                 target.style.setProperty('--editorial-card-y', `${(phase * -16 - motionKick * 0.08).toFixed(2)}px`)
@@ -283,7 +273,7 @@ export default function MotionExperience() {
             root.style.removeProperty('--editorial-speed')
             progressRail?.style.removeProperty('--editorial-progress-offset')
         }
-    }, [isAdmin, pathname, usesCatalogMotion, usesStatsMotion])
+    }, [isAdmin, pathname, usesCatalogMotion])
 
     if (isAdmin) return null
 

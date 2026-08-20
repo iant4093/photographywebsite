@@ -125,40 +125,6 @@
     position: relative;
 }
 
-.photo-stats-timeline-current-period {
-    position: absolute;
-    z-index: 5;
-    top: 0.5rem;
-    left: 0;
-    display: grid;
-    width: clamp(7.5rem, 12vw, 10rem);
-    height: 6.2rem;
-    grid-template-rows: 3.7rem 2.5rem;
-    border-right: 1px solid var(--color-charcoal);
-    background: var(--color-cream);
-    pointer-events: none;
-}
-
-.photo-stats-timeline-current-period strong {
-    padding: 0.55rem 0.8rem;
-    color: var(--color-charcoal);
-    font-family: var(--font-serif);
-    font-size: clamp(1.85rem, 3vw, 2.8rem);
-    font-weight: 400;
-    letter-spacing: -0.035em;
-    line-height: 1;
-}
-
-.photo-stats-timeline-current-period span {
-    padding: 0.65rem 0.65rem 0;
-    border-top: 1px solid var(--color-warm-border);
-    color: var(--color-amber-dark);
-    font-size: clamp(0.82rem, 1.2vw, 1rem);
-    font-weight: 600;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-}
-
 .photo-stats-timeline-stage {
     --timeline-edge-padding: 11rem;
     position: relative;
@@ -177,8 +143,11 @@
 .photo-stats-timeline-month {
     position: absolute;
     left: var(--timeline-period-left);
+    display: flex;
     width: var(--timeline-period-width);
+    align-items: center;
     border-left: 1px solid var(--color-charcoal);
+    overflow: hidden;
 }
 
 .photo-stats-timeline-year {
@@ -190,6 +159,31 @@
     bottom: 0;
     height: 2.5rem;
     border-top: 1px solid var(--color-warm-border);
+}
+
+.photo-stats-timeline-year strong,
+.photo-stats-timeline-month strong {
+    display: block;
+    flex: none;
+    margin-left: clamp(0.85rem, 1.6vw, 1.5rem);
+    white-space: nowrap;
+}
+
+.photo-stats-timeline-year strong {
+    color: var(--color-charcoal);
+    font-family: var(--font-serif);
+    font-size: clamp(2rem, 3.4vw, 3.2rem);
+    font-weight: 400;
+    letter-spacing: -0.04em;
+    line-height: 1;
+}
+
+.photo-stats-timeline-month strong {
+    color: var(--color-amber-dark);
+    font-size: clamp(0.9rem, 1.4vw, 1.15rem);
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
 }
 
 .photo-stats-timeline-track {
@@ -307,6 +301,7 @@
 }
 
 .photo-stats-timeline-card:hover {
+    --editorial-hover-scale: 0.015;
     border-color: var(--color-charcoal);
     box-shadow: 6px 7px 0 color-mix(in srgb, var(--color-charcoal) 8%, transparent);
 }

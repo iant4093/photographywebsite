@@ -226,7 +226,7 @@ function TimelineCard({ album, index, position }) {
     const [imageFailed, setImageFailed] = useState(false)
     return (
         <Link
-            className="photo-stats-timeline-card"
+            className="photo-stats-timeline-card photo-stats-motion-item"
             data-timeline-position={position}
             to={albumRoute(album)}
             aria-label={`View ${album.title}`}
@@ -259,7 +259,6 @@ function TimelineCard({ album, index, position }) {
 
 function AlbumTimeline({ albums, loading, error, onRetry }) {
     const scrollerRef = useRef(null)
-    const [selectedTimelinePeriod, setSelectedTimelinePeriod] = useState({ year: '', month: '' })
     const orderedAlbums = useMemo(() => [...albums].sort((left, right) => (
         albumTimestamp(right) - albumTimestamp(left)
         || String(left.title || '').localeCompare(String(right.title || ''))
@@ -292,36 +291,6 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
         return groups
     }, [orderedAlbums])
     const timelineLayout = useMemo(() => buildTimelineLayout(timelineGroups), [timelineGroups])
-    const activeTimelinePeriod = useMemo(() => {
-        const selectedMonthExists = timelineLayout.months.some((period) => (
-            period.label === selectedTimelinePeriod.month
-            && period.key.startsWith(`${selectedTimelinePeriod.year}-`)
-        ))
-        if (selectedMonthExists) return selectedTimelinePeriod
-        return {
-            year: String(timelineLayout.years[0]?.year || ''),
-            month: timelineLayout.months[0]?.label || '',
-        }
-    }, [selectedTimelinePeriod, timelineLayout])
-
-    const syncTimelinePeriod = (scroller) => {
-        if (!scroller || timelineLayout.months.length === 0) return
-        const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16
-        const centerPosition = (
-            (scroller.scrollLeft + (scroller.clientWidth / 2)) / rootFontSize
-        ) - TIMELINE_EDGE_PADDING_REM
-        const month = timelineLayout.months.find((period) => (
-            centerPosition >= period.left && centerPosition <= period.left + period.width
-        )) || timelineLayout.months[timelineLayout.months.length - 1]
-        const year = timelineLayout.years.find((period) => (
-            centerPosition >= period.left && centerPosition <= period.left + period.width
-        )) || timelineLayout.years[timelineLayout.years.length - 1]
-
-        setSelectedTimelinePeriod((current) => {
-            const next = { year: String(year?.year || ''), month: month?.label || '' }
-            return current.year === next.year && current.month === next.month ? current : next
-        })
-    }
 
     const scrollTimeline = (direction) => {
         const scroller = scrollerRef.current
@@ -361,20 +330,10 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
             {!error && orderedAlbums.length > 0 && (
                 <div className="photo-stats-timeline-shell">
                     <div
-                        className="photo-stats-timeline-current-period"
-                        data-active-timeline-year={activeTimelinePeriod.year}
-                        data-active-timeline-month={activeTimelinePeriod.month}
-                        aria-hidden="true"
-                    >
-                        <strong>{activeTimelinePeriod.year}</strong>
-                        <span>{activeTimelinePeriod.month}</span>
-                    </div>
-                    <div
                         ref={scrollerRef}
                         className="photo-stats-timeline-scroll"
                         tabIndex={0}
                         aria-label="Public albums, newest to oldest"
-                        onScroll={(event) => syncTimelinePeriod(event.currentTarget)}
                     >
                         <div
                             className="photo-stats-timeline-stage"
@@ -390,7 +349,9 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                                             '--timeline-period-left': `${TIMELINE_EDGE_PADDING_REM + year.left}rem`,
                                             '--timeline-period-width': `${year.width}rem`,
                                         }}
-                                    />
+                                    >
+                                        <strong>{year.year}</strong>
+                                    </span>
                                 ))}
                                 {timelineLayout.months.map((month) => (
                                     <span
@@ -401,7 +362,9 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
                                             '--timeline-period-left': `${TIMELINE_EDGE_PADDING_REM + month.left}rem`,
                                             '--timeline-period-width': `${month.width}rem`,
                                         }}
-                                    />
+                                    >
+                                        <strong>{month.label}</strong>
+                                    </span>
                                 ))}
                             </div>
                             <ol className="photo-stats-timeline-track">

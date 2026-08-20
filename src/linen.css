@@ -689,7 +689,10 @@
 .linen-site .catalog-section.editorial-motion-frame,
 .linen-site .linen-section-heading.editorial-motion-frame,
 .linen-site .home-hero.editorial-motion-frame,
-.linen-site .linen-video-hero.editorial-motion-frame {
+.linen-site .linen-video-hero.editorial-motion-frame,
+.linen-site .photo-stats-hero.editorial-motion-frame,
+.linen-site .photo-stats-timeline-heading.editorial-motion-frame,
+.linen-site .photo-stats-section-heading.editorial-motion-frame {
   filter: saturate(var(--editorial-saturation));
   transform:
     translate3d(var(--editorial-x), var(--editorial-y), 0)
