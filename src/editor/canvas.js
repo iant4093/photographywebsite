@@ -5,17 +5,25 @@ export function dimensionsForGeometry(width, height, geometry) {
     return turns % 2 ? { width: cropHeight, height: cropWidth } : { width: cropWidth, height: cropHeight }
 }
 
-export function drawGeometry(source, target, geometry, maxWidth = Infinity, maxHeight = Infinity) {
+export function fittedGeometryDimensions(width, height, geometry, maxWidth = Infinity, maxHeight = Infinity) {
+    const natural = dimensionsForGeometry(width, height, geometry)
+    const scale = Math.min(1, maxWidth / natural.width, maxHeight / natural.height)
+    return {
+        width: Math.max(1, Math.round(natural.width * scale)),
+        height: Math.max(1, Math.round(natural.height * scale)),
+    }
+}
+
+export function drawGeometryAtSize(source, target, geometry, targetWidth, targetHeight) {
     const sourceWidth = source.width
     const sourceHeight = source.height
     const sourceX = Math.round(sourceWidth * geometry.crop.x)
     const sourceY = Math.round(sourceHeight * geometry.crop.y)
     const sourceCropWidth = Math.max(1, Math.round(sourceWidth * geometry.crop.width))
     const sourceCropHeight = Math.max(1, Math.round(sourceHeight * geometry.crop.height))
-    const natural = dimensionsForGeometry(sourceWidth, sourceHeight, geometry)
-    const scale = Math.min(1, maxWidth / natural.width, maxHeight / natural.height)
-    target.width = Math.max(1, Math.round(natural.width * scale))
-    target.height = Math.max(1, Math.round(natural.height * scale))
+    const turns = ((Math.round(geometry.quarterTurns) % 4) + 4) % 4
+    target.width = Math.max(1, Math.round(targetWidth))
+    target.height = Math.max(1, Math.round(targetHeight))
     const context = target.getContext('2d', { alpha: false })
     context.save()
     context.fillStyle = '#191713'
@@ -27,11 +35,16 @@ export function drawGeometry(source, target, geometry, maxWidth = Infinity, maxH
     const skewX = Math.tan((geometry.horizontal || 0) * Math.PI / 360)
     const skewY = Math.tan((geometry.vertical || 0) * Math.PI / 360)
     context.transform(1, skewY, skewX, 1, 0, 0)
-    const drawWidth = sourceCropWidth * scale
-    const drawHeight = sourceCropHeight * scale
+    const drawWidth = turns % 2 ? target.height : target.width
+    const drawHeight = turns % 2 ? target.width : target.height
     context.drawImage(source, sourceX, sourceY, sourceCropWidth, sourceCropHeight, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
     context.restore()
     return target
+}
+
+export function drawGeometry(source, target, geometry, maxWidth = Infinity, maxHeight = Infinity) {
+    const dimensions = fittedGeometryDimensions(source.width, source.height, geometry, maxWidth, maxHeight)
+    return drawGeometryAtSize(source, target, geometry, dimensions.width, dimensions.height)
 }
 
 export function cropForAspect(width, height, aspect) {

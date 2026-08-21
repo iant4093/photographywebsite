@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { COLOR_CHANNELS, freshAdjustments, freshGeometry, sanitizeAdjustments, sanitizeGeometry } from '../editor/adjustments'
 import { BUILT_IN_PRESETS, applyPreset, parseSidecar, serializeSidecar } from '../editor/presets'
-import { canvasToBlob, cropForAspect, drawGeometry, outputDimensions } from '../editor/canvas'
+import { canvasToBlob, cropForAspect, drawGeometry, drawGeometryAtSize, fittedGeometryDimensions, outputDimensions } from '../editor/canvas'
 import { decodeStandardFile, makePreviewSource } from '../editor/standardDecoder'
 import { decodeRawFile, isRawFile } from '../editor/rawDecoder'
 import { clearEditorSession, loadEditorSession, saveEditorSource, saveEditorState } from '../editor/sessionStore'
 import { ColorWheel, ToneCurve } from '../editor/DirectControls'
+import { anchoredPan } from '../editor/directControlMath'
+import { workerRequest } from '../editor/workerClient'
 import './Editor.css'
 
 const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/avif,.dng,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.srw,.3fr,.fff,.iiq,.x3f,.raw'
@@ -31,11 +33,30 @@ const RANGE_GROUPS = [
     ] },
 ]
 
-function RangeControl({ label, value, min, max, step, onChange, onReset }) {
+function RangeControl({ label, value, min, max, step, onChange, onLiveChange, onEditStart, onEditEnd, onReset }) {
+    const startLiveEdit = () => onEditStart?.()
+    const finishLiveEdit = () => onEditEnd?.()
     return (
         <label className="editor-range">
             <span>{label}</span>
-            <input aria-label={label} type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+            <input
+                aria-label={label}
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                onPointerDown={startLiveEdit}
+                onPointerUp={finishLiveEdit}
+                onPointerCancel={finishLiveEdit}
+                onKeyUp={finishLiveEdit}
+                onBlur={finishLiveEdit}
+                onChange={(event) => {
+                    startLiveEdit()
+                    const changeHandler = onLiveChange || onChange
+                    changeHandler(Number(event.target.value))
+                }}
+            />
             <input aria-label={`${label} value`} type="number" min={min} max={max} step={step} value={Number(value.toFixed?.(2) ?? value)} onChange={(event) => onChange(Number(event.target.value))} onDoubleClick={onReset} />
         </label>
     )
@@ -87,21 +108,6 @@ function createCanvasFromPixels(pixels, width, height) {
     return canvas
 }
 
-function workerRequest(worker, source, adjustments, clipping = false) {
-    return new Promise((resolve, reject) => {
-        const id = crypto.randomUUID()
-        const listener = ({ data }) => {
-            if (data.id !== id) return
-            worker.removeEventListener('message', listener)
-            if (data.error) reject(new Error(data.error))
-            else resolve(data)
-        }
-        worker.addEventListener('message', listener)
-        const pixels = new Uint8ClampedArray(source.pixels)
-        worker.postMessage({ id, pixels: pixels.buffer, width: source.width, height: source.height, adjustments, clipping }, [pixels.buffer])
-    })
-}
-
 function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -144,7 +150,8 @@ export default function Editor() {
     const beforeCanvasRef = useRef(null)
     const workerRef = useRef(null)
     const renderIdRef = useRef(0)
-    const previewRenderRef = useRef({ busy: false, pending: null })
+    const previewRenderRef = useRef({ busy: false, pending: null, active: null, controller: null })
+    const originalPreviewCanvasRef = useRef({ preview: null, canvas: null })
     const panStartRef = useRef(null)
     const suppressImageClickRef = useRef(false)
     const liveEditStartRef = useRef(null)
@@ -152,6 +159,7 @@ export default function Editor() {
     const restorePromiseRef = useRef(null)
     const [source, setSource] = useState(null)
     const [preview, setPreview] = useState(null)
+    const [fastPreview, setFastPreview] = useState(null)
     const [filename, setFilename] = useState('')
     const [adjustments, setAdjustments] = useState(freshAdjustments)
     const [geometry, setGeometry] = useState(freshGeometry)
@@ -162,6 +170,7 @@ export default function Editor() {
     const [histogram, setHistogram] = useState(null)
     const [isDragging, setIsDragging] = useState(false)
     const [isPanning, setIsPanning] = useState(false)
+    const [isLiveEditing, setIsLiveEditing] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [showClipping, setShowClipping] = useState(false)
     const [compare, setCompare] = useState(false)
@@ -179,14 +188,20 @@ export default function Editor() {
     const [exportState, setExportState] = useState({ active: false, progress: 0, label: '' })
     const exportWorkerRef = useRef(null)
 
+    const restartPreviewWorker = useCallback(() => {
+        workerRef.current?.terminate()
+        workerRef.current = new Worker(new URL('../editor/editorWorker.js', import.meta.url), { type: 'module' })
+    }, [])
+
     useEffect(() => {
         const previewQueue = previewRenderRef.current
-        workerRef.current = new Worker(new URL('../editor/editorWorker.js', import.meta.url), { type: 'module' })
+        restartPreviewWorker()
         return () => {
             previewQueue.pending = null
+            previewQueue.controller?.abort()
             workerRef.current?.terminate()
         }
-    }, [])
+    }, [restartPreviewWorker])
 
     useEffect(() => {
         const stage = stageRef.current
@@ -215,6 +230,7 @@ export default function Editor() {
 
     const beginLiveEdit = useCallback(() => {
         if (!liveEditStartRef.current) liveEditStartRef.current = snapshot()
+        setIsLiveEditing(true)
     }, [snapshot])
 
     const updateAdjustmentsLive = useCallback((nextAdjustments) => {
@@ -222,12 +238,28 @@ export default function Editor() {
     }, [])
 
     const finishLiveEdit = useCallback(() => {
+        setIsLiveEditing(false)
         if (!liveEditStartRef.current) return
         const startingSnapshot = liveEditStartRef.current
         liveEditStartRef.current = null
         setHistory((items) => [...items.slice(-39), startingSnapshot])
         setFuture([])
     }, [])
+
+    const updateGeometryLive = useCallback((nextGeometry) => {
+        setGeometry(sanitizeGeometry(nextGeometry))
+    }, [])
+
+    useEffect(() => {
+        if (!isLiveEditing) return undefined
+        const finish = () => finishLiveEdit()
+        window.addEventListener('pointerup', finish)
+        window.addEventListener('pointercancel', finish)
+        return () => {
+            window.removeEventListener('pointerup', finish)
+            window.removeEventListener('pointercancel', finish)
+        }
+    }, [finishLiveEdit, isLiveEditing])
 
     const undo = useCallback(() => {
         if (!history.length) return
@@ -268,33 +300,75 @@ export default function Editor() {
         if (queue.busy || !workerRef.current) return
         queue.busy = true
         setIsProcessing(true)
-        while (queue.pending) {
-            const task = queue.pending
-            queue.pending = null
-            try {
-                const result = await workerRequest(workerRef.current, task.preview, task.adjustments, task.showClipping)
-                if (task.renderId !== renderIdRef.current || !afterCanvasRef.current || !beforeCanvasRef.current) continue
-                const processedCanvas = createCanvasFromPixels(result.pixels, task.preview.width, task.preview.height)
-                const originalCanvas = createCanvasFromPixels(task.preview.pixels, task.preview.width, task.preview.height)
-                drawGeometry(processedCanvas, afterCanvasRef.current, task.geometry, 1800, 1200)
-                drawGeometry(originalCanvas, beforeCanvasRef.current, task.geometry, 1800, 1200)
-                setDisplaySize({ width: afterCanvasRef.current.width, height: afterCanvasRef.current.height })
-                setHistogram(result.histogram)
-                setStatus(`${task.preview.width} × ${task.preview.height} working preview`)
-            } catch (processingError) {
-                if (task.renderId === renderIdRef.current) setError(processingError.message)
+        try {
+            while (queue.pending) {
+                const task = queue.pending
+                queue.pending = null
+                queue.active = task
+                const controller = new AbortController()
+                queue.controller = controller
+                try {
+                    const result = await workerRequest(workerRef.current, task.workingPreview, task.adjustments, task.showClipping, {
+                        signal: controller.signal,
+                        timeoutMs: task.quality === 'fast' ? 4000 : 12000,
+                    })
+                    if (task.renderId !== renderIdRef.current || !afterCanvasRef.current || !beforeCanvasRef.current) continue
+                    const processedCanvas = createCanvasFromPixels(result.pixels, task.workingPreview.width, task.workingPreview.height)
+                    if (originalPreviewCanvasRef.current.preview !== task.fullPreview) {
+                        originalPreviewCanvasRef.current = {
+                            preview: task.fullPreview,
+                            canvas: createCanvasFromPixels(task.fullPreview.pixels, task.fullPreview.width, task.fullPreview.height),
+                        }
+                    }
+                    const dimensions = fittedGeometryDimensions(task.fullPreview.width, task.fullPreview.height, task.geometry, 1800, 1200)
+                    drawGeometryAtSize(processedCanvas, afterCanvasRef.current, task.geometry, dimensions.width, dimensions.height)
+                    drawGeometryAtSize(originalPreviewCanvasRef.current.canvas, beforeCanvasRef.current, task.geometry, dimensions.width, dimensions.height)
+                    setDisplaySize(dimensions)
+                    setHistogram(result.histogram)
+                    setError('')
+                    setStatus(`${task.fullPreview.width} × ${task.fullPreview.height} working preview`)
+                } catch (processingError) {
+                    if (processingError.name === 'AbortError') continue
+                    restartPreviewWorker()
+                    if (task.renderId === renderIdRef.current && !task.retried && !queue.pending) {
+                        queue.pending = { ...task, retried: true }
+                    } else if (task.renderId === renderIdRef.current && !queue.pending) {
+                        setError(`${processingError.message} Try moving the control again.`)
+                    }
+                } finally {
+                    if (queue.controller === controller) queue.controller = null
+                    if (queue.active === task) queue.active = null
+                }
             }
+        } finally {
+            queue.busy = false
+            queue.active = null
+            queue.controller = null
+            setIsProcessing(false)
         }
-        queue.busy = false
-        setIsProcessing(false)
-    }, [])
+    }, [restartPreviewWorker])
 
     useEffect(() => {
-        if (!preview || !workerRef.current) return
+        if (!preview || !fastPreview || !workerRef.current) return
         const renderId = ++renderIdRef.current
-        previewRenderRef.current.pending = { renderId, preview, adjustments, geometry, showClipping }
+        const queue = previewRenderRef.current
+        const quality = isLiveEditing ? 'fast' : 'full'
+        queue.pending = {
+            renderId,
+            quality,
+            workingPreview: quality === 'fast' ? fastPreview : preview,
+            fullPreview: preview,
+            adjustments,
+            geometry,
+            showClipping,
+            retried: false,
+        }
+        if (quality === 'fast' && queue.active?.quality === 'full') {
+            queue.controller?.abort()
+            restartPreviewWorker()
+        }
         void drainPreviewQueue()
-    }, [adjustments, drainPreviewQueue, geometry, preview, showClipping])
+    }, [adjustments, drainPreviewQueue, fastPreview, geometry, isLiveEditing, preview, restartPreviewWorker, showClipping])
 
     const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false } = {}) => {
         if (!file) return
@@ -309,6 +383,10 @@ export default function Editor() {
         setSessionSourceReady(false)
         setSessionStatus(fromRecovery ? 'Recovering local session…' : 'Saving local session…')
         setIsProcessing(true)
+        const queue = previewRenderRef.current
+        queue.pending = null
+        queue.controller?.abort()
+        restartPreviewWorker()
         try {
             const decoded = isRawFile(file)
                 ? await decodeRawFile(file, setStatus)
@@ -323,8 +401,11 @@ export default function Editor() {
                 x: Number.isFinite(Number(restoredState?.pan?.x)) ? Number(restoredState.pan.x) : 0,
                 y: Number.isFinite(Number(restoredState?.pan?.y)) ? Number(restoredState.pan.y) : 0,
             }
+            const nextPreview = makePreviewSource(decoded, 1200)
             setSource(decoded)
-            setPreview(makePreviewSource(decoded, 1400))
+            setPreview(nextPreview)
+            setFastPreview(makePreviewSource(nextPreview, 560))
+            originalPreviewCanvasRef.current = { preview: null, canvas: null }
             setFilename(file.name.replace(/\.[^.]+$/, ''))
             setAdjustments(nextAdjustments)
             setGeometry(nextGeometry)
@@ -372,15 +453,16 @@ export default function Editor() {
             if (generation !== openGenerationRef.current) return
             setSource(null)
             setPreview(null)
+            setFastPreview(null)
             setError(loadError instanceof Error ? loadError.message : 'This photo could not be opened.')
             setStatus('Choose another photo')
             setSessionSourceReady(false)
             setSessionStatus('No saved session')
             if (fromRecovery) await clearEditorSession().catch(() => {})
         } finally {
-            if (generation === openGenerationRef.current) setIsProcessing(false)
+            if (generation === openGenerationRef.current) setIsProcessing(previewRenderRef.current.busy)
         }
-    }, [])
+    }, [restartPreviewWorker])
 
     useEffect(() => {
         if (!restorePromiseRef.current) restorePromiseRef.current = loadEditorSession()
@@ -510,10 +592,13 @@ export default function Editor() {
         ++openGenerationRef.current
         ++renderIdRef.current
         previewRenderRef.current.pending = null
+        previewRenderRef.current.controller?.abort()
+        restartPreviewWorker()
         exportWorkerRef.current?.terminate()
         exportWorkerRef.current = null
         setSource(null)
         setPreview(null)
+        setFastPreview(null)
         setFilename('')
         setAdjustments(freshAdjustments())
         setGeometry(freshGeometry())
@@ -526,6 +611,9 @@ export default function Editor() {
         setZoom('fit')
         setPan({ x: 0, y: 0 })
         setIsPanning(false)
+        setIsLiveEditing(false)
+        liveEditStartRef.current = null
+        originalPreviewCanvasRef.current = { preview: null, canvas: null }
         setDisplaySize({ width: 1, height: 1 })
         setExportOptions({ ...DEFAULT_EXPORT_OPTIONS })
         setExportState({ active: false, progress: 0, label: '' })
@@ -568,8 +656,29 @@ export default function Editor() {
         setPan((current) => clampPan(current, normalizedZoom))
     }
 
-    const toggleImageZoom = () => {
-        if (zoom === 'fit') changeZoom(fitScale >= 0.99 ? 200 : 100)
+    const zoomAtPoint = (nextZoom, clientX, clientY) => {
+        const normalizedZoom = Math.min(400, Math.max(minimumZoom, Number(nextZoom)))
+        const nextScale = normalizedZoom / 100
+        const rect = stageRef.current?.getBoundingClientRect()
+        if (!rect) {
+            changeZoom(normalizedZoom)
+            return
+        }
+        const nextPan = anchoredPan({
+            cursorX: clientX,
+            cursorY: clientY,
+            centerX: rect.left + rect.width / 2,
+            centerY: rect.top + rect.height / 2,
+            currentPan: pan,
+            currentScale: scale,
+            nextScale,
+        })
+        setZoom(normalizedZoom)
+        setPan(clampPan(nextPan, normalizedZoom))
+    }
+
+    const toggleImageZoom = (clientX, clientY) => {
+        if (zoom === 'fit') zoomAtPoint(fitScale >= 0.99 ? 200 : 100, clientX, clientY)
         else {
             setPan({ x: 0, y: 0 })
             changeZoom('fit')
@@ -614,7 +723,7 @@ export default function Editor() {
                             if (!source) return
                             event.preventDefault()
                             const current = zoom === 'fit' ? fitScale * 100 : Number(zoom)
-                            changeZoom(current + (event.deltaY < 0 ? 12 : -12))
+                            zoomAtPoint(current + (event.deltaY < 0 ? 12 : -12), event.clientX, event.clientY)
                         }}
                         onPointerDown={(event) => {
                             if (!source) return
@@ -665,12 +774,12 @@ export default function Editor() {
                                     marginTop: `${displaySize.height / -2}px`,
                                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
                                 }}
-                                onClick={() => {
+                                onClick={(event) => {
                                     if (suppressImageClickRef.current) {
                                         suppressImageClickRef.current = false
                                         return
                                     }
-                                    toggleImageZoom()
+                                    toggleImageZoom(event.clientX, event.clientY)
                                 }}
                             >
                                 <canvas ref={afterCanvasRef} className="editor-image-canvas" aria-label="Edited photo preview" />
@@ -678,7 +787,7 @@ export default function Editor() {
                                 {compare && <div className="editor-compare-line" style={{ left: `${comparePosition}%` }} />}
                             </div>
                         )}
-                        {isProcessing && <div className="editor-processing" role="status"><span>Processing</span><span className="editor-processing-dots" aria-hidden="true" /></div>}
+                        {isProcessing && <div className="editor-processing" role="status">Processing...</div>}
                     </div>
 
                     <aside className="editor-sidebar" aria-label="Editing controls">
@@ -704,7 +813,19 @@ export default function Editor() {
                         {RANGE_GROUPS.map((group, groupIndex) => (
                             <ControlSection key={group.title} title={group.title} defaultOpen={groupIndex === 0}>
                                 {group.controls.map(([key, label, min, max, step]) => (
-                                    <RangeControl key={key} label={label} value={adjustments[key]} min={min} max={max} step={step} onChange={(value) => changeAdjustment(key, value)} onReset={() => resetAdjustment(key)} />
+                                    <RangeControl
+                                        key={key}
+                                        label={label}
+                                        value={adjustments[key]}
+                                        min={min}
+                                        max={max}
+                                        step={step}
+                                        onChange={(value) => changeAdjustment(key, value)}
+                                        onLiveChange={(value) => updateAdjustmentsLive({ ...adjustments, [key]: value })}
+                                        onEditStart={beginLiveEdit}
+                                        onEditEnd={finishLiveEdit}
+                                        onReset={() => resetAdjustment(key)}
+                                    />
                                 ))}
                             </ControlSection>
                         ))}
@@ -724,7 +845,19 @@ export default function Editor() {
                                 <details key={channel} className="editor-subsection">
                                     <summary>{channel}</summary>
                                     {['hue', 'saturation', 'luminance'].map((property) => (
-                                        <RangeControl key={property} label={property} value={adjustments.hsl[channel][property]} min={-100} max={100} step={1} onChange={(value) => commit({ ...adjustments, hsl: { ...adjustments.hsl, [channel]: { ...adjustments.hsl[channel], [property]: value } } }, geometry)} onReset={() => {}} />
+                                        <RangeControl
+                                            key={property}
+                                            label={property}
+                                            value={adjustments.hsl[channel][property]}
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            onChange={(value) => commit({ ...adjustments, hsl: { ...adjustments.hsl, [channel]: { ...adjustments.hsl[channel], [property]: value } } }, geometry)}
+                                            onLiveChange={(value) => updateAdjustmentsLive({ ...adjustments, hsl: { ...adjustments.hsl, [channel]: { ...adjustments.hsl[channel], [property]: value } } })}
+                                            onEditStart={beginLiveEdit}
+                                            onEditEnd={finishLiveEdit}
+                                            onReset={() => {}}
+                                        />
                                     ))}
                                 </details>
                             ))}
@@ -742,23 +875,23 @@ export default function Editor() {
                                         onChange={(next) => updateAdjustmentsLive({ ...adjustments, grading: { ...adjustments.grading, [range]: next } })}
                                         onEditEnd={finishLiveEdit}
                                     />
-                                    <RangeControl label={`${range} hue`} value={values.hue} min={0} max={359} step={1} onChange={(value) => commit({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, hue: value } } }, geometry)} onReset={() => {}} />
-                                    <RangeControl label={`${range} saturation`} value={values.saturation} min={0} max={100} step={1} onChange={(value) => commit({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, saturation: value } } }, geometry)} onReset={() => {}} />
+                                    <RangeControl label={`${range} hue`} value={values.hue} min={0} max={359} step={1} onChange={(value) => commit({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, hue: value } } }, geometry)} onLiveChange={(value) => updateAdjustmentsLive({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, hue: value } } })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />
+                                    <RangeControl label={`${range} saturation`} value={values.saturation} min={0} max={100} step={1} onChange={(value) => commit({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, saturation: value } } }, geometry)} onLiveChange={(value) => updateAdjustmentsLive({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, saturation: value } } })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />
                                 </div>
                             ))}
                         </ControlSection>
 
                         <ControlSection title="Black & white">
                             <label className="editor-check"><input type="checkbox" checked={adjustments.blackAndWhite} onChange={(event) => changeAdjustment('blackAndWhite', event.target.checked)} /> Enable black and white</label>
-                            {COLOR_CHANNELS.map((channel) => <RangeControl key={channel} label={channel} value={adjustments.bwMixer[channel]} min={-100} max={100} step={1} onChange={(value) => commit({ ...adjustments, bwMixer: { ...adjustments.bwMixer, [channel]: value } }, geometry)} onReset={() => {}} />)}
+                            {COLOR_CHANNELS.map((channel) => <RangeControl key={channel} label={channel} value={adjustments.bwMixer[channel]} min={-100} max={100} step={1} onChange={(value) => commit({ ...adjustments, bwMixer: { ...adjustments.bwMixer, [channel]: value } }, geometry)} onLiveChange={(value) => updateAdjustmentsLive({ ...adjustments, bwMixer: { ...adjustments.bwMixer, [channel]: value } })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />)}
                         </ControlSection>
 
                         <ControlSection title="Crop & geometry">
                             <label className="editor-select">Aspect ratio<select value={geometry.aspect} onChange={(event) => setAspect(event.target.value)}><option value="free">Free</option><option value="original">Original</option><option value="1:1">1 : 1</option><option value="4:3">4 : 3</option><option value="3:2">3 : 2</option><option value="16:9">16 : 9</option><option value="5:4">5 : 4</option></select></label>
-                            {Object.entries(geometry.crop).map(([key, value]) => <RangeControl key={key} label={`Crop ${key}`} value={Math.round(value * 100)} min={key === 'x' || key === 'y' ? 0 : 1} max={100} step={1} onChange={(nextValue) => commit(adjustments, { ...geometry, crop: { ...geometry.crop, [key]: nextValue / 100 }, aspect: 'free' })} onReset={() => {}} />)}
-                            <RangeControl label="Straighten" value={geometry.rotation} min={-45} max={45} step={0.1} onChange={(value) => commit(adjustments, { ...geometry, rotation: value })} onReset={() => commit(adjustments, { ...geometry, rotation: 0 })} />
-                            <RangeControl label="Vertical perspective" value={geometry.vertical} min={-30} max={30} step={0.5} onChange={(value) => commit(adjustments, { ...geometry, vertical: value })} onReset={() => {}} />
-                            <RangeControl label="Horizontal perspective" value={geometry.horizontal} min={-30} max={30} step={0.5} onChange={(value) => commit(adjustments, { ...geometry, horizontal: value })} onReset={() => {}} />
+                            {Object.entries(geometry.crop).map(([key, value]) => <RangeControl key={key} label={`Crop ${key}`} value={Math.round(value * 100)} min={key === 'x' || key === 'y' ? 0 : 1} max={100} step={1} onChange={(nextValue) => commit(adjustments, { ...geometry, crop: { ...geometry.crop, [key]: nextValue / 100 }, aspect: 'free' })} onLiveChange={(nextValue) => updateGeometryLive({ ...geometry, crop: { ...geometry.crop, [key]: nextValue / 100 }, aspect: 'free' })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />)}
+                            <RangeControl label="Straighten" value={geometry.rotation} min={-45} max={45} step={0.1} onChange={(value) => commit(adjustments, { ...geometry, rotation: value })} onLiveChange={(value) => updateGeometryLive({ ...geometry, rotation: value })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => commit(adjustments, { ...geometry, rotation: 0 })} />
+                            <RangeControl label="Vertical perspective" value={geometry.vertical} min={-30} max={30} step={0.5} onChange={(value) => commit(adjustments, { ...geometry, vertical: value })} onLiveChange={(value) => updateGeometryLive({ ...geometry, vertical: value })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />
+                            <RangeControl label="Horizontal perspective" value={geometry.horizontal} min={-30} max={30} step={0.5} onChange={(value) => commit(adjustments, { ...geometry, horizontal: value })} onLiveChange={(value) => updateGeometryLive({ ...geometry, horizontal: value })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />
                             <div className="editor-button-row">
                                 <button type="button" onClick={() => commit(adjustments, { ...geometry, quarterTurns: geometry.quarterTurns - 1 })}>Rotate left</button>
                                 <button type="button" onClick={() => commit(adjustments, { ...geometry, quarterTurns: geometry.quarterTurns + 1 })}>Rotate right</button>

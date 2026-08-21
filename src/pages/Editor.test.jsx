@@ -11,15 +11,31 @@ const mocks = vi.hoisted(() => ({
         target.height = 1
         return target
     }),
+    drawGeometryAtSize: vi.fn((_source, target, _geometry, width, height) => {
+        target.width = width
+        target.height = height
+        return target
+    }),
     loadEditorSession: vi.fn(),
     saveEditorSource: vi.fn(),
     saveEditorState: vi.fn(),
     clearEditorSession: vi.fn(),
+    workerMessages: [],
+    workerFailures: 0,
+    workerInstances: 0,
 }))
 
 vi.mock('../editor/standardDecoder', () => ({
     decodeStandardFile: mocks.decodeStandardFile,
-    makePreviewSource: (source) => ({ ...source, pixels: new Uint8ClampedArray(source.pixels) }),
+    makePreviewSource: (source, maxEdge = 1800) => {
+        const scale = Math.min(1, maxEdge / Math.max(source.width, source.height))
+        return {
+            ...source,
+            width: Math.max(1, Math.round(source.width * scale)),
+            height: Math.max(1, Math.round(source.height * scale)),
+            pixels: new Uint8ClampedArray(source.pixels),
+        }
+    },
 }))
 
 vi.mock('../editor/rawDecoder', () => ({ decodeRawFile: mocks.decodeRawFile, isRawFile: mocks.isRawFile }))
@@ -36,6 +52,7 @@ vi.mock('../editor/canvas', async (importOriginal) => {
     return {
         ...actual,
         drawGeometry: mocks.drawGeometry,
+        drawGeometryAtSize: mocks.drawGeometryAtSize,
         canvasToBlob: vi.fn().mockResolvedValue(new Blob(['edited'], { type: 'image/jpeg' })),
     }
 })
@@ -50,21 +67,31 @@ class ImageDataStub {
 
 class WorkerStub {
     constructor() {
-        this.listeners = []
+        this.listeners = new Map()
+        mocks.workerInstances += 1
     }
     addEventListener(type, listener) {
-        if (type === 'message') this.listeners.push(listener)
+        this.listeners.set(type, [...(this.listeners.get(type) || []), listener])
     }
     removeEventListener(type, listener) {
-        if (type === 'message') this.listeners = this.listeners.filter((item) => item !== listener)
+        this.listeners.set(type, (this.listeners.get(type) || []).filter((item) => item !== listener))
+    }
+    emit(type, event) {
+        for (const listener of this.listeners.get(type) || []) listener(event)
     }
     postMessage(message) {
+        mocks.workerMessages.push(message)
+        if (mocks.workerFailures > 0) {
+            mocks.workerFailures -= 1
+            queueMicrotask(() => this.emit('error', { message: 'simulated worker crash' }))
+            return
+        }
         const result = {
             id: message.id,
             pixels: message.pixels,
             histogram: { red: [1], green: [1], blue: [1], luma: [1] },
         }
-        queueMicrotask(() => this.listeners.forEach((listener) => listener({ data: result })))
+        queueMicrotask(() => this.emit('message', { data: result }))
     }
     terminate() {}
 }
@@ -101,10 +128,14 @@ describe('Photo Editor page', () => {
         mocks.decodeRawFile.mockReset().mockResolvedValue({ ...decodedPhoto, metadata: { ...decodedPhoto.metadata, raw: true } })
         mocks.isRawFile.mockClear()
         mocks.drawGeometry.mockClear()
+        mocks.drawGeometryAtSize.mockClear()
         mocks.loadEditorSession.mockReset().mockResolvedValue(null)
         mocks.saveEditorSource.mockReset().mockResolvedValue()
         mocks.saveEditorState.mockReset().mockResolvedValue()
         mocks.clearEditorSession.mockReset().mockResolvedValue()
+        mocks.workerMessages.length = 0
+        mocks.workerFailures = 0
+        mocks.workerInstances = 0
         vi.stubGlobal('Worker', WorkerStub)
         vi.stubGlobal('ImageData', ImageDataStub)
         vi.stubGlobal('PointerEvent', MouseEvent)
@@ -233,8 +264,36 @@ describe('Photo Editor page', () => {
             const next = min + (max - min) * 0.6
             fireEvent.change(slider, { target: { value: String(next) } })
         }
-        await waitFor(() => expect(mocks.drawGeometry).toHaveBeenCalled())
+        await waitFor(() => expect(mocks.drawGeometryAtSize).toHaveBeenCalled())
         expect(screen.queryByText(/could not|failed/i)).not.toBeInTheDocument()
+    })
+
+    it('uses a smaller live preview while dragging and settles at full working quality', async () => {
+        const largePhoto = { ...decodedPhoto, width: 1200, height: 800 }
+        mocks.decodeStandardFile.mockResolvedValueOnce(largePhoto)
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'responsive.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('responsive')
+        await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 1200)).toBe(true))
+
+        mocks.workerMessages.length = 0
+        const exposure = screen.getByRole('slider', { name: 'Exposure' })
+        fireEvent.pointerDown(exposure, { pointerId: 11 })
+        fireEvent.change(exposure, { target: { value: '1' } })
+        await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 560)).toBe(true))
+        fireEvent.pointerUp(exposure, { pointerId: 11 })
+        await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 1200)).toBe(true))
+    })
+
+    it('recovers from a preview worker crash without leaving Processing stuck', async () => {
+        mocks.workerFailures = 1
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'recovery.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('recovery')
+        await waitFor(() => expect(mocks.drawGeometryAtSize).toHaveBeenCalled(), { timeout: 1500 })
+        await waitFor(() => expect(screen.queryByText('Processing...')).not.toBeInTheDocument())
+        expect(mocks.workerInstances).toBeGreaterThanOrEqual(3)
+        expect(screen.queryByText(/simulated worker crash/i)).not.toBeInTheDocument()
     })
 
     it('restores the local source and editor state, then explicitly clears it', async () => {

@@ -199,23 +199,6 @@
     text-transform: uppercase;
 }
 
-.editor-processing-dots {
-    display: inline-block;
-    width: 0.45em;
-    overflow: hidden;
-    vertical-align: bottom;
-    white-space: nowrap;
-    animation: editor-processing-dots 1.05s steps(1, end) infinite;
-}
-
-.editor-processing-dots::after { content: '...'; }
-
-@keyframes editor-processing-dots {
-    0%, 100% { width: 0.45em; }
-    33% { width: 0.9em; }
-    66% { width: 1.35em; }
-}
-
 .editor-sidebar {
     max-height: 72vh;
     overflow: auto;

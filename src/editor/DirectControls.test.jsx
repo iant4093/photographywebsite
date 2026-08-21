@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ColorWheel, ToneCurve } from './DirectControls'
-import { curveCoordinates, gradeCoordinates } from './directControlMath'
+import { anchoredPan, curveCoordinates, gradeCoordinates } from './directControlMath'
 
 const rectangle = { left: 0, top: 0, width: 200, height: 200, right: 200, bottom: 200, x: 0, y: 0, toJSON: () => ({}) }
 
@@ -13,6 +13,18 @@ describe('editor direct-manipulation controls', () => {
     it('converts curve pointer positions into input and output percentages', () => {
         expect(curveCoordinates(rectangle, 50, 150)).toEqual({ x: 25, y: 25 })
         expect(curveCoordinates(rectangle, -20, 240)).toEqual({ x: 0, y: 0 })
+    })
+
+    it('keeps the pixel below the cursor anchored while zooming', () => {
+        expect(anchoredPan({
+            cursorX: 700,
+            cursorY: 250,
+            centerX: 500,
+            centerY: 400,
+            currentPan: { x: 0, y: 0 },
+            currentScale: 0.5,
+            nextScale: 1,
+        })).toEqual({ x: -200, y: 150 })
     })
 
     it('adds a tone-curve point directly on the graph without sliders', () => {

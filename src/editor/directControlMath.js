@@ -18,3 +18,13 @@ export function gradeCoordinates(rect, clientX, clientY) {
         saturation: clamp(Math.hypot(deltaX, deltaY) / radius * 100, 0, 100),
     }
 }
+
+export function anchoredPan({ cursorX, cursorY, centerX, centerY, currentPan, currentScale, nextScale }) {
+    const screenX = cursorX - centerX
+    const screenY = cursorY - centerY
+    const safeCurrentScale = Math.max(0.0001, currentScale)
+    return {
+        x: screenX - ((screenX - currentPan.x) / safeCurrentScale) * nextScale,
+        y: screenY - ((screenY - currentPan.y) / safeCurrentScale) * nextScale,
+    }
+}
