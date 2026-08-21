@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { isRawFile } from './rawDecoder'
 
 describe('RAW file recognition', () => {
-    it.each(['photo.CR3', 'photo.nef', 'photo.ARW', 'photo.dng', 'photo.raf'])('recognizes %s', (name) => {
+    it.each(['3fr', 'arw', 'cr2', 'cr3', 'dcr', 'dng', 'erf', 'fff', 'iiq', 'kdc', 'mef', 'mos', 'mrw', 'nef', 'nrw', 'orf', 'pef', 'raf', 'raw', 'rw2', 'rwl', 'srw', 'x3f'])('recognizes .%s RAW files', (extension) => {
+        const name = `photo.${extension.toUpperCase()}`
         expect(isRawFile({ name })).toBe(true)
     })
 

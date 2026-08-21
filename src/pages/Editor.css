@@ -318,18 +318,6 @@
     font-size: 0.7rem;
 }
 
-.editor-privacy-note {
-    width: min(104rem, 100%);
-    margin: 2rem auto 0;
-    display: grid;
-    grid-template-columns: minmax(10rem, 0.35fr) 1fr;
-    gap: 1rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--color-warm-border);
-}
-.editor-privacy-note strong { font-family: var(--font-serif); font-size: 1.35rem; font-weight: 400; }
-.editor-privacy-note p { max-width: 55rem; margin: 0; color: var(--color-warm-gray); line-height: 1.6; }
-
 [data-theme="dark"] .editor-page { --editor-panel: #201d19; }
 [data-theme="dark"] .editor-shell { box-shadow: 10px 10px 0 rgba(0,0,0,0.38); }
 [data-theme="dark"] .editor-range input[type="number"],
@@ -353,7 +341,6 @@
     .editor-image-canvas { max-width: 88vw; max-height: 48vh; border-width: 6px; }
     .editor-range { grid-template-columns: minmax(5.8rem, 1fr) minmax(5rem, 1.3fr) 3.2rem; }
     .editor-viewbar { align-items: flex-start; flex-direction: column; }
-    .editor-privacy-note { grid-template-columns: 1fr; padding-inline: 0.45rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

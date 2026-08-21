@@ -511,10 +511,6 @@ export default function Editor() {
                 </div>
             </section>
 
-            <section className="editor-privacy-note">
-                <strong>Private by design</strong>
-                <p>The editor has no upload endpoint. Your original, edits, history, and exported files remain in this browser session or in files you explicitly save.</p>
-            </section>
         </div>
     )
 }

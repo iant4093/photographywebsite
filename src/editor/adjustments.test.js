@@ -38,6 +38,34 @@ describe('browser editor adjustments', () => {
         expect([...clipped.slice(4, 7)]).toEqual([25, 100, 255])
     })
 
+    it('processes every adjustment family together', () => {
+        const settings = freshAdjustments()
+        Object.assign(settings, {
+            exposure: 0.4, contrast: 18, highlights: -22, shadows: 27, whites: 9, blacks: -11,
+            gamma: 1.1, temperature: 14, tint: -8, vibrance: 21, saturation: 12,
+            curve: [4, 28, 53, 79, 98], texture: 20, clarity: 16, dehaze: 9,
+            sharpening: 24, sharpeningRadius: 2, sharpeningDetail: 48,
+            noiseLuminance: 12, noiseColor: 8, vignette: -18, grain: 11,
+        })
+        for (const channel of Object.keys(settings.hsl)) {
+            settings.hsl[channel] = { hue: 6, saturation: 9, luminance: 4 }
+            settings.bwMixer[channel] = 5
+        }
+        for (const range of Object.keys(settings.grading)) settings.grading[range].saturation = 15
+        const pixels = new Uint8ClampedArray([
+            15, 30, 45, 255, 75, 95, 125, 255, 210, 180, 150, 255,
+            25, 180, 70, 255, 170, 30, 110, 255, 65, 85, 225, 255,
+            245, 215, 55, 255, 100, 100, 100, 255, 5, 5, 5, 255,
+        ])
+        const color = processImagePixels(pixels, 3, 3, settings)
+        expect(color).toHaveLength(pixels.length)
+        expect(color).not.toEqual(pixels)
+        settings.blackAndWhite = true
+        const monochrome = processImagePixels(pixels, 3, 3, settings)
+        expect(monochrome[0]).toBe(monochrome[1])
+        expect(monochrome[1]).toBe(monochrome[2])
+    })
+
     it('builds four 64-bin histograms', () => {
         const histogram = calculateHistogram(new Uint8ClampedArray([0, 128, 255, 255, 255, 128, 0, 255]))
         expect(histogram.red).toHaveLength(64)

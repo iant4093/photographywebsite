@@ -190,4 +190,21 @@ describe('Photo Editor page', () => {
         await user.click(redMixer)
         expect(within(redMixer.parentElement).getByRole('spinbutton', { name: 'hue value' })).toBeInTheDocument()
     })
+
+    it('accepts changes from every editor slider', async () => {
+        const user = userEvent.setup()
+        const { container } = render(<Editor />)
+        await user.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'controls.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('controls')
+        const sliders = [...container.querySelectorAll('.editor-sidebar input[type="range"]')]
+        expect(sliders.length).toBeGreaterThan(60)
+        for (const slider of sliders) {
+            const min = Number(slider.min)
+            const max = Number(slider.max)
+            const next = min + (max - min) * 0.6
+            fireEvent.change(slider, { target: { value: String(next) } })
+        }
+        await waitFor(() => expect(mocks.drawGeometry).toHaveBeenCalled())
+        expect(screen.queryByText(/could not|failed/i)).not.toBeInTheDocument()
+    })
 })
