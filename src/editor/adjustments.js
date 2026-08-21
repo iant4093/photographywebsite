@@ -12,7 +12,13 @@ export const DEFAULT_ADJUSTMENTS = Object.freeze({
     tint: 0,
     vibrance: 0,
     saturation: 0,
-    curve: [0, 25, 50, 75, 100],
+    curve: [
+        { x: 0, y: 0 },
+        { x: 25, y: 25 },
+        { x: 50, y: 50 },
+        { x: 75, y: 75 },
+        { x: 100, y: 100 },
+    ],
     hsl: Object.fromEntries(COLOR_CHANNELS.map((channel) => [channel, { hue: 0, saturation: 0, luminance: 0 }])),
     grading: {
         shadows: { hue: 220, saturation: 0 },
@@ -62,11 +68,30 @@ export function sanitizeAdjustments(candidate = {}) {
         if (typeof next[key] === 'number' && Number.isFinite(Number(candidate[key]))) next[key] = Number(candidate[key])
         else if (typeof next[key] === 'boolean') next[key] = Boolean(candidate[key])
     }
-    if (Array.isArray(candidate.curve) && candidate.curve.length === 5) {
-        next.curve = candidate.curve.reduce((points, value) => {
-            points.push(clamp(Number(value) || 0, points.at(-1) || 0, 100))
-            return points
-        }, [])
+    if (Array.isArray(candidate.curve) && candidate.curve.length >= 2) {
+        const legacyCurve = candidate.curve.every((point) => Number.isFinite(Number(point)))
+        const curve = candidate.curve
+            .slice(0, 16)
+            .flatMap((point, index, points) => {
+                const x = legacyCurve ? index / Math.max(1, points.length - 1) * 100 : Number(point?.x)
+                const y = legacyCurve ? Number(point) : Number(point?.y)
+                return Number.isFinite(x) && Number.isFinite(y)
+                    ? [{ x: clamp(x, 0, 100), y: clamp(y, 0, 100) }]
+                    : []
+            })
+            .sort((first, second) => first.x - second.x)
+            .reduce((points, point) => {
+                if (points.length && Math.abs(points.at(-1).x - point.x) < 0.5) points[points.length - 1] = point
+                else points.push(point)
+                return points
+            }, [])
+        if (curve.length >= 2) {
+            if (curve[0].x > 0) curve.unshift({ x: 0, y: 0 })
+            else curve[0].x = 0
+            if (curve.at(-1).x < 100) curve.push({ x: 100, y: 100 })
+            else curve[curve.length - 1].x = 100
+            next.curve = curve
+        }
     }
     for (const channel of COLOR_CHANNELS) {
         for (const property of ['hue', 'saturation', 'luminance']) {
@@ -156,10 +181,14 @@ function channelForHue(hue) {
 }
 
 function curveValue(value, points) {
-    const position = clamp(value, 0, 255) / 255 * 4
-    const index = Math.min(3, Math.floor(position))
-    const fraction = position - index
-    return ((points[index] + (points[index + 1] - points[index]) * fraction) / 100) * 255
+    const position = clamp(value, 0, 255) / 255 * 100
+    const upperIndex = points.findIndex((point) => point.x >= position)
+    if (upperIndex <= 0) return points[0].y / 100 * 255
+    if (upperIndex === -1) return points.at(-1).y / 100 * 255
+    const lower = points[upperIndex - 1]
+    const upper = points[upperIndex]
+    const fraction = (position - lower.x) / Math.max(0.001, upper.x - lower.x)
+    return (lower.y + (upper.y - lower.y) * fraction) / 100 * 255
 }
 
 function boxBlur(data, width, height, radius) {

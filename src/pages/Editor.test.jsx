@@ -107,6 +107,7 @@ describe('Photo Editor page', () => {
         mocks.clearEditorSession.mockReset().mockResolvedValue()
         vi.stubGlobal('Worker', WorkerStub)
         vi.stubGlobal('ImageData', ImageDataStub)
+        vi.stubGlobal('PointerEvent', MouseEvent)
         vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(canvasContext)
         vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
         vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
@@ -130,6 +131,9 @@ describe('Photo Editor page', () => {
         expect(mocks.saveEditorSource).toHaveBeenCalledWith(file)
         expect((await screen.findAllByText(/working preview/)).length).toBeGreaterThan(0)
         expect(screen.getByText(/Canon EOS R7/)).toBeInTheDocument()
+
+        fireEvent.click(container.querySelector('.editor-canvas-transform'))
+        await waitFor(() => expect(screen.getByRole('button', { name: '100%' })).toHaveClass('is-active'))
 
         fireEvent.change(screen.getByRole('spinbutton', { name: 'Exposure value' }), { target: { value: '1.2' } })
         expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(1.2)
@@ -203,7 +207,13 @@ describe('Photo Editor page', () => {
         }
         expect(screen.getByRole('spinbutton', { name: 'Temperature value' })).toBeInTheDocument()
         expect(screen.getByRole('spinbutton', { name: 'Grain value' })).toBeInTheDocument()
-        expect(screen.getByRole('spinbutton', { name: 'Midtones value' })).toBeInTheDocument()
+        expect(screen.getByRole('slider', { name: 'Tone curve point 3' })).toHaveAttribute('aria-valuetext', 'Input 50, output 50')
+        const midtoneWheel = screen.getByRole('slider', { name: 'midtones color wheel' })
+        vi.spyOn(midtoneWheel, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 200, height: 200, right: 200, bottom: 200, x: 0, y: 0, toJSON: () => ({}) })
+        fireEvent.pointerDown(midtoneWheel, { clientX: 200, clientY: 100, pointerId: 4 })
+        fireEvent.pointerUp(midtoneWheel, { pointerId: 4 })
+        expect(screen.getByRole('spinbutton', { name: 'midtones hue value' })).toHaveValue(90)
+        expect(screen.getByRole('spinbutton', { name: 'midtones saturation value' })).toHaveValue(100)
         expect(screen.getByRole('checkbox', { name: /Enable black and white/ })).toBeInTheDocument()
         const redMixer = screen.getAllByText('red').find((node) => node.tagName === 'SUMMARY')
         await user.click(redMixer)

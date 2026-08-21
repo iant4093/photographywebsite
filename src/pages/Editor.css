@@ -31,16 +31,6 @@
     line-height: 1.65;
 }
 
-.editor-kicker {
-    grid-column: 1 / -1;
-    margin: 0;
-    color: var(--color-amber-dark);
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-}
-
 .editor-shell {
     width: min(104rem, 100%);
     margin: 0 auto;
@@ -108,7 +98,8 @@
 }
 
 .editor-main {
-    min-height: 44rem;
+    height: clamp(38rem, 72vh, 52rem);
+    min-height: 38rem;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(18rem, 23rem);
 }
@@ -116,20 +107,19 @@
 .editor-stage {
     position: relative;
     min-width: 0;
-    min-height: 44rem;
+    min-height: 0;
     overflow: hidden;
     display: grid;
     place-items: center;
     touch-action: none;
     user-select: none;
-    background:
-        linear-gradient(45deg, rgba(255,255,255,0.025) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.025) 75%),
-        linear-gradient(45deg, rgba(255,255,255,0.025) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.025) 75%),
-        var(--editor-deep);
-    background-position: 0 0, 10px 10px;
-    background-size: 20px 20px;
-    cursor: grab;
+    background: var(--editor-deep);
+    cursor: default;
 }
+
+.editor-canvas-transform { cursor: zoom-in; }
+.editor-stage.is-zoomed .editor-canvas-transform { cursor: grab; }
+.editor-stage.is-panning .editor-canvas-transform { cursor: grabbing; }
 
 .editor-stage.is-dragging {
     outline: 3px solid var(--color-amber-light);
@@ -160,22 +150,23 @@
 .editor-drop-mark { font-family: var(--font-serif); font-size: 4rem; font-weight: 200; line-height: 1; }
 
 .editor-canvas-transform {
-    position: relative;
-    max-width: 90%;
-    max-height: 90%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
     transform-origin: center;
-    transition: transform 80ms linear;
+    transition: transform 140ms ease-out;
+    will-change: transform;
+    border: 8px solid #eee9df;
+    outline: 1px solid #6e675e;
+    box-shadow: 0 22px 55px rgba(0,0,0,0.38);
 }
+
+.editor-stage.is-panning .editor-canvas-transform { transition: none; }
 
 .editor-image-canvas {
     display: block;
-    max-width: min(100%, 78vw);
-    max-height: 70vh;
-    width: auto;
-    height: auto;
-    border: 10px solid #eee9df;
-    outline: 1px solid #6e675e;
-    box-shadow: 0 22px 55px rgba(0,0,0,0.38);
+    width: 100%;
+    height: 100%;
 }
 
 .editor-before-canvas {
@@ -206,6 +197,23 @@
     font-size: 0.7rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
+}
+
+.editor-processing-dots {
+    display: inline-block;
+    width: 0.45em;
+    overflow: hidden;
+    vertical-align: bottom;
+    white-space: nowrap;
+    animation: editor-processing-dots 1.05s steps(1, end) infinite;
+}
+
+.editor-processing-dots::after { content: '...'; }
+
+@keyframes editor-processing-dots {
+    0%, 100% { width: 0.45em; }
+    33% { width: 0.9em; }
+    66% { width: 1.35em; }
 }
 
 .editor-sidebar {
@@ -285,6 +293,17 @@
     color: var(--color-charcoal);
     font: inherit;
     text-align: right;
+    appearance: textfield;
+}
+
+.editor-text-field input[type="number"] { appearance: textfield; }
+
+.editor-range input[type="number"]::-webkit-inner-spin-button,
+.editor-range input[type="number"]::-webkit-outer-spin-button,
+.editor-text-field input[type="number"]::-webkit-inner-spin-button,
+.editor-text-field input[type="number"]::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
 }
 
 .editor-preset-grid,
@@ -293,19 +312,120 @@
 .editor-subsection > summary { color: var(--color-amber-dark); padding: 0.65rem; }
 .editor-subsection .editor-range { padding: 0 0.65rem 0.65rem; }
 
-.editor-curve-preview { height: 8rem; border: 1px solid var(--color-warm-border); background: linear-gradient(to right, transparent 49.5%, var(--color-warm-border) 50%, transparent 50.5%), linear-gradient(to bottom, transparent 49.5%, var(--color-warm-border) 50%, transparent 50.5%); }
-.editor-curve-preview svg { width: 100%; height: 100%; }
-.editor-curve-preview polyline { fill: none; stroke: var(--color-charcoal); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.editor-curve-control { display: grid; gap: 0.6rem; }
+
+.editor-curve-editor {
+    width: 100%;
+    aspect-ratio: 1;
+    max-height: 19rem;
+    overflow: visible;
+    border: 1px solid var(--color-warm-border);
+    background:
+        linear-gradient(to right, transparent 24.7%, var(--color-warm-border) 25%, transparent 25.3%, transparent 49.7%, var(--color-warm-border) 50%, transparent 50.3%, transparent 74.7%, var(--color-warm-border) 75%, transparent 75.3%),
+        linear-gradient(to bottom, transparent 24.7%, var(--color-warm-border) 25%, transparent 25.3%, transparent 49.7%, var(--color-warm-border) 50%, transparent 50.3%, transparent 74.7%, var(--color-warm-border) 75%, transparent 75.3%),
+        color-mix(in srgb, var(--color-charcoal) 3%, transparent);
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.editor-curve-editor polyline {
+    fill: none;
+    stroke: var(--color-charcoal);
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
+}
+
+.editor-curve-editor circle {
+    fill: var(--editor-panel);
+    stroke: var(--color-charcoal);
+    stroke-width: 1.2;
+    vector-effect: non-scaling-stroke;
+    cursor: grab;
+}
+
+.editor-curve-editor circle:hover,
+.editor-curve-editor circle:focus,
+.editor-curve-editor circle.is-selected {
+    fill: var(--color-amber-light);
+    outline: none;
+    stroke-width: 2;
+}
+
+.editor-direct-control-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    color: var(--color-warm-gray);
+    font-size: 0.58rem;
+    line-height: 1.4;
+}
+
+.editor-direct-control-footer button { flex: 0 0 auto; }
 
 .editor-grading-row { display: grid; gap: 0.55rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--color-warm-border); }
 .editor-grading-row > strong { color: var(--color-amber-dark); font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; }
+
+.editor-color-wheel {
+    position: relative;
+    width: min(12rem, 78%);
+    aspect-ratio: 1;
+    margin: 0.25rem auto 0.5rem;
+    border: 1px solid var(--color-warm-border);
+    border-radius: 50%;
+    background:
+        radial-gradient(circle, color-mix(in srgb, var(--editor-panel) 92%, #888) 0 4%, transparent 72%),
+        conic-gradient(#f44336, #ffdf4a, #53c96b, #42c8d6, #4d6cff, #b34ee9, #f4438c, #f44336);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-charcoal) 22%, transparent);
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.editor-color-wheel:focus-visible {
+    outline: 2px solid var(--color-amber-light);
+    outline-offset: 3px;
+}
+
+.editor-color-wheel-marker {
+    position: absolute;
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 2px solid #f8f5ef;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px #171512, 0 2px 6px rgba(0,0,0,0.45);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
 .editor-check { display: flex; align-items: center; gap: 0.6rem; font-size: 0.75rem; }
 .editor-check input { accent-color: var(--color-amber-dark); }
 
 .editor-select,
 .editor-text-field { display: grid; gap: 0.35rem; color: var(--color-warm-gray); font-size: 0.7rem; }
+.editor-select { position: relative; }
+.editor-select::after {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.66rem;
+    content: '⌄';
+    color: var(--color-amber-dark);
+    font-size: 0.85rem;
+    pointer-events: none;
+}
 .editor-select select,
-.editor-text-field input { width: 100%; min-height: 2.35rem; padding: 0.45rem 0.55rem; color: var(--color-charcoal); }
+.editor-text-field input {
+    width: 100%;
+    min-height: 2.55rem;
+    padding: 0.5rem 0.65rem;
+    color: var(--color-charcoal);
+    border: 1px solid var(--color-warm-border);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--editor-panel) 84%, var(--color-charcoal));
+}
+.editor-select select {
+    padding-right: 2rem;
+    appearance: none;
+}
+.editor-export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
 .editor-export-note { margin: 0; color: var(--color-warm-gray); font-size: 0.68rem; line-height: 1.5; }
 .editor-export-progress { display: grid; gap: 0.55rem; font-size: 0.7rem; }
 .editor-export-progress progress { width: 100%; accent-color: var(--color-amber-dark); }
@@ -339,9 +459,9 @@
 
 @media (max-width: 1000px) {
     .editor-heading { grid-template-columns: 1fr; }
-    .editor-main { grid-template-columns: 1fr; }
-    .editor-stage { min-height: 60vh; }
-    .editor-sidebar { max-height: none; border-top: 1px solid var(--color-warm-border); border-left: 0; }
+    .editor-main { height: auto; grid-template-columns: 1fr; }
+    .editor-stage { height: 60vh; min-height: 32rem; }
+    .editor-sidebar { height: auto; max-height: none; border-top: 1px solid var(--color-warm-border); border-left: 0; }
 }
 
 @media (max-width: 640px) {
@@ -349,10 +469,13 @@
     .editor-heading { padding-inline: 0.45rem; }
     .editor-shell { box-shadow: 4px 4px 0 color-mix(in srgb, var(--color-charcoal) 12%, transparent); }
     .editor-toolbar { align-items: flex-start; flex-direction: column; }
-    .editor-main, .editor-stage { min-height: 33rem; }
+    .editor-main { min-height: 0; }
+    .editor-stage { min-height: 33rem; }
     .editor-stage { height: 56vh; }
-    .editor-image-canvas { max-width: 88vw; max-height: 48vh; border-width: 6px; }
+    .editor-canvas-transform { border-width: 6px; }
+    .editor-image-canvas { max-width: none; max-height: none; }
     .editor-range { grid-template-columns: minmax(5.8rem, 1fr) minmax(5rem, 1.3fr) 3.2rem; }
+    .editor-export-options { grid-template-columns: 1fr; }
     .editor-viewbar { align-items: flex-start; flex-direction: column; }
 }
 

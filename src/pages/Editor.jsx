@@ -5,6 +5,7 @@ import { canvasToBlob, cropForAspect, drawGeometry, outputDimensions } from '../
 import { decodeStandardFile, makePreviewSource } from '../editor/standardDecoder'
 import { decodeRawFile, isRawFile } from '../editor/rawDecoder'
 import { clearEditorSession, loadEditorSession, saveEditorSource, saveEditorState } from '../editor/sessionStore'
+import { ColorWheel, ToneCurve } from '../editor/DirectControls'
 import './Editor.css'
 
 const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/avif,.dng,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.srw,.3fr,.fff,.iiq,.x3f,.raw'
@@ -143,7 +144,10 @@ export default function Editor() {
     const beforeCanvasRef = useRef(null)
     const workerRef = useRef(null)
     const renderIdRef = useRef(0)
+    const previewRenderRef = useRef({ busy: false, pending: null })
     const panStartRef = useRef(null)
+    const suppressImageClickRef = useRef(false)
+    const liveEditStartRef = useRef(null)
     const openGenerationRef = useRef(0)
     const restorePromiseRef = useRef(null)
     const [source, setSource] = useState(null)
@@ -157,12 +161,15 @@ export default function Editor() {
     const [error, setError] = useState('')
     const [histogram, setHistogram] = useState(null)
     const [isDragging, setIsDragging] = useState(false)
+    const [isPanning, setIsPanning] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [showClipping, setShowClipping] = useState(false)
     const [compare, setCompare] = useState(false)
     const [comparePosition, setComparePosition] = useState(50)
     const [zoom, setZoom] = useState('fit')
     const [pan, setPan] = useState({ x: 0, y: 0 })
+    const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 })
+    const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 })
     const [sessionSourceReady, setSessionSourceReady] = useState(false)
     const [sessionStatus, setSessionStatus] = useState('No saved session')
     const [customPresets, setCustomPresets] = useState(() => {
@@ -173,8 +180,29 @@ export default function Editor() {
     const exportWorkerRef = useRef(null)
 
     useEffect(() => {
+        const previewQueue = previewRenderRef.current
         workerRef.current = new Worker(new URL('../editor/editorWorker.js', import.meta.url), { type: 'module' })
-        return () => workerRef.current?.terminate()
+        return () => {
+            previewQueue.pending = null
+            workerRef.current?.terminate()
+        }
+    }, [])
+
+    useEffect(() => {
+        const stage = stageRef.current
+        if (!stage) return undefined
+        const updateViewport = () => setViewportSize({
+            width: Math.max(1, stage.clientWidth),
+            height: Math.max(1, stage.clientHeight),
+        })
+        const frame = window.requestAnimationFrame(updateViewport)
+        if (!globalThis.ResizeObserver) return () => window.cancelAnimationFrame(frame)
+        const observer = new ResizeObserver(updateViewport)
+        observer.observe(stage)
+        return () => {
+            window.cancelAnimationFrame(frame)
+            observer.disconnect()
+        }
     }, [])
 
     const snapshot = useCallback(() => ({ adjustments: structuredClone(adjustments), geometry: structuredClone(geometry) }), [adjustments, geometry])
@@ -184,6 +212,22 @@ export default function Editor() {
         setAdjustments(sanitizeAdjustments(nextAdjustments))
         setGeometry(sanitizeGeometry(nextGeometry))
     }, [adjustments, geometry, snapshot])
+
+    const beginLiveEdit = useCallback(() => {
+        if (!liveEditStartRef.current) liveEditStartRef.current = snapshot()
+    }, [snapshot])
+
+    const updateAdjustmentsLive = useCallback((nextAdjustments) => {
+        setAdjustments(sanitizeAdjustments(nextAdjustments))
+    }, [])
+
+    const finishLiveEdit = useCallback(() => {
+        if (!liveEditStartRef.current) return
+        const startingSnapshot = liveEditStartRef.current
+        liveEditStartRef.current = null
+        setHistory((items) => [...items.slice(-39), startingSnapshot])
+        setFuture([])
+    }, [])
 
     const undo = useCallback(() => {
         if (!history.length) return
@@ -219,32 +263,38 @@ export default function Editor() {
         return () => { window.removeEventListener('keydown', keydown); window.removeEventListener('keyup', keyup) }
     }, [redo, undo])
 
-    const drawCanvases = useCallback((processedCanvas) => {
-        if (!preview || !afterCanvasRef.current || !beforeCanvasRef.current) return
-        drawGeometry(processedCanvas, afterCanvasRef.current, geometry, 1800, 1200)
-        drawGeometry(createCanvasFromPixels(preview.pixels, preview.width, preview.height), beforeCanvasRef.current, geometry, 1800, 1200)
-    }, [geometry, preview])
+    const drainPreviewQueue = useCallback(async () => {
+        const queue = previewRenderRef.current
+        if (queue.busy || !workerRef.current) return
+        queue.busy = true
+        setIsProcessing(true)
+        while (queue.pending) {
+            const task = queue.pending
+            queue.pending = null
+            try {
+                const result = await workerRequest(workerRef.current, task.preview, task.adjustments, task.showClipping)
+                if (task.renderId !== renderIdRef.current || !afterCanvasRef.current || !beforeCanvasRef.current) continue
+                const processedCanvas = createCanvasFromPixels(result.pixels, task.preview.width, task.preview.height)
+                const originalCanvas = createCanvasFromPixels(task.preview.pixels, task.preview.width, task.preview.height)
+                drawGeometry(processedCanvas, afterCanvasRef.current, task.geometry, 1800, 1200)
+                drawGeometry(originalCanvas, beforeCanvasRef.current, task.geometry, 1800, 1200)
+                setDisplaySize({ width: afterCanvasRef.current.width, height: afterCanvasRef.current.height })
+                setHistogram(result.histogram)
+                setStatus(`${task.preview.width} × ${task.preview.height} working preview`)
+            } catch (processingError) {
+                if (task.renderId === renderIdRef.current) setError(processingError.message)
+            }
+        }
+        queue.busy = false
+        setIsProcessing(false)
+    }, [])
 
     useEffect(() => {
-        if (!preview || !workerRef.current) return undefined
+        if (!preview || !workerRef.current) return
         const renderId = ++renderIdRef.current
-        const timer = window.setTimeout(async () => {
-            setIsProcessing(true)
-            try {
-                const result = await workerRequest(workerRef.current, preview, adjustments, showClipping)
-                if (renderId !== renderIdRef.current) return
-                const processedCanvas = createCanvasFromPixels(result.pixels, preview.width, preview.height)
-                drawCanvases(processedCanvas)
-                setHistogram(result.histogram)
-                setStatus(`${preview.width} × ${preview.height} working preview`)
-            } catch (processingError) {
-                if (renderId === renderIdRef.current) setError(processingError.message)
-            } finally {
-                if (renderId === renderIdRef.current) setIsProcessing(false)
-            }
-        }, 45)
-        return () => window.clearTimeout(timer)
-    }, [adjustments, drawCanvases, preview, showClipping])
+        previewRenderRef.current.pending = { renderId, preview, adjustments, geometry, showClipping }
+        void drainPreviewQueue()
+    }, [adjustments, drainPreviewQueue, geometry, preview, showClipping])
 
     const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false } = {}) => {
         if (!file) return
@@ -266,7 +316,7 @@ export default function Editor() {
             if (generation !== openGenerationRef.current) return
             const nextAdjustments = restoredState ? sanitizeAdjustments(restoredState.adjustments) : freshAdjustments()
             const nextGeometry = restoredState ? sanitizeGeometry(restoredState.geometry) : freshGeometry()
-            const nextZoom = restoredState?.zoom === 'fit'
+            const nextZoom = !restoredState || restoredState.zoom === 'fit'
                 ? 'fit'
                 : Math.min(400, Math.max(25, Number(restoredState?.zoom) || 100))
             const nextPan = {
@@ -274,7 +324,7 @@ export default function Editor() {
                 y: Number.isFinite(Number(restoredState?.pan?.y)) ? Number(restoredState.pan.y) : 0,
             }
             setSource(decoded)
-            setPreview(makePreviewSource(decoded))
+            setPreview(makePreviewSource(decoded, 1400))
             setFilename(file.name.replace(/\.[^.]+$/, ''))
             setAdjustments(nextAdjustments)
             setGeometry(nextGeometry)
@@ -459,6 +509,7 @@ export default function Editor() {
     const closePhoto = async () => {
         ++openGenerationRef.current
         ++renderIdRef.current
+        previewRenderRef.current.pending = null
         exportWorkerRef.current?.terminate()
         exportWorkerRef.current = null
         setSource(null)
@@ -474,6 +525,8 @@ export default function Editor() {
         setComparePosition(50)
         setZoom('fit')
         setPan({ x: 0, y: 0 })
+        setIsPanning(false)
+        setDisplaySize({ width: 1, height: 1 })
         setExportOptions({ ...DEFAULT_EXPORT_OPTIONS })
         setExportState({ active: false, progress: 0, label: '' })
         setIsProcessing(false)
@@ -489,13 +542,45 @@ export default function Editor() {
         }
     }
 
-    const scale = zoom === 'fit' ? 1 : Number(zoom) / 100
+    const fitScale = Math.min(
+        1,
+        Math.max(0.01, (viewportSize.width - 28) / Math.max(1, displaySize.width)),
+        Math.max(0.01, (viewportSize.height - 28) / Math.max(1, displaySize.height)),
+    )
+    const scale = zoom === 'fit' ? fitScale : Number(zoom) / 100
+    const minimumZoom = Math.max(10, Math.min(100, fitScale * 100))
+
+    const clampPan = (candidate, nextZoom = zoom) => {
+        const nextScale = nextZoom === 'fit' ? fitScale : Number(nextZoom) / 100
+        const horizontalLimit = Math.max(0, (displaySize.width * nextScale - viewportSize.width) / 2)
+        const verticalLimit = Math.max(0, (displaySize.height * nextScale - viewportSize.height) / 2)
+        return {
+            x: Math.min(horizontalLimit, Math.max(-horizontalLimit, candidate.x)),
+            y: Math.min(verticalLimit, Math.max(-verticalLimit, candidate.y)),
+        }
+    }
+
+    const changeZoom = (nextZoom) => {
+        const normalizedZoom = nextZoom === 'fit'
+            ? 'fit'
+            : Math.min(400, Math.max(minimumZoom, Number(nextZoom)))
+        setZoom(normalizedZoom)
+        setPan((current) => clampPan(current, normalizedZoom))
+    }
+
+    const toggleImageZoom = () => {
+        if (zoom === 'fit') changeZoom(fitScale >= 0.99 ? 200 : 100)
+        else {
+            setPan({ x: 0, y: 0 })
+            changeZoom('fit')
+        }
+    }
+
     const metadataLine = useMemo(() => formatMetadata(source?.metadata), [source])
 
     return (
         <div className="editor-page">
             <header className="editor-heading">
-                <p className="editor-kicker">Browser darkroom</p>
                 <h1>Photo Editor</h1>
                 <p>Edit standard photos and camera RAW files entirely on this device. Nothing is uploaded or stored by the website.</p>
             </header>
@@ -520,7 +605,7 @@ export default function Editor() {
                 <div className="editor-main">
                     <div
                         ref={stageRef}
-                        className={`editor-stage${isDragging ? ' is-dragging' : ''}`}
+                        className={`editor-stage${isDragging ? ' is-dragging' : ''}${zoom !== 'fit' ? ' is-zoomed' : ''}${isPanning ? ' is-panning' : ''}`}
                         onDragEnter={(event) => { event.preventDefault(); setIsDragging(true) }}
                         onDragOver={(event) => event.preventDefault()}
                         onDragLeave={(event) => { if (event.currentTarget === event.target) setIsDragging(false) }}
@@ -528,19 +613,40 @@ export default function Editor() {
                         onWheel={(event) => {
                             if (!source) return
                             event.preventDefault()
-                            const current = zoom === 'fit' ? 100 : Number(zoom)
-                            setZoom(Math.min(400, Math.max(25, current + (event.deltaY < 0 ? 10 : -10))))
+                            const current = zoom === 'fit' ? fitScale * 100 : Number(zoom)
+                            changeZoom(current + (event.deltaY < 0 ? 12 : -12))
                         }}
                         onPointerDown={(event) => {
                             if (!source) return
-                            panStartRef.current = { x: event.clientX, y: event.clientY, pan }
-                            event.currentTarget.setPointerCapture(event.pointerId)
+                            const isImage = event.target instanceof Element && Boolean(event.target.closest('.editor-canvas-transform'))
+                            if (!isImage) return
+                            panStartRef.current = { x: event.clientX, y: event.clientY, pan, moved: false, isImage }
+                            if (zoom !== 'fit') setIsPanning(true)
+                            event.currentTarget.setPointerCapture?.(event.pointerId)
                         }}
                         onPointerMove={(event) => {
-                            if (!panStartRef.current || zoom === 'fit') return
-                            setPan({ x: panStartRef.current.pan.x + event.clientX - panStartRef.current.x, y: panStartRef.current.pan.y + event.clientY - panStartRef.current.y })
+                            if (!panStartRef.current) return
+                            const deltaX = event.clientX - panStartRef.current.x
+                            const deltaY = event.clientY - panStartRef.current.y
+                            if (Math.hypot(deltaX, deltaY) > 3) panStartRef.current.moved = true
+                            if (zoom === 'fit') return
+                            setPan(clampPan({ x: panStartRef.current.pan.x + deltaX, y: panStartRef.current.pan.y + deltaY }))
                         }}
-                        onPointerUp={() => { panStartRef.current = null }}
+                        onPointerUp={(event) => {
+                            const interaction = panStartRef.current
+                            panStartRef.current = null
+                            setIsPanning(false)
+                            event.currentTarget.releasePointerCapture?.(event.pointerId)
+                            suppressImageClickRef.current = Boolean(interaction?.moved)
+                            if (interaction?.moved) {
+                                window.requestAnimationFrame(() => { suppressImageClickRef.current = false })
+                            }
+                        }}
+                        onPointerCancel={() => {
+                            panStartRef.current = null
+                            suppressImageClickRef.current = false
+                            setIsPanning(false)
+                        }}
                     >
                         {!source ? (
                             <button type="button" className="editor-dropzone" onClick={() => fileInputRef.current?.click()}>
@@ -550,13 +656,29 @@ export default function Editor() {
                                 <small>JPEG · PNG · WebP · AVIF · DNG · CR2 · CR3 · NEF · ARW · RAF and more</small>
                             </button>
                         ) : (
-                            <div className="editor-canvas-transform" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
+                            <div
+                                className="editor-canvas-transform"
+                                style={{
+                                    width: `${displaySize.width}px`,
+                                    height: `${displaySize.height}px`,
+                                    marginLeft: `${displaySize.width / -2}px`,
+                                    marginTop: `${displaySize.height / -2}px`,
+                                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+                                }}
+                                onClick={() => {
+                                    if (suppressImageClickRef.current) {
+                                        suppressImageClickRef.current = false
+                                        return
+                                    }
+                                    toggleImageZoom()
+                                }}
+                            >
                                 <canvas ref={afterCanvasRef} className="editor-image-canvas" aria-label="Edited photo preview" />
                                 <canvas ref={beforeCanvasRef} className="editor-image-canvas editor-before-canvas" aria-label="Original photo preview" style={{ clipPath: compare ? `inset(0 ${100 - comparePosition}% 0 0)` : 'inset(0 100% 0 0)' }} />
                                 {compare && <div className="editor-compare-line" style={{ left: `${comparePosition}%` }} />}
                             </div>
                         )}
-                        {isProcessing && <div className="editor-processing" role="status">Processing locally…</div>}
+                        {isProcessing && <div className="editor-processing" role="status"><span>Processing</span><span className="editor-processing-dots" aria-hidden="true" /></div>}
                     </div>
 
                     <aside className="editor-sidebar" aria-label="Editing controls">
@@ -588,10 +710,13 @@ export default function Editor() {
                         ))}
 
                         <ControlSection title="Tone curve">
-                            <div className="editor-curve-preview" aria-hidden="true"><svg viewBox="0 0 100 100"><polyline points={adjustments.curve.map((value, index) => `${index * 25},${100 - value}`).join(' ')} /></svg></div>
-                            {['Black point', 'Shadows', 'Midtones', 'Highlights', 'White point'].map((label, index) => (
-                                <RangeControl key={label} label={label} value={adjustments.curve[index]} min={0} max={100} step={1} onChange={(value) => { const curve = [...adjustments.curve]; curve[index] = value; changeAdjustment('curve', curve) }} onReset={() => changeAdjustment('curve', freshAdjustments().curve)} />
-                            ))}
+                            <ToneCurve
+                                points={adjustments.curve}
+                                onEditStart={beginLiveEdit}
+                                onChange={(curve) => updateAdjustmentsLive({ ...adjustments, curve })}
+                                onEditEnd={finishLiveEdit}
+                                onReset={() => commit({ ...adjustments, curve: freshAdjustments().curve }, geometry)}
+                            />
                         </ControlSection>
 
                         <ControlSection title="Color mixer">
@@ -609,6 +734,14 @@ export default function Editor() {
                             {Object.entries(adjustments.grading).map(([range, values]) => (
                                 <div className="editor-grading-row" key={range}>
                                     <strong>{range}</strong>
+                                    <ColorWheel
+                                        label={range}
+                                        hue={values.hue}
+                                        saturation={values.saturation}
+                                        onEditStart={beginLiveEdit}
+                                        onChange={(next) => updateAdjustmentsLive({ ...adjustments, grading: { ...adjustments.grading, [range]: next } })}
+                                        onEditEnd={finishLiveEdit}
+                                    />
                                     <RangeControl label={`${range} hue`} value={values.hue} min={0} max={359} step={1} onChange={(value) => commit({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, hue: value } } }, geometry)} onReset={() => {}} />
                                     <RangeControl label={`${range} saturation`} value={values.saturation} min={0} max={100} step={1} onChange={(value) => commit({ ...adjustments, grading: { ...adjustments.grading, [range]: { ...values, saturation: value } } }, geometry)} onReset={() => {}} />
                                 </div>
@@ -645,9 +778,11 @@ export default function Editor() {
                         </ControlSection>
 
                         <ControlSection title="Export" defaultOpen>
-                            <label className="editor-select">Format<select value={exportOptions.format} onChange={(event) => setExportOptions({ ...exportOptions, format: event.target.value })}><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
+                            <div className="editor-export-options">
+                                <label className="editor-select">Format<select value={exportOptions.format} onChange={(event) => setExportOptions({ ...exportOptions, format: event.target.value })}><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
+                                <label className="editor-select">Dimensions<select value={exportOptions.resizeMode} onChange={(event) => setExportOptions({ ...exportOptions, resizeMode: event.target.value })}><option value="original">Original size</option><option value="longEdge">Long edge</option><option value="width">Width</option><option value="height">Height</option></select></label>
+                            </div>
                             <RangeControl label="Quality" value={exportOptions.quality} min={1} max={100} step={1} onChange={(quality) => setExportOptions({ ...exportOptions, quality })} onReset={() => setExportOptions({ ...exportOptions, quality: 92 })} />
-                            <label className="editor-select">Dimensions<select value={exportOptions.resizeMode} onChange={(event) => setExportOptions({ ...exportOptions, resizeMode: event.target.value })}><option value="original">Original size</option><option value="longEdge">Long edge</option><option value="width">Width</option><option value="height">Height</option></select></label>
                             {exportOptions.resizeMode !== 'original' && <label className="editor-text-field">Pixels<input type="number" min="1" max="20000" value={exportOptions.size} onChange={(event) => setExportOptions({ ...exportOptions, size: Number(event.target.value) })} /></label>}
                             <label className="editor-text-field">Filename suffix<input value={exportOptions.suffix} onChange={(event) => setExportOptions({ ...exportOptions, suffix: event.target.value.replace(/[^a-zA-Z0-9-_]/g, '') })} /></label>
                             <p className="editor-export-note">Exports use sRGB and remove camera and location metadata by default.</p>
@@ -664,10 +799,10 @@ export default function Editor() {
                         <span>{sessionStatus}</span>
                     </div>
                     <div>
-                        <button type="button" onClick={() => { setZoom('fit'); setPan({ x: 0, y: 0 }) }} className={zoom === 'fit' ? 'is-active' : ''}>Fit</button>
-                        <button type="button" onClick={() => setZoom(100)} className={zoom === 100 ? 'is-active' : ''}>100%</button>
-                        <button type="button" onClick={() => setZoom(Math.max(25, (zoom === 'fit' ? 100 : Number(zoom)) - 25))}>−</button>
-                        <button type="button" onClick={() => setZoom(Math.min(400, (zoom === 'fit' ? 100 : Number(zoom)) + 25))}>+</button>
+                        <button type="button" onClick={() => { setPan({ x: 0, y: 0 }); changeZoom('fit') }} className={zoom === 'fit' ? 'is-active' : ''}>Fit</button>
+                        <button type="button" onClick={() => changeZoom(100)} className={zoom === 100 ? 'is-active' : ''}>100%</button>
+                        <button type="button" onClick={() => changeZoom((zoom === 'fit' ? fitScale * 100 : Number(zoom)) - 25)}>−</button>
+                        <button type="button" onClick={() => changeZoom((zoom === 'fit' ? fitScale * 100 : Number(zoom)) + 25)}>+</button>
                     </div>
                 </div>
             </section>

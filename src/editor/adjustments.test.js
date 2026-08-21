@@ -13,7 +13,12 @@ describe('browser editor adjustments', () => {
         const controls = sanitizeAdjustments({ exposure: '2', hsl: { blue: { saturation: 500 } }, curve: [0, 20, 50, 80, 100] })
         expect(controls.exposure).toBe(2)
         expect(controls.hsl.blue.saturation).toBe(100)
-        expect(sanitizeAdjustments({ curve: [0, 80, 20, 90, 100] }).curve).toEqual([0, 80, 80, 90, 100])
+        expect(controls.curve).toEqual([
+            { x: 0, y: 0 }, { x: 25, y: 20 }, { x: 50, y: 50 }, { x: 75, y: 80 }, { x: 100, y: 100 },
+        ])
+        expect(sanitizeAdjustments({ curve: [{ x: 0, y: 5 }, { x: 34, y: 80 }, { x: 68, y: 20 }, { x: 100, y: 96 }] }).curve).toEqual([
+            { x: 0, y: 5 }, { x: 34, y: 80 }, { x: 68, y: 20 }, { x: 100, y: 96 },
+        ])
         const geometry = sanitizeGeometry({ crop: { x: 0.8, y: 0.8, width: 0.8, height: 0.8 } })
         expect(geometry.crop.width).toBeCloseTo(0.2)
         expect(geometry.crop.height).toBeCloseTo(0.2)
