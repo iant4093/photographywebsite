@@ -153,6 +153,7 @@ describe('Photo Editor page', () => {
         const user = userEvent.setup()
         const { container } = render(<Editor />)
         expect(screen.getByRole('heading', { name: 'Photo Editor' })).toBeInTheDocument()
+        expect(screen.getByText(/entirely on your device/)).toBeInTheDocument()
         expect(screen.getByText(/Nothing is uploaded or stored/)).toBeInTheDocument()
         const file = new File(['jpeg'], 'mountain.jpg', { type: 'image/jpeg' })
         await user.upload(container.querySelector('input[type="file"]'), file)
@@ -162,6 +163,12 @@ describe('Photo Editor page', () => {
         expect(mocks.saveEditorSource).toHaveBeenCalledWith(file)
         expect((await screen.findAllByText(/working preview/)).length).toBeGreaterThan(0)
         expect(screen.getByText(/Canon EOS R7/)).toBeInTheDocument()
+
+        const editorShell = screen.getByRole('region', { name: 'Photo editor workspace' })
+        const requestFullscreen = vi.fn().mockResolvedValue()
+        Object.defineProperty(editorShell, 'requestFullscreen', { configurable: true, value: requestFullscreen })
+        await user.click(screen.getByRole('button', { name: 'Fullscreen' }))
+        expect(requestFullscreen).toHaveBeenCalledOnce()
 
         fireEvent.click(container.querySelector('.editor-canvas-transform'))
         await waitFor(() => expect(screen.getByRole('button', { name: '100%' })).toHaveClass('is-active'))
@@ -269,7 +276,7 @@ describe('Photo Editor page', () => {
     })
 
     it('uses a smaller live preview while dragging and settles at full working quality', async () => {
-        const largePhoto = { ...decodedPhoto, width: 1200, height: 800 }
+        const largePhoto = { ...decodedPhoto, width: 2400, height: 1600 }
         mocks.decodeStandardFile.mockResolvedValueOnce(largePhoto)
         const { container } = render(<Editor />)
         await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'responsive.jpg', { type: 'image/jpeg' }))
@@ -283,6 +290,11 @@ describe('Photo Editor page', () => {
         await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 560)).toBe(true))
         fireEvent.pointerUp(exposure, { pointerId: 11 })
         await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 1200)).toBe(true))
+
+        mocks.workerMessages.length = 0
+        await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Preview quality' }), 'high')
+        await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 1800)).toBe(true))
+        expect(localStorage.getItem('ian-photo-editor-preview-quality-v1')).toBe('high')
     })
 
     it('recovers from a preview worker crash without leaving Processing stuck', async () => {

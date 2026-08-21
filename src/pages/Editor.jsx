@@ -12,7 +12,14 @@ import './Editor.css'
 
 const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/avif,.dng,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.srw,.3fr,.fff,.iiq,.x3f,.raw'
 const CUSTOM_PRESETS_KEY = 'ian-photo-editor-presets-v1'
+const PREVIEW_QUALITY_KEY = 'ian-photo-editor-preview-quality-v1'
 const DEFAULT_EXPORT_OPTIONS = Object.freeze({ format: 'jpeg', quality: 92, resizeMode: 'original', size: 2048, suffix: '-edited' })
+const PREVIEW_QUALITIES = Object.freeze({
+    faster: Object.freeze({ label: 'Faster', fullEdge: 800, liveEdge: 360 }),
+    balanced: Object.freeze({ label: 'Balanced', fullEdge: 1200, liveEdge: 560 }),
+    high: Object.freeze({ label: 'High', fullEdge: 1800, liveEdge: 800 }),
+    maximum: Object.freeze({ label: 'Maximum', fullEdge: 2400, liveEdge: 1100 }),
+})
 
 const RANGE_GROUPS = [
     { title: 'Light', controls: [
@@ -142,9 +149,25 @@ function restoreExportOptions(candidate = {}) {
     }
 }
 
+function storedPreviewQuality() {
+    try {
+        const stored = localStorage.getItem(PREVIEW_QUALITY_KEY)
+        return PREVIEW_QUALITIES[stored] ? stored : 'balanced'
+    } catch {
+        return 'balanced'
+    }
+}
+
+function previewPair(source, quality) {
+    const profile = PREVIEW_QUALITIES[quality] || PREVIEW_QUALITIES.balanced
+    const full = makePreviewSource(source, profile.fullEdge)
+    return { full, fast: makePreviewSource(full, profile.liveEdge) }
+}
+
 export default function Editor() {
     const fileInputRef = useRef(null)
     const sidecarInputRef = useRef(null)
+    const shellRef = useRef(null)
     const stageRef = useRef(null)
     const afterCanvasRef = useRef(null)
     const beforeCanvasRef = useRef(null)
@@ -171,6 +194,7 @@ export default function Editor() {
     const [isDragging, setIsDragging] = useState(false)
     const [isPanning, setIsPanning] = useState(false)
     const [isLiveEditing, setIsLiveEditing] = useState(false)
+    const [isFullscreen, setIsFullscreen] = useState(false)
     const [isProcessing, setIsProcessing] = useState(false)
     const [showClipping, setShowClipping] = useState(false)
     const [compare, setCompare] = useState(false)
@@ -181,6 +205,7 @@ export default function Editor() {
     const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 })
     const [sessionSourceReady, setSessionSourceReady] = useState(false)
     const [sessionStatus, setSessionStatus] = useState('No saved session')
+    const [previewQuality, setPreviewQuality] = useState(storedPreviewQuality)
     const [customPresets, setCustomPresets] = useState(() => {
         try { return JSON.parse(localStorage.getItem(CUSTOM_PRESETS_KEY) || '{}') } catch { return {} }
     })
@@ -218,6 +243,12 @@ export default function Editor() {
             window.cancelAnimationFrame(frame)
             observer.disconnect()
         }
+    }, [])
+
+    useEffect(() => {
+        const updateFullscreenState = () => setIsFullscreen(document.fullscreenElement === shellRef.current)
+        document.addEventListener('fullscreenchange', updateFullscreenState)
+        return () => document.removeEventListener('fullscreenchange', updateFullscreenState)
     }, [])
 
     const snapshot = useCallback(() => ({ adjustments: structuredClone(adjustments), geometry: structuredClone(geometry) }), [adjustments, geometry])
@@ -320,7 +351,7 @@ export default function Editor() {
                             canvas: createCanvasFromPixels(task.fullPreview.pixels, task.fullPreview.width, task.fullPreview.height),
                         }
                     }
-                    const dimensions = fittedGeometryDimensions(task.fullPreview.width, task.fullPreview.height, task.geometry, 1800, 1200)
+                    const dimensions = fittedGeometryDimensions(task.fullPreview.width, task.fullPreview.height, task.geometry)
                     drawGeometryAtSize(processedCanvas, afterCanvasRef.current, task.geometry, dimensions.width, dimensions.height)
                     drawGeometryAtSize(originalPreviewCanvasRef.current.canvas, beforeCanvasRef.current, task.geometry, dimensions.width, dimensions.height)
                     setDisplaySize(dimensions)
@@ -401,10 +432,10 @@ export default function Editor() {
                 x: Number.isFinite(Number(restoredState?.pan?.x)) ? Number(restoredState.pan.x) : 0,
                 y: Number.isFinite(Number(restoredState?.pan?.y)) ? Number(restoredState.pan.y) : 0,
             }
-            const nextPreview = makePreviewSource(decoded, 1200)
+            const nextPreviews = previewPair(decoded, previewQuality)
             setSource(decoded)
-            setPreview(nextPreview)
-            setFastPreview(makePreviewSource(nextPreview, 560))
+            setPreview(nextPreviews.full)
+            setFastPreview(nextPreviews.fast)
             originalPreviewCanvasRef.current = { preview: null, canvas: null }
             setFilename(file.name.replace(/\.[^.]+$/, ''))
             setAdjustments(nextAdjustments)
@@ -462,7 +493,7 @@ export default function Editor() {
         } finally {
             if (generation === openGenerationRef.current) setIsProcessing(previewRenderRef.current.busy)
         }
-    }, [restartPreviewWorker])
+    }, [previewQuality, restartPreviewWorker])
 
     useEffect(() => {
         if (!restorePromiseRef.current) restorePromiseRef.current = loadEditorSession()
@@ -685,16 +716,42 @@ export default function Editor() {
         }
     }
 
+    const changePreviewQuality = (nextQuality) => {
+        if (!PREVIEW_QUALITIES[nextQuality]) return
+        setPreviewQuality(nextQuality)
+        try { localStorage.setItem(PREVIEW_QUALITY_KEY, nextQuality) } catch { /* Preference persistence is optional. */ }
+        if (!source) return
+        ++renderIdRef.current
+        const queue = previewRenderRef.current
+        queue.pending = null
+        queue.controller?.abort()
+        restartPreviewWorker()
+        const nextPreviews = previewPair(source, nextQuality)
+        originalPreviewCanvasRef.current = { preview: null, canvas: null }
+        setPreview(nextPreviews.full)
+        setFastPreview(nextPreviews.fast)
+        setPan({ x: 0, y: 0 })
+        setZoom('fit')
+    }
+
+    const toggleFullscreen = async () => {
+        if (document.fullscreenElement === shellRef.current) {
+            await document.exitFullscreen?.()
+            return
+        }
+        await shellRef.current?.requestFullscreen?.()
+    }
+
     const metadataLine = useMemo(() => formatMetadata(source?.metadata), [source])
 
     return (
         <div className="editor-page">
             <header className="editor-heading">
                 <h1>Photo Editor</h1>
-                <p>Edit standard photos and camera RAW files entirely on this device. Nothing is uploaded or stored by the website.</p>
+                <p>Edit standard photos and camera RAW files entirely on your device. Nothing is uploaded or stored by the website.</p>
             </header>
 
-            <section className="editor-shell" aria-label="Photo editor workspace">
+            <section ref={shellRef} className="editor-shell" aria-label="Photo editor workspace">
                 <div className="editor-toolbar">
                     <div className="editor-toolbar-group">
                         <button type="button" className="editor-primary" onClick={() => fileInputRef.current?.click()}>Open photo</button>
@@ -707,7 +764,13 @@ export default function Editor() {
                     <div className="editor-toolbar-group">
                         <button type="button" className={compare ? 'is-active' : ''} onClick={() => setCompare((value) => !value)} disabled={!source}>Before / after</button>
                         <button type="button" className={showClipping ? 'is-active' : ''} onClick={() => setShowClipping((value) => !value)} disabled={!source}>Clipping</button>
-                        <button type="button" onClick={() => stageRef.current?.requestFullscreen?.()} disabled={!source}>Fullscreen</button>
+                        <label className="editor-toolbar-select">
+                            <span>Preview quality</span>
+                            <select aria-label="Preview quality" value={previewQuality} onChange={(event) => changePreviewQuality(event.target.value)}>
+                                {Object.entries(PREVIEW_QUALITIES).map(([value, profile]) => <option key={value} value={value}>{profile.label} · {profile.fullEdge}px</option>)}
+                            </select>
+                        </label>
+                        <button type="button" className={isFullscreen ? 'is-active' : ''} onClick={() => void toggleFullscreen()} disabled={!source}>{isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}</button>
                     </div>
                 </div>
 

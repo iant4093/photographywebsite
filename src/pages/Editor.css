@@ -59,6 +59,28 @@
     gap: 0.4rem;
 }
 
+.editor-toolbar-select {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--color-warm-gray);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.editor-toolbar-select select {
+    min-height: 2.2rem;
+    padding: 0.35rem 1.7rem 0.35rem 0.55rem;
+    color: var(--color-charcoal);
+    border: 1px solid var(--color-warm-border);
+    border-radius: 0;
+    background: var(--editor-panel);
+    font: inherit;
+    appearance: auto;
+}
+
 .editor-toolbar button,
 .editor-sidebar button,
 .editor-viewbar button {
@@ -126,8 +148,32 @@
     outline-offset: -10px;
 }
 
-.editor-stage:fullscreen {
-    background-color: var(--editor-deep);
+.editor-shell:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+    border: 0;
+    background: var(--editor-panel);
+    box-shadow: none;
+}
+
+.editor-shell:fullscreen .editor-main {
+    height: auto;
+    min-height: 0;
+}
+
+.editor-shell:fullscreen .editor-stage {
+    height: auto;
+    min-height: 0;
+}
+
+.editor-shell:fullscreen .editor-sidebar {
+    height: auto;
+    max-height: none;
+    min-height: 0;
 }
 
 .editor-dropzone {
@@ -438,7 +484,8 @@
 [data-theme="dark"] .editor-shell { box-shadow: 10px 10px 0 rgba(0,0,0,0.38); }
 [data-theme="dark"] .editor-range input[type="number"],
 [data-theme="dark"] .editor-select select,
-[data-theme="dark"] .editor-text-field input { background: #171512; }
+[data-theme="dark"] .editor-text-field input,
+[data-theme="dark"] .editor-toolbar-select select { background: #171512; }
 
 @media (max-width: 1000px) {
     .editor-heading { grid-template-columns: 1fr; }
@@ -460,6 +507,12 @@
     .editor-range { grid-template-columns: minmax(5.8rem, 1fr) minmax(5rem, 1.3fr) 3.2rem; }
     .editor-export-options { grid-template-columns: 1fr; }
     .editor-viewbar { align-items: flex-start; flex-direction: column; }
+    .editor-shell:fullscreen { overflow: auto; }
+}
+
+@media (min-width: 701px) {
+    .editor-shell:fullscreen .editor-main { grid-template-columns: minmax(0, 1fr) minmax(18rem, 23rem); }
+    .editor-shell:fullscreen .editor-sidebar { border-top: 0; border-left: 1px solid var(--color-warm-border); }
 }
 
 @media (prefers-reduced-motion: reduce) {
