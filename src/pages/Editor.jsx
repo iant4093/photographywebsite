@@ -4,10 +4,12 @@ import { BUILT_IN_PRESETS, applyPreset, parseSidecar, serializeSidecar } from '.
 import { canvasToBlob, cropForAspect, drawGeometry, outputDimensions } from '../editor/canvas'
 import { decodeStandardFile, makePreviewSource } from '../editor/standardDecoder'
 import { decodeRawFile, isRawFile } from '../editor/rawDecoder'
+import { clearEditorSession, loadEditorSession, saveEditorSource, saveEditorState } from '../editor/sessionStore'
 import './Editor.css'
 
 const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/avif,.dng,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.srw,.3fr,.fff,.iiq,.x3f,.raw'
 const CUSTOM_PRESETS_KEY = 'ian-photo-editor-presets-v1'
+const DEFAULT_EXPORT_OPTIONS = Object.freeze({ format: 'jpeg', quality: 92, resizeMode: 'original', size: 2048, suffix: '-edited' })
 
 const RANGE_GROUPS = [
     { title: 'Light', controls: [
@@ -108,6 +110,31 @@ function downloadBlob(blob, filename) {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+function restoreSnapshots(candidate) {
+    if (!Array.isArray(candidate)) return []
+    return candidate.slice(-40).flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        return [{
+            adjustments: sanitizeAdjustments(item.adjustments),
+            geometry: sanitizeGeometry(item.geometry),
+        }]
+    })
+}
+
+function restoreExportOptions(candidate = {}) {
+    const formats = new Set(['jpeg', 'png', 'webp'])
+    const resizeModes = new Set(['original', 'longEdge', 'width', 'height'])
+    return {
+        format: formats.has(candidate.format) ? candidate.format : DEFAULT_EXPORT_OPTIONS.format,
+        quality: Math.min(100, Math.max(1, Number(candidate.quality) || DEFAULT_EXPORT_OPTIONS.quality)),
+        resizeMode: resizeModes.has(candidate.resizeMode) ? candidate.resizeMode : DEFAULT_EXPORT_OPTIONS.resizeMode,
+        size: Math.min(20000, Math.max(1, Number(candidate.size) || DEFAULT_EXPORT_OPTIONS.size)),
+        suffix: typeof candidate.suffix === 'string'
+            ? candidate.suffix.replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 80)
+            : DEFAULT_EXPORT_OPTIONS.suffix,
+    }
+}
+
 export default function Editor() {
     const fileInputRef = useRef(null)
     const sidecarInputRef = useRef(null)
@@ -117,6 +144,8 @@ export default function Editor() {
     const workerRef = useRef(null)
     const renderIdRef = useRef(0)
     const panStartRef = useRef(null)
+    const openGenerationRef = useRef(0)
+    const restorePromiseRef = useRef(null)
     const [source, setSource] = useState(null)
     const [preview, setPreview] = useState(null)
     const [filename, setFilename] = useState('')
@@ -134,10 +163,12 @@ export default function Editor() {
     const [comparePosition, setComparePosition] = useState(50)
     const [zoom, setZoom] = useState('fit')
     const [pan, setPan] = useState({ x: 0, y: 0 })
+    const [sessionSourceReady, setSessionSourceReady] = useState(false)
+    const [sessionStatus, setSessionStatus] = useState('No saved session')
     const [customPresets, setCustomPresets] = useState(() => {
         try { return JSON.parse(localStorage.getItem(CUSTOM_PRESETS_KEY) || '{}') } catch { return {} }
     })
-    const [exportOptions, setExportOptions] = useState({ format: 'jpeg', quality: 92, resizeMode: 'original', size: 2048, suffix: '-edited' })
+    const [exportOptions, setExportOptions] = useState(() => ({ ...DEFAULT_EXPORT_OPTIONS }))
     const [exportState, setExportState] = useState({ active: false, progress: 0, label: '' })
     const exportWorkerRef = useRef(null)
 
@@ -215,38 +246,131 @@ export default function Editor() {
         return () => window.clearTimeout(timer)
     }, [adjustments, drawCanvases, preview, showClipping])
 
-    const openFile = useCallback(async (file) => {
+    const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false } = {}) => {
         if (!file) return
         if (!file.type.startsWith('image/') && !isRawFile(file)) {
             setError('Choose a supported photo or camera RAW file.')
             return
         }
+        if (fromRecovery && openGenerationRef.current > 0) return
+        const generation = ++openGenerationRef.current
         setError('')
         setStatus(isRawFile(file) ? 'Preparing RAW file' : 'Reading photo')
+        setSessionSourceReady(false)
+        setSessionStatus(fromRecovery ? 'Recovering local session…' : 'Saving local session…')
         setIsProcessing(true)
         try {
             const decoded = isRawFile(file)
                 ? await decodeRawFile(file, setStatus)
                 : await decodeStandardFile(file)
+            if (generation !== openGenerationRef.current) return
+            const nextAdjustments = restoredState ? sanitizeAdjustments(restoredState.adjustments) : freshAdjustments()
+            const nextGeometry = restoredState ? sanitizeGeometry(restoredState.geometry) : freshGeometry()
+            const nextZoom = restoredState?.zoom === 'fit'
+                ? 'fit'
+                : Math.min(400, Math.max(25, Number(restoredState?.zoom) || 100))
+            const nextPan = {
+                x: Number.isFinite(Number(restoredState?.pan?.x)) ? Number(restoredState.pan.x) : 0,
+                y: Number.isFinite(Number(restoredState?.pan?.y)) ? Number(restoredState.pan.y) : 0,
+            }
             setSource(decoded)
             setPreview(makePreviewSource(decoded))
             setFilename(file.name.replace(/\.[^.]+$/, ''))
-            setAdjustments(freshAdjustments())
-            setGeometry(freshGeometry())
-            setHistory([])
-            setFuture([])
-            setZoom('fit')
-            setPan({ x: 0, y: 0 })
-            setStatus(`${decoded.width} × ${decoded.height}${decoded.metadata.raw ? ' RAW' : ''} loaded locally`)
+            setAdjustments(nextAdjustments)
+            setGeometry(nextGeometry)
+            setHistory(restoreSnapshots(restoredState?.history))
+            setFuture(restoreSnapshots(restoredState?.future))
+            setShowClipping(Boolean(restoredState?.showClipping))
+            setCompare(Boolean(restoredState?.compare))
+            setComparePosition(Number.isFinite(Number(restoredState?.comparePosition))
+                ? Math.min(100, Math.max(0, Number(restoredState.comparePosition)))
+                : 50)
+            setZoom(nextZoom)
+            setPan(nextPan)
+            setExportOptions(restoreExportOptions(restoredState?.exportOptions))
+            setStatus(`${decoded.width} × ${decoded.height}${decoded.metadata.raw ? ' RAW' : ''} ${fromRecovery ? 'recovered' : 'loaded'} locally`)
+            if (fromRecovery) {
+                setSessionSourceReady(true)
+                setSessionStatus('Recovered locally')
+            } else {
+                try {
+                    await saveEditorSource(file)
+                    if (generation !== openGenerationRef.current) return
+                    await saveEditorState({
+                        adjustments: nextAdjustments,
+                        geometry: nextGeometry,
+                        history: [],
+                        future: [],
+                        exportOptions: restoreExportOptions(),
+                        showClipping: false,
+                        compare: false,
+                        comparePosition: 50,
+                        zoom: 'fit',
+                        pan: { x: 0, y: 0 },
+                    })
+                    if (generation !== openGenerationRef.current) return
+                    setSessionSourceReady(true)
+                    setSessionStatus('Saved locally')
+                } catch {
+                    if (generation === openGenerationRef.current) {
+                        await clearEditorSession().catch(() => {})
+                        setSessionStatus('Local recovery unavailable')
+                    }
+                }
+            }
         } catch (loadError) {
+            if (generation !== openGenerationRef.current) return
             setSource(null)
             setPreview(null)
             setError(loadError instanceof Error ? loadError.message : 'This photo could not be opened.')
             setStatus('Choose another photo')
+            setSessionSourceReady(false)
+            setSessionStatus('No saved session')
+            if (fromRecovery) await clearEditorSession().catch(() => {})
         } finally {
-            setIsProcessing(false)
+            if (generation === openGenerationRef.current) setIsProcessing(false)
         }
     }, [])
+
+    useEffect(() => {
+        if (!restorePromiseRef.current) restorePromiseRef.current = loadEditorSession()
+        let active = true
+        restorePromiseRef.current
+            .then((session) => {
+                if (active && session) void openFile(session.file, { restoredState: session.state, fromRecovery: true })
+            })
+            .catch(() => {
+                if (active) setSessionStatus('Local recovery unavailable')
+            })
+        return () => { active = false }
+    }, [openFile])
+
+    useEffect(() => {
+        if (!source || !sessionSourceReady) return undefined
+        const recoverableState = {
+            adjustments,
+            geometry,
+            history,
+            future,
+            exportOptions,
+            showClipping,
+            compare,
+            comparePosition,
+            zoom,
+            pan,
+        }
+        const saveState = () => saveEditorState(recoverableState)
+        const timer = window.setTimeout(() => {
+            saveState().then(() => setSessionStatus('Saved locally'))
+                .catch(() => setSessionStatus('Local recovery unavailable'))
+        }, 450)
+        const flushSession = () => { void saveState() }
+        window.addEventListener('pagehide', flushSession)
+        return () => {
+            window.clearTimeout(timer)
+            window.removeEventListener('pagehide', flushSession)
+        }
+    }, [adjustments, compare, comparePosition, exportOptions, future, geometry, history, pan, sessionSourceReady, showClipping, source, zoom])
 
     useEffect(() => {
         const paste = (event) => {
@@ -332,6 +456,39 @@ export default function Editor() {
         setStatus('Export cancelled')
     }
 
+    const closePhoto = async () => {
+        ++openGenerationRef.current
+        ++renderIdRef.current
+        exportWorkerRef.current?.terminate()
+        exportWorkerRef.current = null
+        setSource(null)
+        setPreview(null)
+        setFilename('')
+        setAdjustments(freshAdjustments())
+        setGeometry(freshGeometry())
+        setHistory([])
+        setFuture([])
+        setHistogram(null)
+        setShowClipping(false)
+        setCompare(false)
+        setComparePosition(50)
+        setZoom('fit')
+        setPan({ x: 0, y: 0 })
+        setExportOptions({ ...DEFAULT_EXPORT_OPTIONS })
+        setExportState({ active: false, progress: 0, label: '' })
+        setIsProcessing(false)
+        setError('')
+        setStatus('Choose a photo to begin')
+        setSessionSourceReady(false)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        try {
+            await clearEditorSession()
+            setSessionStatus('No saved session')
+        } catch {
+            setSessionStatus('Local recovery unavailable')
+        }
+    }
+
     const scale = zoom === 'fit' ? 1 : Number(zoom) / 100
     const metadataLine = useMemo(() => formatMetadata(source?.metadata), [source])
 
@@ -351,6 +508,7 @@ export default function Editor() {
                         <button type="button" onClick={undo} disabled={!history.length}>Undo</button>
                         <button type="button" onClick={redo} disabled={!future.length}>Redo</button>
                         <button type="button" onClick={() => commit(freshAdjustments(), freshGeometry())} disabled={!source}>Reset all</button>
+                        <button type="button" onClick={() => void closePhoto()} disabled={!source}>Close photo</button>
                     </div>
                     <div className="editor-toolbar-group">
                         <button type="button" className={compare ? 'is-active' : ''} onClick={() => setCompare((value) => !value)} disabled={!source}>Before / after</button>
@@ -501,7 +659,10 @@ export default function Editor() {
                 </div>
 
                 <div className="editor-viewbar">
-                    <span>{status}</span>
+                    <div className="editor-viewbar-status">
+                        <span>{status}</span>
+                        <span>{sessionStatus}</span>
+                    </div>
                     <div>
                         <button type="button" onClick={() => { setZoom('fit'); setPan({ x: 0, y: 0 }) }} className={zoom === 'fit' ? 'is-active' : ''}>Fit</button>
                         <button type="button" onClick={() => setZoom(100)} className={zoom === 100 ? 'is-active' : ''}>100%</button>

@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
         target.height = 1
         return target
     }),
+    loadEditorSession: vi.fn(),
+    saveEditorSource: vi.fn(),
+    saveEditorState: vi.fn(),
+    clearEditorSession: vi.fn(),
 }))
 
 vi.mock('../editor/standardDecoder', () => ({
@@ -19,6 +23,13 @@ vi.mock('../editor/standardDecoder', () => ({
 }))
 
 vi.mock('../editor/rawDecoder', () => ({ decodeRawFile: mocks.decodeRawFile, isRawFile: mocks.isRawFile }))
+
+vi.mock('../editor/sessionStore', () => ({
+    loadEditorSession: mocks.loadEditorSession,
+    saveEditorSource: mocks.saveEditorSource,
+    saveEditorState: mocks.saveEditorState,
+    clearEditorSession: mocks.clearEditorSession,
+}))
 
 vi.mock('../editor/canvas', async (importOriginal) => {
     const actual = await importOriginal()
@@ -90,6 +101,10 @@ describe('Photo Editor page', () => {
         mocks.decodeRawFile.mockReset().mockResolvedValue({ ...decodedPhoto, metadata: { ...decodedPhoto.metadata, raw: true } })
         mocks.isRawFile.mockClear()
         mocks.drawGeometry.mockClear()
+        mocks.loadEditorSession.mockReset().mockResolvedValue(null)
+        mocks.saveEditorSource.mockReset().mockResolvedValue()
+        mocks.saveEditorState.mockReset().mockResolvedValue()
+        mocks.clearEditorSession.mockReset().mockResolvedValue()
         vi.stubGlobal('Worker', WorkerStub)
         vi.stubGlobal('ImageData', ImageDataStub)
         vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(canvasContext)
@@ -112,11 +127,15 @@ describe('Photo Editor page', () => {
 
         expect(await screen.findByText('mountain')).toBeInTheDocument()
         expect(mocks.decodeStandardFile).toHaveBeenCalledWith(file)
+        expect(mocks.saveEditorSource).toHaveBeenCalledWith(file)
         expect((await screen.findAllByText(/working preview/)).length).toBeGreaterThan(0)
         expect(screen.getByText(/Canon EOS R7/)).toBeInTheDocument()
 
         fireEvent.change(screen.getByRole('spinbutton', { name: 'Exposure value' }), { target: { value: '1.2' } })
         expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(1.2)
+        await waitFor(() => expect(mocks.saveEditorState).toHaveBeenCalledWith(expect.objectContaining({
+            adjustments: expect.objectContaining({ exposure: 1.2 }),
+        })), { timeout: 1200 })
         expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
         await user.click(screen.getByRole('button', { name: 'Undo' }))
         expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(0)
@@ -206,5 +225,45 @@ describe('Photo Editor page', () => {
         }
         await waitFor(() => expect(mocks.drawGeometry).toHaveBeenCalled())
         expect(screen.queryByText(/could not|failed/i)).not.toBeInTheDocument()
+    })
+
+    it('restores the local source and editor state, then explicitly clears it', async () => {
+        const recoveredFile = new File(['jpeg'], 'recovered.jpg', { type: 'image/jpeg' })
+        mocks.loadEditorSession.mockResolvedValueOnce({
+            file: recoveredFile,
+            state: {
+                adjustments: { exposure: 1.35, temperature: 14 },
+                geometry: { quarterTurns: 1, flipX: true },
+                history: [{ adjustments: { exposure: 0.5 }, geometry: {} }],
+                future: [{ adjustments: { exposure: 2 }, geometry: {} }],
+                compare: true,
+                comparePosition: 36,
+                showClipping: true,
+                zoom: 125,
+                pan: { x: 18, y: -9 },
+                exportOptions: { format: 'webp', quality: 88, resizeMode: 'longEdge', size: 1600, suffix: '-proof' },
+            },
+        })
+
+        const user = userEvent.setup()
+        render(<Editor />)
+
+        expect(await screen.findByText('recovered')).toBeInTheDocument()
+        expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(1.35)
+        expect(screen.getByRole('spinbutton', { name: 'Temperature value' })).toHaveValue(14)
+        expect(screen.getByRole('slider', { name: 'Comparison split' })).toHaveValue('36')
+        expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+        expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled()
+        expect(screen.getByRole('combobox', { name: 'Format' })).toHaveValue('webp')
+        expect(screen.getByRole('combobox', { name: 'Dimensions' })).toHaveValue('longEdge')
+        expect(screen.getByRole('spinbutton', { name: 'Pixels' })).toHaveValue(1600)
+        expect(screen.getByText('Recovered locally')).toBeInTheDocument()
+        expect(mocks.saveEditorSource).not.toHaveBeenCalled()
+
+        await user.click(screen.getByRole('button', { name: 'Close photo' }))
+        await waitFor(() => expect(mocks.clearEditorSession).toHaveBeenCalledTimes(1))
+        expect(screen.getByText('No photo open')).toBeInTheDocument()
+        expect(screen.getByText('No saved session')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Drop a photo or RAW file here/ })).toBeInTheDocument()
     })
 })

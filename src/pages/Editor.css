@@ -318,6 +318,19 @@
     font-size: 0.7rem;
 }
 
+.editor-viewbar > .editor-viewbar-status {
+    display: grid;
+    gap: 0.12rem;
+}
+
+.editor-viewbar-status span:last-child {
+    color: var(--color-amber-dark);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+
 [data-theme="dark"] .editor-page { --editor-panel: #201d19; }
 [data-theme="dark"] .editor-shell { box-shadow: 10px 10px 0 rgba(0,0,0,0.38); }
 [data-theme="dark"] .editor-range input[type="number"],
