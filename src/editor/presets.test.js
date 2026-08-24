@@ -10,14 +10,25 @@ describe('editor presets and clipboard settings', () => {
         expect(current.temperature).toBe(0)
     })
 
-    it('offers ten film stocks and retires the generic defaults', () => {
+    it('offers sixteen film stocks and retires the generic defaults', () => {
         expect(Object.keys(BUILT_IN_PRESETS)).toEqual([
             'Kodak Portra 400', 'Kodak Portra 800', 'Kodak Gold 200', 'Kodak Ektar 100',
             'Fujifilm Pro 400H', 'Fujifilm Velvia 50', 'Fujifilm Superia 400', 'Cinestill 800T',
-            'Kodak Tri-X 400', 'Ilford HP5 Plus',
+            'CineStill 50D', 'Kodak ColorPlus 200', 'Kodak Ultramax 400',
+            'Kodak Tri-X 400', 'Ilford HP5 Plus', 'Kodak T-Max 400',
+            'Fujifilm Neopan Acros 100', 'Ilford Delta 3200',
         ])
         expect(BUILT_IN_PRESETS).not.toHaveProperty('Clean')
         expect(BUILT_IN_PRESETS).not.toHaveProperty('Warm Portrait')
+    })
+
+    it('keeps the additional color and monochrome film stocks distinct', () => {
+        expect(BUILT_IN_PRESETS['CineStill 50D'].blackAndWhite).toBe(false)
+        expect(BUILT_IN_PRESETS['Kodak ColorPlus 200'].temperature).toBeGreaterThan(0)
+        expect(BUILT_IN_PRESETS['Kodak T-Max 400'].blackAndWhite).toBe(true)
+        expect(BUILT_IN_PRESETS['Fujifilm Neopan Acros 100'].blackAndWhite).toBe(true)
+        expect(BUILT_IN_PRESETS['Ilford Delta 3200'].grain)
+            .toBeGreaterThan(BUILT_IN_PRESETS['Fujifilm Neopan Acros 100'].grain)
     })
 
     it('fully replaces a previous built-in film look when switching stocks', () => {
