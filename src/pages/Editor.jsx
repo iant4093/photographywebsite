@@ -21,6 +21,10 @@ const PREVIEW_QUALITIES = Object.freeze({
     maximum: Object.freeze({ label: 'Maximum', fullEdge: 2400, liveEdge: 1100 }),
 })
 const PREVIEW_SETTLE_DELAY_MS = 140
+// Large synchronous WebGL readbacks are unreliable on some browser/GPU combinations.
+// Maximum quality still uses the GPU for its responsive 1100px preview, then lets the
+// worker produce the exact 2400px frame without blocking or risking a stale canvas.
+const MAX_STABLE_GPU_SETTLED_EDGE = 2048
 
 const RANGE_GROUPS = [
     { title: 'Light', controls: [
@@ -526,6 +530,11 @@ export default function Editor() {
                     settleRenderFrameRef.current = window.requestAnimationFrame(() => {
                         settleRenderFrameRef.current = null
                         if (settledTask.renderId !== renderIdRef.current || !liveRendererRef.current) return
+                        if (Math.max(settledTask.workingPreview.width, settledTask.workingPreview.height) > MAX_STABLE_GPU_SETTLED_EDGE) {
+                            queue.pending = settledTask
+                            void drainPreviewQueue()
+                            return
+                        }
                         try {
                             const renderedPixels = liveRendererRef.current.renderPixels?.(
                                 settledTask.workingPreview,

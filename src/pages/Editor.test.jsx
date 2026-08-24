@@ -375,6 +375,34 @@ describe('Photo Editor page', () => {
         expect(screen.getAllByText('1200 × 800 working preview').length).toBeGreaterThan(0)
     })
 
+    it('keeps maximum quality responsive while settling its 2400px preview through the worker', async () => {
+        localStorage.setItem('ian-photo-editor-preview-quality-v1', 'maximum')
+        mocks.gpuEnabled = true
+        mocks.decodeStandardFile.mockResolvedValueOnce({ ...decodedPhoto, width: 3600, height: 2400 })
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'maximum.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('maximum')
+
+        await waitFor(() => expect(mocks.gpuRender.mock.calls.some(([workingPreview]) => (
+            workingPreview.width === 1100
+        ))).toBe(true))
+        await waitFor(() => expect(mocks.workerMessages.some((message) => (
+            message.operation === 'render' && message.width === 2400
+        ))).toBe(true))
+        expect(mocks.gpuRenderPixels.mock.calls.some(([workingPreview]) => workingPreview.width === 2400)).toBe(false)
+
+        mocks.gpuRender.mockClear()
+        mocks.workerMessages.length = 0
+        await userEvent.click(screen.getByRole('button', { name: 'Ilford Delta 3200' }))
+        await waitFor(() => expect(mocks.gpuRender.mock.calls.some(([workingPreview, settings]) => (
+            workingPreview.width === 1100 && settings.blackAndWhite === true
+        ))).toBe(true))
+        await waitFor(() => expect(mocks.workerMessages.some((message) => (
+            message.operation === 'render' && message.width === 2400 && message.adjustments?.blackAndWhite === true
+        ))).toBe(true))
+        expect(mocks.gpuRenderPixels.mock.calls.some(([workingPreview]) => workingPreview.width === 2400)).toBe(false)
+    })
+
     it('prewarms preview blur data and avoids redrawing unchanged before geometry', async () => {
         const { container } = render(<Editor />)
         await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'cached.jpg', { type: 'image/jpeg' }))
