@@ -73,6 +73,12 @@ function fakeWebGl({ shaderCompiles = true, programLinks = true, contextLost = f
         uniform4f: vi.fn(),
         pixelStorei: vi.fn(),
         drawArrays: vi.fn(),
+        readPixels: vi.fn((_x, _y, width, height, _format, _type, output) => {
+            const rowLength = width * 4
+            for (let row = 0; row < height; row += 1) {
+                output.fill(row + 1, row * rowLength, (row + 1) * rowLength)
+            }
+        }),
         isContextLost: vi.fn(() => contextLost),
     }
     return gl
@@ -154,6 +160,25 @@ describe('GPU live preview renderer', () => {
         const fallbackMessages = fakeWebGl({ shaderCompiles: false, shaderMessage: '' })
         vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(fallbackMessages)
         expect(createLivePreviewRenderer()).toBeNull()
+    })
+
+    it('returns a stable top-down pixel copy for the settled preview', () => {
+        const gl = fakeWebGl()
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((type) => type === 'webgl2' ? gl : null)
+        const renderer = new LivePreviewRenderer()
+
+        const result = renderer.renderPixels(source, { ...freshAdjustments(), exposure: 1 })
+
+        expect(gl.readPixels).toHaveBeenCalledWith(0, 0, 3, 2, gl.RGBA, gl.UNSIGNED_BYTE, expect.any(Uint8Array))
+        expect(result).toEqual({
+            width: 3,
+            height: 2,
+            pixels: new Uint8ClampedArray([
+                ...new Array(12).fill(2),
+                ...new Array(12).fill(1),
+            ]),
+        })
+        renderer.dispose()
     })
 
     it('rejects rendering after the graphics context is lost', () => {

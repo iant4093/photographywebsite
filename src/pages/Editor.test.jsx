@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     holdWorkerResponses: false,
     gpuEnabled: false,
     gpuRender: vi.fn(),
+    gpuRenderPixels: vi.fn(),
     gpuPrepare: vi.fn(),
     gpuDispose: vi.fn(),
 }))
@@ -49,6 +50,7 @@ vi.mock('../editor/rawDecoder', () => ({ decodeRawFile: mocks.decodeRawFile, isR
 vi.mock('../editor/livePreviewRenderer', () => ({
     createLivePreviewRenderer: () => mocks.gpuEnabled ? {
         render: mocks.gpuRender,
+        renderPixels: mocks.gpuRenderPixels,
         prepare: mocks.gpuPrepare,
         dispose: mocks.gpuDispose,
     } : null,
@@ -155,6 +157,11 @@ describe('Photo Editor page', () => {
         mocks.holdWorkerResponses = false
         mocks.gpuEnabled = false
         mocks.gpuRender.mockReset().mockImplementation(() => document.createElement('canvas'))
+        mocks.gpuRenderPixels.mockReset().mockImplementation((workingPreview) => ({
+            pixels: new Uint8ClampedArray(workingPreview.pixels),
+            width: workingPreview.width,
+            height: workingPreview.height,
+        }))
         mocks.gpuPrepare.mockReset()
         mocks.gpuDispose.mockReset()
         vi.stubGlobal('Worker', WorkerStub)
@@ -335,6 +342,9 @@ describe('Photo Editor page', () => {
         await waitFor(() => expect(mocks.gpuRender).toHaveBeenCalledWith(
             expect.anything(), expect.objectContaining({ temperature: 7, grain: 12 }), false,
         ))
+        await waitFor(() => expect(mocks.gpuRenderPixels).toHaveBeenCalledWith(
+            expect.anything(), expect.objectContaining({ temperature: 7, grain: 12 }), false,
+        ))
         await waitFor(() => expect(mocks.workerMessages.some((message) => (
             message.width === 2 && message.includeHistogram === true && message.adjustments?.temperature === 7
         ))).toBe(true), { timeout: 1000 })
@@ -354,7 +364,7 @@ describe('Photo Editor page', () => {
         mocks.workerFailures = 1
         await userEvent.click(screen.getByRole('button', { name: 'Fujifilm Velvia 50' }))
 
-        await waitFor(() => expect(mocks.gpuRender.mock.calls.some(([workingPreview, settings]) => (
+        await waitFor(() => expect(mocks.gpuRenderPixels.mock.calls.some(([workingPreview, settings]) => (
             workingPreview.width === 1200 && settings.vibrance === 30 && settings.dehaze === 10
         ))).toBe(true))
         await waitFor(() => expect(mocks.workerMessages.some((message) => (

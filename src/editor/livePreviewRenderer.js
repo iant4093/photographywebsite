@@ -396,6 +396,22 @@ export class LivePreviewRenderer {
         return this.canvas
     }
 
+    renderPixels(source, candidate, clipping = false) {
+        this.render(source, candidate, clipping)
+        const gl = this.gl
+        const width = this.canvas.width
+        const height = this.canvas.height
+        const bottomUp = new Uint8Array(width * height * 4)
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bottomUp)
+        const pixels = new Uint8ClampedArray(bottomUp.length)
+        const rowLength = width * 4
+        for (let row = 0; row < height; row += 1) {
+            const sourceOffset = (height - row - 1) * rowLength
+            pixels.set(bottomUp.subarray(sourceOffset, sourceOffset + rowLength), row * rowLength)
+        }
+        return { pixels, width, height }
+    }
+
     dispose() {
         this.clearTargets()
         this.gl.deleteTexture(this.sourceTexture)

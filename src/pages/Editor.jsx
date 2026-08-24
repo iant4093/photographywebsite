@@ -527,11 +527,18 @@ export default function Editor() {
                         settleRenderFrameRef.current = null
                         if (settledTask.renderId !== renderIdRef.current || !liveRendererRef.current) return
                         try {
-                            const rendered = liveRendererRef.current.render(
+                            const renderedPixels = liveRendererRef.current.renderPixels?.(
                                 settledTask.workingPreview,
                                 settledTask.adjustments,
                                 settledTask.showClipping,
                             )
+                            const rendered = renderedPixels
+                                ? createCanvasFromPixels(renderedPixels.pixels, renderedPixels.width, renderedPixels.height)
+                                : liveRendererRef.current.render(
+                                    settledTask.workingPreview,
+                                    settledTask.adjustments,
+                                    settledTask.showClipping,
+                                )
                             paintPreview(rendered, settledTask, null)
                             queue.pending = {
                                 ...settledTask,
