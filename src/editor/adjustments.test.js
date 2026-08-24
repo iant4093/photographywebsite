@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateHistogram, freshAdjustments, processImagePixels, sanitizeAdjustments, sanitizeGeometry } from './adjustments'
+import { calculateHistogram, freshAdjustments, prewarmSpatialCache, processImagePixels, sanitizeAdjustments, sanitizeGeometry } from './adjustments'
 
 describe('browser editor adjustments', () => {
     it('creates independent nested defaults', () => {
@@ -97,5 +97,14 @@ describe('browser editor adjustments', () => {
         processImagePixels(pixels, 6, 6, { ...freshAdjustments(), clarity: 40 }, { spatialCache })
         expect(spatialCache.size).toBe(1)
         expect(spatialCache.get('6x6:r5')).toBe(cachedBlur)
+    })
+
+    it('prewarms the common fine and broad source blurs', () => {
+        const pixels = new Uint8ClampedArray(6 * 6 * 4).fill(128)
+        const cache = prewarmSpatialCache(pixels, 6, 6)
+        expect([...cache.keys()]).toEqual(['6x6:r1', '6x6:r5'])
+        const fine = cache.get('6x6:r1')
+        prewarmSpatialCache(pixels, 6, 6, [1], cache)
+        expect(cache.get('6x6:r1')).toBe(fine)
     })
 })

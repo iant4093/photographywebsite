@@ -88,4 +88,17 @@ describe('editor worker client', () => {
         worker.emit('message', { data: { id: secondMessage.id, pixels: new ArrayBuffer(4) } })
         await second
     })
+
+    it('requests idle source prewarming with explicit blur radii', async () => {
+        const worker = new FakeWorker()
+        const request = workerRequest(worker, source, {}, false, {
+            sourceId: 'preview-warm',
+            operation: 'prewarm',
+            radii: [1, 5],
+            includeHistogram: false,
+        })
+        expect(worker.message).toMatchObject({ operation: 'prewarm', radii: [1, 5], sourceId: 'preview-warm' })
+        worker.emit('message', { data: { id: worker.message.id, warmed: true } })
+        await expect(request).resolves.toMatchObject({ warmed: true })
+    })
 })

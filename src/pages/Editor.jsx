@@ -21,6 +21,7 @@ const PREVIEW_QUALITIES = Object.freeze({
     high: Object.freeze({ label: 'High', fullEdge: 1800, liveEdge: 800 }),
     maximum: Object.freeze({ label: 'Maximum', fullEdge: 2400, liveEdge: 1100 }),
 })
+const PREVIEW_SETTLE_DELAY_MS = 140
 
 const RANGE_GROUPS = [
     { title: 'Light', controls: [
@@ -162,10 +163,31 @@ function storedPreviewQuality() {
     }
 }
 
-function previewPair(source, quality) {
+function interactivePreviewEdge(profile, viewport) {
+    const visibleEdge = Math.max(Number(viewport?.width) || 0, Number(viewport?.height) || 0)
+    if (visibleEdge < 100) return profile.liveEdge
+    const density = Math.min(1.5, Math.max(1, Number(globalThis.devicePixelRatio) || 1))
+    const viewportEdge = Math.ceil((visibleEdge * density) / 64) * 64
+    return Math.max(Math.min(360, profile.liveEdge), Math.min(profile.liveEdge, viewportEdge))
+}
+
+function previewPair(source, quality, viewport) {
     const profile = PREVIEW_QUALITIES[quality] || PREVIEW_QUALITIES.balanced
     const full = makePreviewSource(source, profile.fullEdge)
-    return { full, fast: makePreviewSource(full, profile.liveEdge) }
+    return { full, fast: makePreviewSource(full, interactivePreviewEdge(profile, viewport)) }
+}
+
+function scheduleIdleWork(callback, timeout = 1000) {
+    if (typeof window.requestIdleCallback === 'function') {
+        return { type: 'idle', id: window.requestIdleCallback(callback, { timeout }) }
+    }
+    return { type: 'timer', id: window.setTimeout(callback, Math.min(timeout, 250)) }
+}
+
+function cancelIdleWork(work) {
+    if (!work) return
+    if (work.type === 'idle') window.cancelIdleCallback?.(work.id)
+    else window.clearTimeout(work.id)
 }
 
 export default function Editor() {
@@ -182,7 +204,9 @@ export default function Editor() {
     const drainPreviewQueueRef = useRef(null)
     const liveRendererRef = useRef(null)
     const liveRenderFrameRef = useRef(null)
-    const originalPreviewCanvasRef = useRef({ preview: null, canvas: null })
+    const settleRenderTimerRef = useRef(null)
+    const originalPreviewCanvasRef = useRef({ preview: null, canvas: null, geometryKey: '', target: null })
+    const viewportSizeRef = useRef({ width: 1, height: 1 })
     const panStartRef = useRef(null)
     const suppressImageClickRef = useRef(false)
     const liveEditStartRef = useRef(null)
@@ -243,6 +267,7 @@ export default function Editor() {
         setLivePreviewEngine(liveRendererRef.current ? 'gpu' : 'worker')
         return () => {
             if (liveRenderFrameRef.current) window.cancelAnimationFrame(liveRenderFrameRef.current)
+            if (settleRenderTimerRef.current) window.clearTimeout(settleRenderTimerRef.current)
             liveRendererRef.current?.dispose()
             liveRendererRef.current = null
         }
@@ -251,10 +276,14 @@ export default function Editor() {
     useEffect(() => {
         const stage = stageRef.current
         if (!stage) return undefined
-        const updateViewport = () => setViewportSize({
-            width: Math.max(1, stage.clientWidth),
-            height: Math.max(1, stage.clientHeight),
-        })
+        const updateViewport = () => {
+            const next = {
+                width: Math.max(1, stage.clientWidth),
+                height: Math.max(1, stage.clientHeight),
+            }
+            viewportSizeRef.current = next
+            setViewportSize(next)
+        }
         const frame = window.requestAnimationFrame(updateViewport)
         if (!globalThis.ResizeObserver) return () => window.cancelAnimationFrame(frame)
         const observer = new ResizeObserver(updateViewport)
@@ -352,12 +381,23 @@ export default function Editor() {
             originalPreviewCanvasRef.current = {
                 preview: task.fullPreview,
                 canvas: createCanvasFromPixels(task.fullPreview.pixels, task.fullPreview.width, task.fullPreview.height),
+                geometryKey: '',
+                target: null,
             }
         }
         const dimensions = fittedGeometryDimensions(task.fullPreview.width, task.fullPreview.height, task.geometry)
         drawGeometryAtSize(processedSource, afterCanvasRef.current, task.geometry, dimensions.width, dimensions.height)
-        drawGeometryAtSize(originalPreviewCanvasRef.current.canvas, beforeCanvasRef.current, task.geometry, dimensions.width, dimensions.height)
-        setDisplaySize(dimensions)
+        const geometryKey = [
+            dimensions.width, dimensions.height, task.geometry.rotation, task.geometry.quarterTurns,
+            task.geometry.flipX, task.geometry.flipY, task.geometry.vertical, task.geometry.horizontal,
+            task.geometry.crop.x, task.geometry.crop.y, task.geometry.crop.width, task.geometry.crop.height,
+        ].join(':')
+        if (originalPreviewCanvasRef.current.geometryKey !== geometryKey || originalPreviewCanvasRef.current.target !== beforeCanvasRef.current) {
+            drawGeometryAtSize(originalPreviewCanvasRef.current.canvas, beforeCanvasRef.current, task.geometry, dimensions.width, dimensions.height)
+            originalPreviewCanvasRef.current.geometryKey = geometryKey
+            originalPreviewCanvasRef.current.target = beforeCanvasRef.current
+        }
+        setDisplaySize((current) => current.width === dimensions.width && current.height === dimensions.height ? current : dimensions)
         if (nextHistogram) setHistogram(nextHistogram)
         setError('')
         setStatus(`${task.fullPreview.width} × ${task.fullPreview.height} working preview`)
@@ -368,22 +408,25 @@ export default function Editor() {
         const queue = previewRenderRef.current
         if (queue.busy || !workerRef.current) return
         queue.busy = true
-        setIsProcessing(true)
         try {
             while (queue.pending) {
                 const task = queue.pending
                 queue.pending = null
                 queue.active = task
+                if (!task.background) setIsProcessing(true)
                 const controller = new AbortController()
                 queue.controller = controller
                 try {
                     const result = await workerRequest(workerRef.current, task.workingPreview, task.adjustments, task.showClipping, {
                         signal: controller.signal,
-                        timeoutMs: task.quality === 'fast' ? 4000 : 12000,
+                        timeoutMs: task.kind === 'prewarm' ? 20000 : task.quality === 'fast' ? 4000 : 12000,
                         sourceId: task.sourceId,
-                        includeHistogram: task.quality === 'full',
-                        outputType: 'bitmap',
+                        includeHistogram: task.kind !== 'prewarm' && task.quality === 'full',
+                        outputType: task.kind === 'prewarm' ? 'pixels' : 'bitmap',
+                        operation: task.kind === 'prewarm' ? 'prewarm' : 'render',
+                        radii: task.kind === 'prewarm' ? [1, 5] : undefined,
                     })
+                    if (task.kind === 'prewarm') continue
                     const processedSource = result.bitmap || createCanvasFromPixels(
                         result.pixels,
                         result.width || task.workingPreview.width,
@@ -421,54 +464,131 @@ export default function Editor() {
         if (!preview || !fastPreview || !workerRef.current) return
         const renderId = ++renderIdRef.current
         const queue = previewRenderRef.current
-        const quality = isLiveEditing ? 'fast' : 'full'
-        const task = {
+        queue.pending = null
+        if (queue.active) {
+            queue.controller?.abort()
+            restartPreviewWorker()
+        }
+        if (settleRenderTimerRef.current) {
+            window.clearTimeout(settleRenderTimerRef.current)
+            settleRenderTimerRef.current = null
+        }
+        const baseTask = {
             renderId,
-            quality,
-            workingPreview: quality === 'fast' ? fastPreview : preview,
             fullPreview: preview,
-            sourceId: `${previewSourceVersionRef.current}:${quality}`,
             adjustments,
             geometry,
             showClipping,
             retried: false,
         }
-        if (quality === 'fast' && liveRendererRef.current) {
-            queue.pending = null
-            if (queue.active) {
-                queue.controller?.abort()
-                restartPreviewWorker()
-            }
+        const interactiveTask = {
+            ...baseTask,
+            quality: 'fast',
+            workingPreview: fastPreview,
+            sourceId: `${previewSourceVersionRef.current}:fast`,
+            background: false,
+        }
+        const settledTask = {
+            ...baseTask,
+            quality: 'full',
+            workingPreview: preview,
+            sourceId: `${previewSourceVersionRef.current}:full`,
+            background: Boolean(liveRendererRef.current),
+        }
+        if (liveRendererRef.current) {
             if (liveRenderFrameRef.current) window.cancelAnimationFrame(liveRenderFrameRef.current)
             liveRenderFrameRef.current = window.requestAnimationFrame(() => {
                 liveRenderFrameRef.current = null
-                if (task.renderId !== renderIdRef.current || !liveRendererRef.current) return
+                if (interactiveTask.renderId !== renderIdRef.current || !liveRendererRef.current) return
                 try {
-                    const rendered = liveRendererRef.current.render(task.workingPreview, task.adjustments, task.showClipping)
-                    paintPreview(rendered, task, null)
+                    const rendered = liveRendererRef.current.render(interactiveTask.workingPreview, interactiveTask.adjustments, interactiveTask.showClipping)
+                    paintPreview(rendered, interactiveTask, null)
                     setIsProcessing(false)
                 } catch {
                     liveRendererRef.current?.dispose()
                     liveRendererRef.current = null
                     setLivePreviewEngine('worker')
-                    queue.pending = task
+                    queue.pending = isLiveEditing ? interactiveTask : { ...settledTask, background: false }
                     void drainPreviewQueue()
                 }
             })
-            return () => {
-                if (liveRenderFrameRef.current) {
-                    window.cancelAnimationFrame(liveRenderFrameRef.current)
-                    liveRenderFrameRef.current = null
-                }
+            if (!isLiveEditing) {
+                settleRenderTimerRef.current = window.setTimeout(() => {
+                    settleRenderTimerRef.current = null
+                    if (settledTask.renderId !== renderIdRef.current) return
+                    queue.pending = settledTask
+                    void drainPreviewQueue()
+                }, PREVIEW_SETTLE_DELAY_MS)
+            }
+        } else {
+            queue.pending = isLiveEditing ? interactiveTask : { ...settledTask, background: false }
+            void drainPreviewQueue()
+        }
+        return () => {
+            if (liveRenderFrameRef.current) {
+                window.cancelAnimationFrame(liveRenderFrameRef.current)
+                liveRenderFrameRef.current = null
+            }
+            if (settleRenderTimerRef.current) {
+                window.clearTimeout(settleRenderTimerRef.current)
+                settleRenderTimerRef.current = null
             }
         }
-        queue.pending = task
-        if (quality === 'fast' && queue.active?.quality === 'full') {
-            queue.controller?.abort()
-            restartPreviewWorker()
-        }
-        void drainPreviewQueue()
     }, [adjustments, drainPreviewQueue, fastPreview, geometry, isLiveEditing, paintPreview, preview, restartPreviewWorker, showClipping])
+
+    useEffect(() => {
+        if (!source || !preview || !fastPreview) return undefined
+        const profile = PREVIEW_QUALITIES[previewQuality] || PREVIEW_QUALITIES.balanced
+        const desiredEdge = Math.min(Math.max(preview.width, preview.height), interactivePreviewEdge(profile, viewportSize))
+        if (Math.max(fastPreview.width, fastPreview.height) === desiredEdge) return undefined
+        const timer = window.setTimeout(() => {
+            ++renderIdRef.current
+            const queue = previewRenderRef.current
+            queue.pending = null
+            if (queue.active) {
+                queue.controller?.abort()
+                restartPreviewWorker()
+            }
+            previewSourceVersionRef.current += 1
+            setFastPreview(makePreviewSource(preview, desiredEdge))
+        }, 180)
+        return () => window.clearTimeout(timer)
+    }, [fastPreview, preview, previewQuality, restartPreviewWorker, source, viewportSize])
+
+    useEffect(() => {
+        if (!preview || !fastPreview || !workerRef.current) return undefined
+        let active = true
+        let idleWork
+        const sourceVersion = previewSourceVersionRef.current
+        const attemptPrewarm = () => {
+            if (!active) return
+            const queue = previewRenderRef.current
+            if (queue.busy || queue.pending || settleRenderTimerRef.current) {
+                idleWork = scheduleIdleWork(attemptPrewarm, 700)
+                return
+            }
+            try { liveRendererRef.current?.prepare(fastPreview, [1, 5]) } catch { /* The normal render path owns GPU fallback. */ }
+            queue.pending = {
+                kind: 'prewarm',
+                renderId: renderIdRef.current,
+                quality: 'full',
+                workingPreview: preview,
+                fullPreview: preview,
+                sourceId: `${sourceVersion}:full`,
+                adjustments: freshAdjustments(),
+                geometry: freshGeometry(),
+                showClipping: false,
+                background: true,
+                retried: false,
+            }
+            void drainPreviewQueue()
+        }
+        idleWork = scheduleIdleWork(attemptPrewarm, 900)
+        return () => {
+            active = false
+            cancelIdleWork(idleWork)
+        }
+    }, [drainPreviewQueue, fastPreview, preview])
 
     const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false } = {}) => {
         if (!file) return
@@ -501,12 +621,12 @@ export default function Editor() {
                 x: Number.isFinite(Number(restoredState?.pan?.x)) ? Number(restoredState.pan.x) : 0,
                 y: Number.isFinite(Number(restoredState?.pan?.y)) ? Number(restoredState.pan.y) : 0,
             }
-            const nextPreviews = previewPair(decoded, previewQuality)
+            const nextPreviews = previewPair(decoded, previewQuality, viewportSizeRef.current)
             previewSourceVersionRef.current += 1
             setSource(decoded)
             setPreview(nextPreviews.full)
             setFastPreview(nextPreviews.fast)
-            originalPreviewCanvasRef.current = { preview: null, canvas: null }
+            originalPreviewCanvasRef.current = { preview: null, canvas: null, geometryKey: '', target: null }
             setFilename(file.name.replace(/\.[^.]+$/, ''))
             setAdjustments(nextAdjustments)
             setGeometry(nextGeometry)
@@ -593,14 +713,18 @@ export default function Editor() {
             pan,
         }
         const saveState = () => saveEditorState(recoverableState)
+        let idleWork
         const timer = window.setTimeout(() => {
-            saveState().then(() => setSessionStatus('Saved locally'))
-                .catch(() => setSessionStatus('Local recovery unavailable'))
-        }, 450)
+            idleWork = scheduleIdleWork(() => {
+                saveState().then(() => setSessionStatus('Saved locally'))
+                    .catch(() => setSessionStatus('Local recovery unavailable'))
+            }, 1200)
+        }, 550)
         const flushSession = () => { void saveState() }
         window.addEventListener('pagehide', flushSession)
         return () => {
             window.clearTimeout(timer)
+            cancelIdleWork(idleWork)
             window.removeEventListener('pagehide', flushSession)
         }
     }, [adjustments, compare, comparePosition, exportOptions, future, geometry, history, pan, sessionSourceReady, showClipping, source, zoom])
@@ -709,6 +833,10 @@ export default function Editor() {
         ++renderIdRef.current
         previewRenderRef.current.pending = null
         previewRenderRef.current.controller?.abort()
+        if (settleRenderTimerRef.current) {
+            window.clearTimeout(settleRenderTimerRef.current)
+            settleRenderTimerRef.current = null
+        }
         if (liveRenderFrameRef.current) {
             window.cancelAnimationFrame(liveRenderFrameRef.current)
             liveRenderFrameRef.current = null
@@ -735,7 +863,7 @@ export default function Editor() {
         setIsPanning(false)
         setIsLiveEditing(false)
         liveEditStartRef.current = null
-        originalPreviewCanvasRef.current = { preview: null, canvas: null }
+        originalPreviewCanvasRef.current = { preview: null, canvas: null, geometryKey: '', target: null }
         setDisplaySize({ width: 1, height: 1 })
         setExportOptions({ ...DEFAULT_EXPORT_OPTIONS })
         setExportState({ active: false, progress: 0, label: '' })
@@ -817,9 +945,9 @@ export default function Editor() {
         queue.pending = null
         queue.controller?.abort()
         restartPreviewWorker()
-        const nextPreviews = previewPair(source, nextQuality)
+        const nextPreviews = previewPair(source, nextQuality, viewportSizeRef.current)
         previewSourceVersionRef.current += 1
-        originalPreviewCanvasRef.current = { preview: null, canvas: null }
+        originalPreviewCanvasRef.current = { preview: null, canvas: null, geometryKey: '', target: null }
         setPreview(nextPreviews.full)
         setFastPreview(nextPreviews.fast)
         setPan({ x: 0, y: 0 })

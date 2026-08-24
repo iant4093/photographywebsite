@@ -29,6 +29,8 @@ export function workerRequest(worker, source, adjustments, clipping = false, {
     sourceId,
     includeHistogram = true,
     outputType = 'pixels',
+    operation = 'render',
+    radii,
 } = {}) {
     return new Promise((resolve, reject) => {
         const id = crypto.randomUUID()
@@ -85,6 +87,8 @@ export function workerRequest(worker, source, adjustments, clipping = false, {
                 reportProgress,
                 includeHistogram,
                 outputType,
+                operation,
+                radii,
             }, payload.transfer)
         } catch (error) {
             if (sourceId) registeredSources.get(worker)?.delete(sourceId)

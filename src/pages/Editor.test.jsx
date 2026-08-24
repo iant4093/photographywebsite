@@ -23,6 +23,12 @@ const mocks = vi.hoisted(() => ({
     workerMessages: [],
     workerFailures: 0,
     workerInstances: 0,
+    workerTerminations: 0,
+    holdWorkerResponses: false,
+    gpuEnabled: false,
+    gpuRender: vi.fn(),
+    gpuPrepare: vi.fn(),
+    gpuDispose: vi.fn(),
 }))
 
 vi.mock('../editor/standardDecoder', () => ({
@@ -39,6 +45,14 @@ vi.mock('../editor/standardDecoder', () => ({
 }))
 
 vi.mock('../editor/rawDecoder', () => ({ decodeRawFile: mocks.decodeRawFile, isRawFile: mocks.isRawFile }))
+
+vi.mock('../editor/livePreviewRenderer', () => ({
+    createLivePreviewRenderer: () => mocks.gpuEnabled ? {
+        render: mocks.gpuRender,
+        prepare: mocks.gpuPrepare,
+        dispose: mocks.gpuDispose,
+    } : null,
+}))
 
 vi.mock('../editor/sessionStore', () => ({
     loadEditorSession: mocks.loadEditorSession,
@@ -81,6 +95,7 @@ class WorkerStub {
     }
     postMessage(message) {
         mocks.workerMessages.push(message)
+        if (mocks.holdWorkerResponses) return
         if (mocks.workerFailures > 0) {
             mocks.workerFailures -= 1
             queueMicrotask(() => this.emit('error', { message: 'simulated worker crash' }))
@@ -93,7 +108,7 @@ class WorkerStub {
         }
         queueMicrotask(() => this.emit('message', { data: result }))
     }
-    terminate() {}
+    terminate() { mocks.workerTerminations += 1 }
 }
 
 const decodedPhoto = {
@@ -136,6 +151,12 @@ describe('Photo Editor page', () => {
         mocks.workerMessages.length = 0
         mocks.workerFailures = 0
         mocks.workerInstances = 0
+        mocks.workerTerminations = 0
+        mocks.holdWorkerResponses = false
+        mocks.gpuEnabled = false
+        mocks.gpuRender.mockReset().mockImplementation(() => document.createElement('canvas'))
+        mocks.gpuPrepare.mockReset()
+        mocks.gpuDispose.mockReset()
         vi.stubGlobal('Worker', WorkerStub)
         vi.stubGlobal('ImageData', ImageDataStub)
         vi.stubGlobal('PointerEvent', MouseEvent)
@@ -295,6 +316,75 @@ describe('Photo Editor page', () => {
         await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Preview quality' }), 'high')
         await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 1800)).toBe(true))
         expect(localStorage.getItem('ian-photo-editor-preview-quality-v1')).toBe('high')
+    })
+
+    it('shows discrete controls and presets through the GPU before the exact preview settles', async () => {
+        mocks.gpuEnabled = true
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'instant.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('instant')
+        await waitFor(() => expect(mocks.gpuRender).toHaveBeenCalled())
+        expect(screen.getByRole('region', { name: 'Photo editor workspace' })).toHaveAttribute('data-preview-engine', 'gpu')
+
+        mocks.gpuRender.mockClear()
+        mocks.workerMessages.length = 0
+        fireEvent.change(screen.getByRole('spinbutton', { name: 'Exposure value' }), { target: { value: '0.8' } })
+        await waitFor(() => expect(mocks.gpuRender).toHaveBeenCalledWith(
+            expect.anything(), expect.objectContaining({ exposure: 0.8 }), false,
+        ))
+        expect(screen.queryByText('Processing...')).not.toBeInTheDocument()
+
+        mocks.gpuRender.mockClear()
+        await userEvent.click(screen.getByRole('button', { name: 'Kodak Portra 400' }))
+        await waitFor(() => expect(mocks.gpuRender).toHaveBeenCalledWith(
+            expect.anything(), expect.objectContaining({ temperature: 7, grain: 12 }), false,
+        ))
+        await waitFor(() => expect(mocks.workerMessages.some((message) => (
+            message.width === 2 && message.includeHistogram === true && message.adjustments?.temperature === 7
+        ))).toBe(true), { timeout: 1000 })
+        expect(screen.queryByText('Processing...')).not.toBeInTheDocument()
+    })
+
+    it('prewarms preview blur data and avoids redrawing unchanged before geometry', async () => {
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'cached.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('cached')
+        await waitFor(() => expect(mocks.workerMessages.some((message) => message.operation === 'prewarm')).toBe(true), { timeout: 1500 })
+
+        mocks.drawGeometryAtSize.mockClear()
+        fireEvent.change(screen.getByRole('spinbutton', { name: 'Exposure value' }), { target: { value: '0.5' } })
+        await waitFor(() => expect(mocks.drawGeometryAtSize).toHaveBeenCalled())
+        expect(mocks.drawGeometryAtSize).toHaveBeenCalledTimes(1)
+    })
+
+    it('terminates an obsolete exact render when a newer edit arrives', async () => {
+        mocks.gpuEnabled = true
+        mocks.holdWorkerResponses = true
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'latest-only.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('latest-only')
+        await waitFor(() => expect(mocks.workerMessages.some((message) => message.includeHistogram === true)).toBe(true), { timeout: 1000 })
+        const beforeEdit = mocks.workerTerminations
+
+        await userEvent.click(screen.getByRole('button', { name: 'Kodak Gold 200' }))
+        await waitFor(() => expect(mocks.workerTerminations).toBeGreaterThan(beforeEdit))
+        await waitFor(() => expect(mocks.gpuRender.mock.calls.some(([, settings]) => settings.temperature === 14)).toBe(true))
+        mocks.holdWorkerResponses = false
+    })
+
+    it('adapts the interactive preview edge to a smaller visible viewport', async () => {
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(220)
+        vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(180)
+        const largePhoto = { ...decodedPhoto, width: 2400, height: 1600 }
+        mocks.decodeStandardFile.mockResolvedValueOnce(largePhoto)
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'viewport.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('viewport')
+        const exposure = screen.getByRole('slider', { name: 'Exposure' })
+        fireEvent.pointerDown(exposure, { pointerId: 19 })
+        fireEvent.change(exposure, { target: { value: '0.5' } })
+        await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 360)).toBe(true))
+        fireEvent.pointerUp(exposure, { pointerId: 19 })
     })
 
     it('recovers from a preview worker crash without leaving Processing stuck', async () => {

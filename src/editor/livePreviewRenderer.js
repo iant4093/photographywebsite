@@ -229,10 +229,14 @@ function configureTexture(gl, texture, width, height, pixels = null) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
 }
 
-function setSampler(gl, program, name, unit, texture) {
+function uniformLocations(gl, program, names) {
+    return Object.fromEntries(names.map((name) => [name, gl.getUniformLocation(program, name)]))
+}
+
+function setSampler(gl, location, unit, texture) {
     gl.activeTexture(gl.TEXTURE0 + unit)
     gl.bindTexture(gl.TEXTURE_2D, texture)
-    gl.uniform1i(gl.getUniformLocation(program, name), unit)
+    gl.uniform1i(location, unit)
 }
 
 function gradingArray(settings) {
@@ -253,6 +257,12 @@ export class LivePreviewRenderer {
         const gl = this.gl
         this.adjustProgram = createProgram(gl, ADJUST_SHADER)
         this.blurProgram = createProgram(gl, BLUR_SHADER)
+        this.adjustUniforms = uniformLocations(gl, this.adjustProgram, [
+            'u_source', 'u_fineBlur', 'u_broadBlur', 'u_curve', 'u_lightA', 'u_lightB', 'u_color',
+            'u_detail', 'u_noise', 'u_misc', 'u_hsl[0]', 'u_bw[0]', 'u_grading[0]', 'u_useFine',
+            'u_useBroad', 'u_useHue', 'u_useGrading', 'u_blackAndWhite', 'u_clipping', 'u_dimensions',
+        ])
+        this.blurUniforms = uniformLocations(gl, this.blurProgram, ['u_source', 'u_texel', 'u_horizontal', 'u_radius'])
         this.vertexArray = gl.createVertexArray()
         gl.bindVertexArray(this.vertexArray)
         this.vertexBuffer = gl.createBuffer()
@@ -275,6 +285,7 @@ export class LivePreviewRenderer {
         this.blurTargets = new Map()
         this.source = null
         this.temporaryTarget = null
+        this.curveKey = ''
     }
 
     makeTarget() {
@@ -316,18 +327,23 @@ export class LivePreviewRenderer {
         const output = this.makeTarget()
         gl.useProgram(this.blurProgram)
         gl.bindVertexArray(this.vertexArray)
-        setSampler(gl, this.blurProgram, 'u_source', 0, this.sourceTexture)
-        gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_texel'), 1 / this.canvas.width, 1 / this.canvas.height)
-        gl.uniform1i(gl.getUniformLocation(this.blurProgram, 'u_radius'), radius)
-        gl.uniform1i(gl.getUniformLocation(this.blurProgram, 'u_horizontal'), 1)
+        setSampler(gl, this.blurUniforms.u_source, 0, this.sourceTexture)
+        gl.uniform2f(this.blurUniforms.u_texel, 1 / this.canvas.width, 1 / this.canvas.height)
+        gl.uniform1i(this.blurUniforms.u_radius, radius)
+        gl.uniform1i(this.blurUniforms.u_horizontal, 1)
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.temporaryTarget.framebuffer)
         gl.drawArrays(gl.TRIANGLES, 0, 6)
-        setSampler(gl, this.blurProgram, 'u_source', 0, this.temporaryTarget.texture)
-        gl.uniform1i(gl.getUniformLocation(this.blurProgram, 'u_horizontal'), 0)
+        setSampler(gl, this.blurUniforms.u_source, 0, this.temporaryTarget.texture)
+        gl.uniform1i(this.blurUniforms.u_horizontal, 0)
         gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer)
         gl.drawArrays(gl.TRIANGLES, 0, 6)
         this.blurTargets.set(radius, output)
         return output.texture
+    }
+
+    prepare(source, radii = [1, 5]) {
+        this.setSource(source)
+        for (const candidate of radii) this.blur(Math.max(1, Math.min(5, Math.round(Number(candidate) || 1))))
     }
 
     render(source, candidate, clipping = false) {
@@ -340,37 +356,42 @@ export class LivePreviewRenderer {
         const fineTexture = useFine ? this.blur(Math.max(1, Math.round(settings.sharpeningRadius))) : this.sourceTexture
         const broadTexture = useBroad ? this.blur(5) : this.sourceTexture
         const lookup = curveLookup(settings.curve)
-        gl.activeTexture(gl.TEXTURE3)
-        gl.bindTexture(gl.TEXTURE_2D, this.curveTexture)
-        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 256, 1, 0, gl.RED, gl.UNSIGNED_BYTE, lookup)
+        const curveKey = settings.curve.map(({ x, y }) => `${x}:${y}`).join('|')
+        if (curveKey !== this.curveKey) {
+            gl.activeTexture(gl.TEXTURE3)
+            gl.bindTexture(gl.TEXTURE_2D, this.curveTexture)
+            gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 256, 1, 0, gl.RED, gl.UNSIGNED_BYTE, lookup)
+            this.curveKey = curveKey
+        }
 
         const program = this.adjustProgram
+        const uniforms = this.adjustUniforms
         gl.useProgram(program)
         gl.bindVertexArray(this.vertexArray)
         gl.bindFramebuffer(gl.FRAMEBUFFER, null)
         gl.viewport(0, 0, this.canvas.width, this.canvas.height)
-        setSampler(gl, program, 'u_source', 0, this.sourceTexture)
-        setSampler(gl, program, 'u_fineBlur', 1, fineTexture)
-        setSampler(gl, program, 'u_broadBlur', 2, broadTexture)
-        setSampler(gl, program, 'u_curve', 3, this.curveTexture)
+        setSampler(gl, uniforms.u_source, 0, this.sourceTexture)
+        setSampler(gl, uniforms.u_fineBlur, 1, fineTexture)
+        setSampler(gl, uniforms.u_broadBlur, 2, broadTexture)
+        setSampler(gl, uniforms.u_curve, 3, this.curveTexture)
 
-        gl.uniform4f(gl.getUniformLocation(program, 'u_lightA'), settings.exposure, settings.contrast, settings.highlights, settings.shadows)
-        gl.uniform4f(gl.getUniformLocation(program, 'u_lightB'), settings.whites, settings.blacks, settings.gamma, settings.temperature)
-        gl.uniform4f(gl.getUniformLocation(program, 'u_color'), settings.tint, settings.vibrance, settings.saturation, settings.dehaze)
-        gl.uniform4f(gl.getUniformLocation(program, 'u_detail'), settings.texture, settings.clarity, settings.sharpening, settings.sharpeningDetail)
-        gl.uniform4f(gl.getUniformLocation(program, 'u_noise'), settings.sharpeningRadius, settings.noiseLuminance, settings.noiseColor, settings.vignette)
-        gl.uniform3f(gl.getUniformLocation(program, 'u_misc'), settings.grain, settings.blackAndWhite ? 1 : 0, clipping ? 1 : 0)
-        gl.uniform3fv(gl.getUniformLocation(program, 'u_hsl[0]'), COLOR_CHANNELS.flatMap((key) => [settings.hsl[key].hue, settings.hsl[key].saturation, settings.hsl[key].luminance]))
-        gl.uniform1fv(gl.getUniformLocation(program, 'u_bw[0]'), COLOR_CHANNELS.map((key) => settings.bwMixer[key]))
-        gl.uniform2fv(gl.getUniformLocation(program, 'u_grading[0]'), gradingArray(settings))
-        gl.uniform1i(gl.getUniformLocation(program, 'u_useFine'), useFine ? 1 : 0)
-        gl.uniform1i(gl.getUniformLocation(program, 'u_useBroad'), useBroad ? 1 : 0)
-        gl.uniform1i(gl.getUniformLocation(program, 'u_useHue'), settings.vibrance || settings.saturation || COLOR_CHANNELS.some((key) => Object.values(settings.hsl[key]).some(Boolean)) ? 1 : 0)
-        gl.uniform1i(gl.getUniformLocation(program, 'u_useGrading'), Object.values(settings.grading).some((grade) => grade.saturation) ? 1 : 0)
-        gl.uniform1i(gl.getUniformLocation(program, 'u_blackAndWhite'), settings.blackAndWhite ? 1 : 0)
-        gl.uniform1i(gl.getUniformLocation(program, 'u_clipping'), clipping ? 1 : 0)
-        gl.uniform2f(gl.getUniformLocation(program, 'u_dimensions'), this.canvas.width, this.canvas.height)
+        gl.uniform4f(uniforms.u_lightA, settings.exposure, settings.contrast, settings.highlights, settings.shadows)
+        gl.uniform4f(uniforms.u_lightB, settings.whites, settings.blacks, settings.gamma, settings.temperature)
+        gl.uniform4f(uniforms.u_color, settings.tint, settings.vibrance, settings.saturation, settings.dehaze)
+        gl.uniform4f(uniforms.u_detail, settings.texture, settings.clarity, settings.sharpening, settings.sharpeningDetail)
+        gl.uniform4f(uniforms.u_noise, settings.sharpeningRadius, settings.noiseLuminance, settings.noiseColor, settings.vignette)
+        gl.uniform3f(uniforms.u_misc, settings.grain, settings.blackAndWhite ? 1 : 0, clipping ? 1 : 0)
+        gl.uniform3fv(uniforms['u_hsl[0]'], COLOR_CHANNELS.flatMap((key) => [settings.hsl[key].hue, settings.hsl[key].saturation, settings.hsl[key].luminance]))
+        gl.uniform1fv(uniforms['u_bw[0]'], COLOR_CHANNELS.map((key) => settings.bwMixer[key]))
+        gl.uniform2fv(uniforms['u_grading[0]'], gradingArray(settings))
+        gl.uniform1i(uniforms.u_useFine, useFine ? 1 : 0)
+        gl.uniform1i(uniforms.u_useBroad, useBroad ? 1 : 0)
+        gl.uniform1i(uniforms.u_useHue, settings.vibrance || settings.saturation || COLOR_CHANNELS.some((key) => Object.values(settings.hsl[key]).some(Boolean)) ? 1 : 0)
+        gl.uniform1i(uniforms.u_useGrading, Object.values(settings.grading).some((grade) => grade.saturation) ? 1 : 0)
+        gl.uniform1i(uniforms.u_blackAndWhite, settings.blackAndWhite ? 1 : 0)
+        gl.uniform1i(uniforms.u_clipping, clipping ? 1 : 0)
+        gl.uniform2f(uniforms.u_dimensions, this.canvas.width, this.canvas.height)
         gl.drawArrays(gl.TRIANGLES, 0, 6)
         return this.canvas
     }

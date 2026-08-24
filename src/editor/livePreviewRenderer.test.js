@@ -91,6 +91,7 @@ describe('GPU live preview renderer', () => {
         const gl = fakeWebGl()
         vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((type) => type === 'webgl2' ? gl : null)
         const renderer = new LivePreviewRenderer()
+        const uniformLookups = gl.getUniformLocation.mock.calls.length
         expect(renderer.render(source, freshAdjustments())).toBe(renderer.canvas)
         expect(gl.drawArrays).toHaveBeenCalledOnce()
         const settings = freshAdjustments()
@@ -120,6 +121,11 @@ describe('GPU live preview renderer', () => {
 
         renderer.render(source, { ...settings, clarity: 40 }, false)
         expect(gl.drawArrays.mock.calls.length - firstDrawCount).toBe(1)
+        expect(gl.getUniformLocation).toHaveBeenCalledTimes(uniformLookups)
+
+        renderer.prepare(source)
+        expect(renderer.blurTargets.has(1)).toBe(true)
+        expect(renderer.blurTargets.has(5)).toBe(true)
 
         renderer.render({ ...source, pixels: new Uint8ClampedArray(source.pixels) }, { ...settings, blackAndWhite: true })
         expect(gl.deleteFramebuffer).toHaveBeenCalled()

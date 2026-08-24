@@ -22,8 +22,10 @@ export function drawGeometryAtSize(source, target, geometry, targetWidth, target
     const sourceCropWidth = Math.max(1, Math.round(sourceWidth * geometry.crop.width))
     const sourceCropHeight = Math.max(1, Math.round(sourceHeight * geometry.crop.height))
     const turns = ((Math.round(geometry.quarterTurns) % 4) + 4) % 4
-    target.width = Math.max(1, Math.round(targetWidth))
-    target.height = Math.max(1, Math.round(targetHeight))
+    const nextWidth = Math.max(1, Math.round(targetWidth))
+    const nextHeight = Math.max(1, Math.round(targetHeight))
+    if (target.width !== nextWidth) target.width = nextWidth
+    if (target.height !== nextHeight) target.height = nextHeight
     const context = target.getContext('2d', { alpha: false })
     context.save()
     context.fillStyle = '#191713'

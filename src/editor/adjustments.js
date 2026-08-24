@@ -321,6 +321,15 @@ function cachedBlur(source, width, height, radius, spatialCache) {
     return cached
 }
 
+export function prewarmSpatialCache(input, width, height, radii = [1, 5], spatialCache = new Map()) {
+    const source = input instanceof Uint8ClampedArray ? input : new Uint8ClampedArray(input)
+    for (const candidate of radii) {
+        const radius = Math.max(1, Math.min(5, Math.round(Number(candidate) || 1)))
+        cachedBlur(source, width, height, radius, spatialCache)
+    }
+    return spatialCache
+}
+
 function spatialData(source, width, height, settings, flags, onProgress, spatialCache) {
     reportProcessingProgress(onProgress, 0.04)
     const fineBlur = flags.fineBlur

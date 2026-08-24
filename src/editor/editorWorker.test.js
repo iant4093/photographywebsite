@@ -65,6 +65,11 @@ describe('editor preview worker', () => {
         expect(messages.at(-1).pixels).toBeUndefined()
     })
 
+    it('prewarms retained spatial data without returning image pixels', () => {
+        const messages = send({ id: 'prewarm', sourceId: 'warm-source', pixels: pixels(), operation: 'prewarm', radii: [1, 5] })
+        expect(messages).toEqual([{ id: 'prewarm', warmed: true }])
+    })
+
     it('falls back to pixels when an offscreen canvas cannot provide a context', () => {
         class OffscreenCanvasStub {
             getContext() { return null }

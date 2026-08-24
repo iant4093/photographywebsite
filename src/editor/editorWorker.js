@@ -1,4 +1,4 @@
-import { calculateHistogram, processImagePixels } from './adjustments'
+import { calculateHistogram, prewarmSpatialCache, processImagePixels } from './adjustments'
 
 const sources = new Map()
 
@@ -45,9 +45,14 @@ if (typeof self !== 'undefined') {
     })
 
     self.onmessage = ({ data: message }) => {
-        const { id, adjustments, clipping, reportProgress, includeHistogram = true, outputType = 'pixels' } = message
+        const { id, adjustments, clipping, operation = 'render', radii, reportProgress, includeHistogram = true, outputType = 'pixels' } = message
         try {
             const source = sourceForMessage(message)
+            if (operation === 'prewarm') {
+                prewarmSpatialCache(source.pixels, source.width, source.height, radii, source.spatialCache)
+                self.postMessage({ id, warmed: true })
+                return
+            }
             const onProgress = reportProgress
                 ? (progress) => self.postMessage({ id, progress })
                 : undefined
