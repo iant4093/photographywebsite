@@ -205,6 +205,7 @@ export default function Editor() {
     const liveRendererRef = useRef(null)
     const liveRenderFrameRef = useRef(null)
     const settleRenderTimerRef = useRef(null)
+    const settleRenderFrameRef = useRef(null)
     const originalPreviewCanvasRef = useRef({ preview: null, canvas: null, geometryKey: '', target: null })
     const viewportSizeRef = useRef({ width: 1, height: 1 })
     const panStartRef = useRef(null)
@@ -268,6 +269,7 @@ export default function Editor() {
         return () => {
             if (liveRenderFrameRef.current) window.cancelAnimationFrame(liveRenderFrameRef.current)
             if (settleRenderTimerRef.current) window.clearTimeout(settleRenderTimerRef.current)
+            if (settleRenderFrameRef.current) window.cancelAnimationFrame(settleRenderFrameRef.current)
             liveRendererRef.current?.dispose()
             liveRendererRef.current = null
         }
@@ -419,14 +421,18 @@ export default function Editor() {
                 try {
                     const result = await workerRequest(workerRef.current, task.workingPreview, task.adjustments, task.showClipping, {
                         signal: controller.signal,
-                        timeoutMs: task.kind === 'prewarm' ? 20000 : task.quality === 'fast' ? 4000 : 12000,
+                        timeoutMs: task.kind === 'prewarm' ? 20000 : task.kind === 'histogram' ? 12000 : task.quality === 'fast' ? 4000 : 45000,
                         sourceId: task.sourceId,
-                        includeHistogram: task.kind !== 'prewarm' && task.quality === 'full',
-                        outputType: task.kind === 'prewarm' ? 'pixels' : 'bitmap',
+                        includeHistogram: task.kind === 'histogram' || (task.kind !== 'prewarm' && task.quality === 'full'),
+                        outputType: task.kind === 'prewarm' || task.kind === 'histogram' ? 'pixels' : 'bitmap',
                         operation: task.kind === 'prewarm' ? 'prewarm' : 'render',
                         radii: task.kind === 'prewarm' ? [1, 5] : undefined,
                     })
                     if (task.kind === 'prewarm') continue
+                    if (task.kind === 'histogram') {
+                        if (task.renderId === renderIdRef.current && result.histogram) setHistogram(result.histogram)
+                        continue
+                    }
                     const processedSource = result.bitmap || createCanvasFromPixels(
                         result.pixels,
                         result.width || task.workingPreview.width,
@@ -437,7 +443,9 @@ export default function Editor() {
                 } catch (processingError) {
                     if (processingError.name === 'AbortError') continue
                     restartPreviewWorker()
-                    if (task.renderId === renderIdRef.current && !task.retried && !queue.pending) {
+                    if (task.kind === 'histogram' || task.kind === 'prewarm') {
+                        continue
+                    } else if (task.renderId === renderIdRef.current && !task.retried && !queue.pending) {
                         queue.pending = { ...task, retried: true }
                     } else if (task.renderId === renderIdRef.current && !queue.pending) {
                         setError(`${processingError.message} Try moving the control again.`)
@@ -472,6 +480,10 @@ export default function Editor() {
         if (settleRenderTimerRef.current) {
             window.clearTimeout(settleRenderTimerRef.current)
             settleRenderTimerRef.current = null
+        }
+        if (settleRenderFrameRef.current) {
+            window.cancelAnimationFrame(settleRenderFrameRef.current)
+            settleRenderFrameRef.current = null
         }
         const baseTask = {
             renderId,
@@ -516,8 +528,33 @@ export default function Editor() {
                 settleRenderTimerRef.current = window.setTimeout(() => {
                     settleRenderTimerRef.current = null
                     if (settledTask.renderId !== renderIdRef.current) return
-                    queue.pending = settledTask
-                    void drainPreviewQueue()
+                    settleRenderFrameRef.current = window.requestAnimationFrame(() => {
+                        settleRenderFrameRef.current = null
+                        if (settledTask.renderId !== renderIdRef.current || !liveRendererRef.current) return
+                        try {
+                            const rendered = liveRendererRef.current.render(
+                                settledTask.workingPreview,
+                                settledTask.adjustments,
+                                settledTask.showClipping,
+                            )
+                            paintPreview(rendered, settledTask, null)
+                            queue.pending = {
+                                ...settledTask,
+                                kind: 'histogram',
+                                quality: 'fast',
+                                workingPreview: fastPreview,
+                                sourceId: `${previewSourceVersionRef.current}:fast`,
+                                background: true,
+                            }
+                            void drainPreviewQueue()
+                        } catch {
+                            liveRendererRef.current?.dispose()
+                            liveRendererRef.current = null
+                            setLivePreviewEngine('worker')
+                            queue.pending = { ...settledTask, background: false }
+                            void drainPreviewQueue()
+                        }
+                    })
                 }, PREVIEW_SETTLE_DELAY_MS)
             }
         } else {
@@ -532,6 +569,10 @@ export default function Editor() {
             if (settleRenderTimerRef.current) {
                 window.clearTimeout(settleRenderTimerRef.current)
                 settleRenderTimerRef.current = null
+            }
+            if (settleRenderFrameRef.current) {
+                window.cancelAnimationFrame(settleRenderFrameRef.current)
+                settleRenderFrameRef.current = null
             }
         }
     }, [adjustments, drainPreviewQueue, fastPreview, geometry, isLiveEditing, paintPreview, preview, restartPreviewWorker, showClipping])

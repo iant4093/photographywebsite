@@ -318,7 +318,7 @@ describe('Photo Editor page', () => {
         expect(localStorage.getItem('ian-photo-editor-preview-quality-v1')).toBe('high')
     })
 
-    it('shows discrete controls and presets through the GPU before the exact preview settles', async () => {
+    it('shows discrete controls and presets through the GPU before the full-quality preview settles', async () => {
         mocks.gpuEnabled = true
         const { container } = render(<Editor />)
         await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'instant.jpg', { type: 'image/jpeg' }))
@@ -343,6 +343,30 @@ describe('Photo Editor page', () => {
             message.width === 2 && message.includeHistogram === true && message.adjustments?.temperature === 7
         ))).toBe(true), { timeout: 1000 })
         expect(screen.queryByText('Processing...')).not.toBeInTheDocument()
+    })
+
+    it('promotes preset previews to full GPU quality even when the background histogram worker fails', async () => {
+        mocks.gpuEnabled = true
+        mocks.decodeStandardFile.mockResolvedValueOnce({ ...decodedPhoto, width: 2400, height: 1600 })
+        const { container } = render(<Editor />)
+        await userEvent.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'full-quality.jpg', { type: 'image/jpeg' }))
+        await screen.findByText('full-quality')
+        await waitFor(() => expect(screen.getAllByText('1200 × 800 working preview').length).toBeGreaterThan(0))
+
+        mocks.gpuRender.mockClear()
+        mocks.workerMessages.length = 0
+        mocks.workerFailures = 1
+        await userEvent.click(screen.getByRole('button', { name: 'Fujifilm Velvia 50' }))
+
+        await waitFor(() => expect(mocks.gpuRender.mock.calls.some(([workingPreview, settings]) => (
+            workingPreview.width === 1200 && settings.vibrance === 30 && settings.dehaze === 10
+        ))).toBe(true))
+        await waitFor(() => expect(mocks.workerMessages.some((message) => (
+            message.width === 560 && message.includeHistogram === true
+        ))).toBe(true))
+        await waitFor(() => expect(mocks.workerTerminations).toBeGreaterThan(0))
+        expect(screen.queryByText(/processing timed out|simulated worker crash/i)).not.toBeInTheDocument()
+        expect(screen.getAllByText('1200 × 800 working preview').length).toBeGreaterThan(0)
     })
 
     it('prewarms preview blur data and avoids redrawing unchanged before geometry', async () => {
