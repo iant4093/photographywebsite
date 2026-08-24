@@ -65,4 +65,27 @@ describe('editor worker client', () => {
         await vi.advanceTimersByTimeAsync(50)
         await timedOutExpectation
     })
+
+    it('transfers a named preview source once and sends only settings afterward', async () => {
+        const worker = new FakeWorker()
+        const first = workerRequest(worker, source, { exposure: 1 }, false, {
+            sourceId: 'preview-full',
+            includeHistogram: false,
+            outputType: 'bitmap',
+        })
+        const firstMessage = worker.message
+        expect(firstMessage.sourceId).toBe('preview-full')
+        expect(firstMessage.pixels).toBeInstanceOf(ArrayBuffer)
+        expect(firstMessage.includeHistogram).toBe(false)
+        expect(firstMessage.outputType).toBe('bitmap')
+        worker.emit('message', { data: { id: firstMessage.id, pixels: new ArrayBuffer(4) } })
+        await first
+
+        const second = workerRequest(worker, source, { exposure: 2 }, false, { sourceId: 'preview-full' })
+        const secondMessage = worker.message
+        expect(secondMessage.sourceId).toBe('preview-full')
+        expect(secondMessage.pixels).toBeUndefined()
+        worker.emit('message', { data: { id: secondMessage.id, pixels: new ArrayBuffer(4) } })
+        await second
+    })
 })

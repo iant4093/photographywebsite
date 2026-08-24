@@ -87,4 +87,15 @@ describe('browser editor adjustments', () => {
         expect(histogram.red.reduce((sum, value) => sum + value, 0)).toBe(2)
         expect(histogram.blue[63]).toBe(1)
     })
+
+    it('reuses source blur maps across repeated preview renders', () => {
+        const pixels = new Uint8ClampedArray(6 * 6 * 4).fill(128)
+        const spatialCache = new Map()
+        processImagePixels(pixels, 6, 6, { ...freshAdjustments(), clarity: 20 }, { spatialCache })
+        const cachedBlur = spatialCache.get('6x6:r5')
+        expect(cachedBlur).toBeInstanceOf(Uint8ClampedArray)
+        processImagePixels(pixels, 6, 6, { ...freshAdjustments(), clarity: 40 }, { spatialCache })
+        expect(spatialCache.size).toBe(1)
+        expect(spatialCache.get('6x6:r5')).toBe(cachedBlur)
+    })
 })

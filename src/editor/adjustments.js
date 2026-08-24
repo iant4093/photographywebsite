@@ -191,7 +191,7 @@ function curveValue(value, points) {
     return (lower.y + (upper.y - lower.y) * fraction) / 100 * 255
 }
 
-function boxBlur(data, width, height, radius) {
+export function boxBlur(data, width, height, radius) {
     if (radius <= 0) return new Float32Array(data)
     const output = new Uint8ClampedArray(data.length)
     const size = radius * 2 + 1
@@ -249,7 +249,7 @@ function boxBlur(data, width, height, radius) {
     return output
 }
 
-function curveLookup(points) {
+export function curveLookup(points) {
     const lookup = new Uint8ClampedArray(256)
     for (let value = 0; value < lookup.length; value += 1) lookup[value] = curveValue(value, points)
     return lookup
@@ -310,11 +310,24 @@ function activeProcessingFlags(settings) {
     }
 }
 
-function spatialData(source, width, height, settings, flags, onProgress) {
+function cachedBlur(source, width, height, radius, spatialCache) {
+    if (!spatialCache) return boxBlur(source, width, height, radius)
+    const key = `${width}x${height}:r${radius}`
+    let cached = spatialCache.get(key)
+    if (!cached) {
+        cached = boxBlur(source, width, height, radius)
+        spatialCache.set(key, cached)
+    }
+    return cached
+}
+
+function spatialData(source, width, height, settings, flags, onProgress, spatialCache) {
     reportProcessingProgress(onProgress, 0.04)
-    const fineBlur = flags.fineBlur ? boxBlur(source, width, height, Math.max(1, Math.round(settings.sharpeningRadius))) : null
+    const fineBlur = flags.fineBlur
+        ? cachedBlur(source, width, height, Math.max(1, Math.round(settings.sharpeningRadius)), spatialCache)
+        : null
     reportProcessingProgress(onProgress, flags.fineBlur ? 0.18 : 0.1)
-    const broadBlur = flags.clarity ? boxBlur(source, width, height, 5) : null
+    const broadBlur = flags.clarity ? cachedBlur(source, width, height, 5, spatialCache) : null
     reportProcessingProgress(onProgress, 0.32)
     return { fineBlur, broadBlur }
 }
@@ -403,13 +416,13 @@ function preparedValues(settings, flags) {
     }
 }
 
-export function processImagePixels(input, width, height, candidate, { clipping = false, onProgress } = {}) {
+export function processImagePixels(input, width, height, candidate, { clipping = false, onProgress, spatialCache } = {}) {
     const settings = sanitizeAdjustments(candidate)
     const source = input instanceof Uint8ClampedArray ? input : new Uint8ClampedArray(input)
     const flags = activeProcessingFlags(settings)
     if (noPixelAdjustments(flags, clipping)) return copySource(source, onProgress)
     const output = new Uint8ClampedArray(source.length)
-    const { fineBlur, broadBlur } = spatialData(source, width, height, settings, flags, onProgress)
+    const { fineBlur, broadBlur } = spatialData(source, width, height, settings, flags, onProgress, spatialCache)
     const values = preparedValues(settings, flags)
     const trackProgress = progressTracker(onProgress, source.length / 4)
 
