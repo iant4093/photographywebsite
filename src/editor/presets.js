@@ -1,4 +1,4 @@
-import { freshAdjustments, sanitizeAdjustments } from './adjustments'
+import { freshAdjustments, sanitizeAdjustments, sanitizeGeometry } from './adjustments'
 
 const filmPreset = (settings) => sanitizeAdjustments(settings)
 
@@ -118,8 +118,8 @@ export const BUILT_IN_PRESETS = Object.freeze({
     }),
 })
 
-export function applyPreset(name, current = freshAdjustments(), customPresets = {}) {
-    const preset = customPresets[name] || BUILT_IN_PRESETS[name]
+export function applyPreset(name, current = freshAdjustments()) {
+    const preset = BUILT_IN_PRESETS[name]
     if (!preset) return sanitizeAdjustments(current)
     const merged = structuredClone(current)
     for (const [key, value] of Object.entries(preset)) {
@@ -130,18 +130,19 @@ export function applyPreset(name, current = freshAdjustments(), customPresets = 
     return sanitizeAdjustments(merged)
 }
 
-export function serializeSidecar(adjustments, geometry, sourceName = '') {
+export function serializeSettings(adjustments, geometry) {
     return JSON.stringify({
-        schema: 'ian-truong-photo-editor/v1',
-        sourceName,
-        createdAt: new Date().toISOString(),
+        schema: 'ian-truong-photo-editor/settings-v1',
         adjustments: sanitizeAdjustments(adjustments),
-        geometry,
+        geometry: sanitizeGeometry(geometry),
     }, null, 2)
 }
 
-export function parseSidecar(text) {
+export function parseSettings(text) {
     const parsed = JSON.parse(text)
-    if (parsed?.schema !== 'ian-truong-photo-editor/v1') throw new Error('This is not a supported editor sidecar.')
-    return parsed
+    if (parsed?.schema !== 'ian-truong-photo-editor/settings-v1') throw new Error('These are not supported editor settings.')
+    return {
+        adjustments: sanitizeAdjustments(parsed.adjustments),
+        geometry: sanitizeGeometry(parsed.geometry),
+    }
 }

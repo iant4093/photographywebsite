@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { freshAdjustments, freshGeometry } from './adjustments'
-import { applyPreset, BUILT_IN_PRESETS, parseSidecar, serializeSidecar } from './presets'
+import { applyPreset, BUILT_IN_PRESETS, parseSettings, serializeSettings } from './presets'
 
-describe('editor presets and sidecars', () => {
+describe('editor presets and clipboard settings', () => {
     it('applies a built-in preset without mutating current settings', () => {
         const current = freshAdjustments()
         const result = applyPreset('Kodak Portra 400', current)
@@ -30,15 +30,14 @@ describe('editor presets and sidecars', () => {
         expect(color.grain).toBe(10)
     })
 
-    it('round-trips versioned local sidecars', () => {
-        const text = serializeSidecar({ ...freshAdjustments(), exposure: 1.25 }, freshGeometry(), 'photo.cr3')
-        const parsed = parseSidecar(text)
-        expect(parsed.schema).toBe('ian-truong-photo-editor/v1')
+    it('round-trips clipboard settings', () => {
+        const text = serializeSettings({ ...freshAdjustments(), exposure: 1.25 }, freshGeometry())
+        const parsed = parseSettings(text)
         expect(parsed.adjustments.exposure).toBe(1.25)
-        expect(parsed.sourceName).toBe('photo.cr3')
+        expect(parsed.geometry).toEqual(freshGeometry())
     })
 
     it('rejects unrelated JSON settings', () => {
-        expect(() => parseSidecar('{"schema":"other"}')).toThrow(/not a supported/i)
+        expect(() => parseSettings('{"schema":"other"}')).toThrow(/not supported/i)
     })
 })

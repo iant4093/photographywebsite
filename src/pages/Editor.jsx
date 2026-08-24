@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { COLOR_CHANNELS, freshAdjustments, freshGeometry, sanitizeAdjustments, sanitizeGeometry } from '../editor/adjustments'
-import { BUILT_IN_PRESETS, applyPreset, parseSidecar, serializeSidecar } from '../editor/presets'
+import { BUILT_IN_PRESETS, applyPreset, parseSettings, serializeSettings } from '../editor/presets'
 import { canvasToBlob, cropForAspect, drawGeometry, drawGeometryAtSize, fittedGeometryDimensions, outputDimensions } from '../editor/canvas'
 import { decodeStandardFile, makePreviewSource } from '../editor/standardDecoder'
 import { decodeRawFile, isRawFile } from '../editor/rawDecoder'
@@ -12,7 +12,6 @@ import { workerRequest } from '../editor/workerClient'
 import './Editor.css'
 
 const ACCEPTED_TYPES = 'image/jpeg,image/png,image/webp,image/avif,.dng,.cr2,.cr3,.nef,.nrw,.arw,.raf,.rw2,.orf,.pef,.srw,.3fr,.fff,.iiq,.x3f,.raw'
-const CUSTOM_PRESETS_KEY = 'ian-photo-editor-presets-v1'
 const PREVIEW_QUALITY_KEY = 'ian-photo-editor-preview-quality-v1'
 const DEFAULT_EXPORT_OPTIONS = Object.freeze({ format: 'jpeg', quality: 92, resizeMode: 'original', size: 2048, suffix: '-edited' })
 const PREVIEW_QUALITIES = Object.freeze({
@@ -192,7 +191,6 @@ function cancelIdleWork(work) {
 
 export default function Editor() {
     const fileInputRef = useRef(null)
-    const sidecarInputRef = useRef(null)
     const shellRef = useRef(null)
     const stageRef = useRef(null)
     const afterCanvasRef = useRef(null)
@@ -240,9 +238,6 @@ export default function Editor() {
     const [sessionSourceReady, setSessionSourceReady] = useState(false)
     const [sessionStatus, setSessionStatus] = useState('No saved session')
     const [previewQuality, setPreviewQuality] = useState(storedPreviewQuality)
-    const [customPresets, setCustomPresets] = useState(() => {
-        try { return JSON.parse(localStorage.getItem(CUSTOM_PRESETS_KEY) || '{}') } catch { return {} }
-    })
     const [exportOptions, setExportOptions] = useState(() => ({ ...DEFAULT_EXPORT_OPTIONS }))
     const [exportState, setExportState] = useState({ active: false, progress: 0, label: '' })
     const exportWorkerRef = useRef(null)
@@ -787,35 +782,17 @@ export default function Editor() {
         commit(adjustments, { ...geometry, aspect, crop: cropForAspect(source.width, source.height, aspect) })
     }
 
-    const savePreset = () => {
-        const name = window.prompt('Name this preset')?.trim()
-        if (!name) return
-        const next = { ...customPresets, [name]: adjustments }
-        setCustomPresets(next)
-        localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(next))
-    }
-
     const copySettings = async () => {
-        await navigator.clipboard.writeText(serializeSidecar(adjustments, geometry, filename))
+        await navigator.clipboard.writeText(serializeSettings(adjustments, geometry))
         setStatus('Settings copied')
     }
 
     const pasteSettings = async () => {
         try {
-            const sidecar = parseSidecar(await navigator.clipboard.readText())
-            commit(sidecar.adjustments, sidecar.geometry)
+            const settings = parseSettings(await navigator.clipboard.readText())
+            commit(settings.adjustments, settings.geometry)
             setStatus('Settings pasted')
         } catch (clipboardError) { setError(clipboardError.message) }
-    }
-
-    const exportSidecar = () => downloadBlob(new Blob([serializeSidecar(adjustments, geometry, filename)], { type: 'application/json' }), `${filename || 'photo'}.ianedit.json`)
-
-    const importSidecar = async (file) => {
-        try {
-            const sidecar = parseSidecar(await file.text())
-            commit(sidecar.adjustments, sidecar.geometry)
-            setStatus('Sidecar applied')
-        } catch (sidecarError) { setError(sidecarError.message) }
     }
 
     const exportImage = async () => {
@@ -1127,11 +1104,10 @@ export default function Editor() {
 
                         <ControlSection title="Presets" defaultOpen>
                             <div className="editor-preset-grid">
-                                {[...Object.keys(BUILT_IN_PRESETS), ...Object.keys(customPresets)].map((name) => (
-                                    <button key={name} type="button" onClick={() => commit(applyPreset(name, adjustments, customPresets), geometry)}>{name}</button>
+                                {Object.keys(BUILT_IN_PRESETS).map((name) => (
+                                    <button key={name} type="button" onClick={() => commit(applyPreset(name, adjustments), geometry)}>{name}</button>
                                 ))}
                             </div>
-                            <button type="button" onClick={savePreset} disabled={!source}>Save current preset</button>
                         </ControlSection>
 
                         {RANGE_GROUPS.map((group, groupIndex) => (
@@ -1224,13 +1200,10 @@ export default function Editor() {
                             </div>
                         </ControlSection>
 
-                        <ControlSection title="Settings & sidecar">
+                        <ControlSection title="Settings">
                             <div className="editor-button-grid">
                                 <button type="button" onClick={() => void copySettings()} disabled={!source}>Copy settings</button>
                                 <button type="button" onClick={() => void pasteSettings()}>Paste settings</button>
-                                <button type="button" onClick={exportSidecar} disabled={!source}>Download sidecar</button>
-                                <button type="button" onClick={() => sidecarInputRef.current?.click()}>Import sidecar</button>
-                                <input ref={sidecarInputRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void importSidecar(event.target.files?.[0])} />
                             </div>
                         </ControlSection>
 

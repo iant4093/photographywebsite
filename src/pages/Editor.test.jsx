@@ -234,18 +234,14 @@ describe('Photo Editor page', () => {
         await user.click(screen.getByRole('button', { name: 'Flip H' }))
         fireEvent.change(screen.getByRole('spinbutton', { name: 'Straighten value' }), { target: { value: '4' } })
 
-        const settingsSummary = screen.getByText('Settings & sidecar')
+        const settingsSummary = screen.getByText('Settings')
         await user.click(settingsSummary)
         await user.click(screen.getByRole('button', { name: 'Copy settings' }))
-        expect(writeClipboard).toHaveBeenCalledWith(expect.stringContaining('ian-truong-photo-editor/v1'))
-        readClipboard.mockResolvedValueOnce(JSON.stringify({ schema: 'ian-truong-photo-editor/v1', adjustments: { contrast: 12 }, geometry: {} }))
+        expect(writeClipboard).toHaveBeenCalledWith(expect.stringContaining('ian-truong-photo-editor/settings-v1'))
+        readClipboard.mockResolvedValueOnce(JSON.stringify({ schema: 'ian-truong-photo-editor/settings-v1', adjustments: { contrast: 12 }, geometry: {} }))
         await user.click(screen.getByRole('button', { name: 'Paste settings' }))
         await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Contrast value' })).toHaveValue(12))
-        await user.click(screen.getByRole('button', { name: 'Download sidecar' }))
-
-        vi.spyOn(window, 'prompt').mockReturnValue('My preset')
-        await user.click(screen.getByRole('button', { name: 'Save current preset' }))
-        expect(screen.getByRole('button', { name: 'My preset' })).toBeInTheDocument()
+        expect(within(settingsSummary.parentElement).getAllByRole('button')).toHaveLength(2)
 
         mocks.decodeRawFile.mockRejectedValueOnce(new Error('Unsupported camera file'))
         const broken = new File(['bad'], 'broken.cr3', { type: 'application/octet-stream' })
