@@ -33,6 +33,16 @@ describe('browser editor adjustments', () => {
         expect(output[7]).toBe(255)
     })
 
+    it('copies untouched pixels exactly and reports bounded processing progress', () => {
+        const pixels = new Uint8ClampedArray([12, 34, 56, 78, 210, 190, 170, 255])
+        const progress = []
+        const output = processImagePixels(pixels, 2, 1, freshAdjustments(), { onProgress: (value) => progress.push(value) })
+        expect(output).toEqual(pixels)
+        expect(output).not.toBe(pixels)
+        expect(progress.at(-1)).toBe(1)
+        expect(progress.every((value) => value >= 0 && value <= 1)).toBe(true)
+    })
+
     it('creates deterministic grain and clipping indicators', () => {
         const pixels = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255])
         const first = processImagePixels(pixels, 2, 1, { ...freshAdjustments(), grain: 30 })

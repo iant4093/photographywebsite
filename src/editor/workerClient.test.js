@@ -30,8 +30,12 @@ describe('editor worker client', () => {
 
     it('resolves the matching worker response and removes listeners', async () => {
         const worker = new FakeWorker()
-        const request = workerRequest(worker, source, { exposure: 1 })
+        const onProgress = vi.fn()
+        const request = workerRequest(worker, source, { exposure: 1 }, false, { reportProgress: true, onProgress })
         worker.emit('message', { data: { id: 'another-request' } })
+        worker.emit('message', { data: { id: worker.message.id, progress: 0.45 } })
+        expect(onProgress).toHaveBeenCalledWith(0.45)
+        expect(worker.message.reportProgress).toBe(true)
         worker.emit('message', { data: { id: worker.message.id, pixels: new ArrayBuffer(4) } })
         await expect(request).resolves.toMatchObject({ id: worker.message.id })
         expect([...worker.listeners.values()].every((listeners) => listeners.length === 0)).toBe(true)

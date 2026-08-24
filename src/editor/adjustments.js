@@ -193,32 +193,134 @@ function curveValue(value, points) {
 
 function boxBlur(data, width, height, radius) {
     if (radius <= 0) return new Float32Array(data)
-    const output = new Float32Array(data.length)
+    const output = new Uint8ClampedArray(data.length)
     const size = radius * 2 + 1
-    const horizontal = new Float32Array(data.length)
-    for (let y = 0; y < height; y += 1) {
+    const rowLength = width * 4
+    const ringSize = size + 2
+    const horizontalRows = new Uint8ClampedArray(rowLength * ringSize)
+    const rowKeys = new Int32Array(ringSize).fill(-1)
+    const columnSums = new Float32Array(width * 3)
+
+    const horizontalRow = (sourceY) => {
+        const y = clamp(sourceY, 0, height - 1)
+        const slot = y % ringSize
+        const rowOffset = slot * rowLength
+        if (rowKeys[slot] === y) return rowOffset
+        rowKeys[slot] = y
         for (let channel = 0; channel < 3; channel += 1) {
             let sum = 0
             for (let x = -radius; x <= radius; x += 1) sum += data[(y * width + clamp(x, 0, width - 1)) * 4 + channel]
             for (let x = 0; x < width; x += 1) {
-                horizontal[(y * width + x) * 4 + channel] = sum / size
+                horizontalRows[rowOffset + x * 4 + channel] = sum / size
                 sum -= data[(y * width + clamp(x - radius, 0, width - 1)) * 4 + channel]
                 sum += data[(y * width + clamp(x + radius + 1, 0, width - 1)) * 4 + channel]
             }
         }
+        return rowOffset
     }
-    for (let x = 0; x < width; x += 1) {
-        for (let channel = 0; channel < 3; channel += 1) {
-            let sum = 0
-            for (let y = -radius; y <= radius; y += 1) sum += horizontal[(clamp(y, 0, height - 1) * width + x) * 4 + channel]
-            for (let y = 0; y < height; y += 1) {
-                output[(y * width + x) * 4 + channel] = sum / size
-                sum -= horizontal[(clamp(y - radius, 0, height - 1) * width + x) * 4 + channel]
-                sum += horizontal[(clamp(y + radius + 1, 0, height - 1) * width + x) * 4 + channel]
-            }
+
+    const addRow = (sourceY, direction) => {
+        const rowOffset = horizontalRow(sourceY)
+        for (let x = 0; x < width; x += 1) {
+            const columnOffset = x * 3
+            const pixelOffset = rowOffset + x * 4
+            columnSums[columnOffset] += horizontalRows[pixelOffset] * direction
+            columnSums[columnOffset + 1] += horizontalRows[pixelOffset + 1] * direction
+            columnSums[columnOffset + 2] += horizontalRows[pixelOffset + 2] * direction
+        }
+    }
+
+    addRow(0, radius + 1)
+    for (let y = 1; y <= radius; y += 1) addRow(y, 1)
+    for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+            const columnOffset = x * 3
+            const pixelOffset = (y * width + x) * 4
+            output[pixelOffset] = columnSums[columnOffset] / size
+            output[pixelOffset + 1] = columnSums[columnOffset + 1] / size
+            output[pixelOffset + 2] = columnSums[columnOffset + 2] / size
+            output[pixelOffset + 3] = data[pixelOffset + 3]
+        }
+        if (y < height - 1) {
+            addRow(y - radius, -1)
+            addRow(y + radius + 1, 1)
         }
     }
     return output
+}
+
+function curveLookup(points) {
+    const lookup = new Uint8ClampedArray(256)
+    for (let value = 0; value < lookup.length; value += 1) lookup[value] = curveValue(value, points)
+    return lookup
+}
+
+function hasChannelAdjustments(settings) {
+    return COLOR_CHANNELS.some((channel) => {
+        const hsl = settings.hsl[channel]
+        return hsl.hue || hsl.saturation || hsl.luminance
+    })
+}
+
+function hasBlackAndWhiteMixerAdjustments(settings) {
+    return COLOR_CHANNELS.some((channel) => settings.bwMixer[channel])
+}
+
+function hasIdentityCurve(points) {
+    return points.every((point) => Math.abs(point.x - point.y) < 0.001)
+}
+
+function reportProcessingProgress(onProgress, value) {
+    if (typeof onProgress === 'function') onProgress(Math.min(1, Math.max(0, value)))
+}
+
+function progressTracker(onProgress, pixelCount) {
+    if (typeof onProgress !== 'function') return null
+    const interval = Math.max(1, Math.ceil(pixelCount / 12))
+    let next = 0
+    return (pixel) => {
+        if (pixel < next) return
+        next = pixel + interval
+        reportProcessingProgress(onProgress, 0.34 + (pixel / Math.max(1, pixelCount)) * 0.62)
+    }
+}
+
+function noPixelAdjustments(flags, clipping) {
+    return !clipping && Object.values(flags).every((value) => typeof value !== 'boolean' || !value)
+}
+
+function activeProcessingFlags(settings) {
+    const channel = hasChannelAdjustments(settings)
+    const blackAndWhiteMixer = hasBlackAndWhiteMixerAdjustments(settings)
+    const grading = Object.entries(settings.grading).filter(([, value]) => value.saturation)
+    return {
+        fineBlur: Boolean(settings.texture || settings.sharpening || settings.noiseLuminance || settings.noiseColor),
+        clarity: Boolean(settings.clarity),
+        exposureColor: Boolean(settings.exposure || settings.temperature || settings.tint),
+        tonal: Boolean(settings.highlights || settings.shadows || settings.whites || settings.blacks),
+        contrast: Boolean(settings.contrast || settings.dehaze),
+        gamma: Math.abs(settings.gamma - 1) > 0.0001,
+        curve: !hasIdentityCurve(settings.curve),
+        hue: Boolean(settings.vibrance || settings.saturation || channel || (settings.blackAndWhite && blackAndWhiteMixer)),
+        grading: grading.length > 0 && !settings.blackAndWhite,
+        blackAndWhite: settings.blackAndWhite,
+        vignette: Boolean(settings.vignette),
+        grain: Boolean(settings.grain),
+        gradingEntries: grading,
+    }
+}
+
+function spatialData(source, width, height, settings, flags, onProgress) {
+    reportProcessingProgress(onProgress, 0.04)
+    const fineBlur = flags.fineBlur ? boxBlur(source, width, height, Math.max(1, Math.round(settings.sharpeningRadius))) : null
+    reportProcessingProgress(onProgress, flags.fineBlur ? 0.18 : 0.1)
+    const broadBlur = flags.clarity ? boxBlur(source, width, height, 5) : null
+    reportProcessingProgress(onProgress, 0.32)
+    return { fineBlur, broadBlur }
+}
+
+function gradingColors(entries) {
+    return Object.fromEntries(entries.map(([key, value]) => [key, gradingColor(value)]))
 }
 
 function gradingColor(range) {
@@ -231,127 +333,185 @@ function seededNoise(index) {
     return (value - Math.floor(value)) * 2 - 1
 }
 
-export function processImagePixels(input, width, height, candidate, { clipping = false } = {}) {
+function pixelChannel(settings, hue) {
+    const channel = channelForHue(hue)
+    return { channel, hsl: settings.hsl[channel] }
+}
+
+function applyHueAdjustments(red, green, blue, settings, saturation, vibrance) {
+    let [hue, sat, light] = rgbToHsl(red, green, blue)
+    const { channel, hsl } = pixelChannel(settings, hue)
+    hue += hsl.hue * 0.45
+    const vibranceBoost = vibrance * (1 - sat) * 0.7
+    sat = clamp(sat * saturation + vibranceBoost + hsl.saturation / 100, 0, 1)
+    light = clamp(light + hsl.luminance / 250, 0, 1)
+    return { color: hslToRgb(hue, sat, light), channel }
+}
+
+function applyColorGrading(red, green, blue, luma, gradingEntries, colors) {
+    for (const [rangeName, rangeSettings] of gradingEntries) {
+        let weight = 1
+        if (rangeName === 'shadows') weight = (1 - luma / 255) ** 2
+        if (rangeName === 'midtones') weight = 1 - Math.abs(luma / 127.5 - 1)
+        if (rangeName === 'highlights') weight = (luma / 255) ** 2
+        const mix = (rangeSettings.saturation / 100) * weight * (rangeName === 'global' ? 0.35 : 0.22)
+        red = red * (1 - mix) + colors[rangeName][0] * 255 * mix
+        green = green * (1 - mix) + colors[rangeName][1] * 255 * mix
+        blue = blue * (1 - mix) + colors[rangeName][2] * 255 * mix
+    }
+    return [red, green, blue]
+}
+
+function applyVignette(red, green, blue, pixel, width, height, amount) {
+    const x = pixel % width
+    const y = Math.floor(pixel / width)
+    const dx = x / Math.max(1, width - 1) * 2 - 1
+    const dy = y / Math.max(1, height - 1) * 2 - 1
+    const distance = Math.min(1, Math.sqrt(dx * dx + dy * dy) / 1.35)
+    const factor = 1 + (amount / 100) * distance ** 2 * 0.7
+    return [red * factor, green * factor, blue * factor]
+}
+
+function applyClipping(red, green, blue, clipping) {
+    if (clipping && (red >= 254 || green >= 254 || blue >= 254)) return [255, 45, 35]
+    if (clipping && (red <= 1 && green <= 1 && blue <= 1)) return [25, 100, 255]
+    return [red, green, blue]
+}
+
+function copySource(source, onProgress) {
+    reportProcessingProgress(onProgress, 0.35)
+    const output = new Uint8ClampedArray(source)
+    reportProcessingProgress(onProgress, 1)
+    return output
+}
+
+function preparedValues(settings, flags) {
+    return {
+        exposure: 2 ** settings.exposure,
+        contrast: 1 + settings.contrast / 100,
+        dehaze: 1 + settings.dehaze / 180,
+        temperature: settings.temperature / 100,
+        tint: settings.tint / 100,
+        saturation: 1 + settings.saturation / 100,
+        vibrance: settings.vibrance / 100,
+        curve: flags.curve ? curveLookup(settings.curve) : null,
+        grading: flags.grading ? gradingColors(flags.gradingEntries) : null,
+        detailStrength: (settings.texture * 0.55 + settings.sharpening * (settings.sharpeningDetail / 50)) / 100,
+        noiseMix: settings.noiseLuminance / 130,
+        colorMix: settings.noiseColor / 120,
+        clarityStrength: settings.clarity / 115,
+    }
+}
+
+export function processImagePixels(input, width, height, candidate, { clipping = false, onProgress } = {}) {
     const settings = sanitizeAdjustments(candidate)
     const source = input instanceof Uint8ClampedArray ? input : new Uint8ClampedArray(input)
+    const flags = activeProcessingFlags(settings)
+    if (noPixelAdjustments(flags, clipping)) return copySource(source, onProgress)
     const output = new Uint8ClampedArray(source.length)
-    const needsSpatial = settings.texture || settings.clarity || settings.sharpening || settings.noiseLuminance || settings.noiseColor
-    const fineBlur = needsSpatial ? boxBlur(source, width, height, Math.max(1, Math.round(settings.sharpeningRadius))) : null
-    const broadBlur = settings.clarity ? boxBlur(source, width, height, 5) : null
-    const exposure = 2 ** settings.exposure
-    const contrast = 1 + settings.contrast / 100
-    const dehaze = 1 + settings.dehaze / 180
-    const temperature = settings.temperature / 100
-    const tint = settings.tint / 100
-    const saturation = 1 + settings.saturation / 100
-    const vibrance = settings.vibrance / 100
-    const grading = Object.fromEntries(Object.entries(settings.grading).map(([key, value]) => [key, gradingColor(value)]))
+    const { fineBlur, broadBlur } = spatialData(source, width, height, settings, flags, onProgress)
+    const values = preparedValues(settings, flags)
+    const trackProgress = progressTracker(onProgress, source.length / 4)
 
     for (let index = 0; index < source.length; index += 4) {
+        const pixel = index / 4
+        trackProgress?.(pixel)
         let red = source[index]
         let green = source[index + 1]
         let blue = source[index + 2]
 
         if (fineBlur) {
-            const detailStrength = (settings.texture * 0.55 + settings.sharpening * (settings.sharpeningDetail / 50)) / 100
-            const noiseMix = settings.noiseLuminance / 130
-            red = red * (1 - noiseMix) + fineBlur[index] * noiseMix + (red - fineBlur[index]) * detailStrength
-            green = green * (1 - noiseMix) + fineBlur[index + 1] * noiseMix + (green - fineBlur[index + 1]) * detailStrength
-            blue = blue * (1 - noiseMix) + fineBlur[index + 2] * noiseMix + (blue - fineBlur[index + 2]) * detailStrength
-            if (settings.noiseColor) {
+            red = red * (1 - values.noiseMix) + fineBlur[index] * values.noiseMix + (red - fineBlur[index]) * values.detailStrength
+            green = green * (1 - values.noiseMix) + fineBlur[index + 1] * values.noiseMix + (green - fineBlur[index + 1]) * values.detailStrength
+            blue = blue * (1 - values.noiseMix) + fineBlur[index + 2] * values.noiseMix + (blue - fineBlur[index + 2]) * values.detailStrength
+            if (values.colorMix) {
                 const luma = red * 0.2126 + green * 0.7152 + blue * 0.0722
-                const colorMix = settings.noiseColor / 120
-                red = red * (1 - colorMix) + luma * colorMix
-                green = green * (1 - colorMix) + luma * colorMix
-                blue = blue * (1 - colorMix) + luma * colorMix
+                red = red * (1 - values.colorMix) + luma * values.colorMix
+                green = green * (1 - values.colorMix) + luma * values.colorMix
+                blue = blue * (1 - values.colorMix) + luma * values.colorMix
             }
         }
         if (broadBlur) {
-            const strength = settings.clarity / 115
-            red += (red - broadBlur[index]) * strength
-            green += (green - broadBlur[index + 1]) * strength
-            blue += (blue - broadBlur[index + 2]) * strength
+            red += (red - broadBlur[index]) * values.clarityStrength
+            green += (green - broadBlur[index + 1]) * values.clarityStrength
+            blue += (blue - broadBlur[index + 2]) * values.clarityStrength
         }
 
-        red *= exposure * (1 + temperature * 0.14)
-        green *= exposure * (1 + tint * 0.08)
-        blue *= exposure * (1 - temperature * 0.14)
-        red *= 1 - tint * 0.05
-        blue *= 1 - tint * 0.05
-
-        const originalLuma = red * 0.2126 + green * 0.7152 + blue * 0.0722
-        const normalizedLuma = originalLuma / 255
-        const shadowMask = (1 - normalizedLuma) ** 2
-        const highlightMask = normalizedLuma ** 2
-        const shadowLift = settings.shadows * shadowMask * 1.25 + settings.blacks * (1 - normalizedLuma) * 0.65
-        const highlightLift = settings.highlights * highlightMask * 1.25 + settings.whites * normalizedLuma * 0.65
-        const tonalLift = shadowLift + highlightLift
-        red += tonalLift
-        green += tonalLift
-        blue += tonalLift
-
-        red = ((red - 127.5) * contrast * dehaze + 127.5)
-        green = ((green - 127.5) * contrast * dehaze + 127.5)
-        blue = ((blue - 127.5) * contrast * dehaze + 127.5)
-        red = 255 * ((clamp(red) / 255) ** (1 / settings.gamma))
-        green = 255 * ((clamp(green) / 255) ** (1 / settings.gamma))
-        blue = 255 * ((clamp(blue) / 255) ** (1 / settings.gamma))
-        red = curveValue(red, settings.curve)
-        green = curveValue(green, settings.curve)
-        blue = curveValue(blue, settings.curve)
-
-        let [hue, sat, light] = rgbToHsl(red, green, blue)
-        const channel = channelForHue(hue)
-        const hsl = settings.hsl[channel]
-        hue += hsl.hue * 0.45
-        const vibranceBoost = vibrance * (1 - sat) * 0.7
-        sat = clamp(sat * saturation + vibranceBoost + hsl.saturation / 100, 0, 1)
-        light = clamp(light + hsl.luminance / 250, 0, 1)
-        ;[red, green, blue] = hslToRgb(hue, sat, light)
-
-        const luma = clamp(red * 0.2126 + green * 0.7152 + blue * 0.0722, 0, 255)
-        for (const [rangeName, rangeSettings] of Object.entries(settings.grading)) {
-            if (!rangeSettings.saturation) continue
-            let weight = 1
-            if (rangeName === 'shadows') weight = (1 - luma / 255) ** 2
-            if (rangeName === 'midtones') weight = 1 - Math.abs(luma / 127.5 - 1)
-            if (rangeName === 'highlights') weight = (luma / 255) ** 2
-            const mix = (rangeSettings.saturation / 100) * weight * (rangeName === 'global' ? 0.35 : 0.22)
-            red = red * (1 - mix) + grading[rangeName][0] * 255 * mix
-            green = green * (1 - mix) + grading[rangeName][1] * 255 * mix
-            blue = blue * (1 - mix) + grading[rangeName][2] * 255 * mix
+        if (flags.exposureColor) {
+            red *= values.exposure * (1 + values.temperature * 0.14)
+            green *= values.exposure * (1 + values.tint * 0.08)
+            blue *= values.exposure * (1 - values.temperature * 0.14)
+            red *= 1 - values.tint * 0.05
+            blue *= 1 - values.tint * 0.05
         }
 
-        if (settings.blackAndWhite) {
-            const mix = settings.bwMixer[channel] / 100
+        if (flags.tonal) {
+            const originalLuma = red * 0.2126 + green * 0.7152 + blue * 0.0722
+            const normalizedLuma = originalLuma / 255
+            const shadowMask = (1 - normalizedLuma) ** 2
+            const highlightMask = normalizedLuma ** 2
+            const shadowLift = settings.shadows * shadowMask * 1.25 + settings.blacks * (1 - normalizedLuma) * 0.65
+            const highlightLift = settings.highlights * highlightMask * 1.25 + settings.whites * normalizedLuma * 0.65
+            const tonalLift = shadowLift + highlightLift
+            red += tonalLift
+            green += tonalLift
+            blue += tonalLift
+        }
+
+        if (flags.contrast) {
+            red = ((red - 127.5) * values.contrast * values.dehaze + 127.5)
+            green = ((green - 127.5) * values.contrast * values.dehaze + 127.5)
+            blue = ((blue - 127.5) * values.contrast * values.dehaze + 127.5)
+        }
+        if (flags.gamma) {
+            red = 255 * ((clamp(red) / 255) ** (1 / settings.gamma))
+            green = 255 * ((clamp(green) / 255) ** (1 / settings.gamma))
+            blue = 255 * ((clamp(blue) / 255) ** (1 / settings.gamma))
+        }
+        if (values.curve) {
+            red = values.curve[Math.round(clamp(red))]
+            green = values.curve[Math.round(clamp(green))]
+            blue = values.curve[Math.round(clamp(blue))]
+        }
+
+        let channel
+        if (flags.hue) {
+            const hueResult = applyHueAdjustments(red, green, blue, settings, values.saturation, values.vibrance)
+            ;[red, green, blue] = hueResult.color
+            channel = hueResult.channel
+        }
+
+        const luma = (flags.grading || flags.blackAndWhite)
+            ? clamp(red * 0.2126 + green * 0.7152 + blue * 0.0722, 0, 255)
+            : 0
+        if (flags.grading) {
+            ;[red, green, blue] = applyColorGrading(red, green, blue, luma, flags.gradingEntries, values.grading)
+        }
+
+        if (flags.blackAndWhite) {
+            if (!channel && COLOR_CHANNELS.some((name) => settings.bwMixer[name])) channel = channelForHue(rgbToHsl(red, green, blue)[0])
+            const mix = channel ? settings.bwMixer[channel] / 100 : 0
             const gray = clamp(luma * (1 + mix * 0.6))
             red = gray
             green = gray
             blue = gray
         }
 
-        const pixel = index / 4
-        const x = pixel % width
-        const y = Math.floor(pixel / width)
-        const dx = x / Math.max(1, width - 1) * 2 - 1
-        const dy = y / Math.max(1, height - 1) * 2 - 1
-        const vignetteDistance = Math.min(1, Math.sqrt(dx * dx + dy * dy) / 1.35)
-        const vignetteFactor = 1 + (settings.vignette / 100) * vignetteDistance ** 2 * 0.7
-        const grain = seededNoise(pixel) * settings.grain * 0.38
-        red = red * vignetteFactor + grain
-        green = green * vignetteFactor + grain
-        blue = blue * vignetteFactor + grain
-
-        if (clipping && (red >= 254 || green >= 254 || blue >= 254)) {
-            red = 255; green = 45; blue = 35
-        } else if (clipping && (red <= 1 && green <= 1 && blue <= 1)) {
-            red = 25; green = 100; blue = 255
+        if (flags.vignette) [red, green, blue] = applyVignette(red, green, blue, pixel, width, height, settings.vignette)
+        if (flags.grain) {
+            const grain = seededNoise(pixel) * settings.grain * 0.38
+            red += grain
+            green += grain
+            blue += grain
         }
+
+        ;[red, green, blue] = applyClipping(red, green, blue, clipping)
         output[index] = clamp(red)
         output[index + 1] = clamp(green)
         output[index + 2] = clamp(blue)
         output[index + 3] = source[index + 3]
     }
+    reportProcessingProgress(onProgress, 1)
     return output
 }
 

@@ -120,8 +120,11 @@ function downloadBlob(blob, filename) {
     const anchor = document.createElement('a')
     anchor.href = url
     anchor.download = filename
+    anchor.hidden = true
+    document.body.append(anchor)
     anchor.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 function restoreSnapshots(candidate) {
@@ -212,6 +215,7 @@ export default function Editor() {
     const [exportOptions, setExportOptions] = useState(() => ({ ...DEFAULT_EXPORT_OPTIONS }))
     const [exportState, setExportState] = useState({ active: false, progress: 0, label: '' })
     const exportWorkerRef = useRef(null)
+    const exportControllerRef = useRef(null)
 
     const restartPreviewWorker = useCallback(() => {
         workerRef.current?.terminate()
@@ -588,9 +592,21 @@ export default function Editor() {
         setExportState({ active: true, progress: 8, label: 'Preparing full-resolution pixels' })
         setError('')
         const worker = new Worker(new URL('../editor/editorWorker.js', import.meta.url), { type: 'module' })
+        const controller = new AbortController()
         exportWorkerRef.current = worker
+        exportControllerRef.current = controller
         try {
-            const result = await workerRequest(worker, source, adjustments, false)
+            const result = await workerRequest(worker, source, adjustments, false, {
+                signal: controller.signal,
+                timeoutMs: 180_000,
+                timeoutMessage: 'The full-resolution export took too long. Try a smaller output size or lower preview quality, then export again.',
+                reportProgress: true,
+                onProgress: (progress) => setExportState({
+                    active: true,
+                    progress: 8 + Math.round(progress * 62),
+                    label: 'Applying edits at full resolution',
+                }),
+            })
             setExportState({ active: true, progress: 72, label: 'Rendering geometry' })
             const processed = createCanvasFromPixels(result.pixels, source.width, source.height)
             const dimensions = outputDimensions(source.width, source.height, geometry, { mode: exportOptions.resizeMode, value: exportOptions.size })
@@ -604,15 +620,18 @@ export default function Editor() {
             setExportState({ active: false, progress: 100, label: 'Export complete' })
             setStatus(`Exported ${output.width} × ${output.height} ${extension.toUpperCase()} in sRGB with metadata removed`)
         } catch (exportError) {
-            if (exportError.message !== 'cancelled') setError(exportError.message)
+            if (exportError.name !== 'AbortError') setError(exportError.message)
             setExportState({ active: false, progress: 0, label: '' })
         } finally {
             worker.terminate()
-            exportWorkerRef.current = null
+            if (exportWorkerRef.current === worker) exportWorkerRef.current = null
+            if (exportControllerRef.current === controller) exportControllerRef.current = null
         }
     }
 
     const cancelExport = () => {
+        exportControllerRef.current?.abort()
+        exportControllerRef.current = null
         exportWorkerRef.current?.terminate()
         exportWorkerRef.current = null
         setExportState({ active: false, progress: 0, label: 'Export cancelled' })
@@ -625,6 +644,8 @@ export default function Editor() {
         previewRenderRef.current.pending = null
         previewRenderRef.current.controller?.abort()
         restartPreviewWorker()
+        exportControllerRef.current?.abort()
+        exportControllerRef.current = null
         exportWorkerRef.current?.terminate()
         exportWorkerRef.current = null
         setSource(null)
