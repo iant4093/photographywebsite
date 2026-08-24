@@ -187,8 +187,8 @@ describe('Photo Editor page', () => {
         await user.click(screen.getByRole('button', { name: 'Before / after' }))
         expect(screen.getByRole('slider', { name: 'Comparison split' })).toHaveValue('50')
         await user.click(screen.getByRole('button', { name: 'Clipping' }))
-        await user.click(screen.getByRole('button', { name: 'Warm Portrait' }))
-        expect(screen.getByRole('spinbutton', { name: 'Temperature value' })).toHaveValue(18)
+        await user.click(screen.getByRole('button', { name: 'Kodak Portra 400' }))
+        expect(screen.getByRole('spinbutton', { name: 'Temperature value' })).toHaveValue(7)
 
         await user.selectOptions(screen.getByRole('combobox', { name: 'Dimensions' }), 'longEdge')
         fireEvent.change(screen.getByRole('spinbutton', { name: 'Pixels' }), { target: { value: '1200' } })
