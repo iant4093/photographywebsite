@@ -26,6 +26,7 @@ describe('VideoAlbumCard', () => {
         const wrapper = container.firstElementChild
         const overlay = container.querySelector('.album-play').parentElement
 
+        expect(wrapper).toHaveClass('h-full')
         fireEvent.mouseEnter(wrapper)
         await waitFor(() => expect(hover.start).toHaveBeenCalledOnce())
         const options = hover.start.mock.calls[0][0]

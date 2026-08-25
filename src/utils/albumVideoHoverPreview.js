@@ -1,6 +1,6 @@
 import { mediaHlsUrl } from './mediaUrls'
 
-export const VIDEO_HOVER_DELAY_MS = 650
+export const VIDEO_HOVER_DELAY_MS = 350
 export const VIDEO_HOVER_DURATION_MS = 4000
 export const VIDEO_HOVER_FADE_MS = 260
 

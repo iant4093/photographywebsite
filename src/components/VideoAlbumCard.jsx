@@ -34,7 +34,7 @@ export default function VideoAlbumCard({ album }) {
     useEffect(() => stopPreview, [stopPreview])
 
     return (
-        <div ref={wrapperRef} onMouseEnter={startPreview} onMouseLeave={stopPreview}>
+        <div ref={wrapperRef} className="h-full" onMouseEnter={startPreview} onMouseLeave={stopPreview}>
             <AlbumCard album={album} />
         </div>
     )
