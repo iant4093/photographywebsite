@@ -55,7 +55,7 @@ class PreviewDataProtectionTests(unittest.TestCase):
 
 class PreviewWorkerTests(unittest.TestCase):
     def test_responsive_hero_invalidations_have_a_migration_safe_namespace(self) -> None:
-        self.assertIn("CallerReference: `responsive-hero-v2-${job.version}`", WORKER_SOURCE)
+        self.assertIn("CallerReference: `responsive-${job.heroType}-hero-v2-${job.version}`", WORKER_SOURCE)
         self.assertNotIn("CallerReference: `hero-${job.version}`", WORKER_SOURCE)
 
     def test_worker_is_reproducibly_packaged_and_concurrency_bounded(self) -> None:
@@ -99,8 +99,12 @@ class PreviewWorkerTests(unittest.TestCase):
         self.assertNotIn("s3:DeleteObject", album_permissions)
         self.assertIn("${ImagesBucket.Arn}/site/hero/versions/v1/*", worker)
         self.assertIn("${ImagesBucket.Arn}/site/hero/current/*", worker)
+        self.assertIn("${ImagesBucket.Arn}/site/hero/versions/video/v1/*", worker)
+        self.assertIn("${ImagesBucket.Arn}/site/hero/video/current/*", worker)
         self.assertIn("- site/hero/manifest.json", worker)
         self.assertIn("- site/hero/current/*", worker)
+        self.assertIn("- site/hero/video/manifest.json", worker)
+        self.assertIn("- site/hero/video/current/*", worker)
         self.assertIn("s3:DeleteObject", worker)
         hero_statement = worker.split(
             "- !Sub '${ImagesBucket.Arn}/site/hero/versions/v1/*'",
