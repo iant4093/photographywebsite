@@ -236,7 +236,7 @@ function Home() {
                                     </svg>
                                 </Link>
                                 <Suspense fallback={<span className="px-1 py-2 text-white/70">Explore Random Photos</span>}>
-                                    <RandomPhotoExplorer />
+                                    <RandomPhotoExplorer albums={photoAlbums} />
                                 </Suspense>
                             </div>
                         </div>

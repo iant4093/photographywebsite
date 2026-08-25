@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PhotoLightbox from './PhotoLightbox'
 import { fetchRandomPhotos, requestAlbumMediaDownload } from '../utils/api'
 import {
@@ -23,16 +23,37 @@ function warmFirstPhoto(images) {
     preload.src = mediaThumbnailUrl(first)
 }
 
-function RandomPhotoExplorer() {
+function RandomPhotoExplorer({ albums = [] }) {
     const controllerRef = useRef(null)
     const requestRef = useRef(null)
     const photosRef = useRef([])
+    const seedIndexRef = useRef(0)
     const openRef = useRef(false)
     const [photos, setPhotos] = useState([])
     const [index, setIndex] = useState(null)
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const seedPhotos = useMemo(() => albums.flatMap((album) => {
+        const url = album?.coverImageUrl || album?.coverThumbnailUrl
+        if (!url || !album?.albumId) return []
+        return [{
+            id: url,
+            url,
+            thumbnailUrl: album.coverThumbnailUrl || url,
+            downloadUrl: url,
+            albumId: album.albumId,
+            albumTitle: album.title || '',
+            albumCategory: album.category || 'Uncategorized',
+            randomSeed: true,
+        }]
+    }), [albums])
+
+    useEffect(() => {
+        if (!seedPhotos.length) return
+        seedIndexRef.current = Math.floor(Math.random() * seedPhotos.length)
+        warmFirstPhoto([seedPhotos[seedIndexRef.current]])
+    }, [seedPhotos])
 
     const loadSession = useCallback(() => {
         if (photosRef.current.length) return Promise.resolve(photosRef.current)
@@ -45,7 +66,6 @@ function RandomPhotoExplorer() {
                 const images = payload.images || []
                 if (!images.length) throw new Error('No public photos are available yet.')
                 photosRef.current = images
-                setPhotos(images)
                 warmFirstPhoto(images)
                 return images
             })
@@ -72,10 +92,33 @@ function RandomPhotoExplorer() {
         openRef.current = true
         setOpen(true)
         setError('')
-        if (!photosRef.current.length) setLoading(true)
+        if (photosRef.current.length) {
+            setPhotos(photosRef.current)
+            setIndex(Math.floor(Math.random() * photosRef.current.length))
+            setLoading(false)
+            return
+        }
+
+        const hasSeed = seedPhotos.length > 0
+        if (hasSeed) {
+            setPhotos(seedPhotos)
+            setIndex(seedIndexRef.current)
+            setLoading(false)
+        } else {
+            setLoading(true)
+        }
         try {
             const images = await loadSession()
-            if (openRef.current) setIndex(Math.floor(Math.random() * images.length))
+            if (!openRef.current) return
+            if (hasSeed) {
+                setPhotos((current) => {
+                    const seen = new Set(current.map((image) => image.url))
+                    return current.concat(images.filter((image) => !seen.has(image.url)))
+                })
+            } else {
+                setPhotos(images)
+                setIndex(0)
+            }
         } catch (requestError) {
             if (requestError?.name !== 'AbortError' && openRef.current) {
                 setError(requestError?.message || 'Random photos could not be loaded.')
@@ -83,7 +126,7 @@ function RandomPhotoExplorer() {
         } finally {
             if (openRef.current) setLoading(false)
         }
-    }, [loadSession])
+    }, [loadSession, seedPhotos])
 
     const handleClose = useCallback(() => {
         openRef.current = false
@@ -95,6 +138,11 @@ function RandomPhotoExplorer() {
     const handleDownload = useCallback(async (event, image) => {
         event.stopPropagation()
         try {
+            if (image.randomSeed && image.downloadUrl) {
+                startBrowserDownload(image.downloadUrl, mediaFileName(image, 'photo.jpg'))
+                trackPhotoDownload(image.albumId)
+                return
+            }
             const downloadUrl = await resolveMediaDownloadUrl(
                 () => requestAlbumMediaDownload(image.albumId, mediaId(image)),
                 image,

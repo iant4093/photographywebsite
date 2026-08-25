@@ -138,6 +138,42 @@ describe('Home complete public catalog', () => {
     expect(api.fetchRandomPhotos).toHaveBeenCalledOnce()
   })
 
+  it('shows a cached album cover immediately while the whole-site random pool warms', async () => {
+    catalog.getCatalogSnapshot.mockReturnValue({
+      items: [{
+        albumId: 'album-seed',
+        title: 'Seed album',
+        type: 'photo',
+        category: 'Hikes',
+        coverImageUrl: 'https://media.test/seed.jpg',
+        coverThumbnailUrl: 'https://media.test/seed-thumb.jpg',
+      }],
+      nextCursor: null,
+    })
+    catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
+    let finishRequest
+    api.fetchRandomPhotos.mockReturnValue(new Promise((resolve) => { finishRequest = resolve }))
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    routed(<Home />)
+
+    const randomButton = await screen.findByRole('button', { name: /explore random photos/i })
+    await waitFor(() => expect(api.fetchRandomPhotos).toHaveBeenCalledOnce())
+    fireEvent.click(randomButton)
+
+    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://media.test/seed.jpg')
+    expect(screen.queryByRole('status')).toBeNull()
+
+    await act(async () => finishRequest({
+      images: [{
+        id: 'full-photo',
+        albumId: 'album-full',
+        url: 'https://media.test/full.jpg',
+        thumbnailUrl: 'https://media.test/full-thumb.jpg',
+      }],
+    }))
+    await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument())
+  })
+
   it('clears a broken cursor snapshot, reports errors, and retries', async () => {
     const error = Object.assign(new Error('Pagination broke'), { code: 'BAD_CURSOR' })
     catalog.loadCompleteCatalog.mockRejectedValueOnce(error).mockImplementationOnce(async ({ onPage }) => {
