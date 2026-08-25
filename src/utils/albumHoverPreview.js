@@ -26,6 +26,12 @@ export function selectAlbumHoverPreviews(detail, coverImageUrl, random = Math.ra
     const seen = new Set()
     const candidates = (Array.isArray(detail?.images) ? detail.images : [])
         .filter((image) => {
+            const width = Number(image?.width)
+            const height = Number(image?.height)
+            return Number.isFinite(width) && Number.isFinite(height)
+                && width > 0 && height > 0 && width > height
+        })
+        .filter((image) => {
             const imagePaths = [image?.url, image?.thumbnailUrl, image?.coverImageUrl]
                 .map(comparablePath)
                 .filter(Boolean)
@@ -136,7 +142,6 @@ export function start({ container, coverImageUrl, loadDetail }) {
             later(() => {
                 nextImage.style.opacity = '1'
                 if (previousImage) {
-                    previousImage.style.opacity = '0'
                     later(() => {
                         previousImage.remove()
                         previewImages.delete(previousImage)

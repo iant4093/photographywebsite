@@ -72,9 +72,10 @@ describe('AlbumCard intent prefetch', () => {
             .map((width) => ({ width, url: `https://media.example.test/${name}-${width}.webp` }))
         prefetchPublicAlbum.mockResolvedValue({
             images: [
-                { id: 'cover', url: album.coverImageUrl, previewSrcSet: previewSrcSet('cover') },
-                { id: 'one', url: 'https://media.example.test/one.jpg', previewSrcSet: previewSrcSet('one') },
-                { id: 'two', url: 'https://media.example.test/two.jpg', previewSrcSet: previewSrcSet('two') },
+                { id: 'cover', url: album.coverImageUrl, width: 1800, height: 1200, previewSrcSet: previewSrcSet('cover') },
+                { id: 'one', url: 'https://media.example.test/one.jpg', width: 1800, height: 1200, previewSrcSet: previewSrcSet('one') },
+                { id: 'two', url: 'https://media.example.test/two.jpg', width: 1800, height: 1200, previewSrcSet: previewSrcSet('two') },
+                { id: 'portrait', url: 'https://media.example.test/portrait.jpg', width: 1200, height: 1800, previewSrcSet: previewSrcSet('portrait') },
             ],
         })
         vi.stubGlobal('matchMedia', vi.fn((query) => ({
@@ -117,9 +118,18 @@ describe('AlbumCard intent prefetch', () => {
             await Promise.resolve()
         })
         await act(async () => { await vi.advanceTimersByTimeAsync(16) })
-        const visibleFrame = [...document.querySelectorAll('.album-card-image > img[aria-hidden="true"]')]
-            .find((image) => image.style.opacity === '1')
-        expect(visibleFrame.getAttribute('src')).not.toBe(firstUrl)
+        const transitionFrames = [...document.querySelectorAll('.album-card-image > img[aria-hidden="true"]')]
+        const incomingFrame = transitionFrames.at(-1)
+        expect(transitionFrames).toHaveLength(2)
+        expect(incomingFrame.getAttribute('src')).not.toBe(firstUrl)
+        expect(incomingFrame.getAttribute('src')).not.toContain('portrait-640')
+        expect(incomingFrame).toHaveStyle({ opacity: '1' })
+        expect(firstFrame).toHaveStyle({ opacity: '1' })
+
+        act(() => vi.advanceTimersByTime(599))
+        expect(firstFrame).toBeInTheDocument()
+        act(() => vi.advanceTimersByTime(1))
+        expect(firstFrame).not.toBeInTheDocument()
 
         fireEvent.mouseLeave(link)
         expect(document.querySelector('.album-card-image > img[aria-hidden="true"]')).toBeNull()

@@ -11,16 +11,21 @@ const previews = (name) => [640, 960, 1440, 1920]
 describe('album hover preview selection', () => {
     afterEach(() => vi.unstubAllGlobals())
 
-    it('uses only complete 640px previews, excludes the cover, removes duplicates, and caps the sequence', () => {
+    it('uses only landscape images with complete 640px previews, excludes the cover, removes duplicates, and caps the sequence', () => {
         const cover = 'https://media.example.test/full/cover.jpg?version=1'
         const images = [
-            { url: 'https://media.example.test/full/cover.jpg', previewSrcSet: previews('cover') },
+            { url: 'https://media.example.test/full/cover.jpg', width: 1800, height: 1200, previewSrcSet: previews('cover') },
             ...Array.from({ length: 7 }, (_, index) => ({
                 url: `https://media.example.test/full/${index}.jpg`,
+                width: 1800,
+                height: 1200,
                 previewSrcSet: previews(String(index)),
             })),
-            { url: 'https://media.example.test/full/incomplete.jpg', previewSrcSet: previews('bad').slice(0, 2) },
-            { url: 'https://media.example.test/full/duplicate.jpg', previewSrcSet: previews('0') },
+            { url: 'https://media.example.test/full/portrait.jpg', width: 1200, height: 1800, previewSrcSet: previews('portrait') },
+            { url: 'https://media.example.test/full/square.jpg', width: 1200, height: 1200, previewSrcSet: previews('square') },
+            { url: 'https://media.example.test/full/unknown.jpg', previewSrcSet: previews('unknown') },
+            { url: 'https://media.example.test/full/incomplete.jpg', width: 1800, height: 1200, previewSrcSet: previews('bad').slice(0, 2) },
+            { url: 'https://media.example.test/full/duplicate.jpg', width: 1800, height: 1200, previewSrcSet: previews('0') },
         ]
 
         const selected = selectAlbumHoverPreviews({ images }, cover, () => 0.5)
@@ -29,6 +34,7 @@ describe('album hover preview selection', () => {
         expect(selected.every(({ url }) => /-640\.webp$/.test(url))).toBe(true)
         expect(selected.some(({ url }) => url.includes('cover-640'))).toBe(false)
         expect(selected.some(({ url }) => url.includes('bad-640'))).toBe(false)
+        expect(selected.some(({ url }) => /portrait|square|unknown/.test(url))).toBe(false)
     })
 
     it('requires a fine hover pointer and honors reduced-motion preferences', () => {
