@@ -76,6 +76,7 @@ describe('SharedAlbum access and gallery', () => {
   it('requires verification, accepts a full pasted URL, and fetches with a purpose-bound token', async () => {
     renderShared()
     const submit = screen.getByRole('button', { name: 'Access Gallery' })
+    expect(submit).toHaveClass('shared-album-submit')
     expect(submit).toBeDisabled()
     fireEvent.change(screen.getByPlaceholderText(/xY7bQk9P/), { target: { value: ' https://site.test/sharedalbum/my-code/ ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Expire security check' }))

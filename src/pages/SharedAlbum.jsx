@@ -191,7 +191,7 @@ export default function SharedAlbum() {
                         onChange={(e) => setInputCode(e.target.value)}
                         className="w-full px-6 py-4 rounded-xl border border-warm-border bg-charcoal/5 text-charcoal text-center text-xl tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all shadow-inner"
                     />
-                    <button type="submit" disabled={!inputCode.trim() || !turnstileToken} className="w-full py-4 rounded-xl bg-charcoal text-white font-medium hover:bg-charcoal-light transition-colors duration-300 shadow-warm disabled:opacity-50">
+                    <button type="submit" disabled={!inputCode.trim() || !turnstileToken} className="shared-album-submit w-full py-4 rounded-xl bg-charcoal text-white font-medium hover:bg-charcoal-light transition-colors duration-300 shadow-warm disabled:opacity-50">
                         Access Gallery
                     </button>
                 </form>

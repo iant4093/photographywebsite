@@ -513,16 +513,6 @@
   border-top: 1px solid var(--color-charcoal);
 }
 
-.linen-site .linen-shared-gate::after {
-  content: "Private proof archive";
-  display: block;
-  margin-top: 3rem;
-  color: var(--color-warm-gray);
-  font-size: 0.58rem;
-  letter-spacing: 0.17em;
-  text-transform: uppercase;
-}
-
 .linen-site form.bg-white,
 .linen-site div.bg-white[class*="border"],
 .linen-site a.bg-white[class*="border"] {

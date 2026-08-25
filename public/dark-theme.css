@@ -47,6 +47,19 @@ html[data-theme="dark"] body {
   color: var(--color-warm-gray);
 }
 
+.linen-site[data-theme="dark"] .shared-album-submit {
+  color: #fffaf2;
+  border: 1px solid #d8c6b3;
+  background: #6f5038;
+}
+
+.linen-site[data-theme="dark"] .shared-album-submit:disabled {
+  color: #d7cec2;
+  border-color: #5b544b;
+  background: #38342e;
+  opacity: 1;
+}
+
 .linen-site[data-theme="dark"] .album-card {
   background: rgba(38, 35, 30, 0.72);
   border-color: rgba(214, 204, 190, 0.42);

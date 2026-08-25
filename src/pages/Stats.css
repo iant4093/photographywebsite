@@ -197,7 +197,7 @@
     --timeline-card-width: clamp(13.5rem, 21vw, 18rem);
     --timeline-group-card-gap: clamp(0.75rem, 1.4vw, 1.1rem);
     position: relative;
-    display: block;
+    margin-top: 0.75rem;
     height: 31rem;
     width: 100%;
 }
