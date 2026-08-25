@@ -59,13 +59,11 @@ function RandomPhotoExplorer() {
     }, [])
 
     useEffect(() => {
-        const prefetch = () => { void loadSession().catch(() => {}) }
-        if ('requestIdleCallback' in window) {
-            const idleId = window.requestIdleCallback(prefetch, { timeout: 1500 })
-            return () => window.cancelIdleCallback(idleId)
-        }
-        const timer = window.setTimeout(prefetch, 350)
-        return () => window.clearTimeout(timer)
+        // Begin assembling the random session as soon as the hero is mounted.
+        // This request is lower priority than the browser's critical assets by
+        // virtue of starting in an effect, but it no longer waits for an idle
+        // callback that may not run before a visitor clicks the button.
+        void loadSession().catch(() => {})
     }, [loadSession])
 
     useEffect(() => () => controllerRef.current?.abort(), [])
@@ -114,7 +112,7 @@ function RandomPhotoExplorer() {
             <button
                 type="button"
                 onClick={handleOpen}
-                className="linen-text-link inline-flex items-center gap-2 px-1 py-2 text-white font-medium transition-all duration-300"
+                className="linen-text-link inline-flex cursor-pointer items-center gap-2 px-1 py-2 text-white font-medium transition-all duration-300"
             >
                 Explore Random Photos
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

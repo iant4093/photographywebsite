@@ -123,6 +123,8 @@ describe('Home complete public catalog', () => {
     const randomButton = await screen.findByRole('button', { name: /explore random photos/i })
     const videosLink = screen.getByRole('link', { name: 'Explore Videos' })
     expect(videosLink.parentElement).toContainElement(randomButton)
+    expect(randomButton).toHaveClass('cursor-pointer')
+    await waitFor(() => expect(api.fetchRandomPhotos).toHaveBeenCalledOnce())
     fireEvent.click(randomButton)
 
     expect(screen.getByRole('dialog', { name: 'Random photos from Ian Truong Photography' })).toBeInTheDocument()
