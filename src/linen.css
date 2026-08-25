@@ -125,6 +125,7 @@
 
 .linen-site .linen-theme-toggle {
   position: relative;
+  display: block;
   width: 31px;
   height: 31px;
   flex: none;
@@ -137,6 +138,16 @@
 .linen-site .linen-theme-toggle:hover {
   color: var(--color-amber-dark);
   border-color: currentColor;
+}
+
+.linen-site .linen-search-toggle {
+  text-decoration: none;
+}
+
+.linen-site .linen-search-toggle.is-active {
+  color: var(--color-amber-dark);
+  border-color: currentColor;
+  box-shadow: inset 0 -2px 0 currentColor;
 }
 
 .linen-site .linen-theme-icon {

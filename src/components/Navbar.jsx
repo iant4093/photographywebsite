@@ -108,6 +108,19 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                                 )}
                             </button>
                         )}
+                        <Link
+                            to="/search"
+                            onClick={() => setIsMenuOpen(false)}
+                            className={`linen-theme-toggle linen-search-toggle${searchActive ? ' is-active' : ''}`}
+                            aria-label="Search"
+                            aria-current={searchActive ? 'page' : undefined}
+                            title="Search"
+                        >
+                            <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                <circle cx="10.5" cy="10.5" r="6.5" />
+                                <path d="m15.5 15.5 5 5" />
+                            </svg>
+                        </Link>
                     </div>
 
                     {/* Navigation Container */}
@@ -115,7 +128,6 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         <div className="linen-desktop-links hidden" aria-label="Primary navigation">
                             <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
                             <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
-                            <Link to="/search" {...activeAttributes(searchActive)}>Search</Link>
                             <Link to="/editor" {...activeAttributes(editorActive)}>Editor</Link>
                             <Link to="/stats" {...activeAttributes(statsActive)}>Stats</Link>
                             <Link to="/sharedalbum" {...activeAttributes(sharedActive)}>Find Album</Link>
@@ -168,10 +180,6 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
 
                     <Link to="/videos" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(videoActive)} aria-current={videoActive ? 'page' : undefined}>
                         Videos
-                    </Link>
-
-                    <Link to="/search" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(searchActive)} aria-current={searchActive ? 'page' : undefined}>
-                        Search
                     </Link>
 
                     <Link to="/editor" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(editorActive)} aria-current={editorActive ? 'page' : undefined}>

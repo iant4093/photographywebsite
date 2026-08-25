@@ -89,8 +89,11 @@ describe('navigation and metadata', () => {
     const toggleTheme = vi.fn()
     const light = routed(<Navbar theme="light" onToggleTheme={toggleTheme} />)
     const toggle = screen.getByRole('button', { name: 'Switch to dark mode' })
+    const search = screen.getByRole('link', { name: 'Search' })
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
     expect(toggle.closest('.linen-brand-cluster')).toContainElement(screen.getByRole('link', { name: /Ian Truong/ }))
+    expect(search).toHaveAttribute('href', '/search')
+    expect(toggle.closest('.linen-brand-cluster')).toContainElement(search)
     fireEvent.click(toggle)
     expect(toggleTheme).toHaveBeenCalledOnce()
     light.unmount()
@@ -101,12 +104,24 @@ describe('navigation and metadata', () => {
 
     routed(<Navbar theme="dark" onToggleTheme={toggleTheme} showThemeToggle={false} />, undefined, '/admin')
     expect(screen.queryByRole('button', { name: /Switch to .* mode/ })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Search' })).toHaveAttribute('href', '/search')
+  })
+
+  it('uses the brand search control instead of a named navigation item', () => {
+    const { container } = routed(<Navbar />, undefined, '/search')
+    const search = screen.getByRole('link', { name: 'Search' })
+    expect(search).toHaveAttribute('aria-current', 'page')
+    expect(search).toHaveClass('is-active')
+    expect(within(container.querySelector('.linen-desktop-links')).queryByRole('link', { name: 'Search' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(within(document.getElementById('site-menu')).queryByRole('link', { name: 'Search' })).toBeNull()
+    fireEvent.click(search)
+    expect(document.body.style.overflow).toBe('unset')
   })
 
   it.each([
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],
-    ['Search', '/search'],
     ['Editor', '/editor'],
     ['Stats', '/stats'],
     ['Contact', '/contact'],
