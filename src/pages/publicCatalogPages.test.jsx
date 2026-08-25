@@ -109,20 +109,25 @@ describe('Home complete public catalog', () => {
   it('opens a fresh whole-site random photo session in the gallery lightbox', async () => {
     catalog.getCatalogSnapshot.mockReturnValue({ items: [], nextCursor: null })
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
-    api.fetchRandomPhotos.mockResolvedValue({
+    let finishRequest
+    api.fetchRandomPhotos.mockReturnValue(new Promise((resolve) => { finishRequest = resolve }))
+    const payload = {
       images: [
         { mediaId: 'first', albumId: 'album-one', url: 'https://media.test/first.jpg', thumbnailUrl: 'https://media.test/first-thumb.jpg' },
         { mediaId: 'second', albumId: 'album-two', url: 'https://media.test/second.jpg', thumbnailUrl: 'https://media.test/second-thumb.jpg' },
       ],
-    })
+    }
+    vi.spyOn(Math, 'random').mockReturnValue(0)
     routed(<Home />)
 
-    const randomButton = screen.getByRole('button', { name: /explore random photos/i })
+    const randomButton = await screen.findByRole('button', { name: /explore random photos/i })
     const videosLink = screen.getByRole('link', { name: 'Explore Videos' })
     expect(videosLink.parentElement).toContainElement(randomButton)
     fireEvent.click(randomButton)
 
-    expect(await screen.findByRole('dialog', { name: 'Random photos from Ian Truong Photography' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Random photos from Ian Truong Photography' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Finding random photos')
+    await act(async () => finishRequest(payload))
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
     expect(screen.getByText('2 / 2')).toBeInTheDocument()

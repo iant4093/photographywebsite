@@ -385,7 +385,8 @@ class PublicAlbumDetailTests(unittest.TestCase):
             )
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("stale-while-revalidate=600", response["headers"]["Cache-Control"])
         body = response_body(response)
         self.assertEqual(body["totalPhotos"], 2)
         self.assertEqual({item["albumId"] for item in body["images"]}, {ALBUM_ID, second_id})

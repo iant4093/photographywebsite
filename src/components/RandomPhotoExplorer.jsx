@@ -1,0 +1,141 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import PhotoLightbox from './PhotoLightbox'
+import { fetchRandomPhotos, requestAlbumMediaDownload } from '../utils/api'
+import {
+    mediaFileName,
+    mediaId,
+    mediaPreviewSrcSet,
+    mediaThumbnailUrl,
+    resolveMediaDownloadUrl,
+    startBrowserDownload,
+} from '../utils/mediaUrls'
+import { trackPhotoDownload } from '../utils/analytics'
+
+const LIGHTBOX_SIZES = '(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)'
+
+function warmFirstPhoto(images) {
+    const first = images[0]
+    if (!first || typeof Image === 'undefined') return
+    const preload = new Image()
+    preload.decoding = 'async'
+    preload.sizes = LIGHTBOX_SIZES
+    preload.srcset = mediaPreviewSrcSet(first)
+    preload.src = mediaThumbnailUrl(first)
+}
+
+function RandomPhotoExplorer() {
+    const controllerRef = useRef(null)
+    const requestRef = useRef(null)
+    const photosRef = useRef([])
+    const openRef = useRef(false)
+    const [photos, setPhotos] = useState([])
+    const [index, setIndex] = useState(null)
+    const [open, setOpen] = useState(false)
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState('')
+
+    const loadSession = useCallback(() => {
+        if (photosRef.current.length) return Promise.resolve(photosRef.current)
+        if (requestRef.current) return requestRef.current
+
+        const controller = new AbortController()
+        controllerRef.current = controller
+        const request = fetchRandomPhotos({ signal: controller.signal })
+            .then((payload) => {
+                const images = payload.images || []
+                if (!images.length) throw new Error('No public photos are available yet.')
+                photosRef.current = images
+                setPhotos(images)
+                warmFirstPhoto(images)
+                return images
+            })
+            .finally(() => {
+                if (controllerRef.current === controller) controllerRef.current = null
+                if (requestRef.current === request) requestRef.current = null
+            })
+        request.catch(() => {})
+        requestRef.current = request
+        return request
+    }, [])
+
+    useEffect(() => {
+        const prefetch = () => { void loadSession().catch(() => {}) }
+        if ('requestIdleCallback' in window) {
+            const idleId = window.requestIdleCallback(prefetch, { timeout: 1500 })
+            return () => window.cancelIdleCallback(idleId)
+        }
+        const timer = window.setTimeout(prefetch, 350)
+        return () => window.clearTimeout(timer)
+    }, [loadSession])
+
+    useEffect(() => () => controllerRef.current?.abort(), [])
+
+    const handleOpen = useCallback(async () => {
+        openRef.current = true
+        setOpen(true)
+        setError('')
+        if (!photosRef.current.length) setLoading(true)
+        try {
+            const images = await loadSession()
+            if (openRef.current) setIndex(Math.floor(Math.random() * images.length))
+        } catch (requestError) {
+            if (requestError?.name !== 'AbortError' && openRef.current) {
+                setError(requestError?.message || 'Random photos could not be loaded.')
+            }
+        } finally {
+            if (openRef.current) setLoading(false)
+        }
+    }, [loadSession])
+
+    const handleClose = useCallback(() => {
+        openRef.current = false
+        setOpen(false)
+        setIndex(null)
+        setLoading(false)
+    }, [])
+
+    const handleDownload = useCallback(async (event, image) => {
+        event.stopPropagation()
+        try {
+            const downloadUrl = await resolveMediaDownloadUrl(
+                () => requestAlbumMediaDownload(image.albumId, mediaId(image)),
+                image,
+            )
+            startBrowserDownload(downloadUrl, mediaFileName(image, 'photo.jpg'))
+            trackPhotoDownload(image.albumId)
+        } catch (downloadError) {
+            console.error('Random photo download failed:', downloadError)
+            alert('The photo could not be downloaded. Please try again.')
+        }
+    }, [])
+
+    return (
+        <>
+            <button
+                type="button"
+                onClick={handleOpen}
+                className="linen-text-link inline-flex items-center gap-2 px-1 py-2 text-white font-medium transition-all duration-300"
+            >
+                Explore Random Photos
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h3l10 16h3M20 4h-3l-3.5 5.6M4 20h3l3.5-5.6" />
+                </svg>
+            </button>
+            {open && (
+                <PhotoLightbox
+                    images={photos}
+                    index={index ?? 0}
+                    ariaLabel="Random photos from Ian Truong Photography"
+                    loading={loading}
+                    emptyMessage={error}
+                    onClose={handleClose}
+                    onNext={() => setIndex((current) => (current + 1) % photos.length)}
+                    onPrevious={() => setIndex((current) => (current - 1 + photos.length) % photos.length)}
+                    onDownload={handleDownload}
+                />
+            )}
+        </>
+    )
+}
+
+export default RandomPhotoExplorer

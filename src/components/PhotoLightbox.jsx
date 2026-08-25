@@ -2,6 +2,7 @@ import AccessibleLightbox from './AccessibleLightbox'
 import {
     mediaDisplayUrl,
     mediaId,
+    mediaPreviewSrcSet,
     mediaThumbnailUrl,
 } from '../utils/mediaUrls'
 
@@ -14,13 +15,17 @@ function PhotoLightbox({
     onPrevious,
     onDownload,
     onMediaError,
+    loading = false,
+    emptyMessage = '',
 }) {
     const activeImage = images[index]
-    if (!activeImage) return null
+    if (!activeImage && !loading && !emptyMessage) return null
 
     const isLegacyOrDemo = typeof activeImage === 'string'
-    const thumbUrl = mediaThumbnailUrl(activeImage)
-    const activeRawUrl = mediaDisplayUrl(activeImage)
+    const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
+    const thumbUrl = activeImage ? mediaThumbnailUrl(activeImage) : ''
+    const activeRawUrl = activeImage ? mediaDisplayUrl(activeImage) : ''
+    const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
 
     return (
         <AccessibleLightbox
@@ -78,24 +83,39 @@ function PhotoLightbox({
                 onClick={(event) => event.stopPropagation()}
             >
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
-                    <img
-                        key={`high-${mediaId(activeImage) || index}`}
-                        src={activeRawUrl}
-                        alt="Full size preview"
-                        onError={onMediaError}
-                        width={activeImage.width}
-                        height={activeImage.height}
-                        decoding="async"
-                        className="linen-lightbox-photo max-w-full max-h-full object-contain relative z-20 animate-fade-in"
-                    />
-                    <img
-                        src={thumbUrl}
-                        alt=""
-                        className="absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
-                    />
+                    {activeImage ? (
+                        <>
+                            <img
+                                key={`high-${activeId}`}
+                                src={activeRawUrl}
+                                srcSet={previewSrcSet || undefined}
+                                sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
+                                alt="Full size preview"
+                                onError={onMediaError}
+                                width={activeImage.width}
+                                height={activeImage.height}
+                                decoding="async"
+                                className="linen-lightbox-photo max-w-full max-h-full object-contain relative z-20 animate-fade-in"
+                            />
+                            <img
+                                key={`placeholder-${activeId}`}
+                                src={thumbUrl}
+                                alt=""
+                                className="linen-lightbox-placeholder absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
+                            />
+                        </>
+                    ) : (
+                        <div className="text-center text-white px-6">
+                            {loading ? (
+                                <p role="status" className="text-sm tracking-[0.18em] uppercase">Finding random photos…</p>
+                            ) : (
+                                <p role="alert" className="text-sm">{emptyMessage}</p>
+                            )}
+                        </div>
+                    )}
                 </div>
 
-                {!isLegacyOrDemo && activeImage.exif && (
+                {!isLegacyOrDemo && activeImage?.exif && (
                     <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
                         {activeImage.exif.model && (
                             <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
@@ -117,24 +137,26 @@ function PhotoLightbox({
                 )}
             </div>
 
-            <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
-                {onDownload && (
-                    <button
-                        type="button"
-                        onClick={(event) => onDownload(event, activeImage, index)}
-                        className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
-                        title="Download Photo"
-                        aria-label="Download photo"
-                    >
-                        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                    </button>
-                )}
-                <span className="text-white/70 text-sm font-medium drop-shadow-md">
-                    {index + 1} / {images.length}
-                </span>
-            </div>
+            {activeImage && (
+                <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
+                    {onDownload && (
+                        <button
+                            type="button"
+                            onClick={(event) => onDownload(event, activeImage, index)}
+                            className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
+                            title="Download Photo"
+                            aria-label="Download photo"
+                        >
+                            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                        </button>
+                    )}
+                    <span className="text-white/70 text-sm font-medium drop-shadow-md">
+                        {index + 1} / {images.length}
+                    </span>
+                </div>
+            )}
         </AccessibleLightbox>
     )
 }

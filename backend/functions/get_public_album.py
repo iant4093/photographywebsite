@@ -152,7 +152,7 @@ def _random_photos_response(event):
     return json_response(
         200,
         {"images": images, "totalPhotos": total_photos},
-        cache_control="no-store",
+        cache_control="public, max-age=0, s-maxage=300, stale-while-revalidate=600",
     )
 
 
