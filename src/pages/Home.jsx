@@ -51,7 +51,7 @@ function Home() {
     const [loadAttempt, setLoadAttempt] = useState(0)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
     const [managedHomeFailed, setManagedHomeFailed] = useState(false)
-    const [sectionSort, setSectionSort] = useState('curated')
+    const [sectionSort, setSectionSort] = useState(0)
 
     const handleExplorePhotos = useCallback((event) => {
         const target = document.getElementById('photo-albums')
@@ -267,23 +267,32 @@ function Home() {
                 <div
                     id="photo-albums"
                     data-reveal-id="home-photo-header"
-                    className="linen-section-heading linen-section-heading-album-index mb-14 scroll-animate"
+                    className="linen-section-heading mb-14 scroll-animate"
                     style={{ scrollMarginTop: '6rem' }}
                 >
                     <span>Selected index</span>
                     <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal inline-block">Photo Albums</h2>
-                    <label className="home-section-sort" htmlFor="home-section-sort">
-                        <span>Sort sections</span>
-                        <span className="home-section-sort-control">
+                    <label className="w-full" htmlFor="home-section-sort">
+                        <span className="linen-category-number block mb-1">Sort sections</span>
+                        <span className="relative block">
                             <select
                                 id="home-section-sort"
+                                aria-label="Sort sections"
                                 value={sectionSort}
-                                onChange={(event) => setSectionSort(event.target.value)}
+                                onChange={(event) => setSectionSort(Number(event.target.value))}
+                                className="w-full py-2 px-4 border-0 border-b border-charcoal rounded-none text-charcoal bg-transparent text-xs font-medium tracking-wider uppercase cursor-pointer focus:outline-none"
+                                style={{ WebkitAppearance: 'none', appearance: 'none', background: 'transparent' }}
                             >
-                                {HOME_SECTION_SORT_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                {HOME_SECTION_SORT_OPTIONS.map((option, index) => (
+                                    <option key={option} value={index}>{option}</option>
                                 ))}
                             </select>
+                            <span
+                                aria-hidden="true"
+                                className="absolute right-0 top-1/2 -translate-y-1/2 text-amber-dark pointer-events-none text-base"
+                            >
+                                ⌄
+                            </span>
                         </span>
                     </label>
                 </div>

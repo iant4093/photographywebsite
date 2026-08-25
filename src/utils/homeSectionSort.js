@@ -1,60 +1,40 @@
 export const HOME_SECTION_SORT_OPTIONS = [
-    { value: 'curated', label: 'Curated order' },
-    { value: 'newest', label: 'Newest albums' },
-    { value: 'oldest', label: 'Oldest albums' },
-    { value: 'title-asc', label: 'Title: A–Z' },
-    { value: 'title-desc', label: 'Title: Z–A' },
-    { value: 'most-albums', label: 'Most photo albums' },
-    { value: 'fewest-albums', label: 'Fewest photo albums' },
+    'Curated order',
+    'Newest albums',
+    'Oldest albums',
+    'Title: A–Z',
+    'Title: Z–A',
+    'Most photo albums',
+    'Fewest photo albums',
 ]
 
-function uploadedAt(album) {
-    const timestamp = Date.parse(album?.uploadedAt || album?.createdAt || '')
-    return Number.isFinite(timestamp) ? timestamp : null
-}
-
-function sectionUploadTime(category, groupedAlbums) {
-    let newest = null
-    for (const album of groupedAlbums[category] || []) {
-        const timestamp = uploadedAt(album)
-        if (timestamp !== null && (newest === null || timestamp > newest)) newest = timestamp
-    }
-    return newest
-}
-
-function compareNullableNumbers(left, right, direction) {
-    if (left === null && right === null) return 0
-    if (left === null) return 1
-    if (right === null) return -1
-    return direction * (left - right)
-}
-
-export function sortHomePhotoSections(curatedCategories, groupedAlbums, mode = 'curated') {
+export function sortHomePhotoSections(curatedCategories, groupedAlbums, mode = 0) {
     const categories = [...curatedCategories]
-    if (mode === 'curated') return categories
+    if (!Number.isInteger(mode) || mode < 1 || mode > 6) return categories
 
     const curatedIndex = new Map(categories.map((category, index) => [category, index]))
-    const fallBackToCurated = (left, right) => curatedIndex.get(left) - curatedIndex.get(right)
+    const latestUpload = (category) => (groupedAlbums[category] || []).reduce((latest, album) => {
+        const next = album?.uploadedAt || album?.createdAt || ''
+        return next > latest ? next : latest
+    }, '')
 
     return categories.sort((left, right) => {
         let order
-        if (mode === 'newest' || mode === 'oldest') {
-            order = compareNullableNumbers(
-                sectionUploadTime(left, groupedAlbums),
-                sectionUploadTime(right, groupedAlbums),
-                mode === 'newest' ? -1 : 1,
-            )
-        } else if (mode === 'title-asc' || mode === 'title-desc') {
+        if (mode < 3) {
+            const leftDate = latestUpload(left)
+            const rightDate = latestUpload(right)
+            order = !leftDate || !rightDate
+                ? (!leftDate && rightDate ? 1 : (leftDate && !rightDate ? -1 : 0))
+                : leftDate.localeCompare(rightDate) * (mode === 1 ? -1 : 1)
+        } else if (mode < 5) {
             order = left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true })
-            if (mode === 'title-desc') order *= -1
-        } else if (mode === 'most-albums' || mode === 'fewest-albums') {
+            if (mode === 4) order *= -1
+        } else {
             const leftCount = groupedAlbums[left]?.length || 0
             const rightCount = groupedAlbums[right]?.length || 0
-            order = mode === 'most-albums' ? rightCount - leftCount : leftCount - rightCount
-        } else {
-            return fallBackToCurated(left, right)
+            order = mode === 5 ? rightCount - leftCount : leftCount - rightCount
         }
 
-        return order || fallBackToCurated(left, right)
+        return order || curatedIndex.get(left) - curatedIndex.get(right)
     })
 }

@@ -98,19 +98,19 @@ describe('Home complete public catalog', () => {
     const view = routed(<Home />)
     const sectionSort = screen.getByLabelText('Sort sections')
 
-    expect(sectionSort).toHaveValue('curated')
+    expect(sectionSort).toHaveValue('0')
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
       .toEqual(['Birding', 'Hikes'])
     expect(screen.getByTestId('home-photo-Birding')).toHaveTextContent('Bird OneBird Two')
 
-    fireEvent.change(sectionSort, { target: { value: 'newest' } })
+    fireEvent.change(sectionSort, { target: { value: '1' } })
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
       .toEqual(['Hikes', 'Birding'])
     expect(screen.getByTestId('home-photo-Birding')).toHaveTextContent('Bird OneBird Two')
 
     view.unmount()
     routed(<Home />)
-    expect(screen.getByLabelText('Sort sections')).toHaveValue('curated')
+    expect(screen.getByLabelText('Sort sections')).toHaveValue('0')
   })
 
   it('smoothly skips the moving wall and targets the photo album heading', () => {

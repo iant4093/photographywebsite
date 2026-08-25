@@ -17,30 +17,30 @@ const grouped = {
 
 describe('home photo section sorting', () => {
     it('preserves the configured category order by default', () => {
-        expect(sortHomePhotoSections(curated, grouped, 'curated')).toEqual(curated)
-        expect(sortHomePhotoSections(curated, grouped, 'unknown')).toEqual(curated)
+        expect(sortHomePhotoSections(curated, grouped, 0)).toEqual(curated)
+        expect(sortHomePhotoSections(curated, grouped, 99)).toEqual(curated)
     })
 
     it('orders entire sections by their most recently uploaded album', () => {
-        expect(sortHomePhotoSections(curated, grouped, 'newest'))
+        expect(sortHomePhotoSections(curated, grouped, 1))
             .toEqual(['Hikes', 'Portraits', 'Birding'])
-        expect(sortHomePhotoSections(curated, grouped, 'oldest'))
+        expect(sortHomePhotoSections(curated, grouped, 2))
             .toEqual(['Birding', 'Portraits', 'Hikes'])
     })
 
     it('orders sections by title without changing their album arrays', () => {
         const birdingAlbums = grouped.Birding
-        expect(sortHomePhotoSections(curated, grouped, 'title-asc'))
+        expect(sortHomePhotoSections(curated, grouped, 3))
             .toEqual(['Birding', 'Hikes', 'Portraits'])
-        expect(sortHomePhotoSections(curated, grouped, 'title-desc'))
+        expect(sortHomePhotoSections(curated, grouped, 4))
             .toEqual(['Portraits', 'Hikes', 'Birding'])
         expect(grouped.Birding).toBe(birdingAlbums)
     })
 
     it('orders sections by album count and uses curated order for ties', () => {
-        expect(sortHomePhotoSections(curated, grouped, 'most-albums'))
+        expect(sortHomePhotoSections(curated, grouped, 5))
             .toEqual(['Portraits', 'Birding', 'Hikes'])
-        expect(sortHomePhotoSections(curated, grouped, 'fewest-albums'))
+        expect(sortHomePhotoSections(curated, grouped, 6))
             .toEqual(['Hikes', 'Birding', 'Portraits'])
     })
 
@@ -50,7 +50,7 @@ describe('home photo section sorting', () => {
             Unknown: [{ createdAt: '' }],
             Known: [{ createdAt: '2026-04-01T12:00:00Z' }],
         }
-        expect(sortHomePhotoSections(categories, albums, 'newest')).toEqual(['Known', 'Unknown'])
-        expect(sortHomePhotoSections(categories, albums, 'oldest')).toEqual(['Known', 'Unknown'])
+        expect(sortHomePhotoSections(categories, albums, 1)).toEqual(['Known', 'Unknown'])
+        expect(sortHomePhotoSections(categories, albums, 2)).toEqual(['Known', 'Unknown'])
     })
 })

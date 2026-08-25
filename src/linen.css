@@ -322,66 +322,6 @@
   grid-template-columns: minmax(7rem, 0.26fr) minmax(0, 1fr);
 }
 
-.linen-site .linen-section-heading-album-index {
-  grid-template-columns: minmax(7rem, 0.26fr) minmax(0, 1fr) minmax(12rem, 0.3fr);
-}
-
-.linen-site .home-section-sort {
-  width: min(100%, 18rem);
-  justify-self: end;
-}
-
-.linen-site .home-section-sort > span:first-child {
-  display: block;
-  margin-bottom: 0.32rem;
-  color: var(--color-amber-dark);
-  font: 500 0.56rem/1.4 var(--font-sans);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.linen-site .home-section-sort-control {
-  position: relative;
-  display: block;
-}
-
-.linen-site .home-section-sort-control::after {
-  content: "";
-  position: absolute;
-  right: 0.2rem;
-  top: 50%;
-  width: 0.45rem;
-  height: 0.45rem;
-  border-right: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  color: var(--color-amber-dark);
-  pointer-events: none;
-  transform: translateY(-70%) rotate(45deg);
-}
-
-.linen-site .home-section-sort select {
-  width: 100%;
-  min-height: 2.5rem;
-  padding: 0.45rem 1.5rem 0.45rem 0;
-  border: 0;
-  border-bottom: 1px solid var(--color-charcoal);
-  border-radius: 0;
-  color: var(--color-charcoal);
-  background: transparent;
-  box-shadow: none;
-  font: 500 0.68rem/1.3 var(--font-sans);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.linen-site .home-section-sort select:focus-visible {
-  outline: 2px solid var(--color-amber-dark);
-  outline-offset: 3px;
-}
-
 .linen-site .linen-catalog-paper {
   background: transparent;
 }
@@ -1013,12 +953,6 @@
   .linen-site .linen-section-heading {
     grid-template-columns: 1fr;
     gap: 0.45rem;
-  }
-
-  .linen-site .home-section-sort {
-    width: 100%;
-    margin-top: 0.6rem;
-    justify-self: stretch;
   }
 
   .linen-admin .linen-admin-heading {
