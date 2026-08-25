@@ -84,13 +84,13 @@ function PhotoLightbox({
             >
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {activeImage ? (
-                        <div key={`media-${activeId}`} className="linen-lightbox-media">
+                        <div key={`media-${activeId}`} className="linen-lightbox-media w-full h-full">
                             <img
                                 src={thumbUrl}
                                 alt=""
                                 width={activeImage.width}
                                 height={activeImage.height}
-                                className="linen-lightbox-placeholder blur-sm opacity-50 z-10 pointer-events-none"
+                                className="linen-lightbox-placeholder max-w-full max-h-full object-contain blur-sm opacity-50 z-10 pointer-events-none"
                             />
                             <img
                                 src={activeRawUrl}
