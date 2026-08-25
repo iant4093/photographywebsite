@@ -36,6 +36,7 @@ def summary(album_id=ALBUM_ONE, count=1):
         "description": "Description",
         "category": "Portraits",
         "createdAt": "2026-01-01T00:00:00Z",
+        "uploadedAt": "2026-01-01T00:00:00Z",
         "visibility": "public",
         "imageCount": count,
         "coverImageUrl": "https://media.example.test/cover.jpg",

@@ -1390,6 +1390,7 @@ class PublicPostureSmokeTests(unittest.TestCase):
             "description": "",
             "category": "Test",
             "createdAt": "2026-01-01T00:00:00Z",
+            "uploadedAt": "2026-01-01T00:00:00Z",
             "visibility": "public",
             "imageCount": 1,
             "coverImageUrl": "https://media.test/public/raw.jpg",

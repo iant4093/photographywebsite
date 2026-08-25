@@ -26,6 +26,7 @@ SUMMARY_FIELDS = {
     "description",
     "category",
     "createdAt",
+    "uploadedAt",
     "visibility",
     "imageCount",
     "coverImageUrl",
@@ -170,7 +171,14 @@ def validate_summary(value: object) -> dict:
         or item["galleryCategoryOrder"] < 0
     ):
         raise ProbeError("album summary has an invalid gallery category order")
-    for name in ("title", "description", "category", "createdAt", "coverBlurhash"):
+    for name in (
+        "title",
+        "description",
+        "category",
+        "createdAt",
+        "uploadedAt",
+        "coverBlurhash",
+    ):
         if not isinstance(item[name], str):
             raise ProbeError("album summary has an invalid text field")
     _public_url(item["coverImageUrl"], allow_empty=True)
