@@ -25,6 +25,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
         'aria-current': active ? 'page' : undefined,
     })
     const menuLinkClass = (active) => `font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300${active ? ' is-active' : ''}`
+    const closeMenu = () => setIsMenuOpen(false)
 
     // Smart Navbar scroll logic
     useEffect(() => {
@@ -79,7 +80,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                 <div className="linen-nav-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
                     <div className="linen-brand-cluster flex items-center gap-3 z-50 relative">
-                        <Link to="/" onClick={() => setIsMenuOpen(false)} className="linen-brand flex items-center gap-3 group relative">
+                        <Link to="/" onClick={closeMenu} className="linen-brand flex items-center gap-3 group relative">
                             <div className="linen-logo-tile w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
                                 <span className="text-cream font-serif font-bold text-sm tracking-tight">IT</span>
                             </div>
@@ -110,15 +111,13 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         )}
                         <Link
                             to="/search"
-                            onClick={() => setIsMenuOpen(false)}
-                            className={`linen-theme-toggle linen-search-toggle${searchActive ? ' is-active' : ''}`}
+                            onClick={closeMenu}
+                            className="linen-theme-toggle block"
                             aria-label="Search"
                             aria-current={searchActive ? 'page' : undefined}
-                            title="Search"
                         >
                             <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                                <circle cx="10.5" cy="10.5" r="6.5" />
-                                <path d="m15.5 15.5 5 5" />
+                                <path d="m20 20-5-5m3-4a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
                             </svg>
                         </Link>
                     </div>
@@ -174,27 +173,27 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
             >
                 <div className={`linen-menu-list flex flex-col items-center gap-8 md:gap-12 transition-all duration-500 delay-100 ${isMenuOpen ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}>
 
-                    <Link to="/" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(photoActive)} aria-current={photoActive ? 'page' : undefined}>
+                    <Link to="/" onClick={closeMenu} className={menuLinkClass(photoActive)} aria-current={photoActive ? 'page' : undefined}>
                         Photographs
                     </Link>
 
-                    <Link to="/videos" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(videoActive)} aria-current={videoActive ? 'page' : undefined}>
+                    <Link to="/videos" onClick={closeMenu} className={menuLinkClass(videoActive)} aria-current={videoActive ? 'page' : undefined}>
                         Videos
                     </Link>
 
-                    <Link to="/editor" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(editorActive)} aria-current={editorActive ? 'page' : undefined}>
+                    <Link to="/editor" onClick={closeMenu} className={menuLinkClass(editorActive)} aria-current={editorActive ? 'page' : undefined}>
                         Editor
                     </Link>
 
-                    <Link to="/stats" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(statsActive)} aria-current={statsActive ? 'page' : undefined}>
+                    <Link to="/stats" onClick={closeMenu} className={menuLinkClass(statsActive)} aria-current={statsActive ? 'page' : undefined}>
                         Stats
                     </Link>
 
-                    <Link to="/sharedalbum" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(sharedActive)} aria-current={sharedActive ? 'page' : undefined}>
+                    <Link to="/sharedalbum" onClick={closeMenu} className={menuLinkClass(sharedActive)} aria-current={sharedActive ? 'page' : undefined}>
                         Find Album
                     </Link>
 
-                    <Link to="/contact" onClick={() => setIsMenuOpen(false)} className={menuLinkClass(contactActive)} aria-current={contactActive ? 'page' : undefined}>
+                    <Link to="/contact" onClick={closeMenu} className={menuLinkClass(contactActive)} aria-current={contactActive ? 'page' : undefined}>
                         Contact
                     </Link>
 
@@ -202,7 +201,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         <>
                             <Link
                                 to={isAdmin ? '/admin' : '/dashboard'}
-                                onClick={() => setIsMenuOpen(false)}
+                                onClick={closeMenu}
                                 className={menuLinkClass(accountActive)}
                                 aria-current={accountActive ? 'page' : undefined}
                             >
@@ -218,7 +217,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                     ) : (
                         <Link
                             to="/login"
-                            onClick={() => setIsMenuOpen(false)}
+                            onClick={closeMenu}
                             className={`linen-menu-action mt-8 font-sans text-lg font-medium px-8 py-3 rounded-xl bg-amber text-cream hover:bg-amber-dark transition-colors duration-300 shadow-warm-sm hover:shadow-warm${accountActive ? ' is-active' : ''}`}
                             aria-current={accountActive ? 'page' : undefined}
                         >

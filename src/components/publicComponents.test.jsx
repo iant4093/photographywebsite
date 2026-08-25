@@ -111,7 +111,6 @@ describe('navigation and metadata', () => {
     const { container } = routed(<Navbar />, undefined, '/search')
     const search = screen.getByRole('link', { name: 'Search' })
     expect(search).toHaveAttribute('aria-current', 'page')
-    expect(search).toHaveClass('is-active')
     expect(within(container.querySelector('.linen-desktop-links')).queryByRole('link', { name: 'Search' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
     expect(within(document.getElementById('site-menu')).queryByRole('link', { name: 'Search' })).toBeNull()
