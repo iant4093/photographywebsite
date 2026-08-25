@@ -15,7 +15,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const photoActive = pathname === '/' || pathname.startsWith('/album/')
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/')
     const searchActive = pathname === '/search'
-    const exploreActive = pathname === '/explore'
+    const exploreActive = pathname === '/explore' || pathname.startsWith('/explore/')
     const editorActive = pathname === '/editor'
     const statsActive = pathname === '/stats'
     const sharedActive = pathname.startsWith('/sharedalbum')

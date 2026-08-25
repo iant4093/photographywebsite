@@ -63,7 +63,7 @@ class ExploreBackfillTests(unittest.TestCase):
         self.assertEqual(counts["plannedJobCount"], 1)
 
         complete = metadata(
-            exploreVersion=1,
+            exploreVersion=2,
             palette=["#112233"],
             colorFamilies=["blue"],
             lens="Test Lens",
@@ -74,7 +74,7 @@ class ExploreBackfillTests(unittest.TestCase):
         self.assertEqual(counts["alreadyCompleteCount"], 1)
 
         malformed = metadata(
-            exploreVersion=1,
+            exploreVersion=2,
             palette=["not-a-color"],
             colorFamilies=["ultraviolet"],
             lens="Test Lens",

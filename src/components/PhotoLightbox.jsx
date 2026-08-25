@@ -84,9 +84,15 @@ function PhotoLightbox({
             >
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {activeImage ? (
-                        <>
+                        <div key={`media-${activeId}`} className="linen-lightbox-media">
                             <img
-                                key={`high-${activeId}`}
+                                src={thumbUrl}
+                                alt=""
+                                width={activeImage.width}
+                                height={activeImage.height}
+                                className="linen-lightbox-placeholder blur-sm opacity-50 z-10 pointer-events-none"
+                            />
+                            <img
                                 src={activeRawUrl}
                                 srcSet={previewSrcSet || undefined}
                                 sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
@@ -97,13 +103,7 @@ function PhotoLightbox({
                                 decoding="async"
                                 className="linen-lightbox-photo max-w-full max-h-full object-contain relative z-20 animate-fade-in"
                             />
-                            <img
-                                key={`placeholder-${activeId}`}
-                                src={thumbUrl}
-                                alt=""
-                                className="linen-lightbox-placeholder absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
-                            />
-                        </>
+                        </div>
                     ) : (
                         <div className="text-center text-white px-6">
                             {loading ? (

@@ -26,7 +26,7 @@ from backfill_preview_v3 import (
 )
 
 
-EXPLORE_VERSION = 1
+EXPLORE_VERSION = 2
 CONFIRMATION = "BACKFILL_EXPLORE_METADATA"
 COLOR_FAMILIES = frozenset({
     "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "monochrome",

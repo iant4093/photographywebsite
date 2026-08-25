@@ -32,6 +32,41 @@ test('extracts a deterministic palette and multiple prominent color families', (
     assert.match(result.palette[0], /^#[0-9a-f]{6}$/)
 })
 
+test('does not classify a small warm accent as an orange photograph', () => {
+    const sample = pixels([
+        ...Array.from({ length: 18 }, () => [30, 92, 185]),
+        ...Array.from({ length: 10 }, () => [112, 116, 121]),
+        ...Array.from({ length: 2 }, () => [226, 112, 30]),
+    ])
+    const result = analyzePixels(sample)
+    assert.ok(result.colorFamilies.includes('blue'))
+    assert.ok(!result.colorFamilies.includes('orange'))
+})
+
+test('keeps orange when it occupies a meaningful part of the photograph', () => {
+    const sample = pixels([
+        ...Array.from({ length: 16 }, () => [32, 88, 182]),
+        ...Array.from({ length: 8 }, () => [226, 112, 30]),
+    ])
+    const result = analyzePixels(sample)
+    assert.ok(result.colorFamilies.includes('orange'))
+})
+
+test('uses the strongest hue instead of monochrome for a broadly colorful photograph', () => {
+    const result = analyzePixels(pixels([
+        ...Array.from({ length: 4 }, () => [225, 50, 40]),
+        ...Array.from({ length: 4 }, () => [230, 135, 35]),
+        ...Array.from({ length: 4 }, () => [210, 205, 35]),
+        ...Array.from({ length: 4 }, () => [45, 175, 75]),
+        ...Array.from({ length: 4 }, () => [35, 165, 175]),
+        ...Array.from({ length: 4 }, () => [45, 90, 205]),
+        ...Array.from({ length: 4 }, () => [135, 70, 190]),
+        ...Array.from({ length: 4 }, () => [205, 85, 145]),
+    ]))
+    assert.ok(!result.colorFamilies.includes('monochrome'))
+    assert.ok(result.colorFamilies.length >= 1)
+})
+
 test('caps diverse palettes after the distance pass already selects five colors', () => {
     const sample = pixels([
         [240, 20, 20],

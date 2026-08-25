@@ -29,3 +29,16 @@ export function fetchExploreLenses(options = {}) {
             : [],
     }))
 }
+
+export function fetchExploreColors(options = {}) {
+    return apiFetch('/public/explore?mode=colors', { signal: options.signal }).then((payload) => ({
+        items: Array.isArray(payload?.items)
+            ? payload.items.filter(item => (
+                typeof item?.id === 'string'
+                && item.id
+                && Number.isFinite(Number(item.photos))
+                && Number(item.photos) > 0
+            ))
+            : [],
+    }))
+}

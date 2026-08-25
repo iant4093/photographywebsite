@@ -1,7 +1,13 @@
-export const EXPLORE_VERSION = 1
+export const EXPLORE_VERSION = 2
 export const MANUAL_LENS_FALLBACK = 'Sirui Nightwalker 75mm T1.2'
 
 const MAX_PALETTE_COLORS = 5
+// A hue must occupy a meaningful share of the whole image, not merely a share
+// of the saturated pixels. This prevents a small warm accent from making an
+// otherwise blue or neutral photograph appear in the orange explorer.
+const MIN_FAMILY_IMAGE_SHARE = 0.12
+const MIN_FAMILY_CHROMATIC_SHARE = 0.16
+const MIN_IMAGE_CHROMATIC_SHARE = 0.18
 const COLOR_FAMILY_ORDER = Object.freeze([
     'red',
     'orange',
@@ -114,9 +120,23 @@ export function analyzePixels(bytes, channels = 3) {
 
     const chromaticTotal = Object.values(familyWeights).reduce((sum, weight) => sum + weight, 0)
     const families = COLOR_FAMILY_ORDER
-        .filter(family => chromaticTotal > 0 && familyWeights[family] / chromaticTotal >= 0.075)
+        .filter(family => (
+            totalWeight > 0
+            && chromaticTotal > 0
+            && familyWeights[family] / totalWeight >= MIN_FAMILY_IMAGE_SHARE
+            && familyWeights[family] / chromaticTotal >= MIN_FAMILY_CHROMATIC_SHARE
+        ))
         .sort((left, right) => familyWeights[right] - familyWeights[left])
         .slice(0, 3)
+    // A colorful image with several evenly distributed hues can miss the
+    // per-family threshold even though it is not monochrome. Preserve its
+    // strongest visual family without letting a tiny accent win.
+    if (!families.length && totalWeight > 0 && chromaticTotal / totalWeight >= MIN_IMAGE_CHROMATIC_SHARE) {
+        const dominantFamily = COLOR_FAMILY_ORDER.reduce((best, family) => (
+            familyWeights[family] > familyWeights[best] ? family : best
+        ))
+        families.push(dominantFamily)
+    }
     if (totalWeight > 0 && neutralWeight / totalWeight >= 0.58) families.push('monochrome')
 
     return {

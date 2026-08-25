@@ -6,7 +6,9 @@ import json
 from validation_helpers import ValidationError
 
 
-ALLOWED_CURSOR_KEY_NAMES = frozenset({"albumId", "createdAt", "mediaId", "ownerSub", "visibility"})
+ALLOWED_CURSOR_KEY_NAMES = frozenset({
+    "albumId", "createdAt", "mediaId", "offset", "ownerSub", "seed", "visibility",
+})
 
 
 def _validated_key(value):

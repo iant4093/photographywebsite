@@ -7,7 +7,7 @@ import {
     prefetchPublicAlbum,
     readCachedPublicAlbum,
 } from './api'
-import { fetchExploreLenses, fetchExplorePhotos } from './exploreApi'
+import { fetchExploreColors, fetchExploreLenses, fetchExplorePhotos } from './exploreApi'
 
 function jsonResponse(body) {
     return new Response(JSON.stringify(body), {
@@ -210,6 +210,20 @@ describe('public Explore API', () => {
         })))
         await expect(fetchExploreLenses()).resolves.toEqual({
             items: [{ name: 'Sigma 18-50mm', photos: 7 }],
+        })
+    })
+
+    it('keeps only identified, positive color facets', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            items: [
+                { id: 'blue', photos: 12 },
+                { id: '', photos: 3 },
+                { id: 'orange', photos: 0 },
+                { id: 'red', photos: 'many' },
+            ],
+        })))
+        await expect(fetchExploreColors()).resolves.toEqual({
+            items: [{ id: 'blue', photos: 12 }],
         })
     })
 })

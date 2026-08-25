@@ -1,6 +1,7 @@
 """Anonymous public album JSON plus safe server-rendered social metadata."""
 
 import html
+import hashlib
 import logging
 import os
 import re
@@ -57,14 +58,15 @@ _DESCRIPTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 RANDOM_PHOTO_LIMIT = 80
-EXPLORE_VERSION = 1
+EXPLORE_VERSION = 2
 EXPLORE_DEFAULT_LIMIT = 24
 EXPLORE_MAX_LIMIT = 48
 EXPLORE_SCAN_LIMIT = 120
 EXPLORE_MAX_SCAN_PAGES = 40
-EXPLORE_COLORS = frozenset({
-    "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "monochrome",
-})
+EXPLORE_COLOR_ORDER = (
+    "blue", "cyan", "green", "yellow", "orange", "red", "pink", "purple", "monochrome",
+)
+EXPLORE_COLORS = frozenset(EXPLORE_COLOR_ORDER)
 EXPLORE_PROJECTION = (
     "albumId,mediaId,previewVersion,previewKeys,#status,dimensions,exploreVersion,"
     "palette,colorFamilies,lens,lensKey"
@@ -163,6 +165,14 @@ def _explore_item(metadata, album):
     dimensions = metadata.get("dimensions") if isinstance(metadata.get("dimensions"), dict) else {}
     largest = dimensions.get("1920") if isinstance(dimensions.get("1920"), dict) else {}
     palette = metadata.get("palette") if isinstance(metadata.get("palette"), list) else []
+    stored_exif = image.get("exif") if isinstance(image, dict) and isinstance(image.get("exif"), dict) else {}
+    safe_exif = {
+        field: str(stored_exif.get(field) or "")[:160]
+        for field in ("model", "lens", "focalLength", "focalRatio", "shutterSpeed", "iso")
+        if stored_exif.get(field)
+    }
+    if not safe_exif.get("lens") and metadata.get("lens"):
+        safe_exif["lens"] = str(metadata.get("lens"))[:160]
     return {
         "albumId": album["albumId"],
         "albumTitle": str(album.get("title") or "Untitled Album")[:200],
@@ -174,11 +184,11 @@ def _explore_item(metadata, album):
         "url": previews[-1]["url"],
         "thumbnailUrl": previews[0]["url"],
         "previewSrcSet": previews,
-        "width": int(largest.get("width") or 0),
-        "height": int(largest.get("height") or 0),
+        "width": int(largest.get("width") or image.get("width") or 0),
+        "height": int(largest.get("height") or image.get("height") or 0),
         "palette": [value for value in palette[:5] if isinstance(value, str)],
         "lens": str(metadata.get("lens") or "")[:160],
-        "exif": {"lens": str(metadata.get("lens") or "")[:160]},
+        "exif": safe_exif,
     }
 
 
@@ -207,45 +217,58 @@ def _explore_media_response(event, params):
     limit = _positive_limit(params.get("limit"))
     scope = f"explore:{mode}:{value.casefold()}"
     cursor = decode_cursor(params.get("cursor"), scope)
-    output = []
+    if cursor:
+        seed = cursor.get("seed", "")
+        offset_text = cursor.get("offset", "")
+        if not re.fullmatch(r"[0-9a-f]{16}", seed) or not offset_text.isdigit():
+            raise ValidationError("Invalid cursor")
+        offset = int(offset_text)
+        if offset < 1 or offset > 100000:
+            raise ValidationError("Invalid cursor")
+    else:
+        seed = secrets.token_hex(8)
+        offset = 0
+    candidates = []
+    scan_cursor = None
     scan_pages = 0
 
-    while len(output) < limit and scan_pages < EXPLORE_MAX_SCAN_PAGES:
+    while scan_pages < EXPLORE_MAX_SCAN_PAGES:
         arguments = {
             "Limit": EXPLORE_SCAN_LIMIT,
             "ProjectionExpression": EXPLORE_PROJECTION,
             "ExpressionAttributeNames": {"#status": "status"},
             "FilterExpression": _explore_filter(mode, value),
         }
-        if cursor:
-            arguments["ExclusiveStartKey"] = cursor
+        if scan_cursor:
+            arguments["ExclusiveStartKey"] = scan_cursor
         response = _preview_table().scan(**arguments)
-        candidates = response.get("Items", [])
-        albums = _batch_albums(item.get("albumId") for item in candidates if isinstance(item, dict))
-        page_cursor = response.get("LastEvaluatedKey")
-        page_complete = True
-        for metadata in candidates:
-            if not isinstance(metadata, dict):
-                continue
-            item = _explore_item(metadata, albums.get(metadata.get("albumId")))
-            if item:
-                output.append(item)
-                if len(output) == limit:
-                    page_cursor = {
-                        "albumId": metadata.get("albumId"),
-                        "mediaId": metadata.get("mediaId"),
-                    }
-                    page_complete = False
-                    break
-        cursor = page_cursor
+        candidates.extend(item for item in response.get("Items", []) if isinstance(item, dict))
+        scan_cursor = response.get("LastEvaluatedKey")
         scan_pages += 1
-        if not page_complete or not cursor:
+        if not scan_cursor:
             break
+    else:
+        raise RuntimeError("Explore result pagination exceeded safe limit")
 
-    output.sort(key=lambda item: (item["albumCreatedAt"], item["albumTitle"], item["mediaId"]), reverse=True)
+    albums = _batch_albums(item.get("albumId") for item in candidates)
+    matches = []
+    for metadata in candidates:
+        item = _explore_item(metadata, albums.get(metadata.get("albumId")))
+        if item:
+            matches.append(item)
+    matches.sort(key=lambda item: hashlib.sha256(
+        f'{seed}:{item["albumId"]}:{item["mediaId"]}'.encode("utf-8")
+    ).digest())
+    output = matches[offset:offset + limit]
+    next_offset = offset + len(output)
+    next_key = (
+        {"seed": seed, "offset": str(next_offset)}
+        if output and next_offset < len(matches)
+        else None
+    )
     return json_response(
         200,
-        {"items": output, "nextCursor": encode_cursor(cursor, scope)},
+        {"items": output, "nextCursor": encode_cursor(next_key, scope)},
         cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
     )
 
@@ -255,6 +278,7 @@ def _lens_options_response(params):
         raise ValidationError("Lens options do not accept additional parameters")
     counts = {}
     cursor = None
+    candidates = []
     for _page in range(EXPLORE_MAX_SCAN_PAGES):
         arguments = {
             "ProjectionExpression": "albumId,mediaId,#status,exploreVersion,lens,lensKey",
@@ -264,29 +288,71 @@ def _lens_options_response(params):
         if cursor:
             arguments["ExclusiveStartKey"] = cursor
         response = _preview_table().scan(**arguments)
-        candidates = response.get("Items", [])
-        albums = _batch_albums(item.get("albumId") for item in candidates if isinstance(item, dict))
-        for metadata in candidates:
-            album = albums.get(metadata.get("albumId")) if isinstance(metadata, dict) else None
-            if not _active_public_photo_album(album):
-                continue
-            if find_image_by_media_id(album, metadata.get("mediaId")) is None:
-                continue
-            key = metadata.get("lensKey")
-            label = metadata.get("lens")
-            if isinstance(key, str) and key and isinstance(label, str) and label:
-                row = counts.setdefault(key, {"name": label[:160], "photos": 0})
-                row["photos"] += 1
+        candidates.extend(item for item in response.get("Items", []) if isinstance(item, dict))
         cursor = response.get("LastEvaluatedKey")
         if not cursor:
             break
     else:
         raise RuntimeError("Lens option pagination exceeded safe limit")
 
+    albums = _batch_albums(item.get("albumId") for item in candidates)
+    for metadata in candidates:
+        album = albums.get(metadata.get("albumId"))
+        if not _active_public_photo_album(album):
+            continue
+        if find_image_by_media_id(album, metadata.get("mediaId")) is None:
+            continue
+        key = metadata.get("lensKey")
+        label = metadata.get("lens")
+        if isinstance(key, str) and key and isinstance(label, str) and label:
+            row = counts.setdefault(key, {"name": label[:160], "photos": 0})
+            row["photos"] += 1
     return json_response(
         200,
         {"items": sorted(counts.values(), key=lambda item: (-item["photos"], item["name"].casefold()))},
-        cache_control="public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
+        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
+def _color_options_response(params):
+    if any(name != "mode" for name in params):
+        raise ValidationError("Color options do not accept additional parameters")
+    counts = {family: 0 for family in EXPLORE_COLOR_ORDER}
+    cursor = None
+    candidates = []
+    for _page in range(EXPLORE_MAX_SCAN_PAGES):
+        arguments = {
+            "ProjectionExpression": "albumId,mediaId,#status,exploreVersion,colorFamilies",
+            "ExpressionAttributeNames": {"#status": "status"},
+            "FilterExpression": Attr("status").eq("ready") & Attr("exploreVersion").eq(EXPLORE_VERSION),
+        }
+        if cursor:
+            arguments["ExclusiveStartKey"] = cursor
+        response = _preview_table().scan(**arguments)
+        candidates.extend(item for item in response.get("Items", []) if isinstance(item, dict))
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            break
+    else:
+        raise RuntimeError("Color option pagination exceeded safe limit")
+
+    albums = _batch_albums(item.get("albumId") for item in candidates)
+    for metadata in candidates:
+        album = albums.get(metadata.get("albumId"))
+        if not _active_public_photo_album(album):
+            continue
+        if find_image_by_media_id(album, metadata.get("mediaId")) is None:
+            continue
+        families = metadata.get("colorFamilies")
+        if not isinstance(families, list):
+            continue
+        for family in set(families):
+            if family in counts:
+                counts[family] += 1
+    return json_response(
+        200,
+        {"items": [{"id": family, "photos": counts[family]} for family in EXPLORE_COLOR_ORDER if counts[family]]},
+        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
     )
 
 
@@ -296,6 +362,8 @@ def _explore_response(event):
         raise ValidationError("Invalid explore parameters")
     if params.get("mode") == "lenses":
         return _lens_options_response(params)
+    if params.get("mode") == "colors":
+        return _color_options_response(params)
     return _explore_media_response(event, params)
 
 
