@@ -61,7 +61,10 @@ RANDOM_PHOTO_LIMIT = 80
 EXPLORE_VERSION = 2
 EXPLORE_DEFAULT_LIMIT = 24
 EXPLORE_MAX_LIMIT = 48
-EXPLORE_SCAN_LIMIT = 120
+# DynamoDB still caps every Scan response at 1 MiB. A larger evaluated-item
+# limit removes dozens of sequential network round trips on a cold filter while
+# retaining that service-side response bound.
+EXPLORE_SCAN_LIMIT = 1000
 EXPLORE_MAX_SCAN_PAGES = 40
 EXPLORE_COLOR_ORDER = (
     "blue", "cyan", "green", "yellow", "orange", "red", "pink", "purple", "monochrome",
