@@ -13,6 +13,7 @@ import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
 const Search = lazy(() => import('./pages/Search'))
+const Explore = lazy(() => import('./pages/Explore'))
 const Editor = lazy(() => import('./pages/Editor'))
 const Stats = lazy(() => import('./pages/Stats'))
 const SharedAlbum = lazy(() => import('./pages/SharedAlbum'))
@@ -93,6 +94,7 @@ function App() {
                         <Route path="/" element={<Home />} />
                         <Route path="/videos" element={<Videos />} />
                         <Route path="/search" element={<Search />} />
+                        <Route path="/explore" element={<Explore />} />
                         <Route path="/editor" element={<Editor />} />
                         <Route path="/stats" element={<Stats />} />
                         <Route path="/album/:albumId" element={<AlbumGallery />} />

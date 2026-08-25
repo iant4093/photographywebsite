@@ -7,6 +7,7 @@ import {
     prefetchPublicAlbum,
     readCachedPublicAlbum,
 } from './api'
+import { fetchExploreLenses, fetchExplorePhotos } from './exploreApi'
 
 function jsonResponse(body) {
     return new Response(JSON.stringify(body), {
@@ -158,5 +159,57 @@ describe('random public photos', () => {
         expect(request.mock.calls[0][0]).toMatch(/\/public\/random-photos$/)
         expect(payload.totalPhotos).toBe(42)
         expect(payload.images).toHaveLength(1)
+    })
+})
+
+describe('public Explore API', () => {
+    beforeEach(() => {
+        vi.stubGlobal('window', {
+            setTimeout: globalThis.setTimeout,
+            clearTimeout: globalThis.clearTimeout,
+        })
+    })
+
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('encodes color and lens filters and preserves safe pagination', async () => {
+        const request = vi.fn()
+            .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'blue' }], nextCursor: 'next' }))
+            .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'lens' }], nextCursor: null }))
+        vi.stubGlobal('fetch', request)
+
+        await expect(fetchExplorePhotos({ mode: 'color', value: 'blue', limit: 12 }))
+            .resolves.toMatchObject({ items: [{ id: 'blue' }], nextCursor: 'next' })
+        await expect(fetchExplorePhotos({ mode: 'lens', value: 'Sigma 18-50mm', cursor: 'next' }))
+            .resolves.toMatchObject({ items: [{ id: 'lens' }] })
+        expect(request.mock.calls[0][0]).toContain('mode=color')
+        expect(request.mock.calls[0][0]).toContain('limit=12')
+        expect(request.mock.calls[1][0]).toContain('cursor=next')
+    })
+
+    it('rejects missing filters and unsafe cursors before making a request', async () => {
+        const request = vi.fn()
+        vi.stubGlobal('fetch', request)
+        await expect(fetchExplorePhotos({ mode: 'camera', value: 'R7' }))
+            .rejects.toMatchObject({ code: 'INVALID_EXPLORE_FILTER' })
+        await expect(fetchExplorePhotos({ mode: 'color', value: '   ' }))
+            .rejects.toMatchObject({ code: 'INVALID_EXPLORE_FILTER' })
+        await expect(fetchExplorePhotos({ mode: 'color', value: 'blue', cursor: 'x'.repeat(4097) }))
+            .rejects.toMatchObject({ code: 'BAD_CURSOR' })
+        expect(request).not.toHaveBeenCalled()
+    })
+
+    it('keeps only named, positive lens facets', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            items: [
+                { name: 'Sigma 18-50mm', photos: 7 },
+                { name: '', photos: 2 },
+                { name: 'Broken count', photos: 'many' },
+                { name: 'Empty lens', photos: 0 },
+            ],
+        })))
+        await expect(fetchExploreLenses()).resolves.toEqual({
+            items: [{ name: 'Sigma 18-50mm', photos: 7 }],
+        })
     })
 })

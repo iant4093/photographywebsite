@@ -1414,7 +1414,9 @@ Resources:
             TableName: !Ref AlbumsTable
         - Statement:
             - Effect: Allow
-              Action: dynamodb:BatchGetItem
+              Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:Scan
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action: s3:ListBucket
@@ -1436,6 +1438,14 @@ Resources:
           Properties:
             ApiId: !Ref Api
             Path: /public/random-photos
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetExplore:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /public/explore
             Method: GET
             Auth:
               Authorizer: NONE

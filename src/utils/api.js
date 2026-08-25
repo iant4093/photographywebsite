@@ -92,7 +92,7 @@ async function readErrorMessage(response) {
     }
 }
 
-async function apiFetch(path, options = {}, config = {}) {
+export async function apiFetch(path, options = {}, config = {}) {
     const {
         timeoutMs = DEFAULT_TIMEOUT_MS,
         retries = options.method && options.method !== 'GET' ? 0 : 1,

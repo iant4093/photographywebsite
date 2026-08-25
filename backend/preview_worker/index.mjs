@@ -31,6 +31,13 @@ import {
     resolveManifestImage,
 } from './contract.mjs'
 import {
+    EXPLORE_VERSION,
+    analyzePixels,
+    isCompleteExploreMetadata,
+    lensKey,
+    normalizeLens,
+} from './explore.mjs'
+import {
     atPreviewStage,
     classifyPreviewObjectFailure,
     previewStageFailure,
@@ -132,6 +139,24 @@ async function generateOutputs(sourceBytes) {
         outputs[String(width)] = { bytes, width, height: outputMetadata.height }
     }
     return outputs
+}
+
+async function extractExploreMetadata(imageBytes, image) {
+    const { data, info } = await sharp(imageBytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
+        .rotate()
+        .toColourspace('srgb')
+        .resize({ width: 64, height: 64, fit: 'inside', withoutEnlargement: true })
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true })
+    const colors = analyzePixels(data, info.channels)
+    const lens = normalizeLens(image?.exif?.lens)
+    return {
+        exploreVersion: EXPLORE_VERSION,
+        ...colors,
+        lens,
+        lensKey: lensKey(lens),
+    }
 }
 
 async function generateHeroOutput(sourceBytes, width, format) {
@@ -528,11 +553,11 @@ async function upgradePreviousReadyMetadataPending(resolved, mediaId, jobId, pre
     }))
 }
 
-async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, outputs) {
+async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, outputs, exploreMetadata) {
     await documentClient.send(new UpdateCommand({
         TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
         Key: { albumId: resolved.job.albumId, mediaId },
-        UpdateExpression: 'SET #status = :ready, sourceSha256 = :sourceSha256, dimensions = :dimensions, completedAt = :completedAt REMOVE #jobId',
+        UpdateExpression: 'SET #status = :ready, sourceSha256 = :sourceSha256, dimensions = :dimensions, completedAt = :completedAt, exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey REMOVE #jobId',
         ConditionExpression: '#status = :pending AND #jobId = :jobId AND #previewVersion = :version AND #previewKeys = :keys',
         ExpressionAttributeNames: {
             '#status': 'status',
@@ -552,8 +577,42 @@ async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, out
                 { width, height: outputs[String(width)].height },
             ])),
             ':completedAt': new Date().toISOString(),
+            ':exploreVersion': exploreMetadata.exploreVersion,
+            ':palette': exploreMetadata.palette,
+            ':colorFamilies': exploreMetadata.colorFamilies,
+            ':lens': exploreMetadata.lens,
+            ':lensKey': exploreMetadata.lensKey,
         },
     }))
+}
+
+async function ensureExploreMetadata(resolved, metadata) {
+    if (isCompleteExploreMetadata(metadata)) return metadata
+    const { bytes } = await readObjectBounded(resolved.previewKeys['640'], MAX_OUTPUT_BYTES)
+    const exploreMetadata = await extractExploreMetadata(bytes, resolved.image)
+    await documentClient.send(new UpdateCommand({
+        TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
+        Key: { albumId: resolved.job.albumId, mediaId: mediaIdForKey(resolved.job.rawKey) },
+        UpdateExpression: 'SET exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, updatedAt = :updatedAt',
+        ConditionExpression: '#status = :ready AND #previewVersion = :version AND #previewKeys = :keys',
+        ExpressionAttributeNames: {
+            '#status': 'status',
+            '#previewVersion': 'previewVersion',
+            '#previewKeys': 'previewKeys',
+        },
+        ExpressionAttributeValues: {
+            ':ready': 'ready',
+            ':version': PREVIEW_VERSION,
+            ':keys': resolved.previewKeys,
+            ':exploreVersion': exploreMetadata.exploreVersion,
+            ':palette': exploreMetadata.palette,
+            ':colorFamilies': exploreMetadata.colorFamilies,
+            ':lens': exploreMetadata.lens,
+            ':lensKey': exploreMetadata.lensKey,
+            ':updatedAt': new Date().toISOString(),
+        },
+    }))
+    return { ...metadata, ...exploreMetadata }
 }
 
 async function tagUntilVisibilityStable(job, previewKeys) {
@@ -612,6 +671,10 @@ async function processJob(jobValue) {
         })
         if (accepted) {
             await atPreviewStage(
+                'metadata_commit_failed',
+                async () => ensureExploreMetadata(resolved, existingMetadata),
+            )
+            await atPreviewStage(
                 'visibility_tag_failed',
                 async () => tagUntilVisibilityStable(job, resolved.previewKeys),
             )
@@ -629,6 +692,10 @@ async function processJob(jobValue) {
     }
     const sourceDigest = createHash('sha256').update(sourceBytes).digest('hex')
     const outputs = await atPreviewStage('source_transform_failed', async () => generateOutputs(sourceBytes))
+    const exploreMetadata = await atPreviewStage(
+        'source_transform_failed',
+        async () => extractExploreMetadata(outputs['640'].bytes, resolved.image),
+    )
     for (const width of PREVIEW_WIDTHS) {
         await atPreviewStage(
             'preview_object_write_failed',
@@ -650,7 +717,14 @@ async function processJob(jobValue) {
     )
     await atPreviewStage(
         'metadata_commit_failed',
-        async () => commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, outputs),
+        async () => commitPreviewMetadata(
+            resolved,
+            mediaId,
+            jobId,
+            sourceDigest,
+            outputs,
+            exploreMetadata,
+        ),
     )
     return { status: 'completed' }
 }

@@ -121,6 +121,7 @@ describe('navigation and metadata', () => {
   it.each([
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],
+    ['Explore', '/explore'],
     ['Editor', '/editor'],
     ['Stats', '/stats'],
     ['Contact', '/contact'],

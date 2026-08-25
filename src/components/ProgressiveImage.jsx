@@ -39,6 +39,7 @@ export default function ProgressiveImage({
     height,
     eager = false,
     className = '',
+    style,
     onError,
 }) {
     const [visibleSrc, setVisibleSrc] = useState(eager ? src : null)
@@ -72,7 +73,7 @@ export default function ProgressiveImage({
     }, [eager, src, visibleSrc])
 
     return (
-        <div ref={containerRef} className={`relative overflow-hidden ${className}`}>
+        <div ref={containerRef} className={`relative overflow-hidden ${className}`} style={style}>
             {shouldLoad && blurhash && (
                 <div className={`absolute inset-0 z-10 transition-opacity duration-500 ${isLoaded ? 'opacity-0' : 'opacity-100'}`} aria-hidden="true">
                     <Blurhash hash={blurhash} width="100%" height="100%" resolutionX={24} resolutionY={24} punch={1} />

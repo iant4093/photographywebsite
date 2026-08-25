@@ -15,6 +15,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const photoActive = pathname === '/' || pathname.startsWith('/album/')
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/')
     const searchActive = pathname === '/search'
+    const exploreActive = pathname === '/explore'
     const editorActive = pathname === '/editor'
     const statsActive = pathname === '/stats'
     const sharedActive = pathname.startsWith('/sharedalbum')
@@ -127,6 +128,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         <div className="linen-desktop-links hidden" aria-label="Primary navigation">
                             <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
                             <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
+                            <Link to="/explore" {...activeAttributes(exploreActive)}>Explore</Link>
                             <Link to="/editor" {...activeAttributes(editorActive)}>Editor</Link>
                             <Link to="/stats" {...activeAttributes(statsActive)}>Stats</Link>
                             <Link to="/sharedalbum" {...activeAttributes(sharedActive)}>Find Album</Link>
@@ -179,6 +181,10 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
 
                     <Link to="/videos" onClick={closeMenu} className={menuLinkClass(videoActive)} aria-current={videoActive ? 'page' : undefined}>
                         Videos
+                    </Link>
+
+                    <Link to="/explore" onClick={closeMenu} className={menuLinkClass(exploreActive)} aria-current={exploreActive ? 'page' : undefined}>
+                        Explore
                     </Link>
 
                     <Link to="/editor" onClick={closeMenu} className={menuLinkClass(editorActive)} aria-current={editorActive ? 'page' : undefined}>

@@ -1,0 +1,371 @@
+.linen-site .explore-page {
+  min-height: 78vh;
+}
+
+.linen-site .explore-header .linen-section-heading {
+  grid-template-columns: minmax(7rem, 0.24fr) minmax(18rem, 1fr) minmax(16rem, 0.38fr);
+}
+
+.linen-site .explore-content {
+  min-width: 0;
+}
+
+.linen-site .explore-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 38rem);
+  margin-bottom: clamp(2rem, 4vw, 3.5rem);
+  border: 1px solid var(--color-charcoal);
+}
+
+.linen-site .explore-mode-tabs button {
+  min-height: 3.25rem;
+  color: var(--color-warm-gray);
+  background: transparent;
+  font: 600 0.65rem/1 var(--font-sans);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.linen-site .explore-mode-tabs button + button {
+  border-left: 1px solid var(--color-charcoal);
+}
+
+.linen-site .explore-mode-tabs button[aria-selected="true"] {
+  color: var(--color-cream);
+  background: var(--color-charcoal);
+}
+
+.linen-site .explore-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.3fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 4vw, 4rem);
+  padding-block: clamp(1.5rem, 3vw, 2.5rem);
+  border-block: 1px solid var(--color-warm-border);
+}
+
+.linen-site .explore-filter-panel > div:first-child > span {
+  color: var(--color-amber-dark);
+  font: 600 0.61rem/1 var(--font-sans);
+  letter-spacing: 0.18em;
+}
+
+.linen-site .explore-filter-panel h2 {
+  margin-top: 0.6rem;
+  font: 400 clamp(1.8rem, 3vw, 2.7rem)/1.05 var(--font-serif);
+}
+
+.linen-site .explore-color-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.linen-site .explore-color-options button {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  align-items: center;
+  min-height: 3.5rem;
+  padding: 0.45rem;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-warm-border);
+  background: rgba(248, 244, 235, 0.34);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 180ms ease, transform 180ms ease, background-color 180ms ease;
+}
+
+.linen-site .explore-color-options button:hover,
+.linen-site .explore-color-options button.is-active {
+  border-color: var(--color-charcoal);
+  background: rgba(248, 244, 235, 0.72);
+  transform: translateY(-2px);
+}
+
+.linen-site .explore-color-options button > i {
+  display: block;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgba(35, 31, 26, 0.32);
+}
+
+.linen-site .explore-color-options button > span {
+  padding-inline: 0.8rem;
+  overflow: hidden;
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linen-site .explore-lens-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-content: flex-start;
+}
+
+.linen-site .explore-lens-options > p {
+  color: var(--color-warm-gray);
+}
+
+.linen-site .explore-lens-options button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-height: 2.9rem;
+  padding: 0.65rem 0.75rem 0.65rem 0.95rem;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-warm-border);
+  background: rgba(248, 244, 235, 0.34);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 180ms ease, transform 180ms ease, background-color 180ms ease;
+}
+
+.linen-site .explore-lens-options button:hover,
+.linen-site .explore-lens-options button.is-active {
+  border-color: var(--color-charcoal);
+  background: rgba(248, 244, 235, 0.72);
+  transform: translateY(-2px);
+}
+
+.linen-site .explore-lens-options small {
+  min-width: 1.75rem;
+  padding: 0.35rem 0.45rem;
+  color: var(--color-cream);
+  background: var(--color-amber-dark);
+  font-size: 0.6rem;
+  text-align: center;
+}
+
+.linen-site .explore-results-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block: clamp(2rem, 4vw, 3.5rem) 1.25rem;
+  padding-bottom: 0.8rem;
+  color: var(--color-warm-gray);
+  border-bottom: 1px solid var(--color-charcoal);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.linen-site .explore-results-heading strong {
+  color: var(--color-charcoal);
+  font: 400 1.5rem/1 var(--font-serif);
+}
+
+.linen-site .explore-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(1rem, 2vw, 1.8rem);
+  align-items: start;
+}
+
+.linen-site .explore-photo-card {
+  --editorial-card-scale: 1;
+  --editorial-hover-scale: 0;
+  min-width: 0;
+  padding: 0.42rem;
+  color: var(--color-charcoal);
+  border: 1px solid rgba(54, 45, 37, 0.72);
+  background: rgba(248, 244, 235, 0.48);
+  box-shadow: 5px 6px 0 rgba(91, 70, 51, 0.075);
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 260ms ease, transform 260ms ease;
+}
+
+.linen-site .explore-photo-card:hover {
+  --editorial-hover-scale: 0.018;
+  box-shadow: 7px 8px 0 rgba(91, 70, 51, 0.11);
+}
+
+.linen-site .explore-photo-image {
+  width: 100%;
+  min-height: 11rem;
+  max-height: 28rem;
+  border: 1px solid rgba(54, 45, 37, 0.58);
+  background: var(--color-cream-dark);
+}
+
+.linen-site .explore-photo-copy {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.8rem 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--color-warm-border);
+}
+
+.linen-site .explore-photo-copy > span:first-child {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.linen-site .explore-photo-copy strong {
+  overflow: hidden;
+  font: 400 1rem/1.15 var(--font-serif);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linen-site .explore-photo-copy small {
+  color: var(--color-warm-gray);
+  font-size: 0.55rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.linen-site .explore-palette {
+  display: flex;
+  flex: none;
+}
+
+.linen-site .explore-palette i {
+  width: 0.55rem;
+  height: 1.45rem;
+  border-block: 1px solid rgba(35, 31, 26, 0.2);
+}
+
+.linen-site .explore-palette i:first-child {
+  border-left: 1px solid rgba(35, 31, 26, 0.2);
+}
+
+.linen-site .explore-palette i:last-child {
+  border-right: 1px solid rgba(35, 31, 26, 0.2);
+}
+
+.linen-site .explore-loading,
+.linen-site .explore-empty,
+.linen-site .explore-error {
+  display: grid;
+  place-items: center;
+  min-height: 18rem;
+  padding: 2rem;
+  color: var(--color-warm-gray);
+  border: 1px solid var(--color-warm-border);
+  text-align: center;
+}
+
+.linen-site .explore-empty h2 {
+  color: var(--color-charcoal);
+  font: 400 2rem/1 var(--font-serif);
+}
+
+.linen-site .explore-empty p {
+  margin-top: 0.8rem;
+}
+
+.linen-site .explore-error {
+  color: #8a2f2a;
+  border-color: #8a2f2a;
+}
+
+.linen-site .explore-load-more {
+  display: block;
+  min-width: min(100%, 22rem);
+  margin: 2.5rem auto 0;
+  padding: 1rem 1.5rem;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-charcoal);
+  background: transparent;
+  font-size: 0.67rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.linen-site .explore-load-more:hover:not(:disabled) {
+  color: var(--color-cream);
+  background: var(--color-charcoal);
+}
+
+.linen-site .explore-load-more:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.linen-site[data-theme="dark"]:not(.linen-admin) :is(
+  .explore-color-options button,
+  .explore-lens-options button,
+  .explore-photo-card
+) {
+  background: rgba(38, 35, 30, 0.7);
+  box-shadow: 5px 6px 0 rgba(0, 0, 0, 0.2);
+}
+
+.linen-site[data-theme="dark"]:not(.linen-admin) :is(
+  .explore-color-options button:hover,
+  .explore-color-options button.is-active,
+  .explore-lens-options button:hover,
+  .explore-lens-options button.is-active
+) {
+  background: rgba(56, 50, 43, 0.9);
+}
+
+.linen-site[data-theme="dark"]:not(.linen-admin) .explore-error {
+  color: #f2a7a0;
+  border-color: #d66f66;
+}
+
+@media (max-width: 1080px) {
+  .linen-site .explore-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .linen-site .explore-header .linen-section-heading,
+  .linen-site .explore-filter-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .linen-site .explore-color-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .linen-site .explore-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.8rem;
+  }
+
+  .linen-site .explore-photo-image {
+    min-height: 8rem;
+  }
+
+  .linen-site .explore-photo-copy {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .linen-site .explore-palette {
+    width: 100%;
+  }
+
+  .linen-site .explore-palette i {
+    flex: 1;
+    height: 0.45rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .linen-site .explore-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .linen-site .explore-photo-card,
+  .linen-site .explore-color-options button,
+  .linen-site .explore-lens-options button {
+    transform: none !important;
+    transition: none;
+  }
+}

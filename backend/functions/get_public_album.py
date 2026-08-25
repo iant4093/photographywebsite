@@ -12,12 +12,17 @@ import urllib.request
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
+from cursor_helpers import decode_cursor, encode_cursor
 from media_access import (
     album_media_prefixes,
     bucket_name,
+    find_image_by_media_id,
     load_preview_metadata_for_albums,
+    public_preview_key,
+    public_url,
     serialize_album_detail,
     serialize_images,
+    validated_preview_keys,
 )
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_uuid
@@ -52,6 +57,246 @@ _DESCRIPTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 RANDOM_PHOTO_LIMIT = 80
+EXPLORE_VERSION = 1
+EXPLORE_DEFAULT_LIMIT = 24
+EXPLORE_MAX_LIMIT = 48
+EXPLORE_SCAN_LIMIT = 120
+EXPLORE_MAX_SCAN_PAGES = 40
+EXPLORE_COLORS = frozenset({
+    "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "monochrome",
+})
+EXPLORE_PROJECTION = (
+    "albumId,mediaId,previewVersion,previewKeys,#status,dimensions,exploreVersion,"
+    "palette,colorFamilies,lens,lensKey"
+)
+
+
+def _preview_table():
+    return dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"])
+
+
+def _positive_limit(value, default=EXPLORE_DEFAULT_LIMIT, maximum=EXPLORE_MAX_LIMIT):
+    if value in (None, ""):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError("limit must be an integer") from None
+    if parsed < 1 or parsed > maximum:
+        raise ValidationError(f"limit must be between 1 and {maximum}")
+    return parsed
+
+
+def _normalized_lens(value):
+    if not isinstance(value, str):
+        raise ValidationError("lens is required")
+    normalized = " ".join(value.strip().split())[:160]
+    if not normalized:
+        raise ValidationError("lens is required")
+    return normalized
+
+
+def _batch_albums(album_ids):
+    identifiers = sorted({value for value in album_ids if isinstance(value, str) and value})
+    if not identifiers:
+        return {}
+    records = {}
+    for offset in range(0, len(identifiers), 100):
+        keys = [{"albumId": album_id} for album_id in identifiers[offset:offset + 100]]
+        request = {
+            table.name: {
+                "Keys": keys,
+                "ConsistentRead": False,
+                "ProjectionExpression": "albumId,#status,#visibility,#type,title,category,createdAt,images",
+                "ExpressionAttributeNames": {
+                    "#status": "status",
+                    "#visibility": "visibility",
+                    "#type": "type",
+                },
+            }
+        }
+        for _attempt in range(3):
+            response = dynamodb.batch_get_item(RequestItems=request)
+            for item in response.get("Responses", {}).get(table.name, []):
+                if isinstance(item, dict) and isinstance(item.get("albumId"), str):
+                    records[item["albumId"]] = item
+            unprocessed = response.get("UnprocessedKeys", {}).get(table.name, {}).get("Keys", [])
+            if not unprocessed:
+                break
+            request[table.name]["Keys"] = unprocessed
+        else:
+            raise RuntimeError("Album visibility verification remained unprocessed")
+    return records
+
+
+def _active_public_photo_album(album):
+    return bool(
+        isinstance(album, dict)
+        and album.get("visibility") == "public"
+        and album.get("status", "active") == "active"
+        and album.get("type", "photo") == "photo"
+        and isinstance(album.get("images"), list)
+    )
+
+
+def _explore_item(metadata, album):
+    if not _active_public_photo_album(album):
+        return None
+    media_id = metadata.get("mediaId")
+    image = find_image_by_media_id(album, media_id)
+    if image is None:
+        return None
+    preview_keys = validated_preview_keys(image, album, metadata)
+    if not preview_keys:
+        return None
+    try:
+        image_index = album["images"].index(image)
+        previews = [
+            {
+                "width": width,
+                "url": public_url(public_preview_key(album["albumId"], preview_keys[str(width)])),
+            }
+            for width in (640, 960, 1440, 1920)
+        ]
+    except (StopIteration, ValidationError):
+        return None
+    dimensions = metadata.get("dimensions") if isinstance(metadata.get("dimensions"), dict) else {}
+    largest = dimensions.get("1920") if isinstance(dimensions.get("1920"), dict) else {}
+    palette = metadata.get("palette") if isinstance(metadata.get("palette"), list) else []
+    return {
+        "albumId": album["albumId"],
+        "albumTitle": str(album.get("title") or "Untitled Album")[:200],
+        "albumCategory": str(album.get("category") or "Uncategorized")[:100],
+        "albumCreatedAt": str(album.get("createdAt") or "")[:64],
+        "mediaId": media_id,
+        "imageIndex": image_index,
+        "id": media_id,
+        "url": previews[-1]["url"],
+        "thumbnailUrl": previews[0]["url"],
+        "previewSrcSet": previews,
+        "width": int(largest.get("width") or 0),
+        "height": int(largest.get("height") or 0),
+        "palette": [value for value in palette[:5] if isinstance(value, str)],
+        "lens": str(metadata.get("lens") or "")[:160],
+        "exif": {"lens": str(metadata.get("lens") or "")[:160]},
+    }
+
+
+def _explore_filter(mode, value):
+    base = Attr("status").eq("ready") & Attr("exploreVersion").eq(EXPLORE_VERSION)
+    if mode == "color":
+        return base & Attr("colorFamilies").contains(value)
+    return base & Attr("lensKey").eq(value.casefold())
+
+
+def _explore_media_response(event, params):
+    del event
+    allowed = {"mode", "value", "limit", "cursor"}
+    if any(name not in allowed for name in params):
+        raise ValidationError("Unsupported explore parameter")
+    mode = params.get("mode")
+    if mode not in {"color", "lens"}:
+        raise ValidationError("mode must be color or lens")
+    value = params.get("value")
+    if mode == "color":
+        value = str(value or "").strip().lower()
+        if value not in EXPLORE_COLORS:
+            raise ValidationError("Unsupported color family")
+    else:
+        value = _normalized_lens(value)
+    limit = _positive_limit(params.get("limit"))
+    scope = f"explore:{mode}:{value.casefold()}"
+    cursor = decode_cursor(params.get("cursor"), scope)
+    output = []
+    scan_pages = 0
+
+    while len(output) < limit and scan_pages < EXPLORE_MAX_SCAN_PAGES:
+        arguments = {
+            "Limit": EXPLORE_SCAN_LIMIT,
+            "ProjectionExpression": EXPLORE_PROJECTION,
+            "ExpressionAttributeNames": {"#status": "status"},
+            "FilterExpression": _explore_filter(mode, value),
+        }
+        if cursor:
+            arguments["ExclusiveStartKey"] = cursor
+        response = _preview_table().scan(**arguments)
+        candidates = response.get("Items", [])
+        albums = _batch_albums(item.get("albumId") for item in candidates if isinstance(item, dict))
+        page_cursor = response.get("LastEvaluatedKey")
+        page_complete = True
+        for metadata in candidates:
+            if not isinstance(metadata, dict):
+                continue
+            item = _explore_item(metadata, albums.get(metadata.get("albumId")))
+            if item:
+                output.append(item)
+                if len(output) == limit:
+                    page_cursor = {
+                        "albumId": metadata.get("albumId"),
+                        "mediaId": metadata.get("mediaId"),
+                    }
+                    page_complete = False
+                    break
+        cursor = page_cursor
+        scan_pages += 1
+        if not page_complete or not cursor:
+            break
+
+    output.sort(key=lambda item: (item["albumCreatedAt"], item["albumTitle"], item["mediaId"]), reverse=True)
+    return json_response(
+        200,
+        {"items": output, "nextCursor": encode_cursor(cursor, scope)},
+        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
+def _lens_options_response(params):
+    if any(name != "mode" for name in params):
+        raise ValidationError("Lens options do not accept additional parameters")
+    counts = {}
+    cursor = None
+    for _page in range(EXPLORE_MAX_SCAN_PAGES):
+        arguments = {
+            "ProjectionExpression": "albumId,mediaId,#status,exploreVersion,lens,lensKey",
+            "ExpressionAttributeNames": {"#status": "status"},
+            "FilterExpression": Attr("status").eq("ready") & Attr("exploreVersion").eq(EXPLORE_VERSION),
+        }
+        if cursor:
+            arguments["ExclusiveStartKey"] = cursor
+        response = _preview_table().scan(**arguments)
+        candidates = response.get("Items", [])
+        albums = _batch_albums(item.get("albumId") for item in candidates if isinstance(item, dict))
+        for metadata in candidates:
+            album = albums.get(metadata.get("albumId")) if isinstance(metadata, dict) else None
+            if not _active_public_photo_album(album):
+                continue
+            if find_image_by_media_id(album, metadata.get("mediaId")) is None:
+                continue
+            key = metadata.get("lensKey")
+            label = metadata.get("lens")
+            if isinstance(key, str) and key and isinstance(label, str) and label:
+                row = counts.setdefault(key, {"name": label[:160], "photos": 0})
+                row["photos"] += 1
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            break
+    else:
+        raise RuntimeError("Lens option pagination exceeded safe limit")
+
+    return json_response(
+        200,
+        {"items": sorted(counts.values(), key=lambda item: (-item["photos"], item["name"].casefold()))},
+        cache_control="public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
+    )
+
+
+def _explore_response(event):
+    params = (event or {}).get("queryStringParameters") or {}
+    if not isinstance(params, dict):
+        raise ValidationError("Invalid explore parameters")
+    if params.get("mode") == "lenses":
+        return _lens_options_response(params)
+    return _explore_media_response(event, params)
 
 
 def _legacy_images(album):
@@ -364,6 +609,13 @@ def handler(event, context):
             return _random_photos_response(event)
         except Exception as error:
             return internal_error(context, error, "get_random_photos")
+    if route_key == "GET /public/explore" or raw_path.endswith("/public/explore"):
+        try:
+            return _explore_response(event)
+        except ValidationError as error:
+            return error_response(400, str(error), code="invalid_request")
+        except Exception as error:
+            return internal_error(context, error, "get_explore")
     try:
         if (event or {}).get("queryStringParameters"):
             raise ValidationError("Public album detail does not accept query parameters")
