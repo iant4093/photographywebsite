@@ -13,9 +13,12 @@ function AlbumCard({
     onImageError,
     onMouseEnter,
     showNewFlag = false,
+    preview = false,
     imageSizes = '(min-width: 768px) 360px, (min-width: 640px) 320px, 280px',
 }) {
     const intentTimer = useRef(null)
+    const hoverController = useRef(null)
+    const imageContainer = useRef(null)
     const [coverPreview, setCoverPreview] = useState({ identity: '', srcSet: '' })
     const albumId = album?.albumId || ''
     const coverImageUrl = album?.coverImageUrl || ''
@@ -25,22 +28,45 @@ function AlbumCard({
     const canPrefetch = !onOpen && album?.visibility === 'public'
     const isNew = showNewFlag && isWithinRecentDays(album?.uploadedAt || album?.createdAt, 4)
     const prefetch = useCallback(() => {
-        if (!canPrefetch) return
         void preloadAlbumRoute(album)
-        void prefetchPublicAlbum(album.albumId)
-    }, [album, canPrefetch])
+        return prefetchPublicAlbum(albumId)
+    }, [album, albumId])
     const schedulePrefetch = useCallback(() => {
         if (!canPrefetch || intentTimer.current !== null) return
         intentTimer.current = window.setTimeout(() => {
             intentTimer.current = null
-            prefetch()
+            void prefetch()
         }, 140)
     }, [canPrefetch, prefetch])
     const cancelPrefetch = useCallback(() => {
         if (intentTimer.current !== null) window.clearTimeout(intentTimer.current)
         intentTimer.current = null
     }, [])
-    useEffect(() => cancelPrefetch, [cancelPrefetch])
+
+    const stopHoverPreview = useCallback(() => {
+        hoverController.current?.stop()
+        hoverController.current = null
+    }, [])
+
+    const scheduleHoverPreview = useCallback(() => {
+        if (!preview || !canPrefetch) return
+        stopHoverPreview()
+        const pending = {}
+        hoverController.current = pending
+        void import('../utils/albumHoverPreview').then(({ start }) => {
+            if (hoverController.current !== pending) return
+            hoverController.current = start({
+                container: imageContainer.current,
+                coverImageUrl,
+                loadDetail: prefetch,
+            })
+        })
+    }, [canPrefetch, coverImageUrl, prefetch, preview, stopHoverPreview])
+
+    useEffect(() => () => {
+        cancelPrefetch()
+        stopHoverPreview()
+    }, [cancelPrefetch, stopHoverPreview])
 
     useEffect(() => {
         if (!previewIdentity) return undefined
@@ -64,7 +90,7 @@ function AlbumCard({
     const content = (
         <>
             {/* Cover image with warm overlay on hover */}
-            <div className="album-card-image relative aspect-[4/3] overflow-hidden bg-cream-dark">
+            <div ref={imageContainer} className="album-card-image relative aspect-[4/3] overflow-hidden bg-cream-dark">
                 {albumCoverUrl(album) ? (
                     <ProgressiveImage
                         src={albumCoverUrl(album)}
@@ -147,11 +173,18 @@ function AlbumCard({
     return (
         <Link
             to={targetRoute}
-            onMouseEnter={(event) => { onMouseEnter?.(event); schedulePrefetch() }}
-            onMouseLeave={cancelPrefetch}
+            onMouseEnter={() => {
+                onMouseEnter?.()
+                schedulePrefetch()
+                scheduleHoverPreview()
+            }}
+            onMouseLeave={() => {
+                cancelPrefetch()
+                stopHoverPreview()
+            }}
             onFocus={schedulePrefetch}
             onBlur={cancelPrefetch}
-            onTouchStart={prefetch}
+            onTouchStart={canPrefetch ? prefetch : undefined}
             className={className}
         >
             {content}
