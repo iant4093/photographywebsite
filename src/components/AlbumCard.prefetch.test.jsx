@@ -112,7 +112,7 @@ describe('AlbumCard intent prefetch', () => {
 
         const firstUrl = firstFrame.getAttribute('src')
         await act(async () => {
-            vi.advanceTimersByTime(1100)
+            vi.advanceTimersByTime(2200)
             await Promise.resolve()
             await Promise.resolve()
         })

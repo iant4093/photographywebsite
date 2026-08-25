@@ -1,7 +1,8 @@
 import { mediaPreviewCandidates } from './mediaUrls'
 
 export const ALBUM_HOVER_DELAY_MS = 650
-export const ALBUM_HOVER_FRAME_MS = 1100
+export const ALBUM_HOVER_FRAME_MS = 2200
+export const ALBUM_HOVER_FADE_MS = 600
 export const ALBUM_HOVER_PREVIEW_WIDTH = 640
 export const ALBUM_HOVER_PREVIEW_LIMIT = 5
 
@@ -81,7 +82,7 @@ function stylePreviewImage(image) {
     Object.assign(image.style, {
         zIndex: '10',
         opacity: '0',
-        transition: 'opacity 240ms ease',
+        transition: `opacity ${ALBUM_HOVER_FADE_MS}ms ease`,
     })
 }
 
@@ -139,7 +140,7 @@ export function start({ container, coverImageUrl, loadDetail }) {
                     later(() => {
                         previousImage.remove()
                         previewImages.delete(previousImage)
-                    }, 240)
+                    }, ALBUM_HOVER_FADE_MS)
                 }
                 later(showNextFrame, ALBUM_HOVER_FRAME_MS)
             }, 16)
