@@ -369,12 +369,16 @@ class PublicAlbumDetailTests(unittest.TestCase):
             ),
         ]
 
-        def serialize(album):
+        def serialize(album, **_kwargs):
             return [{"mediaId": album["images"][0]["rawKey"], "url": "https://media.example.test/photo.jpg"}]
 
         with patch.object(get_public_album, "_random_photo_albums", return_value=albums), patch.object(
             get_public_album, "serialize_images", side_effect=serialize
-        ):
+        ), patch.object(
+            get_public_album,
+            "load_preview_metadata_for_albums",
+            return_value={ALBUM_ID: {}, second_id: {}},
+        ) as load_previews:
             response = get_public_album.handler(
                 {
                     "rawPath": "/public/random-photos",
@@ -391,6 +395,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
         self.assertEqual(body["totalPhotos"], 2)
         self.assertEqual({item["albumId"] for item in body["images"]}, {ALBUM_ID, second_id})
         self.assertEqual({item["albumTitle"] for item in body["images"]}, {"Portfolio", "Second album"})
+        load_previews.assert_called_once()
 
     def test_random_photos_reject_query_parameters(self):
         response = get_public_album.handler(

@@ -234,44 +234,51 @@ def validated_preview_keys(image, album, metadata=None, *, allow_pending=False):
     return validated if validated == expected else {}
 
 
-def load_preview_metadata(album, images=None, *, strict=False):
-    """Batch-read external derivative state for exact manifest media IDs."""
+def load_preview_metadata_for_albums(album_images, *, strict=False):
+    """Batch-read derivative state for media sampled from multiple albums.
+
+    DynamoDB accepts up to 100 keys per batch. Grouping the keys here avoids a
+    separate network round trip for every album in whole-site views such as the
+    random-photo explorer.
+    """
     table_name = os.environ.get("PREVIEW_METADATA_TABLE", "").strip()
-    if not table_name or not isinstance(album, dict):
+    if not table_name:
         return {}
-    sources = images if images is not None else album.get("images", [])
-    media_ids = []
-    seen_media_ids = set()
-    for image in sources if isinstance(sources, list) else []:
-        try:
-            raw_key = validate_album_media_key(_raw_key(image), album=album)
-            media_id = media_id_for_key(raw_key)
-            if media_id not in seen_media_ids:
-                seen_media_ids.add(media_id)
-                media_ids.append(media_id)
-        except ValidationError:
+    keys = []
+    seen_keys = set()
+    for album, images in album_images:
+        if not isinstance(album, dict):
             continue
-    if not media_ids:
+        sources = images if images is not None else album.get("images", [])
+        for image in sources if isinstance(sources, list) else []:
+            try:
+                raw_key = validate_album_media_key(_raw_key(image), album=album)
+                key = (album.get("albumId"), media_id_for_key(raw_key))
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    keys.append({"albumId": key[0], "mediaId": key[1]})
+            except ValidationError:
+                continue
+    if not keys:
         return {}
 
     results = {}
     resource = get_dynamodb_resource()
     try:
-        for offset in range(0, len(media_ids), 100):
+        for offset in range(0, len(keys), 100):
             request = {
                 table_name: {
-                    "Keys": [
-                        {"albumId": album.get("albumId"), "mediaId": media_id}
-                        for media_id in media_ids[offset:offset + 100]
-                    ],
+                    "Keys": keys[offset:offset + 100],
                     "ConsistentRead": False,
                 }
             }
             for _attempt in range(3):
                 response = resource.batch_get_item(RequestItems=request)
                 for item in response.get("Responses", {}).get(table_name, []):
-                    if isinstance(item, dict) and isinstance(item.get("mediaId"), str):
-                        results[item["mediaId"]] = item
+                    album_id = item.get("albumId") if isinstance(item, dict) else None
+                    media_id = item.get("mediaId") if isinstance(item, dict) else None
+                    if isinstance(album_id, str) and isinstance(media_id, str):
+                        results.setdefault(album_id, {})[media_id] = item
                 unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", [])
                 if not unprocessed:
                     break
@@ -286,6 +293,14 @@ def load_preview_metadata(album, images=None, *, strict=False):
         logger.error("preview_metadata_read_failed error_type=%s", type(error).__name__)
         return {}
     return results
+
+
+def load_preview_metadata(album, images=None, *, strict=False):
+    """Batch-read external derivative state for one album."""
+    if not isinstance(album, dict):
+        return {}
+    by_album = load_preview_metadata_for_albums([(album, images)], strict=strict)
+    return by_album.get(album.get("albumId"), {})
 
 
 def delete_preview_metadata(album_id, media_ids):
@@ -378,7 +393,7 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
     return result
 
 
-def serialize_images(album, *, include_internal=False):
+def serialize_images(album, *, include_internal=False, preview_metadata_by_id=None):
     visibility = album.get("visibility")
     if visibility not in ALLOWED_VISIBILITIES:
         raise ValidationError("Album has an invalid visibility")
@@ -404,7 +419,11 @@ def serialize_images(album, *, include_internal=False):
         except ValidationError:
             # A malformed stored key must not cause an out-of-namespace URL leak.
             continue
-    metadata_by_id = load_preview_metadata(album, validated_images)
+    metadata_by_id = (
+        load_preview_metadata(album, validated_images)
+        if preview_metadata_by_id is None
+        else preview_metadata_by_id
+    )
     for validated in validated_images:
         media_id = media_id_for_key(validated["rawKey"])
         results.append(serialize_image(

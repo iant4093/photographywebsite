@@ -15,6 +15,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from media_access import (
     album_media_prefixes,
     bucket_name,
+    load_preview_metadata_for_albums,
     serialize_album_detail,
     serialize_images,
 )
@@ -135,9 +136,15 @@ def _random_photos_response(event):
         group["images"].append(image)
 
     images = []
+    metadata_by_album = load_preview_metadata_for_albums(
+        [(group["album"], group["images"]) for group in grouped.values()]
+    )
     for group in grouped.values():
         album = group["album"]
-        serialized = serialize_images({**album, "images": group["images"]})
+        serialized = serialize_images(
+            {**album, "images": group["images"]},
+            preview_metadata_by_id=metadata_by_album.get(album["albumId"], {}),
+        )
         images.extend(
             {
                 **image,
