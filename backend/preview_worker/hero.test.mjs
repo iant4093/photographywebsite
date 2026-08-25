@@ -18,15 +18,29 @@ const version = '0123456789abcdef0123456789abcdef'
 test('accepts only fixed hero sources and opaque version identifiers', () => {
     assert.deepEqual(parseHeroJob({ kind: 'hero', sourceKey: 'temp-zips/hero-pending', version }), {
         kind: 'hero',
+        heroType: 'photo',
         sourceKey: 'temp-zips/hero-pending',
         version,
     })
     assert.equal(parseHeroJob({ kind: 'hero', sourceKey: 'site/hero/home', version }).sourceKey, 'site/hero/home')
+    assert.deepEqual(parseHeroJob({
+        kind: 'hero',
+        heroType: 'video',
+        sourceKey: 'temp-zips/video-hero-pending',
+        version,
+    }), {
+        kind: 'hero',
+        heroType: 'video',
+        sourceKey: 'temp-zips/video-hero-pending',
+        version,
+    })
     for (const value of [
         null,
         [],
         { kind: 'preview', sourceKey: 'temp-zips/hero-pending', version },
         { kind: 'hero', sourceKey: '../secret', version },
+        { kind: 'hero', heroType: 'video', sourceKey: 'temp-zips/hero-pending', version },
+        { kind: 'hero', heroType: 'unknown', sourceKey: 'temp-zips/hero-pending', version },
         { kind: 'hero', sourceKey: 'temp-zips/hero-pending', version: 'unsafe/path' },
     ]) {
         assert.throws(() => parseHeroJob(value), /Invalid hero/)
@@ -43,6 +57,12 @@ test('uses bounded no-upscale widths and deterministic immutable keys', () => {
     )
     assert.equal(heroCurrentKey(960, 'avif'), 'site/hero/current/hero-960.avif')
     assert.equal(heroCurrentFallbackKey('jpeg'), 'site/hero/current/hero.jpg')
+    assert.equal(
+        heroDerivativeKey(version, 1280, 'webp', 'video'),
+        `site/hero/versions/video/v${HERO_DERIVATIVE_VERSION}/${version}/hero-1280.webp`,
+    )
+    assert.equal(heroCurrentKey(960, 'avif', 'video'), 'site/hero/video/current/hero-960.avif')
+    assert.equal(heroCurrentFallbackKey('jpeg', 'video'), 'site/hero/video/current/hero.jpg')
     assert.throws(() => heroWidthsFor(0), /source width/)
     assert.throws(() => heroDerivativeKey(version, 640, 'gif'), /format/)
     assert.throws(() => heroCurrentKey(0, 'avif'), /current hero width/)
@@ -52,6 +72,24 @@ test('uses bounded no-upscale widths and deterministic immutable keys', () => {
     assert.equal(heroOutputFormatMatches('jpeg', 'jpeg'), true)
     assert.equal(heroOutputFormatMatches('avif', 'avif'), false)
     assert.equal(heroOutputFormatMatches('gif', 'gif'), false)
+})
+
+test('builds video hero manifests in the isolated video namespace', () => {
+    const widths = heroWidthsFor(1280)
+    const outputs = HERO_FORMATS.flatMap((format) => widths.map((width) => ({
+        format,
+        width,
+        height: Math.round(width * 0.6),
+        key: heroDerivativeKey(version, width, format, 'video'),
+    })))
+    const manifest = buildHeroManifest({
+        version,
+        sourceWidth: 1280,
+        sourceHeight: 768,
+        outputs,
+        heroType: 'video',
+    })
+    assert.equal(manifest.fallbackKey, `site/hero/versions/video/v1/${version}/hero-1280.jpg`)
 })
 
 test('builds a complete responsive manifest and rejects partial output', () => {

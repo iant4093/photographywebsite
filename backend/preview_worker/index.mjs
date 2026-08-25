@@ -45,6 +45,7 @@ import {
     heroCurrentKey,
     heroDerivativeKey,
     heroOutputFormatMatches,
+    heroPaths,
     heroWidthsFor,
     parseHeroJob,
 } from './hero.mjs'
@@ -171,7 +172,7 @@ async function processHeroJob(jobValue) {
     for (const width of heroWidthsFor(sourceWidth)) {
         for (const format of HERO_FORMATS) {
             const output = await generateHeroOutput(sourceBytes, width, format)
-            const key = heroDerivativeKey(job.version, width, format)
+            const key = heroDerivativeKey(job.version, width, format, job.heroType)
             await s3.send(new PutObjectCommand({
                 Bucket: requiredEnvironment('IMAGES_BUCKET'),
                 Key: key,
@@ -182,6 +183,7 @@ async function processHeroJob(jobValue) {
                 Tagging: 'visibility=public',
                 Metadata: {
                     'hero-version': job.version,
+                    'hero-type': job.heroType,
                     'hero-width': String(width),
                     generator: 'responsive-hero-v1',
                 },
@@ -194,22 +196,24 @@ async function processHeroJob(jobValue) {
         sourceWidth,
         sourceHeight,
         outputs,
+        heroType: job.heroType,
     })
     const latest = await s3.send(new HeadObjectCommand({
         Bucket: requiredEnvironment('IMAGES_BUCKET'),
         Key: job.sourceKey,
     }))
     if (String(latest.ETag || '').replaceAll('"', '').toLowerCase() !== job.version) {
-        await deleteHeroVersion(job.version)
+        await deleteHeroVersion(job.version, job.heroType)
         return { status: 'superseded', manifest: null }
     }
     await publishHero(job, manifest, head.ContentType || `image/${metadata.format}`)
     return { status: 'completed', manifest }
 }
 
-async function currentHeroManifest() {
+async function currentHeroManifest(heroType) {
+    const paths = heroPaths(heroType)
     try {
-        const { bytes } = await readObjectBounded('site/hero/manifest.json', 64 * 1024)
+        const { bytes } = await readObjectBounded(paths.manifest, 64 * 1024)
         const parsed = JSON.parse(bytes.toString('utf8'))
         return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
     } catch (error) {
@@ -221,14 +225,15 @@ async function currentHeroManifest() {
     }
 }
 
-async function deleteHeroVersion(version) {
+async function deleteHeroVersion(version, heroType) {
+    const paths = heroPaths(heroType)
     try {
-        parseHeroJob({ kind: 'hero', sourceKey: 'site/hero/original', version })
+        parseHeroJob({ kind: 'hero', heroType, sourceKey: paths.original, version })
     } catch {
         return
     }
     const bucket = requiredEnvironment('IMAGES_BUCKET')
-    const prefix = `site/hero/versions/v1/${version}/`
+    const prefix = `${paths.versions}/${version}/`
     let continuationToken
     do {
         const page = await s3.send(new ListObjectsV2Command({
@@ -252,14 +257,15 @@ async function deleteHeroVersion(version) {
 
 async function publishHero(job, manifest, sourceContentType) {
     const bucket = requiredEnvironment('IMAGES_BUCKET')
-    const oldManifest = await currentHeroManifest()
+    const paths = heroPaths(job.heroType)
+    const oldManifest = await currentHeroManifest(job.heroType)
     manifest.previousVersion = typeof oldManifest?.version === 'string' ? oldManifest.version : null
     manifest.publishedAt = new Date().toISOString()
 
     const currentAliases = []
     for (const format of HERO_FORMATS) {
         for (const variant of manifest.variants[format]) {
-            const aliasKey = heroCurrentKey(variant.width, format)
+            const aliasKey = heroCurrentKey(variant.width, format, job.heroType)
             await s3.send(new CopyObjectCommand({
                 Bucket: bucket,
                 Key: aliasKey,
@@ -278,7 +284,7 @@ async function publishHero(job, manifest, sourceContentType) {
     for (const format of HERO_FORMATS) {
         const candidates = manifest.variants[format]
         const preferred = candidates.find(({ width }) => width >= 1280) || candidates.at(-1)
-        const aliasKey = heroCurrentFallbackKey(format)
+        const aliasKey = heroCurrentFallbackKey(format, job.heroType)
         await s3.send(new CopyObjectCommand({
             Bucket: bucket,
             Key: aliasKey,
@@ -298,7 +304,7 @@ async function publishHero(job, manifest, sourceContentType) {
     do {
         const page = await s3.send(new ListObjectsV2Command({
             Bucket: bucket,
-            Prefix: 'site/hero/current/',
+            Prefix: `${paths.current}/`,
             MaxKeys: 1000,
             ContinuationToken: aliasContinuationToken,
         }))
@@ -316,7 +322,7 @@ async function publishHero(job, manifest, sourceContentType) {
 
     await s3.send(new CopyObjectCommand({
         Bucket: bucket,
-        Key: 'site/hero/original',
+        Key: paths.original,
         CopySource: `${bucket}/${job.sourceKey}`,
         CopySourceIfMatch: `"${job.version}"`,
         ContentType: sourceContentType,
@@ -328,7 +334,7 @@ async function publishHero(job, manifest, sourceContentType) {
     }))
     await s3.send(new CopyObjectCommand({
         Bucket: bucket,
-        Key: 'site/hero/home',
+        Key: paths.home,
         CopySource: `${bucket}/${manifest.fallbackKey}`,
         ContentType: 'image/jpeg',
         CacheControl: 'public, max-age=0, must-revalidate',
@@ -339,7 +345,7 @@ async function publishHero(job, manifest, sourceContentType) {
     }))
     await s3.send(new PutObjectCommand({
         Bucket: bucket,
-        Key: 'site/hero/manifest.json',
+        Key: paths.manifest,
         Body: JSON.stringify(manifest),
         ContentType: 'application/json',
         CacheControl: 'public, max-age=0, must-revalidate',
@@ -347,23 +353,23 @@ async function publishHero(job, manifest, sourceContentType) {
         ServerSideEncryption: 'AES256',
     }))
     const invalidationPaths = [...new Set([
-        '/site/hero/home',
-        '/site/hero/manifest.json',
+        `/${paths.home}`,
+        `/${paths.manifest}`,
         ...currentAliases.map((key) => `/${key}`),
         ...existingAliases.map((key) => `/${key}`),
     ])]
     await cloudfront.send(new CreateInvalidationCommand({
         DistributionId: requiredEnvironment('IMAGES_DISTRIBUTION_ID'),
         InvalidationBatch: {
-            CallerReference: `responsive-hero-v2-${job.version}`,
+            CallerReference: `responsive-${job.heroType}-hero-v2-${job.version}`,
             Paths: {
                 Quantity: invalidationPaths.length,
                 Items: invalidationPaths,
             },
         },
     }))
-    await deleteHeroVersion(oldManifest?.previousVersion)
-    if (job.sourceKey === 'temp-zips/hero-pending') {
+    await deleteHeroVersion(oldManifest?.previousVersion, job.heroType)
+    if (job.sourceKey === paths.pending) {
         try {
             await s3.send(new DeleteObjectCommand({
                 Bucket: bucket,

@@ -23,6 +23,21 @@ sqs = boto3.client("sqs")
 HERO_KEY = "site/hero/home"
 HERO_MANIFEST_KEY = "site/hero/manifest.json"
 PENDING_KEY = "temp-zips/hero-pending"
+VIDEO_HERO_KEY = "site/hero/video/home"
+VIDEO_HERO_MANIFEST_KEY = "site/hero/video/manifest.json"
+VIDEO_PENDING_KEY = "temp-zips/video-hero-pending"
+HERO_CONFIGS = {
+    "photo": {
+        "hero_key": HERO_KEY,
+        "manifest_key": HERO_MANIFEST_KEY,
+        "pending_key": PENDING_KEY,
+    },
+    "video": {
+        "hero_key": VIDEO_HERO_KEY,
+        "manifest_key": VIDEO_HERO_MANIFEST_KEY,
+        "pending_key": VIDEO_PENDING_KEY,
+    },
+}
 PENDING_TAGGING = "visibility=pending"
 MAX_HERO_BYTES = 50 * 1024 * 1024
 MIN_HERO_BYTES = 1024
@@ -35,7 +50,7 @@ TYPE_POLICY = {
 }
 
 
-def _audit(event, context, operation, outcome, reason_code):
+def _audit(event, context, operation, outcome, reason_code, hero_type="photo"):
     actor_type, auth_method = actor_context(event)
     event_name = (
         "admin.hero_upload_authorized"
@@ -57,6 +72,7 @@ def _audit(event, context, operation, outcome, reason_code):
         context=context,
         actor_type=actor_type,
         auth_method=auth_method,
+        details={"heroType": hero_type},
     )
 
 
@@ -89,6 +105,13 @@ def _validate_upload_intent(body):
     return content_type, size
 
 
+def _hero_type(body):
+    value = str(body.get("heroType") or "photo").strip().lower()
+    if value not in HERO_CONFIGS:
+        raise ValidationError("heroType must be photo or video")
+    return value
+
+
 def _normalize_etag(value):
     etag = require_string(value, "etag", maximum=128).strip().strip('"')
     if not ETAG_PATTERN.fullmatch(etag):
@@ -117,11 +140,16 @@ def _tag_value(response, name):
     return None
 
 
-def _queue_derivatives(expected_version):
+def _queue_derivatives(expected_version, hero_type, source_key):
     sqs.send_message(
         QueueUrl=os.environ["HERO_DERIVATIVE_QUEUE_URL"],
         MessageBody=json.dumps(
-            {"kind": "hero", "sourceKey": PENDING_KEY, "version": expected_version},
+            {
+                "kind": "hero",
+                "heroType": hero_type,
+                "sourceKey": source_key,
+                "version": expected_version,
+            },
             separators=(",", ":"),
         ),
     )
@@ -129,6 +157,8 @@ def _queue_derivatives(expected_version):
 
 def _authorize_upload(event, context, body):
     content_type, size = _validate_upload_intent(body)
+    hero_type = _hero_type(body)
+    pending_key = HERO_CONFIGS[hero_type]["pending_key"]
     try:
         configured_ttl = int(os.environ.get("UPLOAD_URL_TTL_SECONDS", "300"))
     except (TypeError, ValueError):
@@ -138,14 +168,14 @@ def _authorize_upload(event, context, body):
         "put_object",
         Params={
             "Bucket": os.environ["IMAGES_BUCKET"],
-            "Key": PENDING_KEY,
+            "Key": pending_key,
             "ContentType": content_type,
             "ContentLength": size,
             "Tagging": PENDING_TAGGING,
         },
         ExpiresIn=expires_in,
     )
-    _audit(event, context, "upload-url", "success", "upload_authorized")
+    _audit(event, context, "upload-url", "success", "upload_authorized", hero_type)
     return json_response(
         200,
         {
@@ -161,15 +191,18 @@ def _authorize_upload(event, context, body):
 
 
 def _activate_upload(event, context, body):
+    hero_type = _hero_type(body)
+    config = HERO_CONFIGS[hero_type]
+    pending_key = config["pending_key"]
     expected_etag = _normalize_etag(body.get("etag"))
     bucket = os.environ["IMAGES_BUCKET"]
     try:
-        head = s3.head_object(Bucket=bucket, Key=PENDING_KEY)
+        head = s3.head_object(Bucket=bucket, Key=pending_key)
         actual_etag = str(head.get("ETag") or "").strip('"').lower()
         content_type = str(head.get("ContentType") or "").lower()
         size = int(head.get("ContentLength") or 0)
-        tags = s3.get_object_tagging(Bucket=bucket, Key=PENDING_KEY)
-        prefix_response = s3.get_object(Bucket=bucket, Key=PENDING_KEY, Range="bytes=0-31")
+        tags = s3.get_object_tagging(Bucket=bucket, Key=pending_key)
+        prefix_response = s3.get_object(Bucket=bucket, Key=pending_key, Range="bytes=0-31")
         stream = prefix_response["Body"]
         try:
             prefix = stream.read(32)
@@ -178,29 +211,30 @@ def _activate_upload(event, context, body):
     except ClientError as error:
         code = str(error.response.get("Error", {}).get("Code", ""))
         if code in {"404", "NoSuchKey", "NotFound"}:
-            _audit(event, context, "complete", "denied", "pending_upload_missing")
+            _audit(event, context, "complete", "denied", "pending_upload_missing", hero_type)
             return error_response(409, "The uploaded hero image could not be found", code="upload_missing")
         raise
 
     if actual_etag != expected_etag:
-        _audit(event, context, "complete", "denied", "upload_receipt_mismatch")
+        _audit(event, context, "complete", "denied", "upload_receipt_mismatch", hero_type)
         return error_response(409, "The upload receipt does not match the pending image", code="upload_mismatch")
     if content_type not in TYPE_POLICY or not MIN_HERO_BYTES <= size <= MAX_HERO_BYTES:
-        _audit(event, context, "complete", "denied", "uploaded_object_invalid")
+        _audit(event, context, "complete", "denied", "uploaded_object_invalid", hero_type)
         return error_response(400, "The uploaded hero image is invalid", code="invalid_upload")
     if _tag_value(tags, "visibility") != "pending" or not _matches_content_type(content_type, prefix):
-        _audit(event, context, "complete", "denied", "uploaded_object_invalid")
+        _audit(event, context, "complete", "denied", "uploaded_object_invalid", hero_type)
         return error_response(400, "The uploaded hero image is invalid", code="invalid_upload")
 
-    _queue_derivatives(expected_etag)
+    _queue_derivatives(expected_etag, hero_type, pending_key)
     domain = os.environ["CLOUDFRONT_DOMAIN"].strip().removeprefix("https://").rstrip("/")
-    _audit(event, context, "complete", "success", "hero_processing_queued")
+    _audit(event, context, "complete", "success", "hero_processing_queued", hero_type)
     return json_response(
         202,
         {
             "status": "processing",
-            "heroUrl": f"https://{domain}/{HERO_KEY}",
-            "heroManifestUrl": f"https://{domain}/{HERO_MANIFEST_KEY}",
+            "heroType": hero_type,
+            "heroUrl": f"https://{domain}/{config['hero_key']}",
+            "heroManifestUrl": f"https://{domain}/{config['manifest_key']}",
         },
     )
 
@@ -221,9 +255,25 @@ def handler(event, context):
         return _activate_upload(event, context, body)
     except ValidationError as error:
         if operation in {"upload-url", "complete"}:
-            _audit(event, context, operation, "denied", "invalid_request")
+            requested_type = str((locals().get("body") or {}).get("heroType") or "photo").strip().lower()
+            _audit(
+                event,
+                context,
+                operation,
+                "denied",
+                "invalid_request",
+                requested_type if requested_type in HERO_CONFIGS else "photo",
+            )
         return error_response(400, str(error), code="invalid_request")
     except Exception as error:
         if operation in {"upload-url", "complete"}:
-            _audit(event, context, operation, "failure", "unexpected_error")
+            requested_type = str((locals().get("body") or {}).get("heroType") or "photo").strip().lower()
+            _audit(
+                event,
+                context,
+                operation,
+                "failure",
+                "unexpected_error",
+                requested_type if requested_type in HERO_CONFIGS else "photo",
+            )
         return internal_error(context, error, "hero_cover")

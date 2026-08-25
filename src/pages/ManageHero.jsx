@@ -2,11 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useAuth } from '../context/auth'
 import { completeHeroUpload, requestHeroUploadUrl, uploadFileToS3 } from '../utils/api'
-import { heroCoverUrl } from '../utils/mediaUrls'
+import { cdnUrl, heroCoverUrl } from '../utils/mediaUrls'
+import { completeVideoHeroUpload, requestVideoHeroUploadUrl } from '../utils/videoHeroApi'
 
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
 const MAX_BYTES = 50 * 1024 * 1024
 const MIN_BYTES = 1024
+const HERO_TABS = [
+    { id: 'photo', label: 'Photo Gallery', description: 'photography homepage', fallback: '/images/heroes/photo-1280.jpg' },
+    { id: 'video', label: 'Video Page', description: 'video page', fallback: '/images/heroes/video-1280.jpg' },
+]
 
 function formatMegabytes(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
@@ -23,6 +28,7 @@ function validateFile(file) {
 
 export default function ManageHero() {
     const { getIdToken } = useAuth()
+    const [heroType, setHeroType] = useState('photo')
     const [file, setFile] = useState(null)
     const [dimensions, setDimensions] = useState(null)
     const [uploading, setUploading] = useState(false)
@@ -32,7 +38,8 @@ export default function ManageHero() {
     const [currentFailed, setCurrentFailed] = useState(false)
     const fileInputRef = useRef(null)
     const requestRef = useRef(null)
-    const currentHero = heroCoverUrl()
+    const activeTab = HERO_TABS.find(({ id }) => id === heroType) || HERO_TABS[0]
+    const currentHero = heroType === 'video' ? cdnUrl('site/hero/video/home') : heroCoverUrl()
     const previewUrl = useMemo(() => file ? URL.createObjectURL(file) : '', [file])
 
     useEffect(() => () => {
@@ -40,6 +47,18 @@ export default function ManageHero() {
     }, [previewUrl])
 
     useEffect(() => () => requestRef.current?.abort(), [])
+
+    function selectHeroType(nextType) {
+        if (uploading || nextType === heroType) return
+        setHeroType(nextType)
+        setFile(null)
+        setDimensions(null)
+        setStatus('')
+        setError('')
+        setSuccess(false)
+        setCurrentFailed(false)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+    }
 
     function handleFileChange(event) {
         const selected = event.target.files?.[0] || null
@@ -72,7 +91,9 @@ export default function ManageHero() {
         try {
             setStatus('Preparing secure upload…')
             const token = await getIdToken()
-            const authorization = await requestHeroUploadUrl(token, file, { signal: controller.signal })
+            const authorization = heroType === 'video'
+                ? await requestVideoHeroUploadUrl(token, file, { signal: controller.signal })
+                : await requestHeroUploadUrl(token, file, { signal: controller.signal })
 
             setStatus('Uploading original image without compression…')
             const uploadResponse = await uploadFileToS3(
@@ -85,7 +106,11 @@ export default function ManageHero() {
             if (!etag) throw new Error('The upload finished without a receipt. Please try again.')
 
             setStatus('Creating responsive high-quality versions…')
-            await completeHeroUpload(token, etag, { signal: controller.signal })
+            if (heroType === 'video') {
+                await completeVideoHeroUpload(token, etag, { signal: controller.signal })
+            } else {
+                await completeHeroUpload(token, etag, { signal: controller.signal })
+            }
             setSuccess(true)
             setStatus('')
             setFile(null)
@@ -103,7 +128,7 @@ export default function ManageHero() {
         }
     }
 
-    const displayedImage = previewUrl || (!currentFailed ? currentHero : '') || '/images/heroes/photo-1280.jpg'
+    const displayedImage = previewUrl || (!currentFailed ? currentHero : '') || activeTab.fallback
 
     return (
         <div className="max-w-4xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
@@ -117,12 +142,33 @@ export default function ManageHero() {
 
                 <div className="mb-10">
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">Change Hero Cover</h1>
-                    <p className="mt-2 text-warm-gray">Replace the large cover image on the photography homepage.</p>
+                    <p className="mt-2 text-warm-gray">Replace the large cover image on either public gallery page.</p>
+                </div>
+
+                <div className="mb-8 grid grid-cols-2 border border-warm-border" role="tablist" aria-label="Hero page">
+                    {HERO_TABS.map((tab) => (
+                        <button
+                            key={tab.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={heroType === tab.id}
+                            aria-controls="hero-cover-panel"
+                            disabled={uploading}
+                            onClick={() => selectHeroType(tab.id)}
+                            className={`px-5 py-4 text-sm font-medium tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                                heroType === tab.id
+                                    ? 'bg-charcoal text-cream'
+                                    : 'bg-transparent text-charcoal hover:bg-cream-dark'
+                            } ${tab.id === 'video' ? 'border-l border-warm-border' : ''}`}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
                 </div>
 
                 {success && (
                     <div className="mb-8 p-5 rounded-2xl bg-green-50 border border-green-200 text-green-800" role="status">
-                        <p className="font-medium">Hero cover processing started successfully.</p>
+                        <p className="font-medium">{activeTab.label} hero processing started successfully.</p>
                         <p className="mt-1 text-sm">The original is preserved exactly while optimized display sizes are created. The new cover will appear automatically in about a minute.</p>
                     </div>
                 )}
@@ -132,12 +178,12 @@ export default function ManageHero() {
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 md:p-8 shadow-warm-lg border border-warm-border">
+                <form id="hero-cover-panel" role="tabpanel" onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 md:p-8 shadow-warm-lg border border-warm-border">
                     <div className="aspect-[3/2] overflow-hidden rounded-2xl bg-charcoal mb-7">
                         <img
                             key={displayedImage}
                             src={displayedImage}
-                            alt={previewUrl ? 'Selected hero cover preview' : 'Current homepage hero cover'}
+                            alt={previewUrl ? 'Selected hero cover preview' : `Current ${activeTab.description} hero cover`}
                             className="h-full w-full object-cover object-[center_30%]"
                             onLoad={(event) => {
                                 if (previewUrl) {
@@ -169,6 +215,7 @@ export default function ManageHero() {
                             JPEG, PNG, WebP, or AVIF; up to 50 MB. For a crisp result, use a landscape image at least 2560 pixels wide.
                             The exact selected file is retained as the unmodified master with no Google Drive backup. Responsive high-quality display versions are generated automatically for fast loading.
                         </p>
+                        <p className="mt-2 text-sm font-medium text-charcoal">Updating: {activeTab.label}</p>
                         {file && (
                             <p className="mt-2 text-sm font-medium text-charcoal">
                                 {file.name} · {formatMegabytes(file.size)}

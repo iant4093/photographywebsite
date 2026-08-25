@@ -31,6 +31,7 @@ const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer
 // retaining cursor pagination once the catalog grows beyond the API's cap.
 const PAGE_SIZE = 100
 const HERO_WIDTHS = [640, 960, 1280, 1920]
+const HERO_SIZES = '100vw'
 const heroSet = (format) => HERO_WIDTHS
     .map((width) => `/images/heroes/photo-${width}.${format} ${width}w`)
     .join(', ')
@@ -158,14 +159,10 @@ function Home() {
     const heroSrcSet = useResponsiveHero
         ? currentHeroSrcSet('jpeg')
         : (useBundledHero ? heroSet('jpg') : undefined)
-    const heroWidth = useResponsiveHero ? 1280 : (useBundledHero ? 6000 : 2560)
-    const heroHeight = useResponsiveHero ? 853 : (useBundledHero ? 4000 : 1707)
     const getInstantRandomPhoto = useCallback(() => {
         const url = heroRef.current?.currentSrc || heroSrc
         return url ? {
-            id: url,
             url,
-            thumbnailUrl: url,
             downloadUrl: url,
         } : null
     }, [heroSrc])
@@ -193,25 +190,24 @@ function Home() {
                     <picture>
                         {useResponsiveHero ? (
                             <>
-                                <source type="image/avif" srcSet={currentHeroSrcSet('avif')} sizes="100vw" />
-                                <source type="image/webp" srcSet={currentHeroSrcSet('webp')} sizes="100vw" />
+                                <source type="image/avif" srcSet={currentHeroSrcSet('avif')} sizes={HERO_SIZES} />
+                                <source type="image/webp" srcSet={currentHeroSrcSet('webp')} sizes={HERO_SIZES} />
                             </>
                         ) : useBundledHero ? (
                             <>
-                            <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
-                            <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
+                            <source type="image/avif" srcSet={heroSet('avif')} sizes={HERO_SIZES} />
+                            <source type="image/webp" srcSet={heroSet('webp')} sizes={HERO_SIZES} />
                             </>
                         ) : null}
                         <img
                             ref={heroRef}
                             src={heroSrc}
                             srcSet={heroSrcSet}
-                            sizes="100vw"
-                            width={heroWidth}
-                            height={heroHeight}
+                            sizes={HERO_SIZES}
+                            width="1280"
+                            height="853"
                             alt="Ian Truong Photography portfolio cover"
                             fetchPriority="high"
-                            loading="eager"
                             decoding="async"
                             onError={() => {
                                 if (useResponsiveHero) setResponsiveHeroFailed(true)

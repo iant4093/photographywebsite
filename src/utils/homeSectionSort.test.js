@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { sortHomePhotoSections } from './homeSectionSort'
+import {
+    HOME_SECTION_SORT_OPTIONS,
+    sortHomePhotoSections,
+} from './homeSectionSort'
+import { VIDEO_SECTION_SORT_OPTIONS, sortVideoSections } from './videoSectionSort'
 
 const curated = ['Birding', 'Hikes', 'Portraits']
 const grouped = {
@@ -42,6 +46,13 @@ describe('home photo section sorting', () => {
             .toEqual(['Portraits', 'Birding', 'Hikes'])
         expect(sortHomePhotoSections(curated, grouped, 6))
             .toEqual(['Hikes', 'Birding', 'Portraits'])
+    })
+
+    it('shares section sorting with video while keeping media-specific labels', () => {
+        expect(sortVideoSections(curated, grouped, 1)).toEqual(['Hikes', 'Portraits', 'Birding'])
+        expect(HOME_SECTION_SORT_OPTIONS[5]).toBe('Most photo albums')
+        expect(VIDEO_SECTION_SORT_OPTIONS[5]).toBe('Most video albums')
+        expect(VIDEO_SECTION_SORT_OPTIONS[6]).toBe('Fewest video albums')
     })
 
     it('keeps sections without usable upload dates after dated sections', () => {

@@ -2152,9 +2152,13 @@ Resources:
                 - s3:DeleteObject
               Resource:
                 - !Sub '${ImagesBucket.Arn}/temp-zips/hero-pending'
+                - !Sub '${ImagesBucket.Arn}/temp-zips/video-hero-pending'
                 - !Sub '${ImagesBucket.Arn}/site/hero/home'
                 - !Sub '${ImagesBucket.Arn}/site/hero/original'
                 - !Sub '${ImagesBucket.Arn}/site/hero/manifest.json'
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/home'
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/original'
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/manifest.json'
             - Effect: Allow
               Action:
                 - s3:PutObject
@@ -2173,6 +2177,11 @@ Resources:
                 - !Sub '${ImagesBucket.Arn}/site/hero/manifest.json'
                 - !Sub '${ImagesBucket.Arn}/site/hero/versions/v1/*'
                 - !Sub '${ImagesBucket.Arn}/site/hero/current/*'
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/home'
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/original'
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/manifest.json'
+                - !Sub '${ImagesBucket.Arn}/site/hero/versions/video/v1/*'
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/current/*'
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
@@ -2182,6 +2191,9 @@ Resources:
                     - site/hero/manifest.json
                     - site/hero/versions/v1/*
                     - site/hero/current/*
+                    - site/hero/video/manifest.json
+                    - site/hero/versions/video/v1/*
+                    - site/hero/video/current/*
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
@@ -2550,10 +2562,13 @@ Resources:
         - Statement:
             - Effect: Allow
               Action:
+                - s3:PutObject
+                - s3:PutObjectTagging
                 - s3:GetObject
                 - s3:GetObjectTagging
               Resource:
                 - !Sub '${ImagesBucket.Arn}/temp-zips/hero-pending'
+                - !Sub '${ImagesBucket.Arn}/temp-zips/video-hero-pending'
             - Effect: Allow
               Action: sqs:SendMessage
               Resource: !GetAtt PreviewQueue.Arn

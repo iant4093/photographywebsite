@@ -28,7 +28,8 @@ vi.mock('../utils/catalogState', () => ({
   },
 }))
 vi.mock('../utils/scroll', () => scroll)
-vi.mock('../components/AlbumCard', () => ({ default: ({ album }) => <a href={`/${album.type === 'video' ? 'video' : 'album'}/${album.albumId}`}>{album.title}</a> }))
+vi.mock('../components/AlbumCard', () => ({ default: ({ album, videoPreview }) => <a data-video-preview={videoPreview || undefined} href={`/${album.type === 'video' ? 'video' : 'album'}/${album.albumId}`}>{album.title}</a> }))
+vi.mock('../components/VideoAlbumCard', () => ({ default: ({ album }) => <a data-video-preview="true" href={`/video/${album.albumId}`}>{album.title}</a> }))
 vi.mock('../components/ScrollRow', () => ({ default: ({ children, scrollKey }) => <div data-testid={scrollKey}>{children}</div> }))
 
 import Home from './Home'
@@ -352,6 +353,32 @@ describe('Videos paginated catalog', () => {
       .toEqual(['Sports', 'Films'])
     expect(screen.getByTestId('videos-Films').textContent)
       .toBe('Film FirstFilm Second')
+    expect(screen.getByText('Film First')).toHaveAttribute('data-video-preview', 'true')
+  })
+
+  it('sorts whole video sections locally and resets to curated order on remount', () => {
+    const items = [
+      { albumId: 'film-old', title: 'Film Old', type: 'video', category: 'Films', galleryOrder: 0, galleryCategoryOrder: 0, uploadedAt: '2026-08-01T12:00:00Z' },
+      { albumId: 'film-new', title: 'Film New', type: 'video', category: 'Films', galleryOrder: 1, galleryCategoryOrder: 0, uploadedAt: '2026-08-02T12:00:00Z' },
+      { albumId: 'sports-new', title: 'Sports New', type: 'video', category: 'Sports', galleryCategoryOrder: 1, uploadedAt: '2026-08-22T12:00:00Z' },
+    ]
+    catalog.getCatalogSnapshot.mockReturnValue({ items, nextCursor: null })
+    const view = routed(<Videos />)
+    const sectionSort = screen.getByLabelText('Sort video sections')
+
+    expect(sectionSort).toHaveValue('0')
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(['Films', 'Sports'])
+    expect(screen.getByTestId('videos-Films')).toHaveTextContent('Film OldFilm New')
+
+    fireEvent.change(sectionSort, { target: { value: '1' } })
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(['Sports', 'Films'])
+    expect(screen.getByTestId('videos-Films')).toHaveTextContent('Film OldFilm New')
+
+    view.unmount()
+    routed(<Videos />)
+    expect(screen.getByLabelText('Sort video sections')).toHaveValue('0')
   })
 
   it('renders initial and load-more failures and blocks duplicate load clicks', async () => {
@@ -426,5 +453,25 @@ describe('Videos paginated catalog', () => {
     fireEvent.scroll(window)
     unmount()
     expect(window.cancelAnimationFrame).toHaveBeenCalledWith(4)
+  })
+
+  it('falls back through the managed video hero before the bundled video image', () => {
+    catalog.getCatalogSnapshot.mockReturnValue({ items: [], nextCursor: null })
+    const { container } = routed(<Videos />)
+    const responsive = screen.getByRole('img', { name: 'Cinematography' })
+    expect(responsive).toHaveAttribute('src', expect.stringContaining('/site/hero/video/current/hero.jpg'))
+    expect(responsive).toHaveAttribute('srcset', expect.stringContaining('/site/hero/video/current/hero-960.jpg 960w'))
+    expect(container.querySelector('source[type="image/avif"]')).toHaveAttribute(
+      'srcset',
+      expect.stringContaining('/site/hero/video/current/hero-960.avif 960w'),
+    )
+    fireEvent.error(responsive)
+    const managed = screen.getByRole('img', { name: 'Cinematography' })
+    expect(managed).toHaveAttribute('src', expect.stringContaining('/site/hero/video/home'))
+    expect(container.querySelector('source[type="image/avif"]')).toBeNull()
+    fireEvent.error(managed)
+    const fallback = screen.getByRole('img', { name: 'Cinematography' })
+    expect(fallback).toHaveAttribute('src', '/images/heroes/video-1280.jpg')
+    expect(fallback).toHaveAttribute('srcset', expect.stringContaining('/images/heroes/video-960.jpg 960w'))
   })
 })

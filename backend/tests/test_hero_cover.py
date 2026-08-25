@@ -90,6 +90,24 @@ class HeroUploadValidationTests(unittest.TestCase):
         self.assertNotIn("camera-original", json.dumps(params))
         self.assertEqual(audit.call_args.kwargs["event_name"], "admin.hero_upload_authorized")
         self.assertEqual(audit.call_args.kwargs["outcome"], "success")
+        self.assertEqual(audit.call_args.kwargs["details"], {"heroType": "photo"})
+
+    def test_video_upload_authorization_uses_the_isolated_video_pending_key(self):
+        request = event("upload-url", {
+            "heroType": "video",
+            "filename": "video-cover.jpg",
+            "contentType": "image/jpeg",
+            "size": 4096,
+        })
+        with patch.object(hero_cover, "verify_front_door_request", return_value=None), patch.object(
+            hero_cover, "require_admin", return_value=None
+        ), patch.object(
+            hero_cover.s3, "generate_presigned_url", return_value="https://upload.example"
+        ) as generate:
+            response = hero_cover.handler(request, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(generate.call_args.kwargs["Params"]["Key"], hero_cover.VIDEO_PENDING_KEY)
 
     def test_front_door_and_admin_denials_happen_before_s3(self):
         denied = {"statusCode": 403, "body": "denied"}
@@ -154,6 +172,7 @@ class HeroActivationTests(unittest.TestCase):
         self.assertEqual(queued["QueueUrl"], "https://sqs.test/hero")
         self.assertEqual(json.loads(queued["MessageBody"]), {
             "kind": "hero",
+            "heroType": "photo",
             "sourceKey": hero_cover.PENDING_KEY,
             "version": VALID_ETAG,
         })
@@ -162,6 +181,35 @@ class HeroActivationTests(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs["event_name"], "admin.hero_cover_updated")
         self.assertEqual(audit.call_args.kwargs["outcome"], "success")
         self.assertEqual(audit.call_args.kwargs["reason_code"], "hero_processing_queued")
+
+    def test_video_completion_queues_and_returns_only_video_hero_paths(self):
+        self.request = event("complete", {"heroType": "video", "etag": VALID_ETAG})
+        self._arrange_valid_pending()
+        with patch.object(hero_cover, "verify_front_door_request", return_value=None), patch.object(
+            hero_cover, "require_admin", return_value=None
+        ), patch.dict(
+            "os.environ",
+            {
+                "IMAGES_BUCKET": "images-test",
+                "CLOUDFRONT_DOMAIN": "media.example.test",
+                "HERO_DERIVATIVE_QUEUE_URL": "https://sqs.test/hero",
+            },
+            clear=False,
+        ):
+            response = hero_cover.handler(self.request, None)
+
+        body = response_body(response)
+        self.assertEqual(response["statusCode"], 202)
+        self.assertEqual(body["heroType"], "video")
+        self.assertEqual(body["heroUrl"], "https://media.example.test/site/hero/video/home")
+        self.assertEqual(body["heroManifestUrl"], "https://media.example.test/site/hero/video/manifest.json")
+        hero_cover.s3.head_object.assert_called_with(Bucket="images-test", Key=hero_cover.VIDEO_PENDING_KEY)
+        self.assertEqual(json.loads(hero_cover.sqs.send_message.call_args.kwargs["MessageBody"]), {
+            "kind": "hero",
+            "heroType": "video",
+            "sourceKey": hero_cover.VIDEO_PENDING_KEY,
+            "version": VALID_ETAG,
+        })
 
     def test_bad_receipt_or_content_never_replaces_the_live_hero(self):
         self._arrange_valid_pending()

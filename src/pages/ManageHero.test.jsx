@@ -7,10 +7,15 @@ const api = vi.hoisted(() => ({
   uploadFileToS3: vi.fn(),
   completeHeroUpload: vi.fn(),
 }))
+const videoApi = vi.hoisted(() => ({
+  requestVideoHeroUploadUrl: vi.fn(),
+  completeVideoHeroUpload: vi.fn(),
+}))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 
 vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
+vi.mock('../utils/videoHeroApi', () => videoApi)
 
 import ManageHero from './ManageHero'
 
@@ -41,6 +46,14 @@ describe('admin hero cover upload', () => {
     })
     api.uploadFileToS3.mockResolvedValue(new Response('', { headers: { ETag: `"${ETAG}"` } }))
     api.completeHeroUpload.mockResolvedValue({ heroUrl: 'https://media.example/site/hero/home' })
+    videoApi.requestVideoHeroUploadUrl.mockResolvedValue({
+      uploadUrl: 'https://upload.example',
+      requiredHeaders: {
+        'Content-Type': 'image/jpeg',
+        'x-amz-tagging': 'visibility=pending',
+      },
+    })
+    videoApi.completeVideoHeroUpload.mockResolvedValue({ heroUrl: 'https://media.example/site/hero/video/home' })
   })
 
   it('uploads the exact original file and activates it without album or backup fields', async () => {
@@ -59,7 +72,7 @@ describe('admin hero cover upload', () => {
     expect(screen.getByText(/under the recommended 2560-pixel width/)).toBeInTheDocument()
 
     fireEvent.submit(container.querySelector('form'))
-    expect(await screen.findByText('Hero cover processing started successfully.')).toBeInTheDocument()
+    expect(await screen.findByText('Photo Gallery hero processing started successfully.')).toBeInTheDocument()
     expect(api.requestHeroUploadUrl).toHaveBeenCalledWith('admin-token', file, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(api.uploadFileToS3).toHaveBeenCalledWith(
       'https://upload.example',
@@ -67,7 +80,7 @@ describe('admin hero cover upload', () => {
       expect.objectContaining({ 'x-amz-tagging': 'visibility=pending' }),
       expect.objectContaining({ retries: 1, signal: expect.any(AbortSignal) }),
     )
-    expect(api.completeHeroUpload).toHaveBeenCalledWith('admin-token', `"${ETAG}"`, expect.anything())
+    expect(api.completeHeroUpload).toHaveBeenCalledWith('admin-token', `"${ETAG}"`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     const authorizationBody = api.requestHeroUploadUrl.mock.calls[0]
     expect(JSON.stringify(authorizationBody)).not.toContain('album')
     expect(JSON.stringify(authorizationBody)).not.toContain('Google')
@@ -98,9 +111,33 @@ describe('admin hero cover upload', () => {
 
   it('falls back to the bundled current cover when the managed object is absent', () => {
     mounted()
-    const current = screen.getByRole('img', { name: 'Current homepage hero cover' })
+    const current = screen.getByRole('img', { name: 'Current photography homepage hero cover' })
     fireEvent.error(current)
-    expect(screen.getByRole('img', { name: 'Current homepage hero cover' }))
+    expect(screen.getByRole('img', { name: 'Current photography homepage hero cover' }))
       .toHaveAttribute('src', '/images/heroes/photo-1280.jpg')
+  })
+
+  it('switches to an isolated video-page hero and uploads within that tab', async () => {
+    const { container } = mounted()
+    fireEvent.click(screen.getByRole('tab', { name: 'Video Page' }))
+    expect(screen.getByRole('tab', { name: 'Video Page' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Updating: Video Page')).toBeInTheDocument()
+    const current = screen.getByRole('img', { name: 'Current video page hero cover' })
+    expect(current).toHaveAttribute('src', expect.stringContaining('/site/hero/video/home'))
+
+    const file = heroFile('video-hero.jpg')
+    fireEvent.change(screen.getByLabelText('New hero image'), { target: { files: [file] } })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText('Video Page hero processing started successfully.')).toBeInTheDocument()
+    expect(videoApi.requestVideoHeroUploadUrl).toHaveBeenCalledWith(
+      'admin-token',
+      file,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(videoApi.completeVideoHeroUpload).toHaveBeenCalledWith(
+      'admin-token',
+      `"${ETAG}"`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
   })
 })

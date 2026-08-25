@@ -1,5 +1,24 @@
 const VERSION_PATTERN = /^[a-f0-9]{32}$/
-const SOURCE_KEY_PATTERN = /^(?:temp-zips\/hero-pending|site\/hero\/(?:home|original))$/
+
+export const HERO_TYPES = Object.freeze(['photo', 'video'])
+const HERO_PATHS = Object.freeze({
+    photo: Object.freeze({
+        pending: 'temp-zips/hero-pending',
+        home: 'site/hero/home',
+        original: 'site/hero/original',
+        manifest: 'site/hero/manifest.json',
+        versions: 'site/hero/versions/v1',
+        current: 'site/hero/current',
+    }),
+    video: Object.freeze({
+        pending: 'temp-zips/video-hero-pending',
+        home: 'site/hero/video/home',
+        original: 'site/hero/video/original',
+        manifest: 'site/hero/video/manifest.json',
+        versions: 'site/hero/versions/video/v1',
+        current: 'site/hero/video/current',
+    }),
+})
 
 export const HERO_DERIVATIVE_VERSION = 1
 export const HERO_WIDTHS = Object.freeze([640, 960, 1280, 1920, 2560])
@@ -11,15 +30,22 @@ export const HERO_CONTENT_TYPES = Object.freeze({
     jpeg: 'image/jpeg',
 })
 
+export function heroPaths(heroType = 'photo') {
+    if (!HERO_TYPES.includes(heroType)) throw new Error('Invalid hero type')
+    return HERO_PATHS[heroType]
+}
+
 export function parseHeroJob(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || value.kind !== 'hero') {
         throw new Error('Invalid hero derivative job')
     }
+    const heroType = String(value.heroType || 'photo').trim().toLowerCase()
+    const paths = heroPaths(heroType)
     const version = String(value.version || '').trim().toLowerCase()
     const sourceKey = String(value.sourceKey || '').trim()
     if (!VERSION_PATTERN.test(version)) throw new Error('Invalid hero derivative version')
-    if (!SOURCE_KEY_PATTERN.test(sourceKey)) throw new Error('Invalid hero source key')
-    return { kind: 'hero', version, sourceKey }
+    if (![paths.pending, paths.home, paths.original].includes(sourceKey)) throw new Error('Invalid hero source key')
+    return { kind: 'hero', heroType, version, sourceKey }
 }
 
 export function heroWidthsFor(sourceWidth) {
@@ -33,29 +59,30 @@ export function heroWidthsFor(sourceWidth) {
     ])]
 }
 
-export function heroDerivativeKey(version, width, format) {
-    const parsed = parseHeroJob({ kind: 'hero', sourceKey: 'temp-zips/hero-pending', version })
+export function heroDerivativeKey(version, width, format, heroType = 'photo') {
+    const paths = heroPaths(heroType)
+    const parsed = parseHeroJob({ kind: 'hero', heroType, sourceKey: paths.pending, version })
     if (!Number.isSafeInteger(width) || width < 1 || width > HERO_WIDTHS.at(-1)) {
         throw new Error('Invalid hero derivative width')
     }
     if (!HERO_FORMATS.includes(format)) throw new Error('Invalid hero derivative format')
     const extension = format === 'jpeg' ? 'jpg' : format
-    return `site/hero/versions/v${HERO_DERIVATIVE_VERSION}/${parsed.version}/hero-${width}.${extension}`
+    return `${paths.versions}/${parsed.version}/hero-${width}.${extension}`
 }
 
-export function heroCurrentKey(width, format) {
+export function heroCurrentKey(width, format, heroType = 'photo') {
     if (!Number.isSafeInteger(width) || width < 1 || width > HERO_WIDTHS.at(-1)) {
         throw new Error('Invalid current hero width')
     }
     if (!HERO_FORMATS.includes(format)) throw new Error('Invalid current hero format')
     const extension = format === 'jpeg' ? 'jpg' : format
-    return `${HERO_CURRENT_PREFIX}/hero-${width}.${extension}`
+    return `${heroPaths(heroType).current}/hero-${width}.${extension}`
 }
 
-export function heroCurrentFallbackKey(format = 'jpeg') {
+export function heroCurrentFallbackKey(format = 'jpeg', heroType = 'photo') {
     if (!HERO_FORMATS.includes(format)) throw new Error('Invalid current hero format')
     const extension = format === 'jpeg' ? 'jpg' : format
-    return `${HERO_CURRENT_PREFIX}/hero.${extension}`
+    return `${heroPaths(heroType).current}/hero.${extension}`
 }
 
 export function heroOutputFormatMatches(requestedFormat, detectedFormat) {
@@ -63,8 +90,9 @@ export function heroOutputFormatMatches(requestedFormat, detectedFormat) {
     return detectedFormat === (requestedFormat === 'avif' ? 'heif' : requestedFormat)
 }
 
-export function buildHeroManifest({ version, sourceWidth, sourceHeight, outputs }) {
-    parseHeroJob({ kind: 'hero', sourceKey: 'temp-zips/hero-pending', version })
+export function buildHeroManifest({ version, sourceWidth, sourceHeight, outputs, heroType = 'photo' }) {
+    const paths = heroPaths(heroType)
+    parseHeroJob({ kind: 'hero', heroType, sourceKey: paths.pending, version })
     if (!Number.isSafeInteger(sourceWidth) || sourceWidth < 1 || !Number.isSafeInteger(sourceHeight) || sourceHeight < 1) {
         throw new Error('Invalid hero source dimensions')
     }
@@ -74,7 +102,7 @@ export function buildHeroManifest({ version, sourceWidth, sourceHeight, outputs 
         if (!Number.isSafeInteger(output.width) || output.width < 1 || !Number.isSafeInteger(output.height) || output.height < 1) {
             throw new Error('Invalid hero output dimensions')
         }
-        const expectedKey = heroDerivativeKey(version, output.width, output.format)
+        const expectedKey = heroDerivativeKey(version, output.width, output.format, heroType)
         if (output.key !== expectedKey) throw new Error('Invalid hero output key')
         variants[output.format].push({
             width: output.width,

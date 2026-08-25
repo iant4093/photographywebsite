@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigationType } from 'react-router'
-import AlbumCard from '../components/AlbumCard'
+import VideoAlbumCard from '../components/VideoAlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbumsPage } from '../utils/api'
 import { mergeUniqueById } from '../utils/apiResponse'
 import { getCatalogSnapshot, reconcilePublicCatalogItems, setCatalogSnapshot } from '../utils/catalogState'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
+import { sortVideoSections, VIDEO_SECTION_SORT_OPTIONS } from '../utils/videoSectionSort'
+import { cdnUrl, HERO_CURRENT_WIDTHS } from '../utils/mediaUrls'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 
 const CATALOG_KEY = 'public-videos'
@@ -17,6 +19,17 @@ const HERO_WIDTHS = [640, 960, 1280, 1920]
 const heroSet = (format) => HERO_WIDTHS
     .map((width) => `/images/heroes/video-${width}.${format} ${width}w`)
     .join(', ')
+const VIDEO_HERO_PREFIX = 'site/hero/video/current'
+const currentVideoHeroUrl = (format = 'jpeg') => {
+    const extension = format === 'jpeg' ? 'jpg' : format
+    return ['avif', 'webp', 'jpg'].includes(extension) ? cdnUrl(`${VIDEO_HERO_PREFIX}/hero.${extension}`) : ''
+}
+const currentVideoHeroSrcSet = (format = 'jpeg') => {
+    const extension = format === 'jpeg' ? 'jpg' : format
+    return ['avif', 'webp', 'jpg'].includes(extension)
+        ? HERO_CURRENT_WIDTHS.map((width) => `${cdnUrl(`${VIDEO_HERO_PREFIX}/hero-${width}.${extension}`)} ${width}w`).join(', ')
+        : ''
+}
 
 export default function Videos() {
     const navigationType = useNavigationType()
@@ -31,6 +44,9 @@ export default function Videos() {
     const [loading, setLoading] = useState(!initialSnapshot)
     const [loadingMore, setLoadingMore] = useState(false)
     const [error, setError] = useState(null)
+    const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
+    const [managedHeroFailed, setManagedHeroFailed] = useState(false)
+    const [sectionSort, setSectionSort] = useState(0)
 
     const savePage = useCallback((items, cursor) => {
         const reconciledItems = reconcilePublicCatalogItems(items, 'video')
@@ -89,7 +105,7 @@ export default function Videos() {
     }, [albums])
 
     const videoAlbums = useMemo(() => albums.filter((album) => album.type === 'video'), [albums])
-    const { groupedVideoAlbums, videoCategories } = useMemo(() => {
+    const { groupedVideoAlbums, curatedVideoCategories } = useMemo(() => {
         const grouped = videoAlbums.reduce((result, album) => {
             const category = album.category || 'Uncategorized'
             if (!result[category]) result[category] = []
@@ -100,8 +116,21 @@ export default function Videos() {
             grouped[category] = sortGalleryAlbums(grouped[category])
         }
         const categories = sortGalleryCategories(Object.keys(grouped), grouped)
-        return { groupedVideoAlbums: grouped, videoCategories: categories }
+        return { groupedVideoAlbums: grouped, curatedVideoCategories: categories }
     }, [videoAlbums])
+    const videoCategories = useMemo(() => (
+        sortVideoSections(curatedVideoCategories, groupedVideoAlbums, sectionSort)
+    ), [curatedVideoCategories, groupedVideoAlbums, sectionSort])
+    const managedHeroUrl = cdnUrl('site/hero/video/home')
+    const responsiveHeroUrl = currentVideoHeroUrl()
+    const useResponsiveHero = Boolean(responsiveHeroUrl) && !responsiveHeroFailed
+    const useBundledHero = !useResponsiveHero && (!managedHeroUrl || managedHeroFailed)
+    const heroSrc = useResponsiveHero
+        ? responsiveHeroUrl
+        : (useBundledHero ? '/images/heroes/video-1280.jpg' : managedHeroUrl)
+    const heroSrcSet = useResponsiveHero
+        ? currentVideoHeroSrcSet()
+        : (useBundledHero ? heroSet('jpg') : undefined)
 
     const loadMore = async () => {
         if (!nextCursor || loadingMore) return
@@ -122,19 +151,32 @@ export default function Videos() {
             <section className="linen-video-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>
-                        <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
-                        <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
+                        {useResponsiveHero ? (
+                            <>
+                                <source type="image/avif" srcSet={currentVideoHeroSrcSet('avif')} sizes="100vw" />
+                                <source type="image/webp" srcSet={currentVideoHeroSrcSet('webp')} sizes="100vw" />
+                            </>
+                        ) : useBundledHero ? (
+                            <>
+                                <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
+                                <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
+                            </>
+                        ) : null}
                         <img
                             ref={heroRef}
-                            src="/images/heroes/video-1280.jpg"
-                            srcSet={heroSet('jpg')}
+                            src={heroSrc}
+                            srcSet={heroSrcSet}
                             sizes="100vw"
-                            width="6177"
-                            height="4118"
+                            width={useBundledHero ? 6177 : 1280}
+                            height={useBundledHero ? 4118 : 853}
                             alt="Cinematography"
                             fetchPriority="high"
                             loading="eager"
                             decoding="async"
+                            onError={() => {
+                                if (useResponsiveHero) setResponsiveHeroFailed(true)
+                                else if (!useBundledHero) setManagedHeroFailed(true)
+                            }}
                             className="w-full h-[110%] object-cover object-center parallax-hero"
                         />
                     </picture>
@@ -150,9 +192,27 @@ export default function Videos() {
 
             <section className="linen-catalog-paper">
                 <div className="max-w-7xl mx-auto px-6 py-16 md:py-24">
-                    <div data-reveal-id="video-projects-header" className="linen-section-heading linen-section-heading-compact mb-14 scroll-animate">
+                    <div data-reveal-id="video-projects-header" className="linen-section-heading mb-14 scroll-animate">
                         <span>Film index</span>
                         <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal">Video Projects</h2>
+                        <label className="w-full" htmlFor="video-section-sort">
+                            <span className="linen-category-number block mb-1">Sort sections</span>
+                            <span className="relative block">
+                                <select
+                                    id="video-section-sort"
+                                    aria-label="Sort video sections"
+                                    value={sectionSort}
+                                    onChange={(event) => setSectionSort(Number(event.target.value))}
+                                    className="w-full py-2 px-4 border-0 border-b border-charcoal rounded-none text-charcoal bg-transparent text-xs font-medium tracking-wider uppercase cursor-pointer focus:outline-none"
+                                    style={{ WebkitAppearance: 'none', appearance: 'none', background: 'transparent' }}
+                                >
+                                    {VIDEO_SECTION_SORT_OPTIONS.map((option, index) => (
+                                        <option key={option} value={index}>{option}</option>
+                                    ))}
+                                </select>
+                                <span aria-hidden="true" className="absolute right-0 top-1/2 -translate-y-1/2 text-amber-dark pointer-events-none text-base">⌄</span>
+                            </span>
+                        </label>
                     </div>
 
                     {loading && <SkeletonGrid count={6} type="video" />}
@@ -170,7 +230,7 @@ export default function Videos() {
                                 <ScrollRow scrollKey={`videos-${category}`}>
                                     {groupedVideoAlbums[category].map((album) => (
                                         <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
-                                            <AlbumCard album={album} />
+                                            <VideoAlbumCard album={album} />
                                         </div>
                                     ))}
                                 </ScrollRow>
