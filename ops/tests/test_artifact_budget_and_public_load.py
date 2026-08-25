@@ -346,6 +346,19 @@ class PublicCatalogProbeTests(unittest.TestCase):
     def test_public_schema_rejects_private_fields_signed_urls_and_exif_expansion(self):
         ordered_summary = summary() | {"galleryCategoryOrder": 2}
         self.assertEqual(public_load.validate_summary(ordered_summary), ordered_summary)
+        video_summary = summary() | {
+            "type": "video",
+            "coverHlsUrl": "https://media.example.test/cover.m3u8",
+            "coverThumbnailTime": 4.5,
+        }
+        self.assertEqual(public_load.validate_summary(video_summary), video_summary)
+        video_detail = detail()
+        video_detail["album"].update({
+            "type": "video",
+            "coverHlsUrl": "https://media.example.test/cover.m3u8",
+            "coverThumbnailTime": 4.5,
+        })
+        self.assertEqual(public_load.validate_detail(video_detail, ALBUM_ONE), 1)
         invalid_summaries = [
             summary() | {"ownerEmail": "private@example.test"},
             summary() | {"visibility": "private"},
@@ -354,6 +367,19 @@ class PublicCatalogProbeTests(unittest.TestCase):
             summary() | {"galleryCategoryOrder": True},
             summary() | {"galleryCategoryOrder": -1},
             summary() | {"coverImageUrl": "https://media.test/x?X-Amz-Signature=secret"},
+            summary() | {"coverHlsUrl": "https://media.example.test/cover.m3u8"},
+            summary() | {"coverThumbnailTime": 4.5},
+            summary() | {"coverHlsUrl": "https://media.example.test/cover.m3u8", "coverThumbnailTime": 4.5},
+            summary() | {
+                "type": "video",
+                "coverHlsUrl": "https://media.example.test/cover.m3u8?X-Amz-Signature=secret",
+                "coverThumbnailTime": 4.5,
+            },
+            summary() | {
+                "type": "video",
+                "coverHlsUrl": "https://media.example.test/cover.m3u8",
+                "coverThumbnailTime": True,
+            },
         ]
         for value in invalid_summaries:
             with self.subTest(value=value), self.assertRaises(public_load.ProbeError):

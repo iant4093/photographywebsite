@@ -31,6 +31,7 @@ HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 MEDIA_FIELDS = {
     "coverImageUrl": 2,
+    "coverHlsUrl": 3,
     "coverThumbnailUrl": 1,
     "downloadUrl": 3,
     "hlsUrl": 3,

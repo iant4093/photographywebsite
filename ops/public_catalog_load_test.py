@@ -33,7 +33,7 @@ SUMMARY_FIELDS = {
     "coverThumbnailUrl",
     "coverBlurhash",
 }
-SUMMARY_OPTIONAL_FIELDS = {"galleryCategoryOrder"}
+SUMMARY_OPTIONAL_FIELDS = {"galleryCategoryOrder", "coverHlsUrl", "coverThumbnailTime"}
 DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl", "downloadUrl"}
 IMAGE_OPTIONAL_FIELDS = {
@@ -171,6 +171,19 @@ def validate_summary(value: object) -> dict:
         or item["galleryCategoryOrder"] < 0
     ):
         raise ProbeError("album summary has an invalid gallery category order")
+    has_cover_stream = "coverHlsUrl" in item
+    has_cover_time = "coverThumbnailTime" in item
+    if has_cover_stream != has_cover_time or (has_cover_stream and item["type"] != "video"):
+        raise ProbeError("album summary has invalid cover preview metadata")
+    if has_cover_stream:
+        _public_url(item["coverHlsUrl"])
+        cover_time = item["coverThumbnailTime"]
+        if (
+            isinstance(cover_time, bool)
+            or not isinstance(cover_time, (int, float))
+            or not 0 <= cover_time <= 86400
+        ):
+            raise ProbeError("album summary has invalid cover preview metadata")
     for name in (
         "title",
         "description",
@@ -188,7 +201,14 @@ def validate_summary(value: object) -> dict:
 
 def validate_detail(payload: object, expected_album_id: str) -> int:
     root = _exact_fields(payload, {"album", "images"}, "album detail response")
-    album = _exact_fields(root["album"], DETAIL_FIELDS, "album detail")
+    album = root["album"]
+    if not isinstance(album, dict):
+        raise ProbeError("album detail is not an object")
+    album_fields = set(album)
+    if not DETAIL_FIELDS <= album_fields or album_fields - DETAIL_FIELDS - SUMMARY_OPTIONAL_FIELDS:
+        raise ProbeError("album detail does not match the public field allowlist")
+    if album_fields & FORBIDDEN_PUBLIC_FIELDS:
+        raise ProbeError("album detail contains a forbidden field")
     # Reuse every summary value check; imageCount is the only list-only field.
     validate_summary({
         **{key: value for key, value in album.items() if key != "qrCodeUrl"},
