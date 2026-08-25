@@ -48,7 +48,7 @@ describe('video album hover previews', () => {
         })).toEqual({ hlsUrl: 'https://media.test/hls/summary.m3u8', startTime: 7 })
     })
 
-    it('starts at the saved cover frame, hides the poster only after play, then resets', async () => {
+    it('starts a cold stream without waiting for seeked, then resets', async () => {
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
         const onPlaybackEnd = vi.fn()
@@ -78,8 +78,6 @@ describe('video album hover previews', () => {
         video.dispatchEvent(new Event('loadedmetadata'))
         expect(video.currentTime).toBe(5)
         expect(onPlaybackStart).not.toHaveBeenCalled()
-        video.dispatchEvent(new Event('seeked'))
-        await Promise.resolve()
         expect(video.play).not.toHaveBeenCalled()
         await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
         await Promise.resolve()

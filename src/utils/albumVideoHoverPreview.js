@@ -170,32 +170,29 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
             return
         }
 
-        const seekAndMarkReady = () => {
+        const seekAndStart = () => {
             if (!active || !video) return
             const duration = Number(video.duration)
             const latestStart = Number.isFinite(duration) ? Math.max(0, duration - 0.05) : selected.startTime
             const startTime = Math.min(selected.startTime, latestStart)
             if (startTime > 0.01) {
-                listen(video, 'seeked', () => {
-                    mediaReady = true
-                    void play()
-                }, { once: true })
                 try {
                     video.currentTime = startTime
                 } catch {
-                    mediaReady = true
-                    void play()
+                    // HLS.js already receives the same start position below.
                 }
-            } else {
-                mediaReady = true
-                void play()
             }
+            // Starting playback allows cold Safari HLS streams to fetch the
+            // segment needed to finish the cover-frame seek. Waiting for
+            // `seeked` here can otherwise deadlock until a second hover.
+            mediaReady = true
+            void play()
         }
         listen(video, 'ended', () => cleanup(true), { once: true })
         listen(video, 'error', fail, { once: true })
 
         if (nativeHls) {
-            listen(video, 'loadedmetadata', seekAndMarkReady, { once: true })
+            listen(video, 'loadedmetadata', seekAndStart, { once: true })
             video.src = selected.hlsUrl
             video.load()
             return
@@ -216,7 +213,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
                 maxMaxBufferLength: 8,
                 backBufferLength: 0,
             })
-            listen(video, 'loadedmetadata', seekAndMarkReady, { once: true })
+            listen(video, 'loadedmetadata', seekAndStart, { once: true })
             hls.on(Hls.Events.ERROR, (_event, data) => {
                 if (data.fatal) fail()
             })
