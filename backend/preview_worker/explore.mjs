@@ -107,9 +107,9 @@ export function analyzePixels(bytes, channels = 3) {
         if (selected.length === MAX_PALETTE_COLORS) break
     }
     for (const candidate of candidates) {
+        if (selected.length >= MAX_PALETTE_COLORS) break
         if (selected.includes(candidate)) continue
         selected.push(candidate)
-        if (selected.length === MAX_PALETTE_COLORS) break
     }
 
     const chromaticTotal = Object.values(familyWeights).reduce((sum, weight) => sum + weight, 0)

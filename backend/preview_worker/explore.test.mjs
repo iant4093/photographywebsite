@@ -32,6 +32,22 @@ test('extracts a deterministic palette and multiple prominent color families', (
     assert.match(result.palette[0], /^#[0-9a-f]{6}$/)
 })
 
+test('caps diverse palettes after the distance pass already selects five colors', () => {
+    const sample = pixels([
+        [240, 20, 20],
+        [20, 240, 20],
+        [20, 20, 240],
+        [240, 240, 20],
+        [240, 20, 240],
+        [20, 240, 240],
+        [140, 70, 20],
+        [70, 20, 140],
+    ])
+    const result = analyzePixels(sample)
+    assert.equal(result.palette.length, 5)
+    assert.equal(new Set(result.palette).size, 5)
+})
+
 test('classifies neutral photographs as monochrome and validates complete metadata', () => {
     const result = analyzePixels(pixels([
         ...Array.from({ length: 12 }, () => [40, 40, 40]),
