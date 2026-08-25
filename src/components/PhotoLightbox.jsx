@@ -84,7 +84,7 @@ function PhotoLightbox({
             >
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {activeImage ? (
-                        <div key={`media-${activeId}`} className="linen-lightbox-media w-full h-full">
+                        <div key={`media-${activeId}`} className="linen-lightbox-media absolute inset-0">
                             <img
                                 src={thumbUrl}
                                 alt=""

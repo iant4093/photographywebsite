@@ -37,7 +37,7 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('f/4')
     expect(screen.getByRole('dialog')).toHaveTextContent('1/250s')
     expect(screen.getByRole('dialog')).toHaveTextContent('ISO 100')
-    expect(document.querySelector('.linen-lightbox-media')).toBeInTheDocument()
+    expect(document.querySelector('.linen-lightbox-media')).toHaveClass('absolute', 'inset-0')
 
     rerender(<PhotoLightbox images={[landscape, portrait]} index={1} ariaLabel="Photo viewer" onClose={vi.fn()} />)
     const fullImage = screen.getByAltText('Full size preview')
