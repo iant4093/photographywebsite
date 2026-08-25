@@ -23,7 +23,7 @@ function warmFirstPhoto(images) {
     preload.src = mediaThumbnailUrl(first)
 }
 
-function RandomPhotoExplorer({ albums = [] }) {
+function RandomPhotoExplorer({ albums = [], getInstantPhoto }) {
     const controllerRef = useRef(null)
     const requestRef = useRef(null)
     const photosRef = useRef([])
@@ -99,10 +99,14 @@ function RandomPhotoExplorer({ albums = [] }) {
             return
         }
 
-        const hasSeed = seedPhotos.length > 0
+        const instantPhoto = seedPhotos.length ? null : getInstantPhoto?.()
+        const openingPhotos = seedPhotos.length
+            ? seedPhotos
+            : (instantPhoto?.url ? [{ ...instantPhoto, randomSeed: true, heroFallback: true }] : [])
+        const hasSeed = openingPhotos.length > 0
         if (hasSeed) {
-            setPhotos(seedPhotos)
-            setIndex(seedIndexRef.current)
+            setPhotos(openingPhotos)
+            setIndex(seedPhotos.length ? seedIndexRef.current : 0)
             setLoading(false)
         } else {
             setLoading(true)
@@ -110,7 +114,10 @@ function RandomPhotoExplorer({ albums = [] }) {
         try {
             const images = await loadSession()
             if (!openRef.current) return
-            if (hasSeed) {
+            if (instantPhoto) {
+                setPhotos(images)
+                setIndex(0)
+            } else if (hasSeed) {
                 setPhotos((current) => {
                     const seen = new Set(current.map((image) => image.url))
                     return current.concat(images.filter((image) => !seen.has(image.url)))
@@ -126,7 +133,7 @@ function RandomPhotoExplorer({ albums = [] }) {
         } finally {
             if (openRef.current) setLoading(false)
         }
-    }, [loadSession, seedPhotos])
+    }, [getInstantPhoto, loadSession, seedPhotos])
 
     const handleClose = useCallback(() => {
         openRef.current = false
@@ -140,7 +147,7 @@ function RandomPhotoExplorer({ albums = [] }) {
         try {
             if (image.randomSeed && image.downloadUrl) {
                 startBrowserDownload(image.downloadUrl, mediaFileName(image, 'photo.jpg'))
-                trackPhotoDownload(image.albumId)
+                if (image.albumId) trackPhotoDownload(image.albumId)
                 return
             }
             const downloadUrl = await resolveMediaDownloadUrl(

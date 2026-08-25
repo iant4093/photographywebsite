@@ -128,7 +128,11 @@ describe('Home complete public catalog', () => {
     fireEvent.click(randomButton)
 
     expect(screen.getByRole('dialog', { name: 'Random photos from Ian Truong Photography' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Finding random photos')
+    expect(screen.getByAltText('Full size preview')).toHaveAttribute(
+      'src',
+      'https://d1twwtwfz1yeo4.cloudfront.net/site/hero/current/hero.jpg',
+    )
+    expect(screen.queryByRole('status')).toBeNull()
     await act(async () => finishRequest(payload))
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))

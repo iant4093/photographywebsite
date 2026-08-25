@@ -158,6 +158,15 @@ function Home() {
         : (useBundledHero ? heroSet('jpg') : undefined)
     const heroWidth = useResponsiveHero ? 1280 : (useBundledHero ? 6000 : 2560)
     const heroHeight = useResponsiveHero ? 853 : (useBundledHero ? 4000 : 1707)
+    const getInstantRandomPhoto = useCallback(() => {
+        const url = heroRef.current?.currentSrc || heroSrc
+        return url ? {
+            id: url,
+            url,
+            thumbnailUrl: url,
+            downloadUrl: url,
+        } : null
+    }, [heroSrc])
     const { groupedPhotoAlbums, photoCategories } = useMemo(() => {
         const grouped = photoAlbums.reduce((result, album) => {
             const category = album.category || 'Uncategorized'
@@ -236,7 +245,10 @@ function Home() {
                                     </svg>
                                 </Link>
                                 <Suspense fallback={<span className="px-1 py-2 text-white/70">Explore Random Photos</span>}>
-                                    <RandomPhotoExplorer albums={photoAlbums} />
+                                    <RandomPhotoExplorer
+                                        albums={photoAlbums}
+                                        getInstantPhoto={getInstantRandomPhoto}
+                                    />
                                 </Suspense>
                             </div>
                         </div>
