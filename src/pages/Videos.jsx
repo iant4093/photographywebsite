@@ -10,6 +10,7 @@ import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { sortVideoSections, VIDEO_SECTION_SORT_OPTIONS } from '../utils/videoSectionSort'
 import { cdnUrl, HERO_CURRENT_WIDTHS } from '../utils/mediaUrls'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
+import { warmVideoHoverRuntime } from '../utils/albumVideoHoverPreview'
 
 const CATALOG_KEY = 'public-videos'
 // The API enforces 100 as its maximum, which keeps today's video catalog to a
@@ -68,6 +69,16 @@ export default function Videos() {
             })
         return () => controller.abort()
     }, [initialSnapshot, savePage])
+
+    useEffect(() => {
+        const warm = () => { void warmVideoHoverRuntime() }
+        if (typeof window.requestIdleCallback === 'function') {
+            const idleId = window.requestIdleCallback(warm, { timeout: 1200 })
+            return () => window.cancelIdleCallback(idleId)
+        }
+        const timer = window.setTimeout(warm, 600)
+        return () => window.clearTimeout(timer)
+    }, [])
 
     useEffect(() => {
         const hero = heroRef.current

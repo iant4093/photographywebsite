@@ -467,6 +467,30 @@ def serialize_album_summary(album, *, include_admin=False):
         "coverThumbnailUrl": media_url(thumb_key, visibility) if thumb_key else cover_url,
         "coverBlurhash": album.get("coverBlurhash", ""),
     }
+    if visibility == "public" and album.get("type") == "video":
+        cover_candidates = {value for value in (cover_key, thumb_key) if value}
+        cover_video = None
+        for image in album.get("images", []):
+            if not isinstance(image, dict):
+                continue
+            image_candidates = {value for value in (_raw_key(image), image.get("thumbKey", "")) if value}
+            if cover_candidates.intersection(image_candidates):
+                cover_video = image
+                break
+        if cover_video:
+            hls_key = cover_video.get("hlsUrl", "")
+            if hls_key:
+                try:
+                    hls_key = validate_album_media_key(hls_key, album=album)
+                except ValidationError:
+                    hls_key = ""
+                if hls_key:
+                    summary["coverHlsUrl"] = media_url(hls_key, visibility)
+                    thumbnail_time = cover_video.get("thumbnailTime", 0)
+                    try:
+                        summary["coverThumbnailTime"] = max(0, min(float(thumbnail_time), 86400))
+                    except (TypeError, ValueError):
+                        summary["coverThumbnailTime"] = 0
     if visibility in PROTECTED_VISIBILITIES:
         summary.update(url_expiry_metadata())
     if include_admin:

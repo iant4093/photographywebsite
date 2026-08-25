@@ -45,16 +45,25 @@ describe('loadCompleteCatalog', () => {
                 title: 'Visible',
                 visibility: 'public',
                 uploadedAt: '2025-12-31T20:00:00Z',
+                coverHlsUrl: 'https://media.test/cover.m3u8',
+                coverThumbnailTime: 4.5,
                 ownerEmail: 'must-not-persist@example.test',
                 rawKey: 'must-not-persist',
             }],
             nextCursor: null,
         })
 
-        const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v3:public-photos'))
+        const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v4:public-photos'))
         expect(stored).toMatchObject({
-            version: 3,
-            items: [{ albumId: 'album-one', title: 'Visible', visibility: 'public', uploadedAt: '2025-12-31T20:00:00Z' }],
+            version: 4,
+            items: [{
+                albumId: 'album-one',
+                title: 'Visible',
+                visibility: 'public',
+                uploadedAt: '2025-12-31T20:00:00Z',
+                coverHlsUrl: 'https://media.test/cover.m3u8',
+                coverThumbnailTime: 4.5,
+            }],
             nextCursor: null,
         })
         expect(stored.items[0]).not.toHaveProperty('ownerEmail')
@@ -63,14 +72,14 @@ describe('loadCompleteCatalog', () => {
         // Clearing only memory is intentionally unavailable: deletion removes
         // the persisted copy too, preventing stale data from being resurrected.
         deleteCatalogSnapshot('public-photos')
-        expect(sessionStorage.getItem('ian:public-catalog:v3:public-photos')).toBeNull()
+        expect(sessionStorage.getItem('ian:public-catalog:v4:public-photos')).toBeNull()
     })
 
     it('hydrates a valid tab snapshot and rejects malformed persisted state', () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
-        sessionStorage.setItem('ian:public-catalog:v3:public-videos', JSON.stringify({
-            version: 3,
+        sessionStorage.setItem('ian:public-catalog:v4:public-videos', JSON.stringify({
+            version: 4,
             savedAt: Date.now(),
             nextCursor: null,
             items: [{ albumId: 'video-one', title: 'Film', ownerEmail: 'discard@example.test' }],
@@ -81,9 +90,9 @@ describe('loadCompleteCatalog', () => {
         })
         expect(getCatalogSnapshot('public-videos').items[0]).not.toHaveProperty('ownerEmail')
 
-        sessionStorage.setItem('ian:public-catalog:v3:public-photos', '{bad-json')
+        sessionStorage.setItem('ian:public-catalog:v4:public-photos', '{bad-json')
         expect(getCatalogSnapshot('public-photos')).toBeNull()
-        expect(sessionStorage.getItem('ian:public-catalog:v3:public-photos')).toBeNull()
+        expect(sessionStorage.getItem('ian:public-catalog:v4:public-photos')).toBeNull()
     })
 
     it('reconciles recent public mutations over a stale edge catalog', () => {

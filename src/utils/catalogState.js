@@ -7,8 +7,8 @@ const MAX_STALE_SNAPSHOT_AGE_MS = 30 * 60_000
 const MAX_PENDING_MUTATION_AGE_MS = 10 * 60_000
 const MAX_CATALOG_PAGES = 100
 const MAX_PERSISTED_ITEMS = 500
-const SNAPSHOT_SCHEMA_VERSION = 3
-const SNAPSHOT_STORAGE_PREFIX = 'ian:public-catalog:v3:'
+const SNAPSHOT_SCHEMA_VERSION = 4
+const SNAPSHOT_STORAGE_PREFIX = 'ian:public-catalog:v4:'
 const PERSISTED_CATALOG_KEYS = ['public-photos', 'public-videos']
 const PUBLIC_ALBUM_FIELDS = [
     'albumId',
@@ -24,6 +24,8 @@ const PUBLIC_ALBUM_FIELDS = [
     'coverImageUrl',
     'coverThumbnailUrl',
     'coverBlurhash',
+    'coverHlsUrl',
+    'coverThumbnailTime',
     'galleryOrder',
     'galleryCategoryOrder',
 ]

@@ -4,6 +4,18 @@ export const VIDEO_HOVER_DELAY_MS = 350
 export const VIDEO_HOVER_DURATION_MS = 4000
 export const VIDEO_HOVER_FADE_MS = 260
 
+let hlsModulePromise = null
+
+function loadHlsModule() {
+    if (!hlsModulePromise) {
+        hlsModulePromise = import('hls.js').catch((error) => {
+            hlsModulePromise = null
+            throw error
+        })
+    }
+    return hlsModulePromise
+}
+
 function comparablePath(value) {
     if (!value) return ''
     try {
@@ -19,7 +31,19 @@ export function canRunVideoHoverPreview() {
         && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+export function warmVideoHoverRuntime() {
+    if (!canRunVideoHoverPreview()) return Promise.resolve(null)
+    return loadHlsModule().catch(() => null)
+}
+
 export function selectAlbumCoverVideo(detail, album) {
+    if (album?.coverHlsUrl) {
+        const requestedTime = Number(album.coverThumbnailTime)
+        return {
+            hlsUrl: album.coverHlsUrl,
+            startTime: Number.isFinite(requestedTime) ? Math.max(0, Math.min(requestedTime, 86400)) : 0,
+        }
+    }
     const videos = Array.isArray(detail?.images) ? detail.images : []
     const coverPaths = new Set([
         comparablePath(album?.coverThumbnailUrl),
@@ -44,7 +68,7 @@ function prepareVideo() {
     video.muted = true
     video.defaultMuted = true
     video.playsInline = true
-    video.preload = 'metadata'
+    video.preload = 'auto'
     video.disablePictureInPicture = true
     video.setAttribute('muted', '')
     video.setAttribute('playsinline', '')
@@ -65,6 +89,9 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     let playing = false
     let video = null
     let hls = null
+    let intentReady = false
+    let mediaReady = false
+    let started = false
     const timers = new Set()
     const listeners = []
     const later = (callback, delay) => {
@@ -98,68 +125,84 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     }
     const fail = () => cleanup(false)
 
-    later(async () => {
-        let detail
+    const play = async () => {
+        if (!active || started || !intentReady || !mediaReady || !video) return
+        started = true
         try {
-            detail = await loadDetail()
+            await video.play()
+            if (!active) return
+            playing = true
+            onPlaybackStart?.()
+            window.requestAnimationFrame(() => {
+                if (active && video) video.style.opacity = '1'
+            })
+            later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
         } catch {
             fail()
-            return
+        }
+    }
+
+    later(() => {
+        intentReady = true
+        void play()
+    }, VIDEO_HOVER_DELAY_MS)
+
+    video = prepareVideo()
+    container.appendChild(video)
+    const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
+    const hlsModule = nativeHls ? null : loadHlsModule()
+
+    void (async () => {
+        let selected = selectAlbumCoverVideo(null, album)
+        if (!selected) {
+            let detail
+            try {
+                detail = await loadDetail()
+            } catch {
+                fail()
+                return
+            }
+            selected = selectAlbumCoverVideo(detail, album)
         }
         if (!active) return
-        const selected = selectAlbumCoverVideo(detail, album)
         if (!selected) {
             fail()
             return
         }
 
-        video = prepareVideo()
-        container.appendChild(video)
-        let started = false
-        const play = async () => {
-            if (!active || started) return
-            started = true
-            try {
-                await video.play()
-                if (!active) return
-                playing = true
-                onPlaybackStart?.()
-                window.requestAnimationFrame(() => {
-                    if (active && video) video.style.opacity = '1'
-                })
-                later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
-            } catch {
-                fail()
-            }
-        }
-        const seekAndPlay = () => {
+        const seekAndMarkReady = () => {
             if (!active || !video) return
             const duration = Number(video.duration)
             const latestStart = Number.isFinite(duration) ? Math.max(0, duration - 0.05) : selected.startTime
             const startTime = Math.min(selected.startTime, latestStart)
             if (startTime > 0.01) {
-                listen(video, 'seeked', play, { once: true })
+                listen(video, 'seeked', () => {
+                    mediaReady = true
+                    void play()
+                }, { once: true })
                 try {
                     video.currentTime = startTime
                 } catch {
+                    mediaReady = true
                     void play()
                 }
             } else {
+                mediaReady = true
                 void play()
             }
         }
         listen(video, 'ended', () => cleanup(true), { once: true })
         listen(video, 'error', fail, { once: true })
 
-        if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            listen(video, 'loadedmetadata', seekAndPlay, { once: true })
+        if (nativeHls) {
+            listen(video, 'loadedmetadata', seekAndMarkReady, { once: true })
             video.src = selected.hlsUrl
             video.load()
             return
         }
 
         try {
-            const { default: Hls } = await import('hls.js')
+            const { default: Hls } = await hlsModule
             if (!active || !video) return
             if (!Hls.isSupported()) {
                 fail()
@@ -173,7 +216,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
                 maxMaxBufferLength: 8,
                 backBufferLength: 0,
             })
-            listen(video, 'loadedmetadata', seekAndPlay, { once: true })
+            listen(video, 'loadedmetadata', seekAndMarkReady, { once: true })
             hls.on(Hls.Events.ERROR, (_event, data) => {
                 if (data.fatal) fail()
             })
@@ -182,7 +225,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         } catch {
             fail()
         }
-    }, VIDEO_HOVER_DELAY_MS)
+    })()
 
     return { stop: () => cleanup(true) }
 }

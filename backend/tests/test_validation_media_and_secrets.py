@@ -206,6 +206,47 @@ class MediaAccessTests(unittest.TestCase):
         admin = media_access.serialize_album_summary(album, include_admin=True)
         self.assertEqual(admin["ownerEmail"], "private@example.com")
 
+    def test_public_video_summary_includes_only_the_cover_hover_stream(self):
+        cover = {
+            **self.image,
+            "thumbnailTime": 4.5,
+        }
+        other = {
+            "rawKey": f"albums/{ALBUM_ID}/original/other.mp4",
+            "thumbKey": f"albums/{ALBUM_ID}/thumbnail/other.jpg",
+            "hlsUrl": f"albums/{ALBUM_ID}/original/other_hls/other.m3u8",
+            "thumbnailTime": 2,
+        }
+        album = {
+            "albumId": ALBUM_ID,
+            "type": "video",
+            "visibility": "public",
+            "coverImageUrl": self.image["thumbKey"],
+            "coverThumbKey": self.image["thumbKey"],
+            "images": [other, cover],
+        }
+
+        summary = media_access.serialize_album_summary(album)
+
+        self.assertTrue(summary["coverHlsUrl"].endswith(self.image["hlsUrl"]))
+        self.assertEqual(summary["coverThumbnailTime"], 4.5)
+        self.assertNotIn("images", summary)
+        private = media_access.serialize_album_summary({**album, "visibility": "private"})
+        self.assertNotIn("coverHlsUrl", private)
+        self.assertNotIn("coverThumbnailTime", private)
+
+    def test_public_video_summary_omits_malformed_cover_hover_stream(self):
+        album = {
+            "albumId": ALBUM_ID,
+            "type": "video",
+            "visibility": "public",
+            "coverImageUrl": self.image["thumbKey"],
+            "coverThumbKey": self.image["thumbKey"],
+            "images": [{**self.image, "hlsUrl": "albums/other/video.m3u8"}],
+        }
+        summary = media_access.serialize_album_summary(album)
+        self.assertNotIn("coverHlsUrl", summary)
+
     def test_media_identifier_maps_only_to_manifest_entries(self):
         album = {"images": [self.image]}
         media_id = media_access.media_id_for_key(self.image["rawKey"])
