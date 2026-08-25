@@ -9,7 +9,8 @@ WAF is defense in depth.
 
 - The browser API base is `/api`.
 - `/api/public/*` caches only anonymous `GET`/`HEAD` responses and varies only
-  on the reviewed `cursor`, `limit`, and `type` query keys plus compression.
+  on the reviewed `cursor`, `limit`, `mode`, `type`, and `value` query keys plus
+  compression.
 - `/api/*` otherwise has caching disabled and forwards only the reviewed
   methods, query strings, and API/auth/CORS headers. It forwards no cookies.
 - CloudFront reaches the TLS 1.2 regional custom domain through the fixed `api`

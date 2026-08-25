@@ -11,7 +11,7 @@
     "public_path_pattern": "/api/public/*",
     "private_path_pattern": "/api/*",
     "social_path_patterns": ["album/*", "video/*"],
-    "public_query_strings": ["cursor", "limit", "type"],
+    "public_query_strings": ["cursor", "limit", "mode", "type", "value"],
     "public_forward_headers": ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
     "private_forward_headers": ["Authorization", "CloudFront-Viewer-Country", "Content-Type", "Origin", "X-Turnstile-Token", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
     "public_cache_policy_name": "IanTruong-API-Public-Catalog-v1",
