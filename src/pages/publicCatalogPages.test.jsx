@@ -87,6 +87,32 @@ describe('Home complete public catalog', () => {
     await waitFor(() => expect(container.querySelector('[data-reveal-id="home-photo-header"]')).toHaveClass('is-visible', 'no-stagger'))
   })
 
+  it('sorts whole category sections locally while preserving curated album order', () => {
+    const items = [
+      { albumId: 'bird-two', title: 'Bird Two', type: 'photo', category: 'Birding', galleryOrder: 1, galleryCategoryOrder: 0, uploadedAt: '2026-08-20T12:00:00Z' },
+      { albumId: 'bird-one', title: 'Bird One', type: 'photo', category: 'Birding', galleryOrder: 0, galleryCategoryOrder: 0, uploadedAt: '2026-08-19T12:00:00Z' },
+      { albumId: 'hike-one', title: 'Hike One', type: 'photo', category: 'Hikes', galleryCategoryOrder: 1, uploadedAt: '2026-08-22T12:00:00Z' },
+    ]
+    catalog.getCatalogSnapshot.mockReturnValue({ items, nextCursor: null })
+    catalog.loadCompleteCatalog.mockResolvedValue({ items, nextCursor: null })
+    const view = routed(<Home />)
+    const sectionSort = screen.getByLabelText('Sort sections')
+
+    expect(sectionSort).toHaveValue('curated')
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(['Birding', 'Hikes'])
+    expect(screen.getByTestId('home-photo-Birding')).toHaveTextContent('Bird OneBird Two')
+
+    fireEvent.change(sectionSort, { target: { value: 'newest' } })
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(['Hikes', 'Birding'])
+    expect(screen.getByTestId('home-photo-Birding')).toHaveTextContent('Bird OneBird Two')
+
+    view.unmount()
+    routed(<Home />)
+    expect(screen.getByLabelText('Sort sections')).toHaveValue('curated')
+  })
+
   it('smoothly skips the moving wall and targets the photo album heading', () => {
     catalog.getCatalogSnapshot.mockReturnValue({ items: [], nextCursor: null })
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })

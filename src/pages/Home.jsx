@@ -22,6 +22,7 @@ import {
     heroCoverUrl,
 } from '../utils/mediaUrls'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
+import { HOME_SECTION_SORT_OPTIONS, sortHomePhotoSections } from '../utils/homeSectionSort'
 import { trackHeroExplore } from '../utils/analytics'
 
 const CATALOG_KEY = 'public-photos'
@@ -50,6 +51,7 @@ function Home() {
     const [loadAttempt, setLoadAttempt] = useState(0)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
     const [managedHomeFailed, setManagedHomeFailed] = useState(false)
+    const [sectionSort, setSectionSort] = useState('curated')
 
     const handleExplorePhotos = useCallback((event) => {
         const target = document.getElementById('photo-albums')
@@ -167,7 +169,7 @@ function Home() {
             downloadUrl: url,
         } : null
     }, [heroSrc])
-    const { groupedPhotoAlbums, photoCategories } = useMemo(() => {
+    const { groupedPhotoAlbums, curatedPhotoCategories } = useMemo(() => {
         const grouped = photoAlbums.reduce((result, album) => {
             const category = album.category || 'Uncategorized'
             if (!result[category]) result[category] = []
@@ -178,8 +180,11 @@ function Home() {
             grouped[category] = sortGalleryAlbums(grouped[category])
         }
         const categories = sortGalleryCategories(Object.keys(grouped), grouped)
-        return { groupedPhotoAlbums: grouped, photoCategories: categories }
+        return { groupedPhotoAlbums: grouped, curatedPhotoCategories: categories }
     }, [photoAlbums])
+    const photoCategories = useMemo(() => (
+        sortHomePhotoSections(curatedPhotoCategories, groupedPhotoAlbums, sectionSort)
+    ), [curatedPhotoCategories, groupedPhotoAlbums, sectionSort])
 
     return (
         <div ref={pageRef}>
@@ -262,11 +267,25 @@ function Home() {
                 <div
                     id="photo-albums"
                     data-reveal-id="home-photo-header"
-                    className="linen-section-heading linen-section-heading-compact mb-14 scroll-animate"
+                    className="linen-section-heading linen-section-heading-album-index mb-14 scroll-animate"
                     style={{ scrollMarginTop: '6rem' }}
                 >
                     <span>Selected index</span>
                     <h2 className="font-serif text-4xl md:text-5xl font-normal text-charcoal inline-block">Photo Albums</h2>
+                    <label className="home-section-sort" htmlFor="home-section-sort">
+                        <span>Sort sections</span>
+                        <span className="home-section-sort-control">
+                            <select
+                                id="home-section-sort"
+                                value={sectionSort}
+                                onChange={(event) => setSectionSort(event.target.value)}
+                            >
+                                {HOME_SECTION_SORT_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                            </select>
+                        </span>
+                    </label>
                 </div>
 
                 {loading && <SkeletonGrid count={6} type="photo" />}
