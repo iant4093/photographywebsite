@@ -61,58 +61,48 @@ export default function Contact() {
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div className="relative">
+                    <div>
+                        <label htmlFor="name" className="block mb-2 text-sm font-medium text-charcoal">
+                            Name
+                        </label>
                         <input
                             id="name"
                             type="text"
                             required
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all placeholder-transparent"
-                            placeholder="Name"
+                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-charcoal/5 text-charcoal focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all"
+                            autoComplete="name"
                         />
-                        <label
-                            htmlFor="name"
-                            className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/70 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
-                        >
-                            Name
-                        </label>
                     </div>
-                    <div className="relative">
+                    <div>
+                        <label htmlFor="email" className="block mb-2 text-sm font-medium text-charcoal">
+                            Email
+                        </label>
                         <input
                             id="email"
                             type="email"
                             required
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all placeholder-transparent"
-                            placeholder="Email"
+                            className="w-full px-4 py-3 rounded-xl border border-warm-border bg-charcoal/5 text-charcoal focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all"
+                            autoComplete="email"
                         />
-                        <label
-                            htmlFor="email"
-                            className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/70 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
-                        >
-                            Email
-                        </label>
                     </div>
                 </div>
 
-                <div className="relative mb-6">
+                <div className="mb-6">
+                    <label htmlFor="message" className="block mb-2 text-sm font-medium text-charcoal">
+                        Message
+                    </label>
                     <textarea
                         id="message"
                         required
                         rows={6}
                         value={message}
                         onChange={(e) => setMessage(e.target.value)}
-                        className="peer w-full px-4 pt-6 pb-2 mt-1 rounded-xl border border-warm-border bg-charcoal/5 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all resize-none placeholder-transparent"
-                        placeholder="Message"
+                        className="w-full px-4 py-3 rounded-xl border border-warm-border bg-charcoal/5 text-charcoal focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all resize-none"
                     />
-                    <label
-                        htmlFor="message"
-                        className="absolute left-4 top-1.5 text-xs font-medium text-warm-gray transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-placeholder-shown:text-warm-gray/70 peer-focus:top-1.5 peer-focus:text-xs peer-focus:text-amber cursor-text pointer-events-none"
-                    >
-                        Message
-                    </label>
                 </div>
 
                 <div className="mb-8 flex justify-center">
@@ -128,7 +118,7 @@ export default function Contact() {
                             setTurnstileToken(null)
                             setStatus({ type: 'error', message: 'The security check could not be loaded. Please try again.' })
                         }}
-                        options={{ theme: 'light', action: 'contact' }}
+                        options={{ theme: 'auto', action: 'contact' }}
                     />
                 </div>
 
@@ -140,7 +130,7 @@ export default function Contact() {
                 <button
                     type="submit"
                     disabled={submitting || !turnstileToken}
-                    className="w-full py-4 rounded-xl bg-charcoal text-white font-medium hover:bg-charcoal-light transition-colors duration-300 shadow-warm disabled:opacity-50 cursor-pointer"
+                    className="contact-submit w-full py-4 rounded-xl border border-charcoal bg-charcoal text-white font-medium hover:bg-charcoal-light transition-colors duration-300 shadow-warm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                 >
                     {submitting ? 'Sending...' : 'Send Message'}
                 </button>

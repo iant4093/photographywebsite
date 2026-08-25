@@ -161,26 +161,58 @@ html[data-theme="dark"] .linen-site.linen-admin main :is(
 }
 
 html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-amber,
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit {
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit,
+html[data-theme="dark"] .linen-site.linen-admin main form > button[type="submit"],
+html[data-theme="dark"] .linen-site.linen-admin main button.bg-amber,
+html[data-theme="dark"] .linen-site.linen-admin main a.bg-amber {
   color: #fffaf2;
   border-color: #d8c6b3;
   background: #6f5038;
 }
 
 html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-amber:hover,
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit:hover {
+html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-submit:hover,
+html[data-theme="dark"] .linen-site.linen-admin main form > button[type="submit"]:hover,
+html[data-theme="dark"] .linen-site.linen-admin main button.bg-amber:hover,
+html[data-theme="dark"] .linen-site.linen-admin main a.bg-amber:hover {
   color: #ffffff;
   background: #896548;
 }
 
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-cream {
-  color: #c9beb0;
-  background: #24211d;
+html[data-theme="dark"] .linen-site.linen-admin main :is(
+  .admin-upload-choice.bg-cream,
+  button.bg-cream,
+  a.bg-cream
+) {
+  color: #e5dbce;
+  border-color: #5d554c;
+  background: #2b2823;
 }
 
-html[data-theme="dark"] .linen-site.linen-admin main .admin-upload-choice.bg-cream:hover {
-  color: #f2eadf;
-  background: #302b25;
+html[data-theme="dark"] .linen-site.linen-admin main :is(
+  .admin-upload-choice.bg-cream,
+  button.bg-cream,
+  a.bg-cream
+):hover {
+  color: #fffaf2;
+  background: #39342d;
+}
+
+html[data-theme="dark"] .linen-site .contact-submit {
+  color: #fffaf2;
+  border-color: #d8c6b3;
+  background: #6f5038;
+}
+
+html[data-theme="dark"] .linen-site .contact-submit:hover:not(:disabled) {
+  color: #ffffff;
+  background: #896548;
+}
+
+html[data-theme="dark"] .linen-site .contact-submit:disabled {
+  color: #bdb2a5;
+  border-color: #514b43;
+  background: #302c26;
 }
 
 html[data-theme="dark"] .linen-site.linen-admin [class~="bg-green-50"] {

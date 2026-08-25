@@ -104,6 +104,10 @@ describe('Contact', () => {
   it('requires Turnstile, handles widget failures, sends, clears, and resets', async () => {
     routed(<Contact />)
     expect(screen.getByRole('link', { name: 'privacy notice' })).toHaveAttribute('href', '/privacy')
+    expect(screen.getByLabelText('Name')).not.toHaveAttribute('placeholder')
+    expect(screen.getByLabelText('Email')).not.toHaveAttribute('placeholder')
+    expect(screen.getByLabelText('Message')).not.toHaveAttribute('placeholder')
+    expect(screen.getByRole('button', { name: 'Send Message' })).toHaveClass('contact-submit')
     fill()
     submitForm()
     expect(screen.getByText('Please complete the security check.')).toBeInTheDocument()

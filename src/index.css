@@ -154,13 +154,18 @@ html {
   scrollbar-gutter: stable;
 }
 
-html.editorial-scrollbar-active {
+html.editorial-scrollbar-active,
+html.editorial-scrollbar-active body {
   scrollbar-width: none;
   scrollbar-gutter: auto;
 }
 
-html.editorial-scrollbar-active::-webkit-scrollbar {
-  display: none;
+html.editorial-scrollbar-active::-webkit-scrollbar,
+html.editorial-scrollbar-active body::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent;
 }
 
 /* Utility to hide scrollbars on horizontal lists */
