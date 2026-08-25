@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigationType } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import FloatingGallery from '../components/FloatingGallery'
-import PhotoLightbox from '../components/PhotoLightbox'
 import {
     fetchAlbumsPage,
     fetchRandomPhotos,
@@ -32,6 +31,7 @@ import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { trackHeroExplore, trackPhotoDownload } from '../utils/analytics'
 
 const CATALOG_KEY = 'public-photos'
+const PhotoLightbox = lazy(() => import('../components/PhotoLightbox'))
 // Fetch the complete current public catalog in one compressed response while
 // retaining cursor pagination once the catalog grows beyond the API's cap.
 const PAGE_SIZE = 100
@@ -377,15 +377,17 @@ function Home() {
             </section>
 
             {randomPhotoIndex !== null && randomPhotos[randomPhotoIndex] && (
-                <PhotoLightbox
-                    images={randomPhotos}
-                    index={randomPhotoIndex}
-                    ariaLabel="Random photos from Ian Truong Photography"
-                    onClose={() => setRandomPhotoIndex(null)}
-                    onNext={goToNextRandomPhoto}
-                    onPrevious={goToPreviousRandomPhoto}
-                    onDownload={downloadRandomPhoto}
-                />
+                <Suspense fallback={null}>
+                    <PhotoLightbox
+                        images={randomPhotos}
+                        index={randomPhotoIndex}
+                        ariaLabel="Random photos from Ian Truong Photography"
+                        onClose={() => setRandomPhotoIndex(null)}
+                        onNext={goToNextRandomPhoto}
+                        onPrevious={goToPreviousRandomPhoto}
+                        onDownload={downloadRandomPhoto}
+                    />
+                </Suspense>
             )}
         </div>
     )
