@@ -51,7 +51,7 @@
     {"logicalId": "GetAnalyticsReportFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "AnalyticsTable.Arn"]},
     {"logicalId": "GetGoogleDriveUsageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["DriveUsageCacheTable.Arn"]},
     {"logicalId": "RefreshGoogleDriveUsageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "DriveUsageCacheTable.Arn"]},
-    {"logicalId": "GetPublicAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
+    {"logicalId": "GetPublicAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn", "PreviewMetadataTable.Arn"]},
     {"logicalId": "GetPublicAlbumsFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["GallerySettingsTable.Arn"]},
     {"logicalId": "GetSharedAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn", "RateLimitTable.Arn"]},
     {"logicalId": "GetUploadUrlFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
