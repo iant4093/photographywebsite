@@ -4,7 +4,12 @@ import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import FloatingGallery from '../components/FloatingGallery'
-import { fetchAlbumsPage } from '../utils/api'
+import PhotoLightbox from '../components/PhotoLightbox'
+import {
+    fetchAlbumsPage,
+    fetchRandomPhotos,
+    requestAlbumMediaDownload,
+} from '../utils/api'
 import {
     CatalogPaginationError,
     deleteCatalogSnapshot,
@@ -14,9 +19,17 @@ import {
     setCatalogSnapshot,
 } from '../utils/catalogState'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
-import { currentHeroSrcSet, currentHeroUrl, heroCoverUrl } from '../utils/mediaUrls'
+import {
+    currentHeroSrcSet,
+    currentHeroUrl,
+    heroCoverUrl,
+    mediaFileName,
+    mediaId,
+    resolveMediaDownloadUrl,
+    startBrowserDownload,
+} from '../utils/mediaUrls'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
-import { trackHeroExplore } from '../utils/analytics'
+import { trackHeroExplore, trackPhotoDownload } from '../utils/analytics'
 
 const CATALOG_KEY = 'public-photos'
 // Fetch the complete current public catalog in one compressed response while
@@ -34,6 +47,7 @@ function Home() {
     const catalogSnapshotRef = useRef(initialSnapshot)
     const pageRef = useRef(null)
     const heroRef = useRef(null)
+    const randomControllerRef = useRef(null)
 
     useScrollRestoration(location.pathname, navigationType === 'POP')
 
@@ -43,6 +57,10 @@ function Home() {
     const [loadAttempt, setLoadAttempt] = useState(0)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
     const [managedHomeFailed, setManagedHomeFailed] = useState(false)
+    const [randomPhotos, setRandomPhotos] = useState([])
+    const [randomPhotoIndex, setRandomPhotoIndex] = useState(null)
+    const [randomPhotosLoading, setRandomPhotosLoading] = useState(false)
+    const [randomPhotosError, setRandomPhotosError] = useState('')
 
     const handleExplorePhotos = useCallback((event) => {
         const target = document.getElementById('photo-albums')
@@ -50,6 +68,57 @@ function Home() {
         event.preventDefault()
         trackHeroExplore('photo')
         target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, [])
+
+    const handleExploreRandomPhotos = useCallback(async () => {
+        randomControllerRef.current?.abort()
+        const controller = new AbortController()
+        randomControllerRef.current = controller
+        setRandomPhotosLoading(true)
+        setRandomPhotosError('')
+        try {
+            const payload = await fetchRandomPhotos({ signal: controller.signal })
+            if (!payload.images.length) {
+                setRandomPhotosError('No public photos are available yet.')
+                return
+            }
+            setRandomPhotos(payload.images)
+            setRandomPhotoIndex(0)
+        } catch (requestError) {
+            if (requestError?.name !== 'AbortError') {
+                setRandomPhotosError(requestError?.message || 'Random photos could not be loaded.')
+            }
+        } finally {
+            if (randomControllerRef.current === controller) {
+                randomControllerRef.current = null
+                setRandomPhotosLoading(false)
+            }
+        }
+    }, [])
+
+    useEffect(() => () => randomControllerRef.current?.abort(), [])
+
+    const goToNextRandomPhoto = useCallback(() => {
+        setRandomPhotoIndex((index) => (index + 1) % randomPhotos.length)
+    }, [randomPhotos.length])
+
+    const goToPreviousRandomPhoto = useCallback(() => {
+        setRandomPhotoIndex((index) => (index - 1 + randomPhotos.length) % randomPhotos.length)
+    }, [randomPhotos.length])
+
+    const downloadRandomPhoto = useCallback(async (event, image) => {
+        event.stopPropagation()
+        try {
+            const downloadUrl = await resolveMediaDownloadUrl(
+                () => requestAlbumMediaDownload(image.albumId, mediaId(image)),
+                image,
+            )
+            startBrowserDownload(downloadUrl, mediaFileName(image, 'photo.jpg'))
+            trackPhotoDownload(image.albumId)
+        } catch (downloadError) {
+            console.error('Random photo download failed:', downloadError)
+            alert('The photo could not be downloaded. Please try again.')
+        }
     }, [])
 
     const savePage = useCallback((items, cursor) => {
@@ -220,14 +289,28 @@ function Home() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
                             </a>
-                            <Link to="/videos" onClick={() => trackHeroExplore('video')} className="linen-text-link inline-flex items-center gap-2 px-1 py-3 text-white font-medium transition-all duration-300">
-                                Explore Videos
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                            </Link>
+                            <div className="flex flex-col items-start">
+                                <Link to="/videos" onClick={() => trackHeroExplore('video')} className="linen-text-link inline-flex items-center gap-2 px-1 py-2 text-white font-medium transition-all duration-300">
+                                    Explore Videos
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </Link>
+                                <button
+                                    type="button"
+                                    onClick={handleExploreRandomPhotos}
+                                    disabled={randomPhotosLoading}
+                                    className="linen-text-link inline-flex items-center gap-2 px-1 py-2 text-white font-medium transition-all duration-300 disabled:cursor-wait disabled:opacity-60"
+                                >
+                                    {randomPhotosLoading ? 'Finding Random Photos…' : 'Explore Random Photos'}
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h3l10 16h3M20 4h-3l-3.5 5.6M4 20h3l3.5-5.6" />
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
+                        {randomPhotosError && <p className="mt-3 text-sm text-red-100" role="alert">{randomPhotosError}</p>}
                     </div>
                 </div>
             </section>
@@ -280,7 +363,7 @@ function Home() {
                             <ScrollRow scrollKey={`home-photo-${category}`}>
                                 {groupedPhotoAlbums[category].map((album) => (
                                     <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
-                                        <AlbumCard album={album} />
+                                        <AlbumCard album={album} showNewFlag />
                                     </div>
                                 ))}
                             </ScrollRow>
@@ -292,6 +375,18 @@ function Home() {
                     <div className="text-center py-12 text-warm-gray"><p>No photo albums found.</p></div>
                 )}
             </section>
+
+            {randomPhotoIndex !== null && randomPhotos[randomPhotoIndex] && (
+                <PhotoLightbox
+                    images={randomPhotos}
+                    index={randomPhotoIndex}
+                    ariaLabel="Random photos from Ian Truong Photography"
+                    onClose={() => setRandomPhotoIndex(null)}
+                    onNext={goToNextRandomPhoto}
+                    onPrevious={goToPreviousRandomPhoto}
+                    onDownload={downloadRandomPhoto}
+                />
+            )}
         </div>
     )
 }

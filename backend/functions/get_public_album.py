@@ -4,11 +4,13 @@ import html
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import urllib.request
 
 import boto3
+from boto3.dynamodb.conditions import Attr, Key
 
 from media_access import (
     album_media_prefixes,
@@ -48,6 +50,7 @@ _DESCRIPTION_PATTERN = re.compile(
     r"<meta\s+name=[\"']description[\"']\s+content=[\"'][^\"']*[\"']\s*/?>",
     re.IGNORECASE,
 )
+RANDOM_PHOTO_LIMIT = 80
 
 
 def _legacy_images(album):
@@ -82,6 +85,75 @@ def _legacy_images(album):
             if remaining <= 0:
                 break
     return images
+
+
+def _random_photo_albums():
+    albums = []
+    cursor = None
+    while True:
+        query = {
+            "IndexName": os.environ["VISIBILITY_CREATED_AT_INDEX"],
+            "KeyConditionExpression": Key("visibility").eq("public"),
+            "FilterExpression": (
+                (Attr("status").not_exists() | Attr("status").eq("active"))
+                & (Attr("type").not_exists() | Attr("type").eq("photo"))
+            ),
+            "ScanIndexForward": False,
+        }
+        if cursor:
+            query["ExclusiveStartKey"] = cursor
+        response = table.query(**query)
+        albums.extend(response.get("Items", []))
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            return albums
+
+
+def _random_photos_response(event):
+    if (event or {}).get("queryStringParameters"):
+        return error_response(400, "Random photos does not accept query parameters", code="invalid_request")
+
+    sample = []
+    total_photos = 0
+    for album in _random_photo_albums():
+        media = album.get("images") or _legacy_images(album)
+        for image in media:
+            if not isinstance(image, dict) or not isinstance(image.get("rawKey"), str):
+                continue
+            total_photos += 1
+            candidate = (album, image)
+            if len(sample) < RANDOM_PHOTO_LIMIT:
+                sample.append(candidate)
+                continue
+            replacement = secrets.randbelow(total_photos)
+            if replacement < RANDOM_PHOTO_LIMIT:
+                sample[replacement] = candidate
+
+    grouped = {}
+    for album, image in sample:
+        group = grouped.setdefault(album["albumId"], {"album": album, "images": []})
+        group["images"].append(image)
+
+    images = []
+    for group in grouped.values():
+        album = group["album"]
+        serialized = serialize_images({**album, "images": group["images"]})
+        images.extend(
+            {
+                **image,
+                "albumId": album.get("albumId", ""),
+                "albumTitle": album.get("title", ""),
+                "albumCategory": album.get("category", "Uncategorized"),
+            }
+            for image in serialized
+        )
+
+    secrets.SystemRandom().shuffle(images)
+    return json_response(
+        200,
+        {"images": images, "totalPhotos": total_photos},
+        cache_control="no-store",
+    )
 
 
 def _base_shell():
@@ -278,6 +350,13 @@ def handler(event, context):
     path_parameters = (event or {}).get("pathParameters") or {}
     if isinstance(path_parameters, dict) and "albumType" in path_parameters:
         return _social_preview_response(event)
+    route_key = ((event or {}).get("requestContext") or {}).get("routeKey", "")
+    raw_path = (event or {}).get("rawPath", "")
+    if route_key == "GET /public/random-photos" or raw_path.endswith("/public/random-photos"):
+        try:
+            return _random_photos_response(event)
+        except Exception as error:
+            return internal_error(context, error, "get_random_photos")
     try:
         if (event or {}).get("queryStringParameters"):
             raise ValidationError("Public album detail does not accept query parameters")

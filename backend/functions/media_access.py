@@ -441,6 +441,7 @@ def serialize_album_summary(album, *, include_admin=False):
         "description": album.get("description", ""),
         "category": album.get("category", "Uncategorized"),
         "createdAt": album.get("createdAt", ""),
+        "uploadedAt": album.get("uploadedAt", ""),
         "visibility": visibility,
         "imageCount": len(album.get("images", [])),
         "coverImageUrl": cover_url,

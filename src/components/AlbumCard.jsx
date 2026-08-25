@@ -4,6 +4,7 @@ import ProgressiveImage from './ProgressiveImage'
 import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
 import { prefetchPublicAlbum } from '../utils/api'
 import { preloadAlbumRoute } from '../utils/routePreload'
+import { isWithinRecentDays } from '../utils/date'
 
 // Shared album card used by public, video, and signed-in catalogs.
 function AlbumCard({
@@ -11,6 +12,7 @@ function AlbumCard({
     onOpen,
     onImageError,
     onMouseEnter,
+    showNewFlag = false,
     imageSizes = '(min-width: 768px) 360px, (min-width: 640px) 320px, 280px',
 }) {
     const intentTimer = useRef(null)
@@ -21,6 +23,7 @@ function AlbumCard({
     const previewIdentity = usesResponsiveCover ? `${albumId}\n${coverImageUrl}` : ''
     const coverPreviewSrcSet = coverPreview.identity === previewIdentity ? coverPreview.srcSet : ''
     const canPrefetch = !onOpen && album?.visibility === 'public'
+    const isNew = showNewFlag && isWithinRecentDays(album?.uploadedAt || album?.createdAt, 4)
     const prefetch = useCallback(() => {
         if (!canPrefetch) return
         void preloadAlbumRoute(album)
@@ -98,6 +101,11 @@ function AlbumCard({
                             )}
                         </div>
                     </div>
+                )}
+                {isNew && (
+                    <span className="album-card-new-flag absolute right-0 top-0 z-30" aria-label="New album">
+                        New
+                    </span>
                 )}
                 {/* Golden gradient overlay on hover */}
                 <div className="album-card-wash absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-20 pointer-events-none" />

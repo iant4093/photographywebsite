@@ -1407,6 +1407,7 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - DynamoDBReadPolicy:
@@ -1427,6 +1428,14 @@ Resources:
           Properties:
             ApiId: !Ref Api
             Path: /public/albums/{albumId}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        GetRandomPhotos:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /public/random-photos
             Method: GET
             Auth:
               Authorizer: NONE

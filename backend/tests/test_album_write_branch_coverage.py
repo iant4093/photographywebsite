@@ -151,6 +151,7 @@ class CreateAlbumBranchTests(unittest.TestCase):
         public_item = table.put_item.call_args.kwargs["Item"]
         self.assertEqual(public_item["status"], "active")
         self.assertEqual(public_item["ownerEmail"], "")
+        self.assertRegex(public_item["uploadedAt"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
         self.assertNotIn("ownerSub", public_item)
         self.assertEqual(table.update_item.call_count, 2)
 

@@ -2,7 +2,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const api = vi.hoisted(() => ({ fetchAlbumsPage: vi.fn() }))
+const api = vi.hoisted(() => ({
+  fetchAlbumsPage: vi.fn(),
+  fetchRandomPhotos: vi.fn(),
+  requestAlbumMediaDownload: vi.fn(),
+}))
 const catalog = vi.hoisted(() => ({
   getCatalogSnapshot: vi.fn(() => null),
   setCatalogSnapshot: vi.fn(),
@@ -100,6 +104,31 @@ describe('Home complete public catalog', () => {
     expect(screen.queryByText('Wildlife, portraiture, sport & place')).toBeNull()
     fireEvent.click(link)
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+  })
+
+  it('opens a fresh whole-site random photo session in the gallery lightbox', async () => {
+    catalog.getCatalogSnapshot.mockReturnValue({ items: [], nextCursor: null })
+    catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
+    api.fetchRandomPhotos.mockResolvedValue({
+      images: [
+        { mediaId: 'first', albumId: 'album-one', url: 'https://media.test/first.jpg', thumbnailUrl: 'https://media.test/first-thumb.jpg' },
+        { mediaId: 'second', albumId: 'album-two', url: 'https://media.test/second.jpg', thumbnailUrl: 'https://media.test/second-thumb.jpg' },
+      ],
+    })
+    routed(<Home />)
+
+    const randomButton = screen.getByRole('button', { name: /explore random photos/i })
+    const videosLink = screen.getByRole('link', { name: 'Explore Videos' })
+    expect(videosLink.parentElement).toContainElement(randomButton)
+    fireEvent.click(randomButton)
+
+    expect(await screen.findByRole('dialog', { name: 'Random photos from Ian Truong Photography' })).toBeInTheDocument()
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(api.fetchRandomPhotos).toHaveBeenCalledOnce()
   })
 
   it('clears a broken cursor snapshot, reports errors, and retries', async () => {

@@ -133,6 +133,37 @@ def _fetch_page(*, album_type, limit, start_key):
     return items[:limit], cursor_key
 
 
+def _hydrate_upload_times(records):
+    """Join the tiny non-indexed upload timestamp without hydrating media manifests."""
+    album_ids = [item.get("albumId") for item in records if item.get("albumId")]
+    if not album_ids:
+        return records
+    try:
+        response = dynamodb.batch_get_item(
+            RequestItems={
+                table.name: {
+                    "Keys": [{"albumId": album_id} for album_id in album_ids],
+                    "ProjectionExpression": "albumId, uploadedAt",
+                }
+            }
+        )
+        if not isinstance(response, dict):
+            return records
+        uploaded_by_id = {
+            item.get("albumId"): item.get("uploadedAt")
+            for item in response.get("Responses", {}).get(table.name, [])
+            if item.get("albumId") and item.get("uploadedAt")
+        }
+        for record in records:
+            uploaded_at = uploaded_by_id.get(record.get("albumId"))
+            if uploaded_at:
+                record["uploadedAt"] = uploaded_at
+    except Exception as error:
+        # Recency decoration must never make the public catalog unavailable.
+        logger.warning("public_catalog_upload_time_join_failed error_type=%s", type(error).__name__)
+    return records
+
+
 from front_door import verify_front_door_request
 
 
@@ -153,6 +184,7 @@ def handler(event, context):
             limit=limit,
             start_key=start_key,
         )
+        _hydrate_upload_times(records)
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
         gallery_settings = (

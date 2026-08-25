@@ -377,6 +377,20 @@
   mix-blend-mode: multiply;
 }
 
+.linen-site .album-card-new-flag {
+  min-width: 3.6rem;
+  padding: 0.48rem 0.72rem 0.44rem;
+  color: var(--color-cream);
+  background: rgba(91, 58, 35, 0.94);
+  border-bottom: 1px solid rgba(255, 252, 245, 0.62);
+  border-left: 1px solid rgba(255, 252, 245, 0.62);
+  box-shadow: -3px 3px 0 rgba(41, 36, 31, 0.16);
+  font: 600 0.62rem/1 var(--font-sans);
+  letter-spacing: 0.17em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
 .linen-site .album-play {
   border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: 50%;

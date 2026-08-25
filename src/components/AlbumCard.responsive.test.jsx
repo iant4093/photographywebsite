@@ -66,4 +66,26 @@ describe('AlbumCard responsive covers', () => {
         expect(screen.getByRole('img', { name: video.title })).not.toHaveAttribute('srcset')
         expect(media.albumCoverPreviewSrcSet).not.toHaveBeenCalled()
     })
+
+    it('shows the optional New marker only during the first four days after upload', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-08-24T20:00:00Z'))
+        const recent = renderCard({
+            ...photoAlbum,
+            coverImageUrl: '',
+            coverThumbnailUrl: '',
+            uploadedAt: '2026-08-21T20:00:00Z',
+        }, { showNewFlag: true })
+        expect(screen.getByLabelText('New album')).toHaveTextContent('New')
+        recent.unmount()
+
+        renderCard({
+            ...photoAlbum,
+            coverImageUrl: '',
+            coverThumbnailUrl: '',
+            uploadedAt: '2026-08-20T20:00:00Z',
+        }, { showNewFlag: true })
+        expect(screen.queryByLabelText('New album')).toBeNull()
+        vi.useRealTimers()
+    })
 })

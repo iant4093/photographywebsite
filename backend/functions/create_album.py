@@ -1,6 +1,7 @@
 """Validated, admin-only album creation with pending-to-visible media tagging."""
 
 import concurrent.futures
+import datetime
 import decimal
 import html
 import json
@@ -212,6 +213,7 @@ def handler(event, context):
             "imageCount": len(images),
             "s3Prefix": prefix,
             "createdAt": created_at,
+            "uploadedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "visibility": visibility,
             "ownerEmail": owner_email,
             "isShared": is_shared,

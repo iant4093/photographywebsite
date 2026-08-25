@@ -52,6 +52,26 @@ class PublicCatalogListTests(unittest.TestCase):
             ):
                 cursor_helpers.decode_cursor(encoded, "public:*")
 
+    def test_upload_timestamp_join_adds_only_the_small_recency_field(self):
+        records = [public_album()]
+        with patch.object(
+            get_public_albums.dynamodb,
+            "batch_get_item",
+            return_value={
+                "Responses": {
+                    get_public_albums.table.name: [
+                        {"albumId": ALBUM_ID, "uploadedAt": "2026-08-24T12:00:00Z"}
+                    ]
+                }
+            },
+        ) as batch_get:
+            self.assertIs(get_public_albums._hydrate_upload_times(records), records)
+        self.assertEqual(records[0]["uploadedAt"], "2026-08-24T12:00:00Z")
+        self.assertEqual(
+            batch_get.call_args.kwargs["RequestItems"][get_public_albums.table.name]["ProjectionExpression"],
+            "albumId, uploadedAt",
+        )
+
     def test_provider_invalid_cursor_key_names_and_values_are_rejected(self):
         invalid_keys = (
             {"unknown": "value"},
@@ -337,6 +357,50 @@ class PublicAlbumDetailTests(unittest.TestCase):
             response_body(response),
             {"album": {"albumId": ALBUM_ID}, "images": [{"url": "https://media.example.test/photo"}]},
         )
+
+    def test_random_photos_are_sampled_only_from_public_photo_albums(self):
+        second_id = "22222222-2222-4222-8222-222222222222"
+        albums = [
+            public_album(),
+            public_album(
+                albumId=second_id,
+                title="Second album",
+                images=[{"rawKey": f"albums/{second_id}/original/second.jpg"}],
+            ),
+        ]
+
+        def serialize(album):
+            return [{"mediaId": album["images"][0]["rawKey"], "url": "https://media.example.test/photo.jpg"}]
+
+        with patch.object(get_public_album, "_random_photo_albums", return_value=albums), patch.object(
+            get_public_album, "serialize_images", side_effect=serialize
+        ):
+            response = get_public_album.handler(
+                {
+                    "rawPath": "/public/random-photos",
+                    "requestContext": {"routeKey": "GET /public/random-photos"},
+                    "queryStringParameters": None,
+                },
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+        body = response_body(response)
+        self.assertEqual(body["totalPhotos"], 2)
+        self.assertEqual({item["albumId"] for item in body["images"]}, {ALBUM_ID, second_id})
+        self.assertEqual({item["albumTitle"] for item in body["images"]}, {"Portfolio", "Second album"})
+
+    def test_random_photos_reject_query_parameters(self):
+        response = get_public_album.handler(
+            {
+                "rawPath": "/public/random-photos",
+                "requestContext": {"routeKey": "GET /public/random-photos"},
+                "queryStringParameters": {"limit": "500"},
+            },
+            None,
+        )
+        self.assertEqual(response["statusCode"], 400)
 
     def test_nonpublic_missing_and_inactive_records_are_indistinguishable(self):
         records = [None, public_album(visibility="private"), public_album(status="pending")]

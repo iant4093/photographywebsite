@@ -3,6 +3,7 @@ import {
     clearApiCache,
     fetchAlbum,
     fetchAlbumsPage,
+    fetchRandomPhotos,
     prefetchPublicAlbum,
     readCachedPublicAlbum,
 } from './api'
@@ -133,5 +134,29 @@ describe('public album detail cache', () => {
         expect(request).toHaveBeenCalledTimes(2)
         await expect(prefetchPublicAlbum('missing')).resolves.toBeNull()
         expect(request).toHaveBeenCalledTimes(3)
+    })
+})
+
+describe('random public photos', () => {
+    beforeEach(() => {
+        vi.stubGlobal('window', {
+            setTimeout: globalThis.setTimeout,
+            clearTimeout: globalThis.clearTimeout,
+        })
+    })
+
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('requests a fresh random session and annotates its media', async () => {
+        const request = vi.fn().mockResolvedValue(jsonResponse({
+            images: [{ mediaId: 'photo', url: 'https://media.test/photo.jpg' }],
+            totalPhotos: 42,
+        }))
+        vi.stubGlobal('fetch', request)
+
+        const payload = await fetchRandomPhotos()
+        expect(request.mock.calls[0][0]).toMatch(/\/public\/random-photos$/)
+        expect(payload.totalPhotos).toBe(42)
+        expect(payload.images).toHaveLength(1)
     })
 })
