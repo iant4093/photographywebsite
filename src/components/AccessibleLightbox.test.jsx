@@ -45,8 +45,10 @@ describe('AccessibleLightbox', () => {
         expect(screen.getByRole('dialog', { name: 'Test viewer' })).toHaveClass('linen-lightbox')
         expect(appRoot).toHaveAttribute('inert')
         expect(appRoot).toHaveAttribute('aria-hidden', 'true')
-        expect(screen.getByTestId('site-navigation')).toHaveStyle({ visibility: 'hidden', pointerEvents: 'none' })
-        expect(screen.getByTestId('film-scrollbar')).toHaveStyle({ visibility: 'hidden', pointerEvents: 'none' })
+        expect(screen.getByTestId('site-navigation').style.visibility).toBe('')
+        expect(screen.getByTestId('site-navigation').style.pointerEvents).toBe('')
+        expect(screen.getByTestId('film-scrollbar').style.visibility).toBe('')
+        expect(screen.getByTestId('film-scrollbar').style.pointerEvents).toBe('')
         expect(document.body.style.overflow).toBe('hidden')
         expect(document.body.style.position).toBe('fixed')
 

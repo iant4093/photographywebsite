@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import AccessibleLightbox from './AccessibleLightbox'
 import {
     mediaDisplayUrl,
@@ -18,6 +19,7 @@ function PhotoLightbox({
     loading = false,
     emptyMessage = '',
 }) {
+    const [loadedImageId, setLoadedImageId] = useState(null)
     const activeImage = images[index]
     if (!activeImage && !loading && !emptyMessage) return null
 
@@ -33,7 +35,7 @@ function PhotoLightbox({
             onClose={onClose}
             onNext={images.length > 1 ? onNext : undefined}
             onPrevious={images.length > 1 ? onPrevious : undefined}
-            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal flex flex-col items-center justify-center p-4 md:p-12 mb-0"
+            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/75 flex flex-col items-center justify-center p-4 md:p-12 mb-0"
         >
             <button
                 type="button"
@@ -102,12 +104,13 @@ function PhotoLightbox({
                                 srcSet={previewSrcSet || undefined}
                                 sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
                                 alt="Full size preview"
+                                onLoad={() => setLoadedImageId(activeId)}
                                 onError={onMediaError}
                                 width={activeImage.width}
                                 height={activeImage.height}
                                 decoding="async"
                                 style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
-                                className="linen-lightbox-photo object-contain relative z-20 animate-fade-in"
+                                className={`linen-lightbox-photo object-contain relative z-20 ${loadedImageId === activeId ? 'is-loaded' : ''}`}
                             />
                         </div>
                     ) : (

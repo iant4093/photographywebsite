@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import PhotoLightbox from './PhotoLightbox'
 
@@ -40,9 +40,16 @@ describe('PhotoLightbox', () => {
     expect(document.querySelector('.linen-lightbox-media')).toHaveStyle({
       gridTemplate: 'minmax(0, 1fr) / minmax(0, 1fr)',
     })
+    const landscapePreview = screen.getByAltText('Full size preview')
+    expect(landscapePreview).not.toHaveClass('is-loaded')
+    fireEvent.load(landscapePreview)
+    expect(landscapePreview).toHaveClass('is-loaded')
 
     rerender(<PhotoLightbox images={[landscape, portrait]} index={1} ariaLabel="Photo viewer" onClose={vi.fn()} />)
     const fullImage = screen.getByAltText('Full size preview')
+    expect(fullImage).not.toHaveClass('is-loaded')
+    fireEvent.load(fullImage)
+    expect(fullImage).toHaveClass('is-loaded')
     expect(fullImage).toHaveAttribute('width', '1280')
     expect(fullImage).toHaveAttribute('height', '1920')
     expect(fullImage).toHaveStyle({

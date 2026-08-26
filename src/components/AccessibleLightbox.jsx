@@ -47,12 +47,6 @@ export default function AccessibleLightbox({
             right: document.body.style.right,
             width: document.body.style.width,
         }
-        const siteChromeState = Array.from(document.querySelectorAll('.linen-nav, .editorial-progress'))
-            .map((element) => ({
-                element,
-                visibility: element.style.visibility,
-                pointerEvents: element.style.pointerEvents,
-            }))
         const backgroundState = Array.from(dialog?.parentElement?.children || [])
             .filter((element) => element !== dialog)
             .map((element) => ({
@@ -68,10 +62,6 @@ export default function AccessibleLightbox({
         backgroundState.forEach(({ element }) => {
             element.setAttribute('inert', '')
             element.setAttribute('aria-hidden', 'true')
-        })
-        siteChromeState.forEach(({ element }) => {
-            element.style.visibility = 'hidden'
-            element.style.pointerEvents = 'none'
         })
         Object.assign(document.body.style, {
             overflow: 'hidden',
@@ -126,10 +116,6 @@ export default function AccessibleLightbox({
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
             Object.assign(document.body.style, previousBodyStyles)
-            siteChromeState.forEach(({ element, visibility, pointerEvents }) => {
-                element.style.visibility = visibility
-                element.style.pointerEvents = pointerEvents
-            })
             backgroundState.forEach(({ element, ariaHidden, inert }) => {
                 if (!inert) element.removeAttribute('inert')
                 if (ariaHidden === null) element.removeAttribute('aria-hidden')
