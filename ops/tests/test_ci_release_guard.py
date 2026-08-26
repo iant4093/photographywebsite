@@ -726,18 +726,24 @@ class StackGuardTests(unittest.TestCase):
                 release_guard.previous_parameter_payload(stack)
 
     def test_stack_invariants_accept_stable_expected_outputs(self):
-        release_guard.require_stack_invariants(
-            {
-                "StackStatus": "UPDATE_COMPLETE",
-                "EnableTerminationProtection": True,
-                "Outputs": [
-                    {"OutputKey": "AlbumIndexDeploymentPhase", "OutputValue": "both"},
-                    {"OutputKey": "PrivateMediaCloudFrontDenyEnforced", "OutputValue": "true"},
-                    {"OutputKey": "FrontDoorEnforcementEnabled", "OutputValue": "true"},
-                    {"OutputKey": "ExecuteApiEndpointDisabled", "OutputValue": "true"},
-                ],
-            }
-        )
+        for status in (
+            "CREATE_COMPLETE",
+            "UPDATE_COMPLETE",
+            "UPDATE_ROLLBACK_COMPLETE",
+        ):
+            with self.subTest(status=status):
+                release_guard.require_stack_invariants(
+                    {
+                        "StackStatus": status,
+                        "EnableTerminationProtection": True,
+                        "Outputs": [
+                            {"OutputKey": "AlbumIndexDeploymentPhase", "OutputValue": "both"},
+                            {"OutputKey": "PrivateMediaCloudFrontDenyEnforced", "OutputValue": "true"},
+                            {"OutputKey": "FrontDoorEnforcementEnabled", "OutputValue": "true"},
+                            {"OutputKey": "ExecuteApiEndpointDisabled", "OutputValue": "true"},
+                        ],
+                    }
+                )
 
     def test_stack_invariants_fail_closed(self):
         base = {

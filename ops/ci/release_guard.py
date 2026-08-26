@@ -435,7 +435,15 @@ def require_environment_contract(source: str, policy: Any, *, template_kind: str
 
 def require_stack_invariants(stack: dict[str, Any]) -> None:
     status = stack.get("StackStatus")
-    if status not in {"CREATE_COMPLETE", "UPDATE_COMPLETE"}:
+    # UPDATE_ROLLBACK_COMPLETE is a stable, deployable state. CloudFormation
+    # leaves an existing stack there after a failed update has been fully
+    # rolled back; rejecting it would prevent the corrected release from ever
+    # restoring the stack to UPDATE_COMPLETE.
+    if status not in {
+        "CREATE_COMPLETE",
+        "UPDATE_COMPLETE",
+        "UPDATE_ROLLBACK_COMPLETE",
+    }:
         raise GateError("stack is not in a deployable stable state")
     if stack.get("EnableTerminationProtection") is not True:
         raise GateError("stack termination protection invariant failed")
