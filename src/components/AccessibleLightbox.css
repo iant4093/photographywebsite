@@ -71,7 +71,9 @@
   .linen-photo-lightbox .linen-lightbox-content {
     display: grid !important;
     grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
+    justify-items: stretch;
     gap: 0.5rem;
     overflow: hidden;
   }
