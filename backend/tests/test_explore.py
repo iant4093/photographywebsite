@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -279,6 +280,22 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(body["initialPage"]["items"][0]["mediaId"], MEDIA_ID)
         page.assert_called_once_with("color", "blue", get_public_album.EXPLORE_DEFAULT_LIMIT)
         self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+
+    def test_materialized_count_uses_a_true_low_level_dynamodb_client(self):
+        partition = facet_partition("color", "blue")
+        with patch.dict(os.environ, {"PREVIEW_METADATA_TABLE": "previews"}), patch.object(
+            get_public_album, "dynamodb_client"
+        ) as client:
+            client.query.return_value = {"Count": 4}
+
+            self.assertEqual(get_public_album._index_partition_count(partition), 4)
+
+        client.query.assert_called_once_with(
+            TableName="previews",
+            KeyConditionExpression="albumId = :partition",
+            ExpressionAttributeValues={":partition": {"S": partition}},
+            Select="COUNT",
+        )
 
 
 if __name__ == "__main__":

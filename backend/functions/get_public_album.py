@@ -42,6 +42,7 @@ from validation_helpers import ValidationError, validate_uuid
 
 
 dynamodb = boto3.resource("dynamodb")
+dynamodb_client = boto3.client("dynamodb")
 table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
 s3 = boto3.client("s3")
 
@@ -301,7 +302,7 @@ def _index_partition_count(partition):
             arguments["ExclusiveStartKey"] = cursor
         # The low-level client is thread-safe; boto3 Resource objects are not
         # shared across the parallel count workers.
-        response = dynamodb.meta.client.query(**arguments)
+        response = dynamodb_client.query(**arguments)
         count += int(response.get("Count") or 0)
         cursor = response.get("LastEvaluatedKey")
         if not cursor:
