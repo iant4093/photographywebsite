@@ -116,11 +116,10 @@ describe('SharedAlbum access and gallery', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
     fireEvent.click(screen.getByRole('img', { name: 'Item 1 from Shared Photos' }))
-    const reopened = screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed')
-    fireEvent.click(reopened.querySelector('button.absolute.top-6'))
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
     fireEvent.click(screen.getByRole('img', { name: 'Item 1 from Shared Photos' }))
-    fireEvent.click(screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed'))
+    fireEvent.mouseDown(screen.getByRole('dialog', { name: 'Photo viewer for Shared Photos' }))
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
   })
 
@@ -177,7 +176,7 @@ describe('SharedAlbum access and gallery', () => {
     expect(screen.getByText('Invalid share code')).toBeInTheDocument()
   })
 
-  it('supports video shares, prevents Escape for a lone video, and shows empty albums', async () => {
+  it('supports video shares, closes them accessibly, and shows empty albums', async () => {
     api.fetchSharedAlbum.mockResolvedValueOnce({ album: { title: 'Shared Video', type: 'video', createdAt: '2026-01-01' }, images: [{ id: 'v1', thumbnailUrl: 'thumb', url: 'video' }] })
     const first = renderShared('/sharedalbum/video')
     fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
@@ -186,7 +185,7 @@ describe('SharedAlbum access and gallery', () => {
     fireEvent.click(screen.getByRole('img', { name: 'Item 1 from Shared Video' }))
     expect(screen.getByText('Video v1')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'Escape' })
-    expect(screen.getByText('Video v1')).toBeInTheDocument()
+    expect(screen.queryByText('Video v1')).toBeNull()
     first.unmount()
 
     api.fetchSharedAlbum.mockResolvedValueOnce({ album: { title: 'Empty', type: 'photo', createdAt: '2026-01-01' }, images: [] })

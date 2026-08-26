@@ -59,6 +59,7 @@ class ObserverStub {
 
 globalThis.IntersectionObserver ??= ObserverStub
 globalThis.ResizeObserver ??= ObserverStub
+window.scrollTo = vi.fn()
 globalThis.matchMedia ??= vi.fn().mockImplementation((query) => ({
   matches: false,
   media: query,
@@ -73,4 +74,5 @@ globalThis.matchMedia ??= vi.fn().mockImplementation((query) => ({
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.clearAllMocks()
 })

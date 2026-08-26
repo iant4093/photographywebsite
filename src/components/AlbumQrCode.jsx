@@ -39,7 +39,7 @@ export default function AlbumQrCode({ albumTitle, qrCodeUrl, onLoadError }) {
                 <AccessibleLightbox
                     ariaLabel={`QR code for ${albumTitle}`}
                     onClose={close}
-                    className="fixed inset-0 z-[1000] bg-charcoal/95 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in"
+                    className="linen-qr-lightbox fixed inset-0 z-[1000] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-fade-in"
                 >
                     <button
                         type="button"
@@ -57,7 +57,7 @@ export default function AlbumQrCode({ albumTitle, qrCodeUrl, onLoadError }) {
                         </svg>
                     </button>
 
-                    <section className="linen-qr-card max-w-[min(88vw,32rem)] bg-cream p-5 md:p-8 text-center border border-charcoal shadow-2xl">
+                    <section className="linen-lightbox-content linen-qr-card max-w-[min(88vw,32rem)] bg-cream p-5 md:p-8 text-center border border-charcoal shadow-2xl">
                         {!imageError && (
                             <img
                                 src={qrCodeUrl}

@@ -25,11 +25,27 @@ export default function AccessibleLightbox({
 }) {
     const dialogRef = useRef(null)
     const restoreFocusRef = useRef(null)
+    const callbacksRef = useRef({ onClose, onNext, onPrevious })
     const portalTarget = typeof document === 'undefined' ? null : document.body
 
     useEffect(() => {
+        callbacksRef.current = { onClose, onNext, onPrevious }
+    }, [onClose, onNext, onPrevious])
+
+    useEffect(() => {
         const dialog = dialogRef.current
-        const previousOverflow = document.body.style.overflow
+        const scrollPosition = {
+            x: window.scrollX || window.pageXOffset || 0,
+            y: window.scrollY || window.pageYOffset || 0,
+        }
+        const previousBodyStyles = {
+            overflow: document.body.style.overflow,
+            position: document.body.style.position,
+            top: document.body.style.top,
+            left: document.body.style.left,
+            right: document.body.style.right,
+            width: document.body.style.width,
+        }
         const siteChromeState = Array.from(document.querySelectorAll('.linen-nav, .editorial-progress'))
             .map((element) => ({
                 element,
@@ -57,25 +73,30 @@ export default function AccessibleLightbox({
             element.style.pointerEvents = 'none'
         })
         document.body.style.overflow = 'hidden'
+        document.body.style.position = 'fixed'
+        document.body.style.top = `-${scrollPosition.y}px`
+        document.body.style.left = `-${scrollPosition.x}px`
+        document.body.style.right = '0'
+        document.body.style.width = '100%'
 
         const initialFocus = dialog?.querySelector('[data-lightbox-initial-focus]')
             || focusableElements(dialog)[0]
-        initialFocus?.focus()
+        initialFocus?.focus({ preventScroll: true })
 
         const handleKeyDown = (event) => {
             if (event.key === 'Escape') {
                 event.preventDefault()
-                onClose()
+                callbacksRef.current.onClose()
                 return
             }
-            if (event.key === 'ArrowRight' && onNext) {
+            if (event.key === 'ArrowRight' && callbacksRef.current.onNext) {
                 event.preventDefault()
-                onNext()
+                callbacksRef.current.onNext()
                 return
             }
-            if (event.key === 'ArrowLeft' && onPrevious) {
+            if (event.key === 'ArrowLeft' && callbacksRef.current.onPrevious) {
                 event.preventDefault()
-                onPrevious()
+                callbacksRef.current.onPrevious()
                 return
             }
             if (event.key !== 'Tab') return
@@ -101,7 +122,7 @@ export default function AccessibleLightbox({
         window.addEventListener('keydown', handleKeyDown)
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
-            document.body.style.overflow = previousOverflow
+            Object.assign(document.body.style, previousBodyStyles)
             siteChromeState.forEach(({ element, visibility, pointerEvents }) => {
                 element.style.visibility = visibility
                 element.style.pointerEvents = pointerEvents
@@ -111,9 +132,10 @@ export default function AccessibleLightbox({
                 if (ariaHidden === null) element.removeAttribute('aria-hidden')
                 else element.setAttribute('aria-hidden', ariaHidden)
             })
-            restoreFocusRef.current?.focus()
+            restoreFocusRef.current?.focus({ preventScroll: true })
+            window.scrollTo(scrollPosition.x, scrollPosition.y)
         }
-    }, [onClose, onNext, onPrevious])
+    }, [])
 
     if (!portalTarget) return null
 

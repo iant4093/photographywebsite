@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import AccessibleLightbox from './AccessibleLightbox'
 
@@ -48,6 +48,7 @@ describe('AccessibleLightbox', () => {
         expect(screen.getByTestId('site-navigation')).toHaveStyle({ visibility: 'hidden', pointerEvents: 'none' })
         expect(screen.getByTestId('film-scrollbar')).toHaveStyle({ visibility: 'hidden', pointerEvents: 'none' })
         expect(document.body.style.overflow).toBe('hidden')
+        expect(document.body.style.position).toBe('fixed')
 
         const close = screen.getByRole('button', { name: 'Close viewer' })
         const download = screen.getByRole('button', { name: 'Download item' })
@@ -64,6 +65,36 @@ describe('AccessibleLightbox', () => {
         expect(screen.getByTestId('site-navigation')).not.toHaveStyle({ visibility: 'hidden' })
         expect(screen.getByTestId('film-scrollbar')).not.toHaveStyle({ visibility: 'hidden' })
         expect(document.body.style.overflow).toBe('')
+        expect(document.body.style.position).toBe('')
         expect(opener).toHaveFocus()
+    })
+
+    it('keeps its original scroll lock across callback rerenders and restores the exact offset', () => {
+        window.scrollTo.mockClear()
+        vi.spyOn(window, 'scrollX', 'get').mockReturnValue(11)
+        vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640)
+        const firstClose = vi.fn()
+        const secondClose = vi.fn()
+        const { rerender, unmount } = render(
+            <AccessibleLightbox ariaLabel="Stable viewer" onClose={firstClose}>
+                <button type="button">Viewer action</button>
+            </AccessibleLightbox>,
+        )
+
+        expect(document.body.style.top).toBe('-640px')
+        rerender(
+            <AccessibleLightbox ariaLabel="Stable viewer" onClose={secondClose}>
+                <button type="button">Viewer action</button>
+            </AccessibleLightbox>,
+        )
+        expect(window.scrollTo).not.toHaveBeenCalled()
+        expect(document.body.style.top).toBe('-640px')
+
+        fireEvent.keyDown(window, { key: 'Escape' })
+        expect(firstClose).not.toHaveBeenCalled()
+        expect(secondClose).toHaveBeenCalledOnce()
+        unmount()
+        expect(window.scrollTo).toHaveBeenLastCalledWith(11, 640)
+        expect(document.body.style.top).toBe('')
     })
 })

@@ -45,7 +45,14 @@ describe('PhotoLightbox', () => {
     const fullImage = screen.getByAltText('Full size preview')
     expect(fullImage).toHaveAttribute('width', '1280')
     expect(fullImage).toHaveAttribute('height', '1920')
-    expect(fullImage).toHaveStyle({ width: 'auto', height: '100%' })
+    expect(fullImage).toHaveStyle({
+      width: 'auto',
+      height: 'auto',
+      maxWidth: '100%',
+      maxHeight: '100%',
+    })
     expect(document.querySelectorAll('.linen-lightbox-media')).toHaveLength(1)
+    expect(screen.getByRole('navigation', { name: 'Photo navigation' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close photo viewer' })).toHaveClass('linen-lightbox-close')
   })
 })

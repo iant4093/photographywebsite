@@ -2,14 +2,13 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useNavigationType } from 'react-router'
 import { useAuth } from '../context/auth'
 import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { useScrollRestoration, saveVerticalScroll, getSavedScroll, markAsRevealed } from '../utils/scroll'
 import {
-    mediaDisplayUrl,
     mediaFileName,
     mediaId,
     mediaPreviewSrcSet,
@@ -19,6 +18,7 @@ import {
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
+import PhotoLightbox from '../components/PhotoLightbox'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -208,18 +208,7 @@ function UserDashboard() {
     const goPrev = useCallback(() => {
         setLightboxIndex((i) => (i - 1 + images.length) % images.length)
     }, [images.length])
-
-    // Keyboard navigation for lightbox
-    useEffect(() => {
-        if (lightboxIndex === null) return
-        function handleKey(e) {
-            if (e.key === 'ArrowRight') goNext()
-            if (e.key === 'ArrowLeft') goPrev()
-            if (e.key === 'Escape') setLightboxIndex(null)
-        }
-        window.addEventListener('keydown', handleKey)
-        return () => window.removeEventListener('keydown', handleKey)
-    }, [lightboxIndex, goNext, goPrev])
+    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
 
     // Download current lightbox image
     const downloadImage = async (e) => {
@@ -445,126 +434,18 @@ function UserDashboard() {
                 )}
             </div>
 
-            {/* Lightbox Overlay */}
-            <AnimatePresence>
-                {lightboxIndex !== null && images[lightboxIndex] && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="fixed inset-0 z-[100] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0"
-                        onClick={() => setLightboxIndex(null)}
-                    >
-                        <button onClick={() => setLightboxIndex(null)} className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors cursor-pointer z-10">
-                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-
-                        {/* Previous arrow */}
-                        <button
-                            onClick={(e) => { e.stopPropagation(); goPrev() }}
-                            className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                        >
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                            </svg>
-                        </button>
-
-                        {/* Next arrow */}
-                        <button
-                            onClick={(e) => { e.stopPropagation(); goNext() }}
-                            className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                        >
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
-                        </button>
-
-                        {/* Image Wrapper & Info */}
-                        <div
-                            className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            {(() => {
-                                const activeImg = images[lightboxIndex]
-                                const thumbUrl = mediaThumbnailUrl(activeImg)
-                                const activeRawUrl = mediaDisplayUrl(activeImg)
-
-                                return (
-                                    <>
-                                        <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
-                                            {/* High-res image with faded-in loading */}
-                                            <motion.img
-                                                key={`high-${mediaId(activeImg) || lightboxIndex}`}
-                                                src={activeRawUrl}
-                                                alt="Full size preview"
-                                                onError={() => requestSelectedRefresh('media-error')}
-                                                width={activeImg.width}
-                                                height={activeImg.height}
-                                                decoding="async"
-                                                initial={{ opacity: 0 }}
-                                                animate={{ opacity: 1 }}
-                                                exit={{ opacity: 0 }}
-                                                transition={{ duration: 0.4, delay: 0.1 }}
-                                                className="linen-lightbox-photo max-w-full max-h-full object-contain relative z-20"
-                                                style={{ willChange: "opacity" }}
-                                            />
-
-                                            {/* Placeholder thumbnail for instant visual feedback */}
-                                            <img
-                                                src={thumbUrl}
-                                                alt=""
-                                                className="absolute inset-0 w-full h-full object-contain blur-sm scale-95 opacity-50 z-10 pointer-events-none"
-                                            />
-                                        </div>
-
-                                        {/* EXIF Data Overlay */}
-                                        {activeImg && activeImg.exif && (
-                                            <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
-                                                {activeImg.exif.model && (
-                                                    <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
-                                                        {activeImg.exif.model}
-                                                    </p>
-                                                )}
-                                                {activeImg.exif.lens && (
-                                                    <p className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
-                                                        {activeImg.exif.lens}
-                                                    </p>
-                                                )}
-                                                <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
-                                                    {activeImg.exif.focalLength && <span>{activeImg.exif.focalLength}</span>}
-                                                    {activeImg.exif.focalRatio && <span>{activeImg.exif.focalRatio}</span>}
-                                                    {activeImg.exif.shutterSpeed && <span>{activeImg.exif.shutterSpeed}</span>}
-                                                    {activeImg.exif.iso && <span>{activeImg.exif.iso}</span>}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </>
-                                )
-                            })()}
-                        </div>
-
-                        {/* Download & Image counter */}
-                        <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>
-                            <button
-                                onClick={downloadImage}
-                                className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
-                                title="Download Photo"
-                            >
-                                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                            </button>
-                            <span className="text-white/70 text-sm font-medium drop-shadow-md">
-                                {lightboxIndex + 1} / {images.length}
-                            </span>
-                        </div>
-                    </motion.div>
-                )
-                }
-            </AnimatePresence >
+            {lightboxIndex !== null && images[lightboxIndex] && (
+                <PhotoLightbox
+                    images={images}
+                    index={lightboxIndex}
+                    ariaLabel={`Photo viewer for ${selectedAlbum?.title || 'private album'}`}
+                    onClose={closeLightbox}
+                    onNext={goNext}
+                    onPrevious={goPrev}
+                    onDownload={downloadImage}
+                    onMediaError={() => requestSelectedRefresh('media-error')}
+                />
+            )}
         </motion.div >
     )
 }

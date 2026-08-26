@@ -33,7 +33,7 @@ function PhotoLightbox({
             onClose={onClose}
             onNext={images.length > 1 ? onNext : undefined}
             onPrevious={images.length > 1 ? onPrevious : undefined}
-            className="fixed inset-0 z-[1000] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0 animate-fade-in"
+            className="linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/95 backdrop-blur-md flex flex-col items-center justify-center p-4 md:p-12 mb-0 animate-fade-in"
         >
             <button
                 type="button"
@@ -53,11 +53,11 @@ function PhotoLightbox({
             </button>
 
             {images.length > 1 && (
-                <>
+                <nav className="linen-lightbox-nav" aria-label="Photo navigation">
                     <button
                         type="button"
                         onClick={(event) => { event.stopPropagation(); onPrevious() }}
-                        className="absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                        className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                         aria-label="Previous photo"
                     >
                         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -68,18 +68,18 @@ function PhotoLightbox({
                     <button
                         type="button"
                         onClick={(event) => { event.stopPropagation(); onNext() }}
-                        className="absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                        className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                         aria-label="Next photo"
                     >
                         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                     </button>
-                </>
+                </nav>
             )}
 
             <div
-                className="flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
+                className="linen-lightbox-content flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
                 onClick={(event) => event.stopPropagation()}
             >
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
@@ -94,8 +94,8 @@ function PhotoLightbox({
                                 alt=""
                                 width={activeImage.width}
                                 height={activeImage.height}
-                                style={{ width: 'auto', height: '100%' }}
-                                className="linen-lightbox-placeholder max-w-full object-contain blur-sm opacity-50 z-10 pointer-events-none"
+                                style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
+                                className="linen-lightbox-placeholder object-contain blur-sm opacity-50 z-10 pointer-events-none"
                             />
                             <img
                                 src={activeRawUrl}
@@ -106,8 +106,8 @@ function PhotoLightbox({
                                 width={activeImage.width}
                                 height={activeImage.height}
                                 decoding="async"
-                                style={{ width: 'auto', height: '100%' }}
-                                className="linen-lightbox-photo max-w-full object-contain relative z-20 animate-fade-in"
+                                style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
+                                className="linen-lightbox-photo object-contain relative z-20 animate-fade-in"
                             />
                         </div>
                     ) : (
@@ -144,7 +144,7 @@ function PhotoLightbox({
             </div>
 
             {activeImage && (
-                <div className="shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
+                <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
                     {onDownload && (
                         <button
                             type="button"
