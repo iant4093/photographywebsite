@@ -39,7 +39,7 @@ export default function AlbumQrCode({ albumTitle, qrCodeUrl, onLoadError }) {
                 <AccessibleLightbox
                     ariaLabel={`QR code for ${albumTitle}`}
                     onClose={close}
-                    className="linen-responsive-lightbox linen-qr-lightbox fixed inset-0 z-[1000] bg-charcoal/[0.84] flex flex-col items-center justify-center p-6"
+                    className="linen-responsive-lightbox linen-qr-lightbox fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-6"
                 >
                     <button
                         type="button"

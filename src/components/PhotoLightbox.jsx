@@ -7,7 +7,7 @@ import {
     mediaThumbnailUrl,
 } from '../utils/mediaUrls'
 
-const PHOTO_CROSSFADE_MS = 180
+const PHOTO_CROSSFADE_MS = 260
 
 function PhotoLightbox({
     images,
@@ -71,7 +71,7 @@ function PhotoLightbox({
             onClose={onClose}
             onNext={images.length > 1 ? onNext : undefined}
             onPrevious={images.length > 1 ? onPrevious : undefined}
-            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/[0.84] flex flex-col items-center justify-center p-4 md:p-12 mb-0"
+            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0"
         >
             <button
                 type="button"

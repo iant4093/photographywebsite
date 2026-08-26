@@ -66,7 +66,7 @@ describe('PhotoLightbox', () => {
     expect(document.querySelectorAll('.linen-lightbox-media')).toHaveLength(1)
     expect(screen.getByRole('navigation', { name: 'Photo navigation' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close photo viewer' })).toHaveClass('linen-lightbox-close')
-    expect(screen.getByRole('dialog')).toHaveClass('bg-charcoal/[0.84]')
+    expect(screen.getByRole('dialog')).toHaveClass('bg-charcoal/90')
   })
 
   it('shows pending and empty states without requiring an active photograph', () => {
