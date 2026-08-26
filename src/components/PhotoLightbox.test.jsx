@@ -47,9 +47,14 @@ describe('PhotoLightbox', () => {
 
     rerender(<PhotoLightbox images={[landscape, portrait]} index={1} ariaLabel="Photo viewer" onClose={vi.fn()} />)
     const fullImage = screen.getByAltText('Full size preview')
+    const outgoingImage = document.querySelector('.linen-lightbox-photo-outgoing')
+    expect(outgoingImage).toBeInTheDocument()
+    expect(outgoingImage).toHaveAttribute('src', landscape.url)
+    expect(outgoingImage).not.toHaveClass('is-exiting')
     expect(fullImage).not.toHaveClass('is-loaded')
     fireEvent.load(fullImage)
     expect(fullImage).toHaveClass('is-loaded')
+    expect(outgoingImage).toHaveClass('is-exiting')
     expect(fullImage).toHaveAttribute('width', '1280')
     expect(fullImage).toHaveAttribute('height', '1920')
     expect(fullImage).toHaveStyle({
@@ -61,6 +66,7 @@ describe('PhotoLightbox', () => {
     expect(document.querySelectorAll('.linen-lightbox-media')).toHaveLength(1)
     expect(screen.getByRole('navigation', { name: 'Photo navigation' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close photo viewer' })).toHaveClass('linen-lightbox-close')
+    expect(screen.getByRole('dialog')).toHaveClass('bg-charcoal/[0.84]')
   })
 
   it('shows pending and empty states without requiring an active photograph', () => {

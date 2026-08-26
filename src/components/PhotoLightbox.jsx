@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AccessibleLightbox from './AccessibleLightbox'
 import {
     mediaDisplayUrl,
@@ -6,6 +6,8 @@ import {
     mediaPreviewSrcSet,
     mediaThumbnailUrl,
 } from '../utils/mediaUrls'
+
+const PHOTO_CROSSFADE_MS = 180
 
 function PhotoLightbox({
     images,
@@ -20,14 +22,48 @@ function PhotoLightbox({
     emptyMessage = '',
 }) {
     const [loadedImageId, setLoadedImageId] = useState(null)
+    const [settledImage, setSettledImage] = useState(null)
+    const settledImageRef = useRef(null)
+    const transitionTimerRef = useRef(null)
     const activeImage = images[index]
-    if (!activeImage && !loading && !emptyMessage) return null
-
-    const isLegacyOrDemo = typeof activeImage === 'string'
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
     const thumbUrl = activeImage ? mediaThumbnailUrl(activeImage) : ''
     const activeRawUrl = activeImage ? mediaDisplayUrl(activeImage) : ''
     const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
+
+    useEffect(() => () => {
+        window.clearTimeout(transitionTimerRef.current)
+        transitionTimerRef.current = null
+    }, [activeId])
+
+    if (!activeImage && !loading && !emptyMessage) return null
+
+    const isLegacyOrDemo = typeof activeImage === 'string'
+    const hasOutgoingImage = settledImage && settledImage.id !== activeId
+
+    const handleFullImageLoad = () => {
+        const nextSettledImage = {
+            id: activeId,
+            image: activeImage,
+            rawUrl: activeRawUrl,
+            previewSrcSet,
+        }
+
+        setLoadedImageId(activeId)
+        window.clearTimeout(transitionTimerRef.current)
+
+        if (!settledImageRef.current || settledImageRef.current.id === activeId) {
+            settledImageRef.current = nextSettledImage
+            setSettledImage(nextSettledImage)
+            return
+        }
+
+        transitionTimerRef.current = window.setTimeout(() => {
+            settledImageRef.current = nextSettledImage
+            setSettledImage(nextSettledImage)
+            transitionTimerRef.current = null
+        }, PHOTO_CROSSFADE_MS)
+    }
 
     return (
         <AccessibleLightbox
@@ -35,7 +71,7 @@ function PhotoLightbox({
             onClose={onClose}
             onNext={images.length > 1 ? onNext : undefined}
             onPrevious={images.length > 1 ? onPrevious : undefined}
-            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/75 flex flex-col items-center justify-center p-4 md:p-12 mb-0"
+            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/[0.84] flex flex-col items-center justify-center p-4 md:p-12 mb-0"
         >
             <button
                 type="button"
@@ -87,11 +123,11 @@ function PhotoLightbox({
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {activeImage ? (
                         <div
-                            key={`media-${activeId}`}
                             className="linen-lightbox-media absolute inset-0"
                             style={{ gridTemplate: 'minmax(0, 1fr) / minmax(0, 1fr)' }}
                         >
                             <img
+                                key={`placeholder-${activeId}`}
                                 src={thumbUrl}
                                 alt=""
                                 width={activeImage.width}
@@ -99,18 +135,33 @@ function PhotoLightbox({
                                 style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
                                 className="linen-lightbox-placeholder object-contain blur-sm opacity-50 z-10 pointer-events-none"
                             />
+                            {hasOutgoingImage && (
+                                <img
+                                    src={settledImage.rawUrl}
+                                    srcSet={settledImage.previewSrcSet || undefined}
+                                    sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
+                                    alt=""
+                                    aria-hidden="true"
+                                    width={settledImage.image.width}
+                                    height={settledImage.image.height}
+                                    decoding="async"
+                                    style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
+                                    className={`linen-lightbox-photo linen-lightbox-photo-outgoing is-loaded object-contain relative z-20 ${loadedImageId === activeId ? 'is-exiting' : ''}`}
+                                />
+                            )}
                             <img
+                                key={`preview-${activeId}`}
                                 src={activeRawUrl}
                                 srcSet={previewSrcSet || undefined}
                                 sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
                                 alt="Full size preview"
-                                onLoad={() => setLoadedImageId(activeId)}
+                                onLoad={handleFullImageLoad}
                                 onError={onMediaError}
                                 width={activeImage.width}
                                 height={activeImage.height}
                                 decoding="async"
                                 style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
-                                className={`linen-lightbox-photo object-contain relative z-20 ${loadedImageId === activeId ? 'is-loaded' : ''}`}
+                                className={`linen-lightbox-photo object-contain relative z-30 ${loadedImageId === activeId ? 'is-loaded' : ''}`}
                             />
                         </div>
                     ) : (

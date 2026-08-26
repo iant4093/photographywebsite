@@ -407,7 +407,7 @@ export default function SharedAlbum() {
                     onClose={closeLightbox}
                     onNext={images.length > 1 ? goNext : undefined}
                     onPrevious={images.length > 1 ? goPrev : undefined}
-                    className="linen-responsive-lightbox linen-video-lightbox fixed inset-0 z-[1000] bg-charcoal/75 flex flex-col items-center justify-center p-4 md:p-12"
+                    className="linen-responsive-lightbox linen-video-lightbox fixed inset-0 z-[1000] bg-charcoal/[0.84] flex flex-col items-center justify-center p-4 md:p-12"
                 >
                         <button type="button" onClick={closeLightbox} className="linen-lightbox-close fixed z-[1001] w-12 h-12 text-white/80 hover:text-white transition-colors cursor-pointer flex items-center justify-center" aria-label="Close video player" data-lightbox-initial-focus>
                             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
