@@ -76,10 +76,10 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   posture smoke, and detects drift for the versioned application, CI bootstrap,
   security, WAF, backup, and observability stack inventory in `us-west-2`,
   `us-east-1`, and `us-east-2`, plus exact secret-redacted frontend edge and
-  bucket posture. It also verifies the exact GuardDuty detector, Security Hub,
-  and two reviewed standards in the home Region. `PENDING` is accepted only
-  during an AWS control expansion when both standards remain updatable and
-  expose no failure reason. It does not claim managed
+  bucket posture. It also verifies the exact GuardDuty detector and the
+  standards-free Security Hub contract in the home Region; any enabled standard
+  fails the audit because targeted Config rules are the approved cost-bounded
+  checks. It does not claim managed
   detector or hub coverage in other Regions, and it never remediates drift.
 
 ## Required GitHub settings

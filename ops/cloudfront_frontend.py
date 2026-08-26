@@ -580,6 +580,10 @@ def validate_front_door_resources(
         if isinstance(rule, dict)
     }
     expected_actions = {
+        "ExplorePerIpRateLimit": ("Action", "Block"),
+        "ExploreGlobalCircuitBreaker": ("Action", "Block"),
+        "ApiPerIpRateLimit": ("Action", "Block"),
+        "ApiGlobalCircuitBreaker": ("Action", "Block"),
         "AWSManagedKnownBadInputs": ("OverrideAction", "None"),
         "AWSManagedAmazonIpReputation": ("OverrideAction", "None"),
     }
@@ -588,6 +592,23 @@ def validate_front_door_resources(
         for name, (container, action) in expected_actions.items()
     ):
         raise SystemExit("Refusing front door: WAF selective-block rule contract differs")
+    for name, aggregate_key, limit, path, positional_constraint in (
+        ("ExplorePerIpRateLimit", "IP", 30, "/api/public/explore", "EXACTLY"),
+        ("ExploreGlobalCircuitBreaker", "CONSTANT", 120, "/api/public/explore", "EXACTLY"),
+        ("ApiPerIpRateLimit", "IP", 1200, "/api/", "STARTS_WITH"),
+        ("ApiGlobalCircuitBreaker", "CONSTANT", 3000, "/api/", "STARTS_WITH"),
+    ):
+        rate = actual_rules[name].get("Statement", {}).get("RateBasedStatement", {})
+        scope = rate.get("ScopeDownStatement", {}).get("ByteMatchStatement", {})
+        if (
+            rate.get("AggregateKeyType") != aggregate_key
+            or rate.get("EvaluationWindowSec") != 300
+            or rate.get("Limit") != limit
+            or scope.get("SearchString") != path
+            or scope.get("PositionalConstraint") != positional_constraint
+            or scope.get("FieldToMatch") != {"UriPath": {}}
+        ):
+            raise SystemExit("Refusing front door: WAF API rate-limit contract differs")
 
     api_domain = aws_json(
         ["apigatewayv2", "get-domain-name", "--domain-name", domain, "--region", region],

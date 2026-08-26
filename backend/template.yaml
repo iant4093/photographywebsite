@@ -2787,6 +2787,7 @@ Resources:
     Properties:
       CodeUri: ./
       Handler: photography_stats.handler
+      ReservedConcurrentExecutions: 5
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable

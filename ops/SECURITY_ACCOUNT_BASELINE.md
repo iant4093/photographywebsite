@@ -110,11 +110,12 @@ current owner:
   Check Organizations and delegated-
   administrator ownership before changing features.
 - Existing hub: `SecurityHubDeploymentMode=skip` only after the home hub has
-  exactly the reviewed Foundational Security Best Practices and CIS 1.2.0
-  default standards. Each standard must be `READY`, or provider-reconciling
-  `PENDING` while controls remain `READY_FOR_UPDATES` and no status reason is
-  present. Also check central configuration and delegated administration before
-  changing its configuration.
+  zero enabled standards, the reviewed `SECURITY_CONTROL` finding generator,
+  and the required tags. Broad standards are intentionally disabled because
+  their paid Config evaluations are disproportionate for this account; the
+  targeted Config rules below remain the approved control set. Also check
+  central configuration and delegated administration before changing its
+  configuration.
 - Existing account analyzer: `AccessAnalyzerDeploymentMode=skip`; preserve its
   archive rules.
 - Existing named trail, log group, topic, KMS alias, queue, rule, alarm, vault,
@@ -148,16 +149,13 @@ unknown features, duplicate features, or any feature-state difference fail
 closed.
 
 It also requires the home Security Hub default hub, the `SECURITY_CONTROL`
-finding generator, the required application/stage tags, and exactly the reviewed
-Foundational Security Best Practices and CIS 1.2.0 standards. `READY` is the
-steady state. AWS also uses `PENDING` while it adds controls to an already
-enabled standard; that state is accepted only when controls remain
-`READY_FOR_UPDATES` and no status reason exists. A missing hub, extra or missing
-standard, non-updatable transition, failure reason, malformed provider response,
-access failure, or timeout returns exit status `2`. Errors are generic, and a
-successful report contains only detector, hub, standard, and provider-transition
-counts plus `IN_SYNC`; it never exposes detector IDs, ARNs, account identity,
-tags, findings, or provider responses.
+finding generator, the required application/stage tags, and zero enabled
+standards. Any enabled standard is drift from the reviewed cost-bounded posture.
+A missing hub, enabled standard, malformed provider response, access failure, or
+timeout returns exit status `2`. Errors are generic, and a successful report
+contains only detector, hub, standard, and provider-transition counts plus
+`IN_SYNC`; it never exposes detector IDs, ARNs, account identity, tags, findings,
+or provider responses.
 
 This verifier performs no mutation and does not inventory or claim protection
 outside the home Region. Create or update the managed-services stack only through
@@ -378,12 +376,12 @@ monitoring are disabled. The home posture verifier additionally requires the
 service-managed CloudTrail, DNS, and flow-log sources to be enabled and AI
 analyst, AI protection, and legacy EKS runtime monitoring to be disabled.
 Enable other protection plans only with a documented threat model,
-supported-resource inventory, and cost approval. Confirm
-Security Hub standards and organization ownership before creating the hub. The
-home posture verifier requires both reviewed standards to be fully updatable
-and free of a failure reason; the steady state is `READY`, while AWS control
-expansion may temporarily report `PENDING`. The managed-services template
-enables them when the same home stack creates the Config recorder.
+supported-resource inventory, and cost approval. Confirm Security Hub and
+organization ownership before creating the hub. The home posture verifier
+requires the hub to remain standards-free; the managed-services template also
+sets `EnableDefaultStandards: false`. Enable a broad standard only through a
+separately reviewed cost and control-coverage decision that updates this
+contract and its tests.
 The Config layer also checks public S3 writes, default S3 encryption, public
 Lambda function access, and customer-managed KMS key rotation. These rules use
 only resource types already recorded by the exact home-region recorder. The

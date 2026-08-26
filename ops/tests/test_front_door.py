@@ -6,6 +6,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import re
 import secrets
 import sys
 import unittest
@@ -218,7 +219,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
             **{key: value for key, value in common.items() if key != "apply"}, apply=False
         )
 
-    def test_resource_validation_reads_only_metadata_and_requires_count_mode(self) -> None:
+    def test_resource_validation_reads_only_metadata_and_requires_exact_block_contract(self) -> None:
         account = "000000000000"
         certificate_arn = f"arn:aws:acm:us-west-2:{account}:certificate/certificate-id"
         parameter_name = "/ian-website/prod/front-door-config"
@@ -237,6 +238,78 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                     "ARN": web_acl_arn,
                     "DefaultAction": {"Allow": {}},
                     "Rules": [
+                        {
+                            "Name": "ExplorePerIpRateLimit",
+                            "Action": {"Block": {}},
+                            "Statement": {
+                                "RateBasedStatement": {
+                                    "Limit": 30,
+                                    "EvaluationWindowSec": 300,
+                                    "AggregateKeyType": "IP",
+                                    "ScopeDownStatement": {
+                                        "ByteMatchStatement": {
+                                            "SearchString": "/api/public/explore",
+                                            "FieldToMatch": {"UriPath": {}},
+                                            "PositionalConstraint": "EXACTLY",
+                                        }
+                                    },
+                                }
+                            },
+                        },
+                        {
+                            "Name": "ExploreGlobalCircuitBreaker",
+                            "Action": {"Block": {}},
+                            "Statement": {
+                                "RateBasedStatement": {
+                                    "Limit": 120,
+                                    "EvaluationWindowSec": 300,
+                                    "AggregateKeyType": "CONSTANT",
+                                    "ScopeDownStatement": {
+                                        "ByteMatchStatement": {
+                                            "SearchString": "/api/public/explore",
+                                            "FieldToMatch": {"UriPath": {}},
+                                            "PositionalConstraint": "EXACTLY",
+                                        }
+                                    },
+                                }
+                            },
+                        },
+                        {
+                            "Name": "ApiPerIpRateLimit",
+                            "Action": {"Block": {}},
+                            "Statement": {
+                                "RateBasedStatement": {
+                                    "Limit": 1200,
+                                    "EvaluationWindowSec": 300,
+                                    "AggregateKeyType": "IP",
+                                    "ScopeDownStatement": {
+                                        "ByteMatchStatement": {
+                                            "SearchString": "/api/",
+                                            "FieldToMatch": {"UriPath": {}},
+                                            "PositionalConstraint": "STARTS_WITH",
+                                        }
+                                    },
+                                }
+                            },
+                        },
+                        {
+                            "Name": "ApiGlobalCircuitBreaker",
+                            "Action": {"Block": {}},
+                            "Statement": {
+                                "RateBasedStatement": {
+                                    "Limit": 3000,
+                                    "EvaluationWindowSec": 300,
+                                    "AggregateKeyType": "CONSTANT",
+                                    "ScopeDownStatement": {
+                                        "ByteMatchStatement": {
+                                            "SearchString": "/api/",
+                                            "FieldToMatch": {"UriPath": {}},
+                                            "PositionalConstraint": "STARTS_WITH",
+                                        }
+                                    },
+                                }
+                            },
+                        },
                         {"Name": "AWSManagedKnownBadInputs", "OverrideAction": {"None": {}}},
                         {"Name": "AWSManagedAmazonIpReputation", "OverrideAction": {"None": {}}},
                     ],
@@ -296,9 +369,26 @@ class WafAndPreflightTests(unittest.TestCase):
     def test_waf_is_retained_selectively_blocking_and_privacy_safe(self) -> None:
         self.assertIn("Scope: CLOUDFRONT", WAF_TEMPLATE)
         self.assertIn("DefaultAction:\n        Allow: {}", WAF_TEMPLATE)
-        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 3)
+        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 7)
         self.assertEqual(WAF_TEMPLATE.count("Count: {}"), 0)
         self.assertEqual(WAF_TEMPLATE.count("None: {}"), 2)
+        for rate_rule, aggregate_key, limit_parameter in (
+            ("ExplorePerIpRateLimit", "IP", "ExplorePerIpRequestLimit"),
+            ("ExploreGlobalCircuitBreaker", "CONSTANT", "ExploreGlobalRequestLimit"),
+            ("ApiPerIpRateLimit", "IP", "ApiPerIpRequestLimit"),
+            ("ApiGlobalCircuitBreaker", "CONSTANT", "ApiGlobalRequestLimit"),
+        ):
+            self.assertIn(rate_rule, WAF_TEMPLATE)
+            self.assertIn(f"AggregateKeyType: {aggregate_key}", WAF_TEMPLATE)
+            self.assertIn(f"Limit: !Ref {limit_parameter}", WAF_TEMPLATE)
+        self.assertEqual(WAF_TEMPLATE.count("EvaluationWindowSec: 300"), 4)
+        self.assertEqual(len(re.findall(r"(?m)^\s+SearchString: /api/$", WAF_TEMPLATE)), 2)
+        self.assertEqual(
+            len(re.findall(r"(?m)^\s+SearchString: /api/public/explore$", WAF_TEMPLATE)),
+            2,
+        )
+        self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: STARTS_WITH"), 2)
+        self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: EXACTLY"), 2)
         for managed_group in (
             "AWSManagedRulesKnownBadInputsRuleSet",
             "AWSManagedRulesAmazonIpReputationList",

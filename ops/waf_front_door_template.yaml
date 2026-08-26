@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Retained us-east-1 CloudFront-scope WAF for the photography website single front door.
-  High-confidence managed rules block known-bad and reputation-listed traffic.
+  High-confidence managed rules block known-bad and reputation-listed traffic, while
+  scoped rate rules bound both single-source and distributed API request floods.
 
 Parameters:
   Stage:
@@ -22,6 +23,34 @@ Parameters:
     Default: ''
     AllowedPattern: '^(|arn:[A-Za-z0-9-]+:kms:[A-Za-z0-9-]+:[0-9]{12}:key/[A-Fa-f0-9-]+)$'
     Description: Optional existing KMS key whose policy already permits CloudWatch Logs in us-east-1.
+  ApiPerIpRequestLimit:
+    Type: Number
+    Default: 1200
+    MinValue: 10
+    MaxValue: 2000000000
+    Description: Maximum API requests tracked per viewer IP during each five-minute window.
+  ApiGlobalRequestLimit:
+    Type: Number
+    Default: 3000
+    MinValue: 10
+    MaxValue: 2000000000
+    Description: >-
+      Cost-protection circuit breaker for all API requests during each five-minute window.
+      Exceeding it can temporarily deny legitimate API traffic while static pages remain available.
+  ExplorePerIpRequestLimit:
+    Type: Number
+    Default: 30
+    MinValue: 10
+    MaxValue: 2000000000
+    Description: Maximum Explore API requests tracked per viewer IP during each five-minute window.
+  ExploreGlobalRequestLimit:
+    Type: Number
+    Default: 120
+    MinValue: 10
+    MaxValue: 2000000000
+    Description: >-
+      Distributed cost-protection circuit breaker for the scan-backed Explore API during
+      each five-minute window.
 
 Conditions:
   HasSecurityEventBus: !Not [!Equals [!Ref SecurityEventBusArn, '']]
@@ -43,6 +72,94 @@ Resources:
         MetricName: !Sub 'IanPhotographyFrontDoor-${Stage}'
         SampledRequestsEnabled: false
       Rules:
+        - Name: ExplorePerIpRateLimit
+          Priority: 0
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref ExplorePerIpRequestLimit
+              EvaluationWindowSec: 300
+              AggregateKeyType: IP
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: /api/public/explore
+                  FieldToMatch:
+                    UriPath: {}
+                  PositionalConstraint: EXACTLY
+                  TextTransformations:
+                    - Priority: 0
+                      Type: NONE
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: ExplorePerIpRateLimit
+            SampledRequestsEnabled: false
+        - Name: ExploreGlobalCircuitBreaker
+          Priority: 5
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref ExploreGlobalRequestLimit
+              EvaluationWindowSec: 300
+              AggregateKeyType: CONSTANT
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: /api/public/explore
+                  FieldToMatch:
+                    UriPath: {}
+                  PositionalConstraint: EXACTLY
+                  TextTransformations:
+                    - Priority: 0
+                      Type: NONE
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: ExploreGlobalCircuitBreaker
+            SampledRequestsEnabled: false
+        - Name: ApiPerIpRateLimit
+          Priority: 10
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref ApiPerIpRequestLimit
+              EvaluationWindowSec: 300
+              AggregateKeyType: IP
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: /api/
+                  FieldToMatch:
+                    UriPath: {}
+                  PositionalConstraint: STARTS_WITH
+                  TextTransformations:
+                    - Priority: 0
+                      Type: NONE
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: ApiPerIpRateLimit
+            SampledRequestsEnabled: false
+        - Name: ApiGlobalCircuitBreaker
+          Priority: 15
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref ApiGlobalRequestLimit
+              EvaluationWindowSec: 300
+              AggregateKeyType: CONSTANT
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: /api/
+                  FieldToMatch:
+                    UriPath: {}
+                  PositionalConstraint: STARTS_WITH
+                  TextTransformations:
+                    - Priority: 0
+                      Type: NONE
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: ApiGlobalCircuitBreaker
+            SampledRequestsEnabled: false
         - Name: AWSManagedKnownBadInputs
           Priority: 20
           OverrideAction:
@@ -73,7 +190,7 @@ Resources:
         - Key: Stage
           Value: !Ref Stage
         - Key: DeploymentMode
-          Value: SelectiveBlock
+          Value: SelectiveBlockAndApiRateLimit
 
   WafLogGroup:
     Type: AWS::Logs::LogGroup
@@ -186,8 +303,8 @@ Outputs:
     Description: Privacy-filtered BLOCK security telemetry with no request sampling.
     Value: !Ref WafLogGroup
   WafDeploymentMode:
-    Description: Known-bad input and IP reputation managed rules block.
-    Value: SELECTIVE_BLOCK
+    Description: Managed threat rules plus per-IP and distributed API rate limits block.
+    Value: SELECTIVE_BLOCK_AND_API_RATE_LIMIT
   WafAlarmCrossRegionRouting:
     Description: Whether exact WAF alarm transitions are forwarded to the home-region security bus.
     Value: !If [HasSecurityEventBus, ENABLED, DISABLED]

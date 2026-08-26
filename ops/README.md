@@ -30,10 +30,10 @@ are **dry-run by default** and require multiple exact production guards to apply
   all-in-one security template was removed.
 - `ci/home_security_posture.py` is the aggregate-only, read-only scheduled
   verifier for the home Region. It fails closed unless exactly one GuardDuty
-  detector and one Security Hub hub match the reviewed feature, frequency,
-  tag, control-generator, and two-standard contract. A provider `PENDING`
-  transition is accepted only while both standards remain fully updatable and
-  have no failure reason. It never prints
+  detector and one standards-free Security Hub hub match the reviewed feature,
+  frequency, tag, and control-generator contract. Any enabled Security Hub
+  standard is treated as drift because targeted Config rules provide the
+  approved, cost-bounded checks. It never prints
   provider identifiers, tags, Region names, or findings.
 - `security_budget_template.yaml`, `security_budget_preflight.py`, and
   [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md) define an optional retained,
@@ -257,10 +257,12 @@ traffic, privacy, and cost after 30 days.
 
 - Route 53 DNSSEC is prepared but deferred until the registrar ceremony is
   scheduled. Its required customer-managed KMS key has ongoing key/request cost.
-- The retained CloudFront WAF rollout keeps the common managed group in COUNT
-  and runs known-bad input, IP reputation, and per-IP rate rules in BLOCK, with
-  request sampling disabled and sensitive fields redacted. Return an individual
-  rule to COUNT only for a verified false positive with a documented rollback.
+- The retained CloudFront WAF rollout runs known-bad input, IP reputation,
+  per-IP API/Explore limits, and distributed API/Explore circuit breakers in
+  BLOCK, with request sampling disabled and sensitive fields redacted. The
+  circuit breakers intentionally preserve bounded origin spend over API
+  availability. Return an individual rule to COUNT only for a verified false
+  positive with a documented rollback.
 - Guarded CloudTrail, scoped Config, GuardDuty, Security Hub, Access Analyzer,
   and AWS Backup controls are active and source controlled separately from the
   application stack. Paid Inspector Lambda scanning is disabled because CI

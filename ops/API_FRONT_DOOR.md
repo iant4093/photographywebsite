@@ -23,8 +23,14 @@ WAF is defense in depth.
 - The default execute-api endpoint is disabled. Direct custom-domain requests
   lack the CloudFront-only header and receive the fixed, no-store denial.
 - The separate WAF stack remains in the CloudFront home Region. Sampling is
-  disabled, sensitive fields are redacted, and each managed or rate rule stays
-  in its explicitly reviewed COUNT or BLOCK mode.
+  disabled, sensitive fields are redacted, and every rule stays in its reviewed
+  BLOCK mode. Managed rules block known-bad inputs and reputation-listed sources.
+  A per-IP `/api/` rate rule limits single-source floods, and a separate constant-
+  key `/api/` circuit breaker bounds distributed origin traffic. The circuit
+  breaker intentionally favors bounded AWS origin spend over API availability;
+  static pages remain outside both rate scopes. The scan-backed Explore route
+  has lower, dedicated per-IP and global limits so arbitrary filter values cannot
+  turn repeated metadata scans into unbounded DynamoDB usage.
 
 ## Validate and update
 

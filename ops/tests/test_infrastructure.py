@@ -215,6 +215,20 @@ assert actual_routes == expected_routes
         ]
         self.assertEqual(missing, [])
 
+    def test_anonymous_api_functions_have_reserved_concurrency(self) -> None:
+        anonymous = []
+        for logical_id in re.findall(r"^  ([A-Za-z][A-Za-z0-9]+Function):$", TEMPLATE, re.MULTILINE):
+            block = resource_block(logical_id)
+            if "Authorizer: NONE" not in block:
+                continue
+            anonymous.append(logical_id)
+            self.assertRegex(
+                block,
+                r"(?m)^      ReservedConcurrentExecutions: [1-9][0-9]*$",
+                f"{logical_id} exposes an anonymous route without a concurrency cost bound",
+            )
+        self.assertGreaterEqual(len(anonymous), 8)
+
 
 class DataProtectionTests(unittest.TestCase):
     def test_album_handler_iam_matches_runtime_data_operations(self) -> None:
