@@ -311,6 +311,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "GetPublicAlbumsFunctionRole",
                 "HeroCoverFunctionRole",
                 "PreviewWorkerFunctionRole",
+                "PreparePrintFunctionRole",
                 "RefreshGoogleDriveUsageFunctionRole",
             },
         )
