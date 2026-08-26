@@ -36,8 +36,8 @@ export default function AccessibleLightbox({
     useEffect(() => {
         const dialog = dialogRef.current
         const scrollPosition = {
-            x: window.scrollX || window.pageXOffset || 0,
-            y: window.scrollY || window.pageYOffset || 0,
+            x: window.scrollX,
+            y: window.scrollY,
         }
         const previousBodyStyles = {
             overflow: document.body.style.overflow,

@@ -75,21 +75,34 @@ describe('AccessibleLightbox', () => {
         vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640)
         const firstClose = vi.fn()
         const secondClose = vi.fn()
+        const firstNext = vi.fn()
+        const secondNext = vi.fn()
+        const secondPrevious = vi.fn()
         const { rerender, unmount } = render(
-            <AccessibleLightbox ariaLabel="Stable viewer" onClose={firstClose}>
+            <AccessibleLightbox ariaLabel="Stable viewer" onClose={firstClose} onNext={firstNext}>
                 <button type="button">Viewer action</button>
             </AccessibleLightbox>,
         )
 
         expect(document.body.style.top).toBe('-640px')
         rerender(
-            <AccessibleLightbox ariaLabel="Stable viewer" onClose={secondClose}>
+            <AccessibleLightbox
+                ariaLabel="Stable viewer"
+                onClose={secondClose}
+                onNext={secondNext}
+                onPrevious={secondPrevious}
+            >
                 <button type="button">Viewer action</button>
             </AccessibleLightbox>,
         )
         expect(window.scrollTo).not.toHaveBeenCalled()
         expect(document.body.style.top).toBe('-640px')
 
+        fireEvent.keyDown(window, { key: 'ArrowRight' })
+        fireEvent.keyDown(window, { key: 'ArrowLeft' })
+        expect(firstNext).not.toHaveBeenCalled()
+        expect(secondNext).toHaveBeenCalledOnce()
+        expect(secondPrevious).toHaveBeenCalledOnce()
         fireEvent.keyDown(window, { key: 'Escape' })
         expect(firstClose).not.toHaveBeenCalled()
         expect(secondClose).toHaveBeenCalledOnce()

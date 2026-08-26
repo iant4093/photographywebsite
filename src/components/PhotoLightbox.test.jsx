@@ -55,4 +55,48 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('navigation', { name: 'Photo navigation' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close photo viewer' })).toHaveClass('linen-lightbox-close')
   })
+
+  it('shows pending and empty states without requiring an active photograph', () => {
+    const { rerender } = render(
+      <PhotoLightbox
+        images={[]}
+        index={0}
+        ariaLabel="Random viewer"
+        onClose={vi.fn()}
+        loading
+      />,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Finding random photos')
+    expect(screen.queryByRole('navigation')).toBeNull()
+
+    rerender(
+      <PhotoLightbox
+        images={[]}
+        index={0}
+        ariaLabel="Random viewer"
+        onClose={vi.fn()}
+        emptyMessage="No photographs are available."
+      />,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('No photographs are available.')
+  })
+
+  it('supports a single metadata-free photo and reports media errors', () => {
+    const onMediaError = vi.fn()
+    const image = { ...landscape, exif: undefined }
+    render(
+      <PhotoLightbox
+        images={[image]}
+        index={0}
+        ariaLabel="Single viewer"
+        onClose={vi.fn()}
+        onMediaError={onMediaError}
+      />,
+    )
+
+    expect(screen.queryByRole('navigation')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Download photo' })).toBeNull()
+    screen.getByAltText('Full size preview').dispatchEvent(new Event('error'))
+    expect(onMediaError).toHaveBeenCalledOnce()
+  })
 })

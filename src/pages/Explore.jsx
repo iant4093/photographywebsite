@@ -193,6 +193,9 @@ function ExploreModule({ mode }) {
 
     useEffect(() => {
         setLightboxIndex(null)
+    }, [requestKey])
+
+    useEffect(() => {
         if (!value || hasCurrentPage) return undefined
         const controller = new AbortController()
         fetchExplorePhotos({ mode, value, limit: PAGE_SIZE }, { signal: controller.signal })
