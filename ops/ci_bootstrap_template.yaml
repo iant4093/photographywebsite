@@ -700,11 +700,18 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-security--SecuritySignalProcessorRo-*'
+          - Sid: ReadBootstrapReleaseRoles
+            Effect: Allow
+            Action: iam:GetRole
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-cloudformation-execution'
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-github-production-*'
           - Sid: ManageExactFotomotoPickupUser
             Effect: Allow
             Action:
               - iam:CreateUser
               - iam:DeleteUserPolicy
+              - iam:GetLoginProfile
               - iam:GetUser
               - iam:GetUserPolicy
               - iam:ListAttachedUserPolicies
@@ -738,7 +745,11 @@ Resources:
               - iam:ListEntitiesForPolicy
               - iam:ListPolicyVersions
               - iam:SetDefaultPolicyVersion
-            Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ApplicationStackName}-*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ApplicationStackName}-*'
+              # CloudFormation needs policy-version access to update the four
+              # managed policies attached to this execution role.
+              - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${AWS::StackName}-CloudFormationExecution*'
           - Sid: ManageStackLambdaFunctions
             Effect: Allow
             Action:

@@ -839,6 +839,7 @@ fi
         pickup_user = statement_block(execution, "ManageExactFotomotoPickupUser")
         for action in (
             "iam:CreateUser",
+            "iam:GetLoginProfile",
             "iam:GetUser",
             "iam:GetUserPolicy",
             "iam:ListUserTags",
@@ -855,6 +856,11 @@ fi
         self.assertNotIn("Resource: '*'", pickup_user)
         self.assertNotIn("iam:CreateAccessKey", pickup_user)
         self.assertNotIn("iam:DeleteAccessKey", pickup_user)
+        bootstrap_role = statement_block(execution, "ReadBootstrapReleaseRoles")
+        self.assertIn("Action: iam:GetRole", bootstrap_role)
+        self.assertIn("role/ian-photography-cloudformation-execution", bootstrap_role)
+        self.assertIn("role/ian-photography-github-production-*", bootstrap_role)
+        self.assertNotIn("Resource: '*'", bootstrap_role)
         managed = statement_block(execution, "ManageStackManagedPolicyVersions")
         for action in (
             "iam:CreatePolicy",
@@ -864,6 +870,7 @@ fi
         ):
             self.assertIn(action, managed)
         self.assertIn("policy/${ApplicationStackName}-*", managed)
+        self.assertIn("policy/${AWS::StackName}-CloudFormationExecution*", managed)
         self.assertNotIn("iam:DeletePolicy\n", managed)
 
     def test_execution_role_allow_wildcards_are_explicit_and_minimal(self):
