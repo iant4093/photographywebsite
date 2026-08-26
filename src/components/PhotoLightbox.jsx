@@ -84,7 +84,11 @@ function PhotoLightbox({
             >
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {activeImage ? (
-                        <div key={`media-${activeId}`} className="linen-lightbox-media absolute inset-0">
+                        <div
+                            key={`media-${activeId}`}
+                            className="linen-lightbox-media absolute inset-0"
+                            style={{ gridTemplate: 'minmax(0, 1fr) / minmax(0, 1fr)' }}
+                        >
                             <img
                                 src={thumbUrl}
                                 alt=""
