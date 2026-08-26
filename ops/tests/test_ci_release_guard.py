@@ -263,7 +263,10 @@ class ReleaseIntentTests(unittest.TestCase):
         for rule in lambda_rules:
             self.assertEqual(rule["resourceType"], "AWS::Lambda::Function")
             self.assertEqual(rule["action"], "Modify")
-            self.assertEqual(rule["propertyPaths"], ["Code", "Environment"])
+            expected_paths = ["Code", "Environment"]
+            if rule["logicalId"] == "GetPhotographyStatsFunction":
+                expected_paths.append("ReservedConcurrentExecutions")
+            self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertFalse(rule["allowNoDetails"])
 
         alarm_ids = set(
