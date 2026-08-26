@@ -38,6 +38,13 @@ def album(visibility="public"):
     }
 
 
+def legacy_album():
+    record = album()
+    record["legacyS3Prefix"] = "albums/blue-mountain-11111111/"
+    record["images"][0]["rawKey"] = "albums/blue-mountain-11111111/photo.jpg"
+    return record
+
+
 def metadata():
     return {
         "albumId": ALBUM_ID,
@@ -58,6 +65,44 @@ def metadata():
 
 
 class ExploreApiTests(unittest.TestCase):
+    def test_batch_album_projection_keeps_approved_legacy_prefix(self):
+        batch_client = Mock()
+        batch_client.batch_get_item.return_value = {
+            "Responses": {get_public_album.table.name: [album()]},
+        }
+
+        with patch.object(get_public_album, "dynamodb", batch_client):
+            get_public_album._batch_albums([ALBUM_ID])
+
+        projection = batch_client.batch_get_item.call_args.kwargs["RequestItems"][
+            get_public_album.table.name
+        ]["ProjectionExpression"]
+        self.assertIn("legacyS3Prefix", projection)
+
+    def test_legacy_album_media_is_included_when_prefix_is_approved(self):
+        record = legacy_album()
+        raw_key = record["images"][0]["rawKey"]
+        preview = metadata()
+        preview.update({
+            "mediaId": media_id_for_key(raw_key),
+            "previewKeys": expected_preview_keys(ALBUM_ID, raw_key),
+        })
+
+        with patch.object(
+            get_public_album,
+            "_preview_table",
+            return_value=Mock(scan=Mock(return_value={"Items": [preview]})),
+        ), patch.object(
+            get_public_album,
+            "_batch_albums",
+            return_value={ALBUM_ID: record},
+        ):
+            response = get_public_album._explore_response({
+                "queryStringParameters": {"mode": "color", "value": "blue"},
+            })
+
+        self.assertEqual(len(response_body(response)["items"]), 1)
+
     def test_color_results_use_public_previews_and_allowlisted_metadata(self):
         with patch.object(
             get_public_album,

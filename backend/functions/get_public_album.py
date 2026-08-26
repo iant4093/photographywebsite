@@ -112,7 +112,9 @@ def _batch_albums(album_ids):
             table.name: {
                 "Keys": keys,
                 "ConsistentRead": False,
-                "ProjectionExpression": "albumId,#status,#visibility,#type,title,category,createdAt,images",
+                "ProjectionExpression": (
+                    "albumId,#status,#visibility,#type,title,category,createdAt,images,legacyS3Prefix"
+                ),
                 "ExpressionAttributeNames": {
                     "#status": "status",
                     "#visibility": "visibility",
