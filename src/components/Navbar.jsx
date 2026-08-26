@@ -33,7 +33,9 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
         let frame = null
         const update = () => {
             frame = null
+            if (document.documentElement.hasAttribute('data-lightbox-scroll-lock')) return
             const currentScrollY = window.scrollY
+            if (currentScrollY === lastScrollY.current) return
             const nextVisible = currentScrollY < 10 || currentScrollY < lastScrollY.current
                 ? true
                 : !(currentScrollY > 50 && currentScrollY > lastScrollY.current)

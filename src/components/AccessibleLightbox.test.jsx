@@ -49,6 +49,7 @@ describe('AccessibleLightbox', () => {
         expect(screen.getByTestId('site-navigation').style.pointerEvents).toBe('')
         expect(screen.getByTestId('film-scrollbar').style.visibility).toBe('')
         expect(screen.getByTestId('film-scrollbar').style.pointerEvents).toBe('')
+        expect(document.documentElement).toHaveAttribute('data-lightbox-scroll-lock')
         expect(document.body.style.overflow).toBe('hidden')
         expect(document.body.style.position).toBe('fixed')
 
@@ -66,6 +67,7 @@ describe('AccessibleLightbox', () => {
         expect(appRoot).not.toHaveAttribute('aria-hidden')
         expect(screen.getByTestId('site-navigation')).not.toHaveStyle({ visibility: 'hidden' })
         expect(screen.getByTestId('film-scrollbar')).not.toHaveStyle({ visibility: 'hidden' })
+        expect(document.documentElement).not.toHaveAttribute('data-lightbox-scroll-lock')
         expect(document.body.style.overflow).toBe('')
         expect(document.body.style.position).toBe('')
         expect(opener).toHaveFocus()

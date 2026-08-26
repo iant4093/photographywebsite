@@ -59,6 +59,7 @@ export default function AccessibleLightbox({
             ? document.activeElement
             : null
 
+        document.documentElement.setAttribute('data-lightbox-scroll-lock', '')
         backgroundState.forEach(({ element }) => {
             element.setAttribute('inert', '')
             element.setAttribute('aria-hidden', 'true')
@@ -123,6 +124,7 @@ export default function AccessibleLightbox({
             })
             restoreFocusRef.current?.focus({ preventScroll: true })
             window.scrollTo(scrollPosition.x, scrollPosition.y)
+            document.documentElement.removeAttribute('data-lightbox-scroll-lock')
         }
     }, [])
 

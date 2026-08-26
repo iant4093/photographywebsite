@@ -64,7 +64,10 @@ describe('navigation and metadata', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 0 })
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    document.documentElement.removeAttribute('data-lightbox-scroll-lock')
+    vi.unstubAllGlobals()
+  })
 
   it('opens and closes the guest menu and resets the body lock', () => {
     const { unmount } = routed(<Navbar />)
@@ -155,6 +158,14 @@ describe('navigation and metadata', () => {
     fireEvent.click(within(document.getElementById('site-menu')).getByRole('button', { name: 'Sign Out' }))
     expect(logout).toHaveBeenCalledTimes(2)
 
+    window.scrollY = 100
+    fireEvent.scroll(window)
+    await waitFor(() => expect(nav).toHaveClass('-translate-y-full'))
+    document.documentElement.setAttribute('data-lightbox-scroll-lock', '')
+    window.scrollY = 0
+    fireEvent.scroll(window)
+    await waitFor(() => expect(nav).toHaveClass('-translate-y-full'))
+    document.documentElement.removeAttribute('data-lightbox-scroll-lock')
     window.scrollY = 100
     fireEvent.scroll(window)
     await waitFor(() => expect(nav).toHaveClass('-translate-y-full'))
