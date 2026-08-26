@@ -186,7 +186,17 @@ def _copy_if_needed(source_key, destination_key, *, visibility, cache_control, p
         ):
             return
     except ClientError as error:
-        if error.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey", "NotFound"}:
+        # S3 intentionally returns 403 for HEAD on a missing object when the
+        # caller has object access but no bucket-wide ListBucket permission.
+        # Keep the Lambda least-privileged and let the scoped PutObject call
+        # distinguish a missing destination from a real write denial.
+        if error.response.get("Error", {}).get("Code") not in {
+            "403",
+            "AccessDenied",
+            "404",
+            "NoSuchKey",
+            "NotFound",
+        }:
             raise
     _s3_client().copy_object(
         Bucket=bucket,

@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from test_support import response_body
 
 import prepare_print
+from botocore.exceptions import ClientError
 
 
 ALBUM_ID = "11111111-1111-4111-8111-111111111111"
@@ -141,6 +142,23 @@ class PrintSessionTests(unittest.TestCase):
         self.assertEqual(copy.call_count, 2)
         self.assertEqual(copy.call_args_list[0].kwargs["visibility"], "public")
         self.assertEqual(copy.call_args_list[1].kwargs["visibility"], "private")
+
+    def test_missing_destination_without_list_permission_is_copied(self):
+        s3 = Mock()
+        s3.head_object.side_effect = ClientError(
+            {"Error": {"Code": "403", "Message": "Access Denied"}},
+            "HeadObject",
+        )
+        with patch.object(prepare_print, "_s3_client", return_value=s3):
+            prepare_print._copy_if_needed(
+                RAW_KEY,
+                "fotomoto/originals/opaque_print.jpg",
+                visibility="private",
+                cache_control="private,no-store",
+                print_id="opaque",
+                source_etag="etag",
+            )
+        s3.copy_object.assert_called_once()
 
 
 if __name__ == "__main__":
