@@ -6,6 +6,7 @@ const exploreApi = vi.hoisted(() => ({
   fetchExploreColors: vi.fn(),
   fetchExploreLenses: vi.fn(),
   fetchExplorePhotos: vi.fn(),
+  prefetchExploreModule: vi.fn(() => Promise.resolve()),
 }))
 const api = vi.hoisted(() => ({ requestAlbumMediaDownload: vi.fn() }))
 
@@ -83,6 +84,17 @@ describe('Explore', () => {
     expect(screen.getByLabelText('Extracted color palette')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'View photo from Blue Mountain' }))
     expect(screen.getByRole('dialog', { name: 'Photographs in Color Explorer' })).toHaveTextContent('Canon EOS R7')
+  })
+
+  it('uses a bundled initial page without making a second blocking request', async () => {
+    exploreApi.fetchExploreColors.mockResolvedValue({
+      items: [{ id: 'blue', photos: 12 }],
+      initialPage: { value: 'blue', items: [photo], nextCursor: null },
+    })
+    render(<MemoryRouter initialEntries={['/explore/colors']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
+    expect(exploreApi.fetchExplorePhotos).not.toHaveBeenCalled()
   })
 
   it('browses lenses without rendering irrelevant palette swatches', async () => {

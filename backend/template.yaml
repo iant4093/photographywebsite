@@ -1416,6 +1416,8 @@ Resources:
             - Effect: Allow
               Action:
                 - dynamodb:BatchGetItem
+                - dynamodb:GetItem
+                - dynamodb:Query
                 - dynamodb:Scan
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
@@ -1930,7 +1932,9 @@ Resources:
                 - dynamodb:PutItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
-              Action: dynamodb:BatchGetItem
+              Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action: s3:ListBucket
@@ -2146,6 +2150,7 @@ Resources:
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action:
+                - dynamodb:BatchWriteItem
                 - dynamodb:GetItem
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem

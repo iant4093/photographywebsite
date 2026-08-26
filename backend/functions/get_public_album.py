@@ -9,11 +9,23 @@ import secrets
 import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
 from cursor_helpers import decode_cursor, encode_cursor
+from explore_index import (
+    FACETS_PARTITION,
+    FACET_RECORD_TYPE,
+    INDEX_PREFIX,
+    INDEX_RECORD_TYPE,
+    INDEX_VERSION,
+    READY_RECORD_TYPE,
+    READY_SORT_KEY,
+    SYSTEM_PARTITION,
+    facet_partition,
+)
 from media_access import (
     album_media_prefixes,
     bucket_name,
@@ -74,10 +86,42 @@ EXPLORE_PROJECTION = (
     "albumId,mediaId,previewVersion,previewKeys,#status,dimensions,exploreVersion,"
     "palette,colorFamilies,lens,lensKey"
 )
+EXPLORE_INDEX_CURSOR_PATTERN = re.compile(
+    r"^[a-f0-9]{16}#[0-9a-f-]{36}#[a-f0-9]{24}$"
+)
+EXPLORE_INDEX_MAX_EVALUATED = 5000
+_index_readiness = {"ready": False, "expires_at": 0.0}
+_index_readiness_lock = threading.Lock()
 
 
 def _preview_table():
     return dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"])
+
+
+def _explore_index_ready():
+    now = time.monotonic()
+    with _index_readiness_lock:
+        if now < _index_readiness["expires_at"]:
+            return _index_readiness["ready"]
+        item = _preview_table().get_item(
+            Key={"albumId": SYSTEM_PARTITION, "mediaId": READY_SORT_KEY},
+            ConsistentRead=False,
+            ProjectionExpression="recordType,indexVersion",
+        ).get("Item")
+        ready = bool(
+            isinstance(item, dict)
+            and item.get("recordType") == READY_RECORD_TYPE
+            and item.get("indexVersion") == INDEX_VERSION
+        )
+        # A not-ready result is short-lived so a completed guarded backfill can
+        # activate quickly without requiring a Lambda recycle.
+        _index_readiness.update(ready=ready, expires_at=now + (30 if ready else 5))
+        return ready
+
+
+def _reset_explore_index_cache_for_tests():
+    with _index_readiness_lock:
+        _index_readiness.update(ready=False, expires_at=0.0)
 
 
 def _positive_limit(value, default=EXPLORE_DEFAULT_LIMIT, maximum=EXPLORE_MAX_LIMIT):
@@ -133,6 +177,45 @@ def _batch_albums(album_ids):
             request[table.name]["Keys"] = unprocessed
         else:
             raise RuntimeError("Album visibility verification remained unprocessed")
+    return records
+
+
+def _batch_preview_metadata(references):
+    identities = sorted({
+        (item.get("sourceAlbumId"), item.get("sourceMediaId"))
+        for item in references
+        if isinstance(item, dict)
+        and isinstance(item.get("sourceAlbumId"), str)
+        and isinstance(item.get("sourceMediaId"), str)
+    })
+    records = {}
+    for offset in range(0, len(identities), 100):
+        request = {
+            _preview_table().name: {
+                "Keys": [
+                    {"albumId": album_id, "mediaId": media_id}
+                    for album_id, media_id in identities[offset:offset + 100]
+                ],
+                "ConsistentRead": False,
+                "ProjectionExpression": EXPLORE_PROJECTION,
+                "ExpressionAttributeNames": {"#status": "status"},
+            }
+        }
+        for _attempt in range(3):
+            response = dynamodb.batch_get_item(RequestItems=request)
+            for item in response.get("Responses", {}).get(_preview_table().name, []):
+                if isinstance(item, dict):
+                    identity = (item.get("albumId"), item.get("mediaId"))
+                    if all(isinstance(value, str) for value in identity):
+                        records[identity] = item
+            unprocessed = response.get("UnprocessedKeys", {}).get(
+                _preview_table().name, {}
+            ).get("Keys", [])
+            if not unprocessed:
+                break
+            request[_preview_table().name]["Keys"] = unprocessed
+        else:
+            raise RuntimeError("Explore preview verification remained unprocessed")
     return records
 
 
@@ -204,7 +287,238 @@ def _explore_filter(mode, value):
     return base & Attr("lensKey").eq(value.casefold())
 
 
-def _explore_media_response(event, params):
+def _index_partition_count(partition):
+    count = 0
+    cursor = None
+    for _page in range(EXPLORE_MAX_SCAN_PAGES):
+        arguments = {
+            "TableName": os.environ["PREVIEW_METADATA_TABLE"],
+            "KeyConditionExpression": "albumId = :partition",
+            "ExpressionAttributeValues": {":partition": {"S": partition}},
+            "Select": "COUNT",
+        }
+        if cursor:
+            arguments["ExclusiveStartKey"] = cursor
+        # The low-level client is thread-safe; boto3 Resource objects are not
+        # shared across the parallel count workers.
+        response = dynamodb.meta.client.query(**arguments)
+        count += int(response.get("Count") or 0)
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            return count
+    raise RuntimeError("Explore index count pagination exceeded safe limit")
+
+
+def _index_lens_definitions():
+    definitions = {}
+    cursor = None
+    for _page in range(EXPLORE_MAX_SCAN_PAGES):
+        arguments = {
+            "KeyConditionExpression": Key("albumId").eq(FACETS_PARTITION),
+            "ProjectionExpression": "mediaId,recordType,indexVersion,facetPartition,#name",
+            "ExpressionAttributeNames": {"#name": "name"},
+        }
+        if cursor:
+            arguments["ExclusiveStartKey"] = cursor
+        response = _preview_table().query(**arguments)
+        for item in response.get("Items", []):
+            if not isinstance(item, dict):
+                continue
+            partition = item.get("facetPartition") if isinstance(item, dict) else None
+            name = item.get("name") if isinstance(item, dict) else None
+            if (
+                item.get("recordType") == FACET_RECORD_TYPE
+                and item.get("indexVersion") == INDEX_VERSION
+                and isinstance(partition, str)
+                and partition.startswith(f"{INDEX_PREFIX}#LENS#")
+                and isinstance(name, str)
+                and name.strip()
+                and len(name) <= 160
+            ):
+                definitions[partition] = " ".join(name.strip().split())
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            return definitions
+    raise RuntimeError("Explore lens definition pagination exceeded safe limit")
+
+
+def _parallel_partition_counts(partitions):
+    unique = sorted(set(partitions))
+    if not unique:
+        return {}
+    workers = min(8, len(unique))
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="explore-count") as executor:
+        return dict(zip(unique, executor.map(_index_partition_count, unique), strict=True))
+
+
+def _index_query_page(partition, *, seed, phase, after, limit):
+    condition = Key("albumId").eq(partition)
+    if phase == 0:
+        condition &= Key("mediaId").gt(after) if after else Key("mediaId").gte(seed)
+    elif after:
+        condition &= Key("mediaId").between(after + "\x00", seed)
+    else:
+        condition &= Key("mediaId").lt(seed)
+    return _preview_table().query(
+        KeyConditionExpression=condition,
+        ProjectionExpression="mediaId,recordType,indexVersion,sourceAlbumId,sourceMediaId",
+        Limit=limit,
+        ConsistentRead=False,
+    )
+
+
+def _indexed_media_payload(mode, value, limit, cursor_value=None):
+    scope = f"explore:{mode}:{value.casefold()}"
+    cursor = decode_cursor(cursor_value, scope)
+    if cursor and "offset" in cursor:
+        return None
+    if cursor:
+        if cursor.get("version") != str(INDEX_VERSION):
+            raise ValidationError("Invalid cursor")
+        seed = cursor.get("seed", "")
+        after = cursor.get("after") or None
+        phase_text = cursor.get("phase", "")
+        if (
+            not re.fullmatch(r"[0-9a-f]{16}", seed)
+            or phase_text not in {"0", "1"}
+            or (after is not None and not EXPLORE_INDEX_CURSOR_PATTERN.fullmatch(after))
+        ):
+            raise ValidationError("Invalid cursor")
+        phase = int(phase_text)
+    else:
+        seed = secrets.token_hex(8)
+        phase = 0
+        after = None
+
+    partition = facet_partition(mode, value)
+    output = []
+    evaluated = 0
+    next_key = None
+    fetch_limit = max(64, min(limit * 3, 144))
+
+    while len(output) < limit and evaluated < EXPLORE_INDEX_MAX_EVALUATED:
+        response = _index_query_page(
+            partition,
+            seed=seed,
+            phase=phase,
+            after=after,
+            limit=fetch_limit,
+        )
+        raw_items = [item for item in response.get("Items", []) if isinstance(item, dict)]
+        references = [
+            item for item in response.get("Items", [])
+            if isinstance(item, dict)
+            and item.get("recordType") == INDEX_RECORD_TYPE
+            and item.get("indexVersion") == INDEX_VERSION
+        ]
+        evaluated += len(response.get("Items", []))
+        metadata = _batch_preview_metadata(references)
+        albums = _batch_albums(item.get("sourceAlbumId") for item in references)
+        last_processed = raw_items[-1].get("mediaId") if raw_items else after
+        stopped_early = False
+        for reference in references:
+            last_processed = reference.get("mediaId")
+            identity = (reference.get("sourceAlbumId"), reference.get("sourceMediaId"))
+            item = _explore_item(metadata.get(identity), albums.get(identity[0]))
+            if item:
+                output.append(item)
+            if len(output) >= limit:
+                stopped_early = True
+                break
+
+        has_provider_more = bool(response.get("LastEvaluatedKey"))
+        if stopped_early or has_provider_more:
+            next_key = {
+                "version": str(INDEX_VERSION),
+                "seed": seed,
+                "phase": str(phase),
+            }
+            if last_processed:
+                next_key["after"] = last_processed
+            break
+        if phase == 0:
+            phase = 1
+            after = None
+            continue
+        else:
+            next_key = None
+            break
+
+    if evaluated >= EXPLORE_INDEX_MAX_EVALUATED and len(output) < limit:
+        raise RuntimeError("Explore index validation exceeded safe limit")
+    return {
+        "items": output,
+        "nextCursor": encode_cursor(next_key, scope),
+    }
+
+
+def _indexed_media_response(params):
+    allowed = {"mode", "value", "limit", "cursor"}
+    if any(name not in allowed for name in params):
+        raise ValidationError("Unsupported explore parameter")
+    mode = params.get("mode")
+    if mode not in {"color", "lens"}:
+        raise ValidationError("mode must be color or lens")
+    value = params.get("value")
+    if mode == "color":
+        value = str(value or "").strip().lower()
+        if value not in EXPLORE_COLORS:
+            raise ValidationError("Unsupported color family")
+    else:
+        value = _normalized_lens(value)
+    limit = _positive_limit(params.get("limit"))
+    payload = _indexed_media_payload(mode, value, limit, params.get("cursor"))
+    if payload is None:
+        return _scan_explore_media_response(None, params)
+    return json_response(
+        200,
+        payload,
+        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
+def _indexed_options_response(mode):
+    if mode == "color":
+        definitions = {
+            facet_partition("color", family): family
+            for family in EXPLORE_COLOR_ORDER
+        }
+    else:
+        definitions = _index_lens_definitions()
+    counts = _parallel_partition_counts(definitions)
+    if mode == "color":
+        items = [
+            {"id": definitions[partition], "photos": counts[partition]}
+            for partition in definitions
+            if counts.get(partition)
+        ]
+        first_value = items[0]["id"] if items else None
+    else:
+        items = sorted(
+            (
+                {"name": name, "photos": counts[partition]}
+                for partition, name in definitions.items()
+                if counts.get(partition)
+            ),
+            key=lambda item: (-item["photos"], item["name"].casefold()),
+        )
+        first_value = items[0]["name"] if items else None
+    initial_page = (
+        _indexed_media_payload(mode, first_value, EXPLORE_DEFAULT_LIMIT)
+        if first_value
+        else {"items": [], "nextCursor": None}
+    )
+    return json_response(
+        200,
+        {
+            "items": items,
+            "initialPage": {"value": first_value, **initial_page},
+        },
+        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
+def _scan_explore_media_response(event, params):
     del event
     allowed = {"mode", "value", "limit", "cursor"}
     if any(name not in allowed for name in params):
@@ -365,11 +679,38 @@ def _explore_response(event):
     params = (event or {}).get("queryStringParameters") or {}
     if not isinstance(params, dict):
         raise ValidationError("Invalid explore parameters")
+    mode = params.get("mode")
+    if mode in {"colors", "lenses"}:
+        if any(name != "mode" for name in params):
+            raise ValidationError("Explore options do not accept additional parameters")
+    elif mode == "color":
+        if any(name not in {"mode", "value", "limit", "cursor"} for name in params):
+            raise ValidationError("Unsupported explore parameter")
+        if str(params.get("value") or "").strip().lower() not in EXPLORE_COLORS:
+            raise ValidationError("Unsupported color family")
+        _positive_limit(params.get("limit"))
+    elif mode == "lens":
+        if any(name not in {"mode", "value", "limit", "cursor"} for name in params):
+            raise ValidationError("Unsupported explore parameter")
+        _normalized_lens(params.get("value"))
+        _positive_limit(params.get("limit"))
+    else:
+        raise ValidationError("mode must be color, lens, colors, or lenses")
+    if _explore_index_ready():
+        if params.get("mode") == "lenses":
+            if any(name != "mode" for name in params):
+                raise ValidationError("Lens options do not accept additional parameters")
+            return _indexed_options_response("lens")
+        if params.get("mode") == "colors":
+            if any(name != "mode" for name in params):
+                raise ValidationError("Color options do not accept additional parameters")
+            return _indexed_options_response("color")
+        return _indexed_media_response(params)
     if params.get("mode") == "lenses":
         return _lens_options_response(params)
     if params.get("mode") == "colors":
         return _color_options_response(params)
-    return _explore_media_response(event, params)
+    return _scan_explore_media_response(event, params)
 
 
 def _legacy_images(album):

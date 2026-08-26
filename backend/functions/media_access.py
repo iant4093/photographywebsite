@@ -303,14 +303,22 @@ def load_preview_metadata(album, images=None, *, strict=False):
     return by_album.get(album.get("albumId"), {})
 
 
-def delete_preview_metadata(album_id, media_ids):
+def delete_preview_metadata(album_id, media_ids, related_keys_by_media=None):
     table_name = os.environ.get("PREVIEW_METADATA_TABLE", "").strip()
     if not table_name:
         return 0
     unique_ids = sorted(set(media_ids))
     table = get_dynamodb_resource().Table(table_name)
+    related_keys_by_media = related_keys_by_media if isinstance(related_keys_by_media, dict) else {}
     with table.batch_writer(overwrite_by_pkeys=["albumId", "mediaId"]) as batch:
         for media_id in unique_ids:
+            for key in related_keys_by_media.get(media_id, []):
+                if (
+                    isinstance(key, dict)
+                    and isinstance(key.get("albumId"), str)
+                    and isinstance(key.get("mediaId"), str)
+                ):
+                    batch.delete_item(Key={"albumId": key["albumId"], "mediaId": key["mediaId"]})
             batch.delete_item(Key={"albumId": album_id, "mediaId": media_id})
     return len(unique_ids)
 

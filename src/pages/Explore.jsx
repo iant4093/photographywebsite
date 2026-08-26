@@ -3,7 +3,12 @@ import { Link, useLocation, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
 import { requestAlbumMediaDownload } from '../utils/api'
-import { fetchExploreColors, fetchExploreLenses, fetchExplorePhotos } from '../utils/exploreApi'
+import {
+    fetchExploreColors,
+    fetchExploreLenses,
+    fetchExplorePhotos,
+    prefetchExploreModule,
+} from '../utils/exploreApi'
 import { trackPhotoDownload } from '../utils/analytics'
 import {
     mediaFileName,
@@ -42,11 +47,33 @@ function ExploreHeader({ title = 'Explore', detail = 'Choose a different way int
 }
 
 function ExploreLanding() {
+    const warmModule = useCallback((mode) => {
+        prefetchExploreModule(mode).catch(() => {})
+    }, [])
+
+    useEffect(() => {
+        const warm = () => Promise.allSettled([
+            prefetchExploreModule('color'),
+            prefetchExploreModule('lens'),
+        ])
+        if (typeof window.requestIdleCallback === 'function') {
+            const idleId = window.requestIdleCallback(warm, { timeout: 1500 })
+            return () => window.cancelIdleCallback?.(idleId)
+        }
+        const timeoutId = window.setTimeout(warm, 350)
+        return () => window.clearTimeout(timeoutId)
+    }, [])
+
     return (
         <div className="explore-page animate-fade-in pt-[74px]">
             <ExploreHeader />
             <section className="explore-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Explore modules">
-                <Link to="/explore/colors" className="explore-module-card editorial-motion-media">
+                <Link
+                    to="/explore/colors"
+                    className="explore-module-card editorial-motion-media"
+                    onPointerEnter={() => warmModule('color')}
+                    onFocus={() => warmModule('color')}
+                >
                     <span className="explore-module-number">01</span>
                     <div className="explore-module-colors" aria-hidden="true">
                         {COLOR_OPTIONS.slice(0, 8).map(option => <i key={option.id} style={{ backgroundColor: option.color }} />)}
@@ -57,7 +84,12 @@ function ExploreLanding() {
                     </div>
                     <span className="explore-module-arrow" aria-hidden="true">→</span>
                 </Link>
-                <Link to="/explore/lenses" className="explore-module-card editorial-motion-media">
+                <Link
+                    to="/explore/lenses"
+                    className="explore-module-card editorial-motion-media"
+                    onPointerEnter={() => warmModule('lens')}
+                    onFocus={() => warmModule('lens')}
+                >
                     <span className="explore-module-number">02</span>
                     <div className="explore-module-lens" aria-hidden="true">
                         <i />
@@ -91,6 +123,7 @@ function ExploreCard({ item, index, mode, onOpen }) {
                 width={item.width || 4}
                 height={item.height || 3}
                 className="explore-photo-image"
+                eager={index < 4}
             />
             <span className="explore-photo-copy">
                 <span>
@@ -125,7 +158,17 @@ function ExploreModule({ mode }) {
         setFacetError('')
         const request = isColor ? fetchExploreColors : fetchExploreLenses
         request({ signal: controller.signal })
-            .then(({ items }) => setFacets(items))
+            .then(({ items, initialPage }) => {
+                setFacets(items)
+                if (initialPage?.value) {
+                    setPageState({
+                        key: `${mode}:${initialPage.value}`,
+                        items: initialPage.items,
+                        nextCursor: initialPage.nextCursor,
+                        error: '',
+                    })
+                }
+            })
             .catch(error => {
                 if (error?.name !== 'AbortError') setFacetError(error?.message || 'Explore options could not be loaded.')
             })
@@ -133,7 +176,7 @@ function ExploreModule({ mode }) {
                 if (!controller.signal.aborted) setFacetLoading(false)
             })
         return () => controller.abort()
-    }, [isColor])
+    }, [isColor, mode])
 
     const requestedValue = isColor ? searchParams.get('color') : searchParams.get('lens')
     const activeFacet = useMemo(() => {
@@ -150,7 +193,7 @@ function ExploreModule({ mode }) {
 
     useEffect(() => {
         setLightboxIndex(null)
-        if (!value) return undefined
+        if (!value || hasCurrentPage) return undefined
         const controller = new AbortController()
         fetchExplorePhotos({ mode, value, limit: PAGE_SIZE }, { signal: controller.signal })
             .then(page => setPageState({ key: requestKey, items: page.items, nextCursor: page.nextCursor, error: '' }))
@@ -165,7 +208,7 @@ function ExploreModule({ mode }) {
                 }
             })
         return () => controller.abort()
-    }, [mode, requestKey, value])
+    }, [hasCurrentPage, mode, requestKey, value])
 
     const chooseFacet = nextValue => setSearchParams(isColor ? { color: nextValue } : { lens: nextValue })
     const loadMore = useCallback(async () => {

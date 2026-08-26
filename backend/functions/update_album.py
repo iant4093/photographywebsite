@@ -12,8 +12,10 @@ from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import require_admin
 from cache_invalidation import invalidate_public_api, invalidate_public_previews
+from explore_index import sync_album_index
 from album_qr import album_qr_key, write_album_qr
 from media_access import (
+    load_preview_metadata,
     serialize_album_summary,
     tag_album_visibility,
     tag_keys_visibility,
@@ -216,6 +218,14 @@ def handler(event, context):
         # that registered derivatives while this visibility change was in
         # flight. The worker also re-reads visibility after tagging.
         tag_preview_visibility(updated, new_visibility)
+        if old_visibility != new_visibility and updated.get("type", "photo") == "photo":
+            metadata_by_id = load_preview_metadata(updated, strict=True)
+            if metadata_by_id:
+                sync_album_index(
+                    dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]),
+                    updated,
+                    metadata_by_id,
+                )
         if old_visibility != "public" and new_visibility == "public":
             # Clear any cached denial produced while the source was protected.
             invalidate_public_previews(album_id, reason="album-visibility-public")

@@ -37,6 +37,7 @@ import {
     lensKey,
     normalizeLens,
 } from './explore.mjs'
+import { syncExploreIndex } from './explore-index.mjs'
 import {
     atPreviewStage,
     classifyPreviewObjectFailure,
@@ -670,13 +671,23 @@ async function processJob(jobValue) {
             })
         })
         if (accepted) {
-            await atPreviewStage(
+            const completedMetadata = await atPreviewStage(
                 'metadata_commit_failed',
                 async () => ensureExploreMetadata(resolved, existingMetadata),
             )
-            await atPreviewStage(
+            resolved = await atPreviewStage(
                 'visibility_tag_failed',
                 async () => tagUntilVisibilityStable(job, resolved.previewKeys),
+            )
+            await atPreviewStage(
+                'metadata_commit_failed',
+                async () => syncExploreIndex(
+                    documentClient,
+                    requiredEnvironment('PREVIEW_METADATA_TABLE'),
+                    existingMetadata,
+                    completedMetadata,
+                    resolved.visibility,
+                ),
             )
             return { status: 'already-complete' }
         }
@@ -724,6 +735,25 @@ async function processJob(jobValue) {
             sourceDigest,
             outputs,
             exploreMetadata,
+        ),
+    )
+    resolved = await atPreviewStage(
+        'visibility_tag_failed',
+        async () => tagUntilVisibilityStable(job, resolved.previewKeys),
+    )
+    await atPreviewStage(
+        'metadata_commit_failed',
+        async () => syncExploreIndex(
+            documentClient,
+            requiredEnvironment('PREVIEW_METADATA_TABLE'),
+            existingMetadata,
+            {
+                albumId: resolved.job.albumId,
+                mediaId,
+                status: 'ready',
+                ...exploreMetadata,
+            },
+            resolved.visibility,
         ),
     )
     return { status: 'completed' }

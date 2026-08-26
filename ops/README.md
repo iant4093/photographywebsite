@@ -109,6 +109,21 @@ fallback whenever a complete ready V3 record is unavailable. Dispatch uses
 bounded `SendMessageBatch` calls and requires the reviewed
 `--expected-plan-digest` plus `--confirm backfill-preview-v3` guards.
 
+## Explore materialized index
+
+Color and lens discovery use sparse reference rows inside the retained
+`PreviewMetadataTable`. The public reader always joins those references back to
+the current preview metadata and authoritative public album manifest; index rows
+alone can never make private or deleted media public. Until the READY marker is
+present, the deployed reader retains the bounded scan fallback.
+
+`backfill_explore_index.py` is dry-run by default and prints only aggregate
+counts plus a content-bound plan digest. Apply requires the exact account ID,
+put/delete counts, digest, and `APPLY_EXPLORE_INDEX_BACKFILL` confirmation. The
+script writes the READY marker last, re-reads both source tables, verifies zero
+remaining changes, and only then invalidates the Explore API cache. Run it only
+after the online worker, album visibility, and deletion paths have been deployed.
+
 ## Production change boundary
 
 Routine production changes run only through the tested `main` release described

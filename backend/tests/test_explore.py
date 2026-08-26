@@ -5,6 +5,7 @@ from test_support import response_body
 
 import get_public_album
 from media_access import expected_preview_keys, media_id_for_key
+from explore_index import INDEX_RECORD_TYPE, INDEX_VERSION, facet_partition, index_sort_key
 
 
 ALBUM_ID = "11111111-1111-4111-8111-111111111111"
@@ -65,6 +66,9 @@ def metadata():
 
 
 class ExploreApiTests(unittest.TestCase):
+    def setUp(self):
+        get_public_album._reset_explore_index_cache_for_tests()
+
     def test_batch_album_projection_keeps_approved_legacy_prefix(self):
         batch_client = Mock()
         batch_client.batch_get_item.return_value = {
@@ -230,6 +234,51 @@ class ExploreApiTests(unittest.TestCase):
                 }, None)
                 self.assertEqual(response["statusCode"], 400)
                 self.assertEqual(response_body(response)["code"], "invalid_request")
+
+    def test_materialized_results_query_without_scanning_and_revalidate_public_album(self):
+        reference = {
+            "albumId": facet_partition("color", "blue"),
+            "mediaId": index_sort_key(ALBUM_ID, MEDIA_ID),
+            "recordType": INDEX_RECORD_TYPE,
+            "indexVersion": INDEX_VERSION,
+            "sourceAlbumId": ALBUM_ID,
+            "sourceMediaId": MEDIA_ID,
+        }
+        preview_table = Mock()
+        with patch.object(get_public_album, "_explore_index_ready", return_value=True), patch.object(
+            get_public_album, "_index_query_page", return_value={"Items": [reference]}
+        ) as query, patch.object(
+            get_public_album, "_batch_preview_metadata", return_value={(ALBUM_ID, MEDIA_ID): metadata()}
+        ), patch.object(
+            get_public_album, "_batch_albums", return_value={ALBUM_ID: album()}
+        ), patch.object(get_public_album, "_preview_table", return_value=preview_table):
+            response = get_public_album._explore_response({
+                "queryStringParameters": {"mode": "color", "value": "blue", "limit": "1"},
+            })
+
+        self.assertEqual(len(response_body(response)["items"]), 1)
+        query.assert_called_once()
+        preview_table.scan.assert_not_called()
+
+    def test_materialized_options_bundle_the_first_random_page(self):
+        counts = {facet_partition("color", "blue"): 4}
+        with patch.object(get_public_album, "_explore_index_ready", return_value=True), patch.object(
+            get_public_album, "_parallel_partition_counts", return_value=counts
+        ), patch.object(
+            get_public_album,
+            "_indexed_media_payload",
+            return_value={"items": [{"mediaId": MEDIA_ID}], "nextCursor": "next"},
+        ) as page:
+            response = get_public_album._explore_response({
+                "queryStringParameters": {"mode": "colors"},
+            })
+
+        body = response_body(response)
+        self.assertEqual(body["items"], [{"id": "blue", "photos": 4}])
+        self.assertEqual(body["initialPage"]["value"], "blue")
+        self.assertEqual(body["initialPage"]["items"][0]["mediaId"], MEDIA_ID)
+        page.assert_called_once_with("color", "blue", get_public_album.EXPLORE_DEFAULT_LIMIT)
+        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ NPM ?= npm
 # This list is intentionally explicit: an unmapped function fails the build
 # instead of falling back to copying the entire functions directory.
 SOURCES_GetPublicAlbumsFunction := cursor_helpers.py front_door.py gallery_order.py get_public_albums.py media_access.py response_helpers.py validation_helpers.py
-SOURCES_GetPublicAlbumFunction := cursor_helpers.py front_door.py get_public_album.py media_access.py response_helpers.py validation_helpers.py
+SOURCES_GetPublicAlbumFunction := cursor_helpers.py explore_index.py front_door.py get_public_album.py media_access.py response_helpers.py validation_helpers.py
 SOURCES_GetAlbumsFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py gallery_order.py get_albums.py media_access.py response_helpers.py validation_helpers.py
 SOURCES_GetAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_album.py media_access.py response_helpers.py validation_helpers.py
 SOURCES_GetSharedAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_shared_album.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py
@@ -21,13 +21,13 @@ SOURCES_CompleteChallengeFunction := audit_helpers.py complete_challenge.py fron
 SOURCES_ContactFunction := audit_helpers.py contact.py email_helpers.py front_door.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py
 SOURCES_GoogleDriveBackupFunction := google_drive_sync.py media_access.py validation_helpers.py
 SOURCES_CreateAlbumFunction := album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py preview_jobs.py response_helpers.py secret_helpers.py validation_helpers.py
-SOURCES_UpdateAlbumFunction := album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py front_door.py media_access.py response_helpers.py update_album.py validation_helpers.py
+SOURCES_UpdateAlbumFunction := album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py explore_index.py front_door.py media_access.py response_helpers.py update_album.py validation_helpers.py
 SOURCES_UpdateGalleryOrderFunction := audit_helpers.py auth_helpers.py cache_invalidation.py front_door.py gallery_order.py response_helpers.py update_gallery_order.py validation_helpers.py
-SOURCES_DeleteAlbumFunction := audit_helpers.py auth_helpers.py cache_invalidation.py delete_album.py deletion_helpers.py front_door.py media_access.py response_helpers.py validation_helpers.py
+SOURCES_DeleteAlbumFunction := audit_helpers.py auth_helpers.py cache_invalidation.py delete_album.py deletion_helpers.py explore_index.py front_door.py media_access.py response_helpers.py validation_helpers.py
 SOURCES_AddImagesFunction := add_images.py album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py preview_jobs.py response_helpers.py secret_helpers.py validation_helpers.py
 SOURCES_CreateZipFunction := album_access.py audit_helpers.py auth_helpers.py create_zip.py cursor_helpers.py front_door.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py
 SOURCES_WorkerZipFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py media_access.py validation_helpers.py worker_zip.py zip_helpers.py
-SOURCES_DeleteImagesFunction := audit_helpers.py auth_helpers.py cache_invalidation.py delete_images.py deletion_helpers.py front_door.py media_access.py response_helpers.py validation_helpers.py
+SOURCES_DeleteImagesFunction := audit_helpers.py auth_helpers.py cache_invalidation.py delete_images.py deletion_helpers.py explore_index.py front_door.py media_access.py response_helpers.py validation_helpers.py
 SOURCES_TagMediaObjectFunction := media_access.py tag_media_object.py validation_helpers.py
 SOURCES_GetDownloadUrlFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_download_url.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py
 SOURCES_UpdateImageFunction := audit_helpers.py auth_helpers.py cache_invalidation.py deletion_helpers.py front_door.py media_access.py response_helpers.py update_image.py validation_helpers.py

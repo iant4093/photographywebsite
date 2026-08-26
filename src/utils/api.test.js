@@ -7,7 +7,12 @@ import {
     prefetchPublicAlbum,
     readCachedPublicAlbum,
 } from './api'
-import { fetchExploreColors, fetchExploreLenses, fetchExplorePhotos } from './exploreApi'
+import {
+    clearExploreCache,
+    fetchExploreColors,
+    fetchExploreLenses,
+    fetchExplorePhotos,
+} from './exploreApi'
 
 function jsonResponse(body) {
     return new Response(JSON.stringify(body), {
@@ -164,13 +169,17 @@ describe('random public photos', () => {
 
 describe('public Explore API', () => {
     beforeEach(() => {
+        clearExploreCache()
         vi.stubGlobal('window', {
             setTimeout: globalThis.setTimeout,
             clearTimeout: globalThis.clearTimeout,
         })
     })
 
-    afterEach(() => vi.unstubAllGlobals())
+    afterEach(() => {
+        clearExploreCache()
+        vi.unstubAllGlobals()
+    })
 
     it('encodes color and lens filters and preserves safe pagination', async () => {
         const request = vi.fn()
@@ -210,6 +219,7 @@ describe('public Explore API', () => {
         })))
         await expect(fetchExploreLenses()).resolves.toEqual({
             items: [{ name: 'Sigma 18-50mm', photos: 7 }],
+            initialPage: null,
         })
     })
 
@@ -224,6 +234,30 @@ describe('public Explore API', () => {
         })))
         await expect(fetchExploreColors()).resolves.toEqual({
             items: [{ id: 'blue', photos: 12 }],
+            initialPage: null,
         })
+    })
+
+    it('normalizes and caches the bundled initial page', async () => {
+        const request = vi.fn().mockResolvedValue(jsonResponse({
+            items: [{ id: 'blue', photos: 12 }],
+            initialPage: {
+                value: 'blue',
+                items: [{ mediaId: 'photo-1' }],
+                nextCursor: 'next',
+            },
+        }))
+        vi.stubGlobal('fetch', request)
+
+        const first = await fetchExploreColors()
+        const second = await fetchExploreColors()
+
+        expect(first.initialPage).toEqual({
+            value: 'blue',
+            items: [{ mediaId: 'photo-1' }],
+            nextCursor: 'next',
+        })
+        expect(second).toBe(first)
+        expect(request).toHaveBeenCalledTimes(1)
     })
 })

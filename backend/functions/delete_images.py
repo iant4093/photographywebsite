@@ -13,6 +13,7 @@ from deletion_helpers import (
     delete_prefix_all_versions,
     preflight_deletion,
 )
+from explore_index import index_entry_keys
 from media_access import (
     delete_preview_metadata,
     load_preview_metadata,
@@ -144,7 +145,14 @@ def handler(event, context):
         for hls_prefix in hls_prefixes:
             deleted_versions += delete_prefix_all_versions(hls_prefix)
 
-        delete_preview_metadata(album_id, removed_media_ids)
+        delete_preview_metadata(
+            album_id,
+            removed_media_ids,
+            {
+                media_id: index_entry_keys(preview_metadata.get(media_id, {}))
+                for media_id in removed_media_ids
+            },
+        )
         table.update_item(
             Key={"albumId": album_id},
             UpdateExpression=(

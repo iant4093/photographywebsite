@@ -8,6 +8,7 @@ from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from cache_invalidation import invalidate_public_api, invalidate_public_previews
 from deletion_helpers import DeletionTooLargeError, delete_prefix_all_versions, preflight_deletion
+from explore_index import index_entry_keys
 from media_access import album_media_prefixes, delete_preview_metadata, load_preview_metadata
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_uuid
@@ -65,7 +66,11 @@ def handler(event, context):
         deleted_versions = 0
         for prefix in prefixes:
             deleted_versions += delete_prefix_all_versions(prefix)
-        delete_preview_metadata(album_id, preview_metadata.keys())
+        delete_preview_metadata(
+            album_id,
+            preview_metadata.keys(),
+            {media_id: index_entry_keys(metadata) for media_id, metadata in preview_metadata.items()},
+        )
         table.delete_item(
             Key={"albumId": album_id},
             ConditionExpression="attribute_exists(albumId)",
