@@ -33,7 +33,7 @@ function PhotoLightbox({
             onClose={onClose}
             onNext={images.length > 1 ? onNext : undefined}
             onPrevious={images.length > 1 ? onPrevious : undefined}
-            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal flex flex-col items-center justify-center p-4 md:p-12 mb-0 animate-fade-in"
+            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal flex flex-col items-center justify-center p-4 md:p-12 mb-0"
         >
             <button
                 type="button"

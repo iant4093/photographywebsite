@@ -96,6 +96,7 @@
     position: static;
     width: 2.75rem;
     height: 2.75rem;
+    translate: none;
     transform: none;
     background: rgba(255, 255, 255, 0.14);
   }
