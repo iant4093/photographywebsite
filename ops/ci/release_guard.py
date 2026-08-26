@@ -274,7 +274,10 @@ def gate_change_set(
                     and attribute in intended_properties
                 )
                 if not property_allowed:
-                    raise GateError("resource property is outside the versioned release intent")
+                    raise GateError(
+                        f"resource property is outside the versioned release intent: "
+                        f"{logical_id}.{name or attribute}"
+                    )
         dependency_only = bool(details) and all(dynamic_details)
         if replacement not in SAFE_REPLACEMENTS and not (
             replacement == "Conditional" and dependency_only
@@ -295,7 +298,10 @@ def gate_change_set(
         if protected and not dependency_only and not explicitly_reviewed_protected_change:
             raise GateError("protected resource change requires exceptional approval")
         if release_intent is not None and intended_properties is None and not dependency_only:
-            raise GateError("resource change is outside the versioned release intent")
+            raise GateError(
+                f"resource change is outside the versioned release intent: "
+                f"{logical_id} ({resource_type} {action})"
+            )
         counts[action] += 1
     counts["Total"] = seen
     return counts
