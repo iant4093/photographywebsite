@@ -32,6 +32,8 @@ describe('PhotoLightbox', () => {
       <PhotoLightbox images={[landscape, portrait]} index={0} ariaLabel="Photo viewer" onClose={vi.fn()} />,
     )
     expect(screen.getByRole('dialog', { name: 'Photo viewer' })).toHaveTextContent('Canon EOS R7')
+    expect(document.querySelector('.linen-lightbox-content')).toHaveClass('has-photo-metadata')
+    expect(document.querySelector('.linen-lightbox-metadata')).toHaveTextContent('Canon EOS R7')
     expect(screen.getByRole('dialog')).toHaveTextContent('Sigma 18-50mm F2.8')
     expect(screen.getByRole('dialog')).toHaveTextContent('18mm')
     expect(screen.getByRole('dialog')).toHaveTextContent('f/4')
@@ -108,6 +110,8 @@ describe('PhotoLightbox', () => {
     )
 
     expect(screen.queryByRole('navigation')).toBeNull()
+    expect(document.querySelector('.linen-lightbox-content')).not.toHaveClass('has-photo-metadata')
+    expect(document.querySelector('.linen-lightbox-metadata')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Download photo' })).toBeNull()
     screen.getByAltText('Full size preview').dispatchEvent(new Event('error'))
     expect(onMediaError).toHaveBeenCalledOnce()

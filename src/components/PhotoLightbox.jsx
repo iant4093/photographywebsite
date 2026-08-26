@@ -39,6 +39,7 @@ function PhotoLightbox({
     if (!activeImage && !loading && !emptyMessage) return null
 
     const isLegacyOrDemo = typeof activeImage === 'string'
+    const hasPhotoMetadata = !isLegacyOrDemo && Boolean(activeImage?.exif)
     const hasOutgoingImage = settledImage && settledImage.id !== activeId
 
     const handleFullImageLoad = () => {
@@ -117,7 +118,7 @@ function PhotoLightbox({
             )}
 
             <div
-                className="linen-lightbox-content flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0"
+                className={`linen-lightbox-content flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0 ${hasPhotoMetadata ? 'has-photo-metadata' : ''}`}
                 onClick={(event) => event.stopPropagation()}
             >
                 <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
@@ -175,8 +176,8 @@ function PhotoLightbox({
                     )}
                 </div>
 
-                {!isLegacyOrDemo && activeImage?.exif && (
-                    <div className="shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
+                {hasPhotoMetadata && (
+                    <div className="linen-lightbox-metadata shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
                         {activeImage.exif.model && (
                             <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
                                 {activeImage.exif.model}
