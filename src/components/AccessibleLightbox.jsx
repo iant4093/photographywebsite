@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import './AccessibleLightbox.css'
 
@@ -29,11 +29,11 @@ export default function AccessibleLightbox({
     const callbacksRef = useRef({ onClose, onNext, onPrevious })
     const portalTarget = typeof document === 'undefined' ? null : document.body
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         callbacksRef.current = { onClose, onNext, onPrevious }
     }, [onClose, onNext, onPrevious])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const dialog = dialogRef.current
         const scrollPosition = {
             x: window.scrollX,
@@ -73,12 +73,14 @@ export default function AccessibleLightbox({
             element.style.visibility = 'hidden'
             element.style.pointerEvents = 'none'
         })
-        document.body.style.overflow = 'hidden'
-        document.body.style.position = 'fixed'
-        document.body.style.top = `-${scrollPosition.y}px`
-        document.body.style.left = `-${scrollPosition.x}px`
-        document.body.style.right = '0'
-        document.body.style.width = '100%'
+        Object.assign(document.body.style, {
+            overflow: 'hidden',
+            position: 'fixed',
+            top: `-${scrollPosition.y}px`,
+            left: `-${scrollPosition.x}px`,
+            right: '0',
+            width: '100%',
+        })
 
         const initialFocus = dialog?.querySelector('[data-lightbox-initial-focus]')
             || focusableElements(dialog)[0]
