@@ -90,7 +90,8 @@ function PhotoLightbox({
                                 alt=""
                                 width={activeImage.width}
                                 height={activeImage.height}
-                                className="linen-lightbox-placeholder max-w-full max-h-full object-contain blur-sm opacity-50 z-10 pointer-events-none"
+                                style={{ width: 'auto', height: '100%' }}
+                                className="linen-lightbox-placeholder max-w-full object-contain blur-sm opacity-50 z-10 pointer-events-none"
                             />
                             <img
                                 src={activeRawUrl}
@@ -101,7 +102,8 @@ function PhotoLightbox({
                                 width={activeImage.width}
                                 height={activeImage.height}
                                 decoding="async"
-                                className="linen-lightbox-photo max-w-full max-h-full object-contain relative z-20 animate-fade-in"
+                                style={{ width: 'auto', height: '100%' }}
+                                className="linen-lightbox-photo max-w-full object-contain relative z-20 animate-fade-in"
                             />
                         </div>
                     ) : (

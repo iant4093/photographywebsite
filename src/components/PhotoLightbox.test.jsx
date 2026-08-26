@@ -43,6 +43,7 @@ describe('PhotoLightbox', () => {
     const fullImage = screen.getByAltText('Full size preview')
     expect(fullImage).toHaveAttribute('width', '1280')
     expect(fullImage).toHaveAttribute('height', '1920')
+    expect(fullImage).toHaveStyle({ width: 'auto', height: '100%' })
     expect(document.querySelectorAll('.linen-lightbox-media')).toHaveLength(1)
   })
 })
