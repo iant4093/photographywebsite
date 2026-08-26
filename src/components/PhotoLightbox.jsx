@@ -7,7 +7,7 @@ import {
     mediaThumbnailUrl,
 } from '../utils/mediaUrls'
 
-const PHOTO_CROSSFADE_MS = 260
+const PHOTO_CROSSFADE_MS = 360
 
 function PhotoLightbox({
     images,

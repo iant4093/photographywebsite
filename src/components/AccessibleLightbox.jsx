@@ -41,12 +41,20 @@ export default function AccessibleLightbox({
         }
         const previousBodyStyles = {
             overflow: document.body.style.overflow,
+            overscrollBehavior: document.body.style.overscrollBehavior,
             position: document.body.style.position,
             top: document.body.style.top,
             left: document.body.style.left,
             right: document.body.style.right,
             width: document.body.style.width,
         }
+        const previousDocumentStyles = {
+            overflow: document.documentElement.style.overflow,
+            overscrollBehavior: document.documentElement.style.overscrollBehavior,
+        }
+        const useViewportScrollLock = window.matchMedia?.(
+            '(orientation: landscape) and (max-height: 600px) and (max-width: 1024px) and (pointer: coarse)',
+        ).matches === true
         const backgroundState = Array.from(dialog?.parentElement?.children || [])
             .filter((element) => element !== dialog)
             .map((element) => ({
@@ -64,17 +72,29 @@ export default function AccessibleLightbox({
             element.setAttribute('inert', '')
             element.setAttribute('aria-hidden', 'true')
         })
-        Object.assign(document.body.style, {
-            overflow: 'hidden',
-            position: 'fixed',
-            top: `-${scrollPosition.y}px`,
-            left: `-${scrollPosition.x}px`,
-            right: '0',
-            width: '100%',
-        })
+        if (useViewportScrollLock) {
+            Object.assign(document.documentElement.style, {
+                overflow: 'hidden',
+                overscrollBehavior: 'none',
+            })
+            Object.assign(document.body.style, {
+                overflow: 'hidden',
+                overscrollBehavior: 'none',
+            })
+        } else {
+            Object.assign(document.body.style, {
+                overflow: 'hidden',
+                position: 'fixed',
+                top: `-${scrollPosition.y}px`,
+                left: `-${scrollPosition.x}px`,
+                right: '0',
+                width: '100%',
+            })
+        }
 
-        const initialFocus = dialog?.querySelector('[data-lightbox-initial-focus]')
-            || focusableElements(dialog)[0]
+        const initialFocus = useViewportScrollLock
+            ? dialog
+            : dialog?.querySelector('[data-lightbox-initial-focus]') || focusableElements(dialog)[0]
         initialFocus?.focus({ preventScroll: true })
 
         const handleKeyDown = (event) => {
@@ -117,13 +137,16 @@ export default function AccessibleLightbox({
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
             Object.assign(document.body.style, previousBodyStyles)
+            Object.assign(document.documentElement.style, previousDocumentStyles)
             backgroundState.forEach(({ element, ariaHidden, inert }) => {
                 if (!inert) element.removeAttribute('inert')
                 if (ariaHidden === null) element.removeAttribute('aria-hidden')
                 else element.setAttribute('aria-hidden', ariaHidden)
             })
             restoreFocusRef.current?.focus({ preventScroll: true })
-            window.scrollTo(scrollPosition.x, scrollPosition.y)
+            if (!useViewportScrollLock) {
+                window.scrollTo(scrollPosition.x, scrollPosition.y)
+            }
             document.documentElement.removeAttribute('data-lightbox-scroll-lock')
         }
     }, [])

@@ -114,4 +114,34 @@ describe('AccessibleLightbox', () => {
         expect(window.scrollTo).toHaveBeenLastCalledWith(11, 640)
         expect(document.body.style.top).toBe('')
     })
+
+    it('keeps the live viewport in place on short coarse-pointer landscape screens', () => {
+        window.scrollTo.mockClear()
+        vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+            matches: query.includes('orientation: landscape') && query.includes('pointer: coarse'),
+            media: query,
+            onchange: null,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+        }))
+
+        const { unmount } = render(
+            <AccessibleLightbox ariaLabel="Landscape viewer" onClose={vi.fn()}>
+                <button type="button" data-lightbox-initial-focus>Close viewer</button>
+            </AccessibleLightbox>,
+        )
+
+        expect(screen.getByRole('dialog', { name: 'Landscape viewer' })).toHaveFocus()
+        expect(document.documentElement.style.overflow).toBe('hidden')
+        expect(document.body.style.overflow).toBe('hidden')
+        expect(document.body.style.position).toBe('')
+
+        unmount()
+        expect(document.documentElement.style.overflow).toBe('')
+        expect(document.body.style.overflow).toBe('')
+        expect(window.scrollTo).not.toHaveBeenCalled()
+    })
 })
