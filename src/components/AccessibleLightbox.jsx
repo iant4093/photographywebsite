@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import './AccessibleLightbox.css'
 
 const FOCUSABLE_SELECTOR = [
     'a[href]',
