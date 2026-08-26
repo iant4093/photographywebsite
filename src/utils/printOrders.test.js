@@ -30,6 +30,8 @@ describe('Fotomoto print launcher', () => {
     })
 
     it('fails clearly when the popup is blocked and closes on session failure', async () => {
+        await expect(openPrintOrder(null)).rejects.toThrow(/session request/i)
+
         vi.spyOn(window, 'open').mockReturnValueOnce(null)
         await expect(openPrintOrder(vi.fn())).rejects.toThrow(/allow pop-ups/i)
 
@@ -46,5 +48,23 @@ describe('Fotomoto print launcher', () => {
         vi.spyOn(window, 'open').mockReturnValueOnce(popup)
         await expect(openPrintOrder(() => Promise.reject(new Error('offline')))).rejects.toThrow('offline')
         expect(popup.close).toHaveBeenCalledOnce()
+    })
+
+    it('does not navigate a print window that was closed while authorization ran', async () => {
+        const popup = {
+            closed: true,
+            opener: window,
+            location: { replace: vi.fn() },
+            document: {
+                documentElement: { style: { cssText: '' } },
+                body: { style: { cssText: '' } },
+            },
+            close: vi.fn(),
+        }
+        vi.spyOn(window, 'open').mockReturnValue(popup)
+        const token = `v1.${'a'.repeat(90)}.${'b'.repeat(43)}`
+
+        await expect(openPrintOrder(() => Promise.resolve({ sessionToken: token }))).rejects.toThrow(/closed/i)
+        expect(popup.location.replace).not.toHaveBeenCalled()
     })
 })
