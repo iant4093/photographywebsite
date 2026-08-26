@@ -831,6 +831,11 @@ fi
         self.assertNotIn("secretsmanager:PutSecretValue", print_secret)
         self.assertNotIn("secretsmanager:DeleteSecret", print_secret)
 
+        generated_value = statement_block(execution, "GeneratePrintSessionSecretValue")
+        self.assertIn("Action: secretsmanager:GetRandomPassword", generated_value)
+        self.assertIn("Resource: '*'", generated_value)
+        self.assertNotIn("secretsmanager:GetSecretValue", generated_value)
+
         pickup_user = statement_block(execution, "ManageExactFotomotoPickupUser")
         for action in (
             "iam:CreateUser",
@@ -870,6 +875,7 @@ fi
             "CreateTaggedUserPool",
             "CreateCloudFrontResources",
             "CreateTaggedApplicationKey",
+            "GeneratePrintSessionSecretValue",
             "EstablishApiGatewayAccessLogResourcePolicies",
             "ManageApiGatewayAccessLogDeliveries",
             "ReadGlobalObservabilityInventories",
