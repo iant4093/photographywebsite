@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { BatchWriteCommand } from '@aws-sdk/lib-dynamodb'
 
 
 export const EXPLORE_INDEX_VERSION = 1
@@ -83,8 +82,16 @@ function entryKeys(metadata) {
     return [...metadataFacets(metadata).keys()].sort().map(albumId => ({ albumId, mediaId: sortKey }))
 }
 
-export async function syncExploreIndex(documentClient, tableName, previous, current, visibility) {
+export async function syncExploreIndex(
+    documentClient,
+    tableName,
+    previous,
+    current,
+    visibility,
+    batchWriteCommand,
+) {
     if (!tableName) throw new Error('PREVIEW_METADATA_TABLE is not configured')
+    if (typeof batchWriteCommand !== 'function') throw new Error('Batch write command factory is required')
     const desired = desiredIndexRecords(current, visibility === 'public')
     const desiredEntries = new Set(
         desired
@@ -98,7 +105,7 @@ export async function syncExploreIndex(documentClient, tableName, previous, curr
     for (let offset = 0; offset < requests.length; offset += 25) {
         let pending = requests.slice(offset, offset + 25)
         for (let attempt = 0; attempt < 5 && pending.length; attempt += 1) {
-            const response = await documentClient.send(new BatchWriteCommand({
+            const response = await documentClient.send(batchWriteCommand({
                 RequestItems: { [tableName]: pending },
             }))
             pending = response.UnprocessedItems?.[tableName] || []

@@ -14,7 +14,13 @@ import {
 } from '@aws-sdk/client-s3'
 import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import {
+    BatchWriteCommand,
+    DynamoDBDocumentClient,
+    GetCommand,
+    PutCommand,
+    UpdateCommand,
+} from '@aws-sdk/lib-dynamodb'
 
 import {
     PREVIEW_QUALITY,
@@ -687,6 +693,7 @@ async function processJob(jobValue) {
                     existingMetadata,
                     completedMetadata,
                     resolved.visibility,
+                    input => new BatchWriteCommand(input),
                 ),
             )
             return { status: 'already-complete' }
@@ -754,6 +761,7 @@ async function processJob(jobValue) {
                 ...exploreMetadata,
             },
             resolved.visibility,
+            input => new BatchWriteCommand(input),
         ),
     )
     return { status: 'completed' }

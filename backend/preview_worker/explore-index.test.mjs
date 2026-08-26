@@ -53,6 +53,7 @@ test('reconciles stale rows and retries unprocessed writes', async () => {
         metadata({ colorFamilies: ['red'], lens: 'Old Lens', lensKey: 'old lens' }),
         metadata({ colorFamilies: ['blue'], lens: 'New Lens', lensKey: 'new lens' }),
         'public',
+        input => ({ input }),
     )
     assert.ok(calls.length >= 2)
     assert.ok(calls[0].some(item => item.DeleteRequest))
@@ -67,7 +68,7 @@ test('rejects malformed metadata and a permanently unprocessed batch', async () 
         },
     }
     await assert.rejects(
-        syncExploreIndex(client, 'previews', null, metadata(), 'public'),
+        syncExploreIndex(client, 'previews', null, metadata(), 'public', input => ({ input })),
         /remained unprocessed/,
     )
 })
