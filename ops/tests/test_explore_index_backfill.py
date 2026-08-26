@@ -74,7 +74,48 @@ class FakeTable:
         self.marker = Item
 
 
+class FakeScanTable:
+    def __init__(self, pages):
+        self.pages = list(pages)
+        self.requests = []
+
+    def scan(self, **request):
+        self.requests.append(request)
+        return self.pages.pop(0)
+
+
 class ExploreIndexBackfillTests(unittest.TestCase):
+    def test_scan_table_paginates_and_rejects_malformed_or_repeated_pages(self):
+        table = FakeScanTable([
+            {"Items": [{"value": 1}, "ignored"], "LastEvaluatedKey": {"cursor": "next"}},
+            {"Items": [{"value": 2}]},
+        ])
+        self.assertEqual(backfill.scan_table(table), [{"value": 1}, {"value": 2}])
+        self.assertEqual(table.requests[1], {"ExclusiveStartKey": {"cursor": "next"}})
+
+        with self.assertRaisesRegex(RuntimeError, "malformed Items"):
+            backfill.scan_table(FakeScanTable([{"Items": {}}]))
+        with self.assertRaisesRegex(RuntimeError, "pagination token repeated"):
+            backfill.scan_table(FakeScanTable([
+                {"Items": [], "LastEvaluatedKey": {"cursor": "same"}},
+                {"Items": [], "LastEvaluatedKey": {"cursor": "same"}},
+            ]))
+
+    def test_raw_key_and_missing_metadata_are_fail_closed(self):
+        self.assertEqual(backfill._raw_key(None), "")
+        self.assertEqual(backfill._raw_key({"key": RAW_KEY}), RAW_KEY)
+        self.assertEqual(backfill._raw_key({"rawKey": 7}), "")
+
+        desired, counts = backfill.desired_records(
+            [album(images=[{"rawKey": RAW_KEY}, None, {}])],
+            [metadata(exploreVersion=1, colorFamilies=[], lens="", lensKey="")],
+        )
+        self.assertEqual(counts["missingExploreMetadataCount"], 1)
+        self.assertEqual(
+            [item["recordType"] for item in desired.values()],
+            [backfill.READY_RECORD_TYPE],
+        )
+
     def test_desired_inventory_indexes_only_current_public_manifest_media(self):
         desired, counts = backfill.desired_records(
             [album(), album(albumId="22222222-2222-4222-8222-222222222222", visibility="private")],
