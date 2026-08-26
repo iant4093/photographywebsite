@@ -624,6 +624,9 @@ class BrowserBoundaryTests(unittest.TestCase):
                         "Items": [{
                             "EventType": "viewer-request",
                             "FunctionARN": "arn:aws:cloudfront::123:function/managed",
+                        }, {
+                            "EventType": "viewer-response",
+                            "FunctionARN": "arn:aws:cloudfront::123:function/unrelated",
                         }]
                     }
                 }

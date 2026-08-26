@@ -72,6 +72,12 @@ class CloudFrontHelperTests(unittest.TestCase):
             cloudfront_frontend.normalize_policy(provider_policy),
             cloudfront_frontend.normalize_policy(source_policy),
         )
+        self.assertEqual(
+            cloudfront_frontend.normalize_policy(
+                {"Headers": {"Items": ["Alpha", {"not": "a header name"}]}}
+            ),
+            {"Headers": {"Items": ["Alpha", {"not": "a header name"}]}},
+        )
         self.assertTrue(cloudfront_frontend.certificate_covers("WWW.Example.test.", ["www.example.test"]))
         self.assertTrue(cloudfront_frontend.certificate_covers("www.example.test", ["*.example.test"]))
         self.assertFalse(cloudfront_frontend.certificate_covers("deep.www.example.test", ["*.example.test"]))
@@ -321,6 +327,18 @@ class CloudFrontHelperTests(unittest.TestCase):
             cloudfront_frontend.render_print_csp(print_baseline, media_domain="media.example"),
             "default-src 'none'; img-src https://media.example",
         )
+        for invalid_print_baseline in (
+            {},
+            {"fotomoto_print": {"content_security_policy_template": 42}},
+            {"fotomoto_print": {"content_security_policy_template": "default-src 'none'"}},
+        ):
+            with self.subTest(invalid_print_baseline=invalid_print_baseline), self.assertRaises(
+                SystemExit
+            ):
+                cloudfront_frontend.render_print_csp(
+                    invalid_print_baseline,
+                    media_domain="media.example",
+                )
         print_policy = cloudfront_frontend.print_policy_config(print_baseline)
         self.assertEqual(print_policy["Name"], "print-policy")
         self.assertEqual(print_policy["CustomHeadersConfig"]["Quantity"], 4)

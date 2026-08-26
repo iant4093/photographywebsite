@@ -351,6 +351,8 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertTrue(cloudfront_frontend.waf_search_string_matches("/api/", "/api/"))
         self.assertFalse(cloudfront_frontend.waf_search_string_matches("L2FwaS9vdGhlci8=", "/api/"))
         self.assertFalse(cloudfront_frontend.waf_search_string_matches("not base64!", "/api/"))
+        self.assertFalse(cloudfront_frontend.waf_search_string_matches(None, "/api/"))
+        self.assertFalse(cloudfront_frontend.waf_search_string_matches("/w==", "/api/"))
 
     def test_secret_value_loader_never_prints_the_value(self) -> None:
         runtime_value = secrets.token_urlsafe(48)
