@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
-import { requestAlbumMediaDownload } from '../utils/api'
+import { requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
     fetchExploreColors,
     fetchExploreLenses,
@@ -18,6 +18,7 @@ import {
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import './Explore.css'
+import { openPrintOrder } from '../utils/printOrders'
 
 const PAGE_SIZE = 24
 const COLOR_OPTIONS = Object.freeze([
@@ -253,6 +254,16 @@ function ExploreModule({ mode }) {
         }
     }, [])
 
+    const handlePrint = useCallback(async (event, image) => {
+        event.stopPropagation()
+        try {
+            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)))
+        } catch (error) {
+            console.error('Explore print order failed:', error)
+            alert(error?.message || 'The print store could not be opened. Please try again.')
+        }
+    }, [])
+
     const activeLabel = isColor ? COLOR_BY_ID.get(value)?.label : value
     const availableColors = isColor
         ? facets.map(option => ({ ...COLOR_BY_ID.get(option.id), ...option })).filter(option => option.id && option.label)
@@ -353,6 +364,7 @@ function ExploreModule({ mode }) {
                     onNext={() => setLightboxIndex(current => (current + 1) % items.length)}
                     onPrevious={() => setLightboxIndex(current => (current - 1 + items.length) % items.length)}
                     onDownload={handleDownload}
+                    onPrint={handlePrint}
                 />
             )}
         </div>

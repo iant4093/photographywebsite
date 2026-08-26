@@ -9,6 +9,7 @@ No certificate, DNS, origin, or logging change is made implicitly.
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
 import json
 import os
@@ -100,6 +101,14 @@ def render_csp(
         cognito_origin=f"https://cognito-idp.{region}.amazonaws.com",
         s3_origins=s3_origins,
     )
+
+
+def render_print_csp(baseline: dict[str, Any], *, media_domain: str) -> str:
+    settings = baseline.get("fotomoto_print") or {}
+    template = settings.get("content_security_policy_template")
+    if not isinstance(template, str) or "{media_origin}" not in template:
+        raise SystemExit("Refusing Fotomoto print setup: print CSP template is missing or invalid")
+    return template.format(media_origin=f"https://{media_domain}")
 
 
 def certificate_covers(hostname: str, names: list[str]) -> bool:
@@ -306,6 +315,38 @@ def policy_config(name: str, baseline: dict[str, Any], cache_control: str) -> di
                     "Value": "same-origin",
                     "Override": True,
                 },
+            ],
+        },
+    }
+
+
+def print_policy_config(baseline: dict[str, Any]) -> dict[str, Any]:
+    settings = baseline["fotomoto_print"]
+    return {
+        "Name": settings["response_policy_name"],
+        "Comment": "Isolated Fotomoto checkout bridge; managed in source control",
+        "SecurityHeadersConfig": {
+            "FrameOptions": {"Override": True, "FrameOption": "DENY"},
+            "ReferrerPolicy": {"Override": True, "ReferrerPolicy": "no-referrer"},
+            "ContentSecurityPolicy": {
+                "Override": True,
+                "ContentSecurityPolicy": settings["content_security_policy"],
+            },
+            "ContentTypeOptions": {"Override": True},
+            "StrictTransportSecurity": {
+                "Override": True,
+                "AccessControlMaxAgeSec": 31536000,
+                "IncludeSubdomains": True,
+                "Preload": True,
+            },
+        },
+        "CustomHeadersConfig": {
+            "Quantity": 4,
+            "Items": [
+                {"Header": "Cache-Control", "Value": "no-cache, max-age=0, must-revalidate", "Override": True},
+                {"Header": "Permissions-Policy", "Value": settings["permissions_policy"], "Override": True},
+                {"Header": "Cross-Origin-Opener-Policy", "Value": "same-origin", "Override": True},
+                {"Header": "X-Robots-Tag", "Value": "noindex, nofollow, noarchive", "Override": True},
             ],
         },
     }
@@ -529,6 +570,23 @@ def _arn_account(arn: str) -> str:
     return parts[4] if len(parts) > 5 else ""
 
 
+def waf_search_string_matches(value: Any, expected: str) -> bool:
+    """Match the exact WAF byte string returned by AWS CLI JSON.
+
+    Botocore serializes blob fields such as SearchString as base64 in JSON.
+    Keep accepting the decoded form used by tests/SDK callers, but do not
+    weaken the guard to a prefix or substring comparison.
+    """
+    if value == expected:
+        return True
+    if not isinstance(value, str):
+        return False
+    try:
+        return base64.b64decode(value, validate=True).decode("utf-8") == expected
+    except (ValueError, UnicodeDecodeError):
+        return False
+
+
 def validate_front_door_resources(
     *, domain: str, certificate_arn: str, parameter_name: str, web_acl_arn: str,
     account: str, region: str, profile: str | None,
@@ -604,7 +662,7 @@ def validate_front_door_resources(
             rate.get("AggregateKeyType") != aggregate_key
             or rate.get("EvaluationWindowSec") != 300
             or rate.get("Limit") != limit
-            or scope.get("SearchString") != path
+            or not waf_search_string_matches(scope.get("SearchString"), path)
             or scope.get("PositionalConstraint") != positional_constraint
             or scope.get("FieldToMatch") != {"UriPath": {}}
         ):
@@ -807,6 +865,7 @@ def main() -> int:
     parser.add_argument("--expected-etag")
     parser.add_argument("--expected-account-id")
     parser.add_argument("--include-www", action="store_true")
+    parser.add_argument("--include-fotomoto-print", action="store_true")
     parser.add_argument("--include-api-front-door", action="store_true")
     parser.add_argument("--api-certificate-arn")
     parser.add_argument("--origin-parameter-name", "--origin-secret-arn", dest="origin_parameter_name")
@@ -846,6 +905,10 @@ def main() -> int:
         region=args.region,
         bucket=media_bucket,
     )
+    if args.include_fotomoto_print:
+        baseline["fotomoto_print"]["content_security_policy"] = render_print_csp(
+            baseline, media_domain=media_distribution["DomainName"]
+        )
     current = aws_json(
         ["cloudfront", "get-distribution-config", "--id", distribution_id],
         profile=args.profile,
@@ -971,6 +1034,23 @@ def main() -> int:
             baseline["optional_www_alias"], names
         ):
             raise SystemExit("Refusing www alias: the issued ACM certificate does not cover www")
+    if args.include_fotomoto_print:
+        certificate_arn = config.get("ViewerCertificate", {}).get("ACMCertificateArn")
+        if not certificate_arn:
+            raise SystemExit("Refusing Fotomoto print alias: distribution does not use an ACM certificate")
+        certificate_region = certificate_arn.split(":")[3]
+        certificate = aws_json(
+            ["acm", "describe-certificate", "--certificate-arn", certificate_arn, "--region", certificate_region],
+            profile=args.profile,
+        )["Certificate"]
+        certificate_names = [
+            certificate.get("DomainName", ""),
+            *(certificate.get("SubjectAlternativeNames", []) or []),
+        ]
+        if certificate.get("Status") != "ISSUED" or not certificate_covers(
+            baseline["fotomoto_print"]["alias"], certificate_names
+        ):
+            raise SystemExit("Refusing Fotomoto print alias: the issued ACM certificate does not cover it")
     if request_router_enabled:
         redirect_arn, redirect_action = ensure_www_redirect_function(
             name=redirect_name,
@@ -1005,6 +1085,12 @@ def main() -> int:
     immutable_id, immutable_action = ensure_response_policy(
         immutable_desired, apply=args.apply, profile=args.profile
     )
+    print_id = None
+    print_action = "disabled"
+    if args.include_fotomoto_print:
+        print_id, print_action = ensure_response_policy(
+            print_policy_config(baseline), apply=args.apply, profile=args.profile
+        )
 
     print(json.dumps({
         "mode": "apply" if args.apply else "dry-run",
@@ -1016,6 +1102,7 @@ def main() -> int:
             "html": html_action,
             "static": static_action,
             "immutable": immutable_action,
+            "fotomotoPrint": print_action,
         },
         "wwwRedirect": redirect_action,
         "socialPreviewRouter": social_router_action,
@@ -1031,6 +1118,8 @@ def main() -> int:
         return 0
 
     assert html_id and static_id and immutable_id
+    if args.include_fotomoto_print:
+        assert print_id
     # Updating an already-associated response policy can rotate the
     # distribution ETag. Refresh only after proving that the distribution
     # configuration itself is byte-for-byte equivalent after normalization;
@@ -1058,6 +1147,8 @@ def main() -> int:
     aliases = [baseline["canonical_alias"]]
     if args.include_www:
         aliases.append(baseline["optional_www_alias"])
+    if args.include_fotomoto_print:
+        aliases.append(baseline["fotomoto_print"]["alias"])
     desired_distribution["Aliases"] = {"Quantity": len(aliases), "Items": aliases}
 
     origin_verification_value = None
@@ -1072,6 +1163,8 @@ def main() -> int:
     existing_behaviors = desired_distribution.get("CacheBehaviors", {}).get("Items", []) or []
     managed_patterns = set(baseline["immutable_path_patterns"])
     managed_patterns.update(baseline.get("static_path_patterns", []))
+    if args.include_fotomoto_print:
+        managed_patterns.add(baseline["fotomoto_print"]["path_pattern"])
     if args.include_api_front_door:
         managed_patterns.update({api_settings["public_path_pattern"], api_settings["private_path_pattern"]})
         managed_patterns.update(api_settings.get("social_path_patterns", []))
@@ -1090,6 +1183,15 @@ def main() -> int:
         )
         for pattern in baseline.get("static_path_patterns", [])
     ]
+    print_behaviors = []
+    if args.include_fotomoto_print:
+        print_behaviors = [cache_behavior(
+            default,
+            baseline["fotomoto_print"]["path_pattern"],
+            print_id,
+            baseline,
+            cache_policy="html",
+        )]
     api_behaviors = []
     if args.include_api_front_door:
         assert public_api_cache_id and public_api_origin_request_id
@@ -1130,7 +1232,7 @@ def main() -> int:
             api_behaviors.append(social_behavior)
     # CloudFront selects the first matching ordered behavior, so the narrow
     # public cache path must precede the cache-disabled catch-all API path.
-    managed = api_behaviors + immutable + static
+    managed = api_behaviors + print_behaviors + immutable + static
     if request_router_enabled:
         for behavior in preserved:
             associate_viewer_request(behavior, redirect_arn)

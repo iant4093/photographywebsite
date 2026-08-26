@@ -29,7 +29,7 @@ fi
 
 while IFS= read -r -d '' file; do
   relative="${file#${root}/}"
-  [[ "$relative" != "index.html" ]] || continue
+  [[ "$relative" != "index.html" && "$relative" != "print.html" ]] || continue
   if [[ "$relative" == assets/* ]]; then
     cache_control='public,max-age=31536000,immutable'
   else
@@ -41,6 +41,12 @@ while IFS= read -r -d '' file; do
     --only-show-errors
 done < <(find "$root" -type f -print0)
 
+aws s3 cp "$root/print.html" "s3://${FRONTEND_BUCKET}/print.html" \
+  --region "$AWS_REGION" \
+  --cache-control 'no-cache,max-age=0,must-revalidate' \
+  --content-type 'text/html; charset=utf-8' \
+  --only-show-errors
+
 aws s3 cp "$root/index.html" "s3://${FRONTEND_BUCKET}/index.html" \
   --region "$AWS_REGION" \
   --cache-control 'no-cache,max-age=0,must-revalidate' \
@@ -49,7 +55,7 @@ aws s3 cp "$root/index.html" "s3://${FRONTEND_BUCKET}/index.html" \
 
 invalidation_id="$(aws cloudfront create-invalidation \
   --distribution-id "$FRONTEND_DISTRIBUTION_ID" \
-  --paths '/' '/index.html' '/theme-init.js' '/dark-theme.css' '/images/heroes/*' '/favicon.svg' \
+  --paths '/' '/index.html' '/print.html' '/theme-init.js' '/dark-theme.css' '/images/heroes/*' '/favicon.svg' \
   --query 'Invalidation.Id' \
   --output text)"
 aws cloudfront wait invalidation-completed \

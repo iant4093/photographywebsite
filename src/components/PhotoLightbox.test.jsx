@@ -116,4 +116,25 @@ describe('PhotoLightbox', () => {
     screen.getByAltText('Full size preview').dispatchEvent(new Event('error'))
     expect(onMediaError).toHaveBeenCalledOnce()
   })
+
+  it('offers print ordering only when a caller authorizes the action', async () => {
+    const onPrint = vi.fn().mockResolvedValue(undefined)
+    const { rerender } = render(
+      <PhotoLightbox
+        images={[landscape]}
+        index={0}
+        ariaLabel="Printable viewer"
+        onClose={vi.fn()}
+        onPrint={onPrint}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Order a print of this photo' }))
+    expect(onPrint).toHaveBeenCalledWith(expect.any(Object), landscape, 0)
+
+    rerender(
+      <PhotoLightbox images={[landscape]} index={0} ariaLabel="Viewer" onClose={vi.fn()} />,
+    )
+    expect(screen.queryByRole('button', { name: 'Order a print of this photo' })).toBeNull()
+  })
 })

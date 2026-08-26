@@ -384,6 +384,13 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("PublicPreviewCachePolicy", "AWS::CloudFront::CachePolicy"),
                 ("PublicPreviewResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
                 ("PublicPreviewRewriteFunction", "AWS::CloudFront::Function"),
+                ("PrintSessionSecret", "AWS::SecretsManager::Secret"),
+                ("FotomotoAutoPickupUser", "AWS::IAM::User"),
+                ("PreparePrintFunction", "AWS::Lambda::Function"),
+                ("PreparePrintFunctionRole", "AWS::IAM::Role"),
+                ("PreparePrintFunctionAlbumPrintSessionPermission", "AWS::Lambda::Permission"),
+                ("PreparePrintFunctionSharedPrintSessionPermission", "AWS::Lambda::Permission"),
+                ("PreparePrintFunctionRedeemPrintSessionPermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:
@@ -1753,7 +1760,7 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("OriginAccessControlId", frontend)
         self.assertLess(frontend.index('"$root/index.html"'), frontend.index("create-invalidation"))
         self.assertIn(
-            "--paths '/' '/index.html' '/theme-init.js' '/dark-theme.css' '/images/heroes/*' '/favicon.svg'",
+            "--paths '/' '/index.html' '/print.html' '/theme-init.js' '/dark-theme.css' '/images/heroes/*' '/favicon.svg'",
             frontend,
         )
         self.assertNotIn("--paths '/*'", frontend)

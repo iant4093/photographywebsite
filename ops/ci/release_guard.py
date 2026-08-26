@@ -547,14 +547,14 @@ def validate_tar(
 
 
 def frontend_upload_plan(root: Path) -> list[dict[str, str]]:
-    """Return a deterministic, no-delete upload plan with index.html last."""
+    """Return a deterministic, no-delete upload plan with HTML entrypoints last."""
 
     if not root.is_dir() or not (root / "index.html").is_file():
         raise GateError("frontend artifact is missing index.html")
     entries: list[dict[str, str]] = []
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
         relative = path.relative_to(root).as_posix()
-        if relative == "index.html":
+        if relative in {"index.html", "print.html"}:
             continue
         immutable = relative.startswith("assets/")
         entries.append(
@@ -567,12 +567,14 @@ def frontend_upload_plan(root: Path) -> list[dict[str, str]]:
                 ),
             }
         )
-    entries.append(
-        {
-            "path": "index.html",
-            "cache_control": "no-cache,max-age=0,must-revalidate",
-        }
-    )
+    for entrypoint in ("print.html", "index.html"):
+        if (root / entrypoint).is_file():
+            entries.append(
+                {
+                    "path": entrypoint,
+                    "cache_control": "no-cache,max-age=0,must-revalidate",
+                }
+            )
     return entries
 
 

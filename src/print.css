@@ -1,0 +1,82 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/playfair-display";
+
+:root {
+  color-scheme: dark;
+  font-family: "Inter Variable", sans-serif;
+  background: #171613;
+  color: #f2ede3;
+}
+
+* { box-sizing: border-box; }
+
+body.print-store-body {
+  margin: 0;
+  min-height: 100vh;
+  background: #171613;
+}
+
+.print-store-shell {
+  width: min(42rem, calc(100% - 2rem));
+  min-height: 100vh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.print-store-monogram {
+  width: 3.5rem;
+  height: 3.5rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d5cbbc;
+  font: 1.1rem "Playfair Display Variable", serif;
+}
+
+.print-store-kicker {
+  margin: 1.5rem 0 .6rem;
+  color: #c89d78;
+  font-size: .72rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+.print-store-shell h1 {
+  margin: 0;
+  font: 400 clamp(2.25rem, 8vw, 4.75rem)/1.05 "Playfair Display Variable", serif;
+}
+
+#print-status {
+  max-width: 34rem;
+  margin: 1.25rem 0 0;
+  color: #b9b0a5;
+  line-height: 1.6;
+}
+
+#print-retry {
+  margin-top: 1.75rem;
+  border: 1px solid #d5cbbc;
+  background: transparent;
+  color: #f2ede3;
+  padding: .9rem 1.4rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.print-store-note {
+  margin: 2.5rem 0 0;
+  color: #817970;
+  font-size: .8rem;
+}
+
+noscript {
+  display: block;
+  padding: 1rem;
+  text-align: center;
+}
+
+a { color: #d4a77f; }

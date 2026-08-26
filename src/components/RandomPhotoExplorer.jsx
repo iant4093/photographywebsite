@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PhotoLightbox from './PhotoLightbox'
-import { fetchRandomPhotos, requestAlbumMediaDownload } from '../utils/api'
+import { fetchRandomPhotos, requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
     mediaFileName,
     mediaId,
@@ -10,6 +10,7 @@ import {
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import { trackPhotoDownload } from '../utils/analytics'
+import { openPrintOrder } from '../utils/printOrders'
 
 const LIGHTBOX_SIZES = '(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)'
 
@@ -162,6 +163,16 @@ function RandomPhotoExplorer({ albums = [], getInstantPhoto }) {
         }
     }, [])
 
+    const handlePrint = useCallback(async (event, image) => {
+        event.stopPropagation()
+        try {
+            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)))
+        } catch (printError) {
+            console.error('Random photo print order failed:', printError)
+            alert(printError?.message || 'The print store could not be opened. Please try again.')
+        }
+    }, [])
+
     return (
         <>
             <button
@@ -185,6 +196,7 @@ function RandomPhotoExplorer({ albums = [], getInstantPhoto }) {
                     onNext={() => setIndex((current) => (current + 1) % photos.length)}
                     onPrevious={() => setIndex((current) => (current - 1 + photos.length) % photos.length)}
                     onDownload={handleDownload}
+                    onPrint={photos[index ?? 0]?.randomSeed ? undefined : handlePrint}
                 />
             )}
         </>

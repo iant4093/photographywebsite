@@ -812,8 +812,44 @@ fi
         self.assertIn("aws:ResourceTag/Application: IanTruongPhotography", certificate)
         self.assertNotIn("acm:DeleteCertificate", execution)
 
-        self.assertNotIn("secretsmanager:PutSecretValue", execution)
-        self.assertNotIn("secretsmanager:ListSecretVersionIds", execution)
+        print_secret = statement_block(execution, "ManageExactPrintSessionSecretMetadata")
+        for action in (
+            "secretsmanager:CreateSecret",
+            "secretsmanager:DescribeSecret",
+            "secretsmanager:GetResourcePolicy",
+            "secretsmanager:ListSecretVersionIds",
+            "secretsmanager:TagResource",
+            "secretsmanager:UntagResource",
+            "secretsmanager:UpdateSecret",
+        ):
+            self.assertIn(action, print_secret)
+        self.assertIn(
+            "secret:ian-photography/prod/fotomoto-print-session-*",
+            print_secret,
+        )
+        self.assertNotIn("secretsmanager:GetSecretValue", print_secret)
+        self.assertNotIn("secretsmanager:PutSecretValue", print_secret)
+        self.assertNotIn("secretsmanager:DeleteSecret", print_secret)
+
+        pickup_user = statement_block(execution, "ManageExactFotomotoPickupUser")
+        for action in (
+            "iam:CreateUser",
+            "iam:GetUser",
+            "iam:GetUserPolicy",
+            "iam:ListUserTags",
+            "iam:ListUserPolicies",
+            "iam:PutUserPolicy",
+            "iam:TagUser",
+            "iam:UntagUser",
+        ):
+            self.assertIn(action, pickup_user)
+        self.assertIn(
+            "user/ian-photography-fotomoto-autopickup-prod",
+            pickup_user,
+        )
+        self.assertNotIn("Resource: '*'", pickup_user)
+        self.assertNotIn("iam:CreateAccessKey", pickup_user)
+        self.assertNotIn("iam:DeleteAccessKey", pickup_user)
         managed = statement_block(execution, "ManageStackManagedPolicyVersions")
         for action in (
             "iam:CreatePolicy",

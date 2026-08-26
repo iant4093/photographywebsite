@@ -17,12 +17,14 @@ function PhotoLightbox({
     onNext,
     onPrevious,
     onDownload,
+    onPrint,
     onMediaError,
     loading = false,
     emptyMessage = '',
 }) {
     const [loadedImageId, setLoadedImageId] = useState(null)
     const [settledImage, setSettledImage] = useState(null)
+    const [printing, setPrinting] = useState(false)
     const settledImageRef = useRef(null)
     const transitionTimerRef = useRef(null)
     const activeImage = images[index]
@@ -64,6 +66,17 @@ function PhotoLightbox({
             setSettledImage(nextSettledImage)
             transitionTimerRef.current = null
         }, PHOTO_CROSSFADE_MS)
+    }
+
+    const handlePrint = async (event) => {
+        event.stopPropagation()
+        if (!onPrint || !activeImage || printing) return
+        setPrinting(true)
+        try {
+            await onPrint(event, activeImage, index)
+        } finally {
+            setPrinting(false)
+        }
     }
 
     return (
@@ -200,19 +213,35 @@ function PhotoLightbox({
 
             {activeImage && (
                 <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
-                    {onDownload && (
-                        <button
-                            type="button"
-                            onClick={(event) => onDownload(event, activeImage, index)}
-                            className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
-                            title="Download Photo"
-                            aria-label="Download photo"
-                        >
-                            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                        </button>
-                    )}
+                    <div className="flex items-center justify-center gap-2">
+                        {onDownload && (
+                            <button
+                                type="button"
+                                onClick={(event) => onDownload(event, activeImage, index)}
+                                className="text-white/60 hover:text-white transition-colors p-4 rounded-full cursor-pointer hover:bg-white/10 active:scale-95 touch-manipulation"
+                                title="Download Photo"
+                                aria-label="Download photo"
+                            >
+                                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                            </button>
+                        )}
+                        {onPrint && (
+                            <button
+                                type="button"
+                                onClick={handlePrint}
+                                disabled={printing}
+                                className="linen-lightbox-print inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation"
+                                aria-label="Order a print of this photo"
+                            >
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" />
+                                </svg>
+                                <span>{printing ? 'Preparing…' : 'Order a Print'}</span>
+                            </button>
+                        )}
+                    </div>
                     <span className="text-white/70 text-sm font-medium drop-shadow-md">
                         {index + 1} / {images.length}
                     </span>

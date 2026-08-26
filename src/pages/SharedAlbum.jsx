@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router'
-import { fetchSharedAlbum, requestSharedAlbumZip, requestSharedMediaDownload } from '../utils/api'
+import { fetchSharedAlbum, requestSharedAlbumZip, requestSharedMediaDownload, requestSharedPrintSession } from '../utils/api'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 import { motion } from 'framer-motion'
@@ -18,6 +18,7 @@ import { pollZipJob } from '../utils/zipDownload'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AccessibleLightbox from '../components/AccessibleLightbox'
 import PhotoLightbox from '../components/PhotoLightbox'
+import { openPrintOrder } from '../utils/printOrders'
 
 export default function SharedAlbum() {
     const { code } = useParams()
@@ -117,6 +118,17 @@ export default function SharedAlbum() {
         } catch (err) {
             console.error('Download failed:', err)
             alert('The file could not be downloaded. Please try again.')
+        }
+    }
+
+    const printImage = async (event, image) => {
+        event.stopPropagation()
+        if (!image) return
+        try {
+            await openPrintOrder(() => requestSharedPrintSession(code, mediaId(image)))
+        } catch (printError) {
+            console.error('Print order failed:', printError)
+            alert(printError?.message || 'The print store could not be opened. Please try again.')
         }
     }
 
@@ -397,6 +409,7 @@ export default function SharedAlbum() {
                     onNext={goNext}
                     onPrevious={goPrev}
                     onDownload={downloadImage}
+                    onPrint={printImage}
                     onMediaError={() => requestMediaRefresh('media-error')}
                 />
             )}

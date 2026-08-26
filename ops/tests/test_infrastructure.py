@@ -144,6 +144,9 @@ expected_routes = {
     ("POST", "/albums/{albumId}/delete-images"),
     ("POST", "/albums/{albumId}/download-url"),
     ("POST", "/shared/{shareCode}/download-url"),
+    ("POST", "/albums/{albumId}/print"),
+    ("POST", "/shared/{shareCode}/print"),
+    ("POST", "/print/session"),
     ("PATCH", "/albums/{albumId}/images"),
     ("POST", "/upload-url"),
     ("POST", "/admin/hero/{operation}"),
@@ -808,12 +811,13 @@ class IdentityAndSecretTests(unittest.TestCase):
             self.assertIn("NoEcho: true", match.group("body"))
 
     def test_rate_limit_identifiers_use_one_exact_secure_parameter(self) -> None:
-        self.assertNotIn("AWS::SecretsManager::Secret", TEMPLATE)
+        self.assertEqual(TEMPLATE.count("Type: AWS::SecretsManager::Secret"), 1)
+        self.assertIn("PrintSessionSecret:", TEMPLATE)
         self.assertEqual(
             TEMPLATE.count("RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'"),
-            7,
+            8,
         )
-        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 17)
+        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 18)
 
     def test_cognito_client_has_no_public_password_or_srp_flow(self) -> None:
         client = resource_block("UserPoolClient")

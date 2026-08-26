@@ -3,6 +3,13 @@
   "allowed_origin_stages": ["s3-website", "s3-rest-oac"],
   "canonical_alias": "iantruongphotography.com",
   "optional_www_alias": "www.iantruongphotography.com",
+  "fotomoto_print": {
+    "alias": "prints.iantruongphotography.com",
+    "path_pattern": "print.html",
+    "response_policy_name": "IanTruong-Frontend-Fotomoto-Print-Security-v1",
+    "content_security_policy_template": "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action https://widget.fotomoto.com https://secure.fotomoto.com https://my.fotomoto.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://widget.fotomoto.com https://static-fotomoto-com.s3.amazonaws.com; style-src 'self' 'unsafe-inline' https://widget.fotomoto.com https://static-fotomoto-com.s3.amazonaws.com; font-src 'self' data: https://static-fotomoto-com.s3.amazonaws.com; img-src 'self' data: blob: {media_origin} https://widget.fotomoto.com https://static-fotomoto-com.s3.amazonaws.com https://gallery.fotomoto.com https://my.fotomoto.com https://secure.fotomoto.com; connect-src 'self' {media_origin} https://widget.fotomoto.com https://analytics.fotomoto.com https://gallery.fotomoto.com https://my.fotomoto.com https://secure.fotomoto.com; frame-src https://widget.fotomoto.com https://gallery.fotomoto.com https://my.fotomoto.com https://secure.fotomoto.com; upgrade-insecure-requests",
+    "permissions_policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(self \"https://widget.fotomoto.com\" \"https://secure.fotomoto.com\" \"https://my.fotomoto.com\"), usb=()"
+  },
   "api_origin_domain": "origin-api.iantruongphotography.com",
   "api_front_door": {
     "origin_id": "ian-photography-regional-api-v1",

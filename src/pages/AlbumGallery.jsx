@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useNavigationType } from 'react-router'
-import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
+import { fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
 import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
@@ -19,6 +19,7 @@ import {
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import { navigateBackOr } from '../utils/navigation'
+import { openPrintOrder } from '../utils/printOrders'
 import { trackAlbumView, trackPhotoDownload, trackZipRequest } from '../utils/analytics'
 
 
@@ -140,6 +141,19 @@ function AlbumGallery() {
         } catch (err) {
             console.error('Download failed:', err)
             alert('The photo could not be downloaded. Please try again.')
+        }
+    }
+
+    const printImage = async (event, image) => {
+        event.stopPropagation()
+        if (!image) return
+        try {
+            let token = null
+            try { token = await getIdToken() } catch { /* public album */ }
+            await openPrintOrder(() => requestAlbumPrintSession(albumId, mediaId(image), token))
+        } catch (error) {
+            console.error('Print order failed:', error)
+            alert(error?.message || 'The print store could not be opened. Please try again.')
         }
     }
 
@@ -326,6 +340,7 @@ function AlbumGallery() {
                                 onNext={goNext}
                                 onPrevious={goPrev}
                                 onDownload={downloadImage}
+                                onPrint={printImage}
                                 onMediaError={() => requestMediaRefresh('media-error')}
                             />
                         )}

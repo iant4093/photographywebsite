@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useNavigationType } from 'react-router'
 import { useAuth } from '../context/auth'
-import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
+import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import AlbumCard from '../components/AlbumCard'
@@ -19,6 +19,7 @@ import {
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import PhotoLightbox from '../components/PhotoLightbox'
+import { openPrintOrder } from '../utils/printOrders'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -233,6 +234,22 @@ function UserDashboard() {
         }
     }
 
+    const printImage = async (event, image) => {
+        event.stopPropagation()
+        if (!image || !selectedAlbum?.albumId) return
+        try {
+            const token = await getIdToken()
+            await openPrintOrder(() => requestAlbumPrintSession(
+                selectedAlbum.albumId,
+                mediaId(image),
+                token,
+            ))
+        } catch (error) {
+            console.error('Print order failed:', error)
+            alert(error?.message || 'The print store could not be opened. Please try again.')
+        }
+    }
+
     const photoAlbums = useMemo(() => albums.filter(a => a.type !== 'video'), [albums]);
     const videoAlbums = useMemo(() => albums.filter(a => a.type === 'video'), [albums]);
 
@@ -443,6 +460,7 @@ function UserDashboard() {
                     onNext={goNext}
                     onPrevious={goPrev}
                     onDownload={downloadImage}
+                    onPrint={printImage}
                     onMediaError={() => requestSelectedRefresh('media-error')}
                 />
             )}

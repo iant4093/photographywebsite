@@ -466,6 +466,31 @@ export function requestSharedMediaDownload(shareCode, mediaId, options = {}) {
     })
 }
 
+export function requestAlbumPrintSession(albumId, mediaId, token = null, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}/print`, {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({ mediaId }),
+        signal: options.signal,
+    })
+}
+
+export function requestSharedPrintSession(shareCode, mediaId, options = {}) {
+    return apiFetch(`/shared/${encodeURIComponent(shareCode)}/print`, {
+        method: 'POST',
+        body: JSON.stringify({ mediaId }),
+        signal: options.signal,
+    })
+}
+
+export function redeemPrintSession(sessionToken, options = {}) {
+    return apiFetch('/print/session', {
+        method: 'POST',
+        body: JSON.stringify({ sessionToken }),
+        signal: options.signal,
+    })
+}
+
 export function requestUploadUrl(token, albumId, filename, contentType, size, kind, options = {}) {
     return apiFetch('/upload-url', {
         method: 'POST',

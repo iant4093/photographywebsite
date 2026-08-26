@@ -700,6 +700,22 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-security--SecuritySignalProcessorRo-*'
+          - Sid: ManageExactFotomotoPickupUser
+            Effect: Allow
+            Action:
+              - iam:CreateUser
+              - iam:DeleteUserPolicy
+              - iam:GetUser
+              - iam:GetUserPolicy
+              - iam:ListAttachedUserPolicies
+              - iam:ListGroupsForUser
+              - iam:ListUserTags
+              - iam:ListUserPolicies
+              - iam:PutUserPolicy
+              - iam:TagUser
+              - iam:UntagUser
+              - iam:UpdateUser
+            Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:user/ian-photography-fotomoto-autopickup-prod'
           - Sid: PassStackRolesOnlyToRuntimeServices
             Effect: Allow
             Action: iam:PassRole
@@ -1095,6 +1111,17 @@ Resources:
                 aws:ResourceTag/Application: IanTruongPhotography
               Bool:
                 kms:GrantIsForAWSResource: 'true'
+          - Sid: ManageExactPrintSessionSecretMetadata
+            Effect: Allow
+            Action:
+              - secretsmanager:CreateSecret
+              - secretsmanager:DescribeSecret
+              - secretsmanager:GetResourcePolicy
+              - secretsmanager:ListSecretVersionIds
+              - secretsmanager:TagResource
+              - secretsmanager:UntagResource
+              - secretsmanager:UpdateSecret
+            Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:us-west-2:${AWS::AccountId}:secret:ian-photography/prod/fotomoto-print-session-*'
           - Sid: ManageApplicationLogsMetricsAndAlarms
             Effect: Allow
             Action:

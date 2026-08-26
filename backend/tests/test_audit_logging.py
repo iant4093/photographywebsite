@@ -112,6 +112,7 @@ class AuditIntegrationTests(unittest.TestCase):
             "get_upload_url.py",
             "hero_cover.py",
             "get_download_url.py",
+            "prepare_print.py",
             "get_shared_album.py",
             "get_album.py",
             "create_zip.py",

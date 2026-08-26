@@ -593,6 +593,25 @@ Resources:
             Prefix: albums/
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
+          # Fotomoto print files are generated only after an authorized click.
+          # Reference URLs are deterministic and can be recreated, while the
+          # private high-resolution pickup copy has the shortest useful life.
+          - Id: ExpireFotomotoReferences
+            Status: Enabled
+            Prefix: fotomoto/references/
+            ExpirationInDays: 30
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          - Id: ExpireFotomotoOriginals
+            Status: Enabled
+            Prefix: fotomoto/originals/
+            ExpirationInDays: 7
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders:
@@ -683,6 +702,56 @@ Resources:
                 StringNotEquals:
                   s3:ExistingObjectTag/visibility: public
             - !Ref AWS::NoValue
+
+  PrintSessionSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub 'ian-photography/${Stage}/fotomoto-print-session'
+      Description: HMAC key for five-minute, single-photo Fotomoto capabilities.
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: ApplicationSecret
+
+  FotomotoAutoPickupUser:
+    Type: AWS::IAM::User
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserName: !Sub 'ian-photography-fotomoto-autopickup-${Stage}'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: Purpose
+          Value: FotomotoAutoPickup
+      Policies:
+        - PolicyName: ReadTemporaryPrintOriginalsOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ListOnlyThePrintPickupPrefix
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ImagesBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - fotomoto/originals
+                      - fotomoto/originals/*
+              - Sid: ReadOnlyTemporaryPrintOriginals
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub '${ImagesBucket.Arn}/fotomoto/originals/*'
 
   PreviewMediaCachePolicy:
     Type: AWS::CloudFront::CachePolicy
@@ -2490,6 +2559,79 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  PreparePrintFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: prepare_print.handler
+      ReservedConcurrentExecutions: 10
+      Timeout: 30
+      MemorySize: 384
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+          RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
+          PRINT_SESSION_SECRET_ARN: !Ref PrintSessionSecret
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt RateLimitTable.Arn
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/rate-limit-hash'
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref PrintSessionSecret
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/albums/*'
+                - !Sub '${ImagesBucket.Arn}/fotomoto/*'
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectTagging
+              Resource: !Sub '${ImagesBucket.Arn}/fotomoto/*'
+      Events:
+        AlbumPrintSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}/print
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        SharedPrintSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /shared/{shareCode}/print
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        RedeemPrintSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /print/session
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
   UpdateImageFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -3361,6 +3503,15 @@ Outputs:
   ImagesBucketName:
     Description: Private media bucket
     Value: !Ref ImagesBucket
+  FotomotoAutoPickupUserName:
+    Description: IAM user whose one-time access key is entered in Fotomoto Auto Pickup.
+    Value: !Ref FotomotoAutoPickupUser
+  FotomotoAutoPickupBucket:
+    Description: S3 bucket configured in Fotomoto Auto Pickup.
+    Value: !Ref ImagesBucket
+  FotomotoAutoPickupPrefix:
+    Description: S3 folder configured in Fotomoto Auto Pickup.
+    Value: fotomoto/originals/
   ImagesDistributionId:
     Description: Media CloudFront distribution ID used by guarded invalidation tooling
     Value: !Ref ImagesCloudFront

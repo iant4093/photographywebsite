@@ -346,6 +346,12 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertIn("describe-parameters", serialized_calls)
         self.assertNotIn("get-parameter", serialized_calls)
 
+    def test_waf_search_string_guard_accepts_cli_blob_encoding_only_for_exact_path(self) -> None:
+        self.assertTrue(cloudfront_frontend.waf_search_string_matches("L2FwaS8=", "/api/"))
+        self.assertTrue(cloudfront_frontend.waf_search_string_matches("/api/", "/api/"))
+        self.assertFalse(cloudfront_frontend.waf_search_string_matches("L2FwaS9vdGhlci8=", "/api/"))
+        self.assertFalse(cloudfront_frontend.waf_search_string_matches("not base64!", "/api/"))
+
     def test_secret_value_loader_never_prints_the_value(self) -> None:
         runtime_value = secrets.token_urlsafe(48)
         output = io.StringIO()

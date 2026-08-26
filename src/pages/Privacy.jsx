@@ -19,7 +19,7 @@ export default function Privacy() {
     return (
         <div className="max-w-3xl mx-auto px-6 py-16 pt-[104px] md:pt-[120px] animate-fade-in">
             <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-6">Privacy Notice</h1>
-            <p className="text-sm text-warm-gray mb-10">Last updated August 13, 2026</p>
+            <p className="text-sm text-warm-gray mb-10">Last updated August 26, 2026</p>
 
             <div className="space-y-8 text-charcoal-light leading-relaxed">
                 <section>
@@ -66,6 +66,14 @@ export default function Privacy() {
                         media delivery. Cloudflare Turnstile helps protect login and contact forms and may process network and
                         device information under Cloudflare's privacy terms. Email delivery providers process messages needed to
                         respond or send account and gallery notices.
+                    </p>
+                    <p className="mt-3">
+                        Print ordering is optional and action-gated. Fotomoto is not loaded during ordinary website or private-gallery
+                        browsing. If you choose “Order a Print,” the site gives Fotomoto an opaque, low-resolution image reference and
+                        temporarily makes the corresponding print-resolution file available through a restricted pickup folder.
+                        Fotomoto processes print selections, contact and shipping details, order records, and related device or network
+                        information; Stripe processes payment information. Private album addresses, share codes, account tokens, and
+                        the site's original media paths are not sent to Fotomoto.
                     </p>
                 </section>
 

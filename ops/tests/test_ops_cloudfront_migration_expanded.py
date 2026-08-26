@@ -309,6 +309,22 @@ class CloudFrontHelperTests(unittest.TestCase):
         self.assertNotIn("ForwardedValues", behavior)
         self.assertEqual(behavior["CachePolicyId"], "immutable")
 
+        print_baseline = {
+            "fotomoto_print": {
+                "content_security_policy_template": "default-src 'none'; img-src {media_origin}",
+                "response_policy_name": "print-policy",
+                "content_security_policy": "default-src 'none'",
+                "permissions_policy": "camera=()",
+            }
+        }
+        self.assertEqual(
+            cloudfront_frontend.render_print_csp(print_baseline, media_domain="media.example"),
+            "default-src 'none'; img-src https://media.example",
+        )
+        print_policy = cloudfront_frontend.print_policy_config(print_baseline)
+        self.assertEqual(print_policy["Name"], "print-policy")
+        self.assertEqual(print_policy["CustomHeadersConfig"]["Quantity"], 4)
+
 
 class CloudFrontMainTests(unittest.TestCase):
     def setUp(self):
