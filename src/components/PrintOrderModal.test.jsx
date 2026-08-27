@@ -22,11 +22,14 @@ describe('PrintOrderModal', () => {
 
         const dialog = await screen.findByRole('dialog', { name: 'Print options' })
         const frame = screen.getByTitle('Fotomoto print options')
+        const close = screen.getByRole('button', { name: /close print options/i })
         expect(dialog).toBeInTheDocument()
         expect(frame).toHaveAttribute('src', `${configuredPrintOrigin()}/print.html#session=capability`)
-        expect(screen.getByRole('button', { name: /close print options/i })).toHaveFocus()
+        expect(close).toHaveFocus()
+        expect(close.closest('.print-order-modal__panel')).toBeNull()
+        expect(close.parentElement).toHaveClass('print-order-modal__shell')
 
-        fireEvent.click(screen.getByRole('button', { name: /close print options/i }))
+        fireEvent.click(close)
         expect(screen.queryByRole('dialog', { name: 'Print options' })).not.toBeInTheDocument()
         expect(trigger).toHaveFocus()
         trigger.remove()

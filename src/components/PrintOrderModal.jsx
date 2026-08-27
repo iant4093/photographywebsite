@@ -80,17 +80,19 @@ export default function PrintOrderModal({ src, onClose }) {
                 if (event.target === event.currentTarget) onClose()
             }}
         >
-            <div className="print-order-modal__panel">
-                <div className={`print-order-modal__loading ${loaded ? 'is-hidden' : ''}`} role="status">
-                    Preparing print options…
+            <div className="print-order-modal__shell">
+                <div className="print-order-modal__panel">
+                    <div className={`print-order-modal__loading ${loaded ? 'is-hidden' : ''}`} role="status">
+                        Preparing print options…
+                    </div>
+                    <iframe
+                        className={`print-order-modal__frame ${loaded ? 'is-loaded' : ''}`}
+                        src={src}
+                        title="Fotomoto print options"
+                        referrerPolicy="no-referrer"
+                        onLoad={() => setLoaded(true)}
+                    />
                 </div>
-                <iframe
-                    className={`print-order-modal__frame ${loaded ? 'is-loaded' : ''}`}
-                    src={src}
-                    title="Fotomoto print options"
-                    referrerPolicy="no-referrer"
-                    onLoad={() => setLoaded(true)}
-                />
                 <button
                     ref={closeRef}
                     type="button"
