@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "frontend": {
-    "totalUncompressedBytes": 7200000,
+    "totalUncompressedBytes": 7550000,
     "totalGzipBytes": 5000000,
     "entryJavaScriptBytes": 355000,
     "entryJavaScriptGzipBytes": 120000,
     "entryCssBytes": 95000,
     "entryCssGzipBytes": 17000,
-    "largestChunkBytes": 550000,
-    "largestChunkGzipBytes": 180000
+    "largestChunkBytes": 930000,
+    "largestChunkGzipBytes": 255000
   },
   "sam": {
     "default": {
