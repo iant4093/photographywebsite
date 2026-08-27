@@ -38,6 +38,12 @@ describe('PrintOrderModal', () => {
 
     it('closes with Escape and ignores untrusted frame destinations', () => {
         render(<PrintOrderModal />)
+        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT))
+        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, { detail: { src: 42 } }))
+        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, { detail: { src: 'not a URL' } }))
+        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, {
+            detail: { src: `${configuredPrintOrigin()}/another-page.html#session=capability` },
+        }))
         fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, {
             detail: { src: 'https://untrusted.example/print.html#session=capability' },
         }))
@@ -47,5 +53,56 @@ describe('PrintOrderModal', () => {
         expect(screen.getByRole('dialog')).toBeInTheDocument()
         fireEvent.keyDown(window, { key: 'Escape' })
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('reveals the bridge after load, traps focus, and closes from the backdrop', () => {
+        render(<PrintOrderModal />)
+        openPrintModal()
+
+        const dialog = screen.getByRole('dialog', { name: 'Print options' })
+        const close = screen.getByRole('button', { name: /close print options/i })
+        const frame = screen.getByTitle('Fotomoto print options')
+        const loading = screen.getByRole('status')
+
+        fireEvent.load(frame)
+        expect(frame).toHaveClass('is-loaded')
+        expect(loading).toHaveClass('is-hidden')
+
+        fireEvent.keyDown(window, { key: 'Tab' })
+        expect(frame).toHaveFocus()
+        fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
+        expect(close).toHaveFocus()
+
+        fireEvent.mouseDown(dialog.firstElementChild)
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
+        fireEvent.mouseDown(dialog)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('preserves an existing lightbox lock and restores background dialog accessibility', () => {
+        document.documentElement.setAttribute('data-lightbox-scroll-lock', '')
+        document.body.style.overflow = 'clip'
+        const retained = document.createElement('section')
+        retained.setAttribute('role', 'dialog')
+        retained.setAttribute('aria-hidden', 'false')
+        retained.setAttribute('inert', '')
+        const restored = document.createElement('section')
+        restored.setAttribute('role', 'dialog')
+        document.body.append(retained, restored)
+        render(<PrintOrderModal />)
+
+        openPrintModal()
+        expect(document.body.style.overflow).toBe('clip')
+        expect(retained).toHaveAttribute('aria-hidden', 'true')
+        expect(restored).toHaveAttribute('inert')
+
+        fireEvent.click(screen.getByRole('button', { name: /close print options/i }))
+        expect(document.body.style.overflow).toBe('clip')
+        expect(retained).toHaveAttribute('aria-hidden', 'false')
+        expect(retained).toHaveAttribute('inert')
+        expect(restored).not.toHaveAttribute('aria-hidden')
+        expect(restored).not.toHaveAttribute('inert')
+        retained.remove()
+        restored.remove()
     })
 })
