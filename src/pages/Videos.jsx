@@ -240,7 +240,7 @@ export default function Videos() {
                                 </div>
                                 <ScrollRow scrollKey={`videos-${category}`}>
                                     {groupedVideoAlbums[category].map((album) => (
-                                        <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
+                                        <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] lg:w-[360px] snap-start stagger-child">
                                             <VideoAlbumCard album={album} />
                                         </div>
                                     ))}

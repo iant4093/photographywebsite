@@ -327,7 +327,7 @@ function Home() {
                             </div>
                             <ScrollRow scrollKey={`home-photo-${category}`}>
                                 {groupedPhotoAlbums[category].map((album) => (
-                                    <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] md:w-[360px] snap-start stagger-child">
+                                    <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] lg:w-[360px] snap-start stagger-child">
                                         <AlbumCard album={album} showNewFlag preview />
                                     </div>
                                 ))}
