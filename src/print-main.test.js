@@ -6,7 +6,8 @@ function printDocument() {
         <main>
             <h1 id="print-title">Preparing your print</h1>
             <p id="print-status">Preparing…</p>
-            <button id="print-retry" type="button" hidden>Open store</button>
+            <button id="print-reopen" type="button" hidden>Reopen print options</button>
+            <a id="print-fallback" href="#" hidden>Open store</a>
         </main>
     `
 }
@@ -35,7 +36,7 @@ describe('isolated Fotomoto print bridge', () => {
         await import('./print-main.js')
 
         await waitFor(() => expect(document.getElementById('print-title')).toHaveTextContent('Print store unavailable'))
-        expect(document.getElementById('print-retry')).not.toHaveAttribute('hidden')
+        expect(document.getElementById('print-fallback')).not.toHaveAttribute('hidden')
         expect(fetchMock).not.toHaveBeenCalled()
         expect(document.querySelector('script[src*="fotomoto.com"]')).toBeNull()
     })
@@ -68,6 +69,10 @@ describe('isolated Fotomoto print bridge', () => {
         window.fotomoto_loaded()
 
         await waitFor(() => expect(showWindow).toHaveBeenCalledWith('PRINT', imageUrl))
+        expect(document.getElementById('print-reopen')).not.toHaveAttribute('hidden')
+        document.getElementById('print-reopen').click()
+        expect(showWindow).toHaveBeenCalledTimes(2)
+        expect(showWindow).toHaveBeenLastCalledWith('PRINT', imageUrl)
         // A late network event must not settle the already-opened widget twice.
         document.querySelector('script[src*="widget.fotomoto.com"]').onerror()
         expect(fetchMock).toHaveBeenCalledWith('/api/print/session', expect.objectContaining({
@@ -89,7 +94,7 @@ describe('isolated Fotomoto print bridge', () => {
 
         await waitFor(() => expect(document.getElementById('print-title')).toHaveTextContent('Print store unavailable'))
         expect(document.getElementById('print-status')).toHaveTextContent('expired')
-        expect(document.getElementById('print-retry')).not.toHaveAttribute('hidden')
+        expect(document.getElementById('print-fallback')).not.toHaveAttribute('hidden')
         expect(document.querySelector('script[src*="fotomoto.com"]')).toBeNull()
     })
 

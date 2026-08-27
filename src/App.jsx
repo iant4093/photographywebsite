@@ -7,6 +7,7 @@ import BackToTop from './components/BackToTop'
 import DocumentMetadata from './components/DocumentMetadata'
 import MotionExperience from './components/MotionExperience'
 import AnalyticsTracker from './components/AnalyticsTracker'
+import PrintOrderModal from './components/PrintOrderModal'
 import Home from './pages/Home'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
@@ -126,6 +127,7 @@ function App() {
             <BackToTop />
             <Footer />
             <MotionExperience />
+            <PrintOrderModal />
         </div>
     )
 }

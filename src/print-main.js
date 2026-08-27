@@ -6,14 +6,24 @@ const WIDGET_URL = `https://widget.fotomoto.com/stores/script/${STORE_ID}.js?api
 const STORE_URL = `https://my.fotomoto.com/store/${STORE_ID}`
 const title = document.getElementById('print-title')
 const status = document.getElementById('print-status')
-const retry = document.getElementById('print-retry')
+const reopen = document.getElementById('print-reopen')
+const fallback = document.getElementById('print-fallback')
+
+let printApi = null
+let stagedImageUrl = ''
 
 window.opener = null
 
 function setError(message) {
     title.textContent = 'Print store unavailable'
     status.textContent = message
-    retry.hidden = false
+    reopen.hidden = true
+    fallback.hidden = false
+}
+
+function showPrintOptions() {
+    if (!printApi || !stagedImageUrl) return
+    printApi.showWindow(printApi.PRINT, stagedImageUrl)
 }
 
 function sessionFromFragment() {
@@ -93,15 +103,18 @@ async function start() {
 
         title.textContent = 'Opening print options'
         status.textContent = 'Fotomoto is loading print, size, payment, and shipping choices…'
-        const api = await loadFotomoto()
-        api.showWindow(api.PRINT, payload.imageUrl)
+        printApi = await loadFotomoto()
+        stagedImageUrl = payload.imageUrl
+        title.textContent = 'Print options ready'
+        status.textContent = 'If you close the Fotomoto panel, you can reopen it here without leaving your photograph.'
+        reopen.hidden = false
+        showPrintOptions()
     } catch (error) {
         setError(error?.message || 'Return to the photograph and try again.')
     }
 }
 
-retry.addEventListener('click', () => {
-    window.location.assign(STORE_URL)
-})
+reopen.addEventListener('click', showPrintOptions)
+fallback.href = STORE_URL
 
 start()

@@ -572,6 +572,25 @@ class BrowserBoundaryTests(unittest.TestCase):
         self.assertNotIn("https://*.s3", csp)
         self.assertNotIn("{s3_origins}", csp)
 
+    def test_print_bridge_is_embeddable_only_by_the_canonical_site(self) -> None:
+        print_csp = cloudfront_frontend.render_print_csp(
+            BASELINE,
+            media_domain="media.example.test",
+        )
+        self.assertIn("frame-ancestors https://iantruongphotography.com", print_csp)
+        self.assertNotIn("frame-ancestors 'none'", print_csp)
+        self.assertIn(
+            "frame-src https://challenges.cloudflare.com https://prints.iantruongphotography.com",
+            BASELINE["content_security_policy_template"],
+        )
+        print_policy = cloudfront_frontend.print_policy_config({
+            "fotomoto_print": {
+                **BASELINE["fotomoto_print"],
+                "content_security_policy": print_csp,
+            }
+        })
+        self.assertNotIn("FrameOptions", print_policy["SecurityHeadersConfig"])
+
     def test_cloudfront_apply_is_guarded(self) -> None:
         script = (ROOT / "ops" / "cloudfront_frontend.py").read_text(encoding="utf-8")
         for guard in ("--expected-etag", "--expected-account-id", "--apply"):

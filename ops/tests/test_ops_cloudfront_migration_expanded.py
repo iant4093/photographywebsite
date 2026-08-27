@@ -342,6 +342,7 @@ class CloudFrontHelperTests(unittest.TestCase):
         print_policy = cloudfront_frontend.print_policy_config(print_baseline)
         self.assertEqual(print_policy["Name"], "print-policy")
         self.assertEqual(print_policy["CustomHeadersConfig"]["Quantity"], 4)
+        self.assertNotIn("FrameOptions", print_policy["SecurityHeadersConfig"])
 
 
 class CloudFrontMainTests(unittest.TestCase):

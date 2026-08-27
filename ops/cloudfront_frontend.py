@@ -326,7 +326,6 @@ def print_policy_config(baseline: dict[str, Any]) -> dict[str, Any]:
         "Name": settings["response_policy_name"],
         "Comment": "Isolated Fotomoto checkout bridge; managed in source control",
         "SecurityHeadersConfig": {
-            "FrameOptions": {"Override": True, "FrameOption": "DENY"},
             "ReferrerPolicy": {"Override": True, "ReferrerPolicy": "no-referrer"},
             "ContentSecurityPolicy": {
                 "Override": True,

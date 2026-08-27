@@ -1,0 +1,109 @@
+.print-order-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: grid;
+  place-items: center;
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  background: rgb(10 9 8 / 72%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: print-modal-in 180ms ease-out both;
+}
+
+.print-order-modal__panel {
+  position: relative;
+  width: min(74rem, 100%);
+  height: min(54rem, 100%);
+  overflow: hidden;
+  border: 1px solid rgb(211 199 181 / 55%);
+  background: #171613;
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 48%);
+}
+
+.print-order-modal__frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+}
+
+.print-order-modal__frame.is-loaded { opacity: 1; }
+
+.print-order-modal__loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #d7cfc4;
+  font-size: .78rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  transition: opacity 140ms ease-out;
+}
+
+.print-order-modal__loading.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.print-order-modal__close {
+  position: absolute;
+  top: .8rem;
+  right: .8rem;
+  z-index: 3;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(242 237 227 / 35%);
+  border-radius: 999px;
+  background: rgb(23 22 19 / 88%);
+  color: #f2ede3;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.print-order-modal__close:hover {
+  border-color: rgb(242 237 227 / 75%);
+  background: #2d2a26;
+  transform: scale(1.04);
+}
+
+.print-order-modal__close:focus-visible {
+  outline: 2px solid #d5a77f;
+  outline-offset: 3px;
+}
+
+.print-order-modal__close svg {
+  width: 1.45rem;
+  height: 1.45rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.7;
+}
+
+@keyframes print-modal-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 700px) {
+  .print-order-modal { padding: 0; }
+  .print-order-modal__panel {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+  }
+  .print-order-modal__close {
+    top: max(.65rem, env(safe-area-inset-top));
+    right: max(.65rem, env(safe-area-inset-right));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .print-order-modal,
+  .print-order-modal__frame { animation: none; transition: none; }
+}

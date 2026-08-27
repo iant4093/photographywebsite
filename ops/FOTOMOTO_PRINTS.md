@@ -1,9 +1,11 @@
 # Fotomoto Free-plan print ordering
 
-Photo lightboxes can open Fotomoto for public, link-only, and assigned private
-albums. The integration runs only on
+Photo lightboxes can open Fotomoto in an embedded print dialog for public,
+link-only, and assigned private albums. The integration runs only on
 `https://prints.iantruongphotography.com/print.html`, a separate browser-storage
-origin. The Fotomoto script is never loaded by the authenticated application.
+origin. The Fotomoto script is never loaded by the authenticated application;
+the application frames only that exact isolated origin. Closing the dialog
+returns to the same photograph and scroll position.
 
 The store uses Fotomoto's **Free** subscription. There is no monthly subscription
 or Auto Pickup credential. A print-ready file is uploaded manually only after a
@@ -86,9 +88,11 @@ Store ID: `f3b4ffed02e8ae181e8de27d1b75195593fbcd49`
 
 Customer flow:
 
-1. Open a photo lightbox and choose **Order a Print**.
+1. Open a photo lightbox and choose **Order a Print**. The print dialog opens
+   over the photograph without creating a browser tab or pop-up.
 2. Choose an enabled product, size, crop, quantity, and shipping option in the
-   Fotomoto window.
+   Fotomoto panel. If you close the vendor panel, use **Reopen print options**;
+   closing the website dialog returns to the photograph.
 3. Complete payment through Fotomoto's Stripe checkout.
 4. Receive Fotomoto's order confirmation and shipment updates. The customer
    never needs an account on the photography website.

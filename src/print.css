@@ -57,7 +57,8 @@ body.print-store-body {
   line-height: 1.6;
 }
 
-#print-retry {
+#print-reopen,
+#print-fallback {
   margin-top: 1.75rem;
   border: 1px solid #d5cbbc;
   background: transparent;
@@ -65,7 +66,12 @@ body.print-store-body {
   padding: .9rem 1.4rem;
   font: inherit;
   cursor: pointer;
+  text-decoration: none;
+  transition: background 150ms ease, color 150ms ease;
 }
+
+#print-reopen:hover,
+#print-fallback:hover { background: #f2ede3; color: #171613; }
 
 .print-store-note {
   margin: 2.5rem 0 0;

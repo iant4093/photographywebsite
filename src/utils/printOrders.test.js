@@ -1,70 +1,35 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { configuredPrintOrigin, openPrintOrder } from './printOrders'
+import { configuredPrintOrigin, openPrintOrder, PRINT_ORDER_OPEN_EVENT } from './printOrders'
 
 describe('Fotomoto print launcher', () => {
     afterEach(() => vi.restoreAllMocks())
 
-    it('opens synchronously, severs the opener, and passes the capability in a fragment', async () => {
-        const replace = vi.fn()
-        const popup = {
-            closed: false,
-            opener: window,
-            location: { replace },
-            document: {
-                title: '',
-                documentElement: { style: { cssText: '' } },
-                body: { style: { cssText: '' }, textContent: '' },
-            },
-            close: vi.fn(),
-        }
-        vi.spyOn(window, 'open').mockReturnValue(popup)
+    it('opens the isolated print origin in the in-site dialog with the capability in a fragment', async () => {
+        const opened = vi.fn()
+        window.addEventListener(PRINT_ORDER_OPEN_EVENT, opened, { once: true })
         const token = `v1.${'a'.repeat(90)}.${'b'.repeat(43)}`
 
-        await openPrintOrder(() => Promise.resolve({ sessionToken: token }))
+        const src = await openPrintOrder(() => Promise.resolve({ sessionToken: token }))
 
-        expect(window.open).toHaveBeenCalledOnce()
-        expect(popup.opener).toBeNull()
-        expect(replace).toHaveBeenCalledOnce()
-        expect(replace).toHaveBeenCalledWith(`${configuredPrintOrigin()}/print.html#session=${encodeURIComponent(token)}`)
-        expect(popup.close).not.toHaveBeenCalled()
+        expect(src).toBe(`${configuredPrintOrigin()}/print.html#session=${encodeURIComponent(token)}`)
+        expect(opened).toHaveBeenCalledOnce()
+        expect(opened.mock.calls[0][0].detail).toEqual({ src })
     })
 
-    it('fails clearly when the popup is blocked and closes on session failure', async () => {
+    it('fails clearly without opening a dialog when session preparation fails', async () => {
         await expect(openPrintOrder(null)).rejects.toThrow(/session request/i)
-
-        vi.spyOn(window, 'open').mockReturnValueOnce(null)
-        await expect(openPrintOrder(vi.fn())).rejects.toThrow(/allow pop-ups/i)
-
-        const popup = {
-            closed: false,
-            opener: window,
-            location: { replace: vi.fn() },
-            document: {
-                documentElement: { style: { cssText: '' } },
-                body: { style: { cssText: '' } },
-            },
-            close: vi.fn(),
-        }
-        vi.spyOn(window, 'open').mockReturnValueOnce(popup)
+        const opened = vi.fn()
+        window.addEventListener(PRINT_ORDER_OPEN_EVENT, opened)
         await expect(openPrintOrder(() => Promise.reject(new Error('offline')))).rejects.toThrow('offline')
-        expect(popup.close).toHaveBeenCalledOnce()
+        expect(opened).not.toHaveBeenCalled()
+        window.removeEventListener(PRINT_ORDER_OPEN_EVENT, opened)
     })
 
-    it('does not navigate a print window that was closed while authorization ran', async () => {
-        const popup = {
-            closed: true,
-            opener: window,
-            location: { replace: vi.fn() },
-            document: {
-                documentElement: { style: { cssText: '' } },
-                body: { style: { cssText: '' } },
-            },
-            close: vi.fn(),
-        }
-        vi.spyOn(window, 'open').mockReturnValue(popup)
-        const token = `v1.${'a'.repeat(90)}.${'b'.repeat(43)}`
-
-        await expect(openPrintOrder(() => Promise.resolve({ sessionToken: token }))).rejects.toThrow(/closed/i)
-        expect(popup.location.replace).not.toHaveBeenCalled()
+    it('rejects an invalid capability without dispatching the print dialog', async () => {
+        const opened = vi.fn()
+        window.addEventListener(PRINT_ORDER_OPEN_EVENT, opened)
+        await expect(openPrintOrder(() => Promise.resolve({ sessionToken: 'short' }))).rejects.toThrow(/invalid/i)
+        expect(opened).not.toHaveBeenCalled()
+        window.removeEventListener(PRINT_ORDER_OPEN_EVENT, opened)
     })
 })
