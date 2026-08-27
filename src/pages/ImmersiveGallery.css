@@ -1,0 +1,263 @@
+.linen-site.linen-immersive {
+  min-height: 100dvh;
+  color: #eee8dc;
+  background: #171411;
+}
+
+.linen-site.linen-immersive > main {
+  min-height: 100dvh;
+}
+
+.museum-experience,
+.museum-loading,
+.museum-device-gate {
+  min-height: 100dvh;
+  color: #eee8dc;
+  background: #171411;
+}
+
+.museum-experience {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+.museum-canvas {
+  position: absolute !important;
+  inset: 0;
+}
+
+.museum-topbar {
+  position: fixed;
+  z-index: 12;
+  top: 1.25rem;
+  left: 1.25rem;
+  right: 1.25rem;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  pointer-events: none;
+}
+
+.museum-topbar > a {
+  padding: 0.8rem 1rem;
+  color: #eee8dc;
+  border: 1px solid rgba(238, 232, 220, 0.38);
+  background: rgba(23, 20, 17, 0.74);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+}
+
+.museum-topbar > div {
+  display: grid;
+  justify-items: end;
+  padding: 0.72rem 0.9rem;
+  background: rgba(23, 20, 17, 0.64);
+  backdrop-filter: blur(12px);
+}
+
+.museum-topbar strong {
+  font: 400 1rem/1.2 var(--font-serif);
+}
+
+.museum-topbar span {
+  color: #b9aa98;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.museum-crosshair {
+  position: fixed;
+  z-index: 8;
+  top: 50%;
+  left: 50%;
+  width: 0.36rem;
+  height: 0.36rem;
+  border: 1px solid rgba(245, 238, 224, 0.9);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.museum-controls-legend {
+  position: fixed;
+  z-index: 10;
+  bottom: 1.25rem;
+  left: 50%;
+  display: flex;
+  gap: 1rem;
+  padding: 0.72rem 1rem;
+  color: #c5b9a8;
+  border: 1px solid rgba(238, 232, 220, 0.2);
+  background: rgba(23, 20, 17, 0.72);
+  font-size: 0.64rem;
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+.museum-controls-legend span,
+.museum-entry-panel > div {
+  white-space: nowrap;
+}
+
+.museum-experience kbd {
+  display: inline-block;
+  min-width: 1.35rem;
+  margin-inline: 0.1rem;
+  padding: 0.2rem 0.28rem;
+  color: #eee8dc;
+  border: 1px solid rgba(238, 232, 220, 0.32);
+  background: rgba(255, 255, 255, 0.06);
+  font: inherit;
+  text-align: center;
+}
+
+.museum-interaction {
+  position: fixed;
+  z-index: 11;
+  bottom: 5.2rem;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  max-width: min(32rem, calc(100vw - 3rem));
+  padding: 0.7rem 1rem;
+  border: 1px solid rgba(238, 232, 220, 0.35);
+  background: rgba(23, 20, 17, 0.82);
+  transform: translateX(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.museum-interaction > span {
+  display: grid;
+  width: 1.9rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid rgba(238, 232, 220, 0.45);
+  font-size: 0.72rem;
+}
+
+.museum-interaction p {
+  overflow: hidden;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.museum-entry-panel {
+  position: fixed;
+  z-index: 20;
+  top: 50%;
+  left: 50%;
+  width: min(40rem, calc(100vw - 3rem));
+  padding: clamp(1.8rem, 4vw, 3.3rem);
+  color: #eee8dc;
+  border: 1px solid rgba(238, 232, 220, 0.38);
+  background: rgba(23, 20, 17, 0.9);
+  box-shadow: 16px 18px 0 rgba(0, 0, 0, 0.24);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(18px);
+}
+
+.museum-entry-number,
+.museum-kicker {
+  color: #c59a6a;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.museum-entry-panel h1,
+.museum-device-gate h1,
+.museum-loading h1 {
+  margin-block: 0.75rem 1rem;
+  font: 400 clamp(2.8rem, 6vw, 5.4rem)/0.92 var(--font-serif);
+}
+
+.museum-entry-panel p,
+.museum-device-gate > p:not(.museum-kicker),
+.museum-loading p {
+  max-width: 34rem;
+  color: #bfb3a3;
+  line-height: 1.65;
+}
+
+.museum-entry-panel button,
+.museum-loading button {
+  width: 100%;
+  margin-block: 1.5rem 1rem;
+  padding: 1rem 1.25rem;
+  color: #211c18;
+  border: 1px solid #eee8dc;
+  background: #eee8dc;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.museum-entry-panel > div {
+  color: #948777;
+  font-size: 0.66rem;
+  text-align: center;
+}
+
+.museum-loading,
+.museum-device-gate {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.museum-loading-mark,
+.museum-device-gate-mark {
+  display: grid;
+  width: 3.4rem;
+  aspect-ratio: 1;
+  margin-bottom: 1.2rem;
+  place-items: center;
+  border: 1px solid #a7947e;
+  font: 400 1rem/1 var(--font-serif);
+}
+
+.museum-device-gate > p:not(.museum-kicker) {
+  margin-bottom: 1.6rem;
+}
+
+.museum-device-gate > a,
+.museum-loading a {
+  padding-bottom: 0.35rem;
+  color: #eee8dc;
+  border-bottom: 1px solid #a7947e;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.museum-loading--error {
+  gap: 0.5rem;
+}
+
+.museum-loading--error h1 {
+  font-size: clamp(2.3rem, 5vw, 4rem);
+}
+
+.museum-loading--error button {
+  width: min(22rem, 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .museum-experience * {
+    scroll-behavior: auto !important;
+  }
+}

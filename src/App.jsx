@@ -56,6 +56,7 @@ function App() {
     const location = useLocation()
     const navigationType = useNavigationType()
     const isAdminRoute = location.pathname.startsWith('/admin')
+    const isImmersiveRoute = location.pathname === '/explore/immersive-gallery'
     const restoreDashboardScroll = location.state?.restoreDashboardScroll === true
     const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)
     const theme = preferredTheme
@@ -84,15 +85,17 @@ function App() {
     }, [location.hash, location.pathname, navigationType, restoreDashboardScroll])
 
     return (
-        <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} min-h-screen flex flex-col bg-cream`}>
+        <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} ${isImmersiveRoute ? 'linen-immersive' : ''} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
             <AnalyticsTracker />
-            <a className="linen-skip-link" href="#main-content">Skip to main content</a>
-            <Navbar
-                theme={theme}
-                onToggleTheme={toggleTheme}
-                showThemeToggle
-            />
+            {!isImmersiveRoute && <a className="linen-skip-link" href="#main-content">Skip to main content</a>}
+            {!isImmersiveRoute && (
+                <Navbar
+                    theme={theme}
+                    onToggleTheme={toggleTheme}
+                    showThemeToggle
+                />
+            )}
             <main id="main-content" tabIndex={-1} className="flex-1">
                 <Suspense fallback={<PageLoading />}>
                     <Routes location={location}>
@@ -131,9 +134,9 @@ function App() {
                     </Routes>
                 </Suspense>
             </main>
-            <BackToTop />
-            <Footer />
-            <MotionExperience />
+            {!isImmersiveRoute && <BackToTop />}
+            {!isImmersiveRoute && <Footer />}
+            {!isImmersiveRoute && <MotionExperience />}
         </div>
     )
 }

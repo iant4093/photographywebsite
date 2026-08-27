@@ -77,6 +77,14 @@ describe('App routing shell', () => {
     expect(window.history.scrollRestoration).toBe('manual')
   })
 
+  it('removes the standard site chrome from the immersive gallery route', async () => {
+    render(<MemoryRouter initialEntries={['/explore/immersive-gallery']}><App /></MemoryRouter>)
+    expect(await screen.findByRole('heading', { name: 'Explore route' })).toBeInTheDocument()
+    expect(screen.queryByTestId('mock-navbar')).toBeNull()
+    expect(screen.queryByText('Footer')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Top' })).toBeNull()
+  })
+
   it('scrolls a canonical fallback hash target into view', async () => {
     const scrollIntoView = vi.fn()
     const { container } = render(<MemoryRouter initialEntries={['/#main-content']}><App /></MemoryRouter>)

@@ -86,6 +86,7 @@ describe('Explore', () => {
   it('presents Explore as a module landing page without loading an index', () => {
     render(<MemoryRouter initialEntries={['/explore']}><Explore /></MemoryRouter>)
     expect(screen.getByRole('heading', { name: 'Explore' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Immersive Gallery/ })).toHaveAttribute('href', '/explore/immersive-gallery')
     expect(screen.getByRole('link', { name: /Color Explorer/ })).toHaveAttribute('href', '/explore/colors')
     expect(screen.getByRole('link', { name: /Lens Explorer/ })).toHaveAttribute('href', '/explore/lenses')
     expect(screen.getByRole('link', { name: /Exposure Explorer/ })).toHaveAttribute('href', '/explore/exposure')
@@ -176,6 +177,12 @@ describe('Explore', () => {
 
     render(<MemoryRouter initialEntries={[{ pathname: '/explore', state: { restoreExploreScroll: true } }]}><Explore /></MemoryRouter>)
     expect(scroll.useScrollRestoration).toHaveBeenLastCalledWith('/explore', true)
+  })
+
+  it('saves the Explore position before entering the immersive gallery', () => {
+    render(<MemoryRouter initialEntries={['/explore']}><Explore /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('link', { name: /Immersive Gallery/ }))
+    expect(scroll.saveVerticalScroll).toHaveBeenCalledWith('/explore')
   })
 
   it('runs a settings-guessing round and reveals the complete answer', async () => {

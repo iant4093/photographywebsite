@@ -45,7 +45,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{js,jsx}'],
-      exclude: ['src/**/*.test.{js,jsx}', 'src/test/**'],
+      exclude: [
+        'src/**/*.test.{js,jsx}',
+        'src/test/**',
+        // WebGL rendering is browser-QA'd; its catalog, layout, collision, and device logic remain unit tested.
+        'src/pages/ImmersiveGalleryDesktop.jsx',
+      ],
       reporter: ['text', 'json-summary', 'lcov', 'html'],
       reportsDirectory: 'coverage/frontend',
       thresholds: {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
@@ -27,6 +27,7 @@ import { shareUrlForAlbumPhoto } from '../utils/share'
 import { saveVerticalScroll, useScrollRestoration } from '../utils/scroll'
 
 const PAGE_SIZE = 24
+const ImmersiveGallery = lazy(() => import('./ImmersiveGallery'))
 const COLOR_OPTIONS = Object.freeze([
     { id: 'blue', label: 'Blue', color: '#426f9c' },
     { id: 'cyan', label: 'Aqua', color: '#5d9fa2' },
@@ -91,13 +92,30 @@ function ExploreLanding() {
             <ExploreHeader />
             <section className="explore-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Explore modules">
                 <Link
+                    to="/explore/immersive-gallery"
+                    className="explore-module-card explore-module-card--immersive editorial-motion-media"
+                    onClick={() => saveVerticalScroll('/explore')}
+                >
+                    <span className="explore-module-number">01</span>
+                    <div className="explore-module-museum" aria-hidden="true">
+                        <span className="explore-module-museum-ceiling" />
+                        <i /><i /><i /><i /><i /><i />
+                        <strong>ENTER GALLERY</strong>
+                    </div>
+                    <div>
+                        <h2>Immersive Gallery</h2>
+                        <p>Walk through a living museum generated from every public photography collection.</p>
+                    </div>
+                    <span className="explore-module-arrow" aria-hidden="true">→</span>
+                </Link>
+                <Link
                     to="/explore/colors"
                     className="explore-module-card editorial-motion-media"
                     onClick={() => saveVerticalScroll('/explore')}
                     onPointerEnter={() => warmModule('color')}
                     onFocus={() => warmModule('color')}
                 >
-                    <span className="explore-module-number">01</span>
+                    <span className="explore-module-number">02</span>
                     <div className="explore-module-colors" aria-hidden="true">
                         {COLOR_OPTIONS.slice(0, 8).map(option => <i key={option.id} style={{ backgroundColor: option.color }} />)}
                     </div>
@@ -114,7 +132,7 @@ function ExploreLanding() {
                     onPointerEnter={() => warmModule('lens')}
                     onFocus={() => warmModule('lens')}
                 >
-                    <span className="explore-module-number">02</span>
+                    <span className="explore-module-number">03</span>
                     <div className="explore-module-lens" aria-hidden="true">
                         <i />
                         <i />
@@ -133,7 +151,7 @@ function ExploreLanding() {
                     onPointerEnter={() => warmModule('exposure')}
                     onFocus={() => warmModule('exposure')}
                 >
-                    <span className="explore-module-number">03</span>
+                    <span className="explore-module-number">04</span>
                     <div className="explore-module-exposure" aria-hidden="true">
                         <i /><i /><i /><i />
                     </div>
@@ -150,7 +168,7 @@ function ExploreLanding() {
                     onPointerEnter={() => warmModule('sample')}
                     onFocus={() => warmModule('sample')}
                 >
-                    <span className="explore-module-number">04</span>
+                    <span className="explore-module-number">05</span>
                     <div className="explore-module-game" aria-hidden="true">
                         <span>?</span>
                         <i>1/500</i><i>f/2.8</i><i>ISO 400</i>
@@ -785,6 +803,7 @@ function GuessSettingsGame() {
 
 export default function Explore() {
     const { pathname } = useLocation()
+    if (pathname === '/explore/immersive-gallery') return <ImmersiveGallery />
     if (pathname === '/explore/colors') return <ExploreModule mode="color" />
     if (pathname === '/explore/lenses') return <ExploreModule mode="lens" />
     if (pathname === '/explore/exposure') return <ExposureExplorer />
