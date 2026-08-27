@@ -180,4 +180,24 @@ describe('PhotoLightbox', () => {
     expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: 'Landscape Album' }))
     delete navigator.share
   })
+
+  it('shares the exact active photograph URL supplied by its gallery', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+    render(
+      <PhotoLightbox
+        images={[landscape, portrait]}
+        index={1}
+        ariaLabel="Shareable viewer"
+        onClose={vi.fn()}
+        shareUrl={(image, index) => `https://example.test/album/a1?photo=${image.id}&index=${index}`}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Share photo' }))
+    expect(share).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://example.test/album/a1?photo=portrait&index=1',
+    }))
+    delete navigator.share
+  })
 })

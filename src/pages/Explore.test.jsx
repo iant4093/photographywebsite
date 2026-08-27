@@ -18,11 +18,12 @@ vi.mock('../utils/mediaUrls', () => ({
   mediaFileName: () => 'photo.jpg',
   mediaId: image => image.id,
   mediaPreviewSrcSet: image => (image.previewSrcSet || []).map(item => `${item.url} ${item.width}w`).join(', '),
+  mediaThumbnailUrl: image => image.thumbnailUrl,
   resolveMediaDownloadUrl: request => request().then(result => result.downloadUrl),
   startBrowserDownload: vi.fn(),
 }))
 vi.mock('../components/ProgressiveImage', () => ({
-  default: ({ alt, src }) => <img alt={alt} src={src} />,
+  default: ({ alt, src, className }) => <img alt={alt} src={src} className={className} />,
 }))
 vi.mock('../components/PhotoLightbox', () => ({
   default: ({ images, index, ariaLabel, onClose, onNext, onPrevious, onDownload }) => (
@@ -89,9 +90,32 @@ describe('Explore', () => {
     expect(screen.getByRole('button', { name: /Available light/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('reconciles each exposure filter by stable media id and never leaks wide-open photos into stopped-down results', async () => {
+    const stoppedDown = {
+      ...photo,
+      albumTitle: 'Stopped Down Mountain',
+      mediaId: 'media-3',
+      id: 'media-3',
+      thumbnailUrl: 'https://media.test/stopped.webp',
+      exif: { ...photo.exif, focalRatio: 'f/8', iso: 'ISO 1600' },
+    }
+    exploreApi.fetchExploreSample.mockResolvedValue({ images: [photo, stoppedDown] })
+    render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByRole('button', { name: 'View photo from Blue Mountain' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Stopped Down/ }))
+    expect(screen.getByRole('button', { name: 'View photo from Stopped Down Mountain' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View photo from Blue Mountain' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'ISO' }))
+    fireEvent.click(screen.getByRole('button', { name: /Low light/ }))
+    expect(screen.getByRole('button', { name: 'View photo from Stopped Down Mountain' })).toBeInTheDocument()
+  })
+
   it('runs a settings-guessing round and reveals the complete answer', async () => {
     render(<MemoryRouter initialEntries={['/explore/guess-settings']}><Explore /></MemoryRouter>)
     expect(await screen.findByRole('img', { name: /photograph from (Blue Mountain|Green Valley)/i })).toBeInTheDocument()
+    expect(document.querySelector('.explore-game-image')).toHaveClass('explore-game-image')
     const choices = screen.getAllByRole('button').filter(button => /^(f\/|1\/|ISO|\d+mm)/.test(button.textContent))
     expect(choices).toHaveLength(4)
     fireEvent.click(choices[0])

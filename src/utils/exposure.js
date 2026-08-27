@@ -6,7 +6,7 @@ export const EXPOSURE_GROUPS = Object.freeze([
         options: [
             { id: 'wide', label: 'Wide open', detail: 'f/1–f/2.8', matches: value => value > 0 && value <= 2.8 },
             { id: 'middle', label: 'Balanced', detail: 'f/3.2–f/7.1', matches: value => value > 2.8 && value <= 7.1 },
-            { id: 'deep', label: 'Deep focus', detail: 'f/8+', matches: value => value > 7.1 },
+            { id: 'deep', label: 'Stopped Down', detail: 'f/8+', matches: value => value > 7.1 },
         ],
     },
     {

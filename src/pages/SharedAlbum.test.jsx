@@ -123,6 +123,16 @@ describe('SharedAlbum access and gallery', () => {
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
   })
 
+  it('opens a shared exact-photo link after verification and returns to the protected album', async () => {
+    renderShared('/sharedalbum/code-1?photo=p2')
+    fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
+    expect(await screen.findByRole('dialog', { name: 'Photo viewer for Shared Photos' })).toBeInTheDocument()
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
+    expect(screen.queryByRole('dialog', { name: 'Photo viewer for Shared Photos' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Shared Photos' })).toBeInTheDocument()
+  })
+
   it('requires a fresh security check when protected media expires', async () => {
     renderShared('/sharedalbum/code-1')
     fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))

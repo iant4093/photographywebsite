@@ -20,6 +20,7 @@ function PhotoLightbox({
     onDownload,
     onPrint,
     shareTitle,
+    shareUrl,
     onMediaError,
     loading = false,
     emptyMessage = '',
@@ -88,9 +89,13 @@ function PhotoLightbox({
         event.stopPropagation()
         window.clearTimeout(shareTimerRef.current)
         try {
+            const targetUrl = typeof shareUrl === 'function'
+                ? shareUrl(activeImage, index)
+                : shareUrl
             const result = await sharePage({
                 title: shareTitle || activeImage?.albumTitle || 'Ian Truong Photography',
                 text: 'View this photograph on Ian Truong Photography.',
+                url: targetUrl || undefined,
             })
             if (result === 'copied') {
                 setShareLabel('Link Copied')
@@ -237,7 +242,7 @@ function PhotoLightbox({
 
             {activeImage && (
                 <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
-                    <div className="flex items-center justify-center gap-2">
+                    <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
                         <button
                             type="button"
                             onClick={handleShare}
@@ -279,7 +284,7 @@ function PhotoLightbox({
                             </button>
                         )}
                     </div>
-                    <span className="text-white/70 text-sm font-medium drop-shadow-md">
+                    <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">
                         {index + 1} / {images.length}
                     </span>
                 </div>

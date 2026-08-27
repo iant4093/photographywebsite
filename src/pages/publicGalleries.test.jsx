@@ -137,6 +137,15 @@ describe('AlbumGallery', () => {
     expect(screen.queryByRole('img', { name: 'Full size preview' })).toBeNull()
   })
 
+  it('opens an exact shared photograph and stays on the album when the lightbox closes', async () => {
+    gallery(<AlbumGallery />, '/album/a1?photo=two')
+    expect(await screen.findByRole('dialog', { name: 'Photo viewer for Wild Album' })).toBeInTheDocument()
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
+    expect(screen.queryByRole('dialog', { name: 'Photo viewer for Wild Album' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Wild Album' })).toBeInTheDocument()
+  })
+
   it('downloads a ZIP, displays worker state/errors, and guards duplicate work', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     let finish

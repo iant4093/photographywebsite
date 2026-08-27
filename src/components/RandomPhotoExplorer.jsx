@@ -11,6 +11,7 @@ import {
 } from '../utils/mediaUrls'
 import { trackPhotoDownload } from '../utils/analytics'
 import { openPrintOrder } from '../utils/printOrders'
+import { shareUrlForAlbumPhoto } from '../utils/share'
 
 const LIGHTBOX_SIZES = '(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)'
 
@@ -197,6 +198,7 @@ function RandomPhotoExplorer({ albums = [], getInstantPhoto }) {
                     onPrevious={() => setIndex((current) => (current - 1 + photos.length) % photos.length)}
                     onDownload={handleDownload}
                     onPrint={photos[index ?? 0]?.randomSeed ? undefined : handlePrint}
+                    shareUrl={image => shareUrlForAlbumPhoto(image.albumId, image.randomSeed ? '' : mediaId(image))}
                 />
             )}
         </>

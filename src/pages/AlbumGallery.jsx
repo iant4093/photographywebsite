@@ -22,6 +22,7 @@ import { pollZipJob } from '../utils/zipDownload'
 import { navigateBackOr } from '../utils/navigation'
 import { openPrintOrder } from '../utils/printOrders'
 import { trackAlbumView, trackPhotoDownload, trackZipRequest } from '../utils/analytics'
+import { shareUrlForAlbumPhoto } from '../utils/share'
 
 
 
@@ -31,6 +32,7 @@ function AlbumGallery() {
     const navigate = useNavigate()
     const navType = useNavigationType()
     const location = useLocation()
+    const initialSharedPhotoIdRef = useRef(new URLSearchParams(location.search).get('photo'))
 
     // Manage scroll memory for this page (saves position for when user returns from a photo or deep link)
     useScrollRestoration(location.pathname, navType === 'POP')
@@ -48,8 +50,9 @@ function AlbumGallery() {
     const { getIdToken } = useAuth()
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
+    const sharedPhotoId = new URLSearchParams(location.search).get('photo')
 
-    const loadAlbum = useCallback(async ({ signal, background = false } = {}) => {
+    const loadAlbum = useCallback(async ({ signal, background = false, openPhotoId = '' } = {}) => {
         if (!background) setLoading(true)
         try {
             let token = null
@@ -60,7 +63,12 @@ function AlbumGallery() {
             }
             const data = await fetchAlbum(albumId, token, { signal })
             setAlbum(data.album || data)
-            setImages(data.images || [])
+            const nextImages = data.images || []
+            setImages(nextImages)
+            if (!background && openPhotoId) {
+                const requestedIndex = nextImages.findIndex(image => mediaId(image) === openPhotoId)
+                if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
+            }
             setLoadError('')
             setMediaError('')
             return data
@@ -89,7 +97,7 @@ function AlbumGallery() {
             setLightboxIndex(null)
             setLoadError('')
             setMediaError('')
-            return loadAlbum({ signal: controller.signal })
+            return loadAlbum({ signal: controller.signal, openPhotoId: initialSharedPhotoIdRef.current })
         }).catch(() => {})
         return () => controller.abort()
     }, [albumId, loadAlbum])
@@ -118,7 +126,16 @@ function AlbumGallery() {
         setLightboxIndex((i) => (i - 1 + images.length) % images.length)
     }, [images.length])
 
-    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
+    const closeLightbox = useCallback(() => {
+        setLightboxIndex(null)
+        if (!sharedPhotoId) return
+        const params = new URLSearchParams(location.search)
+        params.delete('photo')
+        navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, {
+            replace: true,
+            preventScrollReset: true,
+        })
+    }, [location.pathname, location.search, navigate, sharedPhotoId])
     const handleBack = useCallback(
         () => navigateBackOr(navigate, '/#photo-albums'),
         [navigate],
@@ -342,6 +359,7 @@ function AlbumGallery() {
                                 onDownload={downloadImage}
                                 onPrint={printImage}
                                 shareTitle={`${album.title} — Ian Truong Photography`}
+                                shareUrl={image => shareUrlForAlbumPhoto(albumId, mediaId(image))}
                                 onMediaError={() => requestMediaRefresh('media-error')}
                             />
                         )}

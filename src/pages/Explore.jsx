@@ -16,11 +16,13 @@ import {
     mediaFileName,
     mediaId,
     mediaPreviewSrcSet,
+    mediaThumbnailUrl,
     resolveMediaDownloadUrl,
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import './Explore.css'
 import { openPrintOrder } from '../utils/printOrders'
+import { shareUrlForAlbumPhoto } from '../utils/share'
 
 const PAGE_SIZE = 24
 const COLOR_OPTIONS = Object.freeze([
@@ -258,10 +260,10 @@ function ExploreModule({ mode }) {
             const page = await fetchExplorePhotos({ mode, value, limit: PAGE_SIZE, cursor: nextCursor })
             setPageState(current => {
                 if (current.key !== requestKey) return current
-                const known = new Set(current.items.map(item => `${item.albumId}:${item.mediaId}`))
+                const known = new Set(current.items.map(item => `${item.albumId}:${mediaId(item)}`))
                 return {
                     ...current,
-                    items: current.items.concat(page.items.filter(item => !known.has(`${item.albumId}:${item.mediaId}`))),
+                    items: current.items.concat(page.items.filter(item => !known.has(`${item.albumId}:${mediaId(item)}`))),
                     nextCursor: page.nextCursor,
                     error: '',
                 }
@@ -375,7 +377,7 @@ function ExploreModule({ mode }) {
                     <div className="explore-grid">
                         {items.map((item, index) => (
                             <ExploreCard
-                                key={`${item.albumId}:${item.mediaId}`}
+                                key={`${item.albumId}:${mediaId(item)}`}
                                 item={item}
                                 index={index}
                                 mode={mode}
@@ -401,6 +403,7 @@ function ExploreModule({ mode }) {
                     onPrevious={() => setLightboxIndex(current => (current - 1 + items.length) % items.length)}
                     onDownload={handleDownload}
                     onPrint={handlePrint}
+                    shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
                 />
             )}
         </div>
@@ -460,6 +463,7 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
             onPrevious={() => setIndex(current => (current - 1 + images.length) % images.length)}
             onDownload={handleDownload}
             onPrint={handlePrint}
+            shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
             shareTitle="Ian Truong Photography"
         />
     )
@@ -545,7 +549,7 @@ function ExposureExplorer() {
                     <div className="explore-grid">
                         {matching.map((item, itemIndex) => (
                             <ExploreCard
-                                key={`${item.albumId}:${item.mediaId}`}
+                                key={`${item.albumId}:${mediaId(item)}`}
                                 item={item}
                                 index={itemIndex}
                                 mode="exposure"
@@ -603,13 +607,14 @@ function GuessSettingsGame() {
                         <div className="explore-game-photo">
                             <ProgressiveImage
                                 key={mediaId(activeRound.image)}
-                                src={activeRound.image.thumbnailUrl}
+                                src={mediaThumbnailUrl(activeRound.image)}
                                 srcSet={mediaPreviewSrcSet(activeRound.image)}
                                 sizes="(max-width: 800px) calc(100vw - 3rem), 58vw"
                                 width={activeRound.image.width || 4}
                                 height={activeRound.image.height || 3}
                                 alt={`A photograph from ${activeRound.image.albumTitle}`}
                                 eager
+                                className="explore-game-image"
                             />
                             <span>{activeRound.image.albumTitle}</span>
                         </div>

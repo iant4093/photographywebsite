@@ -551,10 +551,13 @@
   background: var(--color-charcoal);
 }
 
-.linen-site .explore-game-photo img {
+.linen-site .explore-game-image {
   width: 100%;
   height: 100%;
   max-height: 62vh;
+}
+
+.linen-site .explore-game-photo img {
   object-fit: contain;
 }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router'
+import { useParams, useNavigate, useLocation } from 'react-router'
 import { fetchSharedAlbum, requestSharedAlbumZip, requestSharedMediaDownload, requestSharedPrintSession } from '../utils/api'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
@@ -20,10 +20,13 @@ import AlbumShareButton from '../components/AlbumShareButton'
 import AccessibleLightbox from '../components/AccessibleLightbox'
 import PhotoLightbox from '../components/PhotoLightbox'
 import { openPrintOrder } from '../utils/printOrders'
+import { shareUrlForPathPhoto } from '../utils/share'
 
 export default function SharedAlbum() {
     const { code } = useParams()
     const navigate = useNavigate()
+    const location = useLocation()
+    const initialSharedPhotoIdRef = useRef(new URLSearchParams(location.search).get('photo'))
 
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
@@ -39,6 +42,7 @@ export default function SharedAlbum() {
 
     // Lightbox
     const [lightboxIndex, setLightboxIndex] = useState(null)
+    const sharedPhotoId = new URLSearchParams(location.search).get('photo')
 
     // Attempt to load album if code is present in URL
     useEffect(() => {
@@ -54,8 +58,14 @@ export default function SharedAlbum() {
             return fetchSharedAlbum(code, turnstileToken, { signal: controller.signal })
         }).then(data => {
             if (!data) return
-            setAlbum(data.album || data)
-            setImages(data.images || [])
+            const nextAlbum = data.album || data
+            const nextImages = data.images || []
+            setAlbum(nextAlbum)
+            setImages(nextImages)
+            if (nextAlbum.type !== 'video' && initialSharedPhotoIdRef.current) {
+                const requestedIndex = nextImages.findIndex(image => mediaId(image) === initialSharedPhotoIdRef.current)
+                if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
+            }
             setAccessMessage('')
             setLoading(false)
         }).catch(err => {
@@ -102,7 +112,16 @@ export default function SharedAlbum() {
     const goPrev = useCallback(() => {
         setLightboxIndex((i) => (i - 1 + images.length) % images.length)
     }, [images.length])
-    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
+    const closeLightbox = useCallback(() => {
+        setLightboxIndex(null)
+        if (!sharedPhotoId) return
+        const params = new URLSearchParams(location.search)
+        params.delete('photo')
+        navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, {
+            replace: true,
+            preventScrollReset: true,
+        })
+    }, [location.pathname, location.search, navigate, sharedPhotoId])
 
     // Download a single image
     const downloadImage = async (e) => {
@@ -411,6 +430,7 @@ export default function SharedAlbum() {
                     onDownload={downloadImage}
                     onPrint={printImage}
                     shareTitle={`${album.title} — Ian Truong Photography`}
+                    shareUrl={image => shareUrlForPathPhoto(location.pathname, mediaId(image))}
                     onMediaError={() => requestMediaRefresh('media-error')}
                 />
             )}

@@ -3,6 +3,23 @@ function currentPageUrl() {
     return `${window.location.origin}${window.location.pathname}${window.location.search}`
 }
 
+function photoUrl(pathname, photoId) {
+    if (typeof window === 'undefined' || !pathname || !photoId) return ''
+    const url = new URL(pathname, window.location.origin)
+    url.searchParams.set('photo', String(photoId))
+    return url.toString()
+}
+
+export function shareUrlForAlbumPhoto(albumId, photoId) {
+    if (!albumId) return ''
+    const pathname = `/album/${encodeURIComponent(String(albumId))}`
+    return photoId ? photoUrl(pathname, photoId) : new URL(pathname, window.location.origin).toString()
+}
+
+export function shareUrlForPathPhoto(pathname, photoId) {
+    return photoUrl(pathname, photoId)
+}
+
 async function copyText(value) {
     if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(value)

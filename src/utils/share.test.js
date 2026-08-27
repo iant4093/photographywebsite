@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sharePage, shareUrlForCurrentPage } from './share'
+import { sharePage, shareUrlForAlbumPhoto, shareUrlForCurrentPage, shareUrlForPathPhoto } from './share'
 
 describe('native page sharing', () => {
     afterEach(() => {
@@ -53,5 +53,10 @@ describe('native page sharing', () => {
         window.history.replaceState({}, '', '/album/abc?view=public#photo-2')
         expect(shareUrlForCurrentPage()).toContain('/album/abc?view=public')
         expect(shareUrlForCurrentPage()).not.toContain('#photo-2')
+    })
+
+    it('builds canonical exact-photo URLs for public and protected album routes', () => {
+        expect(shareUrlForAlbumPhoto('album id', 'photo/id')).toBe('http://localhost:3000/album/album%20id?photo=photo%2Fid')
+        expect(shareUrlForPathPhoto('/sharedalbum/code-1', 'p2')).toBe('http://localhost:3000/sharedalbum/code-1?photo=p2')
     })
 })
