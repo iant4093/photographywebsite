@@ -34,7 +34,17 @@ vi.mock('./pages/AwsCosts', () => ({ default: () => <h1>AWS costs route</h1> }))
 vi.mock('./pages/Analytics', () => ({ default: () => <h1>Website analytics route</h1> }))
 vi.mock('./pages/GoogleDriveUsage', () => ({ default: () => <h1>Google Drive usage route</h1> }))
 vi.mock('./pages/GitHubAnalytics', () => ({ default: () => <h1>GitHub analytics route</h1> }))
-vi.mock('./pages/SiteHealth', () => ({ default: () => <h1>Site health route</h1> }))
+vi.mock('./pages/SiteHealth', async () => {
+  const { Link } = await import('react-router')
+  return {
+    default: () => (
+      <>
+        <h1>Site health route</h1>
+        <Link to="/admin" state={{ restoreDashboardScroll: true }}>Back to dashboard</Link>
+      </>
+    ),
+  }
+})
 vi.mock('./pages/AuditLog', () => ({ default: () => <h1>Audit log route</h1> }))
 vi.mock('./pages/AdminSecurity', () => ({ default: () => <h1>Admin security route</h1> }))
 vi.mock('./pages/Admin', () => ({ default: () => <h1>Upload route</h1> }))
@@ -88,6 +98,15 @@ describe('App routing shell', () => {
     await waitFor(() => {
       expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'instant' })
     })
+  })
+
+  it('does not overwrite dashboard scroll restoration when returning from a module', async () => {
+    render(<MemoryRouter initialEntries={['/admin/site-health']}><App /></MemoryRouter>)
+    expect(await screen.findByRole('heading', { name: 'Site health route' })).toBeInTheDocument()
+    window.scrollTo.mockClear()
+    fireEvent.click(screen.getByRole('link', { name: 'Back to dashboard' }))
+    expect(await screen.findByRole('heading', { name: 'Admin route' })).toBeInTheDocument()
+    await waitFor(() => expect(window.scrollTo).not.toHaveBeenCalled())
   })
 
   it('uses the stored theme and exposes its toggle on protected admin routes', async () => {

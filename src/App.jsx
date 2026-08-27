@@ -56,6 +56,7 @@ function App() {
     const location = useLocation()
     const navigationType = useNavigationType()
     const isAdminRoute = location.pathname.startsWith('/admin')
+    const restoreDashboardScroll = location.state?.restoreDashboardScroll === true
     const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)
     const theme = preferredTheme
 
@@ -71,6 +72,7 @@ function App() {
     }
 
     useEffect(() => {
+        if (restoreDashboardScroll) return
         if (location.hash) {
             const frame = window.requestAnimationFrame(() => {
                 document.getElementById(location.hash.slice(1))?.scrollIntoView?.({ block: 'start' })
@@ -79,7 +81,7 @@ function App() {
         }
         if (navigationType !== 'POP') window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
         return
-    }, [location.hash, location.pathname, navigationType])
+    }, [location.hash, location.pathname, navigationType, restoreDashboardScroll])
 
     return (
         <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} min-h-screen flex flex-col bg-cream`}>
