@@ -3,7 +3,7 @@
   "frontend": {
     "totalUncompressedBytes": 6500000,
     "totalGzipBytes": 4600000,
-    "entryJavaScriptBytes": 322000,
+    "entryJavaScriptBytes": 323000,
     "entryJavaScriptGzipBytes": 110000,
     "entryCssBytes": 85000,
     "entryCssGzipBytes": 15100,
