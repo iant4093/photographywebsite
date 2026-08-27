@@ -12,6 +12,8 @@ import {
     fetchExploreColors,
     fetchExploreLenses,
     fetchExplorePhotos,
+    fetchExploreSample,
+    prefetchExploreModule,
 } from './exploreApi'
 
 function jsonResponse(body) {
@@ -259,5 +261,60 @@ describe('public Explore API', () => {
         })
         expect(second).toBe(first)
         expect(request).toHaveBeenCalledTimes(1)
+    })
+
+    it('supports abortable cached random samples', async () => {
+        const request = vi.fn().mockResolvedValue(jsonResponse({ images: [], totalPhotos: 0 }))
+        vi.stubGlobal('fetch', request)
+        const controller = new AbortController()
+        controller.abort()
+
+        await expect(fetchExploreSample({ signal: controller.signal }))
+            .rejects.toMatchObject({ name: 'AbortError' })
+        await expect(fetchExploreSample()).resolves.toMatchObject({ images: [] })
+        expect(request).toHaveBeenCalledOnce()
+    })
+
+    it('settles an active abort subscriber for both success and failure', async () => {
+        const controller = new AbortController()
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(jsonResponse({ images: [], totalPhotos: 0 })))
+        await expect(fetchExploreSample({ signal: controller.signal })).resolves.toMatchObject({ images: [] })
+
+        clearExploreCache()
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('network down')))
+        await expect(fetchExploreSample({ signal: controller.signal })).rejects.toThrow('Unable to reach the service')
+    })
+
+    it('expires cached Explore facets', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+        const request = vi.fn(() => Promise.resolve(jsonResponse({ items: [{ id: 'blue', photos: 1 }] })))
+        vi.stubGlobal('fetch', request)
+
+        await fetchExploreColors()
+        vi.advanceTimersByTime(5 * 60_000 + 1)
+        await fetchExploreColors()
+        expect(request).toHaveBeenCalledTimes(2)
+        vi.useRealTimers()
+    })
+
+    it('prefetches each module and ignores unusable bundled pages', async () => {
+        const request = vi.fn((url) => {
+            if (String(url).includes('mode=lenses')) {
+                return Promise.resolve(jsonResponse({
+                    items: [{ name: 'Lens', photos: 1 }],
+                    initialPage: { value: '', items: [{ mediaId: 'ignored' }] },
+                }))
+            }
+            if (String(url).includes('mode=colors')) {
+                return Promise.resolve(jsonResponse({ items: [{ id: 'blue', photos: 1 }] }))
+            }
+            return Promise.resolve(jsonResponse({ images: [], totalPhotos: 0 }))
+        })
+        vi.stubGlobal('fetch', request)
+
+        await expect(prefetchExploreModule('lens')).resolves.toMatchObject({ initialPage: null })
+        await expect(prefetchExploreModule('color')).resolves.toMatchObject({ items: [{ id: 'blue', photos: 1 }] })
+        await expect(prefetchExploreModule('sample')).resolves.toMatchObject({ images: [] })
     })
 })
