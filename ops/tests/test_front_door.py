@@ -243,7 +243,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             "Action": {"Block": {}},
                             "Statement": {
                                 "RateBasedStatement": {
-                                    "Limit": 30,
+                                    "Limit": 300,
                                     "EvaluationWindowSec": 300,
                                     "AggregateKeyType": "IP",
                                     "ScopeDownStatement": {
@@ -261,7 +261,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             "Action": {"Block": {}},
                             "Statement": {
                                 "RateBasedStatement": {
-                                    "Limit": 120,
+                                    "Limit": 1500,
                                     "EvaluationWindowSec": 300,
                                     "AggregateKeyType": "CONSTANT",
                                     "ScopeDownStatement": {

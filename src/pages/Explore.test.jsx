@@ -107,6 +107,17 @@ describe('Explore', () => {
     expect(screen.getByRole('button', { name: /Clean light/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('restores the selected exposure setting from the URL after a refresh', async () => {
+    render(<MemoryRouter initialEntries={['/explore/exposure?setting=shutter:frozen']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByRole('tab', { name: 'Shutter speed' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('button', { name: /Frozen action/ })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledWith(
+      { mode: 'exposure', value: 'shutter:frozen', limit: 24 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+  })
+
   it('reconciles each exposure filter by stable media id and never leaks wide-open photos into stopped-down results', async () => {
     const stoppedDown = {
       ...photo,

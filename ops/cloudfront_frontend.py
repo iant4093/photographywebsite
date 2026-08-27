@@ -650,8 +650,8 @@ def validate_front_door_resources(
     ):
         raise SystemExit("Refusing front door: WAF selective-block rule contract differs")
     for name, aggregate_key, limit, path, positional_constraint in (
-        ("ExplorePerIpRateLimit", "IP", 30, "/api/public/explore", "EXACTLY"),
-        ("ExploreGlobalCircuitBreaker", "CONSTANT", 120, "/api/public/explore", "EXACTLY"),
+        ("ExplorePerIpRateLimit", "IP", 300, "/api/public/explore", "EXACTLY"),
+        ("ExploreGlobalCircuitBreaker", "CONSTANT", 1500, "/api/public/explore", "EXACTLY"),
         ("ApiPerIpRateLimit", "IP", 1200, "/api/", "STARTS_WITH"),
         ("ApiGlobalCircuitBreaker", "CONSTANT", 3000, "/api/", "STARTS_WITH"),
     ):

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
@@ -40,6 +40,13 @@ const COLOR_OPTIONS = Object.freeze([
 ])
 const COLOR_BY_ID = new Map(COLOR_OPTIONS.map(option => [option.id, option]))
 const CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 1080px) 50vw, (min-width: 1440px) 420px, 360px'
+
+function exposureSelection(value) {
+    const [groupId, optionId] = String(value || '').split(':', 2)
+    const group = EXPOSURE_GROUPS.find(candidate => candidate.id === groupId)
+    if (!group?.options.some(option => option.id === optionId)) return null
+    return { groupId, optionId }
+}
 
 function ExploreHeader({ title = 'Explore', detail = 'Choose a different way into the photography archive.' }) {
     return (
@@ -487,11 +494,15 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
 }
 
 function ExposureExplorer() {
+    const [searchParams, setSearchParams] = useSearchParams()
+    const initialSelection = useRef(
+        exposureSelection(searchParams.get('setting')) || { groupId: 'aperture', optionId: 'wide' },
+    )
     const [facetState, setFacetState] = useState({ groups: [], loading: true, error: '' })
     const [pageState, setPageState] = useState({ key: '', items: [], total: 0, nextCursor: null, error: '' })
     const [loadingMore, setLoadingMore] = useState(false)
-    const [groupId, setGroupId] = useState('aperture')
-    const [optionId, setOptionId] = useState('wide')
+    const [groupId, setGroupId] = useState(initialSelection.current.groupId)
+    const [optionId, setOptionId] = useState(initialSelection.current.optionId)
     const [lightboxIndex, setLightboxIndex] = useState(null)
     const group = EXPOSURE_GROUPS.find(candidate => candidate.id === groupId) || EXPOSURE_GROUPS[0]
     const indexedGroup = facetState.groups.find(candidate => candidate.id === group.id)
@@ -511,16 +522,16 @@ function ExposureExplorer() {
             .then(({ items, initialPage }) => {
                 setFacetState({ groups: items, loading: false, error: '' })
                 if (initialPage?.value) {
-                    const [initialGroup, initialOption] = initialPage.value.split(':')
-                    setGroupId(initialGroup)
-                    setOptionId(initialOption)
-                    setPageState({
-                        key: initialPage.value,
-                        items: initialPage.items,
-                        total: initialPage.total ?? initialPage.items.length,
-                        nextCursor: initialPage.nextCursor,
-                        error: '',
-                    })
+                    const requestedValue = `${initialSelection.current.groupId}:${initialSelection.current.optionId}`
+                    if (initialPage.value === requestedValue) {
+                        setPageState({
+                            key: initialPage.value,
+                            items: initialPage.items,
+                            total: initialPage.total ?? initialPage.items.length,
+                            nextCursor: initialPage.nextCursor,
+                            error: '',
+                        })
+                    }
                 }
             })
             .catch(error => {
@@ -555,8 +566,16 @@ function ExposureExplorer() {
         if (!next) return
         const counts = facetState.groups.find(candidate => candidate.id === next.id)?.options || []
         const populated = next.options.find(option => counts.find(row => row.id === option.id)?.photos > 0)
+        const nextOptionId = populated?.id || next.options[0].id
         setGroupId(next.id)
-        setOptionId(populated?.id || next.options[0].id)
+        setOptionId(nextOptionId)
+        setSearchParams({ setting: `${next.id}:${nextOptionId}` }, { replace: true })
+        setLightboxIndex(null)
+    }
+
+    const chooseOption = nextOptionId => {
+        setOptionId(nextOptionId)
+        setSearchParams({ setting: `${group.id}:${nextOptionId}` }, { replace: true })
         setLightboxIndex(null)
     }
 
@@ -619,7 +638,7 @@ function ExposureExplorer() {
                                     className={option.id === optionId ? 'is-active' : ''}
                                     aria-pressed={option.id === optionId}
                                     disabled={!facetState.loading && count === 0}
-                                    onClick={() => { setOptionId(option.id); setLightboxIndex(null) }}
+                                    onClick={() => chooseOption(option.id)}
                                 >
                                     <strong>{option.label}</strong>
                                     <span>{option.detail}</span>
