@@ -6,6 +6,7 @@ import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
 import PhotoLightbox from '../components/PhotoLightbox'
 import AlbumQrCode from '../components/AlbumQrCode'
+import AlbumShareButton from '../components/AlbumShareButton'
 import { useScrollRestoration } from '../utils/scroll'
 import { useLocation } from 'react-router'
 import {
@@ -249,8 +250,8 @@ function AlbumGallery() {
                                 </p>
                             </div>
 
-                            {(album.qrCodeUrl || images.length > 0) && (
-                                <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                            <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                                    <AlbumShareButton albumTitle={album.title} />
                                     <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
                                     {images.length > 0 && (
                                         <button
@@ -273,8 +274,7 @@ function AlbumGallery() {
                                             )}
                                         </button>
                                     )}
-                                </div>
-                            )}
+                            </div>
                         </div>
 
                         {(mediaError || zipError) && (
@@ -341,6 +341,7 @@ function AlbumGallery() {
                                 onPrevious={goPrev}
                                 onDownload={downloadImage}
                                 onPrint={printImage}
+                                shareTitle={`${album.title} — Ian Truong Photography`}
                                 onMediaError={() => requestMediaRefresh('media-error')}
                             />
                         )}

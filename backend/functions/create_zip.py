@@ -90,12 +90,12 @@ def handler(event, context):
         else:
             return _not_found()
 
-        if album.get("type", "photo") != "photo":
-            return error_response(400, "ZIP downloads are available for photo albums", code="unsupported")
+        if album.get("type", "photo") not in {"photo", "video"}:
+            return error_response(400, "ZIP downloads are unavailable for this album type", code="unsupported")
         image_keys = raw_image_keys(album)
         max_objects = max(1, min(int(os.environ.get("ZIP_MAX_OBJECTS", "1000")), 5000))
         if not image_keys:
-            return error_response(400, "Album has no downloadable photos", code="empty_album")
+            return error_response(400, "Album has no downloadable media", code="empty_album")
         if len(image_keys) > max_objects:
             return error_response(413, "Album is too large for ZIP download", code="zip_too_large")
 

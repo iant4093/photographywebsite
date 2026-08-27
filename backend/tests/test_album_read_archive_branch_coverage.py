@@ -429,7 +429,11 @@ class CreateZipBranchTests(unittest.TestCase):
         self.assertEqual(self._call({}, record=None)[0]["statusCode"], 404)
         self.assertEqual(self._call({"albumId": ALBUM_ID}, record=None)[0]["statusCode"], 404)
         self.assertEqual(self._call({"shareCode": SHARE_CODE}, record=None)[0]["statusCode"], 404)
-        self.assertEqual(self._call({"albumId": ALBUM_ID}, record=album(type="video"))[0]["statusCode"], 400)
+        self.assertEqual(self._call({"albumId": ALBUM_ID}, record=album(type="audio"))[0]["statusCode"], 400)
+        self.assertIn(
+            self._call({"albumId": ALBUM_ID}, record=album(type="video"))[0]["statusCode"],
+            {200, 202},
+        )
         self.assertEqual(self._call({"albumId": ALBUM_ID}, record=album(images=[]))[0]["statusCode"], 400)
         with patch.dict(os.environ, {"ZIP_MAX_OBJECTS": "1"}):
             self.assertEqual(self._call({"albumId": ALBUM_ID}, record=album(images=[{"rawKey": RAW_KEY}, {"rawKey": RAW_KEY_2}]))[0]["statusCode"], 413)
@@ -562,16 +566,23 @@ class WorkerZipBranchTests(unittest.TestCase):
         destination.__enter__.return_value = destination
         with patch.object(worker_zip, "s3", s3), patch.object(worker_zip, "_validated_album", return_value=album()), patch.object(
             worker_zip, "StreamToS3", return_value=stream
-        ), patch.object(worker_zip.zipfile, "ZipFile", return_value=archive), patch.object(
+        ), patch.object(worker_zip.zipfile, "ZipFile", return_value=archive) as zip_file, patch.object(
             worker_zip, "tag_keys_visibility"
         ):
             result = worker_zip.handler({"albumId": ALBUM_ID}, None)
         self.assertEqual(result, {"status": "complete", "objectCount": 1, "totalBytes": 4})
         stream.close.assert_called_once()
         destination.write.assert_called_once_with(b"data")
+        zip_file.assert_called_once_with(
+            stream,
+            "w",
+            compression=worker_zip.zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+        )
 
         for record, env in (
-            (album(type="video"), {}),
+            (album(type="audio"), {}),
             (album(images=[]), {}),
             (album(images=[{"rawKey": RAW_KEY}, {"rawKey": RAW_KEY_2}]), {"ZIP_MAX_OBJECTS": "1"}),
         ):

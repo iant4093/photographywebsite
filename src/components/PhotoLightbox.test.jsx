@@ -156,4 +156,28 @@ describe('PhotoLightbox', () => {
     fireEvent.click(download)
     expect(onDownload).toHaveBeenCalledWith(expect.any(Object), landscape, 0)
   })
+
+  it('offers native page sharing before the download action', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+    render(
+      <PhotoLightbox
+        images={[landscape]}
+        index={0}
+        ariaLabel="Shareable viewer"
+        shareTitle="Landscape Album"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />,
+    )
+
+    const actions = document.querySelector('.linen-lightbox-actions')
+    const shareButton = screen.getByRole('button', { name: 'Share photo' })
+    const downloadButton = screen.getByRole('button', { name: 'Download photo' })
+    expect(actions.compareDocumentPosition(shareButton) & Node.DOCUMENT_POSITION_CONTAINED_BY).toBeTruthy()
+    expect(shareButton.compareDocumentPosition(downloadButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(shareButton)
+    expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: 'Landscape Album' }))
+    delete navigator.share
+  })
 })

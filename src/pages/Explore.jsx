@@ -7,8 +7,10 @@ import {
     fetchExploreColors,
     fetchExploreLenses,
     fetchExplorePhotos,
+    fetchExploreSample,
     prefetchExploreModule,
 } from '../utils/exploreApi'
+import { buildSettingsRound, EXPOSURE_GROUPS, matchingExposurePhotos } from '../utils/exposure'
 import { trackPhotoDownload } from '../utils/analytics'
 import {
     mediaFileName,
@@ -56,6 +58,7 @@ function ExploreLanding() {
         const warm = () => Promise.allSettled([
             prefetchExploreModule('color'),
             prefetchExploreModule('lens'),
+            prefetchExploreModule('sample'),
         ])
         if (typeof window.requestIdleCallback === 'function') {
             const idleId = window.requestIdleCallback(warm, { timeout: 1500 })
@@ -100,6 +103,39 @@ function ExploreLanding() {
                     <div>
                         <h2>Lens Explorer</h2>
                         <p>See how each lens renders the archive, from wide landscapes to distant wildlife.</p>
+                    </div>
+                    <span className="explore-module-arrow" aria-hidden="true">→</span>
+                </Link>
+                <Link
+                    to="/explore/exposure"
+                    className="explore-module-card editorial-motion-media"
+                    onPointerEnter={() => warmModule('sample')}
+                    onFocus={() => warmModule('sample')}
+                >
+                    <span className="explore-module-number">03</span>
+                    <div className="explore-module-exposure" aria-hidden="true">
+                        <i /><i /><i /><i />
+                    </div>
+                    <div>
+                        <h2>Exposure Explorer</h2>
+                        <p>Browse by aperture, shutter speed, ISO, and focal length.</p>
+                    </div>
+                    <span className="explore-module-arrow" aria-hidden="true">→</span>
+                </Link>
+                <Link
+                    to="/explore/guess-settings"
+                    className="explore-module-card editorial-motion-media"
+                    onPointerEnter={() => warmModule('sample')}
+                    onFocus={() => warmModule('sample')}
+                >
+                    <span className="explore-module-number">04</span>
+                    <div className="explore-module-game" aria-hidden="true">
+                        <span>?</span>
+                        <i>1/500</i><i>f/2.8</i><i>ISO 400</i>
+                    </div>
+                    <div>
+                        <h2>Guess the Settings</h2>
+                        <p>Read the frame, choose the camera setting, and test your eye.</p>
                     </div>
                     <span className="explore-module-arrow" aria-hidden="true">→</span>
                 </Link>
@@ -371,9 +407,261 @@ function ExploreModule({ mode }) {
     )
 }
 
+function useExploreSample() {
+    const [state, setState] = useState({ images: [], loading: true, error: '' })
+    useEffect(() => {
+        const controller = new AbortController()
+        fetchExploreSample({ signal: controller.signal })
+            .then(payload => setState({ images: payload.images || [], loading: false, error: '' }))
+            .catch(error => {
+                if (error?.name !== 'AbortError') {
+                    setState({ images: [], loading: false, error: error?.message || 'Photographs could not be loaded.' })
+                }
+            })
+        return () => controller.abort()
+    }, [])
+    return state
+}
+
+function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
+    const handleDownload = useCallback(async (event, image) => {
+        event.stopPropagation()
+        try {
+            const downloadUrl = await resolveMediaDownloadUrl(
+                () => requestAlbumMediaDownload(image.albumId, mediaId(image)),
+                image,
+            )
+            startBrowserDownload(downloadUrl, mediaFileName(image, 'photo.jpg'))
+            trackPhotoDownload(image.albumId)
+        } catch (error) {
+            console.error('Explore photo download failed:', error)
+            alert('The photo could not be downloaded. Please try again.')
+        }
+    }, [])
+
+    const handlePrint = useCallback(async (event, image) => {
+        event.stopPropagation()
+        try {
+            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)))
+        } catch (error) {
+            console.error('Explore print order failed:', error)
+            alert(error?.message || 'The print store could not be opened. Please try again.')
+        }
+    }, [])
+
+    if (index === null || !images[index]) return null
+    return (
+        <PhotoLightbox
+            images={images}
+            index={index}
+            ariaLabel={ariaLabel}
+            onClose={() => setIndex(null)}
+            onNext={() => setIndex(current => (current + 1) % images.length)}
+            onPrevious={() => setIndex(current => (current - 1 + images.length) % images.length)}
+            onDownload={handleDownload}
+            onPrint={handlePrint}
+            shareTitle="Ian Truong Photography"
+        />
+    )
+}
+
+function ExposureExplorer() {
+    const { images, loading, error } = useExploreSample()
+    const [groupId, setGroupId] = useState('aperture')
+    const [optionId, setOptionId] = useState('wide')
+    const [lightboxIndex, setLightboxIndex] = useState(null)
+    const group = EXPOSURE_GROUPS.find(candidate => candidate.id === groupId) || EXPOSURE_GROUPS[0]
+    const matching = useMemo(
+        () => matchingExposurePhotos(images, group.id, optionId),
+        [group.id, images, optionId],
+    )
+
+    const chooseGroup = nextGroup => {
+        const next = EXPOSURE_GROUPS.find(candidate => candidate.id === nextGroup)
+        if (!next) return
+        const populated = next.options.find(option => matchingExposurePhotos(images, next.id, option.id).length > 0)
+        setGroupId(next.id)
+        setOptionId(populated?.id || next.options[0].id)
+        setLightboxIndex(null)
+    }
+
+    return (
+        <div className="explore-page animate-fade-in pt-[74px]">
+            <ExploreHeader title="Exposure Explorer" detail="Browse a random cross-section of the archive by the choices behind each exposure." />
+            <section className="explore-content max-w-7xl mx-auto px-6 pb-20 md:pb-28">
+                <Link to="/explore" className="explore-back">← All Explore modules</Link>
+                <section className="explore-exposure-panel" aria-labelledby="exposure-filter-title">
+                    <div className="explore-exposure-heading">
+                        <span>03</span>
+                        <h2 id="exposure-filter-title">Choose a setting</h2>
+                    </div>
+                    <div className="explore-exposure-groups" role="tablist" aria-label="Exposure setting">
+                        {EXPOSURE_GROUPS.map(candidate => (
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={candidate.id === group.id}
+                                className={candidate.id === group.id ? 'is-active' : ''}
+                                key={candidate.id}
+                                onClick={() => chooseGroup(candidate.id)}
+                            >
+                                {candidate.label}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="explore-exposure-options">
+                        {group.options.map(option => {
+                            const count = matchingExposurePhotos(images, group.id, option.id).length
+                            return (
+                                <button
+                                    type="button"
+                                    key={option.id}
+                                    className={option.id === optionId ? 'is-active' : ''}
+                                    aria-pressed={option.id === optionId}
+                                    disabled={!loading && count === 0}
+                                    onClick={() => { setOptionId(option.id); setLightboxIndex(null) }}
+                                >
+                                    <strong>{option.label}</strong>
+                                    <span>{option.detail}</span>
+                                    {!loading && <small>{count}</small>}
+                                </button>
+                            )
+                        })}
+                    </div>
+                </section>
+
+                {loading && <div className="explore-loading" role="status">Reading exposure settings…</div>}
+                {error && <p className="explore-error" role="alert">{error}</p>}
+                {!loading && !error && (
+                    <div className="explore-results-heading" aria-live="polite">
+                        <p><strong>{matching.length}</strong> {matching.length === 1 ? 'photograph' : 'photographs'} in this shuffle</p>
+                        <span>{group.label} · {group.options.find(option => option.id === optionId)?.label}</span>
+                    </div>
+                )}
+                {!loading && !error && matching.length === 0 && (
+                    <div className="explore-empty"><h2>No match in this shuffle</h2><p>Choose another setting to keep exploring.</p></div>
+                )}
+                {matching.length > 0 && (
+                    <div className="explore-grid">
+                        {matching.map((item, itemIndex) => (
+                            <ExploreCard
+                                key={`${item.albumId}:${item.mediaId}`}
+                                item={item}
+                                index={itemIndex}
+                                mode="exposure"
+                                onOpen={setLightboxIndex}
+                            />
+                        ))}
+                    </div>
+                )}
+            </section>
+            <ExploreSampleLightbox
+                images={matching}
+                index={lightboxIndex}
+                setIndex={setLightboxIndex}
+                ariaLabel="Photographs in Exposure Explorer"
+            />
+        </div>
+    )
+}
+
+function GuessSettingsGame() {
+    const { images, loading, error } = useExploreSample()
+    const [round, setRound] = useState(null)
+    const [selected, setSelected] = useState('')
+    const [score, setScore] = useState({ correct: 0, answered: 0 })
+    const initialRound = useMemo(() => buildSettingsRound(images), [images])
+    const activeRound = round || initialRound
+
+    const chooseAnswer = value => {
+        if (!activeRound || selected) return
+        setSelected(value)
+        setScore(current => ({
+            correct: current.correct + (value === activeRound.answer ? 1 : 0),
+            answered: current.answered + 1,
+        }))
+    }
+
+    const nextRound = () => {
+        const previousId = activeRound?.image?.mediaId || activeRound?.image?.id || activeRound?.image?.url || ''
+        setRound(buildSettingsRound(images, previousId))
+        setSelected('')
+    }
+
+    return (
+        <div className="explore-page animate-fade-in pt-[74px]">
+            <ExploreHeader title="Guess the Settings" detail="Look closely at the photograph, then choose the setting you think made it." />
+            <section className="explore-game max-w-7xl mx-auto px-6 pb-20 md:pb-28">
+                <Link to="/explore" className="explore-back">← All Explore modules</Link>
+                {loading && <div className="explore-loading" role="status">Building a settings round…</div>}
+                {error && <p className="explore-error" role="alert">{error}</p>}
+                {!loading && !error && !activeRound && (
+                    <div className="explore-empty"><h2>Not enough settings yet</h2><p>The game needs photographs with complete exposure metadata.</p></div>
+                )}
+                {activeRound && (
+                    <div className="explore-game-board">
+                        <div className="explore-game-photo">
+                            <ProgressiveImage
+                                key={mediaId(activeRound.image)}
+                                src={activeRound.image.thumbnailUrl}
+                                srcSet={mediaPreviewSrcSet(activeRound.image)}
+                                sizes="(max-width: 800px) calc(100vw - 3rem), 58vw"
+                                width={activeRound.image.width || 4}
+                                height={activeRound.image.height || 3}
+                                alt={`A photograph from ${activeRound.image.albumTitle}`}
+                                eager
+                            />
+                            <span>{activeRound.image.albumTitle}</span>
+                        </div>
+                        <div className="explore-game-question">
+                            <div className="explore-game-score">
+                                <span>04 · Round {score.answered + (selected ? 0 : 1)}</span>
+                                <strong>{score.correct} / {score.answered} correct</strong>
+                            </div>
+                            <h2>{activeRound.prompt}</h2>
+                            <div className="explore-game-options">
+                                {activeRound.options.map(option => {
+                                    const answered = Boolean(selected)
+                                    const className = answered
+                                        ? option === activeRound.answer ? 'is-correct' : option === selected ? 'is-wrong' : ''
+                                        : ''
+                                    return (
+                                        <button
+                                            type="button"
+                                            key={option}
+                                            className={className}
+                                            disabled={answered}
+                                            onClick={() => chooseAnswer(option)}
+                                        >
+                                            {option}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                            {selected ? (
+                                <div className="explore-game-answer" role="status">
+                                    <strong>{selected === activeRound.answer ? 'Correct.' : `The answer was ${activeRound.answer}.`}</strong>
+                                    <p>
+                                        {activeRound.image.exif.focalLength} · {activeRound.image.exif.focalRatio} · {activeRound.image.exif.shutterSpeed} · {activeRound.image.exif.iso}
+                                    </p>
+                                    <button type="button" onClick={nextRound}>Next photograph →</button>
+                                </div>
+                            ) : (
+                                <button type="button" className="explore-game-skip" onClick={nextRound}>Skip photograph</button>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </section>
+        </div>
+    )
+}
+
 export default function Explore() {
     const { pathname } = useLocation()
     if (pathname === '/explore/colors') return <ExploreModule mode="color" />
     if (pathname === '/explore/lenses') return <ExploreModule mode="lens" />
+    if (pathname === '/explore/exposure') return <ExposureExplorer />
+    if (pathname === '/explore/guess-settings') return <GuessSettingsGame />
     return <ExploreLanding />
 }

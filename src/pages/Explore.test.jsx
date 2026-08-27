@@ -6,6 +6,7 @@ const exploreApi = vi.hoisted(() => ({
   fetchExploreColors: vi.fn(),
   fetchExploreLenses: vi.fn(),
   fetchExplorePhotos: vi.fn(),
+  fetchExploreSample: vi.fn(),
   prefetchExploreModule: vi.fn(() => Promise.resolve()),
 }))
 const api = vi.hoisted(() => ({ requestAlbumMediaDownload: vi.fn() }))
@@ -43,7 +44,10 @@ const photo = {
   mediaId: 'media-1', id: 'media-1', thumbnailUrl: 'https://media.test/photo.webp',
   previewSrcSet: [{ width: 640, url: 'https://media.test/photo.webp' }],
   palette: ['#123456', '#567890'], width: 1920, height: 1280,
-  exif: { model: 'Canon EOS R7', lens: 'Sigma 18-50mm F2.8' },
+  exif: {
+    model: 'Canon EOS R7', lens: 'Sigma 18-50mm F2.8',
+    focalLength: '56mm', focalRatio: 'f/2.8', shutterSpeed: '1/500s', iso: 'ISO 400',
+  },
 }
 const secondPhoto = {
   ...photo, albumId: 'album-2', albumTitle: 'Green Valley', mediaId: 'media-2', id: 'media-2',
@@ -63,6 +67,7 @@ describe('Explore', () => {
       ],
     })
     exploreApi.fetchExplorePhotos.mockResolvedValue({ items: [photo], nextCursor: null })
+    exploreApi.fetchExploreSample.mockResolvedValue({ images: [photo, secondPhoto] })
   })
 
   it('presents Explore as a module landing page without loading an index', () => {
@@ -70,7 +75,28 @@ describe('Explore', () => {
     expect(screen.getByRole('heading', { name: 'Explore' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Color Explorer/ })).toHaveAttribute('href', '/explore/colors')
     expect(screen.getByRole('link', { name: /Lens Explorer/ })).toHaveAttribute('href', '/explore/lenses')
+    expect(screen.getByRole('link', { name: /Exposure Explorer/ })).toHaveAttribute('href', '/explore/exposure')
+    expect(screen.getByRole('link', { name: /Guess the Settings/ })).toHaveAttribute('href', '/explore/guess-settings')
     expect(exploreApi.fetchExplorePhotos).not.toHaveBeenCalled()
+  })
+
+  it('explores a random sample by exposure settings', async () => {
+    render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
+    expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
+    expect(exploreApi.fetchExploreSample).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(screen.getByRole('tab', { name: 'Aperture' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('tab', { name: 'ISO' }))
+    expect(screen.getByRole('button', { name: /Available light/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('runs a settings-guessing round and reveals the complete answer', async () => {
+    render(<MemoryRouter initialEntries={['/explore/guess-settings']}><Explore /></MemoryRouter>)
+    expect(await screen.findByRole('img', { name: /photograph from (Blue Mountain|Green Valley)/i })).toBeInTheDocument()
+    const choices = screen.getAllByRole('button').filter(button => /^(f\/|1\/|ISO|\d+mm)/.test(button.textContent))
+    expect(choices).toHaveLength(4)
+    fireEvent.click(choices[0])
+    expect(await screen.findByRole('button', { name: /Next photograph/ })).toBeInTheDocument()
+    expect(screen.getAllByText(/56mm/).length).toBeGreaterThan(0)
   })
 
   it('browses available colors and opens matching photographs with full metadata', async () => {

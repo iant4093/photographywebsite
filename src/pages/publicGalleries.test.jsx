@@ -230,6 +230,7 @@ describe('VideoGallery', () => {
     api.fetchAlbum.mockResolvedValue(videoData)
     urls.resolveMediaDownloadUrl.mockImplementation((request) => request().then((value) => value.downloadUrl))
     api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'https://x.test/video-download' })
+    zip.pollZipJob.mockResolvedValue('https://x.test/videos.zip')
     window.history.replaceState({ idx: 0 }, '')
   })
 
@@ -251,6 +252,15 @@ describe('VideoGallery', () => {
     gallery(<VideoGallery />, '/video/v-album')
     fireEvent.click(await screen.findByRole('button', { name: 'Show QR code for Video Album' }))
     expect(screen.getByRole('img', { name: 'QR code linking to Video Album' })).toHaveAttribute('src', 'https://x.test/video-qr.svg')
+  })
+
+  it('downloads every original video through the shared ZIP pipeline', async () => {
+    gallery(<VideoGallery />, '/video/v-album')
+    fireEvent.click(await screen.findByRole('button', { name: 'Download All' }))
+    await waitFor(() => expect(zip.pollZipJob).toHaveBeenCalledWith(expect.objectContaining({
+      jobKey: 'album:v-album',
+    })))
+    expect(urls.startBrowserDownload).toHaveBeenCalledWith('https://x.test/videos.zip', 'Video Album.zip')
   })
 
   it('opens from a thumbnail, refreshes media, downloads, closes, and goes back', async () => {

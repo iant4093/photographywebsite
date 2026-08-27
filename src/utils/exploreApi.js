@@ -1,4 +1,4 @@
-import { ApiError, apiFetch } from './api'
+import { ApiError, apiFetch, fetchRandomPhotos } from './api'
 import { isSafeCursor, normalizePage } from './apiResponse'
 
 const EXPLORE_CACHE_TTL_MS = 5 * 60_000
@@ -95,7 +95,13 @@ export function fetchExploreColors(options = {}) {
 }
 
 export function prefetchExploreModule(mode) {
+    if (mode === 'sample') return fetchExploreSample()
     return mode === 'lens' ? fetchExploreLenses() : fetchExploreColors()
+}
+
+export function fetchExploreSample(options = {}) {
+    const key = '/public/random-photos:explore-sample'
+    return cachedRequest(key, () => fetchRandomPhotos(), options.signal)
 }
 
 export function clearExploreCache() {

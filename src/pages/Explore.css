@@ -102,6 +102,52 @@
 .linen-site .explore-module-lens i:nth-child(2) { inset: 44%; background: rgba(181, 110, 61, 0.3); }
 .linen-site .explore-module-lens i:nth-child(3) { inset: 49%; background: var(--color-charcoal); }
 
+.linen-site .explore-module-exposure {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-self: center;
+  gap: 0.7rem;
+  height: clamp(7rem, 13vw, 10rem);
+  padding: 0.8rem;
+  border: 1px solid var(--color-warm-border);
+}
+
+.linen-site .explore-module-exposure i {
+  align-self: end;
+  height: 28%;
+  background: var(--color-amber-dark);
+  transition: height 280ms ease;
+}
+
+.linen-site .explore-module-exposure i:nth-child(2) { height: 54%; opacity: 0.8; }
+.linen-site .explore-module-exposure i:nth-child(3) { height: 82%; opacity: 0.65; }
+.linen-site .explore-module-exposure i:nth-child(4) { height: 42%; opacity: 0.5; }
+.linen-site .explore-module-card:hover .explore-module-exposure i:nth-child(odd) { height: 68%; }
+
+.linen-site .explore-module-game {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-self: center;
+  gap: 0.55rem;
+  padding: 1.25rem;
+  border: 1px solid var(--color-warm-border);
+}
+
+.linen-site .explore-module-game > span {
+  grid-column: 1 / -1;
+  color: var(--color-amber-dark);
+  font: 400 clamp(3rem, 7vw, 6rem)/0.9 var(--font-serif);
+  text-align: center;
+}
+
+.linen-site .explore-module-game i {
+  padding: 0.65rem 0.35rem;
+  border: 1px solid var(--color-warm-border);
+  font: normal 0.65rem/1 var(--font-sans);
+  text-align: center;
+}
+
 .linen-site .explore-back {
   display: inline-block;
   margin-bottom: 1.5rem;
@@ -388,11 +434,240 @@
   cursor: wait;
 }
 
+.linen-site .explore-exposure-panel {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.28fr) minmax(0, 0.72fr);
+  gap: 1.25rem clamp(1.5rem, 4vw, 4rem);
+  padding-block: clamp(1.5rem, 3vw, 2.5rem);
+  border-block: 1px solid var(--color-warm-border);
+}
+
+.linen-site .explore-exposure-heading {
+  grid-row: 1 / span 2;
+}
+
+.linen-site .explore-exposure-heading > span {
+  color: var(--color-amber-dark);
+  font: 600 0.61rem/1 var(--font-sans);
+  letter-spacing: 0.18em;
+}
+
+.linen-site .explore-exposure-heading h2 {
+  margin-top: 0.6rem;
+  font: 400 clamp(1.8rem, 3vw, 2.7rem)/1.05 var(--font-serif);
+}
+
+.linen-site .explore-exposure-groups {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-warm-border);
+}
+
+.linen-site .explore-exposure-groups button {
+  padding: 0.75rem 1rem;
+  color: var(--color-warm-gray);
+  border-bottom: 2px solid transparent;
+  font-size: 0.66rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.linen-site .explore-exposure-groups button:hover,
+.linen-site .explore-exposure-groups button.is-active {
+  color: var(--color-charcoal);
+  border-bottom-color: var(--color-amber-dark);
+}
+
+.linen-site .explore-exposure-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.linen-site .explore-exposure-options button {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  min-height: 6rem;
+  padding: 1rem;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-warm-border);
+  background: rgba(248, 244, 235, 0.34);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+.linen-site .explore-exposure-options button:hover:not(:disabled),
+.linen-site .explore-exposure-options button.is-active {
+  border-color: var(--color-charcoal);
+  background: rgba(248, 244, 235, 0.72);
+  transform: translateY(-2px);
+}
+
+.linen-site .explore-exposure-options button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.linen-site .explore-exposure-options strong {
+  font: 400 1.15rem/1.1 var(--font-serif);
+}
+
+.linen-site .explore-exposure-options span {
+  color: var(--color-warm-gray);
+  font-size: 0.67rem;
+}
+
+.linen-site .explore-exposure-options small {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  min-width: 1.7rem;
+  padding: 0.3rem;
+  color: var(--color-cream);
+  background: var(--color-amber-dark);
+  text-align: center;
+}
+
+.linen-site .explore-game-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(19rem, 0.75fr);
+  min-height: min(68vh, 46rem);
+  border: 1px solid var(--color-charcoal);
+  background: rgba(248, 244, 235, 0.34);
+  box-shadow: 9px 10px 0 rgba(91, 70, 51, 0.08);
+}
+
+.linen-site .explore-game-photo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 28rem;
+  padding: clamp(1rem, 2vw, 2rem);
+  border-right: 1px solid var(--color-warm-border);
+  background: var(--color-charcoal);
+}
+
+.linen-site .explore-game-photo img {
+  width: 100%;
+  height: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+}
+
+.linen-site .explore-game-photo > span {
+  position: absolute;
+  left: 1.25rem;
+  bottom: 1.1rem;
+  padding: 0.4rem 0.55rem;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(20, 18, 16, 0.72);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.linen-site .explore-game-question {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(1.25rem, 3vw, 2.75rem);
+}
+
+.linen-site .explore-game-score {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  color: var(--color-warm-gray);
+  font-size: 0.61rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.linen-site .explore-game-score span { color: var(--color-amber-dark); }
+
+.linen-site .explore-game-question h2 {
+  margin-bottom: 1.5rem;
+  font: 400 clamp(1.8rem, 3vw, 2.8rem)/1.1 var(--font-serif);
+}
+
+.linen-site .explore-game-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.linen-site .explore-game-options button,
+.linen-site .explore-game-answer button,
+.linen-site .explore-game-skip {
+  min-height: 3.2rem;
+  padding: 0.8rem 1rem;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-warm-border);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.linen-site .explore-game-options button:hover:not(:disabled) {
+  border-color: var(--color-charcoal);
+  background: rgba(181, 110, 61, 0.12);
+}
+
+.linen-site .explore-game-options button.is-correct {
+  color: #f8f4eb;
+  border-color: #46664d;
+  background: #46664d;
+}
+
+.linen-site .explore-game-options button.is-wrong {
+  color: #f8f4eb;
+  border-color: #8a4239;
+  background: #8a4239;
+}
+
+.linen-site .explore-game-answer {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+  color: var(--color-warm-gray);
+}
+
+.linen-site .explore-game-answer strong {
+  color: var(--color-charcoal);
+  font: 400 1.35rem/1.2 var(--font-serif);
+}
+
+.linen-site .explore-game-answer button {
+  margin-top: 0.5rem;
+  border-color: var(--color-charcoal);
+}
+
+.linen-site .explore-game-skip {
+  align-self: start;
+  min-height: auto;
+  margin-top: 1.25rem;
+  padding-inline: 0;
+  color: var(--color-warm-gray);
+  border: 0;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .linen-site[data-theme="dark"]:not(.linen-admin) :is(
   .explore-module-card,
   .explore-color-options button,
   .explore-lens-options button,
   .explore-photo-card
+) ,
+.linen-site[data-theme="dark"]:not(.linen-admin) :is(
+  .explore-exposure-options button,
+  .explore-game-board
 ) {
   background: rgba(38, 35, 30, 0.7);
   box-shadow: 5px 6px 0 rgba(0, 0, 0, 0.2);
@@ -403,6 +678,10 @@
   .explore-color-options button.is-active,
   .explore-lens-options button:hover,
   .explore-lens-options button.is-active
+) ,
+.linen-site[data-theme="dark"]:not(.linen-admin) :is(
+  .explore-exposure-options button:hover:not(:disabled),
+  .explore-exposure-options button.is-active
 ) {
   background: rgba(56, 50, 43, 0.9);
 }
@@ -434,6 +713,25 @@
 
   .linen-site .explore-module-card {
     min-height: 25rem;
+  }
+
+  .linen-site .explore-exposure-panel,
+  .linen-site .explore-game-board {
+    grid-template-columns: 1fr;
+  }
+
+  .linen-site .explore-exposure-heading {
+    grid-row: auto;
+  }
+
+  .linen-site .explore-exposure-options {
+    grid-template-columns: 1fr;
+  }
+
+  .linen-site .explore-game-photo {
+    min-height: 20rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-warm-border);
   }
 
   .linen-site .explore-grid {

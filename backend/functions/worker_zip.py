@@ -104,7 +104,7 @@ def handler(event, context):
     bucket = bucket_name()
     try:
         album = _validated_album(event)
-        if album.get("type", "photo") != "photo":
+        if album.get("type", "photo") not in {"photo", "video"}:
             raise ValidationError("Unsupported album type")
         raw_keys = raw_image_keys(album)
         max_objects = max(1, min(int(os.environ.get("ZIP_MAX_OBJECTS", "1000")), 5000))
@@ -123,9 +123,18 @@ def handler(event, context):
 
         zip_key, lock_key = zip_keys(album)
         stream = StreamToS3(bucket, zip_key)
-        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+        # Deflate preserves the original media bytes while avoiding store-only
+        # archives. JPEG and MP4 inputs are already compressed, so savings vary,
+        # but no image or video quality is discarded.
+        with zipfile.ZipFile(
+            stream,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+        ) as archive:
             for index, key in enumerate(validated_keys, start=1):
-                filename = posixpath.basename(key).replace("\r", "_").replace("\n", "_") or "photo"
+                filename = posixpath.basename(key).replace("\r", "_").replace("\n", "_") or "media"
                 archive_name = f"{index:04d}_{filename}"
                 response = s3.get_object(Bucket=bucket, Key=key)
                 with archive.open(archive_name, "w") as destination:

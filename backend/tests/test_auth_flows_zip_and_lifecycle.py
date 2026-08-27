@@ -234,6 +234,7 @@ class ZipTests(unittest.TestCase):
             "images": [{"rawKey": f"albums/{ALBUM_ID}/original/one.jpg"}],
         }
         self.assertNotEqual(zip_helpers.zip_version(base), zip_helpers.zip_version({**base, "visibility": "public"}))
+        self.assertNotEqual(zip_helpers.zip_version(base), zip_helpers.zip_version({**base, "type": "video"}))
         changed = {**base, "images": [*base["images"], {"rawKey": f"albums/{ALBUM_ID}/original/two.jpg"}]}
         self.assertNotEqual(zip_helpers.zip_version(base), zip_helpers.zip_version(changed))
 

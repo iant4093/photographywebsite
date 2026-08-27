@@ -181,7 +181,7 @@ describe('SharedAlbum access and gallery', () => {
     const first = renderShared('/sharedalbum/video')
     fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
     await screen.findByText('Shared Video')
-    expect(screen.queryByRole('button', { name: 'Download All' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Download All' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('img', { name: 'Item 1 from Shared Video' }))
     expect(screen.getByText('Video v1')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'Escape' })

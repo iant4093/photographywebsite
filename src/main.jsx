@@ -5,10 +5,17 @@ import { AuthProvider } from './context/authContext'
 import App from './App'
 import './index.css'
 import './linen.css'
+import { registerPwa } from './utils/pwa'
 
 const releaseSha = import.meta.env.VITE_RELEASE_SHA ?? ''
 if (/^[0-9a-f]{40}$/.test(releaseSha)) {
   document.documentElement.dataset.releaseSha = releaseSha
+}
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    registerPwa().catch(error => console.warn('Offline app support could not start:', error))
+  }, { once: true })
 }
 
 // Mount the app with BrowserRouter and AuthProvider wrapping the root

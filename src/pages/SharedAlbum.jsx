@@ -16,6 +16,7 @@ import {
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import AlbumQrCode from '../components/AlbumQrCode'
+import AlbumShareButton from '../components/AlbumShareButton'
 import AccessibleLightbox from '../components/AccessibleLightbox'
 import PhotoLightbox from '../components/PhotoLightbox'
 import { openPrintOrder } from '../utils/printOrders'
@@ -311,14 +312,14 @@ export default function SharedAlbum() {
                         </p>
                     </div>
 
-                    {(album.qrCodeUrl || (images.length > 0 && album.type !== 'video')) && (
-                        <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                    <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                            <AlbumShareButton albumTitle={album.title} />
                             <AlbumQrCode
                                 albumTitle={album.title}
                                 qrCodeUrl={album.qrCodeUrl}
                                 onLoadError={requireFreshVerification}
                             />
-                            {images.length > 0 && album.type !== 'video' && (
+                            {images.length > 0 && (
                                 <button
                                     onClick={downloadAll}
                                     disabled={downloading}
@@ -339,8 +340,7 @@ export default function SharedAlbum() {
                                     )}
                                 </button>
                             )}
-                        </div>
-                    )}
+                    </div>
                 </div>
 
                 {zipError && (
@@ -410,6 +410,7 @@ export default function SharedAlbum() {
                     onPrevious={goPrev}
                     onDownload={downloadImage}
                     onPrint={printImage}
+                    shareTitle={`${album.title} — Ian Truong Photography`}
                     onMediaError={() => requestMediaRefresh('media-error')}
                 />
             )}

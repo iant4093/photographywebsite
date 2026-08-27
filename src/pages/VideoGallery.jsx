@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router'
-import { fetchAlbum, requestAlbumMediaDownload } from '../utils/api'
+import { fetchAlbum, requestAlbumMediaDownload, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
 import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 import AccessibleLightbox from '../components/AccessibleLightbox'
 import AlbumQrCode from '../components/AlbumQrCode'
+import AlbumShareButton from '../components/AlbumShareButton'
 import {
     mediaFileName,
     mediaId,
@@ -16,7 +17,8 @@ import {
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { navigateBackOr } from '../utils/navigation'
-import { trackAlbumView } from '../utils/analytics'
+import { pollZipJob } from '../utils/zipDownload'
+import { trackAlbumView, trackZipRequest } from '../utils/analytics'
 
 export default function VideoGallery() {
     const { albumId } = useParams()
@@ -27,9 +29,13 @@ export default function VideoGallery() {
     const [loading, setLoading] = useState(true)
     const [loadError, setLoadError] = useState('')
     const [mediaError, setMediaError] = useState('')
+    const [downloadingAll, setDownloadingAll] = useState(false)
+    const [zipError, setZipError] = useState('')
+    const [zipStatus, setZipStatus] = useState('')
     const { getIdToken } = useAuth()
     const autoPlayFirst = searchParams.get('play') === '1'
     const trackedAlbumRef = useRef(null)
+    const zipControllerRef = useRef(null)
 
     // Lightbox state — null means gallery view, a number is the index in the player
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -84,6 +90,8 @@ export default function VideoGallery() {
         return () => controller.abort()
     }, [albumId, loadAlbum])
 
+    useEffect(() => () => zipControllerRef.current?.abort(), [])
+
     const refreshMedia = useCallback(
         () => loadAlbum({ background: true }),
         [loadAlbum],
@@ -127,6 +135,39 @@ export default function VideoGallery() {
         } catch (err) {
             console.error('Download failed:', err)
             alert('The video could not be downloaded. Please try again.')
+        }
+    }
+
+    const downloadAll = async () => {
+        if (!images.length || !album) return
+        zipControllerRef.current?.abort()
+        const controller = new AbortController()
+        zipControllerRef.current = controller
+        setDownloadingAll(true)
+        setZipError('')
+        setZipStatus('starting')
+        if (album.visibility === 'public') trackZipRequest(albumId)
+        try {
+            let token = null
+            try { token = await getIdToken() } catch { /* public album */ }
+            const url = await pollZipJob({
+                jobKey: `album:${albumId}`,
+                request: ({ signal }) => requestAlbumZip(albumId, token, { signal }),
+                signal: controller.signal,
+                onStatus: setZipStatus,
+            })
+            startBrowserDownload(url, `${album.title || 'video-album'}.zip`)
+        } catch (error) {
+            if (error?.name !== 'AbortError') {
+                console.error('Video ZIP download failed:', error)
+                setZipError(error?.message || 'The ZIP could not be generated. Please try again later.')
+            }
+        } finally {
+            if (zipControllerRef.current === controller) {
+                zipControllerRef.current = null
+                setDownloadingAll(false)
+                setZipStatus('')
+            }
         }
     }
 
@@ -195,12 +236,37 @@ export default function VideoGallery() {
                         </p>
                     )}
                 </div>
-                <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
+                <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
+                    <AlbumShareButton albumTitle={album.title} />
+                    <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
+                    {images.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={downloadAll}
+                            disabled={downloadingAll}
+                            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all duration-300 shadow-warm-sm border border-transparent disabled:opacity-70 disabled:cursor-not-allowed bg-amber text-white hover:bg-amber-dark hover:scale-105 active:scale-95 cursor-pointer"
+                        >
+                            {downloadingAll ? (
+                                <>
+                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    {zipStatus === 'rate_limited' ? 'Waiting...' : 'Preparing...'}
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    Download All
+                                </>
+                            )}
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {mediaError && (
+            {(mediaError || zipError) && (
                 <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {mediaError}
+                    {mediaError || zipError}
                 </div>
             )}
 

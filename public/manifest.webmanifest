@@ -1,0 +1,21 @@
+{
+  "name": "Ian Truong Photography",
+  "short_name": "Ian Photography",
+  "description": "Explore Ian Truong's photography and video portfolio.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#faf8f5",
+  "theme_color": "#faf8f5",
+  "orientation": "any",
+  "categories": ["photo", "entertainment"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
