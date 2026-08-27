@@ -99,6 +99,8 @@ EXPLORE_INDEX_CURSOR_PATTERN = re.compile(
 EXPLORE_INDEX_MAX_EVALUATED = 5000
 _index_readiness = {"ready": False, "expires_at": 0.0}
 _index_readiness_lock = threading.Lock()
+_exposure_items_cache = {"items": None, "expires_at": 0.0}
+_exposure_items_lock = threading.Lock()
 
 
 def _preview_table():
@@ -129,6 +131,8 @@ def _explore_index_ready():
 def _reset_explore_index_cache_for_tests():
     with _index_readiness_lock:
         _index_readiness.update(ready=False, expires_at=0.0)
+    with _exposure_items_lock:
+        _exposure_items_cache.update(items=None, expires_at=0.0)
 
 
 def _positive_limit(value, default=EXPLORE_DEFAULT_LIMIT, maximum=EXPLORE_MAX_LIMIT):
@@ -361,37 +365,47 @@ def _normalized_exposure_value(value):
 
 
 def _all_public_explore_items():
-    candidates = []
-    cursor = None
-    for _page in range(EXPLORE_MAX_SCAN_PAGES):
-        arguments = {
-            "Limit": EXPLORE_SCAN_LIMIT,
-            "ProjectionExpression": EXPLORE_PROJECTION,
-            "ExpressionAttributeNames": {"#status": "status"},
-            "FilterExpression": (
-                Attr("status").eq("ready")
-                & Attr("exploreVersion").eq(EXPLORE_VERSION)
-            ),
-        }
-        if cursor:
-            arguments["ExclusiveStartKey"] = cursor
-        response = _preview_table().scan(**arguments)
-        candidates.extend(
-            item for item in response.get("Items", []) if isinstance(item, dict)
-        )
-        cursor = response.get("LastEvaluatedKey")
-        if not cursor:
-            break
-    else:
-        raise RuntimeError("Exposure index pagination exceeded safe limit")
+    now = time.monotonic()
+    with _exposure_items_lock:
+        if (
+            _exposure_items_cache["items"] is not None
+            and now < _exposure_items_cache["expires_at"]
+        ):
+            return _exposure_items_cache["items"]
 
-    albums = _batch_albums(item.get("albumId") for item in candidates)
-    output = []
-    for metadata in candidates:
-        item = _explore_item(metadata, albums.get(metadata.get("albumId")))
-        if item:
-            output.append(item)
-    return output
+        candidates = []
+        cursor = None
+        for _page in range(EXPLORE_MAX_SCAN_PAGES):
+            arguments = {
+                "Limit": EXPLORE_SCAN_LIMIT,
+                "ProjectionExpression": EXPLORE_PROJECTION,
+                "ExpressionAttributeNames": {"#status": "status"},
+                "FilterExpression": (
+                    Attr("status").eq("ready")
+                    & Attr("exploreVersion").eq(EXPLORE_VERSION)
+                ),
+            }
+            if cursor:
+                arguments["ExclusiveStartKey"] = cursor
+            response = _preview_table().scan(**arguments)
+            candidates.extend(
+                item for item in response.get("Items", []) if isinstance(item, dict)
+            )
+            cursor = response.get("LastEvaluatedKey")
+            if not cursor:
+                break
+        else:
+            raise RuntimeError("Exposure index pagination exceeded safe limit")
+
+        albums = _batch_albums(item.get("albumId") for item in candidates)
+        output = []
+        for metadata in candidates:
+            item = _explore_item(metadata, albums.get(metadata.get("albumId")))
+            if item:
+                output.append(item)
+        cached = tuple(output)
+        _exposure_items_cache.update(items=cached, expires_at=now + 300)
+        return cached
 
 
 def _exposure_page_payload(items, value, limit, cursor_value=None):

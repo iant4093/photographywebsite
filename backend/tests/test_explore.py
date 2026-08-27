@@ -218,6 +218,19 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(len(body["initialPage"]["items"]), 1)
         self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
 
+    def test_exposure_snapshot_is_reused_for_filter_changes_and_pagination(self):
+        preview_table = Mock(scan=Mock(return_value={"Items": [metadata()]}))
+        with patch.object(get_public_album, "_preview_table", return_value=preview_table), patch.object(
+            get_public_album, "_batch_albums", return_value={ALBUM_ID: album()}
+        ) as batch:
+            first = get_public_album._all_public_explore_items()
+            second = get_public_album._all_public_explore_items()
+
+        self.assertIs(first, second)
+        self.assertEqual(len(first), 1)
+        preview_table.scan.assert_called_once()
+        batch.assert_called_once()
+
     def test_exposure_results_page_through_a_stable_random_order_with_true_total(self):
         items = [
             {
