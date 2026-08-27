@@ -301,3 +301,83 @@
     margin-top: 0.3rem;
   }
 }
+
+@media (orientation: landscape) and (max-height: 330px) and (max-width: 1024px) {
+  .linen-photo-lightbox {
+    grid-template-columns: minmax(0, 1fr) clamp(8rem, 18vw, 9.25rem);
+    gap: 0.25rem;
+    padding:
+      max(0.2rem, env(safe-area-inset-top))
+      max(0.25rem, env(safe-area-inset-right))
+      max(0.2rem, env(safe-area-inset-bottom))
+      max(0.25rem, env(safe-area-inset-left)) !important;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-content.has-photo-metadata {
+    grid-template-columns: minmax(0, 1fr) clamp(8.25rem, 20vw, 10rem);
+    gap: clamp(0.3rem, 0.9vw, 0.5rem);
+  }
+
+  .linen-photo-lightbox .linen-lightbox-media {
+    inset: 0.2rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-close {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-close svg {
+    width: 1.2rem;
+    height: 1.2rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-nav {
+    flex-direction: row;
+    gap: 0.3rem;
+  }
+
+  .linen-photo-lightbox :is(.linen-lightbox-previous, .linen-lightbox-next) {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .linen-photo-lightbox :is(.linen-lightbox-previous, .linen-lightbox-next) svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-actions,
+  .linen-photo-lightbox .linen-lightbox-actions > div {
+    gap: 0.2rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-actions button {
+    min-height: 1.85rem;
+    padding: 0.28rem 0.4rem;
+    font-size: 0.62rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-actions button svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-actions span {
+    font-size: 0.62rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-metadata {
+    padding: 0.2rem 0.1rem;
+    line-height: 1.1;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-metadata > p:first-child {
+    font-size: 0.72rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-metadata > p:not(:first-child),
+  .linen-photo-lightbox .linen-lightbox-metadata > div {
+    font-size: 0.62rem;
+  }
+}
