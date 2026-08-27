@@ -137,4 +137,23 @@ describe('PhotoLightbox', () => {
     )
     expect(screen.queryByRole('button', { name: 'Order a print of this photo' })).toBeNull()
   })
+
+  it('presents photo downloads as a labeled action button', () => {
+    const onDownload = vi.fn()
+    render(
+      <PhotoLightbox
+        images={[landscape]}
+        index={0}
+        ariaLabel="Downloadable viewer"
+        onClose={vi.fn()}
+        onDownload={onDownload}
+      />,
+    )
+
+    const download = screen.getByRole('button', { name: 'Download photo' })
+    expect(download).toHaveTextContent('Download')
+    expect(download).toHaveClass('linen-lightbox-download')
+    fireEvent.click(download)
+    expect(onDownload).toHaveBeenCalledWith(expect.any(Object), landscape, 0)
+  })
 })

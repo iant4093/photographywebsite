@@ -22,14 +22,16 @@ describe('PrintOrderModal', () => {
 
         const dialog = await screen.findByRole('dialog', { name: 'Print options' })
         const frame = screen.getByTitle('Fotomoto print options')
-        const close = screen.getByRole('button', { name: /close print options/i })
         expect(dialog).toBeInTheDocument()
         expect(frame).toHaveAttribute('src', `${configuredPrintOrigin()}/print.html#session=capability`)
-        expect(close).toHaveFocus()
-        expect(close.closest('.print-order-modal__panel')).toBeNull()
-        expect(close.parentElement).toHaveClass('print-order-modal__shell')
+        expect(frame).toHaveFocus()
+        expect(screen.queryByRole('button', { name: /close print options/i })).toBeNull()
 
-        fireEvent.click(close)
+        fireEvent(window, new MessageEvent('message', {
+            origin: configuredPrintOrigin(),
+            source: frame.contentWindow,
+            data: { type: 'ian-photography:close-print-dialog' },
+        }))
         expect(screen.queryByRole('dialog', { name: 'Print options' })).not.toBeInTheDocument()
         expect(trigger).toHaveFocus()
         trigger.remove()
@@ -45,6 +47,13 @@ describe('PrintOrderModal', () => {
 
         openPrintModal()
         expect(await screen.findByRole('dialog')).toBeInTheDocument()
+        const frame = screen.getByTitle('Fotomoto print options')
+        fireEvent(window, new MessageEvent('message', {
+            origin: 'https://untrusted.example',
+            source: frame.contentWindow,
+            data: { type: 'ian-photography:close-print-dialog' },
+        }))
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
         fireEvent.keyDown(window, { key: 'Escape' })
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
@@ -53,7 +62,6 @@ describe('PrintOrderModal', () => {
         openPrintModal()
 
         const dialog = await screen.findByRole('dialog', { name: 'Print options' })
-        const close = screen.getByRole('button', { name: /close print options/i })
         const frame = screen.getByTitle('Fotomoto print options')
         const loading = screen.getByRole('status')
 
@@ -64,7 +72,7 @@ describe('PrintOrderModal', () => {
         fireEvent.keyDown(window, { key: 'Tab' })
         expect(frame).toHaveFocus()
         fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
-        expect(close).toHaveFocus()
+        expect(frame).toHaveFocus()
 
         fireEvent.mouseDown(dialog.firstElementChild)
         expect(screen.getByRole('dialog')).toBeInTheDocument()
@@ -88,7 +96,12 @@ describe('PrintOrderModal', () => {
         expect(retained).toHaveAttribute('aria-hidden', 'true')
         expect(restored).toHaveAttribute('inert')
 
-        fireEvent.click(screen.getByRole('button', { name: /close print options/i }))
+        const frame = screen.getByTitle('Fotomoto print options')
+        fireEvent(window, new MessageEvent('message', {
+            origin: configuredPrintOrigin(),
+            source: frame.contentWindow,
+            data: { type: 'ian-photography:close-print-dialog' },
+        }))
         expect(document.body.style.overflow).toBe('clip')
         expect(retained).toHaveAttribute('aria-hidden', 'false')
         expect(retained).toHaveAttribute('inert')

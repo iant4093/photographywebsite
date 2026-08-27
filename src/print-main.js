@@ -7,6 +7,7 @@ const STORE_URL = `https://my.fotomoto.com/store/${STORE_ID}`
 const title = document.getElementById('print-title')
 const status = document.getElementById('print-status')
 const reopen = document.getElementById('print-reopen')
+const close = document.getElementById('print-close')
 const fallback = document.getElementById('print-fallback')
 
 let printApi = null
@@ -115,6 +116,13 @@ async function start() {
 }
 
 reopen.addEventListener('click', showPrintOptions)
+close.addEventListener('click', () => {
+    window.parent.postMessage({ type: 'ian-photography:close-print-dialog' }, '*')
+})
+window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return
+    window.parent.postMessage({ type: 'ian-photography:close-print-dialog' }, '*')
+})
 fallback.href = STORE_URL
 
 start()

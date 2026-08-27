@@ -7,7 +7,7 @@ const FOCUSABLE_SELECTOR = 'button:not([disabled]), iframe, [href], [tabindex]:n
 export default function PrintOrderModal({ src, onClose }) {
     const [loaded, setLoaded] = useState(false)
     const dialogRef = useRef(null)
-    const closeRef = useRef(null)
+    const frameRef = useRef(null)
     const restoreFocusRef = useRef(null)
     const portalTarget = typeof document === 'undefined' ? null : document.body
 
@@ -32,7 +32,7 @@ export default function PrintOrderModal({ src, onClose }) {
             element.setAttribute('aria-hidden', 'true')
             element.setAttribute('inert', '')
         })
-        closeRef.current?.focus({ preventScroll: true })
+        frameRef.current?.focus({ preventScroll: true })
 
         const handleKeyDown = (event) => {
             if (event.key === 'Escape') {
@@ -53,10 +53,22 @@ export default function PrintOrderModal({ src, onClose }) {
                 first.focus()
             }
         }
+        const printOrigin = new URL(src).origin
+        const handleFrameMessage = (event) => {
+            if (
+                event.origin === printOrigin
+                && event.source === frameRef.current?.contentWindow
+                && event.data?.type === 'ian-photography:close-print-dialog'
+            ) {
+                onClose()
+            }
+        }
         window.addEventListener('keydown', handleKeyDown)
+        window.addEventListener('message', handleFrameMessage)
 
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
+            window.removeEventListener('message', handleFrameMessage)
             if (!alreadyLocked) document.body.style.overflow = previousOverflow
             backgroundDialogs.forEach(({ element, ariaHidden, inert }) => {
                 if (!inert) element.removeAttribute('inert')
@@ -80,31 +92,18 @@ export default function PrintOrderModal({ src, onClose }) {
                 if (event.target === event.currentTarget) onClose()
             }}
         >
-            <div className="print-order-modal__shell">
-                <div className="print-order-modal__panel">
-                    <div className={`print-order-modal__loading ${loaded ? 'is-hidden' : ''}`} role="status">
-                        Preparing print options…
-                    </div>
-                    <iframe
-                        className={`print-order-modal__frame ${loaded ? 'is-loaded' : ''}`}
-                        src={src}
-                        title="Fotomoto print options"
-                        referrerPolicy="no-referrer"
-                        onLoad={() => setLoaded(true)}
-                    />
+            <div className="print-order-modal__panel">
+                <div className={`print-order-modal__loading ${loaded ? 'is-hidden' : ''}`} role="status">
+                    Preparing print options…
                 </div>
-                <button
-                    ref={closeRef}
-                    type="button"
-                    className="print-order-modal__close"
-                    onClick={onClose}
-                    aria-label="Close print options and return to photo"
-                    title="Back to photo"
-                >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M6 6l12 12M18 6L6 18" />
-                    </svg>
-                </button>
+                <iframe
+                    ref={frameRef}
+                    className={`print-order-modal__frame ${loaded ? 'is-loaded' : ''}`}
+                    src={src}
+                    title="Fotomoto print options"
+                    referrerPolicy="no-referrer"
+                    onLoad={() => setLoaded(true)}
+                />
             </div>
         </div>,
         portalTarget,

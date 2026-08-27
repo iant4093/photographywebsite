@@ -170,7 +170,7 @@
   .linen-photo-lightbox {
     display: grid !important;
     grid-template-rows: minmax(0, 1fr);
-    grid-template-columns: minmax(0, 1fr) 3.25rem;
+    grid-template-columns: minmax(0, 1fr) clamp(8.75rem, 19vw, 10.5rem);
     align-items: stretch;
     justify-items: stretch;
     width: 100%;
@@ -255,15 +255,25 @@
     grid-row: 1;
     grid-column: 2;
     align-self: end;
-    justify-self: center;
+    justify-self: stretch;
     flex-direction: column;
-    gap: 0.05rem;
+    width: 100%;
+    gap: 0.25rem;
     margin-top: 0;
     white-space: nowrap;
   }
 
+  .linen-photo-lightbox .linen-lightbox-actions > div {
+    width: 100%;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
   .linen-photo-lightbox .linen-lightbox-actions button {
-    padding: 0.4rem;
+    justify-content: center;
+    width: 100%;
+    padding: 0.42rem 0.55rem;
+    font-size: 0.7rem;
   }
 
   .linen-photo-lightbox .linen-lightbox-actions span {

@@ -8,6 +8,7 @@ function printDocument() {
             <p id="print-status">Preparing…</p>
             <button id="print-reopen" type="button" hidden>Reopen print options</button>
             <a id="print-fallback" href="#" hidden>Open store</a>
+            <button id="print-close" type="button">Back to Photo</button>
         </main>
     `
 }
@@ -39,6 +40,19 @@ describe('isolated Fotomoto print bridge', () => {
         expect(document.getElementById('print-fallback')).not.toHaveAttribute('hidden')
         expect(fetchMock).not.toHaveBeenCalled()
         expect(document.querySelector('script[src*="fotomoto.com"]')).toBeNull()
+    })
+
+    it('lets the bridge request a return to the photograph', async () => {
+        const postMessage = vi.spyOn(window.parent, 'postMessage')
+        vi.stubGlobal('fetch', vi.fn())
+
+        await import('./print-main.js')
+        document.getElementById('print-close').click()
+
+        expect(postMessage).toHaveBeenCalledWith(
+            { type: 'ian-photography:close-print-dialog' },
+            '*',
+        )
     })
 
     it('rejects an oversized capability before making a request', async () => {

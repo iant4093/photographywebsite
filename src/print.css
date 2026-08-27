@@ -57,9 +57,18 @@ body.print-store-body {
   line-height: 1.6;
 }
 
-#print-reopen,
-#print-fallback {
+.print-store-actions {
+  width: min(24rem, 100%);
   margin-top: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+#print-reopen,
+#print-fallback,
+#print-close {
+  width: 100%;
   border: 1px solid #d5cbbc;
   background: transparent;
   color: #f2ede3;
@@ -71,7 +80,10 @@ body.print-store-body {
 }
 
 #print-reopen:hover,
-#print-fallback:hover { background: #f2ede3; color: #171613; }
+#print-fallback:hover,
+#print-close:hover { background: #f2ede3; color: #171613; }
+
+#print-close { border-color: rgb(213 203 188 / 55%); }
 
 .print-store-note {
   margin: 2.5rem 0 0;
