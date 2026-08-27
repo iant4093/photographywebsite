@@ -706,23 +706,6 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-cloudformation-execution'
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-github-production-*'
-          - Sid: ManageExactFotomotoPickupUser
-            Effect: Allow
-            Action:
-              - iam:CreateUser
-              - iam:DeleteUserPolicy
-              - iam:GetLoginProfile
-              - iam:GetUser
-              - iam:GetUserPolicy
-              - iam:ListAttachedUserPolicies
-              - iam:ListGroupsForUser
-              - iam:ListUserTags
-              - iam:ListUserPolicies
-              - iam:PutUserPolicy
-              - iam:TagUser
-              - iam:UntagUser
-              - iam:UpdateUser
-            Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:user/ian-photography-fotomoto-autopickup-prod'
           - Sid: PassStackRolesOnlyToRuntimeServices
             Effect: Allow
             Action: iam:PassRole

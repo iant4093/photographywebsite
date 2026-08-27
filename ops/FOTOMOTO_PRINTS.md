@@ -1,9 +1,13 @@
-# Fotomoto print ordering
+# Fotomoto Free-plan print ordering
 
 Photo lightboxes can open Fotomoto for public, link-only, and assigned private
-albums. The integration deliberately runs on
+albums. The integration runs only on
 `https://prints.iantruongphotography.com/print.html`, a separate browser-storage
 origin. The Fotomoto script is never loaded by the authenticated application.
+
+The store uses Fotomoto's **Free** subscription. There is no monthly subscription
+or Auto Pickup credential. A print-ready file is uploaded manually only after a
+customer places an order.
 
 ## Security and data flow
 
@@ -17,17 +21,20 @@ origin. The Fotomoto script is never loaded by the authenticated application.
 4. Redemption rechecks that the album is active, its visibility has not
    changed, the share grant is still active when applicable, and the exact
    photograph still exists.
-5. The API copies only that photograph's JPEG preview to an opaque public
-   `fotomoto/references/` name. The full-resolution JPEG is copied to the
-   matching private `fotomoto/originals/` name.
-6. Fotomoto receives the opaque preview URL. Auto Pickup can read only the
-   private originals prefix through a dedicated read-only IAM user. It cannot
-   list or read albums, previews, backups, or any other bucket content.
+5. The API copies only that photograph's optimized JPEG preview to an opaque
+   public `fotomoto/references/` name. It never copies, publishes, signs, or
+   exposes the print-resolution original.
+6. Fotomoto receives the opaque preview URL and handles product selection,
+   checkout, payment, order records, production, and shipping.
+7. After a paid order, the photographer identifies the image from Fotomoto's
+   order preview and manually uploads the matching print-ready JPEG directly to
+   that order in the Fotomoto Dashboard.
 
-Reference copies expire after 30 days and high-resolution pickup copies expire
-after 7 days. A later click recreates either deterministic object. Revoking an
-album, share, or user blocks new capabilities immediately; an already redeemed
-opaque reference remains until its lifecycle expiry.
+Reference copies expire after 30 days. A later authorized click recreates the
+same deterministic reference. Revoking an album, share, or user blocks new
+capabilities immediately; an already redeemed opaque reference remains until
+its lifecycle expiry. Fotomoto receives neither an AWS credential nor access to
+the media bucket.
 
 Fotomoto's legacy widget requires inline script handlers and dynamic JavaScript
 evaluation. Those CSP allowances exist only on `print.html`; that page has no
@@ -40,76 +47,74 @@ Store ID: `f3b4ffed02e8ae181e8de27d1b75195593fbcd49`
 
 1. Sign in at <https://my.fotomoto.com/> and open the store at
    <https://my.fotomoto.com/store/f3b4ffed02e8ae181e8de27d1b75195593fbcd49>.
-2. Open [**Store Settings**](https://my.fotomoto.com/stores/settings), find **Site Addresses**, click **Add Alternate
-   Address**, and add `https://prints.iantruongphotography.com`.
-   Fotomoto's current instructions are at
+2. In the signup/subscription settings, select **Free** (`$0/month`). Current
+   plan details are at <https://www.fotomoto.com/home/pricing>. The Free plan
+   charges a transaction fee on sales and does not include Auto Pickup or
+   framed prints.
+3. Connect the existing **Stripe** account for customer payments. Add the card
+   or PayPal source Fotomoto will charge for the lab's production and shipping
+   cost. Fotomoto's registration and payment checklist is at
+   <https://support.fotomoto.com/hc/en-us/articles/41739217927827-How-to-register-a-Fotomoto-account-created-via-the-Fotomoto-Partner-Program>.
+4. In **Order Processing**, choose **Automatic** so that, after the requested
+   high-resolution file has been supplied, Fotomoto's lab prints, packages, and
+   ships the order instead of asking the photographer to self-fulfill it.
+5. Open [**Store Settings**](https://my.fotomoto.com/stores/settings), find
+   **Site Addresses**, choose **Add Alternate Address**, and add exactly:
+
+   `https://prints.iantruongphotography.com`
+
+   Fotomoto's address instructions are at
    <https://support.fotomoto.com/hc/en-us/articles/41749556027283-How-do-I-add-an-alternate-site-address>.
-3. In the Dashboard **Settings** tab, find the **Image URL Whitelist**, click
+6. In the Dashboard **Settings** tab, find **Image URL Whitelist**, choose
    **(+) Add Alternate Address**, and allow only:
 
    `https://d1twwtwfz1yeo4.cloudfront.net/fotomoto/references/`
 
    Do not whitelist `/albums/`, the whole media domain, S3, or either website
-   host. Instructions:
+   host. Instructions are at
    <https://support.fotomoto.com/hc/en-us/articles/41880887507091-How-to-use-the-Image-URL-Whitelist>.
-4. Configure the products, sizes, crop behavior, prices, shipping, tax, and
-   Stripe payment settings that should appear in the print window. Leave file
-   downloads and licensing disabled unless they are intentionally sold.
-5. Enable **automatic order fulfillment** so successfully paid orders go to
-   production without manual approval. Fotomoto's payment/fulfillment checklist
-   is at
-   <https://support.fotomoto.com/hc/en-us/articles/41739217927827-How-to-register-a-Fotomoto-account-created-via-the-Fotomoto-Partner-Program>.
+7. In **Store → For Sale**, enable only the products and sizes that should be
+   offered, set selling prices, and confirm crop behavior. Leave downloads and
+   licensing disabled unless they are intentionally sold. Free supports the
+   print products listed at
+   <https://support.fotomoto.com/hc/en-us/articles/41714161921171-Products-you-can-sell-using-Fotomoto>,
+   except framed prints, which require Pro or Pro Plus.
+8. Do **not** create an Auto Pickup profile and do not create or enter an AWS
+   access key. The Free-plan integration has no vendor IAM identity.
 
-## One-time Auto Pickup configuration
+## Order workflow
 
-Auto Pickup is the maintenance-free path for full-resolution print files and
-requires a Fotomoto plan that includes it. Follow
-<https://support.fotomoto.com/hc/en-us/articles/41739456328595-Using-Auto-Pickup-to-find-your-print-files-automatically>.
+Customer flow:
 
-After the backend stack has deployed, create exactly one access key. In the
-Fotomoto Dashboard, open **Settings → Auto Pickup → Create New Profile** first,
-then run:
+1. Open a photo lightbox and choose **Order a Print**.
+2. Choose an enabled product, size, crop, quantity, and shipping option in the
+   Fotomoto window.
+3. Complete payment through Fotomoto's Stripe checkout.
+4. Receive Fotomoto's order confirmation and shipment updates. The customer
+   never needs an account on the photography website.
 
-```bash
-aws iam create-access-key \
-  --user-name ian-photography-fotomoto-autopickup-prod
-```
+Photographer flow after an order:
 
-The secret access key is displayed only once. Enter it directly into Fotomoto;
-do not put it in `.env`, GitHub, source control, screenshots, notes, or AWS
-Secrets Manager. Configure the Auto Pickup source as:
+1. Open the order-notification email or sign in at <https://my.fotomoto.com/>.
+2. Open the pending order and use its visible preview to identify the exact
+   photograph. The opaque website filename is not intended to identify the
+   private album or original path.
+3. Export or locate the matching full-resolution, print-ready JPEG. Use the
+   original color space and dimensions Fotomoto requests; do not upscale the
+   website preview.
+4. Upload that JPEG through the order's high-resolution upload prompt. Fotomoto
+   documents the manual path as the normal alternative to Auto Pickup in its
+   product tour: <https://www.fotomoto.com/home/tour>.
+5. Confirm the upload and order status. With automatic lab fulfillment enabled,
+   Fotomoto handles production, packaging, shipping, and customer updates from
+   that point.
 
-- Type: **Amazon S3**
-- Region: **US West (Oregon) / `us-west-2`**
-- Bucket: **`goldenhour-images-428207759706-prod`**
-- Folder/prefix: **`fotomoto/originals/`**
-- Lookup Pattern Helper: enter a staged website filename such as
-  **`OPAQUE_STEM_web.jpg`** and its corresponding print filename
-  **`OPAQUE_STEM_print.jpg`**, then save the exact pattern produced by the
-  helper. The only transformation is replacing the final `_web.jpg` with
-  `_print.jpg`; the opaque stem is unchanged.
-- Access key / secret: the dedicated user's newly created key only
+There is no scheduled application job, catalog backfill, credential rotation,
+or ongoing gallery synchronization. Normal uploads, visibility changes, share
+revocation, and album deletion require no Fotomoto maintenance. The only manual
+work is supplying a print-ready JPEG when a real order is received.
 
-Click **Test Connection**, then **Save Profile**. Do not grant Fotomoto access
-to the bucket root or `albums/`. To verify pickup without placing an order,
-open **Store → All Photos Album**, hover the staged test image, click its
-information (`i`) icon, then click the orange **Check** button. Fotomoto should
-report that the print file was found. Finish with a low-value private test order
-and cancel/refund it according to Fotomoto's workflow if appropriate.
-
-## Routine operation and recovery
-
-There is no scheduled application job and no catalog backfill. A print is
-staged only after an authorized user clicks **Order a Print**. Normal uploads,
-visibility changes, share revocation, and album deletion need no Fotomoto work.
-
-If Auto Pickup reports a missing file, have the authorized user reopen the
-photo and click **Order a Print** once to recreate the seven-day original, then
-retry fulfillment. If the access key is ever exposed, create a second key,
-replace it in Fotomoto, verify one pickup, and delete the old key. Never keep two
-keys after the rotation test.
-
-The Fotomoto API-mode and function references used by the implementation are:
+The Fotomoto API-mode and widget references used by the implementation are:
 
 - <https://support.fotomoto.com/hc/en-us/articles/41750590989971-Getting-Started-with-the-Fotomoto-API>
 - <https://support.fotomoto.com/hc/en-us/articles/41750603193107-Fotomoto-API-Function-reference-page>

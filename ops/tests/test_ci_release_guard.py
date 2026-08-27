@@ -386,7 +386,6 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("PublicPreviewResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
                 ("PublicPreviewRewriteFunction", "AWS::CloudFront::Function"),
                 ("PrintSessionSecret", "AWS::SecretsManager::Secret"),
-                ("FotomotoAutoPickupUser", "AWS::IAM::User"),
                 ("PreparePrintFunction", "AWS::Lambda::Function"),
                 ("PreparePrintFunctionRole", "AWS::IAM::Role"),
                 ("PreparePrintFunctionAlbumPrintSessionPermission", "AWS::Lambda::Permission"),

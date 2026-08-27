@@ -85,8 +85,6 @@
     {"logicalId": "Api", "resourceType": "AWS::ApiGatewayV2::Api", "action": "Modify", "propertyPaths": ["Body"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "ImagesBucket", "resourceType": "AWS::S3::Bucket", "action": "Modify", "propertyPaths": ["LifecycleConfiguration"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "PrintSessionSecret", "resourceType": "AWS::SecretsManager::Secret", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "FotomotoAutoPickupUser", "resourceType": "AWS::IAM::User", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "FotomotoAutoPickupUser", "resourceType": "AWS::IAM::User", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "PreparePrintFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "PreparePrintFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "PreparePrintFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},

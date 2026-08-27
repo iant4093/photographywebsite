@@ -593,21 +593,13 @@ Resources:
             Prefix: albums/
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
-          # Fotomoto print files are generated only after an authorized click.
-          # Reference URLs are deterministic and can be recreated, while the
-          # private high-resolution pickup copy has the shortest useful life.
+          # Fotomoto receives only an opaque low-resolution reference generated
+          # after an authorized click. References are deterministic and can be
+          # recreated; print-resolution files are uploaded manually after sale.
           - Id: ExpireFotomotoReferences
             Status: Enabled
             Prefix: fotomoto/references/
             ExpirationInDays: 30
-            NoncurrentVersionExpiration:
-              NoncurrentDays: 1
-            AbortIncompleteMultipartUpload:
-              DaysAfterInitiation: 1
-          - Id: ExpireFotomotoOriginals
-            Status: Enabled
-            Prefix: fotomoto/originals/
-            ExpirationInDays: 7
             NoncurrentVersionExpiration:
               NoncurrentDays: 1
             AbortIncompleteMultipartUpload:
@@ -720,38 +712,6 @@ Resources:
           Value: !Ref Stage
         - Key: DataClassification
           Value: ApplicationSecret
-
-  FotomotoAutoPickupUser:
-    Type: AWS::IAM::User
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      UserName: !Sub 'ian-photography-fotomoto-autopickup-${Stage}'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-        - Key: Purpose
-          Value: FotomotoAutoPickup
-      Policies:
-        - PolicyName: ReadTemporaryPrintOriginalsOnly
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: ListOnlyThePrintPickupPrefix
-                Effect: Allow
-                Action: s3:ListBucket
-                Resource: !GetAtt ImagesBucket.Arn
-                Condition:
-                  StringLike:
-                    s3:prefix:
-                      - fotomoto/originals
-                      - fotomoto/originals/*
-              - Sid: ReadOnlyTemporaryPrintOriginals
-                Effect: Allow
-                Action: s3:GetObject
-                Resource: !Sub '${ImagesBucket.Arn}/fotomoto/originals/*'
 
   PreviewMediaCachePolicy:
     Type: AWS::CloudFront::CachePolicy
@@ -2600,12 +2560,12 @@ Resources:
               Action: s3:GetObject
               Resource:
                 - !Sub '${ImagesBucket.Arn}/albums/*'
-                - !Sub '${ImagesBucket.Arn}/fotomoto/*'
+                - !Sub '${ImagesBucket.Arn}/fotomoto/references/*'
             - Effect: Allow
               Action:
                 - s3:PutObject
                 - s3:PutObjectTagging
-              Resource: !Sub '${ImagesBucket.Arn}/fotomoto/*'
+              Resource: !Sub '${ImagesBucket.Arn}/fotomoto/references/*'
       Events:
         AlbumPrintSession:
           Type: HttpApi
@@ -3503,15 +3463,6 @@ Outputs:
   ImagesBucketName:
     Description: Private media bucket
     Value: !Ref ImagesBucket
-  FotomotoAutoPickupUserName:
-    Description: IAM user whose one-time access key is entered in Fotomoto Auto Pickup.
-    Value: !Ref FotomotoAutoPickupUser
-  FotomotoAutoPickupBucket:
-    Description: S3 bucket configured in Fotomoto Auto Pickup.
-    Value: !Ref ImagesBucket
-  FotomotoAutoPickupPrefix:
-    Description: S3 folder configured in Fotomoto Auto Pickup.
-    Value: fotomoto/originals/
   ImagesDistributionId:
     Description: Media CloudFront distribution ID used by guarded invalidation tooling
     Value: !Ref ImagesCloudFront

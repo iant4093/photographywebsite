@@ -92,7 +92,7 @@ async function start() {
         document.body.append(source)
 
         title.textContent = 'Opening print options'
-        status.textContent = 'Fotomoto is loading paper, size, framing, payment, and shipping choices…'
+        status.textContent = 'Fotomoto is loading print, size, payment, and shipping choices…'
         const api = await loadFotomoto()
         api.showWindow(api.PRINT, payload.imageUrl)
     } catch (error) {

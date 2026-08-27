@@ -822,6 +822,13 @@ class IdentityAndSecretTests(unittest.TestCase):
         )
         self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 18)
 
+    def test_free_print_plan_has_no_vendor_credential_or_original_staging_path(self) -> None:
+        print_function = resource_block("PreparePrintFunction")
+        self.assertIn("${ImagesBucket.Arn}/fotomoto/references/*", print_function)
+        self.assertNotIn("fotomoto/originals", TEMPLATE)
+        self.assertNotIn("FotomotoAutoPickup", TEMPLATE)
+        self.assertNotIn("AWS::IAM::User", TEMPLATE)
+
     def test_cognito_client_has_no_public_password_or_srp_flow(self) -> None:
         client = resource_block("UserPoolClient")
         self.assertIn("ALLOW_ADMIN_USER_PASSWORD_AUTH", client)

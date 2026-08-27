@@ -1,10 +1,11 @@
-"""Authorize one photograph and stage opaque Fotomoto pickup objects.
+"""Authorize one photograph and stage an opaque Fotomoto preview.
 
 The public application never gives Fotomoto an album URL, share code, Cognito
 token, or protected S3 URL.  The first request creates a short-lived signed
 capability.  A separate browser origin redeems that capability and receives
-only an unguessable low-resolution reference URL.  The corresponding original
-is copied to a private, prefix-restricted Auto Pickup namespace.
+only an unguessable low-resolution reference URL.  Production originals are
+never copied or exposed; on Fotomoto's Free plan the photographer uploads the
+print-ready file manually only after an order is placed.
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 TOKEN_PATTERN = re.compile(r"^v1\.[A-Za-z0-9_-]{80,1536}\.[A-Za-z0-9_-]{43}$")
 PRINT_PREFIX = "fotomoto"
 REFERENCE_SUFFIX = "_web.jpg"
-ORIGINAL_SUFFIX = "_print.jpg"
 TOKEN_LIFETIME_SECONDS = 300
 MAX_CLOCK_SKEW_SECONDS = 30
 
@@ -213,13 +213,10 @@ def _copy_if_needed(source_key, destination_key, *, visibility, cache_control, p
 
 
 def _stage_print(album, image, media_id):
-    raw_key = _source_key(image, album, "rawKey")
     thumb_key = _source_key(image, album, "thumbKey")
-    raw_etag = _require_jpeg(raw_key)
     thumb_etag = _require_jpeg(thumb_key)
     print_id = _print_identifier(album["albumId"], media_id)
     reference_key = f"{PRINT_PREFIX}/references/{print_id}{REFERENCE_SUFFIX}"
-    original_key = f"{PRINT_PREFIX}/originals/{print_id}{ORIGINAL_SUFFIX}"
     _copy_if_needed(
         thumb_key,
         reference_key,
@@ -227,14 +224,6 @@ def _stage_print(album, image, media_id):
         cache_control="public,max-age=86400,s-maxage=86400",
         print_id=print_id,
         source_etag=thumb_etag,
-    )
-    _copy_if_needed(
-        raw_key,
-        original_key,
-        visibility="private",
-        cache_control="private,no-store",
-        print_id=print_id,
-        source_etag=raw_etag,
     )
     return public_url(reference_key)
 

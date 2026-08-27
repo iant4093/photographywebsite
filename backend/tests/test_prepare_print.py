@@ -123,14 +123,10 @@ class PrintSessionTests(unittest.TestCase):
             ), None)
         self.assertEqual(denied["statusCode"], 404)
 
-    def test_staging_uses_opaque_paths_and_public_private_visibility_tags(self):
+    def test_staging_uses_only_an_opaque_low_resolution_reference(self):
         record = album()
         s3 = Mock()
-        s3.head_object.side_effect = [
-            {"ContentType": "image/jpeg", "ContentLength": 100},
-            {"ContentType": "image/jpeg", "ContentLength": 1000},
-            Exception("missing"),
-        ]
+        s3.head_object.return_value = {"ContentType": "image/jpeg", "ContentLength": 100}
         # Destination HEAD failures are normally ClientError; exercise the copy
         # contract directly to keep this test independent of botocore internals.
         with patch.object(prepare_print, "_s3_client", return_value=s3), patch.object(
@@ -139,9 +135,9 @@ class PrintSessionTests(unittest.TestCase):
             url = prepare_print._stage_print(record, record["images"][0], MEDIA_ID)
         self.assertTrue(url.startswith("https://media.example.test/fotomoto/references/"))
         self.assertNotIn(ALBUM_ID, url)
-        self.assertEqual(copy.call_count, 2)
+        self.assertEqual(copy.call_count, 1)
+        self.assertEqual(copy.call_args.args[0], THUMB_KEY)
         self.assertEqual(copy.call_args_list[0].kwargs["visibility"], "public")
-        self.assertEqual(copy.call_args_list[1].kwargs["visibility"], "private")
 
     def test_missing_destination_without_list_permission_is_copied(self):
         s3 = Mock()
@@ -151,10 +147,10 @@ class PrintSessionTests(unittest.TestCase):
         )
         with patch.object(prepare_print, "_s3_client", return_value=s3):
             prepare_print._copy_if_needed(
-                RAW_KEY,
-                "fotomoto/originals/opaque_print.jpg",
-                visibility="private",
-                cache_control="private,no-store",
+                THUMB_KEY,
+                "fotomoto/references/opaque_web.jpg",
+                visibility="public",
+                cache_control="public,max-age=86400,s-maxage=86400",
                 print_id="opaque",
                 source_etag="etag",
             )

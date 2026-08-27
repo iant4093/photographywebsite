@@ -836,26 +836,9 @@ fi
         self.assertIn("Resource: '*'", generated_value)
         self.assertNotIn("secretsmanager:GetSecretValue", generated_value)
 
-        pickup_user = statement_block(execution, "ManageExactFotomotoPickupUser")
-        for action in (
-            "iam:CreateUser",
-            "iam:GetLoginProfile",
-            "iam:GetUser",
-            "iam:GetUserPolicy",
-            "iam:ListUserTags",
-            "iam:ListUserPolicies",
-            "iam:PutUserPolicy",
-            "iam:TagUser",
-            "iam:UntagUser",
-        ):
-            self.assertIn(action, pickup_user)
-        self.assertIn(
-            "user/ian-photography-fotomoto-autopickup-prod",
-            pickup_user,
-        )
-        self.assertNotIn("Resource: '*'", pickup_user)
-        self.assertNotIn("iam:CreateAccessKey", pickup_user)
-        self.assertNotIn("iam:DeleteAccessKey", pickup_user)
+        self.assertNotIn("FotomotoPickup", execution)
+        self.assertNotIn("iam:CreateAccessKey", execution)
+        self.assertNotIn("iam:DeleteAccessKey", execution)
         bootstrap_role = statement_block(execution, "ReadBootstrapReleaseRoles")
         self.assertIn("Action: iam:GetRole", bootstrap_role)
         self.assertIn("role/ian-photography-cloudformation-execution", bootstrap_role)

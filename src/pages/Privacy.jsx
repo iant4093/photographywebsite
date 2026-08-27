@@ -70,10 +70,10 @@ export default function Privacy() {
                     <p className="mt-3">
                         Print ordering is optional and action-gated. Fotomoto is not loaded during ordinary website or private-gallery
                         browsing. If you choose “Order a Print,” the site gives Fotomoto an opaque, low-resolution image reference and
-                        temporarily makes the corresponding print-resolution file available through a restricted pickup folder.
-                        Fotomoto processes print selections, contact and shipping details, order records, and related device or network
-                        information; Stripe processes payment information. Private album addresses, share codes, account tokens, and
-                        the site's original media paths are not sent to Fotomoto.
+                        no print-resolution file. If an order is placed, the photographer manually uploads the corresponding
+                        print-ready file directly to Fotomoto for that order. Fotomoto processes print selections, contact and shipping
+                        details, order records, and related device or network information; Stripe processes payment information.
+                        Private album addresses, share codes, account tokens, and the site's original media paths are not sent to Fotomoto.
                     </p>
                 </section>
 

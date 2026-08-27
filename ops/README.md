@@ -22,8 +22,8 @@ are **dry-run by default** and require multiple exact production guards to apply
 - [`API_FRONT_DOOR.md`](API_FRONT_DOOR.md) defines current same-origin API,
   origin-verification, WAF, rotation, validation, and rollback operations.
 - [`FOTOMOTO_PRINTS.md`](FOTOMOTO_PRINTS.md) defines the isolated print-store
-  origin, private-gallery capability boundary, Auto Pickup configuration, and
-  credential rotation/recovery procedure.
+  origin, private-gallery capability boundary, Free-plan preview handoff, and
+  manual print-ready upload procedure.
 - `dns_hardening.py` manages CAA and `www` alias records after CloudFront is
   ready for `www`.
 - `dnssec-key-template.yaml` is a deliberately separate, explicit DNSSEC stack.
