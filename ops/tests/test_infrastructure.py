@@ -689,6 +689,13 @@ class BrowserBoundaryTests(unittest.TestCase):
             ["album/*", "video/*"],
         )
 
+    def test_homepage_supports_edge_to_edge_ios_safe_areas(self) -> None:
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn(
+            'content="width=device-width, initial-scale=1.0, viewport-fit=cover"',
+            index,
+        )
+
     def test_edge_social_router_maps_only_album_documents_and_preserves_www(self) -> None:
         node = shutil.which("node")
         if not node:
