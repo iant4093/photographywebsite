@@ -10,6 +10,7 @@ import {
 import {
     clearExploreCache,
     fetchExploreColors,
+    fetchExploreExposures,
     fetchExploreLenses,
     fetchExplorePhotos,
     fetchExploreSample,
@@ -183,19 +184,23 @@ describe('public Explore API', () => {
         vi.unstubAllGlobals()
     })
 
-    it('encodes color and lens filters and preserves safe pagination', async () => {
+    it('encodes color, lens, and exposure filters and preserves safe pagination', async () => {
         const request = vi.fn()
             .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'blue' }], nextCursor: 'next' }))
             .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'lens' }], nextCursor: null }))
+            .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'exposure' }], total: 42, nextCursor: null }))
         vi.stubGlobal('fetch', request)
 
         await expect(fetchExplorePhotos({ mode: 'color', value: 'blue', limit: 12 }))
             .resolves.toMatchObject({ items: [{ id: 'blue' }], nextCursor: 'next' })
         await expect(fetchExplorePhotos({ mode: 'lens', value: 'Sigma 18-50mm', cursor: 'next' }))
             .resolves.toMatchObject({ items: [{ id: 'lens' }] })
+        await expect(fetchExplorePhotos({ mode: 'exposure', value: 'aperture:wide' }))
+            .resolves.toMatchObject({ items: [{ id: 'exposure' }], total: 42 })
         expect(request.mock.calls[0][0]).toContain('mode=color')
         expect(request.mock.calls[0][0]).toContain('limit=12')
         expect(request.mock.calls[1][0]).toContain('cursor=next')
+        expect(request.mock.calls[2][0]).toContain('value=aperture%3Awide')
     })
 
     it('rejects missing filters and unsafe cursors before making a request', async () => {
@@ -237,6 +242,35 @@ describe('public Explore API', () => {
         await expect(fetchExploreColors()).resolves.toEqual({
             items: [{ id: 'blue', photos: 12 }],
             initialPage: null,
+        })
+    })
+
+    it('normalizes exposure groups, zero counts, and the bundled first page', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            items: [
+                { id: 'aperture', options: [{ id: 'wide', photos: 12 }, { id: 'deep', photos: 0 }] },
+                { id: '', options: [] },
+                { id: 'broken' },
+            ],
+            initialPage: {
+                value: 'aperture:wide',
+                items: [{ mediaId: 'photo-1' }],
+                total: 12,
+                nextCursor: 'next',
+            },
+        })))
+
+        await expect(fetchExploreExposures()).resolves.toEqual({
+            items: [{
+                id: 'aperture',
+                options: [{ id: 'wide', photos: 12 }, { id: 'deep', photos: 0 }],
+            }],
+            initialPage: {
+                value: 'aperture:wide',
+                items: [{ mediaId: 'photo-1' }],
+                total: 12,
+                nextCursor: 'next',
+            },
         })
     })
 
@@ -309,12 +343,16 @@ describe('public Explore API', () => {
             if (String(url).includes('mode=colors')) {
                 return Promise.resolve(jsonResponse({ items: [{ id: 'blue', photos: 1 }] }))
             }
+            if (String(url).includes('mode=exposures')) {
+                return Promise.resolve(jsonResponse({ items: [{ id: 'aperture', options: [] }] }))
+            }
             return Promise.resolve(jsonResponse({ images: [], totalPhotos: 0 }))
         })
         vi.stubGlobal('fetch', request)
 
         await expect(prefetchExploreModule('lens')).resolves.toMatchObject({ initialPage: null })
         await expect(prefetchExploreModule('color')).resolves.toMatchObject({ items: [{ id: 'blue', photos: 1 }] })
+        await expect(prefetchExploreModule('exposure')).resolves.toMatchObject({ items: [{ id: 'aperture', options: [] }] })
         await expect(prefetchExploreModule('sample')).resolves.toMatchObject({ images: [] })
     })
 })

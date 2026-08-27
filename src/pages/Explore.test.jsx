@@ -4,15 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const exploreApi = vi.hoisted(() => ({
   fetchExploreColors: vi.fn(),
+  fetchExploreExposures: vi.fn(),
   fetchExploreLenses: vi.fn(),
   fetchExplorePhotos: vi.fn(),
   fetchExploreSample: vi.fn(),
   prefetchExploreModule: vi.fn(() => Promise.resolve()),
 }))
 const api = vi.hoisted(() => ({ requestAlbumMediaDownload: vi.fn() }))
+const scroll = vi.hoisted(() => ({ saveVerticalScroll: vi.fn(), useScrollRestoration: vi.fn() }))
 
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/exploreApi', () => exploreApi)
+vi.mock('../utils/scroll', () => scroll)
 vi.mock('../utils/analytics', () => ({ trackPhotoDownload: vi.fn() }))
 vi.mock('../utils/mediaUrls', () => ({
   mediaFileName: () => 'photo.jpg',
@@ -67,6 +70,15 @@ describe('Explore', () => {
         { name: 'Sirui Nightwalker 75mm T1.2', photos: 4 },
       ],
     })
+    exploreApi.fetchExploreExposures.mockResolvedValue({
+      items: [
+        { id: 'aperture', options: [{ id: 'wide', photos: 120 }, { id: 'middle', photos: 45 }, { id: 'deep', photos: 30 }] },
+        { id: 'shutter', options: [{ id: 'motion', photos: 20 }, { id: 'handheld', photos: 70 }, { id: 'frozen', photos: 105 }] },
+        { id: 'iso', options: [{ id: 'clean', photos: 60 }, { id: 'available', photos: 110 }, { id: 'low', photos: 25 }] },
+        { id: 'focal', options: [{ id: 'wide', photos: 55 }, { id: 'normal', photos: 100 }, { id: 'telephoto', photos: 40 }] },
+      ],
+      initialPage: { value: 'aperture:wide', items: [photo], total: 120, nextCursor: null },
+    })
     exploreApi.fetchExplorePhotos.mockResolvedValue({ items: [photo], nextCursor: null })
     exploreApi.fetchExploreSample.mockResolvedValue({ images: [photo, secondPhoto] })
   })
@@ -81,13 +93,18 @@ describe('Explore', () => {
     expect(exploreApi.fetchExplorePhotos).not.toHaveBeenCalled()
   })
 
-  it('explores a random sample by exposure settings', async () => {
+  it('explores the complete exposure index while initially rendering one page', async () => {
     render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
     expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
-    expect(exploreApi.fetchExploreSample).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(exploreApi.fetchExploreExposures).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(screen.getAllByText('120')).toHaveLength(2)
     expect(screen.getByRole('tab', { name: 'Aperture' })).toHaveAttribute('aria-selected', 'true')
     fireEvent.click(screen.getByRole('tab', { name: 'ISO' }))
-    expect(screen.getByRole('button', { name: /Available light/ })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledWith(
+      { mode: 'exposure', value: 'iso:clean', limit: 24 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+    expect(screen.getByRole('button', { name: /Clean light/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('reconciles each exposure filter by stable media id and never leaks wide-open photos into stopped-down results', async () => {
@@ -99,17 +116,55 @@ describe('Explore', () => {
       thumbnailUrl: 'https://media.test/stopped.webp',
       exif: { ...photo.exif, focalRatio: 'f/8', iso: 'ISO 1600' },
     }
-    exploreApi.fetchExploreSample.mockResolvedValue({ images: [photo, stoppedDown] })
+    exploreApi.fetchExploreExposures.mockResolvedValue({
+      items: [
+        { id: 'aperture', options: [{ id: 'wide', photos: 1 }, { id: 'middle', photos: 0 }, { id: 'deep', photos: 1 }] },
+        { id: 'shutter', options: [{ id: 'motion', photos: 0 }, { id: 'handheld', photos: 0 }, { id: 'frozen', photos: 2 }] },
+        { id: 'iso', options: [{ id: 'clean', photos: 0 }, { id: 'available', photos: 1 }, { id: 'low', photos: 1 }] },
+        { id: 'focal', options: [{ id: 'wide', photos: 0 }, { id: 'normal', photos: 2 }, { id: 'telephoto', photos: 0 }] },
+      ],
+      initialPage: { value: 'aperture:wide', items: [photo], total: 1, nextCursor: null },
+    })
+    exploreApi.fetchExplorePhotos.mockImplementation(({ value }) => Promise.resolve({
+      items: value === 'aperture:deep' || value === 'iso:low' ? [stoppedDown] : [photo],
+      total: 1,
+      nextCursor: null,
+    }))
     render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
 
     expect(await screen.findByRole('button', { name: 'View photo from Blue Mountain' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Stopped Down/ }))
-    expect(screen.getByRole('button', { name: 'View photo from Stopped Down Mountain' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'View photo from Stopped Down Mountain' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'View photo from Blue Mountain' })).toBeNull()
 
     fireEvent.click(screen.getByRole('tab', { name: 'ISO' }))
+    expect(await screen.findByRole('button', { name: 'View photo from Blue Mountain' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Low light/ }))
-    expect(screen.getByRole('button', { name: 'View photo from Stopped Down Mountain' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'View photo from Stopped Down Mountain' })).toBeInTheDocument()
+  })
+
+  it('loads more exposure results without changing the true total or duplicating a photo', async () => {
+    exploreApi.fetchExploreExposures.mockResolvedValue({
+      items: [{ id: 'aperture', options: [{ id: 'wide', photos: 50 }] }],
+      initialPage: { value: 'aperture:wide', items: [photo], total: 50, nextCursor: 'exposure-cursor' },
+    })
+    exploreApi.fetchExplorePhotos.mockResolvedValue({ items: [photo, secondPhoto], total: 50, nextCursor: null })
+    render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Show another random set' }))
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(screen.getAllByText('Blue Mountain')).toHaveLength(1)
+    expect(screen.getAllByText('50')).toHaveLength(2)
+  })
+
+  it('saves and restores the Explore landing scroll position around module navigation', () => {
+    const first = render(<MemoryRouter initialEntries={['/explore']}><Explore /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('link', { name: /Exposure Explorer/ }))
+    expect(scroll.saveVerticalScroll).toHaveBeenCalledWith('/explore')
+    first.unmount()
+
+    render(<MemoryRouter initialEntries={[{ pathname: '/explore', state: { restoreExploreScroll: true } }]}><Explore /></MemoryRouter>)
+    expect(scroll.useScrollRestoration).toHaveBeenLastCalledWith('/explore', true)
   })
 
   it('runs a settings-guessing round and reveals the complete answer', async () => {

@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
 import { requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
     fetchExploreColors,
+    fetchExploreExposures,
     fetchExploreLenses,
     fetchExplorePhotos,
     fetchExploreSample,
     prefetchExploreModule,
 } from '../utils/exploreApi'
-import { buildSettingsRound, EXPOSURE_GROUPS, matchingExposurePhotos } from '../utils/exposure'
+import { buildSettingsRound, EXPOSURE_GROUPS } from '../utils/exposure'
 import { trackPhotoDownload } from '../utils/analytics'
 import {
     mediaFileName,
@@ -23,6 +24,7 @@ import {
 import './Explore.css'
 import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForAlbumPhoto } from '../utils/share'
+import { saveVerticalScroll, useScrollRestoration } from '../utils/scroll'
 
 const PAGE_SIZE = 24
 const COLOR_OPTIONS = Object.freeze([
@@ -52,6 +54,12 @@ function ExploreHeader({ title = 'Explore', detail = 'Choose a different way int
 }
 
 function ExploreLanding() {
+    const location = useLocation()
+    const navigationType = useNavigationType()
+    useScrollRestoration(
+        location.pathname,
+        navigationType === 'POP' || Boolean(location.state?.restoreExploreScroll),
+    )
     const warmModule = useCallback((mode) => {
         prefetchExploreModule(mode).catch(() => {})
     }, [])
@@ -60,6 +68,7 @@ function ExploreLanding() {
         const warm = () => Promise.allSettled([
             prefetchExploreModule('color'),
             prefetchExploreModule('lens'),
+            prefetchExploreModule('exposure'),
             prefetchExploreModule('sample'),
         ])
         if (typeof window.requestIdleCallback === 'function') {
@@ -77,6 +86,7 @@ function ExploreLanding() {
                 <Link
                     to="/explore/colors"
                     className="explore-module-card editorial-motion-media"
+                    onClick={() => saveVerticalScroll('/explore')}
                     onPointerEnter={() => warmModule('color')}
                     onFocus={() => warmModule('color')}
                 >
@@ -93,6 +103,7 @@ function ExploreLanding() {
                 <Link
                     to="/explore/lenses"
                     className="explore-module-card editorial-motion-media"
+                    onClick={() => saveVerticalScroll('/explore')}
                     onPointerEnter={() => warmModule('lens')}
                     onFocus={() => warmModule('lens')}
                 >
@@ -111,8 +122,9 @@ function ExploreLanding() {
                 <Link
                     to="/explore/exposure"
                     className="explore-module-card editorial-motion-media"
-                    onPointerEnter={() => warmModule('sample')}
-                    onFocus={() => warmModule('sample')}
+                    onClick={() => saveVerticalScroll('/explore')}
+                    onPointerEnter={() => warmModule('exposure')}
+                    onFocus={() => warmModule('exposure')}
                 >
                     <span className="explore-module-number">03</span>
                     <div className="explore-module-exposure" aria-hidden="true">
@@ -127,6 +139,7 @@ function ExploreLanding() {
                 <Link
                     to="/explore/guess-settings"
                     className="explore-module-card editorial-motion-media"
+                    onClick={() => saveVerticalScroll('/explore')}
                     onPointerEnter={() => warmModule('sample')}
                     onFocus={() => warmModule('sample')}
                 >
@@ -144,6 +157,10 @@ function ExploreLanding() {
             </section>
         </div>
     )
+}
+
+function ExploreBackLink() {
+    return <Link to="/explore" state={{ restoreExploreScroll: true }} className="explore-back">← All Explore modules</Link>
 }
 
 function ExploreCard({ item, index, mode, onOpen }) {
@@ -316,7 +333,7 @@ function ExploreModule({ mode }) {
                     : 'Browse photographs by the lens used to make them.'}
             />
             <section className="explore-content max-w-7xl mx-auto px-6 pb-20 md:pb-28">
-                <Link to="/explore" className="explore-back">← All Explore modules</Link>
+                <ExploreBackLink />
                 <section className="explore-filter-panel" aria-labelledby="explore-filter-title">
                     <div>
                         <span>{isColor ? '01' : '02'}</span>
@@ -470,30 +487,109 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
 }
 
 function ExposureExplorer() {
-    const { images, loading, error } = useExploreSample()
+    const [facetState, setFacetState] = useState({ groups: [], loading: true, error: '' })
+    const [pageState, setPageState] = useState({ key: '', items: [], total: 0, nextCursor: null, error: '' })
+    const [loadingMore, setLoadingMore] = useState(false)
     const [groupId, setGroupId] = useState('aperture')
     const [optionId, setOptionId] = useState('wide')
     const [lightboxIndex, setLightboxIndex] = useState(null)
     const group = EXPOSURE_GROUPS.find(candidate => candidate.id === groupId) || EXPOSURE_GROUPS[0]
-    const matching = useMemo(
-        () => matchingExposurePhotos(images, group.id, optionId),
-        [group.id, images, optionId],
-    )
+    const indexedGroup = facetState.groups.find(candidate => candidate.id === group.id)
+    const value = `${group.id}:${optionId}`
+    const hasCurrentPage = pageState.key === value
+    const images = hasCurrentPage ? pageState.items : []
+    const total = hasCurrentPage
+        ? pageState.total
+        : indexedGroup?.options.find(option => option.id === optionId)?.photos || 0
+    const nextCursor = hasCurrentPage ? pageState.nextCursor : null
+    const resultError = hasCurrentPage ? pageState.error : ''
+    const loading = facetState.loading || (!facetState.error && !hasCurrentPage)
+
+    useEffect(() => {
+        const controller = new AbortController()
+        fetchExploreExposures({ signal: controller.signal })
+            .then(({ items, initialPage }) => {
+                setFacetState({ groups: items, loading: false, error: '' })
+                if (initialPage?.value) {
+                    const [initialGroup, initialOption] = initialPage.value.split(':')
+                    setGroupId(initialGroup)
+                    setOptionId(initialOption)
+                    setPageState({
+                        key: initialPage.value,
+                        items: initialPage.items,
+                        total: initialPage.total ?? initialPage.items.length,
+                        nextCursor: initialPage.nextCursor,
+                        error: '',
+                    })
+                }
+            })
+            .catch(error => {
+                if (error?.name !== 'AbortError') {
+                    setFacetState({ groups: [], loading: false, error: error?.message || 'Exposure settings could not be loaded.' })
+                }
+            })
+        return () => controller.abort()
+    }, [])
+
+    useEffect(() => {
+        if (facetState.loading || facetState.error || hasCurrentPage) return undefined
+        const controller = new AbortController()
+        fetchExplorePhotos({ mode: 'exposure', value, limit: PAGE_SIZE }, { signal: controller.signal })
+            .then(page => setPageState({
+                key: value,
+                items: page.items,
+                total: page.total ?? page.items.length,
+                nextCursor: page.nextCursor,
+                error: '',
+            }))
+            .catch(error => {
+                if (error?.name !== 'AbortError') {
+                    setPageState({ key: value, items: [], total, nextCursor: null, error: error?.message || 'Exposure photos could not be loaded.' })
+                }
+            })
+        return () => controller.abort()
+    }, [facetState.error, facetState.loading, hasCurrentPage, total, value])
 
     const chooseGroup = nextGroup => {
         const next = EXPOSURE_GROUPS.find(candidate => candidate.id === nextGroup)
         if (!next) return
-        const populated = next.options.find(option => matchingExposurePhotos(images, next.id, option.id).length > 0)
+        const counts = facetState.groups.find(candidate => candidate.id === next.id)?.options || []
+        const populated = next.options.find(option => counts.find(row => row.id === option.id)?.photos > 0)
         setGroupId(next.id)
         setOptionId(populated?.id || next.options[0].id)
         setLightboxIndex(null)
     }
 
+    const loadMore = useCallback(async () => {
+        if (!nextCursor || loadingMore) return
+        setLoadingMore(true)
+        try {
+            const page = await fetchExplorePhotos({ mode: 'exposure', value, limit: PAGE_SIZE, cursor: nextCursor })
+            setPageState(current => {
+                if (current.key !== value) return current
+                const known = new Set(current.items.map(item => `${item.albumId}:${mediaId(item)}`))
+                return {
+                    ...current,
+                    items: current.items.concat(page.items.filter(item => !known.has(`${item.albumId}:${mediaId(item)}`))),
+                    total: page.total ?? current.total,
+                    nextCursor: page.nextCursor,
+                    error: '',
+                }
+            })
+        } catch (error) {
+            setPageState(current => current.key === value
+                ? { ...current, error: error?.message || 'More photos could not be loaded.' }
+                : current)
+        } finally {
+            setLoadingMore(false)
+        }
+    }, [loadingMore, nextCursor, value])
+
     return (
         <div className="explore-page animate-fade-in pt-[74px]">
             <ExploreHeader title="Exposure Explorer" detail="Browse a random cross-section of the archive by the choices behind each exposure." />
             <section className="explore-content max-w-7xl mx-auto px-6 pb-20 md:pb-28">
-                <Link to="/explore" className="explore-back">← All Explore modules</Link>
+                <ExploreBackLink />
                 <section className="explore-exposure-panel" aria-labelledby="exposure-filter-title">
                     <div className="explore-exposure-heading">
                         <span>03</span>
@@ -515,14 +611,14 @@ function ExposureExplorer() {
                     </div>
                     <div className="explore-exposure-options">
                         {group.options.map(option => {
-                            const count = matchingExposurePhotos(images, group.id, option.id).length
+                            const count = indexedGroup?.options.find(row => row.id === option.id)?.photos || 0
                             return (
                                 <button
                                     type="button"
                                     key={option.id}
                                     className={option.id === optionId ? 'is-active' : ''}
                                     aria-pressed={option.id === optionId}
-                                    disabled={!loading && count === 0}
+                                    disabled={!facetState.loading && count === 0}
                                     onClick={() => { setOptionId(option.id); setLightboxIndex(null) }}
                                 >
                                     <strong>{option.label}</strong>
@@ -535,19 +631,20 @@ function ExposureExplorer() {
                 </section>
 
                 {loading && <div className="explore-loading" role="status">Reading exposure settings…</div>}
-                {error && <p className="explore-error" role="alert">{error}</p>}
-                {!loading && !error && (
+                {facetState.error && <p className="explore-error" role="alert">{facetState.error}</p>}
+                {resultError && <p className="explore-error" role="alert">{resultError}</p>}
+                {!loading && !facetState.error && !resultError && (
                     <div className="explore-results-heading" aria-live="polite">
-                        <p><strong>{matching.length}</strong> {matching.length === 1 ? 'photograph' : 'photographs'} in this shuffle</p>
+                        <p><strong>{total}</strong> {total === 1 ? 'photograph' : 'photographs'}</p>
                         <span>{group.label} · {group.options.find(option => option.id === optionId)?.label}</span>
                     </div>
                 )}
-                {!loading && !error && matching.length === 0 && (
-                    <div className="explore-empty"><h2>No match in this shuffle</h2><p>Choose another setting to keep exploring.</p></div>
+                {!loading && !facetState.error && !resultError && images.length === 0 && (
+                    <div className="explore-empty"><h2>No photographs found</h2><p>Choose another setting to keep exploring.</p></div>
                 )}
-                {matching.length > 0 && (
+                {images.length > 0 && (
                     <div className="explore-grid">
-                        {matching.map((item, itemIndex) => (
+                        {images.map((item, itemIndex) => (
                             <ExploreCard
                                 key={`${item.albumId}:${mediaId(item)}`}
                                 item={item}
@@ -558,9 +655,14 @@ function ExposureExplorer() {
                         ))}
                     </div>
                 )}
+                {nextCursor && (
+                    <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore}>
+                        {loadingMore ? 'Loading…' : 'Show another random set'}
+                    </button>
+                )}
             </section>
             <ExploreSampleLightbox
-                images={matching}
+                images={images}
                 index={lightboxIndex}
                 setIndex={setLightboxIndex}
                 ariaLabel="Photographs in Exposure Explorer"
@@ -596,7 +698,7 @@ function GuessSettingsGame() {
         <div className="explore-page animate-fade-in pt-[74px]">
             <ExploreHeader title="Guess the Settings" detail="Look closely at the photograph, then choose the setting you think made it." />
             <section className="explore-game max-w-7xl mx-auto px-6 pb-20 md:pb-28">
-                <Link to="/explore" className="explore-back">← All Explore modules</Link>
+                <ExploreBackLink />
                 {loading && <div className="explore-loading" role="status">Building a settings round…</div>}
                 {error && <p className="explore-error" role="alert">{error}</p>}
                 {!loading && !error && !activeRound && (

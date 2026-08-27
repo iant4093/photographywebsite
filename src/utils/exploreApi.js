@@ -50,7 +50,7 @@ function normalizeInitialPage(payload) {
 export function fetchExplorePhotos(params, options = {}) {
     const mode = params?.mode
     const value = String(params?.value || '').trim()
-    if (!['color', 'lens'].includes(mode) || !value) {
+    if (!['color', 'lens', 'exposure'].includes(mode) || !value) {
         return Promise.reject(new ApiError('Choose an Explore filter first.', { code: 'INVALID_EXPLORE_FILTER' }))
     }
     const query = new URLSearchParams({ mode, value, limit: String(params?.limit || 24) })
@@ -94,8 +94,30 @@ export function fetchExploreColors(options = {}) {
     })), options.signal)
 }
 
+export function fetchExploreExposures(options = {}) {
+    const path = '/public/explore?mode=exposures'
+    return cachedRequest(path, () => apiFetch(path).then((payload) => ({
+        items: Array.isArray(payload?.items)
+            ? payload.items.filter(group => (
+                typeof group?.id === 'string'
+                && group.id
+                && Array.isArray(group.options)
+            )).map(group => ({
+                id: group.id,
+                options: group.options.filter(option => (
+                    typeof option?.id === 'string'
+                    && Number.isFinite(Number(option.photos))
+                    && Number(option.photos) >= 0
+                )).map(option => ({ ...option, photos: Number(option.photos) })),
+            }))
+            : [],
+        initialPage: normalizeInitialPage(payload),
+    })), options.signal)
+}
+
 export function prefetchExploreModule(mode) {
     if (mode === 'sample') return fetchExploreSample()
+    if (mode === 'exposure') return fetchExploreExposures()
     return mode === 'lens' ? fetchExploreLenses() : fetchExploreColors()
 }
 

@@ -83,6 +83,12 @@ EXPLORE_COLOR_ORDER = (
     "blue", "cyan", "green", "yellow", "orange", "red", "pink", "purple", "monochrome",
 )
 EXPLORE_COLORS = frozenset(EXPLORE_COLOR_ORDER)
+EXPOSURE_DEFINITIONS = {
+    "aperture": ("wide", "middle", "deep"),
+    "shutter": ("motion", "handheld", "frozen"),
+    "iso": ("clean", "available", "low"),
+    "focal": ("wide", "normal", "telephoto"),
+}
 EXPLORE_PROJECTION = (
     "albumId,mediaId,previewVersion,previewKeys,#status,dimensions,exploreVersion,"
     "palette,colorFamilies,lens,lensKey"
@@ -286,6 +292,187 @@ def _explore_filter(mode, value):
     if mode == "color":
         return base & Attr("colorFamilies").contains(value)
     return base & Attr("lensKey").eq(value.casefold())
+
+
+def _exposure_number(value):
+    match = re.search(r"(\d+(?:\.\d+)?)", str(value or "").replace(",", ""))
+    return float(match.group(1)) if match else 0.0
+
+
+def _shutter_seconds(value):
+    normalized = re.sub(
+        r"(?:seconds?|secs?|s)$", "", str(value or "").strip().lower()
+    ).strip()
+    fraction = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", normalized)
+    if fraction:
+        denominator = float(fraction.group(2))
+        return float(fraction.group(1)) / denominator if denominator > 0 else 0.0
+    try:
+        numeric = float(normalized)
+    except (TypeError, ValueError):
+        return 0.0
+    return numeric if numeric > 0 else 0.0
+
+
+def _exposure_bucket(item, group):
+    exif = item.get("exif") if isinstance(item, dict) else None
+    if not isinstance(exif, dict):
+        return None
+    if group == "aperture":
+        value = _exposure_number(exif.get("focalRatio"))
+        if 0 < value <= 2.8:
+            return "wide"
+        if 2.8 < value <= 7.1:
+            return "middle"
+        return "deep" if value > 7.1 else None
+    if group == "shutter":
+        value = _shutter_seconds(exif.get("shutterSpeed"))
+        if value >= (1 / 60):
+            return "motion"
+        if value >= (1 / 320):
+            return "handheld"
+        return "frozen" if value > 0 else None
+    if group == "iso":
+        value = _exposure_number(exif.get("iso"))
+        if 0 < value <= 200:
+            return "clean"
+        if 200 < value <= 800:
+            return "available"
+        return "low" if value > 800 else None
+    if group == "focal":
+        value = _exposure_number(exif.get("focalLength"))
+        if 0 < value <= 24:
+            return "wide"
+        if 24 < value <= 70:
+            return "normal"
+        return "telephoto" if value > 70 else None
+    return None
+
+
+def _normalized_exposure_value(value):
+    normalized = str(value or "").strip().lower()
+    parts = normalized.split(":", 1)
+    if len(parts) != 2 or parts[0] not in EXPOSURE_DEFINITIONS:
+        raise ValidationError("Unsupported exposure filter")
+    group, option = parts
+    if option not in EXPOSURE_DEFINITIONS[group]:
+        raise ValidationError("Unsupported exposure filter")
+    return group, option, f"{group}:{option}"
+
+
+def _all_public_explore_items():
+    candidates = []
+    cursor = None
+    for _page in range(EXPLORE_MAX_SCAN_PAGES):
+        arguments = {
+            "Limit": EXPLORE_SCAN_LIMIT,
+            "ProjectionExpression": EXPLORE_PROJECTION,
+            "ExpressionAttributeNames": {"#status": "status"},
+            "FilterExpression": (
+                Attr("status").eq("ready")
+                & Attr("exploreVersion").eq(EXPLORE_VERSION)
+            ),
+        }
+        if cursor:
+            arguments["ExclusiveStartKey"] = cursor
+        response = _preview_table().scan(**arguments)
+        candidates.extend(
+            item for item in response.get("Items", []) if isinstance(item, dict)
+        )
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            break
+    else:
+        raise RuntimeError("Exposure index pagination exceeded safe limit")
+
+    albums = _batch_albums(item.get("albumId") for item in candidates)
+    output = []
+    for metadata in candidates:
+        item = _explore_item(metadata, albums.get(metadata.get("albumId")))
+        if item:
+            output.append(item)
+    return output
+
+
+def _exposure_page_payload(items, value, limit, cursor_value=None):
+    group, option, normalized = _normalized_exposure_value(value)
+    scope = f"explore:exposure:{normalized}"
+    cursor = decode_cursor(cursor_value, scope)
+    if cursor:
+        seed = cursor.get("seed", "")
+        offset_text = cursor.get("offset", "")
+        if not re.fullmatch(r"[0-9a-f]{16}", seed) or not offset_text.isdigit():
+            raise ValidationError("Invalid cursor")
+        offset = int(offset_text)
+        if offset < 1 or offset > 100000:
+            raise ValidationError("Invalid cursor")
+    else:
+        seed = secrets.token_hex(8)
+        offset = 0
+
+    matches = [item for item in items if _exposure_bucket(item, group) == option]
+    matches.sort(key=lambda item: hashlib.sha256(
+        f'{seed}:{item["albumId"]}:{item["mediaId"]}'.encode("utf-8")
+    ).digest())
+    output = matches[offset:offset + limit]
+    next_offset = offset + len(output)
+    next_key = (
+        {"seed": seed, "offset": str(next_offset)}
+        if output and next_offset < len(matches)
+        else None
+    )
+    return {
+        "items": output,
+        "total": len(matches),
+        "nextCursor": encode_cursor(next_key, scope),
+    }
+
+
+def _exposure_options_response(params):
+    if any(name != "mode" for name in params):
+        raise ValidationError("Exposure options do not accept additional parameters")
+    items = _all_public_explore_items()
+    groups = []
+    first_value = None
+    for group, options in EXPOSURE_DEFINITIONS.items():
+        option_rows = []
+        for option in options:
+            count = sum(_exposure_bucket(item, group) == option for item in items)
+            option_rows.append({"id": option, "photos": count})
+            if first_value is None and count:
+                first_value = f"{group}:{option}"
+        groups.append({"id": group, "options": option_rows})
+    initial_page = (
+        _exposure_page_payload(items, first_value, EXPLORE_DEFAULT_LIMIT)
+        if first_value
+        else {"items": [], "total": 0, "nextCursor": None}
+    )
+    return json_response(
+        200,
+        {
+            "items": groups,
+            "initialPage": {"value": first_value, **initial_page},
+        },
+        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
+def _exposure_media_response(params):
+    if any(name not in {"mode", "value", "limit", "cursor"} for name in params):
+        raise ValidationError("Unsupported explore parameter")
+    _normalized_exposure_value(params.get("value"))
+    limit = _positive_limit(params.get("limit"))
+    payload = _exposure_page_payload(
+        _all_public_explore_items(),
+        params.get("value"),
+        limit,
+        params.get("cursor"),
+    )
+    return json_response(
+        200,
+        payload,
+        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+    )
 
 
 def _index_partition_count(partition):
@@ -681,6 +868,10 @@ def _explore_response(event):
     if not isinstance(params, dict):
         raise ValidationError("Invalid explore parameters")
     mode = params.get("mode")
+    if mode == "exposures":
+        return _exposure_options_response(params)
+    if mode == "exposure":
+        return _exposure_media_response(params)
     if mode in {"colors", "lenses"}:
         if any(name != "mode" for name in params):
             raise ValidationError("Explore options do not accept additional parameters")
@@ -696,7 +887,7 @@ def _explore_response(event):
         _normalized_lens(params.get("value"))
         _positive_limit(params.get("limit"))
     else:
-        raise ValidationError("mode must be color, lens, colors, or lenses")
+        raise ValidationError("mode must be color, lens, exposure, colors, lenses, or exposures")
     if _explore_index_ready():
         if params.get("mode") == "lenses":
             if any(name != "mode" for name in params):

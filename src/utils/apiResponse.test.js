@@ -26,6 +26,13 @@ describe('normalizePage', () => {
         expect(normalizePage({ items: 'not-an-array' })).toEqual({ items: [], nextCursor: null })
         expect(normalizePage(null)).toEqual({ items: [], nextCursor: null })
     })
+
+    it('preserves a valid server-side total without trusting malformed counts', () => {
+        expect(normalizePage({ items: [], total: '42' })).toEqual({
+            items: [], nextCursor: null, total: 42,
+        })
+        expect(normalizePage({ items: [], total: -1 })).toEqual({ items: [], nextCursor: null })
+    })
 })
 
 describe('mergeUniqueById', () => {

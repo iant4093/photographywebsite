@@ -8,10 +8,14 @@ export function normalizePage(payload) {
             ? payload.albums
             : []
 
-    return {
+    const page = {
         items,
         nextCursor: payload.nextToken || payload.nextCursor || payload.cursor || payload.paginationToken || null,
     }
+    if (Number.isFinite(Number(payload.total)) && Number(payload.total) >= 0) {
+        page.total = Number(payload.total)
+    }
+    return page
 }
 
 export function mergeUniqueById(existing, incoming) {

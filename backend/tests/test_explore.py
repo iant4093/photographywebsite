@@ -186,6 +186,71 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(response_body(response)["items"], [{"id": "blue", "photos": 1}])
         self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
 
+    def test_exposure_options_count_the_complete_public_archive_and_bundle_a_page(self):
+        items = [
+            {
+                "albumId": ALBUM_ID,
+                "mediaId": f"media-{index}",
+                "exif": settings,
+            }
+            for index, settings in enumerate((
+                {"focalRatio": "f/2.8", "shutterSpeed": "1/500s", "iso": "ISO 100", "focalLength": "18mm"},
+                {"focalRatio": "f/8", "shutterSpeed": "1/30s", "iso": "ISO 1600", "focalLength": "400mm"},
+                {"focalRatio": "f/4", "shutterSpeed": "1/250s", "iso": "ISO 400", "focalLength": "56mm"},
+            ))
+        ]
+        with patch.object(get_public_album, "_all_public_explore_items", return_value=items), patch.object(
+            get_public_album.secrets, "token_hex", return_value="0123456789abcdef"
+        ):
+            response = get_public_album._explore_response({
+                "queryStringParameters": {"mode": "exposures"},
+            })
+
+        body = response_body(response)
+        aperture = next(group for group in body["items"] if group["id"] == "aperture")
+        self.assertEqual(aperture["options"], [
+            {"id": "wide", "photos": 1},
+            {"id": "middle", "photos": 1},
+            {"id": "deep", "photos": 1},
+        ])
+        self.assertEqual(body["initialPage"]["value"], "aperture:wide")
+        self.assertEqual(body["initialPage"]["total"], 1)
+        self.assertEqual(len(body["initialPage"]["items"]), 1)
+        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+
+    def test_exposure_results_page_through_a_stable_random_order_with_true_total(self):
+        items = [
+            {
+                "albumId": ALBUM_ID,
+                "mediaId": f"media-{index}",
+                "exif": {"focalRatio": "f/2"},
+            }
+            for index in range(3)
+        ]
+        with patch.object(get_public_album, "_all_public_explore_items", return_value=items), patch.object(
+            get_public_album.secrets, "token_hex", return_value="0123456789abcdef"
+        ):
+            first = response_body(get_public_album._explore_response({
+                "queryStringParameters": {
+                    "mode": "exposure", "value": "aperture:wide", "limit": "2",
+                },
+            }))
+            second = response_body(get_public_album._explore_response({
+                "queryStringParameters": {
+                    "mode": "exposure",
+                    "value": "aperture:wide",
+                    "limit": "2",
+                    "cursor": first["nextCursor"],
+                },
+            }))
+
+        self.assertEqual(first["total"], 3)
+        self.assertEqual(second["total"], 3)
+        ids = [item["mediaId"] for item in first["items"] + second["items"]]
+        self.assertEqual(len(ids), 3)
+        self.assertEqual(len(set(ids)), 3)
+        self.assertIsNone(second["nextCursor"])
+
     def test_randomized_result_cursor_is_stable_and_has_no_duplicates(self):
         raw_keys = [f"albums/{ALBUM_ID}/original/photo-{index}.jpg" for index in range(3)]
         full_album = album()
@@ -226,6 +291,8 @@ class ExploreApiTests(unittest.TestCase):
             {"mode": "camera", "value": "R7"},
             {"mode": "lenses", "cursor": "x"},
             {"mode": "colors", "cursor": "x"},
+            {"mode": "exposure", "value": "aperture:unknown"},
+            {"mode": "exposures", "cursor": "x"},
         ):
             with self.subTest(params=params):
                 response = get_public_album.handler({
