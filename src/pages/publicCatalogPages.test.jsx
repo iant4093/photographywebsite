@@ -84,6 +84,12 @@ describe('Home complete public catalog', () => {
     scroll.isRevealed.mockReturnValue(true)
     const { container } = routed(<Home />)
     expect(screen.getByText('Cached')).toBeInTheDocument()
+    expect(screen.getByText('Cached').parentElement).toHaveClass(
+      'w-[280px]',
+      'sm:w-[320px]',
+      'lg:w-[360px]',
+    )
+    expect(screen.getByText('Cached').parentElement).not.toHaveClass('md:w-[360px]')
     expect(screen.queryByRole('status')).toBeNull()
     await waitFor(() => expect(container.querySelector('[data-reveal-id="home-photo-header"]')).toHaveClass('is-visible', 'no-stagger'))
   })
@@ -354,6 +360,12 @@ describe('Videos paginated catalog', () => {
     expect(screen.getByTestId('videos-Films').textContent)
       .toBe('Film FirstFilm Second')
     expect(screen.getByText('Film First')).toHaveAttribute('data-video-preview', 'true')
+    expect(screen.getByText('Film First').parentElement).toHaveClass(
+      'w-[280px]',
+      'sm:w-[320px]',
+      'lg:w-[360px]',
+    )
+    expect(screen.getByText('Film First').parentElement).not.toHaveClass('md:w-[360px]')
   })
 
   it('sorts whole video sections locally and resets to curated order on remount', () => {
