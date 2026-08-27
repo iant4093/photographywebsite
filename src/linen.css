@@ -18,8 +18,6 @@
 
   position: relative;
   isolation: isolate;
-  width: 100%;
-  min-height: 100dvh;
   color: var(--color-charcoal);
   font-family: var(--font-sans);
   background: var(--color-cream);
@@ -439,10 +437,10 @@
 }
 
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 1024px) {
-  .linen-site .linen-nav-inner,
   .linen-site .max-w-7xl {
-    padding-left: max(1.5rem, calc(env(safe-area-inset-left) + 0.5rem));
-    padding-right: max(1.5rem, calc(env(safe-area-inset-right) + 0.5rem));
+    padding-inline:
+      max(1.5rem, env(safe-area-inset-left))
+      max(1.5rem, env(safe-area-inset-right));
   }
 
   .linen-site .linen-gallery-page .linen-media-grid {

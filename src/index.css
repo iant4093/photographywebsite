@@ -127,7 +127,6 @@ body {
   color: var(--color-charcoal);
   background-color: var(--color-cream);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Native scrollbar fallback; public editorial routes provide a custom rail. */
@@ -174,7 +173,6 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
 }
 
 .scrollbar-hide {
-  -ms-overflow-style: none;
   scrollbar-width: none;
 }
 
