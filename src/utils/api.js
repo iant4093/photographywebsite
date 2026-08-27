@@ -722,6 +722,13 @@ export function fetchGoogleDriveUsage(token, options = {}) {
     }, { timeoutMs: 60_000, retries: 0 })
 }
 
+export function fetchGitHubAnalytics(token, options = {}) {
+    return apiFetch('/admin/github-analytics', {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }, { timeoutMs: 30_000, retries: 0 })
+}
+
 export function fetchPhotographyStats(options = {}) {
     return apiFetch('/public/stats', {
         signal: options.signal,

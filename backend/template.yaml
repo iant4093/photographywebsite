@@ -454,6 +454,30 @@ Resources:
         - Key: DataClassification
           Value: AccountStorageMetadata
 
+  GitHubAnalyticsCacheTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'GoldenHour-GitHubAnalyticsCache-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: cacheKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cacheKey
+          KeyType: HASH
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: PublicRepositoryMetadata
+
   # The rate-limit and front-door values are retained as standard encrypted
   # SSM parameters created by the guarded migration. CloudFormation cannot
   # create SecureString parameters without a custom resource, so consumers
@@ -2961,6 +2985,63 @@ Resources:
             Schedule: cron(15 9 * * ? *)
             Enabled: true
             Input: '{"source":"ian.photography.drive-usage-refresh","action":"refresh"}'
+            RetryPolicy:
+              MaximumEventAgeInSeconds: 3600
+              MaximumRetryAttempts: 2
+
+  GetGitHubAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_github_analytics.handler
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          GITHUB_ANALYTICS_CACHE_TABLE: !Ref GitHubAnalyticsCacheTable
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt GitHubAnalyticsCacheTable.Arn
+      Events:
+        GetGitHubAnalytics:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/github-analytics
+            Method: GET
+
+  RefreshGitHubAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: refresh_github_analytics.handler
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          GITHUB_ANALYTICS_CACHE_TABLE: !Ref GitHubAnalyticsCacheTable
+          GITHUB_REPOSITORY_OWNER: iant4093
+          GITHUB_REPOSITORY_NAME: photographywebsite
+          GITHUB_REPOSITORY_BRANCH: main
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt GitHubAnalyticsCacheTable.Arn
+      Events:
+        GitHubAnalyticsHourlyRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: cron(20 * * * ? *)
+            Enabled: true
+            Input: '{"source":"ian.photography.github-analytics-refresh","action":"refresh"}'
             RetryPolicy:
               MaximumEventAgeInSeconds: 3600
               MaximumRetryAttempts: 2

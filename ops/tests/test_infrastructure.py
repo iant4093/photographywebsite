@@ -156,6 +156,7 @@ expected_routes = {
     ("POST", "/analytics/events"),
     ("GET", "/admin/analytics"),
     ("GET", "/admin/drive-usage"),
+    ("GET", "/admin/github-analytics"),
     ("POST", "/admin/gallery-order"),
     ("DELETE", "/users/{email}"),
     ("PUT", "/users/{email}"),
@@ -433,11 +434,40 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("SOURCES_RefreshGoogleDriveUsageFunction :=", MAKEFILE)
         self.assertIn("DEPS_RefreshGoogleDriveUsageFunction := google-auth==", MAKEFILE)
 
+    def test_github_analytics_is_hourly_cached_admin_only_and_least_privilege(self) -> None:
+        table = resource_block("GitHubAnalyticsCacheTable")
+        function = resource_block("GetGitHubAnalyticsFunction")
+        refresh = resource_block("RefreshGitHubAnalyticsFunction")
+        for expected in (
+            "DeletionPolicy: Retain",
+            "UpdateReplacePolicy: Retain",
+            "DeletionProtectionEnabled: true",
+            "PointInTimeRecoveryEnabled: true",
+            "PublicRepositoryMetadata",
+        ):
+            self.assertIn(expected, table)
+        self.assertIn("Path: /admin/github-analytics", function)
+        self.assertIn("Method: GET", function)
+        self.assertIn("Action: dynamodb:GetItem", function)
+        self.assertNotIn("dynamodb:PutItem", function)
+        self.assertNotIn("secretsmanager:", function)
+        self.assertNotIn("ssm:", function)
+        self.assertIn("Timeout: 300", refresh)
+        self.assertIn("MemorySize: 512", refresh)
+        self.assertIn("Schedule: cron(20 * * * ? *)", refresh)
+        self.assertIn("MaximumRetryAttempts: 2", refresh)
+        self.assertIn("dynamodb:GetItem", refresh)
+        self.assertIn("dynamodb:PutItem", refresh)
+        self.assertNotIn("dynamodb:Scan", refresh)
+        self.assertNotIn("GITHUB_TOKEN", refresh)
+        self.assertIn("SOURCES_GetGitHubAnalyticsFunction :=", MAKEFILE)
+        self.assertIn("SOURCES_RefreshGitHubAnalyticsFunction :=", MAKEFILE)
+
     def test_existing_tables_do_not_toggle_dynamodb_encryption_mode(self) -> None:
         # DynamoDB always encrypts tables at rest. Explicitly adding/removing an
         # AWS-owned-key SSESpecification on these existing resources needlessly
         # consumes the service's guarded encryption-mode update quota.
-        for logical_id in ("AlbumsTable", "GallerySettingsTable", "RateLimitTable", "CostReportCacheTable", "DriveUsageCacheTable"):
+        for logical_id in ("AlbumsTable", "GallerySettingsTable", "RateLimitTable", "CostReportCacheTable", "DriveUsageCacheTable", "GitHubAnalyticsCacheTable"):
             self.assertNotRegex(resource_block(logical_id), r"(?m)^\s+SSESpecification:")
 
     def test_media_bucket_is_private_versioned_and_tls_only(self) -> None:

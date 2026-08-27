@@ -205,18 +205,24 @@ describe('public API client behavior', () => {
       headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    await expect(api.fetchAnalyticsReport('admin-token', 90, { signal })).resolves.toEqual(report)
-    expect(fetchMock.mock.calls[2][0]).toMatch(/\/admin\/analytics\?range=90$/)
+    await expect(api.fetchGitHubAnalytics('admin-token', { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[2][0]).toMatch(/\/admin\/github-analytics$/)
     expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({
       headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    await expect(api.fetchPhotographyStats({ signal })).resolves.toEqual(report)
-    expect(fetchMock.mock.calls[3][0]).toMatch(/\/public\/stats$/)
+    await expect(api.fetchAnalyticsReport('admin-token', 90, { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[3][0]).toMatch(/\/admin\/analytics\?range=90$/)
     expect(fetchMock.mock.calls[3][1]).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    expect(fetchMock.mock.calls[3][1].headers).toEqual({})
+    await expect(api.fetchPhotographyStats({ signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[4][0]).toMatch(/\/public\/stats$/)
+    expect(fetchMock.mock.calls[4][1]).toEqual(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
+    expect(fetchMock.mock.calls[4][1].headers).toEqual({})
   })
 
   it('submits anonymous analytics without credentials or retries', async () => {

@@ -23,6 +23,7 @@ DEFAULT_ENV = {
     "ANALYTICS_TIMEZONE": "America/Los_Angeles",
     "FRONTEND_URL": "https://iantruongphotography.com",
     "DRIVE_USAGE_CACHE_TABLE": "drive-usage-test",
+    "GITHUB_ANALYTICS_CACHE_TABLE": "github-analytics-test",
     "GOOGLE_DRIVE_FOLDER_ID": "drive-root-test",
     "GOOGLE_OAUTH_PARAMETER": "/ian-website/prod/google-drive-credentials",
     "RATE_LIMIT_HASH_SECRET": "unit-test-rate-hash-secret",

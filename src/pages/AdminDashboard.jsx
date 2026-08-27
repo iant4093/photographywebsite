@@ -104,6 +104,17 @@ function AdminDashboard() {
             link: '/admin/analytics',
             color: 'from-charcoal to-amber-dark',
         },
+        {
+            title: 'GitHub Analytics',
+            description: 'Review codebase size, commits, repository activity, and deployment workflow health.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 3v4a4 4 0 004 4h4m0 0-3-3m3 3-3 3M8 21v-3a4 4 0 014-4h4M5 3a2 2 0 110 4 2 2 0 010-4zm0 14a2 2 0 110 4 2 2 0 010-4zm14-8a2 2 0 110 4 2 2 0 010-4z" />
+                </svg>
+            ),
+            link: '/admin/github-analytics',
+            color: 'from-charcoal-light to-green-600',
+        },
     ]
 
     const pageVariants = {

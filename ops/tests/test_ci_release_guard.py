@@ -391,6 +391,14 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("PreparePrintFunctionAlbumPrintSessionPermission", "AWS::Lambda::Permission"),
                 ("PreparePrintFunctionSharedPrintSessionPermission", "AWS::Lambda::Permission"),
                 ("PreparePrintFunctionRedeemPrintSessionPermission", "AWS::Lambda::Permission"),
+                ("GitHubAnalyticsCacheTable", "AWS::DynamoDB::Table"),
+                ("GetGitHubAnalyticsFunction", "AWS::Lambda::Function"),
+                ("GetGitHubAnalyticsFunctionRole", "AWS::IAM::Role"),
+                ("GetGitHubAnalyticsFunctionGetGitHubAnalyticsPermission", "AWS::Lambda::Permission"),
+                ("RefreshGitHubAnalyticsFunction", "AWS::Lambda::Function"),
+                ("RefreshGitHubAnalyticsFunctionRole", "AWS::IAM::Role"),
+                ("RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefresh", "AWS::Events::Rule"),
+                ("RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefreshPermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:
