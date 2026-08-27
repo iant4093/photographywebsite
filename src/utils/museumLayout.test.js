@@ -3,7 +3,10 @@ import {
     buildMuseumCatalog,
     buildMuseumLayout,
     isMuseumPositionWalkable,
+    MUSEUM_DIMENSIONS,
+    museumPlanarAxes,
     moveMuseumPosition,
+    nearbyMuseumRoomIds,
     nearestMuseumRoom,
 } from './museumLayout'
 
@@ -58,10 +61,83 @@ describe('museum layout', () => {
         expect(stopped.x).toBe(4)
     })
 
+    it('keeps every doorway physically connected to its hallway and room', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left-a', 'Hikes'),
+            album('right-a', 'Astro'),
+            album('left-b', 'Portraits'),
+            album('right-b', 'Birding'),
+        ]))
+
+        for (const room of layout.rooms) {
+            const hallwayX = room.side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.4)
+            const portalX = room.innerX + (room.side * 0.1)
+            const roomX = room.innerX + (room.side * 0.4)
+            expect(isMuseumPositionWalkable(layout, hallwayX, room.centerZ)).toBe(true)
+            expect(isMuseumPositionWalkable(layout, portalX, room.centerZ)).toBe(true)
+            expect(isMuseumPositionWalkable(layout, roomX, room.centerZ)).toBe(true)
+            expect(isMuseumPositionWalkable(
+                layout,
+                portalX,
+                room.centerZ + (MUSEUM_DIMENSIONS.doorwayWidth / 2) + 0.2,
+            )).toBe(false)
+        }
+    })
+
+    it('lets the movement controller cross every doorway in both directions', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left-a', 'Hikes'),
+            album('right-a', 'Astro'),
+            album('left-b', 'Portraits'),
+            album('right-b', 'Birding'),
+        ]))
+
+        for (const room of layout.rooms) {
+            let position = {
+                x: room.side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.4),
+                z: room.centerZ,
+            }
+            for (let step = 0; step < 8; step += 1) {
+                position = moveMuseumPosition(layout, position, { x: room.side * 0.25, z: 0 })
+            }
+            expect(Math.abs(position.x)).toBeGreaterThan(MUSEUM_DIMENSIONS.hallHalfWidth + 0.5)
+
+            for (let step = 0; step < 8; step += 1) {
+                position = moveMuseumPosition(layout, position, { x: room.side * -0.25, z: 0 })
+            }
+            expect(Math.abs(position.x)).toBeLessThan(MUSEUM_DIMENSIONS.hallHalfWidth)
+        }
+    })
+
+    it('maps D to camera-right and A to its inverse', () => {
+        const axes = museumPlanarAxes(0, -1)
+        expect(axes.forward).toEqual({ x: 0, z: -1 })
+        expect(axes.right).toEqual({ x: 1, z: 0 })
+    })
+
     it('preloads a room near its entrance', () => {
-        const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('a', 'Hikes'),
+            album('b', 'Astro'),
+        ]))
         const [x, , z] = layout.rooms[0].entrance
         expect(nearestMuseumRoom(layout, { x: x + 1, z })).toBe(layout.rooms[0].id)
+        expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([
+            layout.rooms[0].id,
+            layout.rooms[1].id,
+        ])
         expect(nearestMuseumRoom(layout, { x: 0, z: 10 }, 1)).toBeNull()
+    })
+
+    it('prioritizes the room containing the player over an earlier nearby room', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left', 'Hikes'),
+            album('right', 'Astro'),
+        ]))
+        const rightRoom = layout.rooms[1]
+        expect(nearestMuseumRoom(layout, {
+            x: rightRoom.innerX + 1,
+            z: rightRoom.centerZ,
+        }, 10)).toBe(rightRoom.id)
     })
 })

@@ -3,6 +3,7 @@ import { sortGalleryAlbums, sortGalleryCategories } from './galleryOrder'
 export const MUSEUM_DIMENSIONS = Object.freeze({
     hallHalfWidth: 4.4,
     hallHeight: 6.8,
+    doorwayWidth: 4.2,
     lobbyFrontZ: 12,
     firstBayZ: -7,
     baySpacing: 14,
@@ -151,10 +152,24 @@ export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
         && z <= MUSEUM_DIMENSIONS.lobbyFrontZ - radius
         && z >= layout.hallBackZ + radius
     const inRoom = layout.rooms.some(room => insideRect(x, z, room.bounds, radius))
-    if (!inHall && !inRoom) return false
+    const inDoorway = layout.rooms.some((room) => (
+        Math.abs(z - room.centerZ) <= (MUSEUM_DIMENSIONS.doorwayWidth / 2) - radius
+        && x >= room.innerX - radius
+        && x <= room.innerX + radius
+    ))
+    if (!inHall && !inRoom && !inDoorway) return false
 
     const obstacles = [layout.desk, ...layout.rooms.flatMap(room => room.benches)]
     return !obstacles.some(obstacle => intersectsObstacle(x, z, obstacle, radius))
+}
+
+export function museumPlanarAxes(forwardX, forwardZ) {
+    const length = Math.hypot(forwardX, forwardZ) || 1
+    const forward = { x: forwardX / length, z: forwardZ / length }
+    return {
+        forward,
+        right: { x: -forward.z, z: forward.x },
+    }
 }
 
 export function moveMuseumPosition(layout, current, delta, radius = 0.35) {
@@ -167,11 +182,34 @@ export function moveMuseumPosition(layout, current, delta, radius = 0.35) {
 }
 
 export function nearestMuseumRoom(layout, position, preloadDistance = 4.5) {
+    const contained = layout.rooms.find(room => insideRect(position.x, position.z, room.bounds, 0))
+    if (contained) return contained.id
+
+    let nearest = null
+    let nearestDistance = Number.POSITIVE_INFINITY
     for (const room of layout.rooms) {
-        if (insideRect(position.x, position.z, room.bounds, 0)) return room.id
         const [entranceX, , entranceZ] = room.entrance
-        if (Math.hypot(position.x - entranceX, position.z - entranceZ) <= preloadDistance) return room.id
+        const distance = Math.hypot(position.x - entranceX, position.z - entranceZ)
+        if (distance <= preloadDistance && distance < nearestDistance) {
+            nearest = room.id
+            nearestDistance = distance
+        }
     }
-    return null
+    return nearest
 }
 
+export function nearbyMuseumRoomIds(layout, position, preloadDistance = 6.5) {
+    return layout.rooms
+        .map((room) => {
+            const [entranceX, , entranceZ] = room.entrance
+            return {
+                id: room.id,
+                contained: insideRect(position.x, position.z, room.bounds, 0),
+                distance: Math.hypot(position.x - entranceX, position.z - entranceZ),
+            }
+        })
+        .filter(room => room.contained || room.distance <= preloadDistance)
+        .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
+        .slice(0, 4)
+        .map(room => room.id)
+}
