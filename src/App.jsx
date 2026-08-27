@@ -7,7 +7,6 @@ import BackToTop from './components/BackToTop'
 import DocumentMetadata from './components/DocumentMetadata'
 import MotionExperience from './components/MotionExperience'
 import AnalyticsTracker from './components/AnalyticsTracker'
-import PrintOrderModal from './components/PrintOrderModal'
 import Home from './pages/Home'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
@@ -43,7 +42,7 @@ if (typeof window !== 'undefined') window.history.scrollRestoration = 'manual'
 
 function PageLoading() {
     return (
-        <div className="flex min-h-[60vh] items-center justify-center pt-[88px]" role="status" aria-live="polite">
+        <div className="flex min-h-[60vh] items-center justify-center pt-[88px]" role="status">
             <span className="sr-only">Loading page</span>
             <div className="h-10 w-10 animate-spin rounded-full border-3 border-amber border-t-transparent" />
         </div>
@@ -76,7 +75,7 @@ function App() {
             return () => window.cancelAnimationFrame(frame)
         }
         if (navigationType !== 'POP') window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-        return undefined
+        return
     }, [location.hash, location.pathname, navigationType])
 
     return (
@@ -127,7 +126,6 @@ function App() {
             <BackToTop />
             <Footer />
             <MotionExperience />
-            <PrintOrderModal />
         </div>
     )
 }

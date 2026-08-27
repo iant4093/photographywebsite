@@ -1,5 +1,4 @@
 const DEFAULT_PRINT_ORIGIN = 'https://prints.iantruongphotography.com'
-export const PRINT_ORDER_OPEN_EVENT = 'iantruong:print-order-open'
 
 function printOrigin() {
     const configured = String(import.meta.env.VITE_PRINT_ORIGIN || DEFAULT_PRINT_ORIGIN).trim()
@@ -24,9 +23,8 @@ export async function openPrintOrder(requestSession) {
     }
 
     const src = `${printOrigin()}/print.html#session=${encodeURIComponent(sessionToken)}`
-    window.dispatchEvent(new CustomEvent(PRINT_ORDER_OPEN_EVENT, {
-        detail: { src },
-    }))
+    const { showPrintOrderModal } = await import('../components/PrintOrderModalHost')
+    showPrintOrderModal(src)
     return src
 }
 

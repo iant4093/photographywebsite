@@ -1,12 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import PrintOrderModal from './PrintOrderModal'
-import { configuredPrintOrigin, PRINT_ORDER_OPEN_EVENT } from '../utils/printOrders'
+import { showPrintOrderModal } from './PrintOrderModalHost'
+import { configuredPrintOrigin } from '../utils/printOrders'
 
 function openPrintModal(path = '/print.html#session=capability') {
-    fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, {
-        detail: { src: `${configuredPrintOrigin()}${path}` },
-    }))
+    act(() => showPrintOrderModal(`${configuredPrintOrigin()}${path}`))
 }
 
 describe('PrintOrderModal', () => {
@@ -15,16 +13,14 @@ describe('PrintOrderModal', () => {
         document.documentElement.removeAttribute('data-lightbox-scroll-lock')
     })
 
-    it('embeds the isolated print bridge and closes back to the invoking control', () => {
+    it('embeds the isolated print bridge and closes back to the invoking control', async () => {
         const trigger = document.createElement('button')
         trigger.textContent = 'Order a Print'
         document.body.append(trigger)
         trigger.focus()
-        render(<PrintOrderModal />)
-
         openPrintModal()
 
-        const dialog = screen.getByRole('dialog', { name: 'Print options' })
+        const dialog = await screen.findByRole('dialog', { name: 'Print options' })
         const frame = screen.getByTitle('Fotomoto print options')
         expect(dialog).toBeInTheDocument()
         expect(frame).toHaveAttribute('src', `${configuredPrintOrigin()}/print.html#session=capability`)
@@ -36,30 +32,24 @@ describe('PrintOrderModal', () => {
         trigger.remove()
     })
 
-    it('closes with Escape and ignores untrusted frame destinations', () => {
-        render(<PrintOrderModal />)
-        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT))
-        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, { detail: { src: 42 } }))
-        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, { detail: { src: 'not a URL' } }))
-        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, {
-            detail: { src: `${configuredPrintOrigin()}/another-page.html#session=capability` },
-        }))
-        fireEvent(window, new CustomEvent(PRINT_ORDER_OPEN_EVENT, {
-            detail: { src: 'https://untrusted.example/print.html#session=capability' },
-        }))
+    it('closes with Escape and ignores untrusted frame destinations', async () => {
+        expect(showPrintOrderModal()).toBe(false)
+        expect(showPrintOrderModal(42)).toBe(false)
+        expect(showPrintOrderModal('not a URL')).toBe(false)
+        expect(showPrintOrderModal(`${configuredPrintOrigin()}/another-page.html#session=capability`)).toBe(false)
+        expect(showPrintOrderModal('https://untrusted.example/print.html#session=capability')).toBe(false)
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
         openPrintModal()
-        expect(screen.getByRole('dialog')).toBeInTheDocument()
+        expect(await screen.findByRole('dialog')).toBeInTheDocument()
         fireEvent.keyDown(window, { key: 'Escape' })
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 
-    it('reveals the bridge after load, traps focus, and closes from the backdrop', () => {
-        render(<PrintOrderModal />)
+    it('reveals the bridge after load, traps focus, and closes from the backdrop', async () => {
         openPrintModal()
 
-        const dialog = screen.getByRole('dialog', { name: 'Print options' })
+        const dialog = await screen.findByRole('dialog', { name: 'Print options' })
         const close = screen.getByRole('button', { name: /close print options/i })
         const frame = screen.getByTitle('Fotomoto print options')
         const loading = screen.getByRole('status')
@@ -79,7 +69,7 @@ describe('PrintOrderModal', () => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 
-    it('preserves an existing lightbox lock and restores background dialog accessibility', () => {
+    it('preserves an existing lightbox lock and restores background dialog accessibility', async () => {
         document.documentElement.setAttribute('data-lightbox-scroll-lock', '')
         document.body.style.overflow = 'clip'
         const retained = document.createElement('section')
@@ -89,9 +79,8 @@ describe('PrintOrderModal', () => {
         const restored = document.createElement('section')
         restored.setAttribute('role', 'dialog')
         document.body.append(retained, restored)
-        render(<PrintOrderModal />)
-
         openPrintModal()
+        await screen.findByRole('dialog', { name: 'Print options' })
         expect(document.body.style.overflow).toBe('clip')
         expect(retained).toHaveAttribute('aria-hidden', 'true')
         expect(restored).toHaveAttribute('inert')

@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { configuredPrintOrigin, PRINT_ORDER_OPEN_EVENT } from '../utils/printOrders'
 import './PrintOrderModal.css'
 
 const FOCUSABLE_SELECTOR = 'button:not([disabled]), iframe, [href], [tabindex]:not([tabindex="-1"])'
 
-export default function PrintOrderModal() {
-    const [src, setSrc] = useState('')
+export default function PrintOrderModal({ src, onClose }) {
     const [loaded, setLoaded] = useState(false)
     const dialogRef = useRef(null)
     const closeRef = useRef(null)
@@ -14,27 +12,10 @@ export default function PrintOrderModal() {
     const portalTarget = typeof document === 'undefined' ? null : document.body
 
     useEffect(() => {
-        const handleOpen = (event) => {
-            const nextSrc = event?.detail?.src
-            if (typeof nextSrc !== 'string') return
-            try {
-                const url = new URL(nextSrc)
-                if (url.origin !== configuredPrintOrigin() || url.pathname !== '/print.html') return
-            } catch {
-                return
-            }
-            restoreFocusRef.current = document.activeElement instanceof HTMLElement
-                ? document.activeElement
-                : null
-            setLoaded(false)
-            setSrc(nextSrc)
-        }
-        window.addEventListener(PRINT_ORDER_OPEN_EVENT, handleOpen)
-        return () => window.removeEventListener(PRINT_ORDER_OPEN_EVENT, handleOpen)
-    }, [])
-
-    useEffect(() => {
         if (!src) return undefined
+        restoreFocusRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
         const dialog = dialogRef.current
         const previousOverflow = document.body.style.overflow
         const alreadyLocked = document.documentElement.hasAttribute('data-lightbox-scroll-lock')
@@ -53,11 +34,10 @@ export default function PrintOrderModal() {
         })
         closeRef.current?.focus({ preventScroll: true })
 
-        const close = () => setSrc('')
         const handleKeyDown = (event) => {
             if (event.key === 'Escape') {
                 event.preventDefault()
-                close()
+                onClose()
                 return
             }
             if (event.key !== 'Tab') return
@@ -85,11 +65,9 @@ export default function PrintOrderModal() {
             })
             restoreFocusRef.current?.focus({ preventScroll: true })
         }
-    }, [src])
+    }, [onClose, src])
 
     if (!portalTarget || !src) return null
-
-    const close = () => setSrc('')
 
     return createPortal(
         <div
@@ -99,7 +77,7 @@ export default function PrintOrderModal() {
             aria-modal="true"
             aria-label="Print options"
             onMouseDown={(event) => {
-                if (event.target === event.currentTarget) close()
+                if (event.target === event.currentTarget) onClose()
             }}
         >
             <div className="print-order-modal__panel">
@@ -117,7 +95,7 @@ export default function PrintOrderModal() {
                     ref={closeRef}
                     type="button"
                     className="print-order-modal__close"
-                    onClick={close}
+                    onClick={onClose}
                     aria-label="Close print options and return to photo"
                     title="Back to photo"
                 >
