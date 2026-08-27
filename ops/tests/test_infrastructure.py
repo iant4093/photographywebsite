@@ -793,6 +793,12 @@ class BrowserBoundaryTests(unittest.TestCase):
             },
             {
                 "method": "GET",
+                "uri": "/album/11111111-1111-4111-8111-111111111111",
+                "headers": {"host": {"value": "example.test"}},
+                "querystring": {},
+            },
+            {
+                "method": "GET",
                 "uri": "/api/definitely-not-a-route",
                 "headers": {"host": {"value": "example.test"}},
                 "querystring": {},
@@ -830,14 +836,18 @@ class BrowserBoundaryTests(unittest.TestCase):
             [node, "-e", runner], check=True, text=True, capture_output=True
         )
         results = json.loads(completed.stdout)
-        self.assertEqual(results[0]["uri"], "/index.html")
-        self.assertEqual(results[1]["uri"], "/api/definitely-not-a-route")
-        self.assertEqual(results[2]["uri"], "/api")
-        self.assertEqual(results[3]["uri"], "/assets/app.js")
-        self.assertEqual(results[4]["uri"], "/contact")
-        self.assertEqual(results[5]["statusCode"], 301)
+        self.assertEqual(results[0]["uri"], "/api/public/social/album/invalid")
         self.assertEqual(
-            results[5]["headers"]["location"]["value"],
+            results[1]["uri"],
+            "/api/public/social/album/11111111-1111-4111-8111-111111111111",
+        )
+        self.assertEqual(results[2]["uri"], "/api/definitely-not-a-route")
+        self.assertEqual(results[3]["uri"], "/api")
+        self.assertEqual(results[4]["uri"], "/assets/app.js")
+        self.assertEqual(results[5]["uri"], "/contact")
+        self.assertEqual(results[6]["statusCode"], 301)
+        self.assertEqual(
+            results[6]["headers"]["location"]["value"],
             "https://example.test/album/public-id?view=grid&label=golden%20hour",
         )
     def test_private_frontend_origin_migration_is_staged_and_guarded(self) -> None:

@@ -37,6 +37,22 @@ function handler(event) {
   if (request.uri === '/api' || request.uri.indexOf('/api/') === 0) return request;
   if (request.method !== 'GET' && request.method !== 'HEAD') return request;
 
+  // Album and video document paths are handled by an API-origin cache behavior
+  // so social crawlers receive per-album metadata. Keep this routing here as
+  // well as in the dedicated social router: the canonical redirect function is
+  // deliberately associated broadly and must never rewrite these requests to
+  // /index.html on the API origin.
+  var socialPath = request.uri.match(/^\/(album|video)(?:\/([^/]*))?\/?$/i);
+  if (socialPath) {
+    var routeKind = socialPath[1].toLowerCase() === 'video' ? 'video' : 'album';
+    var candidate = socialPath[2] || '';
+    var albumId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)
+      ? candidate.toLowerCase()
+      : 'invalid';
+    request.uri = '/api/public/social/' + routeKind + '/' + albumId;
+    return request;
+  }
+
   // S3's REST origin has no history fallback. Rewrite only extensionless
   // frontend navigation paths; real assets and well-known files pass through.
   var segment = request.uri.substring(request.uri.lastIndexOf('/') + 1);
