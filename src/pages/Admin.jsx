@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { v4 as uuidv4 } from 'uuid'
-import { Link } from 'react-router'
+import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { mapWithConcurrency } from '../utils/concurrency'
@@ -177,12 +177,12 @@ function Upload() {
         >
             <div className="animate-slide-up">
                 {/* Back link */}
-                <Link to="/admin" className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8">
+                <DashboardBackLink className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                     </svg>
                     Back to Dashboard
-                </Link>
+                </DashboardBackLink>
 
                 <div className="mb-10">
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">Upload Photos</h1>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router'
+import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { fetchGoogleDriveUsage } from '../utils/api'
 import { formatBytes } from '../utils/formatBytes'
@@ -70,12 +70,12 @@ export default function GoogleDriveUsage() {
 
     return (
         <div className="drive-usage-page">
-            <Link to="/admin" className="drive-usage-back-link">
+            <DashboardBackLink className="drive-usage-back-link">
                 <svg className="drive-usage-back-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
                 Back to Dashboard
-            </Link>
+            </DashboardBackLink>
 
             <div className="linen-admin-heading drive-usage-page-heading">
                 <span>Storage overview</span>

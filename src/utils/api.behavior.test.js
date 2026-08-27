@@ -211,18 +211,30 @@ describe('public API client behavior', () => {
       headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    await expect(api.fetchAnalyticsReport('admin-token', 90, { signal })).resolves.toEqual(report)
-    expect(fetchMock.mock.calls[3][0]).toMatch(/\/admin\/analytics\?range=90$/)
+    await expect(api.fetchSiteHealth('admin-token', { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[3][0]).toMatch(/\/admin\/site-health$/)
     expect(fetchMock.mock.calls[3][1]).toEqual(expect.objectContaining({
       headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    await expect(api.fetchPhotographyStats({ signal })).resolves.toEqual(report)
-    expect(fetchMock.mock.calls[4][0]).toMatch(/\/public\/stats$/)
+    await expect(api.fetchAuditLog('admin-token', 30, { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[4][0]).toMatch(/\/admin\/audit-log\?days=30$/)
     expect(fetchMock.mock.calls[4][1]).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer admin-token' },
       signal: expect.any(AbortSignal),
     }))
-    expect(fetchMock.mock.calls[4][1].headers).toEqual({})
+    await expect(api.fetchAnalyticsReport('admin-token', 90, { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[5][0]).toMatch(/\/admin\/analytics\?range=90$/)
+    expect(fetchMock.mock.calls[5][1]).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer admin-token' },
+      signal: expect.any(AbortSignal),
+    }))
+    await expect(api.fetchPhotographyStats({ signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[6][0]).toMatch(/\/public\/stats$/)
+    expect(fetchMock.mock.calls[6][1]).toEqual(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
+    expect(fetchMock.mock.calls[6][1].headers).toEqual({})
   })
 
   it('submits anonymous analytics without credentials or retries', async () => {

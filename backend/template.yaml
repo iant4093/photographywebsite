@@ -3014,6 +3014,68 @@ Resources:
             Path: /admin/github-analytics
             Method: GET
 
+  GetSiteHealthFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_site_health.handler
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          STACK_NAME: !Ref AWS::StackName
+          FRONTEND_URL: !Ref FrontendUrl
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: cloudformation:DescribeStacks
+              Resource: !Ref AWS::StackId
+            # DescribeAlarms does not support resource-level IAM permissions.
+            # The handler uses the exact stack-name prefix and returns only this
+            # website's alarm states and descriptions.
+            - Effect: Allow
+              Action: cloudwatch:DescribeAlarms
+              Resource: '*'
+      Events:
+        GetSiteHealth:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/site-health
+            Method: GET
+
+  GetAuditLogFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_audit_log.handler
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          APPLICATION_LOG_GROUP: !Ref ApplicationLogGroup
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: logs:StartQuery
+              Resource: !GetAtt ApplicationLogGroup.Arn
+            # A Logs Insights query ID has no IAM resource ARN. Results are
+            # parsed through a strict privacy-safe audit-event allowlist.
+            - Effect: Allow
+              Action: logs:GetQueryResults
+              Resource: '*'
+      Events:
+        GetAuditLog:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/audit-log
+            Method: GET
+
   RefreshGitHubAnalyticsFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router'
+import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { fetchGitHubAnalytics } from '../utils/api'
 import './GitHubAnalytics.css'
@@ -103,7 +103,7 @@ export default function GitHubAnalytics() {
 
     return (
         <div className="github-page">
-            <Link to="/admin" className="github-back">← <span>Back to Dashboard</span></Link>
+            <DashboardBackLink className="github-back">← <span>Back to Dashboard</span></DashboardBackLink>
             <header className="linen-admin-heading github-heading">
                 <span>Repository intelligence</span>
                 <h1>GitHub Analytics</h1>

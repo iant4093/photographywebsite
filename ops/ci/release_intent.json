@@ -72,6 +72,8 @@
     {"logicalId": "GetPhotographyStatsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "ReservedConcurrentExecutions"], "allowNoDetails": false},
     {"logicalId": "RefreshGoogleDriveUsageFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "GetGitHubAnalyticsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
+    {"logicalId": "GetSiteHealthFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
+    {"logicalId": "GetAuditLogFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "RefreshGitHubAnalyticsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "RefreshGoogleDriveUsageFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "DeleteUserFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
@@ -130,6 +132,12 @@
     {"logicalId": "RefreshGitHubAnalyticsFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "RefreshGitHubAnalyticsFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefresh", "resourceType": "AWS::Events::Rule", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefreshPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true}
+    {"logicalId": "RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefreshPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "GetSiteHealthFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "GetSiteHealthFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "GetSiteHealthFunctionGetSiteHealthPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "GetAuditLogFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "GetAuditLogFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "GetAuditLogFunctionGetAuditLogPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true}
   ]
 }

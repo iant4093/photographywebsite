@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { useSearchParams } from 'react-router'
+import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { processImage, processVideo, extractFrameFromVideoElement } from '../utils/mediaUtils'
 import {
@@ -654,12 +655,12 @@ function ManageAlbums() {
         <div className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
             <div className="animate-slide-up">
                 {/* Back link */}
-                <Link to="/admin" className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8">
+                <DashboardBackLink className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                     </svg>
                     Back to Dashboard
-                </Link>
+                </DashboardBackLink>
 
                 <div className="mb-10">
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">

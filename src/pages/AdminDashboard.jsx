@@ -1,8 +1,20 @@
-import { Link } from 'react-router'
+import { useLayoutEffect } from 'react'
+import { Link, useLocation } from 'react-router'
 import { motion } from 'framer-motion'
+import { readDashboardScroll, rememberDashboardScroll } from '../utils/dashboardScroll'
 
 // Admin dashboard — hub for portfolio, account, and service controls
 function AdminDashboard() {
+    const location = useLocation()
+
+    useLayoutEffect(() => {
+        if (!location.state?.restoreDashboardScroll) return undefined
+        const frame = window.requestAnimationFrame(() => {
+            window.scrollTo({ top: readDashboardScroll(), left: 0, behavior: 'instant' })
+        })
+        return () => window.cancelAnimationFrame(frame)
+    }, [location.key, location.state])
+
     // Widget data for the available admin actions
     const widgets = [
         {
@@ -72,6 +84,39 @@ function AdminDashboard() {
             color: 'from-green-500 to-green-600',
         },
         {
+            title: 'Site Health',
+            description: 'Check the live website, public API, infrastructure, processing queues, and operational alarms.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 12h4l2.5-7 5 14 2.5-7h4M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" />
+                </svg>
+            ),
+            link: '/admin/site-health',
+            color: 'from-green-600 to-charcoal',
+        },
+        {
+            title: 'Audit Log',
+            description: 'Search privacy-safe administrative, authentication, media, and security activity.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6M9 8h3m5-5H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2z" />
+                </svg>
+            ),
+            link: '/admin/audit-log',
+            color: 'from-charcoal-light to-amber-dark',
+        },
+        {
+            title: 'Website Analytics',
+            description: 'Review visits, popular albums, downloads, traffic sources, devices, countries, and site health.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 19V9m5 10v-5m5 5V5m5 14v-8M3 21h18" />
+                </svg>
+            ),
+            link: '/admin/analytics',
+            color: 'from-charcoal to-amber-dark',
+        },
+        {
             title: 'AWS Costs',
             description: 'Review daily account spending, monthly trends, forecasts, and highest-cost AWS services.',
             icon: (
@@ -92,17 +137,6 @@ function AdminDashboard() {
             ),
             link: '/admin/drive-usage',
             color: 'from-green-600 to-blue-600',
-        },
-        {
-            title: 'Website Analytics',
-            description: 'Review visits, popular albums, downloads, traffic sources, devices, countries, and site health.',
-            icon: (
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 19V9m5 10v-5m5 5V5m5 14v-8M3 21h18" />
-                </svg>
-            ),
-            link: '/admin/analytics',
-            color: 'from-charcoal to-amber-dark',
         },
         {
             title: 'GitHub Analytics',
@@ -149,6 +183,7 @@ function AdminDashboard() {
                         <Link
                             key={widget.title}
                             to={widget.link}
+                            onClick={rememberDashboardScroll}
                             className="linen-admin-card group block bg-white rounded-2xl p-6 shadow-warm hover:shadow-warm-lg transition-all duration-500 border border-warm-border hover:border-amber/30"
                         >
                             <span className="linen-admin-card-index">{String(index + 1).padStart(2, '0')}</span>

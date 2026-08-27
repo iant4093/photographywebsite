@@ -24,6 +24,8 @@ DEFAULT_ENV = {
     "FRONTEND_URL": "https://iantruongphotography.com",
     "DRIVE_USAGE_CACHE_TABLE": "drive-usage-test",
     "GITHUB_ANALYTICS_CACHE_TABLE": "github-analytics-test",
+    "APPLICATION_LOG_GROUP": "/ian-photography/application/test",
+    "STACK_NAME": "ian-website-test",
     "GOOGLE_DRIVE_FOLDER_ID": "drive-root-test",
     "GOOGLE_OAUTH_PARAMETER": "/ian-website/prod/google-drive-credentials",
     "RATE_LIMIT_HASH_SECRET": "unit-test-rate-hash-secret",

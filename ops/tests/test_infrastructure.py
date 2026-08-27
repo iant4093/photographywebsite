@@ -157,6 +157,8 @@ expected_routes = {
     ("GET", "/admin/analytics"),
     ("GET", "/admin/drive-usage"),
     ("GET", "/admin/github-analytics"),
+    ("GET", "/admin/site-health"),
+    ("GET", "/admin/audit-log"),
     ("POST", "/admin/gallery-order"),
     ("DELETE", "/users/{email}"),
     ("PUT", "/users/{email}"),
@@ -462,6 +464,27 @@ class DataProtectionTests(unittest.TestCase):
         self.assertNotIn("GITHUB_TOKEN", refresh)
         self.assertIn("SOURCES_GetGitHubAnalyticsFunction :=", MAKEFILE)
         self.assertIn("SOURCES_RefreshGitHubAnalyticsFunction :=", MAKEFILE)
+
+    def test_admin_observability_is_scoped_and_least_privilege(self) -> None:
+        health = resource_block("GetSiteHealthFunction")
+        audit = resource_block("GetAuditLogFunction")
+
+        self.assertIn("Path: /admin/site-health", health)
+        self.assertIn("Action: cloudformation:DescribeStacks", health)
+        self.assertIn("Resource: !Ref AWS::StackId", health)
+        self.assertIn("Action: cloudwatch:DescribeAlarms", health)
+        self.assertNotIn("cloudwatch:*", health)
+        self.assertNotIn("config:", health)
+
+        self.assertIn("Path: /admin/audit-log", audit)
+        self.assertIn("APPLICATION_LOG_GROUP: !Ref ApplicationLogGroup", audit)
+        self.assertIn("Action: logs:StartQuery", audit)
+        self.assertIn("Resource: !GetAtt ApplicationLogGroup.Arn", audit)
+        self.assertIn("Action: logs:GetQueryResults", audit)
+        self.assertNotIn("logs:*", audit)
+
+        self.assertIn("SOURCES_GetSiteHealthFunction :=", MAKEFILE)
+        self.assertIn("SOURCES_GetAuditLogFunction :=", MAKEFILE)
 
     def test_existing_tables_do_not_toggle_dynamodb_encryption_mode(self) -> None:
         # DynamoDB always encrypts tables at rest. Explicitly adding/removing an

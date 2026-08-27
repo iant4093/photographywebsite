@@ -729,6 +729,20 @@ export function fetchGitHubAnalytics(token, options = {}) {
     }, { timeoutMs: 30_000, retries: 0 })
 }
 
+export function fetchSiteHealth(token, options = {}) {
+    return apiFetch('/admin/site-health', {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }, { timeoutMs: 20_000, retries: 0 })
+}
+
+export function fetchAuditLog(token, days = 7, options = {}) {
+    return apiFetch(`/admin/audit-log?days=${encodeURIComponent(days)}`, {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }, { timeoutMs: 20_000, retries: 0 })
+}
+
 export function fetchPhotographyStats(options = {}) {
     return apiFetch('/public/stats', {
         signal: options.signal,

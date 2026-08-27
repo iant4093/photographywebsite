@@ -399,6 +399,12 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("RefreshGitHubAnalyticsFunctionRole", "AWS::IAM::Role"),
                 ("RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefresh", "AWS::Events::Rule"),
                 ("RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefreshPermission", "AWS::Lambda::Permission"),
+                ("GetSiteHealthFunction", "AWS::Lambda::Function"),
+                ("GetSiteHealthFunctionRole", "AWS::IAM::Role"),
+                ("GetSiteHealthFunctionGetSiteHealthPermission", "AWS::Lambda::Permission"),
+                ("GetAuditLogFunction", "AWS::Lambda::Function"),
+                ("GetAuditLogFunctionRole", "AWS::IAM::Role"),
+                ("GetAuditLogFunctionGetAuditLogPermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:

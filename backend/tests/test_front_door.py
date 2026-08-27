@@ -158,10 +158,10 @@ class FrontDoorVerifierTests(unittest.TestCase):
 class FrontDoorCoverageContractTests(unittest.TestCase):
     def test_all_http_handlers_verify_before_any_business_logic(self) -> None:
         handlers = _http_handlers()
-        self.assertEqual(len(handlers), 30)
+        self.assertEqual(len(handlers), 32)
         self.assertEqual(
             len(re.findall(r"(?m)^          Type: HttpApi$", TEMPLATE_TEXT)),
-            37,
+            39,
         )
         for logical_id, module_name in handlers.items():
             with self.subTest(function=logical_id, module=module_name):

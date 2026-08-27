@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { AuthContext, useAuth } from '../context/auth'
 import AdminDashboard from '../pages/AdminDashboard'
@@ -74,22 +74,48 @@ describe('small presentational and routing components', () => {
 
     const admin = routed(<AdminDashboard />)
     expect(screen.getByText('Studio controls')).toBeInTheDocument()
-    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(10)
+    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(12)
     expect(Array.from(
       admin.container.querySelectorAll('.linen-admin-card-index'),
       (index) => index.textContent,
-    )).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'])
+    )).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'])
     expect(screen.getByRole('link', { name: /Upload Photos/ })).toHaveAttribute('href', '/admin/upload')
     expect(screen.getByRole('link', { name: /Upload Videos/ })).toHaveAttribute('href', '/admin/upload-video')
     expect(screen.getByRole('link', { name: /Change Hero Cover/ })).toHaveAttribute('href', '/admin/hero')
     expect(screen.getByRole('link', { name: /Manage Photo Albums/ })).toHaveAttribute('href', '/admin/manage?type=photo')
     expect(screen.getByRole('link', { name: /Manage Video Albums/ })).toHaveAttribute('href', '/admin/manage?type=video')
     expect(screen.getByRole('link', { name: /Manage Users/ })).toHaveAttribute('href', '/admin/users')
+    expect(screen.getByRole('link', { name: /Site Health/ })).toHaveAttribute('href', '/admin/site-health')
+    expect(screen.getByRole('link', { name: /Audit Log/ })).toHaveAttribute('href', '/admin/audit-log')
+    expect(screen.getByRole('link', { name: /Website Analytics/ })).toHaveAttribute('href', '/admin/analytics')
     expect(screen.getByRole('link', { name: /AWS Costs/ })).toHaveAttribute('href', '/admin/costs')
     expect(screen.getByRole('link', { name: /Google Drive Usage/ })).toHaveAttribute('href', '/admin/drive-usage')
-    expect(screen.getByRole('link', { name: /Website Analytics/ })).toHaveAttribute('href', '/admin/analytics')
     expect(screen.getByRole('link', { name: /GitHub Analytics/ })).toHaveAttribute('href', '/admin/github-analytics')
+    expect(Array.from(admin.container.querySelectorAll('.linen-admin-card h2'), (heading) => heading.textContent).slice(-6)).toEqual([
+      'Site Health', 'Audit Log', 'Website Analytics', 'AWS Costs', 'Google Drive Usage', 'GitHub Analytics',
+    ])
     expect(screen.queryByRole('link', { name: /Admin Security/ })).toBeNull()
+  })
+
+  it('restores the saved dashboard position when returning from a module', () => {
+    window.sessionStorage.clear()
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 640 })
+    const first = routed(<AdminDashboard />)
+    fireEvent.click(screen.getByRole('link', { name: /Site Health/ }))
+    expect(window.sessionStorage.getItem('ian-photography-admin-dashboard-scroll')).toBe('640')
+    first.unmount()
+
+    window.scrollTo.mockClear()
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback()
+      return 1
+    })
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/admin', state: { restoreDashboardScroll: true } }]}>
+        <AdminDashboard />
+      </MemoryRouter>,
+    )
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 640, left: 0, behavior: 'instant' })
   })
 
   it('requires an auth provider and exposes the provided value', () => {

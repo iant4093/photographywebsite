@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router'
+import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { fetchCostReport } from '../utils/api'
 import './AwsCosts.css'
@@ -140,12 +140,12 @@ export default function AwsCosts() {
 
     return (
         <div className="aws-cost-page">
-            <Link to="/admin" className="aws-cost-back-link">
+            <DashboardBackLink className="aws-cost-back-link">
                 <svg className="aws-cost-back-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
                 Back to Dashboard
-            </Link>
+            </DashboardBackLink>
 
             <div className="linen-admin-heading aws-cost-page-heading">
                 <span>Account overview</span>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router'
+import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { fetchAnalyticsReport } from '../utils/api'
 import './Analytics.css'
@@ -155,7 +155,7 @@ export default function Analytics() {
         <div className="analytics-page linen-admin-page">
             <header className="analytics-header">
                 <div>
-                    <Link to="/admin">← Dashboard</Link>
+                    <DashboardBackLink>← Dashboard</DashboardBackLink>
                     <h1>Website Analytics</h1>
                     <p>Visits, portfolio engagement, audience shape, and frontend health in one view.</p>
                 </div>

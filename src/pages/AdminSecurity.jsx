@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
+import DashboardBackLink from '../components/DashboardBackLink'
 import QRCode from 'qrcode'
 import { useAuth } from '../context/auth'
 
@@ -125,9 +126,9 @@ function AdminSecurity() {
     if (adminMfaStatus === 'enabled') {
         return (
             <div className="linen-admin-page mx-auto max-w-3xl px-6 py-12 pt-[88px] md:pt-[104px]">
-                <Link to="/admin" className="mb-8 inline-flex items-center gap-2 text-sm font-medium text-warm-gray transition-colors hover:text-amber">
+                <DashboardBackLink className="mb-8 inline-flex items-center gap-2 text-sm font-medium text-warm-gray transition-colors hover:text-amber">
                     <span aria-hidden="true">←</span> Back to Admin Dashboard
-                </Link>
+                </DashboardBackLink>
                 <div className="rounded-2xl border border-warm-border bg-white p-8 shadow-warm-lg md:p-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-green-700" aria-hidden="true">
                         <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
