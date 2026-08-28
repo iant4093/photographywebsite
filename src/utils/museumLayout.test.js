@@ -56,6 +56,15 @@ describe('museum layout', () => {
         expect(isMuseumPositionWalkable(layout, 20, 8)).toBe(false)
         expect(isMuseumPositionWalkable(layout, layout.rooms[0].centerX, layout.rooms[0].centerZ)).toBe(true)
         expect(isMuseumPositionWalkable(layout, layout.desk.position[0], layout.desk.position[2])).toBe(false)
+        for (const prop of [
+            ...layout.dressing.lobbyPlants,
+            ...layout.dressing.hallPlants,
+            ...layout.dressing.stanchions,
+            layout.dressing.terminalSculpture,
+            ...layout.rooms[0].plants,
+        ]) {
+            expect(isMuseumPositionWalkable(layout, prop.position[0], prop.position[2])).toBe(false)
+        }
 
         const stopped = moveMuseumPosition(layout, { x: 4, z: 8 }, { x: 2, z: 0 })
         expect(stopped.x).toBe(4)

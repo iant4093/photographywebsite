@@ -83,6 +83,17 @@ function makeBenches(room) {
     return benches
 }
 
+function makeRoomPlants(room) {
+    const insetX = room.outerX - (room.side * 0.72)
+    const insetZ = (room.width / 2) - 0.78
+    return [-1, 1].map(direction => ({
+        id: `${room.id}-plant-${direction}`,
+        position: [insetX, 0, room.centerZ + (direction * insetZ)],
+        size: [0.9, 1.75, 0.9],
+        rotationY: direction * 0.34,
+    }))
+}
+
 export function buildMuseumLayout(categories = []) {
     const rooms = categories.map((category, index) => {
         const side = index % 2 === 0 ? -1 : 1
@@ -117,6 +128,7 @@ export function buildMuseumLayout(categories = []) {
         }
         room.paintings = makePaintings(room)
         room.benches = makeBenches(room)
+        room.plants = makeRoomPlants(room)
         return room
     })
 
@@ -124,6 +136,39 @@ export function buildMuseumLayout(categories = []) {
     const hallBackZ = MUSEUM_DIMENSIONS.firstBayZ
         - ((bayCount - 1) * MUSEUM_DIMENSIONS.baySpacing)
         - 11
+
+    const lobbyPlants = [-1, 1].map(side => ({
+        id: `lobby-plant-${side}`,
+        position: [side * 4.02, 0, 11.12],
+        size: [0.94, 1.9, 0.94],
+        rotationY: side * 0.28,
+    }))
+    const stanchions = [-1, 1].flatMap(side => [
+        {
+            id: `stanchion-${side}-front`,
+            position: [side * 3.1, 0, 8.22],
+            size: [0.34, 1.08, 0.34],
+        },
+        {
+            id: `stanchion-${side}-back`,
+            position: [side * 3.1, 0, 6.72],
+            size: [0.34, 1.08, 0.34],
+        },
+    ])
+    const terminalSculpture = {
+        id: 'terminal-sculpture',
+        position: [0, 0, hallBackZ + 2.05],
+        size: [1.75, 2.9, 1.75],
+    }
+    const hallPlants = Array.from({ length: bayCount }, (_, bay) => {
+        const side = bay % 2 === 0 ? -1 : 1
+        return {
+            id: `hall-plant-${bay}`,
+            position: [side * 4.02, 0, MUSEUM_DIMENSIONS.firstBayZ - (bay * MUSEUM_DIMENSIONS.baySpacing) + 5.3],
+            size: [0.86, 1.7, 0.86],
+            rotationY: side * 0.42,
+        }
+    })
 
     return {
         rooms,
@@ -133,6 +178,12 @@ export function buildMuseumLayout(categories = []) {
         desk: {
             position: [0, 0.69, 6.4],
             size: [4.3, 1.38, 1.3],
+        },
+        dressing: {
+            lobbyPlants,
+            hallPlants,
+            stanchions,
+            terminalSculpture,
         },
     }
 }
@@ -165,7 +216,14 @@ export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
     ))
     if (!inHall && !inRoom && !inDoorway) return false
 
-    const obstacles = [layout.desk, ...layout.rooms.flatMap(room => room.benches)]
+    const obstacles = [
+        layout.desk,
+        ...layout.dressing.lobbyPlants,
+        ...layout.dressing.hallPlants,
+        ...layout.dressing.stanchions,
+        layout.dressing.terminalSculpture,
+        ...layout.rooms.flatMap(room => [...room.benches, ...room.plants]),
+    ]
     return !obstacles.some(obstacle => intersectsObstacle(x, z, obstacle, radius))
 }
 
