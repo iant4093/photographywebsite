@@ -277,7 +277,7 @@ export function nearestMuseumRoom(layout, position, preloadDistance = 4.5) {
 }
 
 export function nearbyMuseumRoomIds(layout, position, preloadDistance = 6.5) {
-    return layout.rooms
+    const nearby = layout.rooms
         .map((room) => {
             const [entranceX, , entranceZ] = room.entrance
             return {
@@ -288,6 +288,6 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 6.5) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-        .slice(0, 1)
-        .map(room => room.id)
+    const containingRoom = nearby.find(room => room.contained)
+    return (containingRoom ? [containingRoom] : nearby.slice(0, 2)).map(room => room.id)
 }

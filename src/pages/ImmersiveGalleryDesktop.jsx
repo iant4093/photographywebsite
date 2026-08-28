@@ -110,10 +110,10 @@ function FloorMaterial({ materials, color = '#8b6948' }) {
             {...materials.floor}
             color={color}
             metalness={0.025}
-            roughness={0.48}
-            clearcoat={0.24}
-            clearcoatRoughness={0.52}
-            envMapIntensity={0.42}
+            roughness={0.62}
+            clearcoat={0.08}
+            clearcoatRoughness={0.72}
+            envMapIntensity={0.14}
         />
     )
 }
@@ -178,13 +178,21 @@ async function optimizedCoverUrls(album) {
     const srcSet = await albumCoverPreviewSrcSet(album).catch(() => '')
     const previews = srcSet
         .split(',')
-        .map(candidate => candidate.trim().split(/\s+/)[0])
-        .filter(Boolean)
+        .map((candidate) => {
+            const [url, widthToken = ''] = candidate.trim().split(/\s+/)
+            return { url, width: Number.parseInt(widthToken, 10) || 0 }
+        })
+        .filter(candidate => candidate.url)
+        .sort((left, right) => (
+            Math.abs(left.width - 1440) - Math.abs(right.width - 1440)
+            || right.width - left.width
+        ))
     return [...new Set([
+        // Museum frames are meant to hold up at close viewing distance. Prefer
+        // the 1440px generated WebP (sharp without the full-size transfer), then
+        // gracefully fall back when an optimized preview is not available.
+        ...previews.map(candidate => candidate.url),
         album.coverThumbnailUrl,
-        previews[0],
-        previews[1],
-        previews[2],
         album.coverImageUrl,
     ].filter(Boolean))]
 }
@@ -254,9 +262,10 @@ async function createMuseumCoverTexture(album) {
                 const texture = new THREE.Texture(image)
                 cropMuseumCover(texture, image)
                 texture.colorSpace = THREE.SRGBColorSpace
-                texture.minFilter = THREE.LinearFilter
+                texture.minFilter = THREE.LinearMipmapLinearFilter
                 texture.magFilter = THREE.LinearFilter
-                texture.generateMipmaps = false
+                texture.generateMipmaps = true
+                texture.anisotropy = 4
                 texture.needsUpdate = true
                 coverTextureCache.delete(cacheKey)
                 coverTextureCache.set(cacheKey, texture)
@@ -348,11 +357,10 @@ function Painting({ painting, active }) {
             </mesh>
             <mesh position={[0, 0, 0.155]}>
                 <planeGeometry args={[2.66, 1.76]} />
-                <meshStandardMaterial
+                <meshBasicMaterial
                     map={texture || coverPlaceholderTexture}
                     color="#ffffff"
-                    roughness={0.62}
-                    envMapIntensity={0.25}
+                    toneMapped={false}
                 />
             </mesh>
             <mesh position={[0, -1.55, 0.13]}>
@@ -556,7 +564,10 @@ function CategoryRoom({ room, active, materials }) {
     const wallThickness = 0.24
     const ceilingY = 6.15
     const rowXs = useMemo(() => [...new Set(room.paintings.map(painting => painting.position[0]))], [room.paintings])
-    const lightXs = useMemo(() => rowXs.filter((_, index) => index % 2 === 0), [rowXs])
+    const lightXs = useMemo(() => {
+        if (rowXs.length <= 2) return rowXs
+        return [rowXs[0], rowXs.at(-1)]
+    }, [rowXs])
     const endRotation = room.side < 0 ? Math.PI / 2 : -Math.PI / 2
     return (
         <group>
@@ -609,16 +620,10 @@ function CategoryRoom({ room, active, materials }) {
             {lightXs.map(x => (
                 <group key={x} position={[x, ceilingY - 0.12, room.centerZ]}>
                     <mesh rotation={[Math.PI / 2, 0, 0]}>
-                        <circleGeometry args={[0.34, 12]} />
+                        <circleGeometry args={[0.26, 12]} />
                         <meshBasicMaterial color="#fff1d6" toneMapped={false} />
                     </mesh>
                 </group>
-            ))}
-            {lightXs.map(x => (
-                <mesh key={`beam-${x}`} position={[x, ceilingY - 0.16, room.centerZ]}>
-                    <boxGeometry args={[0.12, 0.16, roomWidth - 0.45]} />
-                    <meshStandardMaterial color="#b8aa96" roughness={0.74} />
-                </mesh>
             ))}
         </group>
     )
@@ -639,9 +644,10 @@ function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
     const lastBayZ = bays.at(-1)?.centerZ ?? MUSEUM_DIMENSIONS.firstBayZ
     const tailFrontZ = lastBayZ - (MUSEUM_DIMENSIONS.baySpacing / 2)
     const tailLength = Math.max(0, tailFrontZ - layout.hallBackZ)
-    const ceilingLights = Array.from({ length: Math.ceil(layout.hallLength / 8) }, (_, index) => (
-        MUSEUM_DIMENSIONS.lobbyFrontZ - 3.3 - (index * 8)
-    )).filter(z => z > layout.hallBackZ)
+    // Keep fixtures between the transverse ceiling ribs. Their matching light
+    // sources are stationary so illumination cannot jump or flash while walking.
+    const ceilingLights = [7, ...bays.map(bay => bay.centerZ)]
+        .filter(z => z > layout.hallBackZ)
 
     return (
         <group>
@@ -693,7 +699,7 @@ function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
             {ceilingLights.map(z => (
                 <group key={z} position={[0, 6.85, z]}>
                     <mesh rotation={[Math.PI / 2, 0, 0]}>
-                        <circleGeometry args={[0.3, 12]} />
+                        <circleGeometry args={[0.25, 12]} />
                         <meshBasicMaterial color="#fff0d3" toneMapped={false} />
                     </mesh>
                 </group>
@@ -708,55 +714,6 @@ function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
                 reflectionsEnabled={reflectionsEnabled}
             />
         </group>
-    )
-}
-
-function LocalMuseumLights({ layout }) {
-    const primary = useRef(null)
-    const secondary = useRef(null)
-    const lastZone = useRef('')
-    const { camera } = useThree()
-
-    useFrame(() => {
-        if (!primary.current || !secondary.current) return
-        const containingRoom = layout.rooms.find(room => (
-            camera.position.x >= room.bounds.minX
-            && camera.position.x <= room.bounds.maxX
-            && camera.position.z >= room.bounds.minZ
-            && camera.position.z <= room.bounds.maxZ
-        ))
-
-        if (containingRoom) {
-            const spacing = MUSEUM_DIMENSIONS.paintingSpacing
-            const firstPaintingX = containingRoom.side * (MUSEUM_DIMENSIONS.hallHalfWidth + 4.15)
-            const row = Math.max(0, Math.round(Math.abs(camera.position.x - firstPaintingX) / spacing))
-            const x = firstPaintingX + (containingRoom.side * row * spacing)
-            const zone = `${containingRoom.id}:${row}`
-            if (zone === lastZone.current) return
-            lastZone.current = zone
-            primary.current.position.set(x, 5.82, containingRoom.centerZ - 2.35)
-            secondary.current.position.set(x + (containingRoom.side * 4.6), 5.72, containingRoom.centerZ + 2.35)
-            primary.current.intensity = 5.8
-            secondary.current.intensity = 3.9
-            return
-        }
-
-        const fixtureIndex = Math.max(0, Math.round((10.7 - camera.position.z) / 8))
-        const z = 10.7 - (fixtureIndex * 8)
-        const zone = `hall:${fixtureIndex}`
-        if (zone === lastZone.current) return
-        lastZone.current = zone
-        primary.current.position.set(-1.2, 6.25, z)
-        secondary.current.position.set(1.2, 5.9, z - 7.2)
-        primary.current.intensity = 5.2
-        secondary.current.intensity = 3.2
-    })
-
-    return (
-        <>
-            <pointLight ref={primary} color="#ffd7a0" intensity={5.2} distance={12} decay={2} />
-            <pointLight ref={secondary} color="#cfdeea" intensity={3.2} distance={10} decay={2} />
-        </>
     )
 }
 
@@ -1042,7 +999,12 @@ function SceneWarmup({ layout, onReady }) {
         const timeout = window.setTimeout(() => {
             if (!cancelled) onReady()
         }, 7000)
-        const nearbyAlbums = layout.rooms.slice(0, 2).map(room => room.albums[0]).filter(Boolean)
+        const initialPosition = safeSessionPosition(layout)
+        const nearbyRoomIds = new Set(nearbyMuseumRoomIds(layout, initialPosition))
+        const nearbyAlbums = layout.rooms
+            .filter(room => nearbyRoomIds.has(room.id))
+            .map(room => room.albums[0])
+            .filter(Boolean)
 
         Promise.all([
             gl.compileAsync?.(scene, camera) || Promise.resolve(),
@@ -1068,33 +1030,20 @@ function SceneWarmup({ layout, onReady }) {
     return null
 }
 
-function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, shadowsEnabled, onSceneReady, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, onSceneReady, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
-    const { gl } = useThree()
-    const shadowRevision = controlsEnabled.activeRoomIds.join('|')
-    useEffect(() => {
-        gl.shadowMap.needsUpdate = true
-    }, [gl, shadowRevision])
     return (
         <>
             <color attach="background" args={[INK]} />
             <fog attach="fog" args={['#151310', 24, 112]} />
-            <ambientLight intensity={0.018} color="#ffead4" />
-            <hemisphereLight args={['#b9c8d3', '#241914', 0.035]} />
+            <ambientLight intensity={0.25} color="#ffead4" />
+            <hemisphereLight args={['#c8d6df', '#4b3325', 0.34]} />
             <directionalLight
                 position={[-5, 10, 14]}
-                intensity={0.46}
+                intensity={0.16}
                 color="#d8e5ef"
-                castShadow={shadowsEnabled}
-                shadow-mapSize={[512, 512]}
-                shadow-bias={-0.0004}
-                shadow-normalBias={0.035}
-                shadow-camera-left={-8}
-                shadow-camera-right={8}
-                shadow-camera-top={10}
-                shadow-camera-bottom={-3}
+                castShadow={false}
             />
-            <LocalMuseumLights layout={layout} />
             <MainHall
                 layout={layout}
                 activeRoomIds={controlsEnabled.activeRoomIds}
@@ -1175,9 +1124,13 @@ export default function ImmersiveGalleryDesktop() {
     const previewMode = previewParams?.get('museum-preview') || ''
     const previewRoomIndex = Number.parseInt(previewParams?.get('museum-room') || '0', 10) || 0
     const visualPreview = ['lobby', 'hall', 'room'].includes(previewMode)
+    const initialActiveRoomIds = useMemo(
+        () => nearbyMuseumRoomIds(layout, safeSessionPosition(layout)),
+        [layout],
+    )
     const renderedActiveRoomIds = visualPreview
         ? (previewMode === 'room' ? [layout.rooms[previewRoomIndex]?.id].filter(Boolean) : [])
-        : activeRoomIds
+        : (activeRoomIds.length > 0 ? activeRoomIds : initialActiveRoomIds)
     const openAlbum = useCallback((album) => {
         sessionStorage.setItem(RETURN_KEY, 'true')
         navigate(`/album/${encodeURIComponent(album.albumId)}`, { state: { fromImmersiveGallery: true } })
@@ -1189,7 +1142,6 @@ export default function ImmersiveGalleryDesktop() {
         deviceMemory <= 4
         || hardwareConcurrency <= 4
     )
-    const shadowsEnabled = !lowPowerMode
 
     if (error) return <CatalogStatus error={error} onRetry={() => {
         setError('')
@@ -1207,7 +1159,7 @@ export default function ImmersiveGalleryDesktop() {
                 dpr={touchMode ? [0.42, 0.64] : [0.62, 0.9]}
                 frameloop={locked && !visualPreview ? 'always' : 'demand'}
                 performance={{ min: 0.45, max: 1, debounce: 240 }}
-                shadows={shadowsEnabled ? { type: THREE.BasicShadowMap } : false}
+                shadows={false}
                 gl={{
                     antialias: !lowPowerMode,
                     powerPreference: 'high-performance',
@@ -1217,11 +1169,7 @@ export default function ImmersiveGalleryDesktop() {
                 onCreated={({ gl }) => {
                     gl.outputColorSpace = THREE.SRGBColorSpace
                     gl.toneMapping = THREE.ACESFilmicToneMapping
-                    gl.toneMappingExposure = 0.68
-                    gl.shadowMap.enabled = shadowsEnabled
-                    gl.shadowMap.type = THREE.BasicShadowMap
-                    gl.shadowMap.autoUpdate = false
-                    gl.shadowMap.needsUpdate = true
+                    gl.toneMappingExposure = 0.88
                 }}
             >
                 <Suspense fallback={null}>
@@ -1233,7 +1181,6 @@ export default function ImmersiveGalleryDesktop() {
                         visualPreview={visualPreview}
                         previewMode={previewMode}
                         previewRoomIndex={previewRoomIndex}
-                        shadowsEnabled={shadowsEnabled}
                         onSceneReady={handleSceneReady}
                         onLock={() => setLocked(true)}
                         onUnlock={() => setLocked(false)}

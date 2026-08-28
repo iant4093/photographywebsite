@@ -353,7 +353,9 @@ export default function MuseumDressing({ layout, activeRoomIds, materials, Label
             <AbstractSculpture sculpture={layout.dressing.terminalSculpture} />
             {activeRooms.flatMap(room => room.plants).map(plant => <PottedPlant key={plant.id} plant={plant} scale={0.92} />)}
             {activeRooms.flatMap(room => room.benches).map(bench => <UpholsteredBench key={bench.id} bench={bench} />)}
-            {bayZs.flatMap(z => [-1, 1].map(side => <WallSconce key={`${z}-${side}`} side={side} z={z + 5.45} />))}
+            {/* Place sconces on the solid wall between galleries, clear of the
+                room end walls and arched entry trim. */}
+            {bayZs.flatMap(z => [-1, 1].map(side => <WallSconce key={`${z}-${side}`} side={side} z={z + 7.4} />))}
         </group>
     )
 }
