@@ -59,11 +59,15 @@ describe('museum layout', () => {
         for (const prop of [
             ...layout.dressing.lobbyPlants,
             ...layout.dressing.hallPlants,
-            ...layout.dressing.stanchions,
             layout.dressing.terminalSculpture,
             ...layout.rooms[0].plants,
         ]) {
             expect(isMuseumPositionWalkable(layout, prop.position[0], prop.position[2])).toBe(false)
+        }
+        // The welcome ropes are visual dressing beside the desk, not invisible
+        // collision walls that can trap a visitor on the way into the hall.
+        for (const stanchion of layout.dressing.stanchions) {
+            expect(isMuseumPositionWalkable(layout, stanchion.position[0], stanchion.position[2])).toBe(true)
         }
 
         const stopped = moveMuseumPosition(layout, { x: 4, z: 8 }, { x: 2, z: 0 })

@@ -3,12 +3,40 @@ import { useThree } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 
 const BRASS = '#b58a4f'
 const DARK_BRASS = '#735332'
 const VELVET = '#6f2028'
 const DEEP_VELVET = '#3f1118'
 const STONE = '#c7bdaf'
+const ROOM_TEXTILES = [
+    { bench: '#633740', base: '#39242a', rug: '#3e282c', rugInner: '#5b3940', rugCenter: '#48292f' },
+    { bench: '#415751', base: '#293936', rug: '#2a3b38', rugInner: '#3f5650', rugCenter: '#30443f' },
+    { bench: '#61543c', base: '#393224', rug: '#3e382a', rugInner: '#5c513a', rugCenter: '#463d2c' },
+    { bench: '#51495e', base: '#312d39', rug: '#34303b', rugInner: '#4e4659', rugCenter: '#3c3545' },
+]
+let sconceGlowTexture = null
+
+function getSconceGlowTexture() {
+    if (sconceGlowTexture || typeof document === 'undefined') return sconceGlowTexture
+    const canvas = document.createElement('canvas')
+    canvas.width = 192
+    canvas.height = 256
+    const context = canvas.getContext('2d')
+    const gradient = context.createRadialGradient(96, 116, 4, 96, 116, 104)
+    gradient.addColorStop(0, 'rgba(255, 226, 179, 0.68)')
+    gradient.addColorStop(0.3, 'rgba(239, 179, 104, 0.3)')
+    gradient.addColorStop(0.72, 'rgba(180, 104, 42, 0.07)')
+    gradient.addColorStop(1, 'rgba(80, 42, 18, 0)')
+    context.fillStyle = gradient
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    sconceGlowTexture = new THREE.CanvasTexture(canvas)
+    sconceGlowTexture.colorSpace = THREE.SRGBColorSpace
+    sconceGlowTexture.minFilter = THREE.LinearFilter
+    sconceGlowTexture.magFilter = THREE.LinearFilter
+    return sconceGlowTexture
+}
 
 const LEAVES = [
     [-0.14, 0.56, 0.02, -0.48, 0.12, 0.36, 0.84],
@@ -21,18 +49,17 @@ const LEAVES = [
     [-0.17, 1.32, -0.02, -0.3, 0.18, 0.3, 0.64],
 ]
 
-function EnvironmentLighting({ enabled }) {
+function EnvironmentLighting({ intensity = 0.22 }) {
     const { gl, scene } = useThree()
 
     useEffect(() => {
-        if (!enabled) return undefined
         const pmrem = new THREE.PMREMGenerator(gl)
         const environmentScene = new RoomEnvironment()
         const environment = pmrem.fromScene(environmentScene, 0.035).texture
         const previous = scene.environment
         const previousIntensity = scene.environmentIntensity
         scene.environment = environment
-        scene.environmentIntensity = 0.18
+        scene.environmentIntensity = intensity
         return () => {
             scene.environment = previous
             scene.environmentIntensity = previousIntensity
@@ -40,9 +67,30 @@ function EnvironmentLighting({ enabled }) {
             environmentScene.dispose?.()
             pmrem.dispose()
         }
-    }, [enabled, gl, scene])
+    }, [gl, intensity, scene])
 
     return null
+}
+
+function ContactPatch({ position, scale = [1, 1] }) {
+    return (
+        <mesh position={[position[0], (position[1] || 0) + 0.012, position[2]]} rotation={[-Math.PI / 2, 0, 0]} scale={[scale[0], scale[1], 1]}>
+            <circleGeometry args={[0.72, 20]} />
+            <meshBasicMaterial color="#120d09" transparent opacity={0.32} depthWrite={false} />
+        </mesh>
+    )
+}
+
+function RoundedBoxShape({ size, radius = 0.08, segments = 3 }) {
+    const geometry = useMemo(() => new RoundedBoxGeometry(
+        size[0],
+        size[1],
+        size[2],
+        segments,
+        Math.min(radius, size[0] / 4, size[1] / 4, size[2] / 4),
+    ), [radius, segments, size])
+    useEffect(() => () => geometry.dispose(), [geometry])
+    return <primitive object={geometry} attach="geometry" />
 }
 
 function PottedPlant({ plant, scale = 1 }) {
@@ -83,6 +131,22 @@ function PottedPlant({ plant, scale = 1 }) {
                     />
                 </mesh>
             ))}
+        </group>
+    )
+}
+
+function LowDetailPottedPlant({ plant, scale = 1 }) {
+    return (
+        <group position={plant.position} rotation={[0, plant.rotationY || 0, 0]} scale={scale}>
+            <mesh position={[0, 0.32, 0]}>
+                <cylinderGeometry args={[0.34, 0.43, 0.64, 8]} />
+                <meshStandardMaterial color="#77685e" roughness={0.72} />
+            </mesh>
+            <mesh position={[0, 0.96, 0]} scale={[0.48, 0.78, 0.48]}>
+                <dodecahedronGeometry args={[0.72, 0]} />
+                <meshStandardMaterial color="#4f6546" roughness={0.88} />
+            </mesh>
+            <ContactPatch position={[0, 0, 0]} scale={[0.72, 0.72]} />
         </group>
     )
 }
@@ -192,17 +256,21 @@ function RunnerCarpet({ layout }) {
     )
 }
 
-function UpholsteredBench({ bench }) {
+function UpholsteredBench({ bench, variant = 0 }) {
     const [width, height, depth] = bench.size
+    const textile = ROOM_TEXTILES[variant % ROOM_TEXTILES.length]
+    const baseSize = useMemo(() => [width, height * 0.72, depth], [depth, height, width])
+    const cushionSize = useMemo(() => [width + 0.04, height * 0.28, depth + 0.04], [depth, height, width])
     return (
         <group position={bench.position}>
+            <ContactPatch position={[0, -bench.position[1], 0]} scale={[width * 0.58, depth * 0.78]} />
             <mesh castShadow receiveShadow position={[0, 0.04, 0]}>
-                <boxGeometry args={[width, height * 0.72, depth]} />
-                <meshStandardMaterial color={DEEP_VELVET} roughness={0.96} />
+                <RoundedBoxShape size={baseSize} radius={0.1} />
+                <meshStandardMaterial color={textile.base || DEEP_VELVET} roughness={0.96} />
             </mesh>
             <mesh castShadow position={[0, height * 0.44, 0]}>
-                <boxGeometry args={[width + 0.04, height * 0.28, depth + 0.04]} />
-                <meshPhysicalMaterial color={VELVET} roughness={0.88} sheen={0.55} sheenRoughness={0.78} />
+                <RoundedBoxShape size={cushionSize} radius={0.11} />
+                <meshPhysicalMaterial color={textile.bench || VELVET} roughness={0.88} sheen={0.55} sheenRoughness={0.78} />
             </mesh>
             {[-0.56, 0.56].map(x => [-1, 1].map(direction => (
                 <mesh key={`${x}-${direction}`} castShadow position={[x, -0.37, direction * ((depth / 2) - 0.18)]}>
@@ -210,6 +278,31 @@ function UpholsteredBench({ bench }) {
                     <meshStandardMaterial color={DARK_BRASS} metalness={0.72} roughness={0.28} />
                 </mesh>
             )))}
+        </group>
+    )
+}
+
+function BenchRug({ bench, variant = 0 }) {
+    const [width, , depth] = bench.size
+    const textile = ROOM_TEXTILES[variant % ROOM_TEXTILES.length]
+    return (
+        <group position={[bench.position[0], 0.024, bench.position[2]]}>
+            <mesh receiveShadow>
+                <boxGeometry args={[width + 1.15, 0.035, depth + 0.95]} />
+                <meshStandardMaterial color={textile.rug} roughness={0.98} />
+            </mesh>
+            <mesh position={[0, 0.021, 0]}>
+                <boxGeometry args={[width + 0.78, 0.01, depth + 0.58]} />
+                <meshStandardMaterial color={textile.rugInner} roughness={0.97} />
+            </mesh>
+            <mesh position={[0, 0.029, 0]}>
+                <boxGeometry args={[width + 0.58, 0.008, depth + 0.38]} />
+                <meshStandardMaterial color="#8a744f" roughness={0.88} />
+            </mesh>
+            <mesh position={[0, 0.035, 0]}>
+                <boxGeometry args={[width + 0.44, 0.008, depth + 0.24]} />
+                <meshStandardMaterial color={textile.rugCenter} roughness={0.98} />
+            </mesh>
         </group>
     )
 }
@@ -304,12 +397,13 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
     const [x, y, z] = layout.desk.position
     return (
         <group position={[x, y, z]}>
+            <ContactPatch position={[0, -y, 0]} scale={[2.9, 1.2]} />
             <mesh castShadow receiveShadow>
-                <boxGeometry args={layout.desk.size} />
+                <RoundedBoxShape size={layout.desk.size} radius={0.07} />
                 <WoodMaterial materials={materials} color="#4c2f1d" roughness={0.42} />
             </mesh>
             <mesh position={[0, 0.76, 0]} castShadow receiveShadow>
-                <boxGeometry args={[layout.desk.size[0] + 0.24, 0.14, layout.desk.size[2] + 0.18]} />
+                <RoundedBoxShape size={[layout.desk.size[0] + 0.24, 0.14, layout.desk.size[2] + 0.18]} radius={0.055} />
                 <meshPhysicalMaterial color="#d2c8ba" roughness={0.3} clearcoat={0.52} clearcoatRoughness={0.46} />
             </mesh>
             <mesh position={[0, 0.05, 0.68]}>
@@ -325,7 +419,7 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
             <group position={[-1.42, 0.836, 0.03]} rotation={[0, -0.18, 0]}>
                 <PaperStack />
             </group>
-            <group position={[1.18, 0.83, -0.25]} rotation={[0, Math.PI + 0.14, 0]}>
+            <group position={[1.18, 0.83, -0.25]} rotation={[0, 0.14, 0]}>
                 <DesktopComputer />
             </group>
         </group>
@@ -377,8 +471,25 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
 
 function WallSconce({ side, z }) {
     const x = side * 4.64
+    const glow = useMemo(() => getSconceGlowTexture(), [])
     return (
         <group position={[x, 3.65, z]}>
+            <mesh
+                position={[-side * 0.105, 0.04, 0]}
+                rotation={[0, side < 0 ? Math.PI / 2 : -Math.PI / 2, 0]}
+                renderOrder={1}
+            >
+                <planeGeometry args={[2.8, 3.4]} />
+                <meshBasicMaterial
+                    map={glow}
+                    color="#e7a861"
+                    transparent
+                    opacity={0.58}
+                    depthWrite={false}
+                    blending={THREE.AdditiveBlending}
+                    toneMapped={false}
+                />
+            </mesh>
             <mesh castShadow>
                 <cylinderGeometry args={[0.15, 0.19, 0.48, 10]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} />
@@ -398,9 +509,13 @@ export default function MuseumDressing({ layout, activeRoomIds, materials, Label
         const active = new Set(activeRoomIds)
         return layout.rooms.filter(room => active.has(room.id))
     }, [activeRoomIds, layout.rooms])
+    const inactiveRooms = useMemo(() => {
+        const active = new Set(activeRoomIds)
+        return layout.rooms.filter(room => !active.has(room.id))
+    }, [activeRoomIds, layout.rooms])
     return (
         <group>
-            <EnvironmentLighting enabled={reflectionsEnabled} />
+            <EnvironmentLighting intensity={reflectionsEnabled ? 0.26 : 0.12} />
             <RunnerCarpet layout={layout} />
             <LobbyEntrance materials={materials} LabelPlane={LabelPlane} PlasterMaterial={PlasterMaterial} />
             <ReceptionDesk layout={layout} materials={materials} LabelPlane={LabelPlane} WoodMaterial={WoodMaterial} />
@@ -408,8 +523,14 @@ export default function MuseumDressing({ layout, activeRoomIds, materials, Label
             {layout.dressing.hallPlants.map(plant => <PottedPlant key={plant.id} plant={plant} scale={0.9} />)}
             <LobbyStanchions stanchions={layout.dressing.stanchions} />
             <AbstractSculpture sculpture={layout.dressing.terminalSculpture} />
+            {layout.rooms.flatMap((room, roomIndex) => room.benches.map(bench => ({ bench, roomIndex }))).map(({ bench, roomIndex }) => (
+                <BenchRug key={`rug-${bench.id}`} bench={bench} variant={roomIndex} />
+            ))}
+            {layout.rooms.flatMap((room, roomIndex) => room.benches.map(bench => ({ bench, roomIndex }))).map(({ bench, roomIndex }) => (
+                <UpholsteredBench key={bench.id} bench={bench} variant={roomIndex} />
+            ))}
             {activeRooms.flatMap(room => room.plants).map(plant => <PottedPlant key={plant.id} plant={plant} scale={0.92} />)}
-            {activeRooms.flatMap(room => room.benches).map(bench => <UpholsteredBench key={bench.id} bench={bench} />)}
+            {inactiveRooms.flatMap(room => room.plants).map(plant => <LowDetailPottedPlant key={plant.id} plant={plant} scale={0.92} />)}
             {/* Place sconces on the solid wall between galleries, clear of the
                 room end walls and arched entry trim. */}
             {bayZs.flatMap(z => [-1, 1].map(side => <WallSconce key={`${z}-${side}`} side={side} z={z + 7.4} />))}

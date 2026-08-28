@@ -185,7 +185,6 @@ export function buildMuseumLayout(categories = []) {
         },
         ...dressing.lobbyPlants,
         ...dressing.hallPlants,
-        ...dressing.stanchions,
         dressing.terminalSculpture,
         ...rooms.flatMap(room => [...room.benches, ...room.plants]),
     ]
@@ -236,7 +235,6 @@ export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
         layout.desk,
         ...layout.dressing.lobbyPlants,
         ...layout.dressing.hallPlants,
-        ...layout.dressing.stanchions,
         layout.dressing.terminalSculpture,
         ...layout.rooms.flatMap(room => [...room.benches, ...room.plants]),
     ]

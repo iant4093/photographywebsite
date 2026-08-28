@@ -13,3 +13,7 @@ Source: https://polyhaven.com/a/white_plaster_02
 File: white_plaster_02_diff_1k.jpg (delivery copy resized to 512px and JPEG-compressed)
 
 License: https://polyhaven.com/license
+
+Museum Wallpaper
+Generated specifically for Ian Truong Photography with OpenAI image generation on 2026-08-28.
+File: museum_wallpaper_albedo_1k.jpg
