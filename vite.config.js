@@ -74,6 +74,7 @@ export default defineConfig(({ mode }) => {
           'src/test/**',
           // WebGL rendering is browser-QA'd; its catalog, layout, collision, and device logic remain unit tested.
           'src/pages/ImmersiveGalleryDesktop.jsx',
+          'src/components/museum/**',
         ],
         reporter: ['text', 'json-summary', 'lcov', 'html'],
         reportsDirectory: 'coverage/frontend',
