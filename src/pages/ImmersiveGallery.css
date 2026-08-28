@@ -20,6 +20,8 @@
   position: fixed;
   inset: 0;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 .museum-canvas {
@@ -150,6 +152,120 @@
   white-space: nowrap;
 }
 
+.museum-interaction--touch {
+  justify-content: center;
+  color: #eee8dc;
+  font: inherit;
+  cursor: pointer;
+}
+
+.museum-touch-controls {
+  position: fixed;
+  z-index: 9;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.museum-look-zone {
+  position: absolute;
+  inset: 0 0 0 34%;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.museum-look-zone > span {
+  position: absolute;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  color: rgba(238, 232, 220, 0.54);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.museum-joystick {
+  position: absolute;
+  left: max(1rem, env(safe-area-inset-left));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  width: clamp(7.2rem, 26vw, 9rem);
+  aspect-ratio: 1;
+  border: 1px solid rgba(238, 232, 220, 0.42);
+  border-radius: 50%;
+  background: rgba(23, 20, 17, 0.56);
+  box-shadow: inset 0 0 0 1.15rem rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(10px);
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.museum-joystick::before,
+.museum-joystick::after {
+  position: absolute;
+  content: '';
+  background: rgba(238, 232, 220, 0.2);
+  pointer-events: none;
+}
+
+.museum-joystick::before {
+  top: 50%;
+  left: 12%;
+  width: 76%;
+  height: 1px;
+}
+
+.museum-joystick::after {
+  top: 12%;
+  left: 50%;
+  width: 1px;
+  height: 76%;
+}
+
+.museum-joystick-knob {
+  position: absolute;
+  inset: 0;
+  width: 3.4rem;
+  aspect-ratio: 1;
+  margin: auto;
+  border: 1px solid rgba(238, 232, 220, 0.64);
+  border-radius: 50%;
+  background: rgba(197, 154, 106, 0.62);
+  box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.museum-joystick > span {
+  position: absolute;
+  right: 0;
+  bottom: -1.2rem;
+  left: 0;
+  color: rgba(238, 232, 220, 0.58);
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.museum-touch-pause {
+  position: absolute;
+  top: max(5rem, calc(env(safe-area-inset-top) + 4rem));
+  right: max(1rem, env(safe-area-inset-right));
+  padding: 0.72rem 0.9rem;
+  color: #eee8dc;
+  border: 1px solid rgba(238, 232, 220, 0.4);
+  background: rgba(23, 20, 17, 0.66);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
+  touch-action: manipulation;
+  pointer-events: auto;
+}
+
 .museum-entry-panel {
   position: fixed;
   z-index: 20;
@@ -254,6 +370,117 @@
 
 .museum-loading--error button {
   width: min(22rem, 100%);
+}
+
+@media (pointer: coarse), (max-width: 899px) {
+  .museum-topbar {
+    top: max(0.75rem, env(safe-area-inset-top));
+    right: max(0.75rem, env(safe-area-inset-right));
+    left: max(0.75rem, env(safe-area-inset-left));
+  }
+
+  .museum-topbar > a {
+    padding: 0.7rem 0.78rem;
+  }
+
+  .museum-topbar > div {
+    max-width: 52vw;
+    padding: 0.64rem 0.7rem;
+  }
+
+  .museum-topbar strong {
+    overflow: hidden;
+    max-width: 100%;
+    font-size: 0.88rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .museum-topbar span {
+    font-size: 0.55rem;
+  }
+
+  .museum-entry-panel {
+    width: min(38rem, calc(100vw - max(2rem, env(safe-area-inset-left) + env(safe-area-inset-right))));
+    max-height: calc(100dvh - max(2rem, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+    padding: clamp(1.35rem, 5vw, 2.4rem);
+    overflow: auto;
+  }
+
+  .museum-entry-panel h1 {
+    font-size: clamp(2.35rem, 12vw, 4.4rem);
+  }
+
+  .museum-entry-panel button {
+    margin-block: 1.1rem 0.8rem;
+  }
+
+  .museum-entry-panel > div {
+    white-space: normal;
+  }
+
+  .museum-crosshair {
+    width: 0.3rem;
+    height: 0.3rem;
+  }
+
+  .museum-interaction--touch {
+    bottom: max(9.7rem, calc(env(safe-area-inset-bottom) + 8.7rem));
+    width: min(26rem, calc(100vw - 2rem));
+  }
+}
+
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 600px) {
+  .museum-topbar > div,
+  .museum-look-zone > span,
+  .museum-joystick > span {
+    display: none;
+  }
+
+  .museum-topbar {
+    right: auto;
+  }
+
+  .museum-joystick {
+    left: max(0.7rem, env(safe-area-inset-left));
+    bottom: max(0.7rem, env(safe-area-inset-bottom));
+    width: clamp(5.2rem, 16vw, 6.5rem);
+  }
+
+  .museum-joystick-knob {
+    width: 2.5rem;
+  }
+
+  .museum-touch-pause {
+    top: 50%;
+    right: max(0.7rem, env(safe-area-inset-right));
+    transform: translateY(-50%);
+  }
+
+  .museum-interaction--touch {
+    bottom: max(0.7rem, env(safe-area-inset-bottom));
+    width: min(20rem, 44vw);
+  }
+
+  .museum-entry-panel {
+    width: min(42rem, calc(100vw - 2rem));
+    padding: 1.15rem 1.4rem;
+  }
+
+  .museum-entry-panel h1 {
+    margin-block: 0.35rem 0.55rem;
+    font-size: clamp(2rem, 9vh, 3.2rem);
+  }
+
+  .museum-entry-panel p {
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+
+  .museum-entry-panel button {
+    margin-block: 0.65rem;
+    padding: 0.75rem 1rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

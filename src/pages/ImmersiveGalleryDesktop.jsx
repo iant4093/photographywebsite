@@ -29,6 +29,12 @@ const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
 const MuseumDressing = lazy(() => import('../components/museum/MuseumDressing.jsx'))
 
+function usesTouchControls() {
+    if (typeof window === 'undefined') return false
+    return Boolean(window.matchMedia?.('(pointer: coarse)').matches)
+        || (window.innerWidth < 900 && (navigator.maxTouchPoints || 0) > 0)
+}
+
 function safeSessionPosition(layout) {
     try {
         const value = JSON.parse(sessionStorage.getItem(SESSION_KEY))
@@ -659,13 +665,91 @@ function focusedPainting(layout, camera) {
     return best
 }
 
-function PlayerController({ layout, enabled, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function MuseumTouchControls({ input, onPause }) {
+    const stick = useRef(null)
+    const knob = useRef(null)
+    const lastLook = useRef({ x: 0, y: 0 })
+
+    const resetMovement = () => {
+        input.current.moveX = 0
+        input.current.moveY = 0
+        if (knob.current) knob.current.style.transform = 'translate3d(0, 0, 0)'
+    }
+
+    const updateMovement = (event) => {
+        const rect = stick.current?.getBoundingClientRect()
+        if (!rect) return
+        const radius = Math.min(rect.width, rect.height) * 0.34
+        const rawX = event.clientX - (rect.left + (rect.width / 2))
+        const rawY = event.clientY - (rect.top + (rect.height / 2))
+        const length = Math.hypot(rawX, rawY)
+        const scale = length > radius ? radius / length : 1
+        const x = rawX * scale
+        const y = rawY * scale
+        input.current.moveX = x / radius
+        input.current.moveY = y / radius
+        if (knob.current) knob.current.style.transform = `translate3d(${x}px, ${y}px, 0)`
+    }
+
+    useEffect(() => () => {
+        input.current.moveX = 0
+        input.current.moveY = 0
+        input.current.lookX = 0
+        input.current.lookY = 0
+    }, [input])
+
+    return (
+        <div className="museum-touch-controls">
+            <div
+                className="museum-look-zone"
+                aria-label="Drag to look around"
+                onPointerDown={(event) => {
+                    event.preventDefault()
+                    lastLook.current = { x: event.clientX, y: event.clientY }
+                    event.currentTarget.setPointerCapture(event.pointerId)
+                }}
+                onPointerMove={(event) => {
+                    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+                    input.current.lookX += event.clientX - lastLook.current.x
+                    input.current.lookY += event.clientY - lastLook.current.y
+                    lastLook.current = { x: event.clientX, y: event.clientY }
+                }}
+            >
+                <span>Drag to look</span>
+            </div>
+            <div
+                ref={stick}
+                className="museum-joystick"
+                aria-label="Movement joystick"
+                onPointerDown={(event) => {
+                    event.preventDefault()
+                    event.currentTarget.setPointerCapture(event.pointerId)
+                    updateMovement(event)
+                }}
+                onPointerMove={(event) => {
+                    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+                    updateMovement(event)
+                }}
+                onPointerUp={resetMovement}
+                onPointerCancel={resetMovement}
+                onLostPointerCapture={resetMovement}
+            >
+                <div ref={knob} className="museum-joystick-knob" />
+                <span>Move</span>
+            </div>
+            <button className="museum-touch-pause" type="button" onClick={onPause}>Pause</button>
+        </div>
+    )
+}
+
+function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const { camera } = useThree()
     const keys = useRef(new Set())
     const lastRoom = useRef(null)
     const lastNearbyRooms = useRef('')
     const lastFocused = useRef(null)
     const lastSavedAt = useRef(0)
+    const touchEuler = useMemo(() => new THREE.Euler(0, 0, 0, 'YXZ'), [])
 
     useEffect(() => {
         const returningFromAlbum = sessionStorage.getItem(RETURN_KEY) === 'true'
@@ -701,7 +785,22 @@ function PlayerController({ layout, enabled, onActiveRoom, onNearbyRooms, onFocu
     useFrame((state, frameDelta) => {
         if (!enabled) return
         const delta = Math.min(frameDelta, 0.05)
-        const speed = keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') ? 5.3 : 3.25
+        if (touchMode && (touchInput.current.lookX || touchInput.current.lookY)) {
+            touchEuler.setFromQuaternion(camera.quaternion)
+            touchEuler.y -= touchInput.current.lookX * 0.0042
+            touchEuler.x = THREE.MathUtils.clamp(
+                touchEuler.x - (touchInput.current.lookY * 0.0038),
+                -1.28,
+                1.28,
+            )
+            camera.quaternion.setFromEuler(touchEuler)
+            touchInput.current.lookX = 0
+            touchInput.current.lookY = 0
+        }
+        const touchMagnitude = touchMode
+            ? Math.min(1, Math.hypot(touchInput.current.moveX, touchInput.current.moveY))
+            : 0
+        const speed = keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') || touchMagnitude > 0.9 ? 5.3 : 3.25
         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
         forward.y = 0
         forward.normalize()
@@ -712,8 +811,13 @@ function PlayerController({ layout, enabled, onActiveRoom, onNearbyRooms, onFocu
         if (keys.current.has('KeyS') || keys.current.has('ArrowDown')) movement.sub(forward)
         if (keys.current.has('KeyD') || keys.current.has('ArrowRight')) movement.add(right)
         if (keys.current.has('KeyA') || keys.current.has('ArrowLeft')) movement.sub(right)
+        if (touchMode) {
+            movement.addScaledVector(forward, -touchInput.current.moveY)
+            movement.addScaledVector(right, touchInput.current.moveX)
+        }
         if (movement.lengthSq()) {
-            movement.normalize().multiplyScalar(speed * delta)
+            const movementScale = touchMode && touchMagnitude > 0 ? Math.max(0.18, touchMagnitude) : 1
+            movement.normalize().multiplyScalar(speed * delta * movementScale)
             const next = moveMuseumPosition(
                 layout,
                 { x: camera.position.x, z: camera.position.z },
@@ -772,7 +876,7 @@ function PreviewCamera({ mode, roomIndex, layout }) {
     return null
 }
 
-function MuseumScene({ layout, controlsEnabled, visualPreview, previewMode, previewRoomIndex, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
     return (
         <>
@@ -800,12 +904,14 @@ function MuseumScene({ layout, controlsEnabled, visualPreview, previewMode, prev
                     <PlayerController
                         layout={layout}
                         enabled={controlsEnabled.locked}
+                        touchMode={touchMode}
+                        touchInput={touchInput}
                         onActiveRoom={onActiveRoom}
                         onNearbyRooms={onNearbyRooms}
                         onFocusedPainting={onFocusedPainting}
                         onOpenAlbum={onOpenAlbum}
                     />
-                    <PointerLockControls selector="#museum-enter" onLock={onLock} onUnlock={onUnlock} />
+                    {!touchMode && <PointerLockControls selector="#museum-enter" onLock={onLock} onUnlock={onUnlock} />}
                 </>
             )}
             <AdaptiveDpr />
@@ -828,6 +934,8 @@ function CatalogStatus({ error, onRetry }) {
 
 export default function ImmersiveGalleryDesktop() {
     const navigate = useNavigate()
+    const previewParams = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null
+    const forceTouchPreview = previewParams?.get('museum-touch') === '1'
     const [albums, setAlbums] = useState(null)
     const [error, setError] = useState('')
     const [loadVersion, setLoadVersion] = useState(0)
@@ -835,6 +943,19 @@ export default function ImmersiveGalleryDesktop() {
     const [activeRoomId, setActiveRoomId] = useState(null)
     const [activeRoomIds, setActiveRoomIds] = useState([])
     const [focused, setFocused] = useState(null)
+    const [touchMode, setTouchMode] = useState(() => forceTouchPreview || usesTouchControls())
+    const touchInput = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 })
+
+    useEffect(() => {
+        const pointer = window.matchMedia?.('(pointer: coarse)')
+        const update = () => setTouchMode(forceTouchPreview || usesTouchControls())
+        pointer?.addEventListener?.('change', update)
+        window.addEventListener('resize', update)
+        return () => {
+            pointer?.removeEventListener?.('change', update)
+            window.removeEventListener('resize', update)
+        }
+    }, [forceTouchPreview])
 
     useEffect(() => {
         const controller = new AbortController()
@@ -848,7 +969,6 @@ export default function ImmersiveGalleryDesktop() {
 
     const catalog = useMemo(() => buildMuseumCatalog(albums || []), [albums])
     const layout = useMemo(() => buildMuseumLayout(catalog), [catalog])
-    const previewParams = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null
     const previewMode = previewParams?.get('museum-preview') || ''
     const previewRoomIndex = Number.parseInt(previewParams?.get('museum-room') || '0', 10) || 0
     const visualPreview = ['lobby', 'hall', 'room'].includes(previewMode)
@@ -869,11 +989,11 @@ export default function ImmersiveGalleryDesktop() {
     if (!catalog.length) return <CatalogStatus error="There are no public photo albums to display yet." onRetry={() => setLoadVersion(value => value + 1)} />
 
     return (
-        <div className="museum-experience" aria-label="Ian Truong Photography immersive gallery">
+        <div className={`museum-experience${touchMode ? ' museum-experience--touch' : ''}`} aria-label="Ian Truong Photography immersive gallery">
             <Canvas
                 className="museum-canvas"
-                camera={{ fov: 66, near: 0.08, far: 220, position: layout.spawn }}
-                dpr={[0.75, 1.5]}
+                camera={{ fov: touchMode ? 72 : 66, near: 0.08, far: 220, position: layout.spawn }}
+                dpr={touchMode ? [0.65, 1.15] : [0.75, 1.5]}
                 shadows
                 gl={{ antialias: true, powerPreference: 'high-performance', alpha: false }}
                 onCreated={({ gl }) => {
@@ -888,6 +1008,8 @@ export default function ImmersiveGalleryDesktop() {
                     <MuseumScene
                         layout={layout}
                         controlsEnabled={{ locked, activeRoomIds: renderedActiveRoomIds }}
+                        touchMode={touchMode}
+                        touchInput={touchInput}
                         visualPreview={visualPreview}
                         previewMode={previewMode}
                         previewRoomIndex={previewRoomIndex}
@@ -908,27 +1030,36 @@ export default function ImmersiveGalleryDesktop() {
                 </div>
             </div>
             <div className="museum-crosshair" aria-hidden="true" />
-            {focused && locked && (
+            {focused && locked && (touchMode ? (
+                <button className="museum-interaction museum-interaction--touch" type="button" onClick={() => openAlbum(focused.album)}>
+                    Open <strong>{focused.album.title}</strong>
+                </button>
+            ) : (
                 <div className="museum-interaction" role="status">
                     <span>E</span>
                     <p>Open <strong>{focused.album.title}</strong></p>
                 </div>
+            ))}
+            {!touchMode && (
+                <div className="museum-controls-legend" aria-hidden="true">
+                    <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span>
+                    <span><kbd>Mouse</kbd> Look</span>
+                    <span><kbd>Shift</kbd> Walk faster</span>
+                    <span><kbd>Esc</kbd> Pause</span>
+                </div>
             )}
-            <div className="museum-controls-legend" aria-hidden="true">
-                <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span>
-                <span><kbd>Mouse</kbd> Look</span>
-                <span><kbd>Shift</kbd> Walk faster</span>
-                <span><kbd>Esc</kbd> Pause</span>
-            </div>
+            {touchMode && locked && !visualPreview && (
+                <MuseumTouchControls input={touchInput} onPause={() => setLocked(false)} />
+            )}
             {!locked && !visualPreview && (
                 <div className="museum-entry-panel">
                     <span className="museum-entry-number">The virtual archive</span>
                     <h1>{activeRoomId ? 'Gallery paused' : 'Enter the gallery'}</h1>
                     <p>
-                        Walk through rooms generated from the live photography archive. Look toward a framed album and press E to open it.
+                        Walk through rooms generated from the live photography archive. Look toward a framed album and {touchMode ? 'tap Open to enter it.' : 'press E to open it.'}
                     </p>
-                    <button id="museum-enter" type="button">{activeRoomId ? 'Continue exploring' : 'Begin walk-through'}</button>
-                    <div><kbd>WASD</kbd> to move · <kbd>Mouse</kbd> to look · <kbd>Esc</kbd> to pause</div>
+                    <button id="museum-enter" type="button" onClick={touchMode ? () => setLocked(true) : undefined}>{activeRoomId ? 'Continue exploring' : 'Begin walk-through'}</button>
+                    <div>{touchMode ? 'Use the joystick to move · Drag the view to look around' : <><kbd>WASD</kbd> to move · <kbd>Mouse</kbd> to look · <kbd>Esc</kbd> to pause</>}</div>
                 </div>
             )}
         </div>
