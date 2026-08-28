@@ -102,7 +102,7 @@ function useMuseumMaterials() {
     const sources = useTexture({
         plasterColor: `${TEXTURE_ROOT}/white_plaster_02_diff_1k.jpg`,
         woodColor: `${TEXTURE_ROOT}/wood_floor_diff_1k.jpg`,
-        wallpaperColor: `${TEXTURE_ROOT}/museum_wallpaper_albedo_1k.jpg`,
+        wallpaperColor: `${TEXTURE_ROOT}/museum_wallpaper_albedo_512.jpg`,
     })
     const materials = useMemo(() => ({
         plaster: {

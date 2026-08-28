@@ -50,6 +50,7 @@ export default defineConfig(({ mode }) => {
             if (!id.includes('node_modules')) return undefined
             if (id.includes('amazon-cognito-identity-js') || id.includes('@aws-crypto') || id.includes('/buffer/')) return 'vendor-auth'
             if (id.includes('hls.js')) return 'vendor-hls'
+            if (id.includes('/three/') || id.includes('@react-three/')) return 'vendor-museum'
             if (id.includes('@marsidev/react-turnstile')) return 'vendor-turnstile'
             if (id.includes('framer-motion') || id.includes('motion-dom') || id.includes('motion-utils')) return 'vendor-motion'
             if (id.includes('react-blurhash') || id.includes('/blurhash/')) return 'vendor-imaging'

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "frontend": {
-    "totalUncompressedBytes": 7550000,
+    "totalUncompressedBytes": 7650000,
     "totalGzipBytes": 5000000,
     "entryJavaScriptBytes": 355000,
     "entryJavaScriptGzipBytes": 120000,
