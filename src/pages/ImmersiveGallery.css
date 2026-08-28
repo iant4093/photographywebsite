@@ -52,6 +52,15 @@
   animation: museum-loading-sweep 1.25s ease-in-out infinite;
 }
 
+.museum-loading-progress--determinate > i {
+  inset: 0;
+  width: 100%;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #8d623e, #d2a575);
+  animation: none;
+  transition: transform 160ms ease-out;
+}
+
 @keyframes museum-loading-sweep {
   to { transform: translateX(365%); }
 }

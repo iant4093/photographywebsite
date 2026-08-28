@@ -46,6 +46,11 @@ export function buildMuseumCatalog(albums = []) {
 
 function makePaintings(room) {
     const wallOffset = (room.width / 2) - 0.12
+    // Deliberately vary the cadence instead of repeating identical pairs all
+    // the way down a room. Each three-row chapter reads as a hero, a quieter
+    // pair, then an offset pair with more negative space.
+    const rowOffsets = [0, 0.62, -0.18, 1.02, 0.18, -0.34]
+    const scalePattern = [1.28, 1.02, 0.9, 0.94, 1.14, 0.88]
     return room.albums.map((album, index) => {
         const row = Math.floor(index / 2)
         const onNearWall = index % 2 === 0
@@ -54,13 +59,17 @@ function makePaintings(room) {
             MUSEUM_DIMENSIONS.hallHalfWidth
             + 4.15
             + (row * MUSEUM_DIMENSIONS.paintingSpacing)
+            + rowOffsets[row % rowOffsets.length]
         )
+        const scale = scalePattern[index % scalePattern.length]
+        const heightOffset = [0.24, -0.04, -0.22, 0.18, 0.08, -0.16][index % 6]
         return {
             id: album.albumId,
             album,
-            position: [x, 2.65, z],
+            position: [x, 2.65 + heightOffset, z],
             rotationY: onNearWall ? 0 : Math.PI,
             normal: [0, 0, onNearWall ? 1 : -1],
+            scale: [scale, scale, 1],
         }
     })
 }
@@ -76,8 +85,9 @@ function makeBenches(room) {
         )
         benches.push({
             id: `${room.id}-bench-${row}`,
-            position: [x, 0.42, room.centerZ],
+            position: [x, 0.42, room.centerZ + (row % 2 === 0 ? -0.72 : 0.58)],
             size: [1.7, 0.42, 3.15],
+            rotationY: row % 2 === 0 ? -0.045 : 0.045,
         })
     }
     return benches

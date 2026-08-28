@@ -4,6 +4,8 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { fetchAllAlbums } from '../utils/api'
 import { albumCoverPreviewSrcSet } from '../utils/mediaUrls'
 import {
@@ -20,24 +22,36 @@ const SESSION_KEY = 'ian-photography-museum-position-v2'
 const RETURN_KEY = 'ian-photography-museum-return'
 const HALL_PAINT = '#d8d0c4'
 const ROOM_PAINT = '#d2c9bc'
+// Decorative surfaces sit just inside the structural shell. A small, shared
+// inset plus polygonOffset avoids z-fighting without letting wallpaper float
+// through moulding at the end of a bay.
+const WALL_SURFACE_GAP = 0.018
 const GOLD = '#9b7747'
 const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
 const WALLPAPER_TILE_SIZE = 3.4
 const HALL_WALL_THICKNESS = 0.32
 const ROOM_SHELL_INSET = 0.42
+// Image decoding and GPU promotion are the only workloads in this scene that
+// can create multi-frame stalls. Four concurrent off-thread decodes finish the
+// opening warmup quickly without exposing uploads during the walk-through.
 const COVER_LOAD_CONCURRENCY = 4
-const LOW_RES_COVER_WIDTH = 640
-const MAX_LOW_RES_COVERS = 120
-// The largest live bay currently contains 32 detailed covers. Keep enough
-// headroom that cache eviction never disposes a texture still mounted in view.
-const MAX_DETAIL_COVERS = 48
+const LOW_RES_COVER_WIDTH = 480
+const DESKTOP_COVER_CACHE_BUDGET = 192 * 1024 * 1024
+const LOW_POWER_COVER_CACHE_BUDGET = 84 * 1024 * 1024
 const coverTextureCache = new Map()
 const coverTextureLoads = new Map()
 const coverTextureReferences = new Map()
+const labelTextureCache = new Map()
+const roomPlaqueBatchCache = new Map()
 const coverLoadQueue = []
+const coverUploadQueue = []
+const uploadedCoverTextures = new WeakSet()
+const pendingCoverUploads = new WeakMap()
+const pinnedCoverTextures = new WeakSet()
 let activeCoverLoads = 0
 let coverLoadSequence = 0
+let coverUploadScheduled = false
 const MuseumDressing = lazy(() => import('../components/museum/MuseumDressing.jsx'))
 function coverCacheKey(album, targetWidth) {
     return `${album.albumId}:${targetWidth}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
@@ -55,16 +69,58 @@ function cachedCoverTexture(album, targetWidth) {
 
 function trimCoverTextureCache() {
     const entries = [...coverTextureCache.entries()]
-    const lowResolution = entries.filter(([key]) => Number(key.split(':')[1]) <= LOW_RES_COVER_WIDTH)
-    const detail = entries.filter(([key]) => Number(key.split(':')[1]) > LOW_RES_COVER_WIDTH)
-    const overflow = [
-        ...lowResolution.slice(0, Math.max(0, lowResolution.length - MAX_LOW_RES_COVERS)),
-        ...detail.slice(0, Math.max(0, detail.length - MAX_DETAIL_COVERS)),
-    ].filter(([key]) => (coverTextureReferences.get(key) || 0) === 0)
-    overflow.forEach(([key, texture]) => {
+    const deviceMemory = typeof navigator === 'undefined' ? 8 : Number(navigator.deviceMemory || 8)
+    const lowPower = usesTouchControls() || deviceMemory <= 4
+    const budget = lowPower ? LOW_POWER_COVER_CACHE_BUDGET : DESKTOP_COVER_CACHE_BUDGET
+    let bytes = entries.reduce((total, [, texture]) => total + Number(texture?.userData?.museumBytes || 0), 0)
+    for (const [key, texture] of entries) {
+        if (bytes <= budget) break
+        if ((coverTextureReferences.get(key) || 0) > 0 || pinnedCoverTextures.has(texture)) continue
         coverTextureCache.delete(key)
+        bytes -= Number(texture?.userData?.museumBytes || 0)
+        texture?.image?.close?.()
         texture?.dispose()
+    }
+}
+
+function enqueueCoverUpload(gl, texture) {
+    if (!texture || uploadedCoverTextures.has(texture)) return Promise.resolve(texture)
+    const pending = pendingCoverUploads.get(texture)
+    if (pending) return pending
+    pinnedCoverTextures.add(texture)
+    const upload = new Promise((resolve) => {
+        coverUploadQueue.push({ gl, texture, resolve })
+        if (coverUploadScheduled) return
+        coverUploadScheduled = true
+        const scheduleFlush = (callback) => {
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(
+                    () => window.requestAnimationFrame(callback),
+                    { timeout: 180 },
+                )
+                return
+            }
+            window.setTimeout(() => window.requestAnimationFrame(callback), 54)
+        }
+        const flush = () => {
+            const next = coverUploadQueue.shift()
+            if (!next) {
+                coverUploadScheduled = false
+                return
+            }
+            if (!uploadedCoverTextures.has(next.texture)) {
+                next.gl.initTexture?.(next.texture)
+                uploadedCoverTextures.add(next.texture)
+            }
+            pinnedCoverTextures.delete(next.texture)
+            pendingCoverUploads.delete(next.texture)
+            next.resolve(next.texture)
+            scheduleFlush(flush)
+        }
+        scheduleFlush(flush)
     })
+    pendingCoverUploads.set(texture, upload)
+    return upload
 }
 
 function usesTouchControls() {
@@ -138,7 +194,7 @@ function PlasterMaterial({ materials, color = HALL_PAINT, side, roughness = 0.88
     )
 }
 
-function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8c8b4', side = THREE.FrontSide, shapeUv = false, phase = 0 }) {
+function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8c8b4', side = THREE.FrontSide, shapeUv = false, phase = 0, reverseU = false }) {
     const map = useMemo(() => {
         const next = materials.wallpaper.map.clone()
         next.wrapS = THREE.RepeatWrapping
@@ -147,17 +203,18 @@ function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8
             next.repeat.set(1 / WALLPAPER_TILE_SIZE, 1 / WALLPAPER_TILE_SIZE)
             next.offset.set((centerZ / WALLPAPER_TILE_SIZE) + phase, phase * 0.37)
         } else {
-            next.repeat.set(
-                Math.max(0.35, width / WALLPAPER_TILE_SIZE),
-                Math.max(0.35, height / WALLPAPER_TILE_SIZE),
-            )
-            next.offset.set(((centerZ - (width / 2)) / WALLPAPER_TILE_SIZE) + phase, phase * 0.37)
+            const horizontalRepeat = Math.max(0.35, width / WALLPAPER_TILE_SIZE)
+            next.repeat.set(reverseU ? -horizontalRepeat : horizontalRepeat, Math.max(0.35, height / WALLPAPER_TILE_SIZE))
+            next.offset.set((
+                (reverseU ? centerZ + (width / 2) : centerZ - (width / 2))
+                / WALLPAPER_TILE_SIZE
+            ) + phase, phase * 0.37)
         }
         next.colorSpace = THREE.SRGBColorSpace
         next.anisotropy = 4
         next.needsUpdate = true
         return next
-    }, [centerZ, height, materials.wallpaper.map, phase, shapeUv, width])
+    }, [centerZ, height, materials.wallpaper.map, phase, reverseU, shapeUv, width])
 
     useEffect(() => () => map.dispose(), [map])
 
@@ -169,31 +226,106 @@ function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8
             color={color}
             roughness={0.9}
             metalness={0}
+            polygonOffset
+            polygonOffsetFactor={-1}
+            polygonOffsetUnits={-2}
             side={side}
         />
     )
 }
 
-let paintingWashTexture = null
-function getPaintingWashTexture() {
-    if (paintingWashTexture || typeof document === 'undefined') return paintingWashTexture
+let curtainTexture = null
+let floorLightPoolTexture = null
+let wallLightPoolTexture = null
+function getCurtainTexture() {
+    if (curtainTexture || typeof document === 'undefined') return curtainTexture
     const canvas = document.createElement('canvas')
     canvas.width = 256
-    canvas.height = 384
+    canvas.height = 256
     const context = canvas.getContext('2d')
-    const gradient = context.createRadialGradient(128, 52, 6, 128, 122, 218)
-    gradient.addColorStop(0, 'rgba(255, 231, 193, 0.66)')
-    gradient.addColorStop(0.34, 'rgba(255, 213, 161, 0.28)')
-    gradient.addColorStop(0.76, 'rgba(204, 152, 100, 0.07)')
-    gradient.addColorStop(1, 'rgba(120, 80, 42, 0)')
+    const gradient = context.createLinearGradient(0, 0, canvas.width, 0)
+    for (let index = 0; index <= 16; index += 1) {
+        const position = index / 16
+        const light = index % 2 === 0 ? 31 : 13
+        gradient.addColorStop(position, `hsl(351 45% ${light}%)`)
+    }
     context.fillStyle = gradient
     context.fillRect(0, 0, canvas.width, canvas.height)
-    paintingWashTexture = new THREE.CanvasTexture(canvas)
-    paintingWashTexture.colorSpace = THREE.SRGBColorSpace
-    paintingWashTexture.minFilter = THREE.LinearFilter
-    paintingWashTexture.magFilter = THREE.LinearFilter
-    paintingWashTexture.needsUpdate = true
-    return paintingWashTexture
+    const vignette = context.createLinearGradient(0, 0, 0, canvas.height)
+    vignette.addColorStop(0, 'rgba(255, 224, 198, 0.12)')
+    vignette.addColorStop(0.62, 'rgba(42, 4, 12, 0)')
+    vignette.addColorStop(1, 'rgba(24, 2, 8, 0.32)')
+    context.fillStyle = vignette
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    curtainTexture = new THREE.CanvasTexture(canvas)
+    curtainTexture.colorSpace = THREE.SRGBColorSpace
+    curtainTexture.wrapS = THREE.RepeatWrapping
+    curtainTexture.wrapT = THREE.ClampToEdgeWrapping
+    curtainTexture.repeat.set(1.75, 1)
+    curtainTexture.anisotropy = 2
+    curtainTexture.needsUpdate = true
+    return curtainTexture
+}
+
+function getFloorLightPoolTexture() {
+    if (floorLightPoolTexture || typeof document === 'undefined') return floorLightPoolTexture
+    const canvas = document.createElement('canvas')
+    canvas.width = 160
+    canvas.height = 160
+    const context = canvas.getContext('2d')
+    const gradient = context.createRadialGradient(80, 80, 4, 80, 80, 78)
+    gradient.addColorStop(0, 'rgba(255, 215, 166, 0.34)')
+    gradient.addColorStop(0.34, 'rgba(236, 168, 96, 0.18)')
+    gradient.addColorStop(0.72, 'rgba(171, 91, 42, 0.055)')
+    gradient.addColorStop(1, 'rgba(80, 36, 18, 0)')
+    context.fillStyle = gradient
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    floorLightPoolTexture = new THREE.CanvasTexture(canvas)
+    floorLightPoolTexture.colorSpace = THREE.SRGBColorSpace
+    floorLightPoolTexture.minFilter = THREE.LinearFilter
+    floorLightPoolTexture.magFilter = THREE.LinearFilter
+    floorLightPoolTexture.needsUpdate = true
+    return floorLightPoolTexture
+}
+
+function getWallLightPoolTexture() {
+    if (wallLightPoolTexture || typeof document === 'undefined') return wallLightPoolTexture
+    const canvas = document.createElement('canvas')
+    canvas.width = 192
+    canvas.height = 160
+    const context = canvas.getContext('2d')
+    const gradient = context.createRadialGradient(96, 30, 4, 96, 70, 112)
+    gradient.addColorStop(0, 'rgba(255, 235, 204, 0.48)')
+    gradient.addColorStop(0.3, 'rgba(245, 190, 124, 0.24)')
+    gradient.addColorStop(0.7, 'rgba(161, 88, 40, 0.07)')
+    gradient.addColorStop(1, 'rgba(70, 34, 18, 0)')
+    context.fillStyle = gradient
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    wallLightPoolTexture = new THREE.CanvasTexture(canvas)
+    wallLightPoolTexture.colorSpace = THREE.SRGBColorSpace
+    wallLightPoolTexture.minFilter = THREE.LinearFilter
+    wallLightPoolTexture.magFilter = THREE.LinearFilter
+    wallLightPoolTexture.generateMipmaps = false
+    wallLightPoolTexture.needsUpdate = true
+    return wallLightPoolTexture
+}
+
+function FloorLightPool({ position, size = [4.8, 5.8], opacity = 0.16 }) {
+    const map = useMemo(() => getFloorLightPoolTexture(), [])
+    return (
+        <mesh position={position} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}>
+            <planeGeometry args={size} />
+            <meshBasicMaterial
+                map={map}
+                color="#efb779"
+                transparent
+                opacity={opacity}
+                depthWrite={false}
+                blending={THREE.AdditiveBlending}
+                toneMapped={false}
+            />
+        </mesh>
+    )
 }
 
 function WallpaperPanel({ materials, side, centerZ, width, height = MUSEUM_DIMENSIONS.hallHeight }) {
@@ -201,14 +333,14 @@ function WallpaperPanel({ materials, side, centerZ, width, height = MUSEUM_DIMEN
     return (
         <mesh
             position={[
-                side * (MUSEUM_DIMENSIONS.hallHalfWidth - ((HALL_WALL_THICKNESS / 2) + 0.006)),
+                side * (MUSEUM_DIMENSIONS.hallHalfWidth - ((HALL_WALL_THICKNESS / 2) + WALL_SURFACE_GAP)),
                 height / 2,
                 centerZ,
             ]}
             rotation={[0, rotationY, 0]}
         >
             <planeGeometry args={[width, height]} />
-            <WallpaperMaterial materials={materials} width={width} height={height} centerZ={centerZ} />
+            <WallpaperMaterial materials={materials} width={width} height={height} centerZ={centerZ} reverseU={side < 0} />
         </mesh>
     )
 }
@@ -246,12 +378,30 @@ function StaticSpotlight({
     angle = 0.62,
     penumbra = 0.78,
     castShadow = false,
+    shadowKey = '',
 }) {
+    const light = useRef(null)
     const targetObject = useMemo(() => new THREE.Object3D(), [])
+    useEffect(() => {
+        if (!castShadow || !light.current?.shadow) return undefined
+        const shadow = light.current.shadow
+        // The room shell, frames and furniture are already mounted when an
+        // active-room slot changes. Render that shadow once, then keep it
+        // frozen while camera-aware artwork materials come and go; otherwise
+        // a 512px shadow pass needlessly rerenders on every walking frame.
+        targetObject.updateMatrixWorld(true)
+        light.current.updateMatrixWorld(true)
+        shadow.autoUpdate = false
+        shadow.needsUpdate = true
+        return () => {
+            shadow.autoUpdate = true
+        }
+    }, [castShadow, shadowKey, targetObject])
     return (
         <>
             <primitive object={targetObject} position={target} />
             <spotLight
+                ref={light}
                 position={position}
                 target={targetObject}
                 color={color}
@@ -300,8 +450,11 @@ function WoodMaterial({ materials, color = '#6f4d31', roughness = 0.55 }) {
     )
 }
 
-function useLabelTexture(title, subtitle = '', { width = 1024, height = 256, dark = true } = {}) {
-    const texture = useMemo(() => {
+function getLabelTexture(title, subtitle = '', { width = 1024, height = 256, dark = true } = {}) {
+    const key = `${dark ? 'dark' : 'light'}:${width}:${height}:${title}:${subtitle}`
+    const cached = labelTextureCache.get(key)
+    if (cached) return cached
+
         const canvas = document.createElement('canvas')
         canvas.width = width
         canvas.height = height
@@ -325,16 +478,106 @@ function useLabelTexture(title, subtitle = '', { width = 1024, height = 256, dar
         }
         const next = new THREE.CanvasTexture(canvas)
         next.colorSpace = THREE.SRGBColorSpace
-        next.generateMipmaps = true
-        next.minFilter = THREE.LinearMipmapLinearFilter
+        // Plaques are flat UI-like surfaces. Avoiding per-label mip generation
+        // removes a burst of GPU work when a large room is activated.
+        next.generateMipmaps = false
+        next.minFilter = THREE.LinearFilter
         next.magFilter = THREE.LinearFilter
-        next.anisotropy = 2
+        next.anisotropy = 1
         next.needsUpdate = true
-        return next
-    }, [dark, height, subtitle, title, width])
+    labelTextureCache.set(key, next)
+    return next
+}
 
-    useEffect(() => () => texture.dispose(), [texture])
-    return texture
+function useLabelTexture(title, subtitle = '', options = {}) {
+    const { width = 1024, height = 256, dark = true } = options
+    return useMemo(
+        () => getLabelTexture(title, subtitle, { width, height, dark }),
+        [dark, height, subtitle, title, width],
+    )
+}
+
+function roomPlaqueBatchKey(paintings) {
+    return paintings.map(({ album, id }) => (
+        `${id}:${album?.title || ''}:${albumPlaqueSubtitle(album)}`
+    )).join('|')
+}
+
+function getRoomPlaqueBatch(paintings) {
+    const key = roomPlaqueBatchKey(paintings)
+    const cached = roomPlaqueBatchCache.get(key)
+    if (cached) return cached
+
+    const columns = Math.min(4, Math.max(1, paintings.length))
+    const rows = Math.max(1, Math.ceil(paintings.length / columns))
+    // Preserve the exact per-plaque source resolution; the optimization is a
+    // bind/draw-call reduction, not a visible quality tradeoff.
+    const tileWidth = 512
+    const tileHeight = 128
+    const canvas = document.createElement('canvas')
+    canvas.width = columns * tileWidth
+    canvas.height = rows * tileHeight
+    const context = canvas.getContext('2d')
+    const parent = new THREE.Matrix4()
+    const local = new THREE.Matrix4().makeTranslation(0, -1.55, 0.13)
+    const rotation = new THREE.Quaternion()
+    const position = new THREE.Vector3()
+    const scale = new THREE.Vector3()
+    const geometries = paintings.map((painting, index) => {
+        const source = getLabelTexture(
+            painting.album.title,
+            albumPlaqueSubtitle(painting.album),
+            { width: 512, height: 128, dark: false },
+        ).image
+        const column = index % columns
+        const row = Math.floor(index / columns)
+        context.drawImage(source, column * tileWidth, row * tileHeight, tileWidth, tileHeight)
+
+        const geometry = new THREE.PlaneGeometry(2.9, 0.62)
+        const uv = geometry.getAttribute('uv')
+        for (let vertex = 0; vertex < uv.count; vertex += 1) {
+            uv.setXY(
+                vertex,
+                (column + uv.getX(vertex)) / columns,
+                ((rows - row - 1) + uv.getY(vertex)) / rows,
+            )
+        }
+        uv.needsUpdate = true
+        rotation.setFromEuler(new THREE.Euler(0, painting.rotationY, 0))
+        scale.set(...(painting.scale || [1, 1, 1]))
+        parent.compose(position.set(...painting.position), rotation, scale)
+        geometry.applyMatrix4(parent.multiply(local))
+        return geometry
+    })
+    const geometry = mergeGeometries(geometries, false)
+    geometries.forEach(item => item.dispose())
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.generateMipmaps = false
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.anisotropy = 1
+    texture.needsUpdate = true
+    const batch = { geometry, texture }
+    roomPlaqueBatchCache.set(key, batch)
+    return batch
+}
+
+function RoomPlaqueBatch({ paintings }) {
+    const batch = useMemo(() => getRoomPlaqueBatch(paintings), [paintings])
+    if (!paintings.length) return null
+    return (
+        <mesh geometry={batch.geometry}>
+            <meshBasicMaterial map={batch.texture} toneMapped={false} />
+        </mesh>
+    )
+}
+
+function albumPlaqueSubtitle(album) {
+    const date = album?.createdAt || album?.uploadedAt || ''
+    return date ? new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric',
+    }) : 'Photographic series'
 }
 
 function LabelPlane({ title, subtitle, position, rotation = [0, 0, 0], size = [3, 0.75] }) {
@@ -345,6 +588,41 @@ function LabelPlane({ title, subtitle, position, rotation = [0, 0, 0], size = [3
             <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
         </mesh>
     )
+}
+
+function useUnavailableArtworkTexture(title, enabled) {
+    const texture = useMemo(() => {
+        if (!enabled || typeof document === 'undefined') return null
+        const canvas = document.createElement('canvas')
+        canvas.width = 512
+        canvas.height = 320
+        const context = canvas.getContext('2d')
+        const gradient = context.createLinearGradient(0, 0, 512, 320)
+        gradient.addColorStop(0, '#29231f')
+        gradient.addColorStop(1, '#14110f')
+        context.fillStyle = gradient
+        context.fillRect(0, 0, 512, 320)
+        context.strokeStyle = '#9b7747'
+        context.lineWidth = 5
+        context.strokeRect(18, 18, 476, 284)
+        context.fillStyle = '#eee5d7'
+        context.textAlign = 'center'
+        context.textBaseline = 'middle'
+        context.font = '500 34px Georgia, serif'
+        context.fillText(title, 256, 145, 420)
+        context.fillStyle = '#a9957e'
+        context.font = '500 18px Helvetica, Arial, sans-serif'
+        context.fillText('PREVIEW UNAVAILABLE', 256, 196, 420)
+        const next = new THREE.CanvasTexture(canvas)
+        next.colorSpace = THREE.SRGBColorSpace
+        next.generateMipmaps = false
+        next.minFilter = THREE.LinearFilter
+        next.magFilter = THREE.LinearFilter
+        next.needsUpdate = true
+        return next
+    }, [enabled, title])
+    useEffect(() => () => texture?.dispose(), [texture])
+    return texture
 }
 
 async function optimizedCoverUrls(album, targetWidth = 960) {
@@ -423,6 +701,29 @@ function loadHtmlImage(url, highPriority = false) {
     })
 }
 
+async function loadDecodedImage(url, highPriority = false) {
+    if (typeof createImageBitmap !== 'function') return loadHtmlImage(url, highPriority)
+    try {
+        const response = await fetch(developmentMediaUrl(url), {
+            cache: 'force-cache',
+            credentials: 'omit',
+            priority: highPriority ? 'high' : 'low',
+        })
+        if (!response.ok) throw new Error(`Museum cover request failed (${response.status})`)
+        const blob = await response.blob()
+        return await createImageBitmap(blob, {
+            // WebGL ignores Texture.flipY for ImageBitmap sources, so perform
+            // the upload-space flip during off-thread decoding instead.
+            imageOrientation: 'flipY',
+            premultiplyAlpha: 'none',
+        })
+    } catch {
+        // Safari and cross-origin endpoints do not all expose ImageBitmap in
+        // the same way. The async HTML image path remains a robust fallback.
+        return loadHtmlImage(url, highPriority)
+    }
+}
+
 function cropMuseumCover(texture, image) {
     const imageWidth = image.width || image.naturalWidth
     const imageHeight = image.height || image.naturalHeight
@@ -449,16 +750,26 @@ async function createMuseumCoverTexture(album, targetWidth = 960, priority = tar
         let lastError = null
         for (const url of urls) {
             try {
-                const image = await loadHtmlImage(url, targetWidth > LOW_RES_COVER_WIDTH)
+                const image = await loadDecodedImage(url, targetWidth > LOW_RES_COVER_WIDTH)
                 const texture = new THREE.Texture(image)
                 cropMuseumCover(texture, image)
                 texture.colorSpace = THREE.SRGBColorSpace
-                texture.minFilter = THREE.LinearMipmapLinearFilter
+                // Generating mipmaps during a walk-through is a major source of
+                // interaction-frame stalls. Linear filtering plus restrained
+                // anisotropy stays crisp without that upload penalty.
+                texture.minFilter = THREE.LinearFilter
                 texture.magFilter = THREE.LinearFilter
-                texture.generateMipmaps = true
-                texture.anisotropy = 4
+                texture.generateMipmaps = false
+                texture.anisotropy = targetWidth <= LOW_RES_COVER_WIDTH ? 2 : 4
                 texture.userData.museumCacheKey = cacheKey
+                texture.userData.museumBytes = Math.round(
+                    (image.width || image.naturalWidth || targetWidth)
+                    * (image.height || image.naturalHeight || targetWidth)
+                    * 4
+                    * 1,
+                )
                 texture.needsUpdate = true
+                pinnedCoverTextures.add(texture)
                 coverTextureCache.delete(cacheKey)
                 coverTextureCache.set(cacheKey, texture)
                 trimCoverTextureCache()
@@ -486,7 +797,8 @@ function developmentMediaUrl(value) {
     return value
 }
 
-function useCoverTexture(album, targetWidth, priority = targetWidth) {
+function useCoverTexture(album, targetWidth, priority = targetWidth, onPermanentError) {
+    const { gl, invalidate } = useThree()
     const cacheKey = coverCacheKey(album, targetWidth)
     const [loaded, setLoaded] = useState(() => (
         cachedCoverTexture(album, targetWidth)
@@ -499,11 +811,22 @@ function useCoverTexture(album, targetWidth, priority = targetWidth) {
         if (!targetWidth) return undefined
         const load = (attempt = 0) => {
             createMuseumCoverTexture(album, targetWidth, priority)
+                // A room can fall out of the camera residency set while its
+                // image is still decoding. Do not promote that stale texture
+                // to the GPU after the consumer has gone away.
+                .then(texture => (cancelled ? texture : enqueueCoverUpload(gl, texture)))
                 .then(texture => {
-                    if (!cancelled) setLoaded(texture)
+                    if (!cancelled) {
+                        setLoaded(texture)
+                        invalidate()
+                    }
                 })
                 .catch(() => {
-                    if (cancelled || attempt >= 2) return
+                    if (cancelled) return
+                    if (attempt >= 2) {
+                        onPermanentError?.()
+                        return
+                    }
                     retryTimer = window.setTimeout(() => load(attempt + 1), 500 * (attempt + 1))
                 })
         }
@@ -513,7 +836,7 @@ function useCoverTexture(album, targetWidth, priority = targetWidth) {
             cancelled = true
             window.clearTimeout(retryTimer)
         }
-    }, [album, cacheKey, priority, targetWidth])
+    }, [album, cacheKey, gl, invalidate, onPermanentError, priority, targetWidth])
 
     useEffect(() => {
         const referenceKey = loaded?.userData?.museumCacheKey
@@ -530,21 +853,149 @@ function useCoverTexture(album, targetWidth, priority = targetWidth) {
     return loaded
 }
 
-function Painting({ painting, targetWidth = 0, onTextureReady }) {
-    const lowTexture = useCoverTexture(painting.album, LOW_RES_COVER_WIDTH, 5000 + targetWidth)
-    const detailTexture = useCoverTexture(painting.album, targetWidth, targetWidth)
-    const texture = detailTexture || lowTexture
+function RoomFrameShells({ paintings, materials }) {
+    const shadow = useRef(null)
+    const glow = useRef(null)
+    const backing = useRef(null)
+    const frame = useRef(null)
+    const mat = useRef(null)
+    const canvas = useRef(null)
+    const lamp = useRef(null)
+    const wallGlow = useMemo(() => getWallLightPoolTexture(), [])
+    const roundedBacking = useMemo(() => new RoundedBoxGeometry(1, 1, 1, 2, 0.035), [])
+    const roundedFrame = useMemo(() => new RoundedBoxGeometry(1, 1, 1, 2, 0.045), [])
+
+    useEffect(() => () => {
+        roundedBacking.dispose()
+        roundedFrame.dispose()
+    }, [roundedBacking, roundedFrame])
+
+    useEffect(() => {
+        const parent = new THREE.Matrix4()
+        const local = new THREE.Matrix4()
+        const matrix = new THREE.Matrix4()
+        const position = new THREE.Vector3()
+        const rotation = new THREE.Quaternion()
+        const scale = new THREE.Vector3()
+        const parentRotation = new THREE.Quaternion()
+        const paintingScale = new THREE.Vector3()
+        const batches = [
+            [shadow.current, [0.1, -0.12, -0.105], [0, 0, 0], [3.55, 2.64, 1]],
+            [glow.current, [0, 0.28, -0.125], [0, 0, 0], [5.9, 4.8, 1]],
+            [backing.current, [0, -0.04, -0.08], [0, 0, 0], [4.15, 4.45, 0.08]],
+            [frame.current, [0, 0, 0], [0, 0, 0], [3.24, 2.34, 0.14]],
+            [mat.current, [0, 0, 0.1], [0, 0, 0], [3, 2.1, 0.08]],
+            [canvas.current, [0, 0, 0.151], [0, 0, 0], [2.66, 1.76, 1]],
+            [lamp.current, [0, 1.72, 0.28], [0.16, 0, 0], [1.45, 0.08, 0.11]],
+        ]
+        paintings.forEach((painting, index) => {
+            parentRotation.setFromEuler(new THREE.Euler(0, painting.rotationY, 0))
+            paintingScale.set(...(painting.scale || [1, 1, 1]))
+            parent.compose(position.set(...painting.position), parentRotation, paintingScale)
+            batches.forEach(([mesh, localPosition, localRotation, localScale]) => {
+                if (!mesh) return
+                rotation.setFromEuler(new THREE.Euler(...localRotation))
+                local.compose(position.set(...localPosition), rotation, scale.set(...localScale))
+                matrix.multiplyMatrices(parent, local)
+                mesh.setMatrixAt(index, matrix)
+            })
+            // A quiet cool/warm alternation gives the room photographic depth
+            // without adding another real light or draw call.
+            glow.current?.setColorAt(
+                index,
+                new THREE.Color(index % 4 === 2 ? '#a9bfd0' : '#edb478'),
+            )
+        })
+        batches.forEach(([mesh]) => {
+            if (!mesh) return
+            mesh.instanceMatrix.needsUpdate = true
+            mesh.computeBoundingSphere?.()
+        })
+        if (glow.current?.instanceColor) {
+            glow.current.instanceColor.needsUpdate = true
+            glow.current.material.needsUpdate = true
+        }
+    }, [paintings])
+
+    const count = paintings.length
+    if (!count) return null
+    return (
+        <>
+            <RoomPlaqueBatch paintings={paintings} />
+            <instancedMesh ref={shadow} args={[undefined, undefined, count]} renderOrder={1}>
+                <planeGeometry args={[1, 1]} />
+                <meshBasicMaterial
+                    color="#120d09"
+                    transparent
+                    opacity={0.24}
+                    depthWrite={false}
+                    polygonOffset
+                    polygonOffsetFactor={-1}
+                    polygonOffsetUnits={-1}
+                />
+            </instancedMesh>
+            <instancedMesh ref={glow} args={[undefined, undefined, count]} renderOrder={1}>
+                <planeGeometry args={[1, 1]} />
+                <meshBasicMaterial
+                    map={wallGlow}
+                    color="#ffffff"
+                    transparent
+                    opacity={0.72}
+                    depthWrite={false}
+                    blending={THREE.AdditiveBlending}
+                    toneMapped={false}
+                />
+            </instancedMesh>
+            <instancedMesh ref={backing} args={[undefined, undefined, count]} castShadow receiveShadow>
+                <primitive object={roundedBacking} attach="geometry" />
+                <meshStandardMaterial color="#c8c0b3" roughness={0.93} />
+            </instancedMesh>
+            <instancedMesh ref={frame} args={[undefined, undefined, count]} castShadow receiveShadow>
+                <primitive object={roundedFrame} attach="geometry" />
+                <meshPhysicalMaterial
+                    map={materials.joinery.map}
+                    bumpMap={materials.joinery.map}
+                    bumpScale={0.012}
+                    color={GOLD}
+                    roughness={0.34}
+                    metalness={0.66}
+                    clearcoat={0.25}
+                    clearcoatRoughness={0.5}
+                />
+            </instancedMesh>
+            <instancedMesh ref={mat} args={[undefined, undefined, count]} castShadow receiveShadow>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshStandardMaterial color="#f7f2e8" roughness={0.72} />
+            </instancedMesh>
+            <instancedMesh ref={canvas} args={[undefined, undefined, count]}>
+                <planeGeometry args={[1, 1]} />
+                <meshStandardMaterial color="#28241f" roughness={0.96} />
+            </instancedMesh>
+            <instancedMesh ref={lamp} args={[undefined, undefined, count]}>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshStandardMaterial color="#9b7c59" emissive="#e1a765" emissiveIntensity={0.68} metalness={0.45} roughness={0.42} />
+            </instancedMesh>
+        </>
+    )
+}
+
+function Painting({ painting, targetWidth = 0, loadLow = false, lowPriority = 0, onTextureReady }) {
+    const [lowFailed, setLowFailed] = useState(false)
+    const markLowFailed = useCallback(() => setLowFailed(true), [])
+    const lowTexture = useCoverTexture(
+        painting.album,
+        loadLow ? LOW_RES_COVER_WIDTH : 0,
+        5000 + lowPriority,
+        markLowFailed,
+    )
+    const detailTexture = useCoverTexture(
+        painting.album,
+        lowTexture && targetWidth > LOW_RES_COVER_WIDTH ? targetWidth : 0,
+        targetWidth,
+    )
+    const unavailableTexture = useUnavailableArtworkTexture(painting.album.title, lowFailed)
+    const texture = detailTexture || lowTexture || (lowFailed ? unavailableTexture : null)
     const artworkMaterial = useRef(null)
-    const paintingGroup = useRef(null)
-    const plaqueMesh = useRef(null)
-    const worldPosition = useMemo(() => new THREE.Vector3(), [])
-    const lastPlaqueProbe = useRef(-1)
-    const date = painting.album.createdAt || painting.album.uploadedAt || ''
-    const subtitle = date ? new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, {
-        year: 'numeric', month: 'short', day: 'numeric',
-    }) : 'Photographic series'
-    const plaque = useLabelTexture(painting.album.title, subtitle, { width: 768, height: 192, dark: false })
-    const lightWash = useMemo(() => getPaintingWashTexture(), [])
 
     useEffect(() => {
         if (!texture) return
@@ -555,53 +1006,10 @@ function Painting({ painting, targetWidth = 0, onTextureReady }) {
         if (texture && artworkMaterial.current && artworkMaterial.current.opacity < 1) {
             artworkMaterial.current.opacity = Math.min(1, artworkMaterial.current.opacity + (delta * 4.5))
         }
-        if (
-            plaqueMesh.current
-            && paintingGroup.current
-            && state.clock.elapsedTime - lastPlaqueProbe.current > 0.18
-        ) {
-            lastPlaqueProbe.current = state.clock.elapsedTime
-            paintingGroup.current.getWorldPosition(worldPosition)
-            plaqueMesh.current.visible = state.camera.position.distanceToSquared(worldPosition) < 360
-        }
     })
 
     return (
-        <group ref={paintingGroup} position={painting.position} rotation={[0, painting.rotationY, 0]}>
-            <mesh position={[0, 0.16, -0.075]} renderOrder={-1}>
-                <planeGeometry args={[5.35, 5.7]} />
-                <meshBasicMaterial
-                    map={lightWash}
-                    color="#f1c78f"
-                    transparent
-                    opacity={0.9}
-                    depthWrite={false}
-                    blending={THREE.AdditiveBlending}
-                    toneMapped={false}
-                />
-            </mesh>
-            <mesh position={[0, -0.04, -0.08]}>
-                <boxGeometry args={[4.15, 4.45, 0.08]} />
-                <meshStandardMaterial color="#c8c0b3" roughness={0.93} />
-            </mesh>
-            <mesh castShadow>
-                <boxGeometry args={[3.24, 2.34, 0.14]} />
-                <meshPhysicalMaterial
-                    color={GOLD}
-                    roughness={0.3}
-                    metalness={0.66}
-                    clearcoat={0.25}
-                    clearcoatRoughness={0.5}
-                />
-            </mesh>
-            <mesh position={[0, 0, 0.1]}>
-                <boxGeometry args={[3, 2.1, 0.08]} />
-                <meshStandardMaterial color="#f7f2e8" roughness={0.72} />
-            </mesh>
-            <mesh position={[0, 0, 0.151]}>
-                <planeGeometry args={[2.66, 1.76]} />
-                <meshStandardMaterial color="#28241f" roughness={0.96} />
-            </mesh>
+        <group position={painting.position} rotation={[0, painting.rotationY, 0]} scale={painting.scale || [1, 1, 1]}>
             {texture && (
                 <mesh position={[0, 0, 0.155]}>
                     <planeGeometry args={[2.66, 1.76]} />
@@ -616,21 +1024,142 @@ function Painting({ painting, targetWidth = 0, onTextureReady }) {
                     />
                 </mesh>
             )}
-            <mesh ref={plaqueMesh} position={[0, -1.55, 0.13]}>
-                <planeGeometry args={[2.9, 0.62]} />
-                <meshBasicMaterial map={plaque} toneMapped={false} />
-            </mesh>
-            <mesh position={[0, 1.72, 0.28]} rotation={[0.16, 0, 0]}>
-                <boxGeometry args={[1.45, 0.08, 0.11]} />
-                <meshStandardMaterial
-                    color="#9b7c59"
-                    emissive="#d99d58"
-                    emissiveIntensity={0.22}
-                    metalness={0.45}
-                    roughness={0.46}
-                />
-            </mesh>
         </group>
+    )
+}
+
+function CameraAwareRoomPaintings({ room, active, detailed, allowDetail, qualityLighting, materials, onTextureReady }) {
+    const { camera } = useThree()
+    const baselineSelection = useMemo(() => room.paintings.map(painting => ({
+        painting,
+        targetWidth: LOW_RES_COVER_WIDTH,
+    })), [room.paintings])
+    const initialSelection = useMemo(() => baselineSelection.slice(0, Math.min(4, baselineSelection.length)), [baselineSelection])
+    const [selection, setSelection] = useState(initialSelection)
+    const selectionRef = useRef(initialSelection)
+    const selectionKey = useRef(initialSelection.map(item => `${item.painting.id}:${item.targetWidth}`).join('|'))
+    const selectionSeenAt = useRef(new Map(initialSelection.map(item => [item.painting.id, 0])))
+    const detailFocus = useRef({ id: null, since: 0 })
+    const activatedAt = useRef(null)
+    const lastProbe = useRef(-1)
+    const projection = useMemo(() => new THREE.Matrix4(), [])
+    const frustum = useMemo(() => new THREE.Frustum(), [])
+    const sphere = useMemo(() => new THREE.Sphere(new THREE.Vector3(), 2.5), [])
+    const viewDirection = useMemo(() => new THREE.Vector3(), [])
+    const toPainting = useMemo(() => new THREE.Vector3(), [])
+
+    useFrame((state) => {
+        if (!active) return
+        if (activatedAt.current === null) activatedAt.current = state.clock.elapsedTime
+        const activationAge = state.clock.elapsedTime - activatedAt.current
+        const warmupDuration = Math.max(0.42, Math.min(0.9, baselineSelection.length * 0.055))
+        if (activationAge < warmupDuration) {
+            const stagedCount = Math.min(baselineSelection.length, 4 + Math.floor(activationAge / 0.11))
+            const staged = baselineSelection.slice(0, stagedCount)
+            const stagedKey = staged.map(item => `${item.painting.id}:${item.targetWidth}`).join('|')
+            if (stagedKey !== selectionKey.current) {
+                selectionKey.current = stagedKey
+                selectionRef.current = staged
+                setSelection(staged)
+            }
+            return
+        }
+        if (state.clock.elapsedTime - lastProbe.current < 0.16) return
+        lastProbe.current = state.clock.elapsedTime
+        camera.updateMatrixWorld()
+        projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+        frustum.setFromProjectionMatrix(projection)
+        camera.getWorldDirection(viewDirection)
+
+        const entranceDistance = Math.hypot(
+            camera.position.x - room.entrance[0],
+            camera.position.z - room.entrance[2],
+        )
+        const candidates = room.paintings.map((painting, index) => {
+            sphere.center.set(...painting.position)
+            toPainting.copy(sphere.center).sub(camera.position)
+            const distance = toPainting.length()
+            const facing = distance > 0 ? viewDirection.dot(toPainting.multiplyScalar(1 / distance)) : 1
+            const visible = frustum.intersectsSphere(sphere) && facing > -0.12
+            const entranceWarmup = entranceDistance < 12 && index < 4
+            return { painting, distance, facing, visible: visible || entranceWarmup }
+        }).filter(candidate => candidate.visible && candidate.distance < 68)
+            .sort((left, right) => left.distance - right.distance)
+
+        // Textures have already been resident since the opening preload. Keep
+        // every artwork the camera can plausibly see mounted so long galleries
+        // never end in conspicuous dark canvases, while still avoiding the
+        // per-frame cost of mounting the whole room.
+        const maximum = detailed ? (qualityLighting ? 20 : 14) : 10
+        const focusCandidate = candidates.find(({ distance, facing }) => (
+            allowDetail && distance < 8 && facing > 0.22
+        ))
+        if (focusCandidate?.painting.id !== detailFocus.current.id) {
+            detailFocus.current = {
+                id: focusCandidate?.painting.id || null,
+                since: state.clock.elapsedTime,
+            }
+        }
+        const stableDetailId = focusCandidate
+            && state.clock.elapsedTime - detailFocus.current.since >= 0.6
+            ? focusCandidate.painting.id
+            : null
+        const next = candidates.slice(0, maximum).map(({ painting, distance, facing }) => {
+            const shouldPromote = painting.id === stableDetailId
+                && distance < 8
+                && facing > 0.22
+            selectionSeenAt.current.set(painting.id, state.clock.elapsedTime)
+            return {
+                painting,
+                targetWidth: shouldPromote
+                    ? (qualityLighting ? 1600 : 960)
+                    : LOW_RES_COVER_WIDTH,
+            }
+        })
+        // Keep a small entrance set resident when the visitor turns away. The
+        // previous all-room fallback was the main cause of mass decode/upload
+        // bursts while walking between galleries.
+        const primary = next.length ? next : initialSelection
+        const primaryIds = new Set(primary.map(item => item.painting.id))
+        const retained = selectionRef.current.filter((item) => {
+            if (primaryIds.has(item.painting.id)) return false
+            const lastSeen = selectionSeenAt.current.get(item.painting.id) || 0
+            sphere.center.set(...item.painting.position)
+            const distance = camera.position.distanceTo(sphere.center)
+            return state.clock.elapsedTime - lastSeen < 0.72 && distance < 74
+        })
+        const effective = [...primary, ...retained]
+            .slice(0, maximum + 4)
+            .sort((left, right) => room.paintings.indexOf(left.painting) - room.paintings.indexOf(right.painting))
+        const nextKey = effective.map(item => `${item.painting.id}:${item.targetWidth}`).join('|')
+        if (nextKey === selectionKey.current) return
+        selectionKey.current = nextKey
+        selectionRef.current = effective
+        setSelection(effective)
+    })
+
+    // Frame, mat, plaque and picture-light geometry always stays present while
+    // a room is active. The camera-aware selection controls texture I/O only.
+    // This preserves the authored gallery rhythm and removes geometry pop-in,
+    // while Three.js still frustum-culls shells that are outside the view.
+    return (
+        <>
+            <RoomFrameShells paintings={room.paintings} materials={materials} />
+            {selection.map(({ painting, targetWidth }) => {
+                const paintingIndex = room.paintings.indexOf(painting)
+                const lowPriority = room.paintings.length - paintingIndex
+                return (
+                    <Painting
+                        key={painting.id}
+                        painting={painting}
+                        targetWidth={targetWidth}
+                        loadLow={targetWidth > 0}
+                        lowPriority={lowPriority}
+                        onTextureReady={onTextureReady}
+                    />
+                )
+            })}
+        </>
     )
 }
 
@@ -644,7 +1173,7 @@ function RoomWallpaperSurfaces({ room, shellCenterX, shellDepth, ceilingY, mater
             <mesh
                 receiveShadow
                 position={[
-                    room.outerX - (room.side * ((wallThickness / 2) + 0.007)),
+                    room.outerX - (room.side * ((wallThickness / 2) + WALL_SURFACE_GAP)),
                     ceilingY / 2,
                     room.centerZ,
                 ]}
@@ -658,6 +1187,7 @@ function RoomWallpaperSurfaces({ room, shellCenterX, shellDepth, ceilingY, mater
                     centerZ={room.centerZ}
                     color={color}
                     phase={roomPhase}
+                    reverseU={room.side < 0}
                 />
             </mesh>
             {[-1, 1].map(direction => (
@@ -667,7 +1197,7 @@ function RoomWallpaperSurfaces({ room, shellCenterX, shellDepth, ceilingY, mater
                     position={[
                         shellCenterX,
                         ceilingY / 2,
-                        room.centerZ + direction * ((room.width / 2) - ((wallThickness / 2) + 0.007)),
+                        room.centerZ + direction * ((room.width / 2) - ((wallThickness / 2) + WALL_SURFACE_GAP)),
                     ]}
                     rotation={[0, direction < 0 ? 0 : Math.PI, 0]}
                 >
@@ -679,6 +1209,7 @@ function RoomWallpaperSurfaces({ room, shellCenterX, shellDepth, ceilingY, mater
                         centerZ={shellCenterX}
                         color={color}
                         phase={roomPhase}
+                        reverseU={direction > 0}
                     />
                 </mesh>
             ))}
@@ -736,79 +1267,67 @@ function RoomCofferedCeiling({ room, shellCenterX, shellDepth, ceilingY, materia
     )
 }
 
-function useDoorwayShape() {
-    return useMemo(() => {
-        const radius = (MUSEUM_DIMENSIONS.doorwayWidth / 2) - 0.12
-        const springHeight = 2.68
-        const archRise = 1.48
-        const shape = new THREE.Shape()
-        shape.moveTo(-radius, 0.05)
-        shape.lineTo(-radius, springHeight)
-        for (let segment = 0; segment <= 24; segment += 1) {
-            const angle = Math.PI - ((Math.PI * segment) / 24)
-            shape.lineTo(
-                Math.cos(angle) * radius,
-                springHeight + (Math.sin(angle) * archRise),
-            )
-        }
-        shape.lineTo(radius, 0.05)
-        shape.closePath()
-        return shape
-    }, [])
+function VelvetCurtainMaterial({ map }) {
+    return (
+        <meshPhysicalMaterial
+            map={map}
+            bumpMap={map}
+            bumpScale={0.035}
+            color="#7b2835"
+            roughness={0.82}
+            sheen={0.7}
+            sheenColor="#c7737b"
+            sheenRoughness={0.76}
+            side={THREE.DoubleSide}
+        />
+    )
 }
 
 function RoomPortalScrim({ room, ready }) {
-    const material = useRef(null)
-    const labelMaterial = useRef(null)
-    const doorwayShape = useDoorwayShape()
-    const portalLabel = useLabelTexture(room.name, '', { width: 640, height: 180, dark: true })
+    const left = useRef(null)
+    const right = useRef(null)
+    const progress = useRef(ready ? 1 : 0)
+    const curtainMap = useMemo(() => getCurtainTexture(), [])
+    const panelWidth = (MUSEUM_DIMENSIONS.doorwayWidth / 2) + 0.18
+    const panelHeight = 4.5
     useFrame((_, delta) => {
-        if (!material.current) return
-        const target = ready ? 0 : 0.96
-        material.current.opacity = THREE.MathUtils.damp(
-            material.current.opacity,
-            target,
-            ready ? 7 : 12,
-            delta,
-        )
-        material.current.visible = material.current.opacity > 0.012
-        if (labelMaterial.current) {
-            labelMaterial.current.opacity = Math.min(1, material.current.opacity * 1.35)
-            labelMaterial.current.visible = material.current.visible
-        }
+        progress.current = THREE.MathUtils.damp(progress.current, ready ? 1 : 0, ready ? 4.8 : 8, delta)
+        ;[[-1, left.current], [1, right.current]].forEach(([direction, group]) => {
+            if (!group) return
+            group.position.x = direction * ((panelWidth / 2) + (progress.current * 1.92))
+            group.scale.x = Math.max(0.09, 1 - (progress.current * 0.88))
+            group.visible = progress.current < 0.992
+        })
     })
     const rotationY = room.side < 0 ? Math.PI / 2 : -Math.PI / 2
     return (
         <group
-            position={[room.innerX + (room.side * 0.23), 0, room.centerZ]}
+            // Flat panels sit just inside the room. The architectural wall masks
+            // their square corners, so the visible silhouette is the real arch
+            // instead of a second, competing arch-shaped mesh.
+            position={[room.innerX + (room.side * 0.64), 0, room.centerZ]}
             rotation={[0, rotationY, 0]}
         >
-            <mesh renderOrder={2}>
-                <shapeGeometry args={[doorwayShape, 24]} />
-                <meshPhysicalMaterial
-                    ref={material}
-                    color="#211318"
-                    roughness={0.94}
-                    sheen={0.42}
-                    sheenColor="#7b343d"
-                    transparent
-                    opacity={ready ? 0 : 0.96}
-                    depthWrite={false}
-                    side={THREE.DoubleSide}
-                />
-            </mesh>
-            <mesh position={[0, 2.25, 0.018]} renderOrder={3}>
-                <planeGeometry args={[2.7, 0.76]} />
-                <meshBasicMaterial
-                    ref={labelMaterial}
-                    map={portalLabel}
-                    toneMapped={false}
-                    transparent
-                    opacity={ready ? 0 : 1}
-                    depthWrite={false}
-                    side={THREE.DoubleSide}
-                />
-            </mesh>
+            <group ref={left} position={[-panelWidth / 2, 0, 0]}>
+                <mesh castShadow receiveShadow position={[0, panelHeight / 2, 0]}>
+                    <planeGeometry args={[panelWidth, panelHeight, 1, 1]} />
+                    <VelvetCurtainMaterial map={curtainMap} />
+                </mesh>
+                <mesh position={[-(panelWidth * 0.28), 1.48, 0.045]} rotation={[Math.PI / 2, 0, 0]}>
+                    <torusGeometry args={[0.14, 0.035, 7, 14]} />
+                    <meshStandardMaterial color="#b98c53" metalness={0.72} roughness={0.28} />
+                </mesh>
+            </group>
+            <group ref={right} position={[panelWidth / 2, 0, 0]}>
+                <mesh castShadow receiveShadow position={[0, panelHeight / 2, 0]}>
+                    <planeGeometry args={[panelWidth, panelHeight, 1, 1]} />
+                    <VelvetCurtainMaterial map={curtainMap} />
+                </mesh>
+                <mesh position={[panelWidth * 0.28, 1.48, 0.045]} rotation={[Math.PI / 2, 0, 0]}>
+                    <torusGeometry args={[0.14, 0.035, 7, 14]} />
+                    <meshStandardMaterial color="#b98c53" metalness={0.72} roughness={0.28} />
+                </mesh>
+            </group>
         </group>
     )
 }
@@ -829,6 +1348,27 @@ function useArchSpandrelShape() {
         }
         shape.lineTo(radius, MUSEUM_DIMENSIONS.hallHeight)
         shape.lineTo(-radius, MUSEUM_DIMENSIONS.hallHeight)
+        shape.closePath()
+        return shape
+    }, [])
+}
+
+function useArchOpeningShape() {
+    return useMemo(() => {
+        const radius = MUSEUM_DIMENSIONS.doorwayWidth / 2
+        const springHeight = 2.7
+        const archRise = 1.55
+        const shape = new THREE.Shape()
+        shape.moveTo(-radius, 0)
+        shape.lineTo(-radius, springHeight)
+        for (let segment = 0; segment <= 18; segment += 1) {
+            const angle = Math.PI - ((Math.PI * segment) / 18)
+            shape.lineTo(
+                Math.cos(angle) * radius,
+                springHeight + (Math.sin(angle) * archRise),
+            )
+        }
+        shape.lineTo(radius, 0)
         shape.closePath()
         return shape
     }, [])
@@ -889,13 +1429,13 @@ function DoorWall({ side, centerZ, room, materials }) {
                     ))}
                     <mesh
                         position={[
-                            side * (MUSEUM_DIMENSIONS.hallHalfWidth - ((thickness / 2) + 0.007)),
+                            side * (MUSEUM_DIMENSIONS.hallHalfWidth - ((thickness / 2) + WALL_SURFACE_GAP)),
                             0,
                             centerZ,
                         ]}
                         rotation={[0, rotationY, 0]}
                     >
-                        <shapeGeometry args={[spandrelShape, 24]} />
+                        <extrudeGeometry args={[spandrelShape, { depth: 0.035, bevelEnabled: false, steps: 1, curveSegments: 24 }]} />
                         <WallpaperMaterial
                             materials={materials}
                             width={MUSEUM_DIMENSIONS.doorwayWidth}
@@ -924,7 +1464,7 @@ function DoorWall({ side, centerZ, room, materials }) {
                 <group
                     key={`panel-${direction}`}
                     position={[
-                        wallX - (side * ((thickness / 2) + 0.055)),
+                        wallX - (side * ((thickness / 2) + 0.045)),
                         1.42,
                         centerZ + (direction * panelOffset),
                     ]}
@@ -950,7 +1490,13 @@ function DoorWall({ side, centerZ, room, materials }) {
                         rotation={[0, rotationY, 0]}
                     >
                         <tubeGeometry args={[archCurve, 28, 0.13, 7, false]} />
-                        <meshStandardMaterial color="#c9bda9" roughness={0.72} />
+                        <meshStandardMaterial
+                            map={materials.joinery.map}
+                            bumpMap={materials.joinery.map}
+                            bumpScale={0.01}
+                            color="#c9bda9"
+                            roughness={0.72}
+                        />
                     </mesh>
                     {[-1, 1].map(direction => (
                         <group key={direction} position={[wallX, 1.42, centerZ + direction * (archRadius + 0.18)]}>
@@ -968,16 +1514,138 @@ function DoorWall({ side, centerZ, room, materials }) {
                             </mesh>
                         </group>
                     ))}
+                    <group
+                        position={[wallX - (side * 0.34), 4.6, centerZ]}
+                        rotation={[0, rotationY, 0]}
+                    >
+                        {[-1.42, 1.42].map(offset => (
+                            <mesh key={offset} position={[offset, 0.31, -0.09]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                                <cylinderGeometry args={[0.035, 0.035, 0.24, 8]} />
+                                <meshStandardMaterial color="#80603a" metalness={0.62} roughness={0.36} />
+                            </mesh>
+                        ))}
+                        <mesh position={[0, 0, -0.032]} castShadow>
+                            <boxGeometry args={[3.25, 0.74, 0.09]} />
+                            <meshPhysicalMaterial
+                                map={materials.joinery.map}
+                                bumpMap={materials.joinery.map}
+                                bumpScale={0.01}
+                                color="#9b7747"
+                                metalness={0.62}
+                                roughness={0.32}
+                                clearcoat={0.24}
+                            />
+                        </mesh>
+                        <mesh position={[0, 0, 0.025]}>
+                            <boxGeometry args={[3.07, 0.56, 0.055]} />
+                            <meshStandardMaterial color="#181411" roughness={0.72} />
+                        </mesh>
+                        <LabelPlane
+                            title={room.name}
+                            subtitle={`${room.albums.length} ${room.albums.length === 1 ? 'album' : 'albums'}`}
+                            position={[0, 0, 0.058]}
+                            size={[2.98, 0.5]}
+                        />
+                    </group>
+                </>
+            )}
+        </group>
+    )
+}
+
+function FarDoorWall({ side, centerZ, room, materials }) {
+    const wallX = side * MUSEUM_DIMENSIONS.hallHalfWidth
+    const rotationY = side < 0 ? Math.PI / 2 : -Math.PI / 2
+    const openingShape = useArchOpeningShape()
+    const archCurve = useArchTrimCurve()
+
+    return (
+        <group>
+            <mesh position={[wallX, MUSEUM_DIMENSIONS.hallHeight / 2, centerZ]}>
+                <boxGeometry args={[HALL_WALL_THICKNESS, MUSEUM_DIMENSIONS.hallHeight, MUSEUM_DIMENSIONS.baySpacing]} />
+                <PlasterMaterial materials={materials} color={HALL_PAINT} textured={false} />
+            </mesh>
+            <WallpaperPanel
+                materials={materials}
+                side={side}
+                centerZ={centerZ}
+                width={MUSEUM_DIMENSIONS.baySpacing}
+            />
+            {room && (
+                <>
+                    {/* From a distance the real room is hidden by an intentional
+                        velvet portal rather than an obvious loading blocker. */}
+                    <mesh
+                        position={[wallX - (side * ((HALL_WALL_THICKNESS / 2) + 0.044)), 0.02, centerZ]}
+                        rotation={[0, rotationY, 0]}
+                    >
+                        <shapeGeometry args={[openingShape, 18]} />
+                        <meshStandardMaterial color="#251116" roughness={0.93} side={THREE.DoubleSide} />
+                    </mesh>
+                    <mesh
+                        position={[wallX - (side * ((HALL_WALL_THICKNESS / 2) + 0.052)), 0, centerZ]}
+                        rotation={[0, rotationY, 0]}
+                    >
+                        <tubeGeometry args={[archCurve, 20, 0.12, 6, false]} />
+                        <meshStandardMaterial
+                            map={materials.joinery.map}
+                            bumpMap={materials.joinery.map}
+                            bumpScale={0.01}
+                            color="#c9bda9"
+                            roughness={0.72}
+                        />
+                    </mesh>
                     <LabelPlane
                         title={room.name}
                         subtitle={`${room.albums.length} ${room.albums.length === 1 ? 'album' : 'albums'}`}
-                        position={[wallX - (side * 0.18), 4.64, centerZ]}
+                        position={[wallX - (side * 0.225), 4.78, centerZ]}
                         rotation={[0, rotationY, 0]}
-                        size={[3.3, 0.56]}
+                        size={[3.02, 0.58]}
                     />
                 </>
             )}
         </group>
+    )
+}
+
+function DistanceManagedDoorWall({ side, centerZ, room, materials, forceNear = false }) {
+    const { camera } = useThree()
+    const near = useRef(null)
+    const far = useRef(null)
+    const lastProbeAt = useRef(-1)
+    const initialDetailed = forceNear || Math.abs(centerZ - 11.25) < 27
+    const detailed = useRef(initialDetailed)
+
+    useFrame((state) => {
+        if (!room || state.clock.elapsedTime - lastProbeAt.current < 0.24) return
+        lastProbeAt.current = state.clock.elapsedTime
+        const doorwayX = side * MUSEUM_DIMENSIONS.hallHalfWidth
+        const distance = Math.hypot(camera.position.x - doorwayX, camera.position.z - centerZ)
+        const next = forceNear || (detailed.current ? distance < 34 : distance < 27)
+        // React can reapply the JSX visibility during an unrelated parent
+        // render. Reconcile the actual groups even when the distance state did
+        // not cross a hysteresis boundary.
+        if (
+            next === detailed.current
+            && near.current?.visible === next
+            && far.current?.visible === !next
+        ) return
+        detailed.current = next
+        if (near.current) near.current.visible = next
+        if (far.current) far.current.visible = !next
+    })
+
+    if (!room) return <FarDoorWall side={side} centerZ={centerZ} room={null} materials={materials} />
+
+    return (
+        <>
+            <group ref={near} visible={initialDetailed}>
+                <DoorWall side={side} centerZ={centerZ} room={room} materials={materials} />
+            </group>
+            <group ref={far} visible={!initialDetailed}>
+                <FarDoorWall side={side} centerZ={centerZ} room={room} materials={materials} />
+            </group>
+        </>
     )
 }
 
@@ -989,7 +1657,10 @@ function VaultedCeiling({ layout, centerZ, materials }) {
         const end = Math.PI - start
         const count = 32
         const frontZ = centerZ + (layout.hallLength / 2)
-        const backZ = centerZ - (layout.hallLength / 2)
+        // Stop the vault just in front of the terminal wall. Ending on the
+        // exact same plane produced the striped/hatched z-fighting visible at
+        // the back of the corridor.
+        const backZ = centerZ - (layout.hallLength / 2) + 0.14
         const positions = []
         const uvs = []
         const indices = []
@@ -1042,13 +1713,40 @@ function VaultedCeiling({ layout, centerZ, materials }) {
                 </mesh>
             ))}
             {[-1, 1].map(side => (
-                <mesh key={side} position={[side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.06), 4.98, centerZ]}>
-                    <boxGeometry args={[0.16, 0.22, layout.hallLength]} />
+                <mesh key={side} position={[side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.06), 4.98, centerZ + 0.14]}>
+                    <boxGeometry args={[0.16, 0.22, Math.max(1, layout.hallLength - 0.28)]} />
                     <meshStandardMaterial color="#b8aa95" roughness={0.72} />
                 </mesh>
             ))}
         </group>
     )
+}
+
+function FixedRoomLighting({ rooms, qualityLighting }) {
+    const slots = [rooms[0] || null, rooms[1] || null]
+    return slots.flatMap((room, slotIndex) => {
+        const centerX = room ? room.centerX + (room.side * (ROOM_SHELL_INSET / 2)) : 0
+        const centerZ = room?.centerZ || -500
+        const targetX = room ? room.outerX - (room.side * 0.62) : 0
+        const halfWidth = room ? Math.max(1.5, room.width * 0.27) : 1.5
+        const intensity = room
+            ? (qualityLighting ? (slotIndex === 0 ? 38 : 30) : 23)
+            : 0
+        return [-1, 1].map(direction => (
+            <StaticSpotlight
+                key={`fixed-room-light-${slotIndex}-${direction}`}
+                position={[centerX, 5.78, centerZ + (direction * 1.25)]}
+                target={[targetX, 2.18, centerZ + (direction * halfWidth)]}
+                color={direction < 0 ? '#ffd3a0' : '#d9c7b7'}
+                intensity={intensity}
+                distance={12}
+                angle={0.48}
+                penumbra={0.82}
+                castShadow={qualityLighting && slotIndex === 0 && direction < 0}
+                shadowKey={room?.id || 'inactive'}
+            />
+        ))
+    })
 }
 
 function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
@@ -1071,15 +1769,37 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
     const shellDepth = Math.max(1, room.depth - ROOM_SHELL_INSET)
     const shellCenterX = room.centerX + (room.side * (ROOM_SHELL_INSET / 2))
     const [readyPaintingIds, setReadyPaintingIds] = useState(() => new Set())
-    const revealThreshold = Math.min(4, room.paintings.length)
-    const roomReady = active && readyPaintingIds.size >= revealThreshold
+    const readyPaintingIdsRef = useRef(new Set())
+    const readyFlushTimer = useRef(null)
+    const [allowDetail, setAllowDetail] = useState(false)
+    const roomPaintingIds = useMemo(() => new Set(
+        room.paintings.slice(0, Math.min(4, room.paintings.length)).map(painting => painting.id),
+    ), [room.paintings])
+    const roomReady = active && [...roomPaintingIds].every(id => readyPaintingIds.has(id))
+    useEffect(() => {
+        let timer
+        if (!active) {
+            timer = window.setTimeout(() => setAllowDetail(false), 0)
+        } else if (!detailed || !roomReady) {
+            timer = window.setTimeout(() => setAllowDetail(false), 0)
+        } else {
+            // Let the portal complete and the player settle before one nearby
+            // painting upgrades. Entry frames should only ever show cached lows.
+            timer = window.setTimeout(() => setAllowDetail(true), 700)
+        }
+        return () => {
+            window.clearTimeout(timer)
+            window.clearTimeout(readyFlushTimer.current)
+        }
+    }, [active, detailed, roomReady])
     const markPaintingReady = useCallback((paintingId) => {
-        setReadyPaintingIds((current) => {
-            if (current.has(paintingId)) return current
-            const next = new Set(current)
-            next.add(paintingId)
-            return next
-        })
+        if (readyPaintingIdsRef.current.has(paintingId)) return
+        readyPaintingIdsRef.current.add(paintingId)
+        if (readyFlushTimer.current) return
+        readyFlushTimer.current = window.setTimeout(() => {
+            readyFlushTimer.current = null
+            setReadyPaintingIds(new Set(readyPaintingIdsRef.current))
+        }, 72)
     }, [])
     const illuminatedXs = useMemo(() => {
         const candidates = detailed
@@ -1093,6 +1813,7 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
     const roomTint = ['#d8cab8', '#c9cbbd', '#d3c2bb', '#c7bdaf'][roomVariant]
     return (
         <group>
+            <group visible={active}>
             <mesh position={[room.centerX, -0.11, room.centerZ]} receiveShadow>
                 <boxGeometry args={[room.depth, 0.22, roomWidth]} />
                 <FloorMaterial materials={materials} color="#73573f" />
@@ -1127,11 +1848,15 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                         <boxGeometry args={[shellDepth, ceilingY, wallThickness]} />
                         <PlasterMaterial materials={materials} color={ROOM_PAINT} />
                     </mesh>
-                    <mesh position={[shellCenterX, 0.16, room.centerZ + direction * ((roomWidth / 2) - 0.15)]}>
+                    <mesh position={[shellCenterX, 0.16, room.centerZ + direction * ((roomWidth / 2) - 0.26)]}>
                         <boxGeometry args={[shellDepth, 0.32, 0.18]} />
                         <meshStandardMaterial color="#887763" roughness={0.7} />
                     </mesh>
-                    <mesh position={[shellCenterX, 5.56, room.centerZ + direction * ((roomWidth / 2) - 0.16)]}>
+                    <mesh position={[shellCenterX, 0.035, room.centerZ + direction * ((roomWidth / 2) - 0.34)]}>
+                        <boxGeometry args={[Math.max(0.5, shellDepth - 0.3), 0.055, 0.3]} />
+                        <meshBasicMaterial color="#160f0c" transparent opacity={0.4} depthWrite={false} />
+                    </mesh>
+                    <mesh position={[shellCenterX, 5.56, room.centerZ + direction * ((roomWidth / 2) - 0.28)]}>
                         <boxGeometry args={[shellDepth, 0.18, 0.22]} />
                         <meshStandardMaterial color="#b9aa95" roughness={0.72} />
                     </mesh>
@@ -1139,31 +1864,65 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                         <boxGeometry args={[Math.max(0.5, shellDepth - 0.8), 0.065, 0.08]} />
                     <meshStandardMaterial color="#8d704e" metalness={0.62} roughness={0.45} />
                     </mesh>
+                    <mesh position={[
+                        outerWallX - (room.side * 0.15),
+                        ceilingY / 2,
+                        room.centerZ + direction * ((roomWidth / 2) - 0.16),
+                    ]}>
+                        <boxGeometry args={[0.16, ceilingY - 0.2, 0.2]} />
+                        <meshStandardMaterial color="#b9aa95" roughness={0.74} />
+                    </mesh>
                 </group>
             ))}
-            <mesh position={[outerWallX - (room.side * 0.15), 0.17, room.centerZ]}>
+            <mesh position={[outerWallX - (room.side * 0.25), 0.17, room.centerZ]}>
                 <boxGeometry args={[0.18, 0.34, roomWidth]} />
                 <meshStandardMaterial color="#887763" roughness={0.7} />
             </mesh>
+            <group position={[outerWallX - (room.side * 0.145), 3.08, room.centerZ]}>
+                <mesh receiveShadow>
+                    <boxGeometry args={[0.055, 2.28, 5.65]} />
+                    <meshStandardMaterial color="#211a17" roughness={0.86} />
+                </mesh>
+                {[-1, 1].map(direction => (
+                    <mesh key={`end-cap-horizontal-${direction}`} position={[-room.side * 0.035, direction * 1.12, 0]}>
+                        <boxGeometry args={[0.075, 0.09, 5.78]} />
+                        <meshPhysicalMaterial color="#9b7747" metalness={0.58} roughness={0.35} />
+                    </mesh>
+                ))}
+                {[-1, 1].map(direction => (
+                    <mesh key={`end-cap-vertical-${direction}`} position={[-room.side * 0.035, 0, direction * 2.83]}>
+                        <boxGeometry args={[0.075, 2.32, 0.09]} />
+                        <meshPhysicalMaterial color="#9b7747" metalness={0.58} roughness={0.35} />
+                    </mesh>
+                ))}
+            </group>
             <LabelPlane
                 title={room.name}
                 subtitle={`${room.albums.length} ${room.albums.length === 1 ? 'collection' : 'collections'}`}
-                position={[outerWallX - (room.side * 0.16), 3.05, room.centerZ]}
+                position={[outerWallX - (room.side * 0.19), 3.05, room.centerZ]}
                 rotation={[0, endRotation, 0]}
                 size={[4.6, 1.2]}
             />
-            {active && room.paintings.map((painting) => (
-                    <Painting
-                        key={painting.id}
-                        painting={painting}
-                        targetWidth={detailed
-                            ? (qualityLighting ? 2048 : 1280)
-                            : (qualityLighting ? 1280 : 960)}
-                        onTextureReady={markPaintingReady}
-                    />
+            <CameraAwareRoomPaintings
+                room={room}
+                active={active}
+                detailed={detailed}
+                allowDetail={allowDetail}
+                qualityLighting={qualityLighting}
+                materials={materials}
+                onTextureReady={markPaintingReady}
+            />
+            {illuminatedXs.map(x => (
+                <FloorLightPool
+                    key={`room-pool-${x}`}
+                    position={[x, 0.052, room.centerZ]}
+                    size={[5.4, Math.max(4.2, roomWidth - 1.1)]}
+                    opacity={qualityLighting ? 0.28 : 0.15}
+                />
             ))}
+            </group>
             <RoomPortalScrim room={room} ready={roomReady} />
-            {lightXs.map(x => (
+            {active && lightXs.map(x => (
                 <group key={x} position={[x, ceilingY - 0.12, room.centerZ]}>
                     <mesh rotation={[Math.PI / 2, 0, 0]}>
                         <circleGeometry args={[0.26, 12]} />
@@ -1171,29 +1930,6 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                     </mesh>
                 </group>
             ))}
-            {active && illuminatedXs.flatMap((x, xIndex) => [-1, 1].map((direction, directionIndex) => (
-                <StaticSpotlight
-                    key={`room-light-${x}-${direction}`}
-                    position={[x, ceilingY - 0.28, room.centerZ + (direction * 1.35)]}
-                    target={[x, 2.15, room.centerZ + (direction * ((roomWidth / 2) - 0.42))]}
-                    color="#ffd4a2"
-                    intensity={qualityLighting ? 22 : 16}
-                    distance={12}
-                    angle={0.46}
-                    penumbra={0.76}
-                    castShadow={detailed && qualityLighting && xIndex === 0 && directionIndex === 0}
-                />
-            )))}
-            {active && (
-                <rectAreaLight
-                    position={[shellCenterX, ceilingY - 0.34, room.centerZ]}
-                    rotation={[-Math.PI / 2, 0, 0]}
-                    color="#f0d1ad"
-                    intensity={qualityLighting ? 3.2 : 2.3}
-                    width={Math.max(3, shellDepth - 1.2)}
-                    height={Math.max(3, roomWidth - 1.2)}
-                />
-            )}
         </group>
     )
 }
@@ -1207,6 +1943,10 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
         right: layout.rooms.find(room => room.bay === index && room.side === 1),
     }))
     const activeRooms = useMemo(() => new Set(activeRoomIds), [activeRoomIds])
+    const activeRoomList = useMemo(
+        () => layout.rooms.filter(room => activeRooms.has(room.id)).slice(0, 2),
+        [activeRooms, layout.rooms],
+    )
     const firstWallEndZ = MUSEUM_DIMENSIONS.firstBayZ + (MUSEUM_DIMENSIONS.baySpacing / 2)
     const lobbyWallLength = MUSEUM_DIMENSIONS.lobbyFrontZ - firstWallEndZ
     const lobbyWallCenterZ = firstWallEndZ + (lobbyWallLength / 2)
@@ -1265,14 +2005,47 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
             ))}
             {bays.map(bay => (
                 <group key={bay.centerZ}>
-                    <DoorWall side={-1} centerZ={bay.centerZ} room={bay.left} materials={materials} />
-                    <DoorWall side={1} centerZ={bay.centerZ} room={bay.right} materials={materials} />
+                    <DistanceManagedDoorWall
+                        side={-1}
+                        centerZ={bay.centerZ}
+                        room={bay.left}
+                        materials={materials}
+                        forceNear={Boolean(bay.left && activeRooms.has(bay.left.id))}
+                    />
+                    <DistanceManagedDoorWall
+                        side={1}
+                        centerZ={bay.centerZ}
+                        room={bay.right}
+                        materials={materials}
+                        forceNear={Boolean(bay.right && activeRooms.has(bay.right.id))}
+                    />
                 </group>
             ))}
             <mesh position={[0, MUSEUM_DIMENSIONS.hallHeight / 2, layout.hallBackZ]}>
                 <boxGeometry args={[MUSEUM_DIMENSIONS.hallHalfWidth * 2, MUSEUM_DIMENSIONS.hallHeight, 0.24]} />
                 <PlasterMaterial materials={materials} color={HALL_PAINT} textured={false} />
             </mesh>
+            <mesh position={[0, MUSEUM_DIMENSIONS.hallHeight / 2, layout.hallBackZ + 0.135]}>
+                <planeGeometry args={[(MUSEUM_DIMENSIONS.hallHalfWidth * 2) - 0.28, MUSEUM_DIMENSIONS.hallHeight - 0.26]} />
+                <WallpaperMaterial
+                    materials={materials}
+                    width={MUSEUM_DIMENSIONS.hallHalfWidth * 2}
+                    height={MUSEUM_DIMENSIONS.hallHeight}
+                    centerZ={layout.hallBackZ}
+                    color="#d0bfab"
+                />
+            </mesh>
+            {/* A shallow terminal frame physically separates the perpendicular
+                surfaces, so texture sampling can never expose a coplanar seam. */}
+            {[-1, 1].map(side => (
+                <mesh
+                    key={`terminal-pilaster-${side}`}
+                    position={[side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.16), MUSEUM_DIMENSIONS.hallHeight / 2, layout.hallBackZ + 0.18]}
+                >
+                    <boxGeometry args={[0.24, MUSEUM_DIMENSIONS.hallHeight - 0.12, 0.18]} />
+                    <meshStandardMaterial color="#b9aa95" roughness={0.74} />
+                </mesh>
+            ))}
             {layout.rooms.map(room => (
                 <CategoryRoom
                     key={room.id}
@@ -1283,6 +2056,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                     qualityLighting={reflectionsEnabled}
                 />
             ))}
+            <FixedRoomLighting rooms={activeRoomList} qualityLighting={reflectionsEnabled} />
             {ceilingLights.map(z => (
                 <group key={z} position={[0, 6.85, z]}>
                     <mesh rotation={[Math.PI / 2, 0, 0]}>
@@ -1292,16 +2066,29 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                 </group>
             ))}
             {illuminatedHallLights.map(z => (
-                <StaticSpotlight
-                    key={`hall-light-${z}`}
-                    position={[0, 5.9, z]}
-                    target={[0, 0, z]}
-                    color="#ffd8aa"
-                    intensity={reflectionsEnabled ? 28 : 18}
-                    distance={24}
-                    angle={0.72}
-                    penumbra={0.82}
-                />
+                <group key={`hall-light-${z}`}>
+                    <StaticSpotlight
+                        position={[0, 5.9, z]}
+                        target={[0, 0, z]}
+                        color="#ffd8aa"
+                        intensity={reflectionsEnabled ? 31 : 20}
+                        distance={22}
+                        angle={0.68}
+                        penumbra={0.86}
+                    />
+                    <pointLight
+                        position={[0, 6.35, z]}
+                        color="#f4bd82"
+                        intensity={reflectionsEnabled ? 5.5 : 3.2}
+                        distance={13}
+                        decay={2}
+                    />
+                    <FloorLightPool
+                        position={[0, 0.064, z]}
+                        size={[7.6, 8.8]}
+                        opacity={reflectionsEnabled ? 0.12 : 0.08}
+                    />
+                </group>
             ))}
             <MuseumDressing
                 layout={layout}
@@ -1449,13 +2236,14 @@ function NativePointerLockControls({ onLock, onUnlock }) {
 }
 
 function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
-    const { camera } = useThree()
+    const { camera, performance } = useThree()
     const keys = useRef(new Set())
     const lastRoom = useRef(null)
     const lastNearbyRooms = useRef('')
     const lastFocused = useRef(null)
     const lastSavedAt = useRef(0)
     const lastProbeAt = useRef(0)
+    const lastPerformanceRegressionAt = useRef(-10)
     const touchEuler = useMemo(() => new THREE.Euler(0, 0, 0, 'YXZ'), [])
     const forward = useMemo(() => new THREE.Vector3(), [])
     const right = useMemo(() => new THREE.Vector3(), [])
@@ -1495,6 +2283,13 @@ function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom
 
     useFrame((state, frameDelta) => {
         if (!enabled) return
+        if (
+            frameDelta > 0.038
+            && state.clock.elapsedTime - lastPerformanceRegressionAt.current > 0.9
+        ) {
+            lastPerformanceRegressionAt.current = state.clock.elapsedTime
+            performance.regress()
+        }
         const delta = Math.min(frameDelta, 0.05)
         if (touchMode && (touchInput.current.lookX || touchInput.current.lookY)) {
             touchEuler.setFromQuaternion(camera.quaternion)
@@ -1546,7 +2341,7 @@ function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom
                 lastRoom.current = room
                 onActiveRoom(room)
             }
-            const nearbyRooms = nearbyMuseumRoomIds(layout, position)
+            const nearbyRooms = nearbyMuseumRoomIds(layout, position, touchMode ? 15 : 20)
             const nearbyKey = nearbyRooms.join('|')
             if (nearbyKey !== lastNearbyRooms.current) {
                 lastNearbyRooms.current = nearbyKey
@@ -1590,97 +2385,123 @@ function PreviewCamera({ mode, roomIndex, layout }) {
     return null
 }
 
-function SceneWarmup({ layout, onReady, touchMode }) {
+function SceneWarmup({ layout, onReady, onProgress, touchMode }) {
     const { camera, gl, invalidate, scene } = useThree()
 
     useEffect(() => {
         let cancelled = false
-        let idleHandle = null
-        let fallbackTimer = null
+        let completed = 0
+        const allAlbums = [...new Map(
+            layout.rooms
+                .flatMap(room => room.albums)
+                .filter(Boolean)
+                .map(album => [album.albumId, album]),
+        ).values()]
+        const total = Math.max(1, allAlbums.length)
         const timeout = window.setTimeout(() => {
             if (!cancelled) onReady()
-        }, 2200)
-        const initialPosition = safeSessionPosition(layout)
-        const nearbyRoomIds = new Set(nearbyMuseumRoomIds(layout, initialPosition))
-        const nearbyAlbums = layout.rooms
-            .filter(room => nearbyRoomIds.has(room.id))
-            .flatMap(room => room.albums)
-            .filter(Boolean)
-            .slice(0, 8)
+        }, touchMode ? 70000 : 60000)
+        onProgress?.(0)
 
-        const covers = Promise.allSettled(nearbyAlbums.map(album => createMuseumCoverTexture(album, LOW_RES_COVER_WIDTH)))
-        covers.then((results) => {
-            results.forEach((result) => {
-                if (result.status === 'fulfilled') gl.initTexture?.(result.value)
-            })
-            invalidate()
-        })
+        // Plaque canvases are small, but creating dozens during a room-entry
+        // frame is enough to hitch the main thread. Build and cache them while
+        // the opening veil is already present.
+        // Each room uses one precomposed plaque atlas and merged plaque mesh,
+        // replacing one texture bind/draw call per visible painting. Promote
+        // those atlases under the opening veil alongside the cover previews so
+        // entering a room cannot trigger the atlas' first GPU upload.
+        const plaqueTextures = layout.rooms.map(room => (
+            getRoomPlaqueBatch(room.paintings).texture
+        ))
+        const promotedPlaques = Promise.allSettled(
+            plaqueTextures.map(texture => enqueueCoverUpload(gl, texture)),
+        )
+
+        // Decode and promote the entire low-resolution collection behind the
+        // opening veil. At 480px this is a modest, bounded cache, and it removes
+        // the far more distracting GPU-upload hitch that used to occur exactly
+        // as a visitor crossed into a new room.
+        const promotedCovers = Promise.allSettled(allAlbums.map(async (album, index) => {
+            try {
+                const texture = await createMuseumCoverTexture(
+                    album,
+                    LOW_RES_COVER_WIDTH,
+                    allAlbums.length - index,
+                )
+                if (cancelled) return
+                await enqueueCoverUpload(gl, texture)
+            } finally {
+                completed += 1
+                if (!cancelled) onProgress?.(completed / total)
+            }
+        }))
 
         const compile = gl.compileAsync?.(scene, camera) || Promise.resolve()
-        Promise.race([
-            compile,
-            new Promise(resolve => window.setTimeout(resolve, 1600)),
+        Promise.all([
+            promotedCovers,
+            promotedPlaques,
+            Promise.race([
+                compile,
+                new Promise(resolve => window.setTimeout(resolve, 2000)),
+            ]),
         ]).then(() => {
             invalidate()
             window.setTimeout(() => {
-                if (!cancelled) onReady()
-            }, 120)
+                if (cancelled) return
+                onReady()
+                onProgress?.(1)
+            }, 80)
         }).catch(() => {
             if (!cancelled) onReady()
         })
 
-        // Quietly warm a representative handful from every room after the
-        // opening view is responsive. Running one decode per idle slice keeps
-        // movement smooth while making the first doorway reveal much faster.
-        const backgroundAlbums = layout.rooms.flatMap(room => (
-            room.albums.slice(0, touchMode ? 1 : 3)
-        )).filter(Boolean)
-        let backgroundIndex = 0
-        const warmNextRoomCover = () => {
-            if (cancelled || backgroundIndex >= backgroundAlbums.length) return
-            const album = backgroundAlbums[backgroundIndex]
-            backgroundIndex += 1
-            createMuseumCoverTexture(album, LOW_RES_COVER_WIDTH, -500)
-                .catch(() => {})
-                .finally(() => {
-                    if (cancelled) return
-                    if ('requestIdleCallback' in window) {
-                        idleHandle = window.requestIdleCallback(warmNextRoomCover, { timeout: 900 })
-                    } else {
-                        fallbackTimer = window.setTimeout(warmNextRoomCover, 220)
-                    }
-                })
-        }
-        fallbackTimer = window.setTimeout(warmNextRoomCover, 1500)
-
         return () => {
             cancelled = true
             window.clearTimeout(timeout)
-            window.clearTimeout(fallbackTimer)
-            if (idleHandle !== null && 'cancelIdleCallback' in window) {
-                window.cancelIdleCallback(idleHandle)
-            }
         }
-    }, [camera, gl, invalidate, layout, onReady, scene, touchMode])
+    }, [camera, gl, invalidate, layout, onProgress, onReady, scene, touchMode])
 
     return null
 }
 
-function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, onSceneReady, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function DevelopmentPerformanceProbe() {
+    const { gl } = useThree()
+    const samples = useRef([])
+    const lastPublishedAt = useRef(0)
+    useFrame((state, delta) => {
+        samples.current.push(delta * 1000)
+        if (samples.current.length > 180) samples.current.shift()
+        if (state.clock.elapsedTime - lastPublishedAt.current < 1 || samples.current.length < 30) return
+        lastPublishedAt.current = state.clock.elapsedTime
+        const ordered = [...samples.current].sort((left, right) => left - right)
+        const pick = ratio => ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * ratio))]
+        document.documentElement.dataset.museumPerf = JSON.stringify({
+            medianMs: Number(pick(0.5).toFixed(2)),
+            p95Ms: Number(pick(0.95).toFixed(2)),
+            maxMs: Number(ordered.at(-1).toFixed(2)),
+            calls: gl.info.render.calls,
+            triangles: gl.info.render.triangles,
+            textures: gl.info.memory.textures,
+        })
+    })
+    return null
+}
+
+function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
     return (
         <>
             <color attach="background" args={[INK]} />
             <fog attach="fog" args={['#151310', 30, 120]} />
-            <ambientLight intensity={touchMode ? 0.2 : 0.12} color="#f3dcc4" />
-            <hemisphereLight args={['#d8e0e4', '#38261d', touchMode ? 0.28 : 0.2]} />
+            <ambientLight intensity={touchMode ? 0.14 : 0.11} color="#f3dcc4" />
+            <hemisphereLight args={['#d8e0e4', '#38261d', touchMode ? 0.21 : 0.19]} />
             <directionalLight
                 position={[-6, 10, 12]}
-                intensity={touchMode ? 0.24 : 0.16}
+                intensity={touchMode ? 0.2 : 0.12}
                 color="#dce8ef"
                 castShadow={false}
             />
-            <directionalLight position={[7, 6, -12]} intensity={0.08} color="#d69e6a" castShadow={false} />
+            <directionalLight position={[7, 6, -12]} intensity={0.055} color="#d69e6a" castShadow={false} />
             <MainHall
                 layout={layout}
                 activeRoomId={controlsEnabled.activeRoomId}
@@ -1688,7 +2509,8 @@ function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPre
                 materials={materials}
                 reflectionsEnabled={!touchMode}
             />
-            <SceneWarmup layout={layout} onReady={onSceneReady} touchMode={touchMode} />
+            <SceneWarmup layout={layout} onReady={onSceneReady} onProgress={onSceneProgress} touchMode={touchMode} />
+            {import.meta.env.DEV && <DevelopmentPerformanceProbe />}
             {visualPreview && <PreviewCamera mode={previewMode} roomIndex={previewRoomIndex} layout={layout} />}
             {!visualPreview && (
                 <>
@@ -1733,8 +2555,19 @@ export default function ImmersiveGalleryDesktop() {
     const [activeRoomIds, setActiveRoomIds] = useState([])
     const [focused, setFocused] = useState(null)
     const [sceneReady, setSceneReady] = useState(false)
+    const [sceneProgress, setSceneProgress] = useState(0)
     const [touchMode, setTouchMode] = useState(() => forceTouchPreview || usesTouchControls())
     const touchInput = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 })
+
+    // Suspense can delay SceneWarmup itself while the first static materials
+    // decode. This is an emergency escape hatch, not a normal readiness timer:
+    // revealing the scene while cover uploads are active causes black frames
+    // and severe walk-through hitches on a cold cache.
+    useEffect(() => {
+        if (!albums || sceneReady) return undefined
+        const fallback = window.setTimeout(() => setSceneReady(true), touchMode ? 75000 : 65000)
+        return () => window.clearTimeout(fallback)
+    }, [albums, sceneReady, touchMode])
 
     useEffect(() => {
         const pointer = window.matchMedia?.('(pointer: coarse)')
@@ -1749,7 +2582,28 @@ export default function ImmersiveGalleryDesktop() {
 
     useEffect(() => {
         const controller = new AbortController()
-        fetchAllAlbums({ type: 'photo', limit: 100 }, { signal: controller.signal })
+        const request = import.meta.env.DEV && typeof window.fetch !== 'function'
+            ? new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest()
+                xhr.open('GET', '/api/public/albums?type=photo&limit=100')
+                xhr.onload = () => {
+                    if (xhr.status < 200 || xhr.status >= 300) {
+                        reject(new Error(`Catalog request failed (${xhr.status})`))
+                        return
+                    }
+                    try {
+                        const payload = JSON.parse(xhr.responseText)
+                        resolve(payload?.items || payload || [])
+                    } catch (cause) {
+                        reject(cause)
+                    }
+                }
+                xhr.onerror = () => reject(new Error('The local catalog proxy is unavailable.'))
+                controller.signal.addEventListener('abort', () => xhr.abort(), { once: true })
+                xhr.send()
+            })
+            : fetchAllAlbums({ type: 'photo', limit: 100 }, { signal: controller.signal })
+        request
             .then(setAlbums)
             .catch((cause) => {
                 if (cause?.name !== 'AbortError') setError(cause?.message || 'The photo catalog is unavailable.')
@@ -1761,10 +2615,10 @@ export default function ImmersiveGalleryDesktop() {
     const layout = useMemo(() => buildMuseumLayout(catalog), [catalog])
     const previewMode = previewParams?.get('museum-preview') || ''
     const previewRoomIndex = Number.parseInt(previewParams?.get('museum-room') || '0', 10) || 0
-    const visualPreview = ['lobby', 'hall', 'room'].includes(previewMode)
+    const visualPreview = import.meta.env.DEV && ['lobby', 'hall', 'room'].includes(previewMode)
     const initialActiveRoomIds = useMemo(
-        () => nearbyMuseumRoomIds(layout, safeSessionPosition(layout)),
-        [layout],
+        () => nearbyMuseumRoomIds(layout, safeSessionPosition(layout), touchMode ? 15 : 20),
+        [layout, touchMode],
     )
     const renderedActiveRoomIds = visualPreview
         ? (previewMode === 'room' ? [layout.rooms[previewRoomIndex]?.id].filter(Boolean) : [])
@@ -1798,7 +2652,7 @@ export default function ImmersiveGalleryDesktop() {
                 className="museum-canvas"
                 camera={{ fov: touchMode ? 72 : 66, near: 0.08, far: 220, position: layout.spawn }}
                 dpr={touchMode ? [0.58, 0.84] : [0.68, 1]}
-                frameloop={locked && !visualPreview ? 'always' : 'demand'}
+                frameloop={locked || visualPreview ? 'always' : 'demand'}
                 performance={{ min: 0.45, max: 1, debounce: 240 }}
                 shadows={!lowPowerMode}
                 gl={{
@@ -1810,7 +2664,7 @@ export default function ImmersiveGalleryDesktop() {
                 onCreated={({ gl }) => {
                     gl.outputColorSpace = THREE.SRGBColorSpace
                     gl.toneMapping = THREE.ACESFilmicToneMapping
-                    gl.toneMappingExposure = touchMode ? 1.18 : 1.08
+                    gl.toneMappingExposure = touchMode ? 1.2 : 1.22
                     gl.shadowMap.type = THREE.PCFSoftShadowMap
                 }}
             >
@@ -1824,6 +2678,7 @@ export default function ImmersiveGalleryDesktop() {
                         previewMode={previewMode}
                         previewRoomIndex={previewRoomIndex}
                         onSceneReady={handleSceneReady}
+                        onSceneProgress={setSceneProgress}
                         onLock={() => setLocked(true)}
                         onUnlock={() => setLocked(false)}
                         onActiveRoom={setActiveRoomId}
@@ -1838,8 +2693,10 @@ export default function ImmersiveGalleryDesktop() {
                     <span className="museum-loading-mark">IT</span>
                     <p className="museum-kicker">Preparing the virtual archive</p>
                     <h1>Opening the gallery</h1>
-                    <p>Calibrating the lights and hanging the first nearby photographs…</p>
-                    <span className="museum-loading-progress" aria-hidden="true"><i /></span>
+                    <p>Calibrating the lights and hanging the collection… {Math.round(sceneProgress * 100)}%</p>
+                    <span className="museum-loading-progress museum-loading-progress--determinate" aria-hidden="true">
+                        <i style={{ transform: `scaleX(${Math.max(0.02, sceneProgress)})` }} />
+                    </span>
                 </div>
             )}
             <div className="museum-topbar">

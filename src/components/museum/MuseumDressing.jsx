@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/immutability -- Three.js scene environment state is managed by the renderer lifecycle. */
 import { useThree } from '@react-three/fiber'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
@@ -17,6 +17,36 @@ const ROOM_TEXTILES = [
     { bench: '#51495e', base: '#312d39', rug: '#34303b', rugInner: '#4e4659', rugCenter: '#3c3545' },
 ]
 let sconceGlowTexture = null
+let textileDetailTexture = null
+
+function getTextileDetailTexture() {
+    if (textileDetailTexture || typeof document === 'undefined') return textileDetailTexture
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 64
+    const context = canvas.getContext('2d')
+    context.fillStyle = '#777'
+    context.fillRect(0, 0, 64, 64)
+    context.strokeStyle = 'rgba(235,235,235,.3)'
+    context.lineWidth = 1
+    for (let offset = -64; offset < 128; offset += 5) {
+        context.beginPath()
+        context.moveTo(offset, 0)
+        context.lineTo(offset - 64, 64)
+        context.stroke()
+        context.beginPath()
+        context.moveTo(offset, 0)
+        context.lineTo(offset + 64, 64)
+        context.stroke()
+    }
+    textileDetailTexture = new THREE.CanvasTexture(canvas)
+    textileDetailTexture.wrapS = THREE.RepeatWrapping
+    textileDetailTexture.wrapT = THREE.RepeatWrapping
+    textileDetailTexture.repeat.set(8, 12)
+    textileDetailTexture.anisotropy = 2
+    textileDetailTexture.needsUpdate = true
+    return textileDetailTexture
+}
 
 function getSconceGlowTexture() {
     if (sconceGlowTexture || typeof document === 'undefined') return sconceGlowTexture
@@ -93,110 +123,89 @@ function RoundedBoxShape({ size, radius = 0.08, segments = 3 }) {
     return <primitive object={geometry} attach="geometry" />
 }
 
-function PottedPlant({ plant, scale = 1 }) {
+function InstancedPlants({ plants, castDynamicShadows = false }) {
+    const pots = useRef(null)
+    const soil = useRef(null)
+    const stems = useRef(null)
+    const leaves = useRef(null)
+    const plantCount = plants.length
+
+    useEffect(() => {
+        if (!plantCount) return
+        const root = new THREE.Matrix4()
+        const local = new THREE.Matrix4()
+        const matrix = new THREE.Matrix4()
+        const position = new THREE.Vector3()
+        const rotation = new THREE.Quaternion()
+        const scale = new THREE.Vector3()
+        const rootRotation = new THREE.Quaternion()
+        let stemIndex = 0
+        let leafIndex = 0
+
+        const setLocalMatrix = (mesh, index, localPosition, localRotation, localScale) => {
+            rotation.setFromEuler(new THREE.Euler(...localRotation))
+            local.compose(position.set(...localPosition), rotation, scale.set(...localScale))
+            matrix.multiplyMatrices(root, local)
+            mesh?.setMatrixAt(index, matrix)
+        }
+
+        plants.forEach((plant, plantIndex) => {
+            const renderScale = plant.renderScale || 1
+            rootRotation.setFromEuler(new THREE.Euler(0, plant.rotationY || 0, 0))
+            root.compose(
+                position.set(...plant.position),
+                rootRotation,
+                scale.set(renderScale, renderScale, renderScale),
+            )
+            setLocalMatrix(pots.current, plantIndex, [0, 0.32, 0], [0, 0, 0], [1, 1, 1])
+            setLocalMatrix(soil.current, plantIndex, [0, 0.64, 0], [0, 0, 0], [1, 1, 1])
+            for (const stem of [[-0.11, 0.96, 0.05, -0.1], [0.12, 1.04, -0.04, 0.12], [0, 1.15, 0.02, 0]]) {
+                setLocalMatrix(stems.current, stemIndex, stem.slice(0, 3), [stem[3], 0, stem[3]], [1, 1, 1])
+                stemIndex += 1
+            }
+            LEAVES.forEach(([x, y, z, rx, ry, rz, leafScale]) => {
+                setLocalMatrix(
+                    leaves.current,
+                    leafIndex,
+                    [x, y, z],
+                    [rx, ry, rz],
+                    [0.34 * leafScale, 0.055, 0.76 * leafScale],
+                )
+                leafIndex += 1
+            })
+        })
+        for (const mesh of [pots.current, soil.current, stems.current, leaves.current]) {
+            if (!mesh) continue
+            mesh.instanceMatrix.needsUpdate = true
+            mesh.computeBoundingSphere?.()
+        }
+    }, [plantCount, plants])
+
+    if (!plantCount) return null
     return (
-        <group position={plant.position} rotation={[0, plant.rotationY || 0, 0]} scale={scale}>
-            <mesh castShadow receiveShadow position={[0, 0.32, 0]}>
-                <cylinderGeometry args={[0.34, 0.43, 0.64, 12, 1, false]} />
+        <>
+            <instancedMesh ref={pots} args={[undefined, undefined, plantCount]} castShadow={castDynamicShadows} receiveShadow>
+                <cylinderGeometry args={[0.34, 0.43, 0.64, 10, 1, false]} />
                 <meshPhysicalMaterial
                     color="#817267"
                     roughness={0.32}
                     clearcoat={0.34}
                     clearcoatRoughness={0.68}
                 />
-            </mesh>
-            <mesh position={[0, 0.64, 0]}>
-                <cylinderGeometry args={[0.32, 0.32, 0.07, 12]} />
+            </instancedMesh>
+            <instancedMesh ref={soil} args={[undefined, undefined, plantCount]}>
+                <cylinderGeometry args={[0.32, 0.32, 0.07, 10]} />
                 <meshStandardMaterial color="#2a2119" roughness={1} />
-            </mesh>
-            {[[-0.11, 0.96, 0.05, -0.1], [0.12, 1.04, -0.04, 0.12], [0, 1.15, 0.02, 0]].map((stem, index) => (
-                <mesh key={index} position={stem.slice(0, 3)} rotation={[stem[3], 0, stem[3]]} castShadow>
-                    <cylinderGeometry args={[0.022, 0.032, 0.92, 7]} />
-                    <meshStandardMaterial color="#425638" roughness={0.88} />
-                </mesh>
-            ))}
-            {LEAVES.map(([x, y, z, rx, ry, rz, leafScale], index) => (
-                <mesh
-                    key={index}
-                    position={[x, y, z]}
-                    rotation={[rx, ry, rz]}
-                    scale={[0.34 * leafScale, 0.055, 0.76 * leafScale]}
-                    castShadow
-                >
-                    <sphereGeometry args={[1, 8, 5]} />
-                    <meshStandardMaterial
-                        color={index % 3 ? '#526947' : '#667c52'}
-                        roughness={0.78}
-                        side={THREE.DoubleSide}
-                    />
-                </mesh>
-            ))}
-        </group>
-    )
-}
-
-function LowDetailPottedPlant({ plant, scale = 1 }) {
-    return (
-        <group position={plant.position} rotation={[0, plant.rotationY || 0, 0]} scale={scale}>
-            <mesh position={[0, 0.32, 0]}>
-                <cylinderGeometry args={[0.34, 0.43, 0.64, 8]} />
-                <meshStandardMaterial color="#77685e" roughness={0.72} />
-            </mesh>
-            <mesh position={[0, 0.96, 0]} scale={[0.48, 0.78, 0.48]}>
-                <dodecahedronGeometry args={[0.72, 0]} />
-                <meshStandardMaterial color="#4f6546" roughness={0.88} />
-            </mesh>
-            <ContactPatch position={[0, 0, 0]} scale={[0.72, 0.72]} />
-        </group>
-    )
-}
-
-function VelvetRope({ start, end }) {
-    const curve = useMemo(() => {
-        const middle = start.clone().lerp(end, 0.5)
-        middle.y -= 0.18
-        return new THREE.CatmullRomCurve3([start, middle, end], false, 'centripetal', 0.5)
-    }, [end, start])
-    return (
-        <mesh castShadow>
-            <tubeGeometry args={[curve, 12, 0.045, 6, false]} />
-            <meshStandardMaterial color={VELVET} roughness={0.92} />
-        </mesh>
-    )
-}
-
-function Stanchion({ position }) {
-    return (
-        <group position={position}>
-            <mesh castShadow receiveShadow position={[0, 0.05, 0]}>
-                <cylinderGeometry args={[0.2, 0.26, 0.1, 12]} />
-                <meshPhysicalMaterial color={DARK_BRASS} metalness={0.76} roughness={0.24} clearcoat={0.3} />
-            </mesh>
-            <mesh castShadow position={[0, 0.55, 0]}>
-                <cylinderGeometry args={[0.055, 0.07, 0.96, 8]} />
-                <meshPhysicalMaterial color={BRASS} metalness={0.84} roughness={0.2} clearcoat={0.24} />
-            </mesh>
-            <mesh castShadow position={[0, 1.04, 0]}>
-                <sphereGeometry args={[0.115, 10, 7]} />
-                <meshPhysicalMaterial color={BRASS} metalness={0.84} roughness={0.18} clearcoat={0.32} />
-            </mesh>
-        </group>
-    )
-}
-
-function LobbyStanchions({ stanchions }) {
-    const bySide = useMemo(() => [-1, 1].map(side => stanchions.filter(stanchion => Math.sign(stanchion.position[0]) === side)), [stanchions])
-    return (
-        <group>
-            {stanchions.map(stanchion => <Stanchion key={stanchion.id} position={stanchion.position} />)}
-            {bySide.map((pair, index) => pair.length === 2 && (
-                <VelvetRope
-                    key={index}
-                    start={new THREE.Vector3(pair[0].position[0], 1.02, pair[0].position[2])}
-                    end={new THREE.Vector3(pair[1].position[0], 1.02, pair[1].position[2])}
-                />
-            ))}
-        </group>
+            </instancedMesh>
+            <instancedMesh ref={stems} args={[undefined, undefined, plantCount * 3]} castShadow={castDynamicShadows}>
+                <cylinderGeometry args={[0.022, 0.032, 0.92, 6]} />
+                <meshStandardMaterial color="#425638" roughness={0.88} />
+            </instancedMesh>
+            <instancedMesh ref={leaves} args={[undefined, undefined, plantCount * LEAVES.length]} castShadow={castDynamicShadows}>
+                <sphereGeometry args={[1, 7, 4]} />
+                <meshStandardMaterial color="#586f49" roughness={0.78} side={THREE.DoubleSide} />
+            </instancedMesh>
+        </>
     )
 }
 
@@ -261,8 +270,9 @@ function UpholsteredBench({ bench, variant = 0 }) {
     const textile = ROOM_TEXTILES[variant % ROOM_TEXTILES.length]
     const baseSize = useMemo(() => [width, height * 0.72, depth], [depth, height, width])
     const cushionSize = useMemo(() => [width + 0.04, height * 0.28, depth + 0.04], [depth, height, width])
+    const textileDetail = useMemo(() => getTextileDetailTexture(), [])
     return (
-        <group position={bench.position}>
+        <group position={bench.position} rotation={[0, bench.rotationY || 0, 0]}>
             <ContactPatch position={[0, -bench.position[1], 0]} scale={[width * 0.58, depth * 0.78]} />
             <mesh castShadow receiveShadow position={[0, 0.04, 0]}>
                 <RoundedBoxShape size={baseSize} radius={0.1} />
@@ -270,7 +280,14 @@ function UpholsteredBench({ bench, variant = 0 }) {
             </mesh>
             <mesh castShadow position={[0, height * 0.44, 0]}>
                 <RoundedBoxShape size={cushionSize} radius={0.11} />
-                <meshPhysicalMaterial color={textile.bench || VELVET} roughness={0.88} sheen={0.55} sheenRoughness={0.78} />
+                <meshPhysicalMaterial
+                    color={textile.bench || VELVET}
+                    bumpMap={textileDetail}
+                    bumpScale={0.026}
+                    roughness={0.88}
+                    sheen={0.55}
+                    sheenRoughness={0.78}
+                />
             </mesh>
             {[-0.56, 0.56].map(x => [-1, 1].map(direction => (
                 <mesh key={`${x}-${direction}`} castShadow position={[x, -0.37, direction * ((depth / 2) - 0.18)]}>
@@ -286,7 +303,7 @@ function BenchRug({ bench, variant = 0 }) {
     const [width, , depth] = bench.size
     const textile = ROOM_TEXTILES[variant % ROOM_TEXTILES.length]
     return (
-        <group position={[bench.position[0], 0.024, bench.position[2]]}>
+        <group position={[bench.position[0], 0.024, bench.position[2]]} rotation={[0, bench.rotationY || 0, 0]}>
             <mesh receiveShadow>
                 <boxGeometry args={[width + 1.15, 0.035, depth + 0.95]} />
                 <meshStandardMaterial color={textile.rug} roughness={0.98} />
@@ -322,82 +339,15 @@ function AbstractSculpture({ sculpture }) {
     )
 }
 
-function PaperStack() {
-    const sheets = [
-        { y: 0, rotation: -0.035, color: '#efe9dc' },
-        { y: 0.012, rotation: 0.018, color: '#f7f2e8' },
-        { y: 0.024, rotation: -0.01, color: '#fbf7ef' },
-    ]
-    return (
-        <group>
-            {sheets.map((sheet, index) => (
-                <mesh key={index} position={[0, sheet.y, 0]} rotation={[0, sheet.rotation, 0]}>
-                    <boxGeometry args={[0.76, 0.012, 0.54]} />
-                    <meshStandardMaterial color={sheet.color} roughness={0.96} />
-                </mesh>
-            ))}
-            {[0.1, 0.17, 0.24].map((z, index) => (
-                <mesh key={z} position={[-0.08, 0.034, z - 0.26]}>
-                    <boxGeometry args={[0.48 - (index * 0.05), 0.004, 0.014]} />
-                    <meshBasicMaterial color="#8f8577" />
-                </mesh>
-            ))}
-            <mesh position={[-0.25, 0.035, -0.17]}>
-                <boxGeometry args={[0.14, 0.005, 0.09]} />
-                <meshBasicMaterial color="#7b2730" />
-            </mesh>
-        </group>
-    )
-}
-
-function DesktopComputer() {
-    const keys = useMemo(() => (
-        Array.from({ length: 24 }, (_, index) => ({
-            x: -0.28 + ((index % 8) * 0.08),
-            z: -0.095 + (Math.floor(index / 8) * 0.075),
-        }))
-    ), [])
-    return (
-        <group>
-            <mesh position={[0, 0.04, -0.02]}>
-                <boxGeometry args={[0.58, 0.05, 0.34]} />
-                <meshStandardMaterial color="#2a2825" metalness={0.25} roughness={0.42} />
-            </mesh>
-            <mesh position={[0, 0.29, -0.04]}>
-                <boxGeometry args={[0.09, 0.48, 0.08]} />
-                <meshStandardMaterial color="#393633" metalness={0.34} roughness={0.38} />
-            </mesh>
-            <mesh position={[0, 0.57, -0.03]} rotation={[-0.035, 0, 0]}>
-                <boxGeometry args={[1.02, 0.68, 0.09]} />
-                <meshPhysicalMaterial color="#252321" metalness={0.18} roughness={0.3} clearcoat={0.24} />
-            </mesh>
-            <mesh position={[0, 0.57, 0.02]} rotation={[-0.035, 0, 0]}>
-                <planeGeometry args={[0.9, 0.56]} />
-                <meshBasicMaterial color="#23313a" />
-            </mesh>
-            <mesh position={[0, 0.02, 0.55]} rotation={[0, 0, 0]}>
-                <boxGeometry args={[0.72, 0.035, 0.31]} />
-                <meshStandardMaterial color="#34312e" metalness={0.18} roughness={0.5} />
-            </mesh>
-            {keys.map((key, index) => (
-                <mesh key={index} position={[key.x, 0.044, key.z + 0.55]}>
-                    <boxGeometry args={[0.058, 0.012, 0.05]} />
-                    <meshStandardMaterial color="#5a5550" roughness={0.62} />
-                </mesh>
-            ))}
-            <mesh position={[0.57, 0.026, 0.52]}>
-                <sphereGeometry args={[0.09, 12, 7, 0, Math.PI * 2, 0, Math.PI / 2]} />
-                <meshStandardMaterial color="#393633" metalness={0.16} roughness={0.46} />
-            </mesh>
-        </group>
-    )
-}
-
 function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
     const [x, y, z] = layout.desk.position
     return (
         <group position={[x, y, z]}>
             <ContactPatch position={[0, -y, 0]} scale={[2.9, 1.2]} />
+            <mesh castShadow receiveShadow position={[0, -0.62, 0]}>
+                <RoundedBoxShape size={[layout.desk.size[0] - 0.42, 0.22, layout.desk.size[2] - 0.24]} radius={0.045} />
+                <meshStandardMaterial color="#24160f" roughness={0.78} />
+            </mesh>
             <mesh castShadow receiveShadow>
                 <RoundedBoxShape size={layout.desk.size} radius={0.07} />
                 <WoodMaterial materials={materials} color="#4c2f1d" roughness={0.42} />
@@ -416,12 +366,6 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
                 position={[0, 0.08, 0.715]}
                 size={[3.25, 0.76]}
             />
-            <group position={[-1.42, 0.836, 0.03]} rotation={[0, -0.18, 0]}>
-                <PaperStack />
-            </group>
-            <group position={[1.18, 0.83, -0.25]} rotation={[0, 0.14, 0]}>
-                <DesktopComputer />
-            </group>
         </group>
     )
 }
@@ -469,16 +413,39 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
     )
 }
 
-function WallSconce({ side, z }) {
-    const x = side * 4.64
+function InstancedWallSconces({ placements }) {
     const glow = useMemo(() => getSconceGlowTexture(), [])
+    const glows = useRef(null)
+    const bases = useRef(null)
+    const shades = useRef(null)
+
+    useEffect(() => {
+        const matrix = new THREE.Matrix4()
+        const position = new THREE.Vector3()
+        const rotation = new THREE.Quaternion()
+        const scale = new THREE.Vector3(1, 1, 1)
+        placements.forEach(({ side, z }, index) => {
+            const x = side * 4.64
+            rotation.setFromEuler(new THREE.Euler(0, side < 0 ? Math.PI / 2 : -Math.PI / 2, 0))
+            matrix.compose(position.set(x - (side * 0.105), 3.69, z), rotation, scale)
+            glows.current?.setMatrixAt(index, matrix)
+            rotation.identity()
+            matrix.compose(position.set(x, 3.65, z), rotation, scale)
+            bases.current?.setMatrixAt(index, matrix)
+            rotation.setFromEuler(new THREE.Euler(0, 0, side * -0.26))
+            matrix.compose(position.set(x - (side * 0.19), 3.77, z), rotation, scale)
+            shades.current?.setMatrixAt(index, matrix)
+        })
+        for (const mesh of [glows.current, bases.current, shades.current]) {
+            if (!mesh) continue
+            mesh.instanceMatrix.needsUpdate = true
+            mesh.computeBoundingSphere?.()
+        }
+    }, [placements])
+
     return (
-        <group position={[x, 3.65, z]}>
-            <mesh
-                position={[-side * 0.105, 0.04, 0]}
-                rotation={[0, side < 0 ? Math.PI / 2 : -Math.PI / 2, 0]}
-                renderOrder={1}
-            >
+        <>
+            <instancedMesh ref={glows} args={[undefined, undefined, placements.length]} renderOrder={1}>
                 <planeGeometry args={[2.8, 3.4]} />
                 <meshBasicMaterial
                     map={glow}
@@ -489,51 +456,56 @@ function WallSconce({ side, z }) {
                     blending={THREE.AdditiveBlending}
                     toneMapped={false}
                 />
-            </mesh>
-            <mesh castShadow>
+            </instancedMesh>
+            <instancedMesh ref={bases} args={[undefined, undefined, placements.length]} castShadow>
                 <cylinderGeometry args={[0.15, 0.19, 0.48, 10]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} />
-            </mesh>
-            <mesh position={[-side * 0.19, 0.12, 0]} rotation={[0, 0, side * -0.26]}>
+            </instancedMesh>
+            <instancedMesh ref={shades} args={[undefined, undefined, placements.length]}>
                 <cylinderGeometry args={[0.24, 0.15, 0.42, 10, 1, true]} />
                 <meshStandardMaterial color="#f2dfbf" emissive="#d99d51" emissiveIntensity={0.5} transparent opacity={0.78} roughness={0.48} side={THREE.DoubleSide} />
-            </mesh>
-        </group>
+            </instancedMesh>
+        </>
     )
 }
 
 export default function MuseumDressing({ layout, activeRoomIds, materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true }) {
     const bayCount = Math.max(1, Math.ceil(layout.rooms.length / 2))
-    const bayZs = Array.from({ length: bayCount }, (_, index) => -7 - (index * 16.5))
-    const activeRooms = useMemo(() => {
-        const active = new Set(activeRoomIds)
-        return layout.rooms.filter(room => active.has(room.id))
-    }, [activeRoomIds, layout.rooms])
-    const inactiveRooms = useMemo(() => {
-        const active = new Set(activeRoomIds)
-        return layout.rooms.filter(room => !active.has(room.id))
-    }, [activeRoomIds, layout.rooms])
+    const bayZs = useMemo(
+        () => Array.from({ length: bayCount }, (_, index) => -7 - (index * 16.5)),
+        [bayCount],
+    )
+    const activeRoomSet = useMemo(() => new Set(activeRoomIds), [activeRoomIds])
+    const activeRooms = useMemo(() => layout.rooms.filter(room => activeRoomSet.has(room.id)), [activeRoomSet, layout.rooms])
+    const staticPlants = useMemo(() => [
+        ...layout.dressing.lobbyPlants.map(plant => ({ ...plant, renderScale: 1.05 })),
+        ...layout.dressing.hallPlants.map(plant => ({ ...plant, renderScale: 0.9 })),
+    ], [layout.dressing.hallPlants, layout.dressing.lobbyPlants])
+    const activeRoomPlants = useMemo(() => [
+        ...activeRooms.flatMap(room => room.plants).map(plant => ({ ...plant, renderScale: 0.92 })),
+    ], [activeRooms])
+    const sconcePlacements = useMemo(
+        () => bayZs.flatMap(z => [-1, 1].map(side => ({ side, z: z + 7.4 }))),
+        [bayZs],
+    )
     return (
         <group>
-            <EnvironmentLighting intensity={reflectionsEnabled ? 0.26 : 0.12} />
+            <EnvironmentLighting intensity={reflectionsEnabled ? 0.17 : 0.08} />
             <RunnerCarpet layout={layout} />
             <LobbyEntrance materials={materials} LabelPlane={LabelPlane} PlasterMaterial={PlasterMaterial} />
             <ReceptionDesk layout={layout} materials={materials} LabelPlane={LabelPlane} WoodMaterial={WoodMaterial} />
-            {layout.dressing.lobbyPlants.map(plant => <PottedPlant key={plant.id} plant={plant} scale={1.05} />)}
-            {layout.dressing.hallPlants.map(plant => <PottedPlant key={plant.id} plant={plant} scale={0.9} />)}
-            <LobbyStanchions stanchions={layout.dressing.stanchions} />
+            <InstancedPlants plants={staticPlants} />
+            <InstancedPlants plants={activeRoomPlants} castDynamicShadows={reflectionsEnabled} />
             <AbstractSculpture sculpture={layout.dressing.terminalSculpture} />
-            {layout.rooms.flatMap((room, roomIndex) => room.benches.map(bench => ({ bench, roomIndex }))).map(({ bench, roomIndex }) => (
-                <BenchRug key={`rug-${bench.id}`} bench={bench} variant={roomIndex} />
+            {layout.rooms.map((room, roomIndex) => (
+                <group key={`furnishings-${room.id}`} visible={activeRoomSet.has(room.id)}>
+                    {room.benches.map(bench => <BenchRug key={`rug-${bench.id}`} bench={bench} variant={roomIndex} />)}
+                    {room.benches.map(bench => <UpholsteredBench key={bench.id} bench={bench} variant={roomIndex} />)}
+                </group>
             ))}
-            {layout.rooms.flatMap((room, roomIndex) => room.benches.map(bench => ({ bench, roomIndex }))).map(({ bench, roomIndex }) => (
-                <UpholsteredBench key={bench.id} bench={bench} variant={roomIndex} />
-            ))}
-            {activeRooms.flatMap(room => room.plants).map(plant => <PottedPlant key={plant.id} plant={plant} scale={0.92} />)}
-            {inactiveRooms.flatMap(room => room.plants).map(plant => <LowDetailPottedPlant key={plant.id} plant={plant} scale={0.92} />)}
             {/* Place sconces on the solid wall between galleries, clear of the
                 room end walls and arched entry trim. */}
-            {bayZs.flatMap(z => [-1, 1].map(side => <WallSconce key={`${z}-${side}`} side={side} z={z + 7.4} />))}
+            <InstancedWallSconces placements={sconcePlacements} />
         </group>
     )
 }
