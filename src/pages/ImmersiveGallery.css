@@ -16,6 +16,46 @@
   background: #171411;
 }
 
+.museum-loading--scene {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  min-height: 0;
+  background:
+    radial-gradient(circle at 50% 43%, rgba(85, 59, 38, 0.2), transparent 31rem),
+    #171411;
+}
+
+.museum-loading--scene h1 {
+  margin-bottom: 0.8rem;
+}
+
+.museum-loading--scene > p:not(.museum-kicker) {
+  max-width: 30rem;
+}
+
+.museum-loading-progress {
+  position: relative;
+  width: min(21rem, 68vw);
+  height: 2px;
+  margin-top: 1.8rem;
+  overflow: hidden;
+  background: rgba(238, 232, 220, 0.14);
+}
+
+.museum-loading-progress > i {
+  position: absolute;
+  inset-block: 0;
+  left: -38%;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, #c59a6a, transparent);
+  animation: museum-loading-sweep 1.25s ease-in-out infinite;
+}
+
+@keyframes museum-loading-sweep {
+  to { transform: translateX(365%); }
+}
+
 .museum-experience {
   position: fixed;
   inset: 0;

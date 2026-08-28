@@ -170,6 +170,24 @@ export function buildMuseumLayout(categories = []) {
         }
     })
 
+    const dressing = {
+        lobbyPlants,
+        hallPlants,
+        stanchions,
+        terminalSculpture,
+    }
+    const obstacles = [
+        {
+            position: [0, 0.69, 6.4],
+            size: [4.3, 1.38, 1.3],
+        },
+        ...dressing.lobbyPlants,
+        ...dressing.hallPlants,
+        ...dressing.stanchions,
+        dressing.terminalSculpture,
+        ...rooms.flatMap(room => [...room.benches, ...room.plants]),
+    ]
+
     return {
         rooms,
         hallBackZ,
@@ -179,12 +197,8 @@ export function buildMuseumLayout(categories = []) {
             position: [0, 0.69, 6.4],
             size: [4.3, 1.38, 1.3],
         },
-        dressing: {
-            lobbyPlants,
-            hallPlants,
-            stanchions,
-            terminalSculpture,
-        },
+        dressing,
+        obstacles,
     }
 }
 
@@ -216,7 +230,7 @@ export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
     ))
     if (!inHall && !inRoom && !inDoorway) return false
 
-    const obstacles = [
+    const obstacles = layout.obstacles || [
         layout.desk,
         ...layout.dressing.lobbyPlants,
         ...layout.dressing.hallPlants,
@@ -274,6 +288,6 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 6.5) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-        .slice(0, 2)
+        .slice(0, 1)
         .map(room => room.id)
 }

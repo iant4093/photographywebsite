@@ -21,10 +21,11 @@ const LEAVES = [
     [-0.17, 1.32, -0.02, -0.3, 0.18, 0.3, 0.64],
 ]
 
-function EnvironmentLighting() {
+function EnvironmentLighting({ enabled }) {
     const { gl, scene } = useThree()
 
     useEffect(() => {
+        if (!enabled) return undefined
         const pmrem = new THREE.PMREMGenerator(gl)
         const environmentScene = new RoomEnvironment()
         const environment = pmrem.fromScene(environmentScene, 0.035).texture
@@ -39,7 +40,7 @@ function EnvironmentLighting() {
             environmentScene.dispose?.()
             pmrem.dispose()
         }
-    }, [gl, scene])
+    }, [enabled, gl, scene])
 
     return null
 }
@@ -48,7 +49,7 @@ function PottedPlant({ plant, scale = 1 }) {
     return (
         <group position={plant.position} rotation={[0, plant.rotationY || 0, 0]} scale={scale}>
             <mesh castShadow receiveShadow position={[0, 0.32, 0]}>
-                <cylinderGeometry args={[0.34, 0.43, 0.64, 24, 1, false]} />
+                <cylinderGeometry args={[0.34, 0.43, 0.64, 12, 1, false]} />
                 <meshPhysicalMaterial
                     color="#817267"
                     roughness={0.32}
@@ -57,7 +58,7 @@ function PottedPlant({ plant, scale = 1 }) {
                 />
             </mesh>
             <mesh position={[0, 0.64, 0]}>
-                <cylinderGeometry args={[0.32, 0.32, 0.07, 24]} />
+                <cylinderGeometry args={[0.32, 0.32, 0.07, 12]} />
                 <meshStandardMaterial color="#2a2119" roughness={1} />
             </mesh>
             {[[-0.11, 0.96, 0.05, -0.1], [0.12, 1.04, -0.04, 0.12], [0, 1.15, 0.02, 0]].map((stem, index) => (
@@ -74,7 +75,7 @@ function PottedPlant({ plant, scale = 1 }) {
                     scale={[0.34 * leafScale, 0.055, 0.76 * leafScale]}
                     castShadow
                 >
-                    <sphereGeometry args={[1, 12, 7]} />
+                    <sphereGeometry args={[1, 8, 5]} />
                     <meshStandardMaterial
                         color={index % 3 ? '#526947' : '#667c52'}
                         roughness={0.78}
@@ -94,7 +95,7 @@ function VelvetRope({ start, end }) {
     }, [end, start])
     return (
         <mesh castShadow>
-            <tubeGeometry args={[curve, 24, 0.045, 8, false]} />
+            <tubeGeometry args={[curve, 12, 0.045, 6, false]} />
             <meshStandardMaterial color={VELVET} roughness={0.92} />
         </mesh>
     )
@@ -104,15 +105,15 @@ function Stanchion({ position }) {
     return (
         <group position={position}>
             <mesh castShadow receiveShadow position={[0, 0.05, 0]}>
-                <cylinderGeometry args={[0.2, 0.26, 0.1, 24]} />
+                <cylinderGeometry args={[0.2, 0.26, 0.1, 12]} />
                 <meshPhysicalMaterial color={DARK_BRASS} metalness={0.76} roughness={0.24} clearcoat={0.3} />
             </mesh>
             <mesh castShadow position={[0, 0.55, 0]}>
-                <cylinderGeometry args={[0.055, 0.07, 0.96, 16]} />
+                <cylinderGeometry args={[0.055, 0.07, 0.96, 8]} />
                 <meshPhysicalMaterial color={BRASS} metalness={0.84} roughness={0.2} clearcoat={0.24} />
             </mesh>
             <mesh castShadow position={[0, 1.04, 0]}>
-                <sphereGeometry args={[0.115, 18, 12]} />
+                <sphereGeometry args={[0.115, 10, 7]} />
                 <meshPhysicalMaterial color={BRASS} metalness={0.84} roughness={0.18} clearcoat={0.32} />
             </mesh>
         </group>
@@ -221,19 +222,9 @@ function AbstractSculpture({ sculpture }) {
                 <meshPhysicalMaterial color={STONE} roughness={0.56} clearcoat={0.16} clearcoatRoughness={0.72} />
             </mesh>
             <mesh castShadow position={[0, 1.36, 0]} rotation={[0.24, 0.38, 0.18]}>
-                <torusKnotGeometry args={[0.46, 0.14, 96, 14, 2, 3]} />
+                <torusKnotGeometry args={[0.46, 0.14, 48, 8, 2, 3]} />
                 <meshPhysicalMaterial color={BRASS} metalness={0.78} roughness={0.24} clearcoat={0.32} />
             </mesh>
-            <spotLight
-                position={[0, 5.3, 1.8]}
-                target-position={[0, 1.2, 0]}
-                intensity={12}
-                distance={8}
-                angle={0.4}
-                penumbra={0.72}
-                decay={2}
-                color="#ffe0ad"
-            />
         </group>
     )
 }
@@ -280,7 +271,6 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
                     <meshStandardMaterial color={DARK_BRASS} metalness={0.55} roughness={0.4} />
                 </mesh>
             </group>
-            <rectAreaLight position={[0, 1.3, 0.2]} rotation={[-Math.PI / 2, 0, 0]} width={3.6} height={1} intensity={2.8} color="#ffd7a3" />
         </group>
     )
 }
@@ -324,7 +314,6 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
                 <PlasterMaterial materials={materials} color="#d8d1c5" />
             </mesh>
             <LabelPlane title="The Photography Archive" subtitle="Est. 2026" position={[0, 5.4, -0.18]} rotation={[0, Math.PI, 0]} size={[4.35, 0.92]} />
-            <rectAreaLight position={[0, 4.7, -0.65]} rotation={[0, Math.PI, 0]} width={5.2} height={3.4} intensity={3.2} color="#c6d9e6" />
         </group>
     )
 }
@@ -334,44 +323,18 @@ function WallSconce({ side, z }) {
     return (
         <group position={[x, 3.65, z]}>
             <mesh castShadow>
-                <cylinderGeometry args={[0.15, 0.19, 0.48, 18]} />
+                <cylinderGeometry args={[0.15, 0.19, 0.48, 10]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} />
             </mesh>
             <mesh position={[-side * 0.19, 0.12, 0]} rotation={[0, 0, side * -0.26]}>
-                <cylinderGeometry args={[0.24, 0.15, 0.42, 18, 1, true]} />
-                <meshPhysicalMaterial color="#f2dfbf" transparent opacity={0.78} roughness={0.48} transmission={0.06} side={THREE.DoubleSide} />
+                <cylinderGeometry args={[0.24, 0.15, 0.42, 10, 1, true]} />
+                <meshStandardMaterial color="#f2dfbf" emissive="#d99d51" emissiveIntensity={0.5} transparent opacity={0.78} roughness={0.48} side={THREE.DoubleSide} />
             </mesh>
-            <pointLight position={[-side * 0.34, 0.12, 0]} color="#ffc783" intensity={6} distance={4.8} decay={2} />
         </group>
     )
 }
 
-function HallLighting({ layout }) {
-    const accentZs = useMemo(() => {
-        const values = []
-        for (let z = 9.5; z > layout.hallBackZ; z -= 11.5) values.push(z)
-        return values
-    }, [layout.hallBackZ])
-    return (
-        <group>
-            {accentZs.map((z, index) => (
-                <spotLight
-                    key={z}
-                    position={[index % 2 ? -3.65 : 3.65, 5.8, z + 1.5]}
-                    target-position={[0, 0.25, z - 1.5]}
-                    intensity={8}
-                    distance={10}
-                    angle={0.43}
-                    penumbra={0.72}
-                    decay={2}
-                    color={index % 2 ? '#f9d5aa' : '#dfe8f0'}
-                />
-            ))}
-        </group>
-    )
-}
-
-export default function MuseumDressing({ layout, activeRoomIds, materials, LabelPlane, PlasterMaterial, WoodMaterial }) {
+export default function MuseumDressing({ layout, activeRoomIds, materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true }) {
     const bayCount = Math.max(1, Math.ceil(layout.rooms.length / 2))
     const bayZs = Array.from({ length: bayCount }, (_, index) => -7 - (index * 16.5))
     const activeRooms = useMemo(() => {
@@ -380,7 +343,7 @@ export default function MuseumDressing({ layout, activeRoomIds, materials, Label
     }, [activeRoomIds, layout.rooms])
     return (
         <group>
-            <EnvironmentLighting />
+            <EnvironmentLighting enabled={reflectionsEnabled} />
             <RunnerCarpet layout={layout} />
             <LobbyEntrance materials={materials} LabelPlane={LabelPlane} PlasterMaterial={PlasterMaterial} />
             <ReceptionDesk layout={layout} materials={materials} LabelPlane={LabelPlane} WoodMaterial={WoodMaterial} />
@@ -391,7 +354,6 @@ export default function MuseumDressing({ layout, activeRoomIds, materials, Label
             {activeRooms.flatMap(room => room.plants).map(plant => <PottedPlant key={plant.id} plant={plant} scale={0.92} />)}
             {activeRooms.flatMap(room => room.benches).map(bench => <UpholsteredBench key={bench.id} bench={bench} />)}
             {bayZs.flatMap(z => [-1, 1].map(side => <WallSconce key={`${z}-${side}`} side={side} z={z + 5.45} />))}
-            <HallLighting layout={layout} />
         </group>
     )
 }

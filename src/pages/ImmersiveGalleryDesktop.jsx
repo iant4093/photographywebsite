@@ -1,7 +1,4 @@
 /* eslint-disable react-hooks/immutability -- Three.js cameras are intentionally mutable scene objects. */
-import { AdaptiveDpr } from '@react-three/drei/core/AdaptiveDpr.js'
-import { PointerLockControls } from '@react-three/drei/core/PointerLockControls.js'
-import { Preload } from '@react-three/drei/core/Preload.js'
 import { useTexture } from '@react-three/drei/core/Texture.js'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -15,7 +12,6 @@ import {
     isMuseumPositionWalkable,
     MUSEUM_DIMENSIONS,
     moveMuseumPosition,
-    museumPlanarAxes,
     nearbyMuseumRoomIds,
     nearestMuseumRoom,
 } from '../utils/museumLayout'
@@ -27,7 +23,8 @@ const ROOM_PAINT = '#d2c9bc'
 const GOLD = '#9b7747'
 const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
-const COVER_LOAD_CONCURRENCY = 2
+const COVER_LOAD_CONCURRENCY = 1
+const MAX_CACHED_COVERS = 32
 const coverTextureCache = new Map()
 const coverTextureLoads = new Map()
 const coverLoadQueue = []
@@ -197,9 +194,9 @@ function runCoverLoadQueue() {
         const job = coverLoadQueue.shift()
         activeCoverLoads += 1
         const start = () => Promise.resolve().then(job.task)
-        // A continuously rendered WebGL scene can starve requestIdleCallback.
-        // Yield one frame instead, then decode two small previews in parallel.
-        const scheduled = new Promise(resolve => window.setTimeout(resolve, 32)).then(start)
+        // Space GPU uploads apart so entering a room never stalls movement while
+        // several covers decode at once.
+        const scheduled = new Promise(resolve => window.setTimeout(resolve, 92)).then(start)
         scheduled
             .then(job.resolve, job.reject)
             .finally(() => {
@@ -261,7 +258,14 @@ async function createMuseumCoverTexture(album) {
                 texture.magFilter = THREE.LinearFilter
                 texture.generateMipmaps = false
                 texture.needsUpdate = true
+                coverTextureCache.delete(cacheKey)
                 coverTextureCache.set(cacheKey, texture)
+                while (coverTextureCache.size > MAX_CACHED_COVERS) {
+                    const oldestKey = coverTextureCache.keys().next().value
+                    const oldest = coverTextureCache.get(oldestKey)
+                    coverTextureCache.delete(oldestKey)
+                    oldest?.dispose()
+                }
                 return texture
             } catch (cause) {
                 lastError = cause
@@ -288,7 +292,14 @@ function developmentMediaUrl(value) {
 
 function useCoverTexture(album, active) {
     const cacheKey = `${album.albumId}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
-    const [loaded, setLoaded] = useState(() => coverTextureCache.get(cacheKey) || null)
+    const [loaded, setLoaded] = useState(() => {
+        const cached = coverTextureCache.get(cacheKey) || null
+        if (cached) {
+            coverTextureCache.delete(cacheKey)
+            coverTextureCache.set(cacheKey, cached)
+        }
+        return cached
+    })
 
     useEffect(() => {
         let cancelled = false
@@ -373,8 +384,8 @@ function useArchedWallShape(hasDoor) {
         const opening = new THREE.Path()
         opening.moveTo(-radius, 0)
         opening.lineTo(-radius, springHeight)
-        for (let segment = 1; segment <= 32; segment += 1) {
-            const angle = Math.PI - ((Math.PI * segment) / 32)
+        for (let segment = 1; segment <= 16; segment += 1) {
+            const angle = Math.PI - ((Math.PI * segment) / 16)
             opening.lineTo(Math.cos(angle) * radius, springHeight + (Math.sin(angle) * archRise))
         }
         opening.lineTo(radius, 0)
@@ -390,8 +401,8 @@ function useArchTrimCurve() {
         const springHeight = 2.7
         const archRise = 1.55
         const points = [new THREE.Vector3(-radius, 0.08, 0)]
-        for (let segment = 0; segment <= 32; segment += 1) {
-            const angle = Math.PI - ((Math.PI * segment) / 32)
+        for (let segment = 0; segment <= 16; segment += 1) {
+            const angle = Math.PI - ((Math.PI * segment) / 16)
             points.push(new THREE.Vector3(
                 Math.cos(angle) * radius,
                 springHeight + (Math.sin(angle) * archRise),
@@ -416,7 +427,7 @@ function DoorWall({ side, centerZ, room, materials }) {
     return (
         <group>
             <mesh position={[wallX, 0, centerZ]} rotation={[0, Math.PI / 2, 0]}>
-                <shapeGeometry args={[wallShape, 48]} />
+                <shapeGeometry args={[wallShape, 20]} />
                 <PlasterMaterial materials={materials} color={HALL_PAINT} side={THREE.DoubleSide} />
             </mesh>
             {[-1, 1].map(direction => (
@@ -444,7 +455,7 @@ function DoorWall({ side, centerZ, room, materials }) {
                         position={[wallX - (side * (thickness / 2)), 0, centerZ]}
                         rotation={[0, rotationY, 0]}
                     >
-                        <tubeGeometry args={[archCurve, 64, 0.13, 12, false]} />
+                        <tubeGeometry args={[archCurve, 28, 0.13, 7, false]} />
                         <meshStandardMaterial color="#c9bda9" roughness={0.72} />
                     </mesh>
                     {[-1, 1].map(direction => (
@@ -482,7 +493,7 @@ function VaultedCeiling({ layout, centerZ, materials }) {
         const centerY = 0.85
         const start = Math.acos(MUSEUM_DIMENSIONS.hallHalfWidth / radius)
         const end = Math.PI - start
-        const count = 24
+        const count = 14
         const step = (end - start) / count
         const nextPanels = Array.from({ length: count }, (_, index) => {
             const angle = start + ((index + 0.5) * step)
@@ -493,8 +504,8 @@ function VaultedCeiling({ layout, centerZ, materials }) {
                 width: (radius * step) * 1.025,
             }
         })
-        const points = Array.from({ length: 49 }, (_, index) => {
-            const angle = start + ((index / 48) * (end - start))
+        const points = Array.from({ length: 29 }, (_, index) => {
+            const angle = start + ((index / 28) * (end - start))
             return new THREE.Vector3(radius * Math.cos(angle), centerY + radius * Math.sin(angle), 0)
         })
         return {
@@ -525,7 +536,7 @@ function VaultedCeiling({ layout, centerZ, materials }) {
             ))}
             {ribZs.map(z => (
                 <mesh key={z} position={[0, 0, z]}>
-                    <tubeGeometry args={[ribCurve, 72, 0.075, 8, false]} />
+                    <tubeGeometry args={[ribCurve, 30, 0.075, 6, false]} />
                     <meshStandardMaterial color="#b9ab97" roughness={0.7} />
                 </mesh>
             ))}
@@ -598,18 +609,9 @@ function CategoryRoom({ room, active, materials }) {
             {lightXs.map(x => (
                 <group key={x} position={[x, ceilingY - 0.12, room.centerZ]}>
                     <mesh rotation={[Math.PI / 2, 0, 0]}>
-                        <circleGeometry args={[0.34, 32]} />
+                        <circleGeometry args={[0.34, 12]} />
                         <meshBasicMaterial color="#fff1d6" toneMapped={false} />
                     </mesh>
-                    {active && (
-                        <pointLight
-                            position={[0, -0.18, 0]}
-                            intensity={7.5}
-                            distance={9.5}
-                            decay={2}
-                            color="#ffe5bc"
-                        />
-                    )}
                 </group>
             ))}
             {lightXs.map(x => (
@@ -622,7 +624,7 @@ function CategoryRoom({ room, active, materials }) {
     )
 }
 
-function MainHall({ layout, activeRoomIds, materials }) {
+function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
     const hallCenterZ = (MUSEUM_DIMENSIONS.lobbyFrontZ + layout.hallBackZ) / 2
     const bayCount = Math.max(1, Math.ceil(layout.rooms.length / 2))
     const bays = Array.from({ length: bayCount }, (_, index) => ({
@@ -691,10 +693,9 @@ function MainHall({ layout, activeRoomIds, materials }) {
             {ceilingLights.map(z => (
                 <group key={z} position={[0, 6.85, z]}>
                     <mesh rotation={[Math.PI / 2, 0, 0]}>
-                        <circleGeometry args={[0.3, 32]} />
+                        <circleGeometry args={[0.3, 12]} />
                         <meshBasicMaterial color="#fff0d3" toneMapped={false} />
                     </mesh>
-                    <pointLight position={[0, -0.35, 0]} intensity={5.5} distance={7.5} decay={2} color="#ffd39a" />
                 </group>
             ))}
             <MuseumDressing
@@ -704,22 +705,77 @@ function MainHall({ layout, activeRoomIds, materials }) {
                 LabelPlane={LabelPlane}
                 PlasterMaterial={PlasterMaterial}
                 WoodMaterial={WoodMaterial}
+                reflectionsEnabled={reflectionsEnabled}
             />
         </group>
     )
 }
 
-function focusedPainting(layout, camera) {
-    const direction = new THREE.Vector3()
+function LocalMuseumLights({ layout }) {
+    const primary = useRef(null)
+    const secondary = useRef(null)
+    const lastZone = useRef('')
+    const { camera } = useThree()
+
+    useFrame(() => {
+        if (!primary.current || !secondary.current) return
+        const containingRoom = layout.rooms.find(room => (
+            camera.position.x >= room.bounds.minX
+            && camera.position.x <= room.bounds.maxX
+            && camera.position.z >= room.bounds.minZ
+            && camera.position.z <= room.bounds.maxZ
+        ))
+
+        if (containingRoom) {
+            const spacing = MUSEUM_DIMENSIONS.paintingSpacing
+            const firstPaintingX = containingRoom.side * (MUSEUM_DIMENSIONS.hallHalfWidth + 4.15)
+            const row = Math.max(0, Math.round(Math.abs(camera.position.x - firstPaintingX) / spacing))
+            const x = firstPaintingX + (containingRoom.side * row * spacing)
+            const zone = `${containingRoom.id}:${row}`
+            if (zone === lastZone.current) return
+            lastZone.current = zone
+            primary.current.position.set(x, 5.82, containingRoom.centerZ - 2.35)
+            secondary.current.position.set(x + (containingRoom.side * 4.6), 5.72, containingRoom.centerZ + 2.35)
+            primary.current.intensity = 5.8
+            secondary.current.intensity = 3.9
+            return
+        }
+
+        const fixtureIndex = Math.max(0, Math.round((10.7 - camera.position.z) / 8))
+        const z = 10.7 - (fixtureIndex * 8)
+        const zone = `hall:${fixtureIndex}`
+        if (zone === lastZone.current) return
+        lastZone.current = zone
+        primary.current.position.set(-1.2, 6.25, z)
+        secondary.current.position.set(1.2, 5.9, z - 7.2)
+        primary.current.intensity = 5.2
+        secondary.current.intensity = 3.2
+    })
+
+    return (
+        <>
+            <pointLight ref={primary} color="#ffd7a0" intensity={5.2} distance={12} decay={2} />
+            <pointLight ref={secondary} color="#cfdeea" intensity={3.2} distance={10} decay={2} />
+        </>
+    )
+}
+
+function focusedPainting(layout, camera, direction = new THREE.Vector3()) {
     camera.getWorldDirection(direction)
     let best = null
     let bestScore = Number.POSITIVE_INFINITY
     for (const painting of layout.rooms.flatMap(room => room.paintings)) {
-        const target = new THREE.Vector3(...painting.position)
-        const distance = target.distanceTo(camera.position)
+        const dx = painting.position[0] - camera.position.x
+        const dy = painting.position[1] - camera.position.y
+        const dz = painting.position[2] - camera.position.z
+        const distance = Math.hypot(dx, dy, dz)
         if (distance > 4.6) continue
-        const toward = target.sub(camera.position).normalize()
-        const alignment = direction.dot(toward)
+        const inverseDistance = distance > 0 ? 1 / distance : 0
+        const alignment = (
+            (direction.x * dx * inverseDistance)
+            + (direction.y * dy * inverseDistance)
+            + (direction.z * dz * inverseDistance)
+        )
         if (alignment < 0.8) continue
         const score = distance + ((1 - alignment) * 7)
         if (score < bestScore) {
@@ -807,6 +863,35 @@ function MuseumTouchControls({ input, onPause }) {
     )
 }
 
+function NativePointerLockControls({ onLock, onUnlock }) {
+    const { camera, gl } = useThree()
+
+    useEffect(() => {
+        camera.rotation.order = 'YXZ'
+        const handleLockChange = () => {
+            if (document.pointerLockElement === gl.domElement) onLock()
+            else onUnlock()
+        }
+        const handleMouseMove = (event) => {
+            if (document.pointerLockElement !== gl.domElement) return
+            camera.rotation.y -= event.movementX * 0.002
+            camera.rotation.x = THREE.MathUtils.clamp(
+                camera.rotation.x - (event.movementY * 0.002),
+                (-Math.PI / 2) + 0.04,
+                (Math.PI / 2) - 0.04,
+            )
+        }
+        document.addEventListener('pointerlockchange', handleLockChange)
+        document.addEventListener('mousemove', handleMouseMove)
+        return () => {
+            document.removeEventListener('pointerlockchange', handleLockChange)
+            document.removeEventListener('mousemove', handleMouseMove)
+        }
+    }, [camera, gl, onLock, onUnlock])
+
+    return null
+}
+
 function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const { camera } = useThree()
     const keys = useRef(new Set())
@@ -814,7 +899,12 @@ function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom
     const lastNearbyRooms = useRef('')
     const lastFocused = useRef(null)
     const lastSavedAt = useRef(0)
+    const lastProbeAt = useRef(0)
     const touchEuler = useMemo(() => new THREE.Euler(0, 0, 0, 'YXZ'), [])
+    const forward = useMemo(() => new THREE.Vector3(), [])
+    const right = useMemo(() => new THREE.Vector3(), [])
+    const movement = useMemo(() => new THREE.Vector3(), [])
+    const focusDirection = useMemo(() => new THREE.Vector3(), [])
 
     useEffect(() => {
         const returningFromAlbum = sessionStorage.getItem(RETURN_KEY) === 'true'
@@ -834,7 +924,7 @@ function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom
         const onKeyDown = (event) => {
             keys.current.add(event.code)
             if (event.code === 'KeyE' && enabled) {
-                const painting = focusedPainting(layout, camera)
+                const painting = focusedPainting(layout, camera, focusDirection)
                 if (painting) onOpenAlbum(painting.album)
             }
         }
@@ -845,7 +935,7 @@ function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom
             window.removeEventListener('keydown', onKeyDown)
             window.removeEventListener('keyup', onKeyUp)
         }
-    }, [camera, enabled, layout, onOpenAlbum])
+    }, [camera, enabled, focusDirection, layout, onOpenAlbum])
 
     useFrame((state, frameDelta) => {
         if (!enabled) return
@@ -866,12 +956,11 @@ function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom
             ? Math.min(1, Math.hypot(touchInput.current.moveX, touchInput.current.moveY))
             : 0
         const speed = keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') || touchMagnitude > 0.9 ? 5.3 : 3.25
-        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
+        forward.set(0, 0, -1).applyQuaternion(camera.quaternion)
         forward.y = 0
         forward.normalize()
-        const axes = museumPlanarAxes(forward.x, forward.z)
-        const right = new THREE.Vector3(axes.right.x, 0, axes.right.z)
-        const movement = new THREE.Vector3()
+        right.set(-forward.z, 0, forward.x)
+        movement.set(0, 0, 0)
         if (keys.current.has('KeyW') || keys.current.has('ArrowUp')) movement.add(forward)
         if (keys.current.has('KeyS') || keys.current.has('ArrowDown')) movement.sub(forward)
         if (keys.current.has('KeyD') || keys.current.has('ArrowRight')) movement.add(right)
@@ -893,21 +982,25 @@ function PlayerController({ layout, enabled, touchMode, touchInput, onActiveRoom
         }
         camera.position.y = layout.spawn[1]
 
-        const room = nearestMuseumRoom(layout, { x: camera.position.x, z: camera.position.z })
-        if (room !== lastRoom.current) {
-            lastRoom.current = room
-            onActiveRoom(room)
-        }
-        const nearbyRooms = nearbyMuseumRoomIds(layout, { x: camera.position.x, z: camera.position.z })
-        const nearbyKey = nearbyRooms.join('|')
-        if (nearbyKey !== lastNearbyRooms.current) {
-            lastNearbyRooms.current = nearbyKey
-            onNearbyRooms(nearbyRooms)
-        }
-        const focused = focusedPainting(layout, camera)
-        if (focused?.id !== lastFocused.current?.id) {
-            lastFocused.current = focused
-            onFocusedPainting(focused)
+        if (state.clock.elapsedTime - lastProbeAt.current > 0.12) {
+            lastProbeAt.current = state.clock.elapsedTime
+            const position = { x: camera.position.x, z: camera.position.z }
+            const room = nearestMuseumRoom(layout, position)
+            if (room !== lastRoom.current) {
+                lastRoom.current = room
+                onActiveRoom(room)
+            }
+            const nearbyRooms = nearbyMuseumRoomIds(layout, position)
+            const nearbyKey = nearbyRooms.join('|')
+            if (nearbyKey !== lastNearbyRooms.current) {
+                lastNearbyRooms.current = nearbyKey
+                onNearbyRooms(nearbyRooms)
+            }
+            const nextFocused = focusedPainting(layout, camera, focusDirection)
+            if (nextFocused?.id !== lastFocused.current?.id) {
+                lastFocused.current = nextFocused
+                onFocusedPainting(nextFocused)
+            }
         }
         if (state.clock.elapsedTime - lastSavedAt.current > 0.8) {
             lastSavedAt.current = state.clock.elapsedTime
@@ -941,7 +1034,41 @@ function PreviewCamera({ mode, roomIndex, layout }) {
     return null
 }
 
-function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function SceneWarmup({ layout, onReady }) {
+    const { camera, gl, invalidate, scene } = useThree()
+
+    useEffect(() => {
+        let cancelled = false
+        const timeout = window.setTimeout(() => {
+            if (!cancelled) onReady()
+        }, 7000)
+        const nearbyAlbums = layout.rooms.slice(0, 2).map(room => room.albums[0]).filter(Boolean)
+
+        Promise.all([
+            gl.compileAsync?.(scene, camera) || Promise.resolve(),
+            Promise.allSettled(nearbyAlbums.map(createMuseumCoverTexture)),
+        ]).then(([, results]) => {
+            results.forEach((result) => {
+                if (result.status === 'fulfilled') gl.initTexture?.(result.value)
+            })
+            invalidate()
+            window.setTimeout(() => {
+                if (!cancelled) onReady()
+            }, 60)
+        }).catch(() => {
+            if (!cancelled) onReady()
+        })
+
+        return () => {
+            cancelled = true
+            window.clearTimeout(timeout)
+        }
+    }, [camera, gl, invalidate, layout, onReady, scene])
+
+    return null
+}
+
+function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, shadowsEnabled, onSceneReady, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
     const { gl } = useThree()
     const shadowRevision = controlsEnabled.activeRoomIds.join('|')
@@ -956,10 +1083,10 @@ function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPre
             <hemisphereLight args={['#b9c8d3', '#241914', 0.035]} />
             <directionalLight
                 position={[-5, 10, 14]}
-                intensity={0.58}
+                intensity={0.46}
                 color="#d8e5ef"
-                castShadow
-                shadow-mapSize={[1024, 1024]}
+                castShadow={shadowsEnabled}
+                shadow-mapSize={[512, 512]}
                 shadow-bias={-0.0004}
                 shadow-normalBias={0.035}
                 shadow-camera-left={-8}
@@ -967,7 +1094,14 @@ function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPre
                 shadow-camera-top={10}
                 shadow-camera-bottom={-3}
             />
-            <MainHall layout={layout} activeRoomIds={controlsEnabled.activeRoomIds} materials={materials} />
+            <LocalMuseumLights layout={layout} />
+            <MainHall
+                layout={layout}
+                activeRoomIds={controlsEnabled.activeRoomIds}
+                materials={materials}
+                reflectionsEnabled={!touchMode}
+            />
+            <SceneWarmup layout={layout} onReady={onSceneReady} />
             {visualPreview && <PreviewCamera mode={previewMode} roomIndex={previewRoomIndex} layout={layout} />}
             {!visualPreview && (
                 <>
@@ -981,11 +1115,9 @@ function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPre
                         onFocusedPainting={onFocusedPainting}
                         onOpenAlbum={onOpenAlbum}
                     />
-                    {!touchMode && <PointerLockControls selector="#museum-enter" onLock={onLock} onUnlock={onUnlock} />}
+                    {!touchMode && <NativePointerLockControls onLock={onLock} onUnlock={onUnlock} />}
                 </>
             )}
-            <AdaptiveDpr />
-            <Preload all={false} />
         </>
     )
 }
@@ -1013,6 +1145,7 @@ export default function ImmersiveGalleryDesktop() {
     const [activeRoomId, setActiveRoomId] = useState(null)
     const [activeRoomIds, setActiveRoomIds] = useState([])
     const [focused, setFocused] = useState(null)
+    const [sceneReady, setSceneReady] = useState(false)
     const [touchMode, setTouchMode] = useState(() => forceTouchPreview || usesTouchControls())
     const touchInput = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 })
 
@@ -1049,6 +1182,14 @@ export default function ImmersiveGalleryDesktop() {
         sessionStorage.setItem(RETURN_KEY, 'true')
         navigate(`/album/${encodeURIComponent(album.albumId)}`, { state: { fromImmersiveGallery: true } })
     }, [navigate])
+    const handleSceneReady = useCallback(() => setSceneReady(true), [setSceneReady])
+    const deviceMemory = typeof navigator === 'undefined' ? 8 : Number(navigator.deviceMemory || 8)
+    const hardwareConcurrency = typeof navigator === 'undefined' ? 8 : Number(navigator.hardwareConcurrency || 8)
+    const lowPowerMode = touchMode || (
+        deviceMemory <= 4
+        || hardwareConcurrency <= 4
+    )
+    const shadowsEnabled = !lowPowerMode
 
     if (error) return <CatalogStatus error={error} onRetry={() => {
         setError('')
@@ -1063,15 +1204,22 @@ export default function ImmersiveGalleryDesktop() {
             <Canvas
                 className="museum-canvas"
                 camera={{ fov: touchMode ? 72 : 66, near: 0.08, far: 220, position: layout.spawn }}
-                dpr={touchMode ? [0.65, 1.15] : [0.75, 1.5]}
-                shadows
-                gl={{ antialias: true, powerPreference: 'high-performance', alpha: false }}
+                dpr={touchMode ? [0.42, 0.64] : [0.62, 0.9]}
+                frameloop={locked && !visualPreview ? 'always' : 'demand'}
+                performance={{ min: 0.45, max: 1, debounce: 240 }}
+                shadows={shadowsEnabled ? { type: THREE.BasicShadowMap } : false}
+                gl={{
+                    antialias: !lowPowerMode,
+                    powerPreference: 'high-performance',
+                    alpha: false,
+                    stencil: false,
+                }}
                 onCreated={({ gl }) => {
                     gl.outputColorSpace = THREE.SRGBColorSpace
                     gl.toneMapping = THREE.ACESFilmicToneMapping
                     gl.toneMappingExposure = 0.68
-                    gl.shadowMap.enabled = true
-                    gl.shadowMap.type = THREE.PCFSoftShadowMap
+                    gl.shadowMap.enabled = shadowsEnabled
+                    gl.shadowMap.type = THREE.BasicShadowMap
                     gl.shadowMap.autoUpdate = false
                     gl.shadowMap.needsUpdate = true
                 }}
@@ -1085,6 +1233,8 @@ export default function ImmersiveGalleryDesktop() {
                         visualPreview={visualPreview}
                         previewMode={previewMode}
                         previewRoomIndex={previewRoomIndex}
+                        shadowsEnabled={shadowsEnabled}
+                        onSceneReady={handleSceneReady}
                         onLock={() => setLocked(true)}
                         onUnlock={() => setLocked(false)}
                         onActiveRoom={setActiveRoomId}
@@ -1094,6 +1244,15 @@ export default function ImmersiveGalleryDesktop() {
                     />
                 </Suspense>
             </Canvas>
+            {!sceneReady && (
+                <div className="museum-loading museum-loading--scene" role="status" aria-live="polite">
+                    <span className="museum-loading-mark">IT</span>
+                    <p className="museum-kicker">Preparing the virtual archive</p>
+                    <h1>Opening the gallery</h1>
+                    <p>Calibrating the lights and hanging the first nearby photographs…</p>
+                    <span className="museum-loading-progress" aria-hidden="true"><i /></span>
+                </div>
+            )}
             <div className="museum-topbar">
                 <Link to="/explore" state={{ restoreExploreScroll: true }}>← Exit gallery</Link>
                 <div>
@@ -1101,8 +1260,8 @@ export default function ImmersiveGalleryDesktop() {
                     <span>{catalog.length} rooms · {catalog.reduce((sum, category) => sum + category.albums.length, 0)} albums</span>
                 </div>
             </div>
-            <div className="museum-crosshair" aria-hidden="true" />
-            {focused && locked && (touchMode ? (
+            {sceneReady && <div className="museum-crosshair" aria-hidden="true" />}
+            {sceneReady && focused && locked && (touchMode ? (
                 <button className="museum-interaction museum-interaction--touch" type="button" onClick={() => openAlbum(focused.album)}>
                     Open <strong>{focused.album.title}</strong>
                 </button>
@@ -1120,17 +1279,25 @@ export default function ImmersiveGalleryDesktop() {
                     <span><kbd>Esc</kbd> Pause</span>
                 </div>
             )}
-            {touchMode && locked && !visualPreview && (
+            {sceneReady && touchMode && locked && !visualPreview && (
                 <MuseumTouchControls input={touchInput} onPause={() => setLocked(false)} />
             )}
-            {!locked && !visualPreview && (
+            {sceneReady && !locked && !visualPreview && (
                 <div className="museum-entry-panel">
                     <span className="museum-entry-number">The virtual archive</span>
                     <h1>{activeRoomId ? 'Gallery paused' : 'Enter the gallery'}</h1>
                     <p>
                         Walk through rooms generated from the live photography archive. Look toward a framed album and {touchMode ? 'tap Open to enter it.' : 'press E to open it.'}
                     </p>
-                    <button id="museum-enter" type="button" onClick={touchMode ? () => setLocked(true) : undefined}>{activeRoomId ? 'Continue exploring' : 'Begin walk-through'}</button>
+                    <button
+                        id="museum-enter"
+                        type="button"
+                        onClick={touchMode
+                            ? () => setLocked(true)
+                            : () => document.querySelector('.museum-canvas canvas')?.requestPointerLock()}
+                    >
+                        {activeRoomId ? 'Continue exploring' : 'Begin walk-through'}
+                    </button>
                     <div>{touchMode ? 'Use the joystick to move · Drag the view to look around' : <><kbd>WASD</kbd> to move · <kbd>Mouse</kbd> to look · <kbd>Esc</kbd> to pause</>}</div>
                 </div>
             )}

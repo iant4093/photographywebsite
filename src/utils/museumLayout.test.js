@@ -158,17 +158,14 @@ describe('museum layout', () => {
         }
     })
 
-    it('preloads a room near its entrance', () => {
+    it('preloads only the nearest room near its entrance', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'),
             album('b', 'Astro'),
         ]))
         const [x, , z] = layout.rooms[0].entrance
         expect(nearestMuseumRoom(layout, { x: x + 1, z })).toBe(layout.rooms[0].id)
-        expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([
-            layout.rooms[0].id,
-            layout.rooms[1].id,
-        ])
+        expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([layout.rooms[0].id])
         expect(nearestMuseumRoom(layout, { x: 0, z: 10 }, 1)).toBeNull()
     })
 
