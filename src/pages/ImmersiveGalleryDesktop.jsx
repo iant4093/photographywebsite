@@ -23,8 +23,12 @@ const ROOM_PAINT = '#d2c9bc'
 const GOLD = '#9b7747'
 const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
-const COVER_LOAD_CONCURRENCY = 2
-const MAX_CACHED_COVERS = 64
+const COVER_LOAD_CONCURRENCY = 3
+const LOW_RES_COVER_WIDTH = 640
+const MAX_LOW_RES_COVERS = 120
+// The largest live bay currently contains 32 detailed covers. Keep enough
+// headroom that cache eviction never disposes a texture still mounted in view.
+const MAX_DETAIL_COVERS = 48
 const coverTextureCache = new Map()
 const coverTextureLoads = new Map()
 const coverLoadQueue = []
@@ -38,6 +42,34 @@ function placeholderColor(albumId = '') {
         ((value * 31) + character.charCodeAt(0)) >>> 0
     ), 7)
     return PLACEHOLDER_COLORS[hash % PLACEHOLDER_COLORS.length]
+}
+
+function coverCacheKey(album, targetWidth) {
+    return `${album.albumId}:${targetWidth}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
+}
+
+function cachedCoverTexture(album, targetWidth) {
+    const key = coverCacheKey(album, targetWidth)
+    const cached = coverTextureCache.get(key) || null
+    if (cached) {
+        coverTextureCache.delete(key)
+        coverTextureCache.set(key, cached)
+    }
+    return cached
+}
+
+function trimCoverTextureCache() {
+    const entries = [...coverTextureCache.entries()]
+    const lowResolution = entries.filter(([key]) => Number(key.split(':')[1]) <= LOW_RES_COVER_WIDTH)
+    const detail = entries.filter(([key]) => Number(key.split(':')[1]) > LOW_RES_COVER_WIDTH)
+    const overflow = [
+        ...lowResolution.slice(0, Math.max(0, lowResolution.length - MAX_LOW_RES_COVERS)),
+        ...detail.slice(0, Math.max(0, detail.length - MAX_DETAIL_COVERS)),
+    ]
+    overflow.forEach(([key, texture]) => {
+        coverTextureCache.delete(key)
+        texture?.dispose()
+    })
 }
 
 function usesTouchControls() {
@@ -201,7 +233,10 @@ function runCoverLoadQueue() {
     while (activeCoverLoads < COVER_LOAD_CONCURRENCY && coverLoadQueue.length > 0) {
         // The room the visitor most recently approached should not sit behind
         // stale work left over from the previous end of the hall.
-        coverLoadQueue.sort((left, right) => right.priority - left.priority || right.sequence - left.sequence)
+        // Detail work for the room being entered outranks background previews.
+        // Within the same tier, preserve scene order so the first visible rooms
+        // are never starved behind the far end of the museum.
+        coverLoadQueue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence)
         const job = coverLoadQueue.shift()
         activeCoverLoads += 1
         const start = () => Promise.resolve().then(job.task)
@@ -227,10 +262,22 @@ function enqueueCoverLoad(task, priority = 0) {
 function loadHtmlImage(url) {
     return new Promise((resolve, reject) => {
         const image = new Image()
+        const timeout = window.setTimeout(() => {
+            image.onload = null
+            image.onerror = null
+            image.src = ''
+            reject(new Error('Museum cover timed out while decoding'))
+        }, 12000)
         image.crossOrigin = 'anonymous'
         image.decoding = 'async'
-        image.onload = () => resolve(image)
-        image.onerror = () => reject(new Error('Museum cover could not be decoded'))
+        image.onload = () => {
+            window.clearTimeout(timeout)
+            resolve(image)
+        }
+        image.onerror = () => {
+            window.clearTimeout(timeout)
+            reject(new Error('Museum cover could not be decoded'))
+        }
         image.src = developmentMediaUrl(url)
     })
 }
@@ -249,8 +296,8 @@ function cropMuseumCover(texture, image) {
     }
 }
 
-async function createMuseumCoverTexture(album, targetWidth = 960) {
-    const cacheKey = `${album.albumId}:${targetWidth}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
+async function createMuseumCoverTexture(album, targetWidth = 960, priority = targetWidth) {
+    const cacheKey = coverCacheKey(album, targetWidth)
     const cached = coverTextureCache.get(cacheKey)
     if (cached) return cached
     const pending = coverTextureLoads.get(cacheKey)
@@ -272,19 +319,14 @@ async function createMuseumCoverTexture(album, targetWidth = 960) {
                 texture.needsUpdate = true
                 coverTextureCache.delete(cacheKey)
                 coverTextureCache.set(cacheKey, texture)
-                while (coverTextureCache.size > MAX_CACHED_COVERS) {
-                    const oldestKey = coverTextureCache.keys().next().value
-                    const oldest = coverTextureCache.get(oldestKey)
-                    coverTextureCache.delete(oldestKey)
-                    oldest?.dispose()
-                }
+                trimCoverTextureCache()
                 return texture
             } catch (cause) {
                 lastError = cause
             }
         }
         throw lastError || new Error('Museum cover is unavailable')
-    }, targetWidth).finally(() => coverTextureLoads.delete(cacheKey))
+    }, priority).finally(() => coverTextureLoads.delete(cacheKey))
     coverTextureLoads.set(cacheKey, request)
     return request
 }
@@ -302,23 +344,19 @@ function developmentMediaUrl(value) {
     return value
 }
 
-function useCoverTexture(album, targetWidth) {
-    const cacheKey = `${album.albumId}:${targetWidth}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
-    const [loaded, setLoaded] = useState(() => {
-        const cached = coverTextureCache.get(cacheKey) || null
-        if (cached) {
-            coverTextureCache.delete(cacheKey)
-            coverTextureCache.set(cacheKey, cached)
-        }
-        return cached
-    })
+function useCoverTexture(album, targetWidth, priority = targetWidth) {
+    const cacheKey = coverCacheKey(album, targetWidth)
+    const [loaded, setLoaded] = useState(() => (
+        cachedCoverTexture(album, targetWidth)
+        || (targetWidth > LOW_RES_COVER_WIDTH ? cachedCoverTexture(album, LOW_RES_COVER_WIDTH) : null)
+    ))
 
     useEffect(() => {
         let cancelled = false
         let retryTimer
         if (!targetWidth) return undefined
         const load = (attempt = 0) => {
-            createMuseumCoverTexture(album, targetWidth)
+            createMuseumCoverTexture(album, targetWidth, priority)
                 .then(texture => {
                     if (!cancelled) setLoaded(texture)
                 })
@@ -333,7 +371,7 @@ function useCoverTexture(album, targetWidth) {
             cancelled = true
             window.clearTimeout(retryTimer)
         }
-    }, [album, cacheKey, targetWidth])
+    }, [album, cacheKey, priority, targetWidth])
 
     return loaded
 }
@@ -379,17 +417,20 @@ function Painting({ painting, targetWidth = 0 }) {
                 <planeGeometry args={[2.66, 1.76]} />
                 <meshBasicMaterial color={placeholderColor(painting.album.albumId)} toneMapped={false} />
             </mesh>
-            <mesh position={[0, 0, 0.155]}>
-                <planeGeometry args={[2.66, 1.76]} />
-                <meshBasicMaterial
-                    ref={artworkMaterial}
-                    map={texture || null}
-                    color="#ffffff"
-                    toneMapped={false}
-                    transparent
-                    opacity={0}
-                />
-            </mesh>
+            {texture && (
+                <mesh position={[0, 0, 0.155]}>
+                    <planeGeometry args={[2.66, 1.76]} />
+                    <meshBasicMaterial
+                        key={texture.uuid}
+                        ref={artworkMaterial}
+                        map={texture}
+                        color="#ffffff"
+                        toneMapped={false}
+                        transparent
+                        opacity={0}
+                    />
+                </mesh>
+            )}
             <mesh position={[0, -1.55, 0.13]}>
                 <planeGeometry args={[2.9, 0.62]} />
                 <meshBasicMaterial map={plaque} toneMapped={false} />
@@ -402,7 +443,8 @@ function Painting({ painting, targetWidth = 0 }) {
     )
 }
 
-function PaintingPlaceholder({ painting }) {
+function PaintingPreview({ painting, priority }) {
+    const texture = useCoverTexture(painting.album, LOW_RES_COVER_WIDTH, priority)
     return (
         <group position={painting.position} rotation={[0, painting.rotationY, 0]}>
             <mesh>
@@ -411,7 +453,11 @@ function PaintingPlaceholder({ painting }) {
             </mesh>
             <mesh position={[0, 0, 0.075]}>
                 <planeGeometry args={[2.82, 1.92]} />
-                <meshBasicMaterial color={placeholderColor(painting.album.albumId)} toneMapped={false} />
+                {texture ? (
+                    <meshBasicMaterial key={texture.uuid} map={texture} color="#ffffff" toneMapped={false} />
+                ) : (
+                    <meshBasicMaterial color="#332f2a" toneMapped={false} />
+                )}
             </mesh>
         </group>
     )
@@ -478,7 +524,7 @@ function DoorWall({ side, centerZ, room, materials }) {
         <group>
             <mesh position={[wallX, 0, centerZ]} rotation={[0, Math.PI / 2, 0]}>
                 <shapeGeometry args={[wallShape, 20]} />
-                <PlasterMaterial materials={materials} color={HALL_PAINT} side={THREE.DoubleSide} />
+                <PlasterMaterial materials={materials} color={HALL_PAINT} side={THREE.DoubleSide} textured={false} />
             </mesh>
             {[-1, 1].map(direction => (
                 <group
@@ -656,7 +702,7 @@ function CategoryRoom({ room, active, detailed, materials }) {
                 rotation={[0, endRotation, 0]}
                 size={[4.6, 1.2]}
             />
-            {room.paintings.map(painting => (
+            {room.paintings.map((painting, index) => (
                 active ? (
                     <Painting
                         key={painting.id}
@@ -664,7 +710,11 @@ function CategoryRoom({ room, active, detailed, materials }) {
                         targetWidth={detailed ? 1920 : 960}
                     />
                 ) : (
-                    <PaintingPlaceholder key={painting.id} painting={painting} />
+                    <PaintingPreview
+                        key={painting.id}
+                        painting={painting}
+                        priority={LOW_RES_COVER_WIDTH + Math.max(0, 100 - (room.bay * 12) - index)}
+                    />
                 )
             ))}
             {lightXs.map(x => (
@@ -711,10 +761,6 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
     const illuminatedHallLights = ceilingLights.filter((_, index) => (
         index % (reflectionsEnabled ? 2 : 4) === 0
     ))
-    const wallSeamZs = Array.from({ length: bayCount + 1 }, (_, index) => (
-        firstWallEndZ - (index * MUSEUM_DIMENSIONS.baySpacing)
-    )).filter(z => z > layout.hallBackZ)
-
     return (
         <group>
             <mesh position={[0, -0.11, hallCenterZ]} receiveShadow>
@@ -730,7 +776,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                         lobbyWallCenterZ,
                     ]}>
                         <boxGeometry args={[0.24, MUSEUM_DIMENSIONS.hallHeight, lobbyWallLength]} />
-                        <PlasterMaterial materials={materials} color={HALL_PAINT} />
+                        <PlasterMaterial materials={materials} color={HALL_PAINT} textured={false} />
                     </mesh>
                     {tailLength > 0 && (
                         <mesh position={[
@@ -739,7 +785,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                             layout.hallBackZ + (tailLength / 2),
                         ]}>
                             <boxGeometry args={[0.24, MUSEUM_DIMENSIONS.hallHeight, tailLength]} />
-                            <PlasterMaterial materials={materials} color={HALL_PAINT} />
+                            <PlasterMaterial materials={materials} color={HALL_PAINT} textured={false} />
                         </mesh>
                     )}
                 </group>
@@ -750,18 +796,9 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                     <DoorWall side={1} centerZ={bay.centerZ} room={bay.right} materials={materials} />
                 </group>
             ))}
-            {wallSeamZs.flatMap(z => [-1, 1].map(side => (
-                <mesh
-                    key={`${z}-${side}`}
-                    position={[side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.13), MUSEUM_DIMENSIONS.hallHeight / 2, z]}
-                >
-                    <boxGeometry args={[0.12, MUSEUM_DIMENSIONS.hallHeight, 0.18]} />
-                    <meshStandardMaterial color="#bcae9b" roughness={0.78} />
-                </mesh>
-            )))}
             <mesh position={[0, MUSEUM_DIMENSIONS.hallHeight / 2, layout.hallBackZ]}>
                 <boxGeometry args={[MUSEUM_DIMENSIONS.hallHalfWidth * 2, MUSEUM_DIMENSIONS.hallHeight, 0.24]} />
-                <PlasterMaterial materials={materials} color={HALL_PAINT} />
+                <PlasterMaterial materials={materials} color={HALL_PAINT} textured={false} />
             </mesh>
             {layout.rooms.map(room => (
                 <CategoryRoom

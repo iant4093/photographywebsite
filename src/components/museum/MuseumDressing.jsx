@@ -325,7 +325,7 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
             <group position={[-1.42, 0.836, 0.03]} rotation={[0, -0.18, 0]}>
                 <PaperStack />
             </group>
-            <group position={[1.18, 0.83, -0.25]} rotation={[0, 0.14, 0]}>
+            <group position={[1.18, 0.83, -0.25]} rotation={[0, Math.PI + 0.14, 0]}>
                 <DesktopComputer />
             </group>
         </group>
