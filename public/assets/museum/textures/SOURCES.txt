@@ -1,0 +1,15 @@
+Museum material textures
+========================
+
+Downloaded from Poly Haven on 2026-08-27 through the official Poly Haven API/CDN.
+All Poly Haven assets are dedicated to the public domain under CC0.
+
+Wood Floor
+Source: https://polyhaven.com/a/wood_floor
+File: wood_floor_diff_1k.jpg (delivery copy resized to 512px and JPEG-compressed)
+
+White Plaster 02
+Source: https://polyhaven.com/a/white_plaster_02
+File: white_plaster_02_diff_1k.jpg (delivery copy resized to 512px and JPEG-compressed)
+
+License: https://polyhaven.com/license

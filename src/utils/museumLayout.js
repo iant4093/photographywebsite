@@ -1,14 +1,14 @@
 import { sortGalleryAlbums, sortGalleryCategories } from './galleryOrder'
 
 export const MUSEUM_DIMENSIONS = Object.freeze({
-    hallHalfWidth: 4.4,
-    hallHeight: 6.8,
-    doorwayWidth: 4.2,
-    lobbyFrontZ: 12,
+    hallHalfWidth: 4.8,
+    hallHeight: 7.4,
+    doorwayWidth: 4.6,
+    lobbyFrontZ: 14,
     firstBayZ: -7,
-    baySpacing: 14,
-    roomSpan: 10,
-    paintingSpacing: 3.35,
+    baySpacing: 16.5,
+    roomSpan: 12.5,
+    paintingSpacing: 5.6,
 })
 
 function normalizedCategory(value) {
@@ -45,20 +45,20 @@ export function buildMuseumCatalog(albums = []) {
 }
 
 function makePaintings(room) {
-    const wallOffset = (MUSEUM_DIMENSIONS.roomSpan / 2) - 0.12
+    const wallOffset = (room.width / 2) - 0.12
     return room.albums.map((album, index) => {
         const row = Math.floor(index / 2)
         const onNearWall = index % 2 === 0
         const z = room.centerZ + (onNearWall ? -wallOffset : wallOffset)
         const x = room.side * (
             MUSEUM_DIMENSIONS.hallHalfWidth
-            + 2.7
+            + 4.15
             + (row * MUSEUM_DIMENSIONS.paintingSpacing)
         )
         return {
             id: album.albumId,
             album,
-            position: [x, 2.45, z],
+            position: [x, 2.65, z],
             rotationY: onNearWall ? 0 : Math.PI,
             normal: [0, 0, onNearWall ? 1 : -1],
         }
@@ -71,13 +71,13 @@ function makeBenches(room) {
     for (let row = 1; row < rows; row += 3) {
         const x = room.side * (
             MUSEUM_DIMENSIONS.hallHalfWidth
-            + 2.7
-            + (row * MUSEUM_DIMENSIONS.paintingSpacing)
+            + 4.15
+            + ((row - 0.5) * MUSEUM_DIMENSIONS.paintingSpacing)
         )
         benches.push({
             id: `${room.id}-bench-${row}`,
             position: [x, 0.42, room.centerZ],
-            size: [1.55, 0.48, 2.7],
+            size: [1.7, 0.42, 3.15],
         })
     }
     return benches
@@ -88,7 +88,12 @@ export function buildMuseumLayout(categories = []) {
         const side = index % 2 === 0 ? -1 : 1
         const bay = Math.floor(index / 2)
         const rows = Math.max(1, Math.ceil(category.albums.length / 2))
-        const depth = 6.2 + (rows * MUSEUM_DIMENSIONS.paintingSpacing)
+        const width = category.albums.length <= 2
+            ? 9.4
+            : category.albums.length <= 6
+                ? 10.8
+                : MUSEUM_DIMENSIONS.roomSpan
+        const depth = 9.2 + ((rows - 1) * MUSEUM_DIMENSIONS.paintingSpacing)
         const centerZ = MUSEUM_DIMENSIONS.firstBayZ - (bay * MUSEUM_DIMENSIONS.baySpacing)
         const innerX = side * MUSEUM_DIMENSIONS.hallHalfWidth
         const outerX = side * (MUSEUM_DIMENSIONS.hallHalfWidth + depth)
@@ -98,6 +103,7 @@ export function buildMuseumLayout(categories = []) {
             bay,
             centerZ,
             depth,
+            width,
             innerX,
             outerX,
             centerX: (innerX + outerX) / 2,
@@ -105,8 +111,8 @@ export function buildMuseumLayout(categories = []) {
             bounds: {
                 minX: Math.min(innerX, outerX),
                 maxX: Math.max(innerX, outerX),
-                minZ: centerZ - (MUSEUM_DIMENSIONS.roomSpan / 2),
-                maxZ: centerZ + (MUSEUM_DIMENSIONS.roomSpan / 2),
+                minZ: centerZ - (width / 2),
+                maxZ: centerZ + (width / 2),
             },
         }
         room.paintings = makePaintings(room)
@@ -117,16 +123,16 @@ export function buildMuseumLayout(categories = []) {
     const bayCount = Math.max(1, Math.ceil(categories.length / 2))
     const hallBackZ = MUSEUM_DIMENSIONS.firstBayZ
         - ((bayCount - 1) * MUSEUM_DIMENSIONS.baySpacing)
-        - 9
+        - 11
 
     return {
         rooms,
         hallBackZ,
         hallLength: MUSEUM_DIMENSIONS.lobbyFrontZ - hallBackZ,
-        spawn: [0, 1.68, 9.5],
+        spawn: [0, 1.7, 11.25],
         desk: {
-            position: [0, 0.72, 4.25],
-            size: [3.8, 1.44, 1.15],
+            position: [0, 0.69, 6.4],
+            size: [4.3, 1.38, 1.3],
         },
     }
 }

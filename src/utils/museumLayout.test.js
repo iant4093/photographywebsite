@@ -113,6 +113,40 @@ describe('museum layout', () => {
         const axes = museumPlanarAxes(0, -1)
         expect(axes.forward).toEqual({ x: 0, z: -1 })
         expect(axes.right).toEqual({ x: 1, z: 0 })
+
+        const facingEast = museumPlanarAxes(1, 0)
+        expect(facingEast.right).toEqual({ x: -0, z: 1 })
+    })
+
+    it('gives adjacent paintings museum-scale breathing room', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('a', 'Hikes'), album('b', 'Hikes'), album('c', 'Hikes'), album('d', 'Hikes'),
+        ]))
+        const nearWall = layout.rooms[0].paintings.filter(painting => painting.rotationY === 0)
+        expect(Math.abs(nearWall[1].position[0] - nearWall[0].position[0])).toBeGreaterThanOrEqual(5.5)
+    })
+
+    it('keeps every dynamically generated room entrance traversable at full catalog scale', () => {
+        const categories = Array.from({ length: 12 }, (_, categoryIndex) => (
+            Array.from({ length: (categoryIndex % 5) + 1 }, (_, albumIndex) => (
+                album(`album-${categoryIndex}-${albumIndex}`, `Category ${categoryIndex}`, {
+                    galleryCategoryOrder: categoryIndex,
+                })
+            ))
+        )).flat()
+        const layout = buildMuseumLayout(buildMuseumCatalog(categories))
+
+        expect(layout.rooms).toHaveLength(12)
+        for (const room of layout.rooms) {
+            let position = {
+                x: room.side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.45),
+                z: room.centerZ,
+            }
+            for (let step = 0; step < 20; step += 1) {
+                position = moveMuseumPosition(layout, position, { x: room.side * 0.3, z: 0 })
+            }
+            expect(Math.abs(position.x)).toBeGreaterThan(MUSEUM_DIMENSIONS.hallHalfWidth + 2)
+        }
     })
 
     it('preloads a room near its entrance', () => {
