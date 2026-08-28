@@ -24,6 +24,17 @@
   touch-action: none;
 }
 
+.museum-experience::after {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 44%, transparent 34%, rgba(9, 7, 6, 0.08) 61%, rgba(7, 5, 4, 0.42) 100%),
+    linear-gradient(180deg, rgba(11, 15, 19, 0.12), transparent 27%, rgba(11, 7, 5, 0.08));
+  content: '';
+  pointer-events: none;
+}
+
 .museum-canvas {
   position: absolute !important;
   inset: 0;

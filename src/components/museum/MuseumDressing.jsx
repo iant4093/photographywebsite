@@ -31,7 +31,7 @@ function EnvironmentLighting() {
         const previous = scene.environment
         const previousIntensity = scene.environmentIntensity
         scene.environment = environment
-        scene.environmentIntensity = 0.27
+        scene.environmentIntensity = 0.12
         return () => {
             scene.environment = previous
             scene.environmentIntensity = previousIntensity
@@ -227,7 +227,7 @@ function AbstractSculpture({ sculpture }) {
             <spotLight
                 position={[0, 5.3, 1.8]}
                 target-position={[0, 1.2, 0]}
-                intensity={36}
+                intensity={12}
                 distance={8}
                 angle={0.4}
                 penumbra={0.72}
@@ -280,7 +280,7 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
                     <meshStandardMaterial color={DARK_BRASS} metalness={0.55} roughness={0.4} />
                 </mesh>
             </group>
-            <rectAreaLight position={[0, 1.3, 0.2]} rotation={[-Math.PI / 2, 0, 0]} width={3.6} height={1} intensity={7} color="#ffe3b5" />
+            <rectAreaLight position={[0, 1.3, 0.2]} rotation={[-Math.PI / 2, 0, 0]} width={3.6} height={1} intensity={2.8} color="#ffd7a3" />
         </group>
     )
 }
@@ -324,7 +324,7 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
                 <PlasterMaterial materials={materials} color="#d8d1c5" />
             </mesh>
             <LabelPlane title="The Photography Archive" subtitle="Est. 2026" position={[0, 5.4, -0.18]} rotation={[0, Math.PI, 0]} size={[4.35, 0.92]} />
-            <rectAreaLight position={[0, 4.7, -0.65]} rotation={[0, Math.PI, 0]} width={5.2} height={3.4} intensity={8} color="#d7e5ef" />
+            <rectAreaLight position={[0, 4.7, -0.65]} rotation={[0, Math.PI, 0]} width={5.2} height={3.4} intensity={3.2} color="#c6d9e6" />
         </group>
     )
 }
@@ -341,7 +341,7 @@ function WallSconce({ side, z }) {
                 <cylinderGeometry args={[0.24, 0.15, 0.42, 18, 1, true]} />
                 <meshPhysicalMaterial color="#f2dfbf" transparent opacity={0.78} roughness={0.48} transmission={0.06} side={THREE.DoubleSide} />
             </mesh>
-            <pointLight position={[-side * 0.34, 0.12, 0]} color="#ffd5a0" intensity={19} distance={5.8} decay={2} />
+            <pointLight position={[-side * 0.34, 0.12, 0]} color="#ffc783" intensity={6} distance={4.8} decay={2} />
         </group>
     )
 }
@@ -359,7 +359,7 @@ function HallLighting({ layout }) {
                     key={z}
                     position={[index % 2 ? -3.65 : 3.65, 5.8, z + 1.5]}
                     target-position={[0, 0.25, z - 1.5]}
-                    intensity={25}
+                    intensity={8}
                     distance={10}
                     angle={0.43}
                     penumbra={0.72}

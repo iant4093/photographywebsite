@@ -274,6 +274,6 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 6.5) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-        .slice(0, 4)
+        .slice(0, 2)
         .map(room => room.id)
 }

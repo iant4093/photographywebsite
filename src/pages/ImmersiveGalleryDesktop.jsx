@@ -22,11 +22,24 @@ import {
 
 const SESSION_KEY = 'ian-photography-museum-position-v2'
 const RETURN_KEY = 'ian-photography-museum-return'
-const HALL_PAINT = '#fffaf1'
-const ROOM_PAINT = '#f6f0e7'
+const HALL_PAINT = '#d8d0c4'
+const ROOM_PAINT = '#d2c9bc'
 const GOLD = '#9b7747'
 const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
+const COVER_LOAD_CONCURRENCY = 2
+const coverTextureCache = new Map()
+const coverTextureLoads = new Map()
+const coverLoadQueue = []
+let activeCoverLoads = 0
+const coverPlaceholderTexture = new THREE.DataTexture(
+    new Uint8Array([51, 43, 37, 255]),
+    1,
+    1,
+    THREE.RGBAFormat,
+)
+coverPlaceholderTexture.colorSpace = THREE.SRGBColorSpace
+coverPlaceholderTexture.needsUpdate = true
 const MuseumDressing = lazy(() => import('../components/museum/MuseumDressing.jsx'))
 
 function usesTouchControls() {
@@ -96,10 +109,14 @@ function PlasterMaterial({ materials, color = HALL_PAINT, side, roughness = 0.88
 
 function FloorMaterial({ materials, color = '#8b6948' }) {
     return (
-        <meshStandardMaterial
+        <meshPhysicalMaterial
             {...materials.floor}
             color={color}
-            roughness={0.62}
+            metalness={0.025}
+            roughness={0.48}
+            clearcoat={0.24}
+            clearcoatRoughness={0.52}
+            envMapIntensity={0.42}
         />
     )
 }
@@ -139,6 +156,9 @@ function useLabelTexture(title, subtitle = '', { width = 1024, height = 256, dar
         }
         const next = new THREE.CanvasTexture(canvas)
         next.colorSpace = THREE.SRGBColorSpace
+        next.generateMipmaps = false
+        next.minFilter = THREE.LinearFilter
+        next.magFilter = THREE.LinearFilter
         next.needsUpdate = true
         return next
     }, [dark, height, subtitle, title, width])
@@ -172,6 +192,87 @@ async function optimizedCoverUrls(album) {
     ].filter(Boolean))]
 }
 
+function runCoverLoadQueue() {
+    while (activeCoverLoads < COVER_LOAD_CONCURRENCY && coverLoadQueue.length > 0) {
+        const job = coverLoadQueue.shift()
+        activeCoverLoads += 1
+        const start = () => Promise.resolve().then(job.task)
+        // A continuously rendered WebGL scene can starve requestIdleCallback.
+        // Yield one frame instead, then decode two small previews in parallel.
+        const scheduled = new Promise(resolve => window.setTimeout(resolve, 32)).then(start)
+        scheduled
+            .then(job.resolve, job.reject)
+            .finally(() => {
+                activeCoverLoads -= 1
+                runCoverLoadQueue()
+            })
+    }
+}
+
+function enqueueCoverLoad(task) {
+    return new Promise((resolve, reject) => {
+        coverLoadQueue.push({ task, resolve, reject })
+        runCoverLoadQueue()
+    })
+}
+
+function loadHtmlImage(url) {
+    return new Promise((resolve, reject) => {
+        const image = new Image()
+        image.crossOrigin = 'anonymous'
+        image.decoding = 'async'
+        image.onload = () => resolve(image)
+        image.onerror = () => reject(new Error('Museum cover could not be decoded'))
+        image.src = developmentMediaUrl(url)
+    })
+}
+
+function cropMuseumCover(texture, image) {
+    const imageWidth = image.width || image.naturalWidth
+    const imageHeight = image.height || image.naturalHeight
+    const imageAspect = imageWidth / imageHeight
+    const frameAspect = 2.66 / 1.76
+    if (imageAspect > frameAspect) {
+        texture.repeat.x = frameAspect / imageAspect
+        texture.offset.x = (1 - texture.repeat.x) / 2
+    } else if (imageAspect > 0) {
+        texture.repeat.y = imageAspect / frameAspect
+        texture.offset.y = (1 - texture.repeat.y) / 2
+    }
+}
+
+async function createMuseumCoverTexture(album) {
+    const cacheKey = `${album.albumId}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
+    const cached = coverTextureCache.get(cacheKey)
+    if (cached) return cached
+    const pending = coverTextureLoads.get(cacheKey)
+    if (pending) return pending
+
+    const request = enqueueCoverLoad(async () => {
+        const urls = await optimizedCoverUrls(album)
+        let lastError = null
+        for (const url of urls) {
+            try {
+                const image = await loadHtmlImage(url)
+                const texture = new THREE.Texture(image)
+                cropMuseumCover(texture, image)
+                texture.colorSpace = THREE.SRGBColorSpace
+                texture.minFilter = THREE.LinearFilter
+                texture.magFilter = THREE.LinearFilter
+                texture.generateMipmaps = false
+                texture.needsUpdate = true
+                coverTextureCache.set(cacheKey, texture)
+                return texture
+            } catch (cause) {
+                lastError = cause
+            }
+        }
+        throw lastError || new Error('Museum cover is unavailable')
+    }).finally(() => coverTextureLoads.delete(cacheKey))
+    coverTextureLoads.set(cacheKey, request)
+    return request
+}
+
 function developmentMediaUrl(value) {
     if (!import.meta.env.DEV || typeof value !== 'string') return value
     try {
@@ -186,57 +287,24 @@ function developmentMediaUrl(value) {
 }
 
 function useCoverTexture(album, active) {
-    const [loaded, setLoaded] = useState(null)
+    const cacheKey = `${album.albumId}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
+    const [loaded, setLoaded] = useState(() => coverTextureCache.get(cacheKey) || null)
 
     useEffect(() => {
         let cancelled = false
-        let loadedTexture = null
-        let image = null
         if (!active) return undefined
-
-        optimizedCoverUrls(album).then((urls) => {
-            const loadCandidate = (index) => {
-                const url = urls[index]
-                if (!url || cancelled) return
-                image = new Image()
-                image.crossOrigin = 'anonymous'
-                image.decoding = 'async'
-                image.onload = () => {
-                    if (cancelled) return
-                    loadedTexture = new THREE.Texture(image)
-                    const imageAspect = image.naturalWidth / image.naturalHeight
-                    const frameAspect = 2.66 / 1.76
-                    if (imageAspect > frameAspect) {
-                        loadedTexture.repeat.x = frameAspect / imageAspect
-                        loadedTexture.offset.x = (1 - loadedTexture.repeat.x) / 2
-                    } else if (imageAspect > 0) {
-                        loadedTexture.repeat.y = imageAspect / frameAspect
-                        loadedTexture.offset.y = (1 - loadedTexture.repeat.y) / 2
-                    }
-                    loadedTexture.colorSpace = THREE.SRGBColorSpace
-                    loadedTexture.minFilter = THREE.LinearMipmapLinearFilter
-                    loadedTexture.magFilter = THREE.LinearFilter
-                    loadedTexture.generateMipmaps = true
-                    loadedTexture.needsUpdate = true
-                    setLoaded({ albumId: album.albumId, texture: loadedTexture })
-                }
-                image.onerror = () => loadCandidate(index + 1)
-                image.src = developmentMediaUrl(url)
-            }
-            loadCandidate(0)
-        })
+        createMuseumCoverTexture(album)
+            .then(texture => {
+                if (!cancelled) setLoaded(texture)
+            })
+            .catch(() => {})
 
         return () => {
             cancelled = true
-            if (image) {
-                image.onload = null
-                image.onerror = null
-            }
-            loadedTexture?.dispose()
         }
-    }, [active, album])
+    }, [active, album, cacheKey])
 
-    return active && loaded?.albumId === album.albumId ? loaded.texture : null
+    return active ? loaded : null
 }
 
 function Painting({ painting, active }) {
@@ -245,11 +313,7 @@ function Painting({ painting, active }) {
     const subtitle = date ? new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, {
         year: 'numeric', month: 'short', day: 'numeric',
     }) : 'Photographic series'
-    const plaque = useLabelTexture(painting.album.title, subtitle, { width: 1024, height: 220, dark: false })
-    const placeholder = useLabelTexture(painting.album.title, 'Loading collection', {
-        width: 1024,
-        height: 680,
-    })
+    const plaque = useLabelTexture(painting.album.title, subtitle, { width: 512, height: 110, dark: false })
 
     return (
         <group position={painting.position} rotation={[0, painting.rotationY, 0]}>
@@ -274,9 +338,10 @@ function Painting({ painting, active }) {
             <mesh position={[0, 0, 0.155]}>
                 <planeGeometry args={[2.66, 1.76]} />
                 <meshStandardMaterial
-                    map={texture || placeholder}
+                    map={texture || coverPlaceholderTexture}
                     color="#ffffff"
-                    roughness={0.67}
+                    roughness={0.62}
+                    envMapIntensity={0.25}
                 />
             </mesh>
             <mesh position={[0, -1.55, 0.13]}>
@@ -486,7 +551,7 @@ function CategoryRoom({ room, active, materials }) {
         <group>
             <mesh position={[room.centerX, -0.11, room.centerZ]} receiveShadow>
                 <boxGeometry args={[room.depth, 0.22, roomWidth]} />
-                <FloorMaterial materials={materials} color="#c7a47d" />
+                <FloorMaterial materials={materials} color="#73573f" />
             </mesh>
             <mesh position={[room.centerX, ceilingY, room.centerZ]}>
                 <boxGeometry args={[room.depth, 0.18, roomWidth]} />
@@ -539,8 +604,8 @@ function CategoryRoom({ room, active, materials }) {
                     {active && (
                         <pointLight
                             position={[0, -0.18, 0]}
-                            intensity={19}
-                            distance={11.5}
+                            intensity={7.5}
+                            distance={9.5}
                             decay={2}
                             color="#ffe5bc"
                         />
@@ -580,7 +645,7 @@ function MainHall({ layout, activeRoomIds, materials }) {
         <group>
             <mesh position={[0, -0.11, hallCenterZ]} receiveShadow>
                 <boxGeometry args={[MUSEUM_DIMENSIONS.hallHalfWidth * 2, 0.22, layout.hallLength]} />
-                <FloorMaterial materials={materials} color="#c7a47d" />
+                <FloorMaterial materials={materials} color="#73573f" />
             </mesh>
             <VaultedCeiling layout={layout} centerZ={hallCenterZ} materials={materials} />
             {[-1, 1].map(side => (
@@ -629,7 +694,7 @@ function MainHall({ layout, activeRoomIds, materials }) {
                         <circleGeometry args={[0.3, 32]} />
                         <meshBasicMaterial color="#fff0d3" toneMapped={false} />
                     </mesh>
-                    <pointLight position={[0, -0.35, 0]} intensity={17} distance={9} decay={2} color="#ffe2b8" />
+                    <pointLight position={[0, -0.35, 0]} intensity={5.5} distance={7.5} decay={2} color="#ffd39a" />
                 </group>
             ))}
             <MuseumDressing
@@ -878,18 +943,23 @@ function PreviewCamera({ mode, roomIndex, layout }) {
 
 function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPreview, previewMode, previewRoomIndex, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
+    const { gl } = useThree()
+    const shadowRevision = controlsEnabled.activeRoomIds.join('|')
+    useEffect(() => {
+        gl.shadowMap.needsUpdate = true
+    }, [gl, shadowRevision])
     return (
         <>
             <color attach="background" args={[INK]} />
-            <fog attach="fog" args={[INK, 30, 135]} />
-            <ambientLight intensity={0.055} color="#fff4e6" />
-            <hemisphereLight args={['#fff5e5', '#332b26', 0.1]} />
+            <fog attach="fog" args={['#151310', 24, 112]} />
+            <ambientLight intensity={0.018} color="#ffead4" />
+            <hemisphereLight args={['#b9c8d3', '#241914', 0.035]} />
             <directionalLight
-                position={[0, 9, 17]}
-                intensity={1.25}
-                color="#fff2dc"
+                position={[-5, 10, 14]}
+                intensity={0.58}
+                color="#d8e5ef"
                 castShadow
-                shadow-mapSize={[1536, 1536]}
+                shadow-mapSize={[1024, 1024]}
                 shadow-bias={-0.0004}
                 shadow-normalBias={0.035}
                 shadow-camera-left={-8}
@@ -999,9 +1069,11 @@ export default function ImmersiveGalleryDesktop() {
                 onCreated={({ gl }) => {
                     gl.outputColorSpace = THREE.SRGBColorSpace
                     gl.toneMapping = THREE.ACESFilmicToneMapping
-                    gl.toneMappingExposure = 0.92
+                    gl.toneMappingExposure = 0.68
                     gl.shadowMap.enabled = true
                     gl.shadowMap.type = THREE.PCFSoftShadowMap
+                    gl.shadowMap.autoUpdate = false
+                    gl.shadowMap.needsUpdate = true
                 }}
             >
                 <Suspense fallback={null}>
