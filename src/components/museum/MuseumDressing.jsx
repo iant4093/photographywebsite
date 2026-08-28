@@ -32,7 +32,7 @@ function EnvironmentLighting({ enabled }) {
         const previous = scene.environment
         const previousIntensity = scene.environmentIntensity
         scene.environment = environment
-        scene.environmentIntensity = 0.12
+        scene.environmentIntensity = 0.18
         return () => {
             scene.environment = previous
             scene.environmentIntensity = previousIntensity
@@ -229,6 +229,77 @@ function AbstractSculpture({ sculpture }) {
     )
 }
 
+function PaperStack() {
+    const sheets = [
+        { y: 0, rotation: -0.035, color: '#efe9dc' },
+        { y: 0.012, rotation: 0.018, color: '#f7f2e8' },
+        { y: 0.024, rotation: -0.01, color: '#fbf7ef' },
+    ]
+    return (
+        <group>
+            {sheets.map((sheet, index) => (
+                <mesh key={index} position={[0, sheet.y, 0]} rotation={[0, sheet.rotation, 0]}>
+                    <boxGeometry args={[0.76, 0.012, 0.54]} />
+                    <meshStandardMaterial color={sheet.color} roughness={0.96} />
+                </mesh>
+            ))}
+            {[0.1, 0.17, 0.24].map((z, index) => (
+                <mesh key={z} position={[-0.08, 0.034, z - 0.26]}>
+                    <boxGeometry args={[0.48 - (index * 0.05), 0.004, 0.014]} />
+                    <meshBasicMaterial color="#8f8577" />
+                </mesh>
+            ))}
+            <mesh position={[-0.25, 0.035, -0.17]}>
+                <boxGeometry args={[0.14, 0.005, 0.09]} />
+                <meshBasicMaterial color="#7b2730" />
+            </mesh>
+        </group>
+    )
+}
+
+function DesktopComputer() {
+    const keys = useMemo(() => (
+        Array.from({ length: 24 }, (_, index) => ({
+            x: -0.28 + ((index % 8) * 0.08),
+            z: -0.095 + (Math.floor(index / 8) * 0.075),
+        }))
+    ), [])
+    return (
+        <group>
+            <mesh position={[0, 0.04, -0.02]}>
+                <boxGeometry args={[0.58, 0.05, 0.34]} />
+                <meshStandardMaterial color="#2a2825" metalness={0.25} roughness={0.42} />
+            </mesh>
+            <mesh position={[0, 0.29, -0.04]}>
+                <boxGeometry args={[0.09, 0.48, 0.08]} />
+                <meshStandardMaterial color="#393633" metalness={0.34} roughness={0.38} />
+            </mesh>
+            <mesh position={[0, 0.57, -0.03]} rotation={[-0.035, 0, 0]}>
+                <boxGeometry args={[1.02, 0.68, 0.09]} />
+                <meshPhysicalMaterial color="#252321" metalness={0.18} roughness={0.3} clearcoat={0.24} />
+            </mesh>
+            <mesh position={[0, 0.57, 0.02]} rotation={[-0.035, 0, 0]}>
+                <planeGeometry args={[0.9, 0.56]} />
+                <meshBasicMaterial color="#23313a" />
+            </mesh>
+            <mesh position={[0, 0.02, 0.55]} rotation={[0, 0, 0]}>
+                <boxGeometry args={[0.72, 0.035, 0.31]} />
+                <meshStandardMaterial color="#34312e" metalness={0.18} roughness={0.5} />
+            </mesh>
+            {keys.map((key, index) => (
+                <mesh key={index} position={[key.x, 0.044, key.z + 0.55]}>
+                    <boxGeometry args={[0.058, 0.012, 0.05]} />
+                    <meshStandardMaterial color="#5a5550" roughness={0.62} />
+                </mesh>
+            ))}
+            <mesh position={[0.57, 0.026, 0.52]}>
+                <sphereGeometry args={[0.09, 12, 7, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                <meshStandardMaterial color="#393633" metalness={0.16} roughness={0.46} />
+            </mesh>
+        </group>
+    )
+}
+
 function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
     const [x, y, z] = layout.desk.position
     return (
@@ -251,25 +322,11 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
                 position={[0, 0.08, 0.715]}
                 size={[3.25, 0.76]}
             />
-            <group position={[-1.45, 0.98, -0.12]} rotation={[0, -0.22, 0]}>
-                <mesh castShadow>
-                    <boxGeometry args={[0.58, 0.04, 0.78]} />
-                    <meshStandardMaterial color="#d7c7af" roughness={0.8} />
-                </mesh>
-                <mesh position={[0, 0.04, 0.04]}>
-                    <boxGeometry args={[0.46, 0.025, 0.6]} />
-                    <meshStandardMaterial color="#6f2028" roughness={0.88} />
-                </mesh>
+            <group position={[-1.42, 0.836, 0.03]} rotation={[0, -0.18, 0]}>
+                <PaperStack />
             </group>
-            <group position={[1.4, 1.08, -0.06]} rotation={[0, 0.2, 0]}>
-                <mesh castShadow>
-                    <boxGeometry args={[0.72, 0.56, 0.04]} />
-                    <meshPhysicalMaterial color="#1c1a18" roughness={0.32} clearcoat={0.22} />
-                </mesh>
-                <mesh position={[0, -0.35, 0.08]}>
-                    <boxGeometry args={[0.42, 0.18, 0.28]} />
-                    <meshStandardMaterial color={DARK_BRASS} metalness={0.55} roughness={0.4} />
-                </mesh>
+            <group position={[1.18, 0.83, -0.25]} rotation={[0, 0.14, 0]}>
+                <DesktopComputer />
             </group>
         </group>
     )

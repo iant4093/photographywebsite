@@ -143,15 +143,17 @@ export function buildMuseumLayout(categories = []) {
         size: [0.94, 1.9, 0.94],
         rotationY: side * 0.28,
     }))
+    // Keep the welcome ropes tucked alongside the desk rather than projecting
+    // into the route visitors use to enter the main hall.
     const stanchions = [-1, 1].flatMap(side => [
         {
             id: `stanchion-${side}-front`,
-            position: [side * 3.1, 0, 8.22],
+            position: [side * 2.68, 0, 6.96],
             size: [0.34, 1.08, 0.34],
         },
         {
             id: `stanchion-${side}-back`,
-            position: [side * 3.1, 0, 6.72],
+            position: [side * 2.68, 0, 5.48],
             size: [0.34, 1.08, 0.34],
         },
     ])
@@ -276,7 +278,7 @@ export function nearestMuseumRoom(layout, position, preloadDistance = 4.5) {
     return nearest
 }
 
-export function nearbyMuseumRoomIds(layout, position, preloadDistance = 6.5) {
+export function nearbyMuseumRoomIds(layout, position, preloadDistance = 25) {
     const nearby = layout.rooms
         .map((room) => {
             const [entranceX, , entranceZ] = room.entrance
@@ -288,6 +290,8 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 6.5) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-    const containingRoom = nearby.find(room => room.contained)
-    return (containingRoom ? [containingRoom] : nearby.slice(0, 2)).map(room => room.id)
+    // Keep one complete hall bay live at a time. Distant rooms retain their
+    // lightweight framed placeholders, while the next bay becomes the nearer
+    // pair early enough to stream before the visitor reaches its arches.
+    return nearby.slice(0, 2).map(room => room.id)
 }

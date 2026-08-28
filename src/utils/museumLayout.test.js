@@ -158,10 +158,12 @@ describe('museum layout', () => {
         }
     })
 
-    it('preloads both rooms at a hall bay and only the room containing the player', () => {
+    it('preloads the nearest pair of rooms without mounting distant galleries', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'),
             album('b', 'Astro'),
+            album('c', 'Portraits'),
+            album('d', 'Sports'),
         ]))
         const [x, , z] = layout.rooms[0].entrance
         expect(nearestMuseumRoom(layout, { x: x + 1, z })).toBe(layout.rooms[0].id)
@@ -172,7 +174,7 @@ describe('museum layout', () => {
         expect(nearbyMuseumRoomIds(layout, {
             x: layout.rooms[1].centerX,
             z: layout.rooms[1].centerZ,
-        })).toEqual([layout.rooms[1].id])
+        })[0]).toBe(layout.rooms[1].id)
         expect(nearestMuseumRoom(layout, { x: 0, z: 10 }, 1)).toBeNull()
     })
 

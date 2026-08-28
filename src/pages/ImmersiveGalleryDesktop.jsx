@@ -23,21 +23,22 @@ const ROOM_PAINT = '#d2c9bc'
 const GOLD = '#9b7747'
 const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
-const COVER_LOAD_CONCURRENCY = 1
-const MAX_CACHED_COVERS = 32
+const COVER_LOAD_CONCURRENCY = 2
+const MAX_CACHED_COVERS = 64
 const coverTextureCache = new Map()
 const coverTextureLoads = new Map()
 const coverLoadQueue = []
 let activeCoverLoads = 0
-const coverPlaceholderTexture = new THREE.DataTexture(
-    new Uint8Array([51, 43, 37, 255]),
-    1,
-    1,
-    THREE.RGBAFormat,
-)
-coverPlaceholderTexture.colorSpace = THREE.SRGBColorSpace
-coverPlaceholderTexture.needsUpdate = true
+let coverLoadSequence = 0
 const MuseumDressing = lazy(() => import('../components/museum/MuseumDressing.jsx'))
+const PLACEHOLDER_COLORS = ['#675b50', '#58666a', '#6b6250', '#5e5968', '#586257']
+
+function placeholderColor(albumId = '') {
+    const hash = [...String(albumId)].reduce((value, character) => (
+        ((value * 31) + character.charCodeAt(0)) >>> 0
+    ), 7)
+    return PLACEHOLDER_COLORS[hash % PLACEHOLDER_COLORS.length]
+}
 
 function usesTouchControls() {
     if (typeof window === 'undefined') return false
@@ -174,7 +175,7 @@ function LabelPlane({ title, subtitle, position, rotation = [0, 0, 0], size = [3
     )
 }
 
-async function optimizedCoverUrls(album) {
+async function optimizedCoverUrls(album, targetWidth = 960) {
     const srcSet = await albumCoverPreviewSrcSet(album).catch(() => '')
     const previews = srcSet
         .split(',')
@@ -184,13 +185,12 @@ async function optimizedCoverUrls(album) {
         })
         .filter(candidate => candidate.url)
         .sort((left, right) => (
-            Math.abs(left.width - 1440) - Math.abs(right.width - 1440)
+            Math.abs(left.width - targetWidth) - Math.abs(right.width - targetWidth)
             || right.width - left.width
         ))
     return [...new Set([
-        // Museum frames are meant to hold up at close viewing distance. Prefer
-        // the 1440px generated WebP (sharp without the full-size transfer), then
-        // gracefully fall back when an optimized preview is not available.
+        // Nearby galleries start with a fast 960px preview. Once a visitor
+        // enters a room, that same frame is upgraded to the 1920px derivative.
         ...previews.map(candidate => candidate.url),
         album.coverThumbnailUrl,
         album.coverImageUrl,
@@ -199,12 +199,15 @@ async function optimizedCoverUrls(album) {
 
 function runCoverLoadQueue() {
     while (activeCoverLoads < COVER_LOAD_CONCURRENCY && coverLoadQueue.length > 0) {
+        // The room the visitor most recently approached should not sit behind
+        // stale work left over from the previous end of the hall.
+        coverLoadQueue.sort((left, right) => right.priority - left.priority || right.sequence - left.sequence)
         const job = coverLoadQueue.shift()
         activeCoverLoads += 1
         const start = () => Promise.resolve().then(job.task)
-        // Space GPU uploads apart so entering a room never stalls movement while
-        // several covers decode at once.
-        const scheduled = new Promise(resolve => window.setTimeout(resolve, 92)).then(start)
+        // A short stagger prevents simultaneous GPU uploads without making a
+        // newly entered room wait behind the entire previous bay.
+        const scheduled = new Promise(resolve => window.setTimeout(resolve, 32)).then(start)
         scheduled
             .then(job.resolve, job.reject)
             .finally(() => {
@@ -214,9 +217,9 @@ function runCoverLoadQueue() {
     }
 }
 
-function enqueueCoverLoad(task) {
+function enqueueCoverLoad(task, priority = 0) {
     return new Promise((resolve, reject) => {
-        coverLoadQueue.push({ task, resolve, reject })
+        coverLoadQueue.push({ task, resolve, reject, priority, sequence: coverLoadSequence++ })
         runCoverLoadQueue()
     })
 }
@@ -246,15 +249,15 @@ function cropMuseumCover(texture, image) {
     }
 }
 
-async function createMuseumCoverTexture(album) {
-    const cacheKey = `${album.albumId}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
+async function createMuseumCoverTexture(album, targetWidth = 960) {
+    const cacheKey = `${album.albumId}:${targetWidth}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
     const cached = coverTextureCache.get(cacheKey)
     if (cached) return cached
     const pending = coverTextureLoads.get(cacheKey)
     if (pending) return pending
 
     const request = enqueueCoverLoad(async () => {
-        const urls = await optimizedCoverUrls(album)
+        const urls = await optimizedCoverUrls(album, targetWidth)
         let lastError = null
         for (const url of urls) {
             try {
@@ -281,7 +284,7 @@ async function createMuseumCoverTexture(album) {
             }
         }
         throw lastError || new Error('Museum cover is unavailable')
-    }).finally(() => coverTextureLoads.delete(cacheKey))
+    }, targetWidth).finally(() => coverTextureLoads.delete(cacheKey))
     coverTextureLoads.set(cacheKey, request)
     return request
 }
@@ -299,8 +302,8 @@ function developmentMediaUrl(value) {
     return value
 }
 
-function useCoverTexture(album, active) {
-    const cacheKey = `${album.albumId}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
+function useCoverTexture(album, targetWidth) {
+    const cacheKey = `${album.albumId}:${targetWidth}:${album.coverImageUrl || album.coverThumbnailUrl || album.coverThumbKey || ''}`
     const [loaded, setLoaded] = useState(() => {
         const cached = coverTextureCache.get(cacheKey) || null
         if (cached) {
@@ -312,28 +315,45 @@ function useCoverTexture(album, active) {
 
     useEffect(() => {
         let cancelled = false
-        if (!active) return undefined
-        createMuseumCoverTexture(album)
-            .then(texture => {
-                if (!cancelled) setLoaded(texture)
-            })
-            .catch(() => {})
+        let retryTimer
+        if (!targetWidth) return undefined
+        const load = (attempt = 0) => {
+            createMuseumCoverTexture(album, targetWidth)
+                .then(texture => {
+                    if (!cancelled) setLoaded(texture)
+                })
+                .catch(() => {
+                    if (cancelled || attempt >= 2) return
+                    retryTimer = window.setTimeout(() => load(attempt + 1), 500 * (attempt + 1))
+                })
+        }
+        load()
 
         return () => {
             cancelled = true
+            window.clearTimeout(retryTimer)
         }
-    }, [active, album, cacheKey])
+    }, [album, cacheKey, targetWidth])
 
-    return active ? loaded : null
+    return loaded
 }
 
-function Painting({ painting, active }) {
-    const texture = useCoverTexture(painting.album, active)
+function Painting({ painting, targetWidth = 0 }) {
+    const texture = useCoverTexture(painting.album, targetWidth)
+    const artworkMaterial = useRef(null)
     const date = painting.album.createdAt || painting.album.uploadedAt || ''
     const subtitle = date ? new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, {
         year: 'numeric', month: 'short', day: 'numeric',
     }) : 'Photographic series'
     const plaque = useLabelTexture(painting.album.title, subtitle, { width: 512, height: 110, dark: false })
+
+    useEffect(() => {
+        if (texture && artworkMaterial.current) artworkMaterial.current.opacity = 0
+    }, [texture])
+    useFrame((_, delta) => {
+        if (!texture || !artworkMaterial.current || artworkMaterial.current.opacity >= 1) return
+        artworkMaterial.current.opacity = Math.min(1, artworkMaterial.current.opacity + (delta * 4.5))
+    })
 
     return (
         <group position={painting.position} rotation={[0, painting.rotationY, 0]}>
@@ -355,12 +375,19 @@ function Painting({ painting, active }) {
                 <boxGeometry args={[3, 2.1, 0.08]} />
                 <meshStandardMaterial color="#f7f2e8" roughness={0.72} />
             </mesh>
+            <mesh position={[0, 0, 0.151]}>
+                <planeGeometry args={[2.66, 1.76]} />
+                <meshBasicMaterial color={placeholderColor(painting.album.albumId)} toneMapped={false} />
+            </mesh>
             <mesh position={[0, 0, 0.155]}>
                 <planeGeometry args={[2.66, 1.76]} />
                 <meshBasicMaterial
-                    map={texture || coverPlaceholderTexture}
+                    ref={artworkMaterial}
+                    map={texture || null}
                     color="#ffffff"
                     toneMapped={false}
+                    transparent
+                    opacity={0}
                 />
             </mesh>
             <mesh position={[0, -1.55, 0.13]}>
@@ -370,6 +397,21 @@ function Painting({ painting, active }) {
             <mesh position={[0, 1.72, 0.28]} rotation={[0.16, 0, 0]}>
                 <boxGeometry args={[1.45, 0.08, 0.11]} />
                 <meshStandardMaterial color="#8a7356" metalness={0.45} roughness={0.46} />
+            </mesh>
+        </group>
+    )
+}
+
+function PaintingPlaceholder({ painting }) {
+    return (
+        <group position={painting.position} rotation={[0, painting.rotationY, 0]}>
+            <mesh>
+                <boxGeometry args={[3.24, 2.34, 0.14]} />
+                <meshStandardMaterial color="#7e674b" roughness={0.54} metalness={0.22} />
+            </mesh>
+            <mesh position={[0, 0, 0.075]}>
+                <planeGeometry args={[2.82, 1.92]} />
+                <meshBasicMaterial color={placeholderColor(painting.album.albumId)} toneMapped={false} />
             </mesh>
         </group>
     )
@@ -558,7 +600,7 @@ function VaultedCeiling({ layout, centerZ, materials }) {
     )
 }
 
-function CategoryRoom({ room, active, materials }) {
+function CategoryRoom({ room, active, detailed, materials }) {
     const roomWidth = room.width
     const outerWallX = room.outerX
     const wallThickness = 0.24
@@ -614,8 +656,16 @@ function CategoryRoom({ room, active, materials }) {
                 rotation={[0, endRotation, 0]}
                 size={[4.6, 1.2]}
             />
-            {active && room.paintings.map(painting => (
-                <Painting key={painting.id} painting={painting} active />
+            {room.paintings.map(painting => (
+                active ? (
+                    <Painting
+                        key={painting.id}
+                        painting={painting}
+                        targetWidth={detailed ? 1920 : 960}
+                    />
+                ) : (
+                    <PaintingPlaceholder key={painting.id} painting={painting} />
+                )
             ))}
             {lightXs.map(x => (
                 <group key={x} position={[x, ceilingY - 0.12, room.centerZ]}>
@@ -625,11 +675,21 @@ function CategoryRoom({ room, active, materials }) {
                     </mesh>
                 </group>
             ))}
+            {active && (
+                <pointLight
+                    position={[room.centerX, ceilingY - 1.05, room.centerZ]}
+                    color="#ffd9aa"
+                    intensity={5.4}
+                    distance={12.5}
+                    decay={2}
+                    castShadow={false}
+                />
+            )}
         </group>
     )
 }
 
-function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
+function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsEnabled }) {
     const hallCenterZ = (MUSEUM_DIMENSIONS.lobbyFrontZ + layout.hallBackZ) / 2
     const bayCount = Math.max(1, Math.ceil(layout.rooms.length / 2))
     const bays = Array.from({ length: bayCount }, (_, index) => ({
@@ -648,6 +708,12 @@ function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
     // sources are stationary so illumination cannot jump or flash while walking.
     const ceilingLights = [7, ...bays.map(bay => bay.centerZ)]
         .filter(z => z > layout.hallBackZ)
+    const illuminatedHallLights = ceilingLights.filter((_, index) => (
+        index % (reflectionsEnabled ? 2 : 4) === 0
+    ))
+    const wallSeamZs = Array.from({ length: bayCount + 1 }, (_, index) => (
+        firstWallEndZ - (index * MUSEUM_DIMENSIONS.baySpacing)
+    )).filter(z => z > layout.hallBackZ)
 
     return (
         <group>
@@ -684,6 +750,15 @@ function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
                     <DoorWall side={1} centerZ={bay.centerZ} room={bay.right} materials={materials} />
                 </group>
             ))}
+            {wallSeamZs.flatMap(z => [-1, 1].map(side => (
+                <mesh
+                    key={`${z}-${side}`}
+                    position={[side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.13), MUSEUM_DIMENSIONS.hallHeight / 2, z]}
+                >
+                    <boxGeometry args={[0.12, MUSEUM_DIMENSIONS.hallHeight, 0.18]} />
+                    <meshStandardMaterial color="#bcae9b" roughness={0.78} />
+                </mesh>
+            )))}
             <mesh position={[0, MUSEUM_DIMENSIONS.hallHeight / 2, layout.hallBackZ]}>
                 <boxGeometry args={[MUSEUM_DIMENSIONS.hallHalfWidth * 2, MUSEUM_DIMENSIONS.hallHeight, 0.24]} />
                 <PlasterMaterial materials={materials} color={HALL_PAINT} />
@@ -693,6 +768,7 @@ function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
                     key={room.id}
                     room={room}
                     active={activeRooms.has(room.id)}
+                    detailed={activeRoomId === room.id}
                     materials={materials}
                 />
             ))}
@@ -703,6 +779,17 @@ function MainHall({ layout, activeRoomIds, materials, reflectionsEnabled }) {
                         <meshBasicMaterial color="#fff0d3" toneMapped={false} />
                     </mesh>
                 </group>
+            ))}
+            {illuminatedHallLights.map(z => (
+                <pointLight
+                    key={`hall-light-${z}`}
+                    position={[0, 5.9, z]}
+                    color="#ffd8aa"
+                    intensity={reflectionsEnabled ? 5.2 : 3.4}
+                    distance={24}
+                    decay={2}
+                    castShadow={false}
+                />
             ))}
             <MuseumDressing
                 layout={layout}
@@ -1003,12 +1090,13 @@ function SceneWarmup({ layout, onReady }) {
         const nearbyRoomIds = new Set(nearbyMuseumRoomIds(layout, initialPosition))
         const nearbyAlbums = layout.rooms
             .filter(room => nearbyRoomIds.has(room.id))
-            .map(room => room.albums[0])
+            .flatMap(room => room.albums)
             .filter(Boolean)
+            .slice(0, 8)
 
         Promise.all([
             gl.compileAsync?.(scene, camera) || Promise.resolve(),
-            Promise.allSettled(nearbyAlbums.map(createMuseumCoverTexture)),
+            Promise.allSettled(nearbyAlbums.map(album => createMuseumCoverTexture(album, 960))),
         ]).then(([, results]) => {
             results.forEach((result) => {
                 if (result.status === 'fulfilled') gl.initTexture?.(result.value)
@@ -1036,16 +1124,18 @@ function MuseumScene({ layout, controlsEnabled, touchMode, touchInput, visualPre
         <>
             <color attach="background" args={[INK]} />
             <fog attach="fog" args={['#151310', 24, 112]} />
-            <ambientLight intensity={0.25} color="#ffead4" />
-            <hemisphereLight args={['#c8d6df', '#4b3325', 0.34]} />
+            <ambientLight intensity={0.12} color="#ffead4" />
+            <hemisphereLight args={['#c2d1dc', '#3d2a20', 0.24]} />
             <directionalLight
-                position={[-5, 10, 14]}
-                intensity={0.16}
-                color="#d8e5ef"
+                position={[-6, 10, 12]}
+                intensity={0.38}
+                color="#dce8ef"
                 castShadow={false}
             />
+            <directionalLight position={[7, 6, -12]} intensity={0.16} color="#d69e6a" castShadow={false} />
             <MainHall
                 layout={layout}
+                activeRoomId={controlsEnabled.activeRoomId}
                 activeRoomIds={controlsEnabled.activeRoomIds}
                 materials={materials}
                 reflectionsEnabled={!touchMode}
@@ -1131,6 +1221,9 @@ export default function ImmersiveGalleryDesktop() {
     const renderedActiveRoomIds = visualPreview
         ? (previewMode === 'room' ? [layout.rooms[previewRoomIndex]?.id].filter(Boolean) : [])
         : (activeRoomIds.length > 0 ? activeRoomIds : initialActiveRoomIds)
+    const renderedActiveRoomId = visualPreview && previewMode === 'room'
+        ? layout.rooms[previewRoomIndex]?.id
+        : activeRoomId
     const openAlbum = useCallback((album) => {
         sessionStorage.setItem(RETURN_KEY, 'true')
         navigate(`/album/${encodeURIComponent(album.albumId)}`, { state: { fromImmersiveGallery: true } })
@@ -1169,13 +1262,13 @@ export default function ImmersiveGalleryDesktop() {
                 onCreated={({ gl }) => {
                     gl.outputColorSpace = THREE.SRGBColorSpace
                     gl.toneMapping = THREE.ACESFilmicToneMapping
-                    gl.toneMappingExposure = 0.88
+                    gl.toneMappingExposure = 0.98
                 }}
             >
                 <Suspense fallback={null}>
                     <MuseumScene
                         layout={layout}
-                        controlsEnabled={{ locked, activeRoomIds: renderedActiveRoomIds }}
+                        controlsEnabled={{ locked, activeRoomId: renderedActiveRoomId, activeRoomIds: renderedActiveRoomIds }}
                         touchMode={touchMode}
                         touchInput={touchInput}
                         visualPreview={visualPreview}
