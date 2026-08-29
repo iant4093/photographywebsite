@@ -46,11 +46,6 @@ export function buildMuseumCatalog(albums = []) {
 
 function makePaintings(room) {
     const wallOffset = (room.width / 2) - 0.12
-    // Deliberately vary the cadence instead of repeating identical pairs all
-    // the way down a room. Each three-row chapter reads as a hero, a quieter
-    // pair, then an offset pair with more negative space.
-    const rowOffsets = [0, 0.62, -0.18, 1.02, 0.18, -0.34]
-    const scalePattern = [1.28, 1.02, 0.9, 0.94, 1.14, 0.88]
     return room.albums.map((album, index) => {
         const row = Math.floor(index / 2)
         const onNearWall = index % 2 === 0
@@ -59,17 +54,14 @@ function makePaintings(room) {
             MUSEUM_DIMENSIONS.hallHalfWidth
             + 4.15
             + (row * MUSEUM_DIMENSIONS.paintingSpacing)
-            + rowOffsets[row % rowOffsets.length]
         )
-        const scale = scalePattern[index % scalePattern.length]
-        const heightOffset = [0.24, -0.04, -0.22, 0.18, 0.08, -0.16][index % 6]
         return {
             id: album.albumId,
             album,
-            position: [x, 2.65 + heightOffset, z],
+            position: [x, 2.65, z],
             rotationY: onNearWall ? 0 : Math.PI,
             normal: [0, 0, onNearWall ? 1 : -1],
-            scale: [scale, scale, 1],
+            scale: [1, 1, 1],
         }
     })
 }
@@ -260,10 +252,28 @@ export function museumPlanarAxes(forwardX, forwardZ) {
     }
 }
 
-export function moveMuseumPosition(layout, current, delta, radius = 0.35) {
+function crossesClosedMuseumPortal(layout, current, proposed, openRoomIds, radius) {
+    if (!openRoomIds) return false
+    return layout.rooms.some((room) => {
+        if (openRoomIds.has(room.id)) return false
+        if (Math.abs(proposed.z - room.centerZ) > (MUSEUM_DIMENSIONS.doorwayWidth / 2) - radius) return false
+        const previousDepth = (current.x - room.innerX) * room.side
+        const proposedDepth = (proposed.x - room.innerX) * room.side
+        // The curtain sits 0.64m inside the room. Stop the visitor's collision
+        // capsule just in front of it, but always allow somebody already inside
+        // to walk back out if a stream is interrupted.
+        const stopDepth = 0.64 - radius
+        return previousDepth <= stopDepth && proposedDepth > stopDepth
+    })
+}
+
+export function moveMuseumPosition(layout, current, delta, radius = 0.35, openRoomIds = null) {
     const next = { x: current.x, z: current.z }
     const proposedX = current.x + delta.x
-    if (isMuseumPositionWalkable(layout, proposedX, current.z, radius)) next.x = proposedX
+    if (
+        isMuseumPositionWalkable(layout, proposedX, current.z, radius)
+        && !crossesClosedMuseumPortal(layout, current, { x: proposedX, z: current.z }, openRoomIds, radius)
+    ) next.x = proposedX
     const proposedZ = current.z + delta.z
     if (isMuseumPositionWalkable(layout, next.x, proposedZ, radius)) next.z = proposedZ
     return next
@@ -298,8 +308,10 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 25) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-    // Keep one complete hall bay live at a time. Distant rooms retain their
-    // lightweight framed placeholders, while the next bay becomes the nearer
-    // pair early enough to stream before the visitor reaches its arches.
+    // Keep one complete hall bay live while approaching it. Once the visitor
+    // crosses a threshold, only that contained room remains active; retaining
+    // its sibling doubled the room shell, frame and artwork draw calls even
+    // though the closed hall portal made the sibling invisible.
+    if (nearby[0]?.contained) return [nearby[0].id]
     return nearby.slice(0, 2).map(room => room.id)
 }

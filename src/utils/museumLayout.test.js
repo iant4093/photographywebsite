@@ -139,6 +139,42 @@ describe('museum layout', () => {
         expect(Math.abs(nearWall[1].position[0] - nearWall[0].position[0])).toBeGreaterThanOrEqual(5.5)
     })
 
+    it('normalizes every frame to one consistent museum presentation size', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('a', 'Hikes'), album('b', 'Hikes'), album('c', 'Hikes'), album('d', 'Hikes'),
+        ]))
+        expect(layout.rooms[0].paintings.every(painting => (
+            painting.position[1] === 2.65
+            && painting.scale.join(',') === '1,1,1'
+        ))).toBe(true)
+    })
+
+    it('keeps a closed streaming portal solid and permits entry after it opens', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
+        const room = layout.rooms[0]
+        const start = {
+            x: room.innerX - (room.side * 0.2),
+            z: room.centerZ,
+        }
+        const closed = moveMuseumPosition(
+            layout,
+            start,
+            { x: room.side * 1.2, z: 0 },
+            0.35,
+            new Set(),
+        )
+        expect((closed.x - room.innerX) * room.side).toBeLessThanOrEqual(0.29)
+
+        const opened = moveMuseumPosition(
+            layout,
+            start,
+            { x: room.side * 1.2, z: 0 },
+            0.35,
+            new Set([room.id]),
+        )
+        expect((opened.x - room.innerX) * room.side).toBeGreaterThan(0.29)
+    })
+
     it('keeps every dynamically generated room entrance traversable at full catalog scale', () => {
         const categories = Array.from({ length: 12 }, (_, categoryIndex) => (
             Array.from({ length: (categoryIndex % 5) + 1 }, (_, albumIndex) => (
@@ -162,6 +198,37 @@ describe('museum layout', () => {
         }
     })
 
+    it('continues activating and traversing every portal during a sustained tour', () => {
+        const albums = Array.from({ length: 10 }, (_, index) => (
+            album(`tour-${index}`, `Gallery ${index}`)
+        ))
+        const layout = buildMuseumLayout(buildMuseumCatalog(albums))
+        const openPortals = new Set()
+
+        for (const room of layout.rooms) {
+            const hallPosition = {
+                x: room.innerX - (room.side * 0.24),
+                z: room.centerZ,
+            }
+            const nearby = nearbyMuseumRoomIds(layout, hallPosition, 20)
+            expect(nearby).toContain(room.id)
+
+            openPortals.clear()
+            openPortals.add(room.id)
+            let position = hallPosition
+            for (let step = 0; step < 14; step += 1) {
+                position = moveMuseumPosition(
+                    layout,
+                    position,
+                    { x: room.side * 0.28, z: 0 },
+                    0.35,
+                    openPortals,
+                )
+            }
+            expect((position.x - room.innerX) * room.side).toBeGreaterThan(2.5)
+        }
+    })
+
     it('preloads the nearest pair of rooms without mounting distant galleries', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'),
@@ -178,7 +245,7 @@ describe('museum layout', () => {
         expect(nearbyMuseumRoomIds(layout, {
             x: layout.rooms[1].centerX,
             z: layout.rooms[1].centerZ,
-        })[0]).toBe(layout.rooms[1].id)
+        })).toEqual([layout.rooms[1].id])
         expect(nearestMuseumRoom(layout, { x: 0, z: 10 }, 1)).toBeNull()
     })
 
