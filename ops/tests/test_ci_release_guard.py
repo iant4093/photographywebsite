@@ -672,12 +672,26 @@ class ReleaseDependencyTests(unittest.TestCase):
             ("CreateUserFunction", "CreateUserFunctionRole"),
             ("EditUserFunction", "EditUserFunctionRole"),
             ("ListUsersFunction", "ListUsersFunctionRole"),
+            (
+                "RandomPhotoPoolBuilderFunction",
+                "RandomPhotoPoolBuilderFunctionRole",
+            ),
             ("TagMediaObjectFunction", "TagMediaObjectFunctionRole"),
         ):
             self.assertEqual(
                 rules[(logical_id, "AWS::Lambda::Function", "Role")],
                 frozenset({f"{role_id}.Arn"}),
             )
+        self.assertEqual(
+            rules[
+                (
+                    "RandomPhotoPoolBuilderFunctionRole",
+                    "AWS::IAM::Role",
+                    "Policies",
+                )
+            ],
+            frozenset({"ImagesBucket.Arn"}),
+        )
         for logical_id in (
             "DeleteUserFunctionRole",
             "EditUserFunctionRole",
