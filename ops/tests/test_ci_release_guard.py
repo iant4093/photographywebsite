@@ -714,6 +714,41 @@ class ReleaseDependencyTests(unittest.TestCase):
             ],
             frozenset({"ImagesBucket.Arn"}),
         )
+        reviewed_album_cascades = {
+            (
+                "GetAdminAlbumMediaFunction",
+                "AWS::Lambda::Function",
+                "Role",
+            ): {"GetAdminAlbumMediaFunctionRole.Arn"},
+            (
+                "GetAdminAlbumMediaFunctionRole",
+                "AWS::IAM::Role",
+                "Policies",
+            ): {"ImagesBucket.Arn"},
+            (
+                "AlbumMediaBackfillFunctionContinueAlbumMediaBackfill",
+                "AWS::Events::Rule",
+                "Targets",
+            ): {"AlbumMediaBackfillFunction.Arn"},
+            (
+                "AlbumMediaBackfillFunctionContinueAlbumMediaBackfillPermission",
+                "AWS::Lambda::Permission",
+                "SourceArn",
+            ): {"AlbumMediaBackfillFunctionContinueAlbumMediaBackfill.Arn"},
+            (
+                "RandomPhotoPoolBuilderFunctionHourlyReconciliation",
+                "AWS::Events::Rule",
+                "Targets",
+            ): {"RandomPhotoPoolBuilderFunction.Arn"},
+            (
+                "RandomPhotoPoolBuilderFunctionHourlyReconciliationPermission",
+                "AWS::Lambda::Permission",
+                "SourceArn",
+            ): {"RandomPhotoPoolBuilderFunctionHourlyReconciliation.Arn"},
+        }
+        for key, expected_causes in reviewed_album_cascades.items():
+            with self.subTest(key=key):
+                self.assertEqual(rules[key], frozenset(expected_causes))
         for logical_id in (
             "DeleteUserFunctionRole",
             "EditUserFunctionRole",
@@ -746,6 +781,88 @@ class ReleaseDependencyTests(unittest.TestCase):
         for candidate in cases:
             with self.subTest(candidate=candidate), self.assertRaises(release_guard.GateError):
                 release_guard.load_release_dependencies(candidate)
+
+    def test_tracked_album_dependencies_allow_the_observed_release_cascades(self):
+        dependencies = release_guard.load_release_dependencies(json.loads(
+            (ROOT / "ops/ci/release_dependencies.json").read_text(encoding="utf-8")
+        ))
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        observed = (
+            (
+                "GetAdminAlbumMediaFunction",
+                "AWS::Lambda::Function",
+                "Role",
+                "GetAdminAlbumMediaFunctionRole.Arn",
+                "False",
+                "Never",
+            ),
+            (
+                "GetAdminAlbumMediaFunctionRole",
+                "AWS::IAM::Role",
+                "Policies",
+                "ImagesBucket.Arn",
+                "False",
+                "Never",
+            ),
+            (
+                "AlbumMediaBackfillFunctionContinueAlbumMediaBackfill",
+                "AWS::Events::Rule",
+                "Targets",
+                "AlbumMediaBackfillFunction.Arn",
+                "False",
+                "Never",
+            ),
+            (
+                "AlbumMediaBackfillFunctionContinueAlbumMediaBackfillPermission",
+                "AWS::Lambda::Permission",
+                "SourceArn",
+                "AlbumMediaBackfillFunctionContinueAlbumMediaBackfill.Arn",
+                "Conditional",
+                "Always",
+            ),
+            (
+                "RandomPhotoPoolBuilderFunctionHourlyReconciliation",
+                "AWS::Events::Rule",
+                "Targets",
+                "RandomPhotoPoolBuilderFunction.Arn",
+                "False",
+                "Never",
+            ),
+            (
+                "RandomPhotoPoolBuilderFunctionHourlyReconciliationPermission",
+                "AWS::Lambda::Permission",
+                "SourceArn",
+                "RandomPhotoPoolBuilderFunctionHourlyReconciliation.Arn",
+                "Conditional",
+                "Always",
+            ),
+        )
+        changes = []
+        for logical_id, resource_type, property_name, cause, replacement, recreation in observed:
+            item = change(
+                logical_id=logical_id,
+                resource_type=resource_type,
+                property_name=property_name,
+                replacement=replacement,
+                recreation=recreation,
+            )
+            item["ResourceChange"]["Details"][0].update({
+                "Evaluation": "Dynamic",
+                "ChangeSource": "ResourceAttribute",
+                "CausingEntity": cause,
+            })
+            changes.append(item)
+
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": changes}],
+                release_intent=intent,
+                release_dependencies=dependencies,
+            ),
+            {"Add": 0, "Modify": 6, "Total": 6},
+        )
 
 
 class StackGuardTests(unittest.TestCase):
