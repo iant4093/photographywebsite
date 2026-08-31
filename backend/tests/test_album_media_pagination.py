@@ -99,8 +99,88 @@ class AlbumMediaPaginationTests(unittest.TestCase):
         )
         self.assertEqual(response["statusCode"], 403)
 
+    def test_missing_album_is_not_exposed_to_an_admin(self):
+        with patch.object(get_album_media.albums_table, "get_item", return_value={}):
+            response = get_album_media.handler(self.event(), None)
+
+        self.assertEqual(response["statusCode"], 404)
+
+    def test_front_door_denial_short_circuits_admin_media_reads(self):
+        denied = {"statusCode": 403, "body": "denied"}
+        with patch.object(get_album_media, "verify_front_door_request", return_value=denied), patch.object(
+            get_album_media.albums_table,
+            "get_item",
+        ) as get_item:
+            response = get_album_media.handler(self.event(), None)
+
+        self.assertEqual(response, denied)
+        get_item.assert_not_called()
+
 
 class AlbumMediaMigrationTests(unittest.TestCase):
+    def test_normalized_item_accepts_a_legacy_string_without_optional_fields(self):
+        raw_key = f"albums/{ALBUM_ID}/legacy.jpg"
+
+        item = album_media_store.normalized_media_item(ALBUM_ID, raw_key, -3)
+
+        self.assertEqual(item["rawKey"], raw_key)
+        self.assertTrue(item["orderKey"].startswith("000000000000#"))
+        self.assertNotIn("thumbKey", item)
+
+    def test_migrate_skips_invalid_or_completed_rows_and_activates_a_valid_snapshot(self):
+        albums_table = Mock()
+        with patch.object(backfill_album_media, "albums_table", albums_table), patch.object(
+            backfill_album_media,
+            "replace_album_media",
+            return_value=True,
+        ) as replace, patch.object(backfill_album_media, "activate_album_media") as activate:
+            self.assertFalse(backfill_album_media._migrate({"albumId": 3, "images": []}))
+            self.assertFalse(backfill_album_media._migrate(record(mediaStoreVersion=1)))
+            self.assertTrue(backfill_album_media._migrate(record()))
+
+        replace.assert_called_once_with(ALBUM_ID, record()["images"])
+        activate.assert_called_once_with(albums_table, ALBUM_ID, record()["images"])
+
+    def test_completed_backfill_state_avoids_repeated_album_scans(self):
+        media_table = Mock()
+        media_table.get_item.return_value = {"Item": {"status": "complete"}}
+        albums_table = Mock()
+
+        with patch.object(backfill_album_media, "albums_table", albums_table), patch.object(
+            backfill_album_media,
+            "_table",
+            return_value=media_table,
+        ):
+            result = backfill_album_media.handler({}, None)
+
+        self.assertEqual(result, {"status": "complete", "processed": 0})
+        albums_table.scan.assert_not_called()
+        media_table.put_item.assert_not_called()
+
+    def test_backfill_requires_its_normalized_table_configuration(self):
+        with patch.object(backfill_album_media, "_table", return_value=None):
+            with self.assertRaises(RuntimeError):
+                backfill_album_media.handler({}, None)
+
+    def test_backfill_persists_a_scan_cursor_for_the_next_bounded_run(self):
+        media_table = Mock()
+        media_table.get_item.return_value = {}
+        albums_table = Mock()
+        cursor = {"albumId": ALBUM_ID}
+        albums_table.scan.return_value = {"Items": [], "LastEvaluatedKey": cursor}
+
+        with patch.object(backfill_album_media, "albums_table", albums_table), patch.object(
+            backfill_album_media,
+            "_table",
+            return_value=media_table,
+        ):
+            result = backfill_album_media.handler({}, None)
+
+        self.assertEqual(result, {"status": "running", "processed": 0})
+        state = media_table.put_item.call_args.kwargs["Item"]
+        self.assertEqual(state["lastEvaluatedKey"], cursor)
+        self.assertFalse(state["scanComplete"])
+
     def test_activation_is_guarded_by_the_exact_legacy_manifest(self):
         table = Mock()
         images = record()["images"]
