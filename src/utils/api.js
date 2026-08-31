@@ -329,7 +329,11 @@ export function fetchAlbums(options = {}) {
 }
 
 export function fetchRandomPhotos(options = {}) {
-    return apiFetch('/public/random-photos', { signal: options.signal }, { timeoutMs: 30_000 })
+    const category = typeof options.category === 'string' ? options.category.trim() : ''
+    const query = category
+        ? `?${new URLSearchParams({ mode: 'category', value: category })}`
+        : ''
+    return apiFetch(`/public/random-photos${query}`, { signal: options.signal }, { timeoutMs: 30_000 })
         .then((payload) => ({
             ...payload,
             images: Array.isArray(payload?.images)

@@ -159,13 +159,6 @@ function Home() {
     const heroSrcSet = useResponsiveHero
         ? currentHeroSrcSet('jpeg')
         : (useBundledHero ? heroSet('jpg') : undefined)
-    const getInstantRandomPhoto = useCallback(() => {
-        const url = heroRef.current?.currentSrc || heroSrc
-        return url ? {
-            url,
-            downloadUrl: url,
-        } : null
-    }, [heroSrc])
     const { groupedPhotoAlbums, curatedPhotoCategories } = useMemo(() => {
         const grouped = photoAlbums.reduce((result, album) => {
             const category = album.category || 'Uncategorized'
@@ -246,10 +239,7 @@ function Home() {
                                     </svg>
                                 </Link>
                                 <Suspense fallback={<span className="px-1 py-2 text-white/70">Explore Random Photos</span>}>
-                                    <RandomPhotoExplorer
-                                        albums={photoAlbums}
-                                        getInstantPhoto={getInstantRandomPhoto}
-                                    />
+                                    <RandomPhotoExplorer prefetch />
                                 </Suspense>
                             </div>
                         </div>
@@ -323,6 +313,7 @@ function Home() {
                             <div className="flex items-center gap-4 mb-8">
                                 <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
                                 <h3 className="font-serif text-2xl font-normal text-charcoal w-fit">{category}</h3>
+                                <RandomPhotoExplorer category={category} variant="icon" />
                                 <div className="h-px bg-warm-border flex-1" />
                             </div>
                             <ScrollRow scrollKey={`home-photo-${category}`}>

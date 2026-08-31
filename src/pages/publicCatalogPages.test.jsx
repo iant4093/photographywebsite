@@ -34,6 +34,7 @@ vi.mock('../components/ScrollRow', () => ({ default: ({ children, scrollKey }) =
 
 import Home from './Home'
 import Videos from './Videos'
+import { clearRandomPhotoSessionCache } from '../utils/randomPhotoSession'
 
 function routed(ui) {
   return render(<MemoryRouter>{ui}</MemoryRouter>)
@@ -42,6 +43,8 @@ function routed(ui) {
 describe('Home complete public catalog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clearRandomPhotoSessionCache()
+    api.fetchRandomPhotos.mockResolvedValue({ images: [] })
     catalog.getCatalogSnapshot.mockReturnValue(null)
     scroll.isRevealed.mockReturnValue(false)
     window.matchMedia = vi.fn(() => ({ matches: true }))
@@ -139,7 +142,7 @@ describe('Home complete public catalog', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
   })
 
-  it('opens a fresh whole-site random photo session in the gallery lightbox', async () => {
+  it('shows a loading state until the genuine whole-site random pool is ready', async () => {
     catalog.getCatalogSnapshot.mockReturnValue({ items: [], nextCursor: null })
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     let finishRequest
@@ -161,13 +164,11 @@ describe('Home complete public catalog', () => {
     fireEvent.click(randomButton)
 
     expect(screen.getByRole('dialog', { name: 'Random photos from Ian Truong Photography' })).toBeInTheDocument()
-    expect(screen.getByAltText('Full size preview')).toHaveAttribute(
-      'src',
-      expect.stringContaining('/site/hero/current/hero.jpg'),
-    )
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('Finding random photos')
+    expect(screen.queryByAltText('Full size preview')).toBeNull()
     await act(async () => finishRequest(payload))
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://media.test/first.jpg')
     fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
@@ -175,40 +176,49 @@ describe('Home complete public catalog', () => {
     expect(api.fetchRandomPhotos).toHaveBeenCalledOnce()
   })
 
-  it('shows a cached album cover immediately while the whole-site random pool warms', async () => {
+  it('opens a category-scoped shuffle without substituting the cached album cover', async () => {
     catalog.getCatalogSnapshot.mockReturnValue({
       items: [{
         albumId: 'album-seed',
         title: 'Seed album',
         type: 'photo',
-        category: 'Hikes',
+        category: 'Birding',
         coverImageUrl: 'https://media.test/seed.jpg',
         coverThumbnailUrl: 'https://media.test/seed-thumb.jpg',
       }],
       nextCursor: null,
     })
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
-    let finishRequest
-    api.fetchRandomPhotos.mockReturnValue(new Promise((resolve) => { finishRequest = resolve }))
-    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let finishCategoryRequest
+    api.fetchRandomPhotos.mockImplementation(({ category } = {}) => (
+      category === 'Birding'
+        ? new Promise((resolve) => { finishCategoryRequest = resolve })
+        : new Promise(() => {})
+    ))
     routed(<Home />)
 
-    const randomButton = await screen.findByRole('button', { name: /explore random photos/i })
+    const randomButton = await screen.findByRole('button', { name: 'Shuffle Birding photos' })
     await waitFor(() => expect(api.fetchRandomPhotos).toHaveBeenCalledOnce())
     fireEvent.click(randomButton)
 
-    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://media.test/seed.jpg')
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Random photos from Birding' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Finding random photos')
+    expect(screen.queryByAltText('Full size preview')).toBeNull()
+    expect(api.fetchRandomPhotos).toHaveBeenCalledWith({
+      category: 'Birding',
+      signal: expect.any(AbortSignal),
+    })
 
-    await act(async () => finishRequest({
+    await act(async () => finishCategoryRequest({
       images: [{
-        id: 'full-photo',
-        albumId: 'album-full',
-        url: 'https://media.test/full.jpg',
-        thumbnailUrl: 'https://media.test/full-thumb.jpg',
+        id: 'bird-photo',
+        albumId: 'album-bird',
+        url: 'https://media.test/bird.jpg',
+        thumbnailUrl: 'https://media.test/bird-thumb.jpg',
       }],
     }))
-    await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('1 / 1')).toBeInTheDocument())
+    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://media.test/bird.jpg')
   })
 
   it('clears a broken cursor snapshot, reports errors, and retries', async () => {

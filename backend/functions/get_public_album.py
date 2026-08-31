@@ -38,7 +38,7 @@ from media_access import (
     validated_preview_keys,
 )
 from response_helpers import error_response, internal_error, json_response
-from validation_helpers import ValidationError, validate_uuid
+from validation_helpers import ValidationError, require_string, validate_uuid
 
 
 dynamodb = boto3.resource("dynamodb")
@@ -953,17 +953,20 @@ def _legacy_images(album):
     return images
 
 
-def _random_photo_albums():
+def _random_photo_albums(category=None):
     albums = []
     cursor = None
     while True:
+        filter_expression = (
+            (Attr("status").not_exists() | Attr("status").eq("active"))
+            & (Attr("type").not_exists() | Attr("type").eq("photo"))
+        )
+        if category:
+            filter_expression = filter_expression & Attr("category").eq(category)
         query = {
             "IndexName": os.environ["VISIBILITY_CREATED_AT_INDEX"],
             "KeyConditionExpression": Key("visibility").eq("public"),
-            "FilterExpression": (
-                (Attr("status").not_exists() | Attr("status").eq("active"))
-                & (Attr("type").not_exists() | Attr("type").eq("photo"))
-            ),
+            "FilterExpression": filter_expression,
             "ScanIndexForward": False,
         }
         if cursor:
@@ -975,13 +978,23 @@ def _random_photo_albums():
             return albums
 
 
+def _random_photo_category(event):
+    params = (event or {}).get("queryStringParameters")
+    if not params:
+        return None
+    if not isinstance(params, dict) or set(params) != {"mode", "value"}:
+        raise ValidationError("Invalid random photo parameters")
+    if params.get("mode") != "category":
+        raise ValidationError("Unsupported random photo mode")
+    return require_string(params.get("value"), "category", maximum=100)
+
+
 def _random_photos_response(event):
-    if (event or {}).get("queryStringParameters"):
-        return error_response(400, "Random photos does not accept query parameters", code="invalid_request")
+    category = _random_photo_category(event)
 
     sample = []
     total_photos = 0
-    for album in _random_photo_albums():
+    for album in _random_photo_albums(category):
         media = album.get("images") or _legacy_images(album)
         for image in media:
             if not isinstance(image, dict) or not isinstance(image.get("rawKey"), str):
@@ -1021,9 +1034,12 @@ def _random_photos_response(event):
         )
 
     secrets.SystemRandom().shuffle(images)
+    body = {"images": images, "totalPhotos": total_photos}
+    if category:
+        body["category"] = category
     return json_response(
         200,
-        {"images": images, "totalPhotos": total_photos},
+        body,
         cache_control="public, max-age=0, s-maxage=300, stale-while-revalidate=600",
     )
 
@@ -1227,6 +1243,8 @@ def handler(event, context):
     if route_key == "GET /public/random-photos" or raw_path.endswith("/public/random-photos"):
         try:
             return _random_photos_response(event)
+        except ValidationError as error:
+            return error_response(400, str(error), code="invalid_request")
         except Exception as error:
             return internal_error(context, error, "get_random_photos")
     if route_key == "GET /public/explore" or raw_path.endswith("/public/explore"):

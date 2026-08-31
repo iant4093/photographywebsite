@@ -168,6 +168,17 @@ describe('random public photos', () => {
         expect(payload.totalPhotos).toBe(42)
         expect(payload.images).toHaveLength(1)
     })
+
+    it('uses the edge-cache allowlisted mode and value for a category shuffle', async () => {
+        const request = vi.fn().mockResolvedValue(jsonResponse({ images: [], totalPhotos: 0 }))
+        vi.stubGlobal('fetch', request)
+
+        await fetchRandomPhotos({ category: 'Birding & Wildlife' })
+
+        expect(request.mock.calls[0][0]).toMatch(
+            /\/public\/random-photos\?mode=category&value=Birding\+%26\+Wildlife$/,
+        )
+    })
 })
 
 describe('public Explore API', () => {

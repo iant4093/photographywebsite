@@ -398,15 +398,51 @@ class PublicAlbumDetailTests(unittest.TestCase):
         load_previews.assert_called_once()
 
     def test_random_photos_reject_query_parameters(self):
-        response = get_public_album.handler(
-            {
-                "rawPath": "/public/random-photos",
-                "requestContext": {"routeKey": "GET /public/random-photos"},
-                "queryStringParameters": {"limit": "500"},
-            },
-            None,
+        invalid = (
+            {"limit": "500"},
+            {"mode": "album", "value": "Birding"},
+            {"mode": "category", "value": ""},
+            {"mode": "category", "value": "Birding", "extra": "no"},
         )
-        self.assertEqual(response["statusCode"], 400)
+        for params in invalid:
+            with self.subTest(params=params):
+                response = get_public_album.handler(
+                    {
+                        "rawPath": "/public/random-photos",
+                        "requestContext": {"routeKey": "GET /public/random-photos"},
+                        "queryStringParameters": params,
+                    },
+                    None,
+                )
+                self.assertEqual(response["statusCode"], 400)
+
+    def test_random_photos_can_be_scoped_to_one_category(self):
+        album = public_album(category="Birding")
+        with patch.object(
+            get_public_album, "_random_photo_albums", return_value=[album]
+        ) as load_albums, patch.object(
+            get_public_album,
+            "load_preview_metadata_for_albums",
+            return_value={ALBUM_ID: {}},
+        ), patch.object(
+            get_public_album,
+            "serialize_images",
+            return_value=[{"id": "bird", "url": "https://media.example.test/bird.jpg"}],
+        ):
+            response = get_public_album.handler(
+                {
+                    "rawPath": "/public/random-photos",
+                    "requestContext": {"routeKey": "GET /public/random-photos"},
+                    "queryStringParameters": {"mode": "category", "value": "Birding"},
+                },
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertEqual(response_body(response)["category"], "Birding")
+        self.assertEqual(response_body(response)["images"][0]["albumCategory"], "Birding")
+        load_albums.assert_called_once_with("Birding")
 
     def test_nonpublic_missing_and_inactive_records_are_indistinguishable(self):
         records = [None, public_album(visibility="private"), public_album(status="pending")]

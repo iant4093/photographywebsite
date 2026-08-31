@@ -72,6 +72,7 @@ describe('PhotoLightbox', () => {
   })
 
   it('shows pending and empty states without requiring an active photograph', () => {
+    const onRetry = vi.fn()
     const { rerender } = render(
       <PhotoLightbox
         images={[]}
@@ -91,9 +92,12 @@ describe('PhotoLightbox', () => {
         ariaLabel="Random viewer"
         onClose={vi.fn()}
         emptyMessage="No photographs are available."
+        onRetry={onRetry}
       />,
     )
     expect(screen.getByRole('alert')).toHaveTextContent('No photographs are available.')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onRetry).toHaveBeenCalledOnce()
   })
 
   it('supports a single metadata-free photo and reports media errors', () => {

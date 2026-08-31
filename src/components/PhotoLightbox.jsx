@@ -17,6 +17,7 @@ function PhotoLightbox({
     onClose,
     onNext,
     onPrevious,
+    onRetry,
     onDownload,
     onPrint,
     shareTitle,
@@ -212,7 +213,18 @@ function PhotoLightbox({
                             {loading ? (
                                 <p role="status" className="text-sm tracking-[0.18em] uppercase">Finding random photos…</p>
                             ) : (
-                                <p role="alert" className="text-sm">{emptyMessage}</p>
+                                <>
+                                    <p role="alert" className="text-sm">{emptyMessage}</p>
+                                    {onRetry && (
+                                        <button
+                                            type="button"
+                                            onClick={onRetry}
+                                            className="mt-5 border border-white/50 px-5 py-2 text-xs uppercase tracking-[0.16em] text-white transition-colors hover:bg-white hover:text-charcoal"
+                                        >
+                                            Try again
+                                        </button>
+                                    )}
+                                </>
                             )}
                         </div>
                     )}

@@ -60,7 +60,12 @@ def invalidate_public_api(*, album_id=None, catalog=False, reason="public-album"
     """Invalidate only anonymous API representations affected by a mutation."""
     paths = []
     if catalog:
-        paths.extend(("/api/public/albums", "/api/public/albums?*"))
+        paths.extend((
+            "/api/public/albums",
+            "/api/public/albums?*",
+            "/api/public/random-photos",
+            "/api/public/random-photos?*",
+        ))
     if album_id:
         paths.append(f"/api/public/albums/{validate_uuid(album_id)}")
     distribution_id = os.environ.get(

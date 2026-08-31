@@ -33,11 +33,13 @@ class CacheInvalidationTests(unittest.TestCase):
         request = self.client.create_invalidation.call_args.kwargs
         self.assertEqual(request["DistributionId"], "frontend")
         self.assertEqual(request["InvalidationBatch"]["Paths"], {
-            "Quantity": 3,
+            "Quantity": 5,
             "Items": [
                 "/api/public/albums",
                 f"/api/public/albums/{ALBUM_ID}",
                 "/api/public/albums?*",
+                "/api/public/random-photos",
+                "/api/public/random-photos?*",
             ],
         })
         self.assertTrue(request["InvalidationBatch"]["CallerReference"].startswith("album-updated-"))
