@@ -67,22 +67,31 @@ function makePaintings(room) {
 }
 
 function makeBenches(room) {
-    const rows = Math.ceil(room.albums.length / 2)
-    const benches = []
-    for (let row = 1; row < rows; row += 3) {
-        const x = room.side * (
-            MUSEUM_DIMENSIONS.hallHalfWidth
-            + 4.15
-            + ((row - 0.5) * MUSEUM_DIMENSIONS.paintingSpacing)
-        )
-        benches.push({
-            id: `${room.id}-bench-${row}`,
-            position: [x, 0.42, room.centerZ + (row % 2 === 0 ? -0.72 : 0.58)],
-            size: [1.7, 0.42, 3.15],
-            rotationY: row % 2 === 0 ? -0.045 : 0.045,
-        })
-    }
-    return benches
+    if (!room.albums.length) return []
+    // Short galleries use one focal bench. Archive-scale galleries are split
+    // into evenly spaced viewing salons so a 70-album room does not read as an
+    // empty hundred-metre tunnel with one seat at the vanishing point. Every
+    // bench stays exactly on the room axis and follows the same rhythm; there
+    // are no random offsets to make the procedural layout feel accidental.
+    // Give long archive rooms a readable cadence roughly every 24 metres.
+    // The six-salon cap keeps the shared instanced furniture and architectural
+    // dressing bounded even when one category contains hundreds of albums.
+    const benchCount = Math.min(6, Math.max(1, Math.ceil(room.depth / 24)))
+    return Array.from({ length: benchCount }, (_, index) => {
+        const depthRatio = (index + 1) / (benchCount + 1)
+        return {
+            id: `${room.id}-bench-${index + 1}`,
+            position: [
+                room.innerX + (room.side * room.depth * depthRatio),
+                0.42,
+                room.centerZ,
+            ],
+            size: [1.86, 0.42, 3.2],
+            // The artwork faces inward from the two transverse walls. Turning
+            // the long axis across the room creates a deliberate viewing axis.
+            rotationY: Math.PI / 2,
+        }
+    })
 }
 
 function makeRoomPlants(room) {
@@ -131,6 +140,27 @@ export function buildMuseumLayout(categories = []) {
         room.paintings = makePaintings(room)
         room.benches = makeBenches(room)
         room.plants = makeRoomPlants(room)
+        room.landmark = {
+            id: `${room.id}-landmark`,
+            position: [
+                // A category with dozens of albums can produce a room more
+                // than 200 metres deep. Pinning the only focal sculpture to
+                // that far wall reduced it to a speck from the entrance. Place
+                // it in the first authored salon instead, while retaining the
+                // former end-wall composition in compact rooms.
+                room.innerX + (room.side * (
+                    room.depth <= 24
+                        ? room.depth - 1.35
+                        : Math.min(18, room.depth * 0.55)
+                )),
+                0,
+                room.centerZ,
+            ],
+            // Collision includes the freestanding backdrop, not only the
+            // sculpture plinth, so visitors cannot ghost through its wings.
+            size: [2.8, 3.8, 4.6],
+            variant: index % 3,
+        }
         return room
     })
 
@@ -188,7 +218,7 @@ export function buildMuseumLayout(categories = []) {
         ...dressing.lobbyPlants,
         ...dressing.hallPlants,
         dressing.terminalSculpture,
-        ...rooms.flatMap(room => [...room.benches, ...room.plants]),
+        ...rooms.flatMap(room => [...room.benches, ...room.plants, room.landmark]),
     ]
 
     return {
@@ -215,10 +245,18 @@ function insideRect(x, z, rect, radius = 0) {
 function intersectsObstacle(x, z, obstacle, radius) {
     const [ox, , oz] = obstacle.position
     const [width, , depth] = obstacle.size
-    return x > ox - (width / 2) - radius
-        && x < ox + (width / 2) + radius
-        && z > oz - (depth / 2) - radius
-        && z < oz + (depth / 2) + radius
+    const rotation = Number(obstacle.rotationY) || 0
+    const cosine = Math.cos(rotation)
+    const sine = Math.sin(rotation)
+    const dx = x - ox
+    const dz = z - oz
+    // Test the visitor capsule in the prop's local axes. This keeps collision
+    // aligned with rendered benches and authored furniture after rotation,
+    // rather than leaving an invisible axis-aligned box around the old pose.
+    const localX = (dx * cosine) + (dz * sine)
+    const localZ = (-dx * sine) + (dz * cosine)
+    return Math.abs(localX) < (width / 2) + radius
+        && Math.abs(localZ) < (depth / 2) + radius
 }
 
 export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
@@ -238,7 +276,7 @@ export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
         ...layout.dressing.lobbyPlants,
         ...layout.dressing.hallPlants,
         layout.dressing.terminalSculpture,
-        ...layout.rooms.flatMap(room => [...room.benches, ...room.plants]),
+        ...layout.rooms.flatMap(room => [...room.benches, ...room.plants, room.landmark].filter(Boolean)),
     ]
     return !obstacles.some(obstacle => intersectsObstacle(x, z, obstacle, radius))
 }
@@ -296,6 +334,38 @@ export function nearestMuseumRoom(layout, position, preloadDistance = 4.5) {
     return nearest
 }
 
+export function museumFloorSurface(layout, position) {
+    const x = Number(position?.x)
+    const z = Number(position?.z)
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return 'carpet'
+
+    // `nearestMuseumRoom` intentionally activates a gallery a few metres
+    // before its threshold so streaming can finish behind the physical gate.
+    // That proximity signal must not drive footsteps: the corridor remains
+    // carpeted until the visitor's capsule has actually crossed the room's
+    // inner structural face. The small inset keeps a foot planted directly on
+    // the brass threshold from rapidly alternating surfaces due to float
+    // precision while the other foot is still in the hall.
+    const inGallery = layout.rooms.some((room) => {
+        const depth = (x - room.innerX) * room.side
+        return depth > 0.08
+            && insideRect(x, z, room.bounds, 0)
+    })
+    return inGallery ? 'wood' : 'carpet'
+}
+
+export function museumArtworkLightIndex(paintingCount, slot, requestedSlots) {
+    const count = Math.max(0, Math.floor(Number(paintingCount) || 0))
+    const slotCount = Math.max(0, Math.floor(Number(requestedSlots) || 0))
+    const activeSlotCount = Math.min(count, slotCount)
+    if (slot < 0 || slot >= activeSlotCount) return -1
+    if (activeSlotCount === 1) return 0
+    // Spread the resident fixture budget over the complete wall run. For a
+    // small two- or three-work room this deliberately resolves to every work;
+    // larger collections receive evenly distributed localized light pools.
+    return Math.round((slot * (count - 1)) / (activeSlotCount - 1))
+}
+
 export function nearbyMuseumRoomIds(layout, position, preloadDistance = 25) {
     const nearby = layout.rooms
         .map((room) => {
@@ -308,10 +378,34 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 25) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-    // Keep one complete hall bay live while approaching it. Once the visitor
-    // crosses a threshold, only that contained room remains active; retaining
-    // its sibling doubled the room shell, frame and artwork draw calls even
-    // though the closed hall portal made the sibling invisible.
+    // Keep only the nearest authored room resident. Every inactive doorway is
+    // physically covered by its dimensional velvet portal, so mounting the
+    // sibling across the hall only doubles image planes, frame shells and
+    // shader work without adding anything visible. Its blurhash atlas and tiny
+    // cover bases are still decoded by the background warmup, which lets the
+    // nearest-room handoff remain visually immediate.
     if (nearby[0]?.contained) return [nearby[0].id]
-    return nearby.slice(0, 2).map(room => room.id)
+    return nearby.slice(0, 1).map(room => room.id)
+}
+
+export function initialMuseumRoomIds(layout, position, preloadDistance = 25, fallbackCount = 2) {
+    const nearby = nearbyMuseumRoomIds(layout, position, preloadDistance)
+    if (nearby.length) return nearby
+    return layout.rooms.slice(0, Math.max(0, fallbackCount)).map(room => room.id)
+}
+
+export function prioritizeMuseumPreloadRooms(rooms = [], currentRoomId, limit = 3) {
+    if (!rooms.length || limit <= 0) return []
+    const current = rooms.find(room => room.id === currentRoomId) || rooms[0]
+    const distanceFromCurrent = room => Math.hypot(
+        Number(room.innerX ?? room.centerX ?? 0) - Number(current.innerX ?? current.centerX ?? 0),
+        Number(room.centerZ ?? 0) - Number(current.centerZ ?? 0),
+    )
+    const nearby = rooms
+        .filter(room => room.id !== current.id)
+        .sort((left, right) => (
+            distanceFromCurrent(left) - distanceFromCurrent(right)
+            || String(left.id).localeCompare(String(right.id))
+        ))
+    return [current, ...nearby].slice(0, Math.min(limit, rooms.length))
 }

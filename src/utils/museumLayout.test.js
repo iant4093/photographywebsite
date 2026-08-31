@@ -3,11 +3,15 @@ import {
     buildMuseumCatalog,
     buildMuseumLayout,
     isMuseumPositionWalkable,
+    initialMuseumRoomIds,
     MUSEUM_DIMENSIONS,
+    museumArtworkLightIndex,
+    museumFloorSurface,
     museumPlanarAxes,
     moveMuseumPosition,
     nearbyMuseumRoomIds,
     nearestMuseumRoom,
+    prioritizeMuseumPreloadRooms,
 } from './museumLayout'
 
 const album = (albumId, category, extra = {}) => ({
@@ -54,7 +58,14 @@ describe('museum layout', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
         expect(isMuseumPositionWalkable(layout, 0, 8)).toBe(true)
         expect(isMuseumPositionWalkable(layout, 20, 8)).toBe(false)
-        expect(isMuseumPositionWalkable(layout, layout.rooms[0].centerX, layout.rooms[0].centerZ)).toBe(true)
+        // The authored room-centre bench is real furniture, not decorative
+        // ghost geometry; visitors route cleanly around either side of it.
+        expect(isMuseumPositionWalkable(layout, layout.rooms[0].centerX, layout.rooms[0].centerZ)).toBe(false)
+        expect(isMuseumPositionWalkable(layout, layout.rooms[0].centerX, layout.rooms[0].centerZ + 2.3)).toBe(true)
+        // The bench is rotated 90 degrees, so its long rendered axis is world
+        // X and its short axis is world Z. Collision follows that same pose.
+        expect(isMuseumPositionWalkable(layout, layout.rooms[0].centerX + 1.45, layout.rooms[0].centerZ)).toBe(false)
+        expect(isMuseumPositionWalkable(layout, layout.rooms[0].centerX, layout.rooms[0].centerZ + 1.4)).toBe(true)
         expect(isMuseumPositionWalkable(layout, layout.desk.position[0], layout.desk.position[2])).toBe(false)
         for (const prop of [
             ...layout.dressing.lobbyPlants,
@@ -131,6 +142,44 @@ describe('museum layout', () => {
         expect(facingEast.right).toEqual({ x: -0, z: 1 })
     })
 
+    it('uses the exact architectural threshold for carpet and wood footsteps', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
+        const room = layout.rooms[0]
+        const justInsideHall = {
+            x: room.innerX - (room.side * 0.16),
+            z: room.centerZ,
+        }
+        const onThreshold = {
+            x: room.innerX + (room.side * 0.04),
+            z: room.centerZ,
+        }
+        const insideGallery = {
+            x: room.innerX + (room.side * 0.4),
+            z: room.centerZ + 2.3,
+        }
+
+        // The streaming system activates the nearby room from the hall, but
+        // footsteps do not switch to wood until the body crosses its floor.
+        expect(nearestMuseumRoom(layout, justInsideHall)).toBe(room.id)
+        expect(museumFloorSurface(layout, justInsideHall)).toBe('carpet')
+        expect(museumFloorSurface(layout, onThreshold)).toBe('carpet')
+        expect(museumFloorSurface(layout, insideGallery)).toBe('wood')
+        expect(museumFloorSurface(layout, { x: Number.NaN, z: 0 })).toBe('carpet')
+    })
+
+    it('distributes picture-light slots across every small room and large wall run', () => {
+        expect(Array.from({ length: 4 }, (_, slot) => (
+            museumArtworkLightIndex(2, slot, 4)
+        ))).toEqual([0, 1, -1, -1])
+        expect(Array.from({ length: 4 }, (_, slot) => (
+            museumArtworkLightIndex(3, slot, 4)
+        ))).toEqual([0, 1, 2, -1])
+        expect(Array.from({ length: 4 }, (_, slot) => (
+            museumArtworkLightIndex(10, slot, 4)
+        ))).toEqual([0, 3, 6, 9])
+        expect(museumArtworkLightIndex(0, 0, 4)).toBe(-1)
+    })
+
     it('gives adjacent paintings museum-scale breathing room', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'), album('b', 'Hikes'), album('c', 'Hikes'), album('d', 'Hikes'),
@@ -147,6 +196,30 @@ describe('museum layout', () => {
             painting.position[1] === 2.65
             && painting.scale.join(',') === '1,1,1'
         ))).toBe(true)
+    })
+
+    it('centers museum benches on each room axis with consistent alignment', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog(Array.from({ length: 10 }, (_, index) => (
+            album(`album-${index}`, 'Hikes')
+        ))))
+        const room = layout.rooms[0]
+        expect(room.benches.length).toBeGreaterThan(0)
+        expect(room.benches.every(bench => (
+            bench.position[2] === room.centerZ && bench.rotationY === Math.PI / 2
+        ))).toBe(true)
+    })
+
+    it('keeps the focal landmark physical while preserving routes around its backdrop', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog(Array.from({ length: 30 }, (_, index) => (
+            album(`album-${index}`, 'Hikes')
+        ))))
+        const room = layout.rooms[0]
+        const [landmarkX, , landmarkZ] = room.landmark.position
+
+        expect(isMuseumPositionWalkable(layout, landmarkX, landmarkZ)).toBe(false)
+        expect(isMuseumPositionWalkable(layout, landmarkX, landmarkZ - 3.2)).toBe(true)
+        expect(isMuseumPositionWalkable(layout, landmarkX, landmarkZ + 3.2)).toBe(true)
+        expect((landmarkX - room.innerX) * room.side).toBeLessThanOrEqual(18)
     })
 
     it('keeps a closed streaming portal solid and permits entry after it opens', () => {
@@ -229,7 +302,7 @@ describe('museum layout', () => {
         }
     })
 
-    it('preloads the nearest pair of rooms without mounting distant galleries', () => {
+    it('preloads only the nearest room without mounting its hidden sibling', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'),
             album('b', 'Astro'),
@@ -240,13 +313,59 @@ describe('museum layout', () => {
         expect(nearestMuseumRoom(layout, { x: x + 1, z })).toBe(layout.rooms[0].id)
         expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([
             layout.rooms[0].id,
-            layout.rooms[1].id,
         ])
         expect(nearbyMuseumRoomIds(layout, {
             x: layout.rooms[1].centerX,
             z: layout.rooms[1].centerZ,
         })).toEqual([layout.rooms[1].id])
         expect(nearestMuseumRoom(layout, { x: 0, z: 10 }, 1)).toBeNull()
+    })
+
+    it('warms the first authored rooms when the lobby is outside every preload radius', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('a', 'Hikes'),
+            album('b', 'Astro'),
+            album('c', 'Portraits'),
+        ]))
+        expect(initialMuseumRoomIds(layout, { x: 0, z: 500 }, 1, 2)).toEqual([
+            layout.rooms[0].id,
+            layout.rooms[1].id,
+        ])
+        expect(initialMuseumRoomIds(layout, {
+            x: layout.rooms[2].centerX,
+            z: layout.rooms[2].centerZ,
+        }, 20, 2)).toContain(layout.rooms[2].id)
+    })
+
+    it('places one centered bench in a compact room', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('a', 'Hikes'),
+            album('b', 'Hikes'),
+            album('c', 'Hikes'),
+            album('d', 'Hikes'),
+        ]))
+        const [room] = layout.rooms
+        expect(room.benches).toHaveLength(1)
+        expect(room.benches[0].position).toEqual([room.centerX, 0.42, room.centerZ])
+        expect(room.benches[0].rotationY).toBe(Math.PI / 2)
+    })
+
+    it('divides archive-scale rooms into evenly spaced viewing salons', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog(Array.from({ length: 74 }, (_, index) => (
+            album(`large-room-${index}`, 'Archive')
+        ))))
+        const [room] = layout.rooms
+        expect(room.benches).toHaveLength(6)
+        expect(room.benches.every(bench => (
+            bench.position[2] === room.centerZ
+            && bench.rotationY === Math.PI / 2
+        ))).toBe(true)
+        const intervals = room.benches.map((bench, index) => (
+            index === 0
+                ? Math.abs(bench.position[0] - room.innerX)
+                : Math.abs(bench.position[0] - room.benches[index - 1].position[0])
+        ))
+        expect(Math.max(...intervals) - Math.min(...intervals)).toBeLessThan(0.001)
     })
 
     it('prioritizes the room containing the player over an earlier nearby room', () => {
@@ -259,5 +378,20 @@ describe('museum layout', () => {
             x: rightRoom.innerX + 1,
             z: rightRoom.centerZ,
         }, 10)).toBe(rightRoom.id)
+    })
+
+    it('pins the current room first when preloading rooms in the same bay', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left', 'Hikes'),
+            album('right', 'Astro'),
+            album('next-left', 'Portraits'),
+            album('next-right', 'Sports'),
+        ]))
+        const rightRoom = layout.rooms[1]
+        const prioritized = prioritizeMuseumPreloadRooms(layout.rooms, rightRoom.id, 3)
+
+        expect(prioritized[0].id).toBe(rightRoom.id)
+        expect(prioritized.map(room => room.id)).toHaveLength(3)
+        expect(new Set(prioritized.map(room => room.id)).size).toBe(3)
     })
 })

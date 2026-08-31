@@ -11,9 +11,21 @@ File: wood_floor_diff_1k.jpg (delivery copy resized to 512px and JPEG-compressed
 White Plaster 02
 Source: https://polyhaven.com/a/white_plaster_02
 File: white_plaster_02_diff_1k.jpg (delivery copy resized to 512px and JPEG-compressed)
+Files: white_plaster_02_nor_gl_1k.jpg and white_plaster_02_rough_1k.jpg (delivery copies resized to 512px and JPEG-compressed)
+
+Wood Floor PBR maps
+Files: wood_floor_nor_gl_1k.jpg and wood_floor_rough_1k.jpg (delivery copies resized to 512px and JPEG-compressed)
 
 License: https://polyhaven.com/license
 
 Museum Wallpaper
 Generated specifically for Ian Truong Photography with OpenAI image generation on 2026-08-28.
 File: museum_wallpaper_albedo_512.jpg (delivery copy resized to 512px and JPEG-compressed)
+
+Museum Wallpaper — Oxblood
+Generated specifically for Ian Truong Photography with OpenAI image generation on 2026-08-28.
+File: museum_wallpaper_oxblood_512.jpg (seamless, evenly lit dark damask delivery copy resized to 512px and JPEG-compressed)
+
+Museum Wallpaper — Authored Oxblood Velvet
+Generated specifically for Ian Truong Photography with OpenAI image generation on 2026-08-29.
+File: museum_wallpaper_oxblood_authored_1024.jpg (original seamless oxblood velvet/damask albedo, 1024px JPEG delivery copy)
