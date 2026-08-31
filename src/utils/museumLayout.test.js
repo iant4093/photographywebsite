@@ -298,6 +298,35 @@ describe('museum layout', () => {
         }
     })
 
+    it('never permits a stale or unloaded room portal during repeated traversal', () => {
+        const albums = Array.from({ length: 12 }, (_, index) => (
+            album(`guarded-${index}`, `Gallery ${index}`)
+        ))
+        const layout = buildMuseumLayout(buildMuseumCatalog(albums))
+
+        for (let circuit = 0; circuit < 5; circuit += 1) {
+            for (const activeRoom of layout.rooms) {
+                const openPortals = new Set([activeRoom.id])
+                for (const room of layout.rooms) {
+                    const start = {
+                        x: room.innerX - (room.side * 0.2),
+                        z: room.centerZ,
+                    }
+                    const result = moveMuseumPosition(
+                        layout,
+                        start,
+                        { x: room.side * 1.2, z: 0 },
+                        0.35,
+                        openPortals,
+                    )
+                    const depth = (result.x - room.innerX) * room.side
+                    if (room.id === activeRoom.id) expect(depth).toBeGreaterThan(0.29)
+                    else expect(depth).toBeLessThanOrEqual(0.29)
+                }
+            }
+        }
+    })
+
     it('keeps only the nearest doorway resident for a stable handoff', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'),

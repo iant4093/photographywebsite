@@ -2337,7 +2337,80 @@ function CameraManagedDoorWall({ side, centerZ, room, materials, forceNear, scon
     if (!forceNear) {
         return <FarDoorWall side={side} centerZ={centerZ} room={room} materials={materials} sconcePlacements={sconcePlacements} />
     }
-    return <DoorWall side={side} centerZ={centerZ} room={room} materials={materials} sconcePlacements={sconcePlacements} />
+    return (
+        <group>
+            <DoorWall side={side} centerZ={centerZ} room={room} materials={materials} sconcePlacements={sconcePlacements} />
+            <AnimatedPortalGate side={side} centerZ={centerZ} />
+        </group>
+    )
+}
+
+function AnimatedPortalGate({ side, centerZ }) {
+    const leftPanel = useRef(null)
+    const rightPanel = useRef(null)
+    const progress = useRef(0)
+    const rotationY = side < 0 ? Math.PI / 2 : -Math.PI / 2
+    const panelWidth = (MUSEUM_DIMENSIONS.doorwayWidth / 2) + 0.12
+    const closedOffset = panelWidth / 2
+    const openTravel = panelWidth + 0.42
+
+    useFrame((_, frameDelta) => {
+        // The near portal mounts with its room already resident, but the two
+        // physical leaves begin fully closed and move into wall pockets. This
+        // makes the streaming handoff visible without ever exposing an empty
+        // room or replacing the gate with a one-frame disappearance.
+        progress.current = THREE.MathUtils.damp(
+            progress.current,
+            1,
+            2.55,
+            Math.min(frameDelta, 0.05),
+        )
+        // Smoothstep keeps the leaves visibly moving for the full transition.
+        // The former ease-out covered most of the travel in its first frames,
+        // which read as an instant disappearance even though it was animated.
+        const eased = progress.current * progress.current * (3 - (2 * progress.current))
+        if (leftPanel.current) leftPanel.current.position.x = -closedOffset - (eased * openTravel)
+        if (rightPanel.current) rightPanel.current.position.x = closedOffset + (eased * openTravel)
+    })
+
+    const renderPanel = (direction, ref) => (
+        <group ref={ref} position={[direction * closedOffset, 2.08, 0]}>
+            <mesh castShadow receiveShadow>
+                <boxGeometry args={[panelWidth, 4.2, 0.18]} />
+                <meshStandardMaterial color="#2b1119" roughness={0.8} metalness={0.05} />
+            </mesh>
+            <mesh position={[0, 0, -0.105]}>
+                <boxGeometry args={[panelWidth - 0.16, 4.02, 0.035]} />
+                <meshStandardMaterial color="#461b28" roughness={0.9} />
+            </mesh>
+            {[-1, 1].map(edge => (
+                <mesh key={edge} position={[edge * ((panelWidth / 2) - 0.09), 0, -0.14]}>
+                    <boxGeometry args={[0.065, 4.08, 0.055]} />
+                    <meshPhysicalMaterial color="#9b7747" metalness={0.62} roughness={0.4} />
+                </mesh>
+            ))}
+            {[-1.3, 0, 1.3].map(y => (
+                <mesh key={y} position={[0, y, -0.14]}>
+                    <boxGeometry args={[panelWidth - 0.18, 0.045, 0.055]} />
+                    <meshPhysicalMaterial color="#765a36" metalness={0.5} roughness={0.48} />
+                </mesh>
+            ))}
+        </group>
+    )
+
+    return (
+        <group
+            position={[
+                side * (MUSEUM_DIMENSIONS.hallHalfWidth - ((HALL_WALL_THICKNESS / 2) + 0.11)),
+                0,
+                centerZ,
+            ]}
+            rotation={[0, rotationY, 0]}
+        >
+            {renderPanel(-1, leftPanel)}
+            {renderPanel(1, rightPanel)}
+        </group>
+    )
 }
 
 function VaultedCeiling({ layout, centerZ, materials }) {
@@ -3233,7 +3306,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                         centerZ={bay.centerZ}
                         room={bay.left}
                         materials={materials}
-                        forceNear={Boolean(bay.left && activeRooms.has(bay.left.id))}
+                        forceNear={Boolean(bay.left && activeRoomId === bay.left.id)}
                         sconcePlacements={hallSconcePlacements}
                     />
                     <DistanceManagedDoorWall
@@ -3241,7 +3314,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                         centerZ={bay.centerZ}
                         room={bay.right}
                         materials={materials}
-                        forceNear={Boolean(bay.right && activeRooms.has(bay.right.id))}
+                        forceNear={Boolean(bay.right && activeRoomId === bay.right.id)}
                         sconcePlacements={hallSconcePlacements}
                     />
                 </group>
@@ -3430,13 +3503,21 @@ function NativePointerLockControls({ input, onLock, onUnlock }) {
 
     useEffect(() => {
         const handleLockChange = () => {
+            input.current.lookX = 0
+            input.current.lookY = 0
             if (document.pointerLockElement === gl.domElement) onLock()
             else onUnlock()
         }
         const handleMouseMove = (event) => {
             if (document.pointerLockElement !== gl.domElement) return
-            input.current.lookX += event.movementX
-            input.current.lookY += event.movementY
+            // Safari and Firefox can emit one enormous relative delta when
+            // pointer lock begins, resumes, or crosses a compositor boundary.
+            // Clamp both the individual sample and the unconsumed frame total
+            // so a single browser glitch can never spin or invert the camera.
+            const deltaX = THREE.MathUtils.clamp(Number(event.movementX) || 0, -24, 24)
+            const deltaY = THREE.MathUtils.clamp(Number(event.movementY) || 0, -24, 24)
+            input.current.lookX = THREE.MathUtils.clamp(input.current.lookX + deltaX, -48, 48)
+            input.current.lookY = THREE.MathUtils.clamp(input.current.lookY + deltaY, -48, 48)
         }
         document.addEventListener('pointerlockchange', handleLockChange)
         document.addEventListener('mousemove', handleMouseMove)
@@ -3535,7 +3616,7 @@ function playMuseumFootstep(audio, stepIndex, speedRatio, volume = 1, surface = 
     source.stop(now + 0.09)
 }
 
-function PlayerController({ layout, enabled, touchMode, touchInput, preferences, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function PlayerController({ layout, enabled, openRoomId, touchMode, touchInput, preferences, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const { camera } = useThree()
     const keys = useRef(new Set())
     const lastRoom = useRef(null)
@@ -3546,9 +3627,10 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
     const gaitPhase = useRef(0)
     const lastFootstep = useRef(-1)
     const footstepAudio = useRef(null)
-    const previousSpeed = useRef(0)
-    const cameraPitchOffset = useRef(0)
-    const cameraYawOffset = useRef(0)
+    const lookYaw = useRef(0)
+    const lookPitch = useRef(0)
+    const cameraRoll = useRef(0)
+    const lookReady = useRef(false)
     const touchEuler = useMemo(() => new THREE.Euler(0, 0, 0, 'YXZ'), [])
     const forward = useMemo(() => new THREE.Vector3(), [])
     const right = useMemo(() => new THREE.Vector3(), [])
@@ -3606,6 +3688,25 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
     }, [camera, layout])
 
     useEffect(() => {
+        if (!enabled) {
+            lookReady.current = false
+            touchInput.current.lookX = 0
+            touchInput.current.lookY = 0
+            keys.current.clear()
+            return
+        }
+        touchEuler.setFromQuaternion(camera.quaternion, 'YXZ')
+        lookYaw.current = touchEuler.y
+        lookPitch.current = THREE.MathUtils.clamp(touchEuler.x, -0.42, 0.42)
+        cameraRoll.current = 0
+        camera.rotation.order = 'YXZ'
+        camera.rotation.set(lookPitch.current, lookYaw.current, 0, 'YXZ')
+        touchInput.current.lookX = 0
+        touchInput.current.lookY = 0
+        lookReady.current = true
+    }, [camera, enabled, touchEuler, touchInput])
+
+    useEffect(() => {
         const onKeyDown = (event) => {
             keys.current.add(event.code)
             if (event.code === 'KeyE' && enabled) {
@@ -3625,26 +3726,25 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
     useFrame((state, frameDelta) => {
         if (!enabled) return
         const delta = Math.min(frameDelta, 0.05)
-        // Remove last frame's procedural pitch before applying mouse/touch
-        // movement. This keeps the authored look direction stable while the
-        // camera rig adds a non-accumulating walking cadence.
-        const previousPitchOffset = cameraPitchOffset.current
-        const previousYawOffset = cameraYawOffset.current
-        camera.rotation.x -= previousPitchOffset
-        camera.rotation.y -= previousYawOffset
-        if (touchInput.current.lookX || touchInput.current.lookY) {
-            touchEuler.setFromQuaternion(camera.quaternion)
-            const lookSensitivity = (touchMode ? 0.0042 : 0.002) * preferences.sensitivity
-            touchEuler.y -= touchInput.current.lookX * lookSensitivity
-            touchEuler.x = THREE.MathUtils.clamp(
-                touchEuler.x - (touchInput.current.lookY * (touchMode ? 0.0038 : lookSensitivity)),
-                -0.52,
-                0.52,
-            )
-            camera.quaternion.setFromEuler(touchEuler)
-            touchInput.current.lookX = 0
-            touchInput.current.lookY = 0
+        if (!lookReady.current) {
+            touchEuler.setFromQuaternion(camera.quaternion, 'YXZ')
+            lookYaw.current = touchEuler.y
+            lookPitch.current = THREE.MathUtils.clamp(touchEuler.x, -0.42, 0.42)
+            lookReady.current = true
         }
+        const lookSensitivity = (touchMode ? 0.0027 : 0.00115) * preferences.sensitivity
+        const frameLookX = THREE.MathUtils.clamp(touchInput.current.lookX, -42, 42)
+        const frameLookY = THREE.MathUtils.clamp(touchInput.current.lookY, -42, 42)
+        lookYaw.current -= frameLookX * lookSensitivity
+        lookYaw.current = THREE.MathUtils.euclideanModulo(lookYaw.current + Math.PI, Math.PI * 2) - Math.PI
+        lookPitch.current = THREE.MathUtils.clamp(
+            lookPitch.current - (frameLookY * (touchMode ? 0.0025 : lookSensitivity)),
+            -0.42,
+            0.42,
+        )
+        touchInput.current.lookX = 0
+        touchInput.current.lookY = 0
+        camera.rotation.set(lookPitch.current, lookYaw.current, cameraRoll.current, 'YXZ')
         const touchMagnitude = touchMode
             ? Math.min(1, Math.hypot(touchInput.current.moveX, touchInput.current.moveY))
             : 0
@@ -3679,6 +3779,7 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
                 { x: camera.position.x, z: camera.position.z },
                 { x: frameMovementX, z: frameMovementZ },
                 0.35,
+                new Set([openRoomId].filter(Boolean)),
             )
             if (Math.abs(next.x - camera.position.x - frameMovementX) > 0.001) velocity.x *= 0.24
             if (Math.abs(next.z - camera.position.z - frameMovementZ) > 0.001) velocity.z *= 0.24
@@ -3709,31 +3810,8 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
         const targetRoll = moving && !reducedMotion
             ? ((Math.sin(gaitPhase.current) * 0.003 * gaitStrength) - (lateralLean * 0.002)) * preferences.bobStrength
             : 0
-        camera.rotation.z = THREE.MathUtils.damp(camera.rotation.z, targetRoll, 9.5, delta)
-        previousSpeed.current = actualSpeed
-        const targetPitch = 0
-        cameraPitchOffset.current = THREE.MathUtils.damp(
-            previousPitchOffset,
-            targetPitch,
-            moving ? 12 : 8,
-            delta,
-        )
-        camera.rotation.x = THREE.MathUtils.clamp(
-            camera.rotation.x + cameraPitchOffset.current,
-            -0.52,
-            0.52,
-        )
-        // A restrained shoulder-to-shoulder yaw shift completes the gait arc.
-        // It is removed before reading mouse input on the next frame, so the
-        // animation never accumulates into the visitor's authored look angle.
-        const targetYaw = 0
-        cameraYawOffset.current = THREE.MathUtils.damp(
-            previousYawOffset,
-            targetYaw,
-            moving ? 11 : 8,
-            delta,
-        )
-        camera.rotation.y += cameraYawOffset.current
+        cameraRoll.current = THREE.MathUtils.damp(cameraRoll.current, targetRoll, 9.5, delta)
+        camera.rotation.set(lookPitch.current, lookYaw.current, cameraRoll.current, 'YXZ')
         const baseFov = touchMode ? Math.max(68, preferences.fov) : preferences.fov
         const targetFov = baseFov
         const nextFov = THREE.MathUtils.damp(camera.fov, targetFov, 7, delta)
@@ -4125,6 +4203,7 @@ function DevelopmentMuseumTour({ layout, onActiveRoom, onNearbyRooms }) {
                     { x: entranceX, z: room.centerZ },
                     { x: insideX - entranceX, z: 0 },
                     0.35,
+                    new Set([room.id]),
                 )
                 const enteredDepth = (probe.x - room.innerX) * room.side
                 if (enteredDepth < 1.6) tour.portalFailures.push(`${tour.circuit + 1}:${room.id}:collision`)
@@ -4269,6 +4348,7 @@ function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInpu
                     <PlayerController
                         layout={layout}
                         enabled={controlsEnabled.locked}
+                        openRoomId={controlsEnabled.activeRoomId}
                         touchMode={touchMode}
                         touchInput={touchInput}
                         preferences={preferences}
@@ -4387,7 +4467,7 @@ export default function ImmersiveGalleryDesktop() {
     const renderedActiveRoomIds = visualPreview
         ? (['room', 'portal'].includes(previewMode) ? [layout.rooms[previewRoomIndex]?.id].filter(Boolean) : [])
         : (activeRoomIds ?? initialActiveRoomIds)
-    const renderedActiveRoomId = visualPreview && previewMode === 'room'
+    const renderedActiveRoomId = visualPreview && ['room', 'portal'].includes(previewMode)
         ? layout.rooms[previewRoomIndex]?.id
         : activeRoomId
     const openAlbum = useCallback((album) => {
