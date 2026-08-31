@@ -204,4 +204,20 @@ describe('PhotoLightbox', () => {
     }))
     delete navigator.share
   })
+
+  it('does not expose sharing for a private viewer', () => {
+    render(
+      <PhotoLightbox
+        images={[landscape]}
+        index={0}
+        ariaLabel="Private viewer"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+        canShare={false}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Share photo' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Download photo' })).toBeInTheDocument()
+  })
 })

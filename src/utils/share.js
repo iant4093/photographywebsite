@@ -3,21 +3,31 @@ function currentPageUrl() {
     return `${window.location.origin}${window.location.pathname}${window.location.search}`
 }
 
-function photoUrl(pathname, photoId) {
-    if (typeof window === 'undefined' || !pathname || !photoId) return ''
+function mediaUrl(pathname, queryKey, mediaId) {
+    if (typeof window === 'undefined' || !pathname || !queryKey || !mediaId) return ''
     const url = new URL(pathname, window.location.origin)
-    url.searchParams.set('photo', String(photoId))
+    url.searchParams.set(queryKey, String(mediaId))
     return url.toString()
 }
 
 export function shareUrlForAlbumPhoto(albumId, photoId) {
     if (!albumId) return ''
     const pathname = `/album/${encodeURIComponent(String(albumId))}`
-    return photoId ? photoUrl(pathname, photoId) : new URL(pathname, window.location.origin).toString()
+    return photoId ? mediaUrl(pathname, 'photo', photoId) : new URL(pathname, window.location.origin).toString()
 }
 
 export function shareUrlForPathPhoto(pathname, photoId) {
-    return photoUrl(pathname, photoId)
+    return mediaUrl(pathname, 'photo', photoId)
+}
+
+export function shareUrlForAlbumVideo(albumId, videoId) {
+    if (!albumId) return ''
+    const pathname = `/video/${encodeURIComponent(String(albumId))}`
+    return videoId ? mediaUrl(pathname, 'video', videoId) : new URL(pathname, window.location.origin).toString()
+}
+
+export function shareUrlForPathVideo(pathname, videoId) {
+    return mediaUrl(pathname, 'video', videoId)
 }
 
 async function copyText(value) {

@@ -6,6 +6,7 @@ import { motion } from 'framer-motion'
 import ProgressiveImage from '../components/ProgressiveImage'
 import VideoPlayer from '../components/VideoPlayer'
 import AccessibleLightbox from '../components/AccessibleLightbox'
+import LightboxShareButton from '../components/LightboxShareButton'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
 import {
@@ -19,11 +20,12 @@ import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { navigateBackOr } from '../utils/navigation'
 import { pollZipJob } from '../utils/zipDownload'
 import { trackAlbumView, trackZipRequest } from '../utils/analytics'
+import { shareUrlForAlbumVideo } from '../utils/share'
 
 export default function VideoGallery() {
     const { albumId } = useParams()
     const navigate = useNavigate()
-    const [searchParams] = useSearchParams()
+    const [searchParams, setSearchParams] = useSearchParams()
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
     const [loading, setLoading] = useState(true)
@@ -34,6 +36,7 @@ export default function VideoGallery() {
     const [zipStatus, setZipStatus] = useState('')
     const { getIdToken } = useAuth()
     const autoPlayFirst = searchParams.get('play') === '1'
+    const initialSharedVideoIdRef = useRef(searchParams.get('video'))
     const trackedAlbumRef = useRef(null)
     const zipControllerRef = useRef(null)
 
@@ -57,8 +60,12 @@ export default function VideoGallery() {
             setImages(fetchedImages)
             setLoadError('')
             setMediaError('')
-            if (!background && autoPlayFirst && fetchedImages.length > 0) {
-                setLightboxIndex(0)
+            if (!background) {
+                const requestedIndex = initialSharedVideoIdRef.current
+                    ? fetchedImages.findIndex(video => mediaId(video) === initialSharedVideoIdRef.current)
+                    : -1
+                if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
+                else if (autoPlayFirst && fetchedImages.length > 0) setLightboxIndex(0)
             }
             return data
         } catch (err) {
@@ -113,7 +120,13 @@ export default function VideoGallery() {
         setLightboxIndex((i) => (i - 1 + images.length) % images.length)
     }, [images.length])
 
-    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
+    const closeLightbox = useCallback(() => {
+        setLightboxIndex(null)
+        if (!searchParams.get('video')) return
+        const nextParams = new URLSearchParams(searchParams)
+        nextParams.delete('video')
+        setSearchParams(nextParams, { replace: true, preventScrollReset: true })
+    }, [searchParams, setSearchParams])
 
     const handleBack = () => {
         navigateBackOr(navigate, '/videos')
@@ -237,7 +250,7 @@ export default function VideoGallery() {
                     )}
                 </div>
                 <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
-                    <AlbumShareButton albumTitle={album.title} />
+                    {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} />}
                     <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
                     {images.length > 0 && (
                         <button
@@ -367,19 +380,31 @@ export default function VideoGallery() {
                         />
                     </div>
 
-                    {/* Download & Counter */}
+                    {/* Share, download & counter */}
                     <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
-                        <button
-                            onClick={downloadOriginal}
-                            className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
-                            title="Download Video"
-                            aria-label="Download video"
-                        >
-                            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            <span>Download</span>
-                        </button>
+                        <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
+                            {album.visibility === 'public' && (
+                                <LightboxShareButton
+                                    media={images[lightboxIndex]}
+                                    index={lightboxIndex}
+                                    mediaType="video"
+                                    shareTitle={`${album.title} — Ian Truong Photography`}
+                                    shareUrl={video => shareUrlForAlbumVideo(albumId, mediaId(video))}
+                                />
+                            )}
+                            <button
+                                type="button"
+                                onClick={downloadOriginal}
+                                className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
+                                title="Download Video"
+                                aria-label="Download video"
+                            >
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                <span>Download</span>
+                            </button>
+                        </div>
                         {images.length > 1 && (
                             <span className="text-white/70 text-sm font-medium drop-shadow-md">
                                 {lightboxIndex + 1} / {images.length}

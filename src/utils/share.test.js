@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sharePage, shareUrlForAlbumPhoto, shareUrlForCurrentPage, shareUrlForPathPhoto } from './share'
+import {
+    sharePage,
+    shareUrlForAlbumPhoto,
+    shareUrlForAlbumVideo,
+    shareUrlForCurrentPage,
+    shareUrlForPathPhoto,
+    shareUrlForPathVideo,
+} from './share'
 
 describe('native page sharing', () => {
     afterEach(() => {
@@ -55,8 +62,10 @@ describe('native page sharing', () => {
         expect(shareUrlForCurrentPage()).not.toContain('#photo-2')
     })
 
-    it('builds canonical exact-photo URLs for public and protected album routes', () => {
+    it('builds canonical exact-media URLs for public and protected album routes', () => {
         expect(shareUrlForAlbumPhoto('album id', 'photo/id')).toBe('http://localhost:3000/album/album%20id?photo=photo%2Fid')
         expect(shareUrlForPathPhoto('/sharedalbum/code-1', 'p2')).toBe('http://localhost:3000/sharedalbum/code-1?photo=p2')
+        expect(shareUrlForAlbumVideo('album id', 'video/id')).toBe('http://localhost:3000/video/album%20id?video=video%2Fid')
+        expect(shareUrlForPathVideo('/sharedalbum/code-1', 'v2')).toBe('http://localhost:3000/sharedalbum/code-1?video=v2')
     })
 })

@@ -20,7 +20,6 @@ import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import PhotoLightbox from '../components/PhotoLightbox'
 import { openPrintOrder } from '../utils/printOrders'
-import { shareUrlForAlbumPhoto } from '../utils/share'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -462,7 +461,7 @@ function UserDashboard() {
                     onPrevious={goPrev}
                     onDownload={downloadImage}
                     onPrint={printImage}
-                    shareUrl={image => shareUrlForAlbumPhoto(selectedAlbum?.albumId, mediaId(image))}
+                    canShare={false}
                     onMediaError={() => requestSelectedRefresh('media-error')}
                 />
             )}

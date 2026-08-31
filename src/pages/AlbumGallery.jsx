@@ -268,7 +268,7 @@ function AlbumGallery() {
                             </div>
 
                             <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
-                                    <AlbumShareButton albumTitle={album.title} />
+                                    {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} />}
                                     <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
                                     {images.length > 0 && (
                                         <button
@@ -358,6 +358,7 @@ function AlbumGallery() {
                                 onPrevious={goPrev}
                                 onDownload={downloadImage}
                                 onPrint={printImage}
+                                canShare={album.visibility === 'public'}
                                 shareTitle={`${album.title} — Ian Truong Photography`}
                                 shareUrl={image => shareUrlForAlbumPhoto(albumId, mediaId(image))}
                                 onMediaError={() => requestMediaRefresh('media-error')}

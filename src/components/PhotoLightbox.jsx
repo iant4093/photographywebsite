@@ -6,7 +6,7 @@ import {
     mediaPreviewSrcSet,
     mediaThumbnailUrl,
 } from '../utils/mediaUrls'
-import { sharePage } from '../utils/share'
+import LightboxShareButton from './LightboxShareButton'
 
 const PHOTO_CROSSFADE_MS = 360
 
@@ -20,6 +20,7 @@ function PhotoLightbox({
     onRetry,
     onDownload,
     onPrint,
+    canShare = true,
     shareTitle,
     shareUrl,
     onMediaError,
@@ -29,10 +30,8 @@ function PhotoLightbox({
     const [loadedImageId, setLoadedImageId] = useState(null)
     const [settledImage, setSettledImage] = useState(null)
     const [printing, setPrinting] = useState(false)
-    const [shareLabel, setShareLabel] = useState('Share')
     const settledImageRef = useRef(null)
     const transitionTimerRef = useRef(null)
-    const shareTimerRef = useRef(null)
     const activeImage = images[index]
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
     const thumbUrl = activeImage ? mediaThumbnailUrl(activeImage) : ''
@@ -41,7 +40,6 @@ function PhotoLightbox({
 
     useEffect(() => () => {
         window.clearTimeout(transitionTimerRef.current)
-        window.clearTimeout(shareTimerRef.current)
         transitionTimerRef.current = null
     }, [activeId])
 
@@ -83,29 +81,6 @@ function PhotoLightbox({
             await onPrint(event, activeImage, index)
         } finally {
             setPrinting(false)
-        }
-    }
-
-    const handleShare = async (event) => {
-        event.stopPropagation()
-        window.clearTimeout(shareTimerRef.current)
-        try {
-            const targetUrl = typeof shareUrl === 'function'
-                ? shareUrl(activeImage, index)
-                : shareUrl
-            const result = await sharePage({
-                title: shareTitle || activeImage?.albumTitle || 'Ian Truong Photography',
-                text: 'View this photograph on Ian Truong Photography.',
-                url: targetUrl || undefined,
-            })
-            if (result === 'copied') {
-                setShareLabel('Link Copied')
-                shareTimerRef.current = window.setTimeout(() => setShareLabel('Share'), 2200)
-            }
-        } catch (error) {
-            console.error('Photo share failed:', error)
-            setShareLabel('Could Not Share')
-            shareTimerRef.current = window.setTimeout(() => setShareLabel('Share'), 2200)
         }
     }
 
@@ -255,18 +230,15 @@ function PhotoLightbox({
             {activeImage && (
                 <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
                     <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
-                        <button
-                            type="button"
-                            onClick={handleShare}
-                            className="linen-lightbox-share inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
-                            title="Share Photo"
-                            aria-label="Share photo"
-                        >
-                            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.7 11.2l6.6-3.8M8.7 12.8l6.6 3.8M7 15.5a3 3 0 100 6 3 3 0 000-6zm10-13a3 3 0 100 6 3 3 0 000-6zm0 13a3 3 0 100 6 3 3 0 000-6z" />
-                            </svg>
-                            <span>{shareLabel}</span>
-                        </button>
+                        {canShare && (
+                            <LightboxShareButton
+                                media={activeImage}
+                                index={index}
+                                mediaType="photo"
+                                shareTitle={shareTitle}
+                                shareUrl={shareUrl}
+                            />
+                        )}
                         {onDownload && (
                             <button
                                 type="button"

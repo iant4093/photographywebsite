@@ -65,7 +65,7 @@ function gallery(ui, path) {
 }
 
 const photoData = {
-  album: { albumId: 'a1', title: 'Wild Album', description: 'Description', createdAt: '2026-01-03', qrCodeUrl: 'https://x.test/photo-qr.svg' },
+  album: { albumId: 'a1', title: 'Wild Album', description: 'Description', createdAt: '2026-01-03', visibility: 'public', qrCodeUrl: 'https://x.test/photo-qr.svg' },
   images: [
     { id: 'one', url: 'https://x.test/one-full', thumbnailUrl: 'https://x.test/one-thumb', width: 2400, height: 1800, exif: { model: 'Camera', lens: 'Lens', focalLength: '50mm', focalRatio: 'f/2', shutterSpeed: '1/100', iso: 'ISO 100' }, previewSrcSet: [{ width: 640, url: 'https://x.test/640' }, { width: 960, url: 'https://x.test/960' }, { width: 1440, url: 'https://x.test/1440' }, { width: 1920, url: 'https://x.test/1920' }] },
     { id: 'two', url: 'https://x.test/two-full', thumbnailUrl: 'https://x.test/two-thumb', width: 800, height: 600 },
@@ -146,6 +146,18 @@ describe('AlbumGallery', () => {
     expect(screen.getByRole('heading', { name: 'Wild Album' })).toBeInTheDocument()
   })
 
+  it('hides album and lightbox sharing for a specific-user photo album', async () => {
+    api.fetchAlbum.mockResolvedValueOnce({
+      ...photoData,
+      album: { ...photoData.album, visibility: 'private', qrCodeUrl: '' },
+    })
+    gallery(<AlbumGallery />, '/album/a1')
+    await screen.findByRole('heading', { name: 'Wild Album' })
+    expect(screen.queryByRole('button', { name: 'Share Wild Album' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open item 1 from Wild Album' }))
+    expect(screen.queryByRole('button', { name: 'Share photo' })).toBeNull()
+  })
+
   it('downloads a ZIP, displays worker state/errors, and guards duplicate work', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     let finish
@@ -224,7 +236,7 @@ describe('AlbumGallery', () => {
 
 describe('VideoGallery', () => {
   const videoData = {
-    album: { title: 'Video Album', description: 'Films', qrCodeUrl: 'https://x.test/video-qr.svg' },
+    album: { title: 'Video Album', description: 'Films', visibility: 'public', qrCodeUrl: 'https://x.test/video-qr.svg' },
     images: [
       { id: 'v1', url: 'https://x.test/v1.mp4', thumbnailUrl: 'https://x.test/v1.jpg' },
       { id: 'v2', url: 'https://x.test/v2.mp4', thumbnailUrl: 'https://x.test/v2.jpg' },
@@ -255,6 +267,33 @@ describe('VideoGallery', () => {
     expect(screen.getByText('Playing v1')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByText('Playing v1')).toBeNull()
+  })
+
+  it('opens and shares an exact video deep link', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+    gallery(<VideoGallery />, '/video/v-album?video=v2')
+    expect(await screen.findByText('Playing v2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Share video' }))
+    await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Video Album — Ian Truong Photography',
+      url: 'http://localhost:3000/video/v-album?video=v2',
+    })))
+    fireEvent.click(screen.getByRole('button', { name: 'Close video player' }))
+    expect(screen.queryByRole('dialog', { name: 'Video player for Video Album' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Video Album' })).toBeInTheDocument()
+    delete navigator.share
+  })
+
+  it('hides album and lightbox sharing for a specific-user video album', async () => {
+    api.fetchAlbum.mockResolvedValueOnce({
+      ...videoData,
+      album: { ...videoData.album, visibility: 'private', qrCodeUrl: '' },
+    })
+    gallery(<VideoGallery />, '/video/v-album?play=1')
+    expect(await screen.findByText('Playing v1')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Share Video Album' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Share video' })).toBeNull()
   })
 
   it('offers a QR lightbox for a public video album', async () => {

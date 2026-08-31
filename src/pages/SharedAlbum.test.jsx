@@ -186,17 +186,29 @@ describe('SharedAlbum access and gallery', () => {
     expect(screen.getByText('Invalid share code')).toBeInTheDocument()
   })
 
-  it('supports video shares, closes them accessibly, and shows empty albums', async () => {
-    api.fetchSharedAlbum.mockResolvedValueOnce({ album: { title: 'Shared Video', type: 'video', createdAt: '2026-01-01' }, images: [{ id: 'v1', thumbnailUrl: 'thumb', url: 'video' }] })
-    const first = renderShared('/sharedalbum/video')
+  it('shares exact videos from link-only albums, closes them accessibly, and shows empty albums', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+    api.fetchSharedAlbum.mockResolvedValueOnce({
+      album: { title: 'Shared Video', type: 'video', createdAt: '2026-01-01' },
+      images: [
+        { id: 'v1', thumbnailUrl: 'thumb-1', url: 'video-1' },
+        { id: 'v2', thumbnailUrl: 'thumb-2', url: 'video-2' },
+      ],
+    })
+    const first = renderShared('/sharedalbum/video?video=v2')
     fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
-    await screen.findByText('Shared Video')
-    expect(screen.getByRole('button', { name: 'Download All' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('img', { name: 'Item 1 from Shared Video' }))
-    expect(screen.getByText('Video v1')).toBeInTheDocument()
+    expect(await screen.findByText('Video v2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Share video' }))
+    await waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Shared Video — Ian Truong Photography',
+      url: 'http://localhost:3000/sharedalbum/video?video=v2',
+    })))
     fireEvent.keyDown(window, { key: 'Escape' })
-    expect(screen.queryByText('Video v1')).toBeNull()
+    expect(screen.queryByText('Video v2')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Download All' })).toBeInTheDocument()
     first.unmount()
+    delete navigator.share
 
     api.fetchSharedAlbum.mockResolvedValueOnce({ album: { title: 'Empty', type: 'photo', createdAt: '2026-01-01' }, images: [] })
     renderShared('/sharedalbum/empty')
