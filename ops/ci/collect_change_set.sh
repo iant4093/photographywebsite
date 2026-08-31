@@ -60,17 +60,18 @@ python3 ops/ci/release_guard.py preserved-parameters \
 
 mkdir -p "$(dirname "$CHANGE_PAGES_PATH")"
 echo '[]' > "$CHANGE_PAGES_PATH"
+page_path="$(dirname "$CHANGE_PAGES_PATH")/change-set-page.json"
 token=""
 while true; do
   args=(cloudformation describe-change-set --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" --no-paginate)
   if [[ -n "$token" ]]; then
     args+=(--next-token "$token")
   fi
-  page="$(aws "${args[@]}" --query '{Changes:Changes,NextToken:NextToken}' --output json)"
-  jq --argjson page "$page" '. + [{Changes: ($page.Changes // [])}]' \
-    "$CHANGE_PAGES_PATH" > "$CHANGE_PAGES_PATH.next"
+  aws "${args[@]}" --query '{Changes:Changes,NextToken:NextToken}' --output json > "$page_path"
+  jq -s '.[0] + [{Changes: (.[1].Changes // [])}]' \
+    "$CHANGE_PAGES_PATH" "$page_path" > "$CHANGE_PAGES_PATH.next"
   mv "$CHANGE_PAGES_PATH.next" "$CHANGE_PAGES_PATH"
-  token="$(jq -r '.NextToken // empty' <<< "$page")"
+  token="$(jq -r '.NextToken // empty' "$page_path")"
   [[ -n "$token" ]] || break
 done
 python3 ops/ci/release_guard.py gate-change-set \
