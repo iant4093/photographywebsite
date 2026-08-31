@@ -75,7 +75,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertEqual(parameters["HeadersConfig"], {"HeaderBehavior": "none"})
         self.assertEqual(
             parameters["QueryStringsConfig"]["QueryStrings"]["Items"],
-            ["cursor", "limit", "mode", "type", "value"],
+            ["cursor", "limit", "mode", "seed", "type", "value"],
         )
         self.assertEqual(cache["MinTTL"], 0)
         self.assertEqual(cache["MaxTTL"], 300)

@@ -24,7 +24,13 @@ def album(**changes):
         "status": "active",
         "visibility": "public",
         "type": "photo",
-        "images": [{"rawKey": RAW_KEY}],
+        "images": [{
+            "rawKey": RAW_KEY,
+            "exif": {
+                "focalRatio": "f/2.8", "shutterSpeed": "1/500s",
+                "iso": "ISO 400", "focalLength": "400mm",
+            },
+        }],
     }
     value.update(changes)
     return value
@@ -65,13 +71,13 @@ class FakeBatch:
 class FakeTable:
     def __init__(self):
         self.batch = FakeBatch()
-        self.marker = None
+        self.markers = []
 
     def batch_writer(self, **_kwargs):
         return self.batch
 
     def put_item(self, *, Item):
-        self.marker = Item
+        self.markers.append(Item)
 
 
 class FakeScanTable:
@@ -113,7 +119,7 @@ class ExploreIndexBackfillTests(unittest.TestCase):
         self.assertEqual(counts["missingExploreMetadataCount"], 1)
         self.assertEqual(
             [item["recordType"] for item in desired.values()],
-            [backfill.READY_RECORD_TYPE],
+            [backfill.READY_RECORD_TYPE, backfill.READY_RECORD_TYPE],
         )
 
     def test_desired_inventory_indexes_only_current_public_manifest_media(self):
@@ -122,9 +128,9 @@ class ExploreIndexBackfillTests(unittest.TestCase):
             [metadata(), metadata(albumId="22222222-2222-4222-8222-222222222222")],
         )
         record_types = [item["recordType"] for item in desired.values()]
-        self.assertEqual(record_types.count(backfill.INDEX_RECORD_TYPE), 2)
+        self.assertEqual(record_types.count(backfill.INDEX_RECORD_TYPE), 6)
         self.assertEqual(record_types.count(backfill.FACET_RECORD_TYPE), 1)
-        self.assertEqual(record_types.count(backfill.READY_RECORD_TYPE), 1)
+        self.assertEqual(record_types.count(backfill.READY_RECORD_TYPE), 2)
         self.assertEqual(counts["indexedPhotoCount"], 1)
         self.assertEqual(counts["eligiblePublicPhotoAlbumCount"], 1)
 
@@ -149,7 +155,11 @@ class ExploreIndexBackfillTests(unittest.TestCase):
         table = FakeTable()
         backfill.apply_plan(table, puts, deletes)
         self.assertEqual(len(table.batch.puts), len(puts))
-        self.assertEqual(table.marker["recordType"], backfill.READY_RECORD_TYPE)
+        self.assertEqual(
+            [item["mediaId"] for item in table.markers],
+            ["READY", "EXPOSURE_READY"],
+        )
+        self.assertTrue(all(item["recordType"] == backfill.READY_RECORD_TYPE for item in table.markers))
 
 
 if __name__ == "__main__":

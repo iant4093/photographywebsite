@@ -25,6 +25,7 @@ def album(visibility="public"):
         "createdAt": "2026-08-15T00:00:00Z",
         "images": [{
             "rawKey": RAW_KEY,
+            "blurhash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
             "width": 3000,
             "height": 2000,
             "exif": {
@@ -63,12 +64,16 @@ def metadata():
         "colorFamilies": ["blue"],
         "lens": "Sigma 18-50mm F2.8",
         "lensKey": "sigma 18-50mm f2.8",
+        "exposureBuckets": ["aperture:middle", "shutter:handheld", "iso:clean", "focal:wide"],
     }
 
 
 class ExploreApiTests(unittest.TestCase):
     def setUp(self):
         get_public_album._reset_explore_index_cache_for_tests()
+        self.exposure_ready = patch.object(get_public_album, "_exposure_index_ready", return_value=False)
+        self.exposure_ready.start()
+        self.addCleanup(self.exposure_ready.stop)
 
     def test_batch_album_projection_keeps_approved_legacy_prefix(self):
         batch_client = Mock()
@@ -132,6 +137,7 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(item["imageIndex"], 0)
         self.assertEqual(item["exif"]["model"], "Canon EOS R7")
         self.assertEqual(item["exif"]["shutterSpeed"], "1/250s")
+        self.assertEqual(item["blurhash"], "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
         self.assertNotIn("gps", item["exif"])
         self.assertIn("/public-previews/", item["url"])
         self.assertNotIn("rawKey", item)
@@ -264,6 +270,34 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(len(set(ids)), 3)
         self.assertIsNone(second["nextCursor"])
 
+    def test_explicit_exposure_seed_is_stable_without_bypassing_pagination_rules(self):
+        items = [
+            {
+                "albumId": ALBUM_ID,
+                "mediaId": f"media-{index}",
+                "exif": {"focalRatio": "f/2"},
+            }
+            for index in range(6)
+        ]
+        params = {
+            "mode": "exposure", "value": "aperture:wide", "limit": "3",
+            "seed": "0123456789abcdef",
+        }
+        with patch.object(get_public_album, "_all_public_explore_items", return_value=items):
+            first = response_body(get_public_album._explore_response({"queryStringParameters": params}))
+            repeated = response_body(get_public_album._explore_response({"queryStringParameters": params}))
+
+        self.assertEqual(
+            [item["mediaId"] for item in first["items"]],
+            [item["mediaId"] for item in repeated["items"]],
+        )
+        invalid = get_public_album.handler({
+            "requestContext": {"routeKey": "GET /public/explore"},
+            "rawPath": "/public/explore",
+            "queryStringParameters": {**params, "cursor": first["nextCursor"]},
+        }, None)
+        self.assertEqual(invalid["statusCode"], 400)
+
     def test_randomized_result_cursor_is_stable_and_has_no_duplicates(self):
         raw_keys = [f"albums/{ALBUM_ID}/original/photo-{index}.jpg" for index in range(3)]
         full_album = album()
@@ -306,6 +340,7 @@ class ExploreApiTests(unittest.TestCase):
             {"mode": "colors", "cursor": "x"},
             {"mode": "exposure", "value": "aperture:unknown"},
             {"mode": "exposures", "cursor": "x"},
+            {"mode": "color", "value": "blue", "seed": "UPPERCASE0000000"},
         ):
             with self.subTest(params=params):
                 response = get_public_album.handler({
@@ -334,12 +369,61 @@ class ExploreApiTests(unittest.TestCase):
             get_public_album, "_batch_albums", return_value={ALBUM_ID: album()}
         ), patch.object(get_public_album, "_preview_table", return_value=preview_table):
             response = get_public_album._explore_response({
-                "queryStringParameters": {"mode": "color", "value": "blue", "limit": "1"},
+                "queryStringParameters": {
+                    "mode": "color", "value": "blue", "limit": "1",
+                    "seed": "0123456789abcdef",
+                },
             })
 
         self.assertEqual(len(response_body(response)["items"]), 1)
         query.assert_called_once()
+        self.assertEqual(query.call_args.kwargs["seed"], "0123456789abcdef")
         preview_table.scan.assert_not_called()
+
+    def test_materialized_exposure_options_never_scan_the_archive(self):
+        counts = {
+            facet_partition("exposure", "aperture:wide"): 4,
+            facet_partition("exposure", "aperture:middle"): 2,
+        }
+        counts.update({
+            facet_partition("exposure", f"{group}:{option}"): counts.get(
+                facet_partition("exposure", f"{group}:{option}"), 0
+            )
+            for group, options in get_public_album.EXPOSURE_DEFINITIONS.items()
+            for option in options
+        })
+        with patch.object(get_public_album, "_exposure_index_ready", return_value=True), patch.object(
+            get_public_album, "_parallel_partition_counts", return_value=counts
+        ), patch.object(
+            get_public_album,
+            "_indexed_media_payload",
+            return_value={"items": [{"mediaId": MEDIA_ID}], "total": 4, "nextCursor": None},
+        ) as page, patch.object(get_public_album, "_all_public_explore_items") as archive:
+            response = get_public_album._explore_response({
+                "queryStringParameters": {"mode": "exposures"},
+            })
+
+        body = response_body(response)
+        aperture = next(group for group in body["items"] if group["id"] == "aperture")
+        self.assertEqual(aperture["options"][0], {"id": "wide", "photos": 4})
+        self.assertEqual(body["initialPage"]["total"], 4)
+        page.assert_called_once_with(
+            "exposure", "aperture:wide", get_public_album.EXPLORE_DEFAULT_LIMIT, total=4
+        )
+        archive.assert_not_called()
+
+    def test_materialized_exposure_accepts_a_legacy_in_flight_cursor(self):
+        expected = {"statusCode": 200, "body": "legacy"}
+        params = {
+            "mode": "exposure", "value": "aperture:wide", "cursor": "legacy-cursor",
+        }
+        with patch.object(get_public_album, "_indexed_media_payload", return_value=None), patch.object(
+            get_public_album, "_exposure_media_response", return_value=expected
+        ) as legacy:
+            response = get_public_album._indexed_media_response(params)
+
+        self.assertIs(response, expected)
+        legacy.assert_called_once_with(params)
 
     def test_materialized_options_bundle_the_first_random_page(self):
         counts = {facet_partition("color", "blue"): 4}

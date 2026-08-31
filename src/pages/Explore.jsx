@@ -4,6 +4,7 @@ import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
 import { requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
+    createExploreSeed,
     fetchExploreColors,
     fetchExploreExposures,
     fetchExploreLenses,
@@ -11,7 +12,7 @@ import {
     fetchExploreSample,
     prefetchExploreModule,
 } from '../utils/exploreApi'
-import { buildSettingsRound, EXPOSURE_GROUPS } from '../utils/exposure'
+import { buildSettingsDeck, buildSettingsRoundForImage, EXPOSURE_GROUPS } from '../utils/exposure'
 import { trackPhotoDownload } from '../utils/analytics'
 import {
     mediaFileName,
@@ -188,6 +189,23 @@ function ExploreBackLink() {
     return <Link to="/explore" state={{ restoreExploreScroll: true }} className="explore-back">← All Explore modules</Link>
 }
 
+function ExploreShuffleButton({ label, loading, onClick }) {
+    return (
+        <button
+            type="button"
+            className="explore-reshuffle"
+            onClick={onClick}
+            disabled={loading}
+            aria-label={`Reshuffle ${label}`}
+        >
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 4h3l10 16h3M20 4h-3l-3.5 5.6M4 20h3l3.5-5.6" />
+            </svg>
+            <span>{loading ? 'Shuffling…' : 'Reshuffle'}</span>
+        </button>
+    )
+}
+
 function ExploreCard({ item, index, mode, onOpen }) {
     return (
         <button
@@ -203,6 +221,7 @@ function ExploreCard({ item, index, mode, onOpen }) {
                 alt=""
                 width={item.width || 4}
                 height={item.height || 3}
+                blurhash={item.blurhash}
                 className="explore-photo-image"
                 eager={index < 4}
             />
@@ -230,7 +249,9 @@ function ExploreModule({ mode }) {
     const [facetError, setFacetError] = useState('')
     const [pageState, setPageState] = useState({ key: '', items: [], nextCursor: null, error: '' })
     const [loadingMore, setLoadingMore] = useState(false)
+    const [reshuffling, setReshuffling] = useState(false)
     const [lightboxIndex, setLightboxIndex] = useState(null)
+    const currentRequestKeyRef = useRef('')
     const isColor = mode === 'color'
 
     useEffect(() => {
@@ -266,6 +287,7 @@ function ExploreModule({ mode }) {
     }, [facets, isColor, requestedValue])
     const value = activeFacet ? (isColor ? activeFacet.id : activeFacet.name) : ''
     const requestKey = value ? `${mode}:${value}` : ''
+    currentRequestKeyRef.current = requestKey
     const hasCurrentPage = Boolean(requestKey && pageState.key === requestKey)
     const items = hasCurrentPage ? pageState.items : []
     const nextCursor = hasCurrentPage ? pageState.nextCursor : null
@@ -318,6 +340,32 @@ function ExploreModule({ mode }) {
             setLoadingMore(false)
         }
     }, [loadingMore, mode, nextCursor, requestKey, value])
+
+    const reshuffle = useCallback(async () => {
+        if (!value || reshuffling) return
+        const targetKey = requestKey
+        setReshuffling(true)
+        setLightboxIndex(null)
+        try {
+            const page = await fetchExplorePhotos({
+                mode,
+                value,
+                limit: PAGE_SIZE,
+                seed: createExploreSeed(),
+            })
+            if (currentRequestKeyRef.current !== targetKey) return
+            setPageState({ key: targetKey, items: page.items, nextCursor: page.nextCursor, error: '' })
+        } catch (error) {
+            if (currentRequestKeyRef.current === targetKey) {
+                setPageState(current => ({
+                    ...current,
+                    error: error?.message || 'A new shuffle could not be loaded.',
+                }))
+            }
+        } finally {
+            setReshuffling(false)
+        }
+    }, [mode, requestKey, reshuffling, value])
 
     const handleDownload = useCallback(async (event, image) => {
         event.stopPropagation()
@@ -403,8 +451,11 @@ function ExploreModule({ mode }) {
 
                 {activeFacet && (
                     <div className="explore-results-heading" aria-live="polite">
-                        <p><strong>{activeFacet.photos}</strong> {activeFacet.photos === 1 ? 'photograph' : 'photographs'}</p>
-                        <span>{activeLabel}</span>
+                        <div>
+                            <p><strong>{activeFacet.photos}</strong> {activeFacet.photos === 1 ? 'photograph' : 'photographs'}</p>
+                            <span>{activeLabel}</span>
+                        </div>
+                        <ExploreShuffleButton label={`${activeLabel} photographs`} loading={reshuffling} onClick={reshuffle} />
                     </div>
                 )}
                 {loading && <div className="explore-loading" role="status">Finding photographs…</div>}
@@ -430,7 +481,7 @@ function ExploreModule({ mode }) {
                 )}
                 {nextCursor && (
                     <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore}>
-                        {loadingMore ? 'Loading…' : 'Show another random set'}
+                        {loadingMore ? 'Loading…' : 'Show more'}
                     </button>
                 )}
             </section>
@@ -519,12 +570,15 @@ function ExposureExplorer() {
     const [facetState, setFacetState] = useState({ groups: [], loading: true, error: '' })
     const [pageState, setPageState] = useState({ key: '', items: [], total: 0, nextCursor: null, error: '' })
     const [loadingMore, setLoadingMore] = useState(false)
+    const [reshuffling, setReshuffling] = useState(false)
     const [groupId, setGroupId] = useState(initialSelection.current.groupId)
     const [optionId, setOptionId] = useState(initialSelection.current.optionId)
     const [lightboxIndex, setLightboxIndex] = useState(null)
+    const currentValueRef = useRef('')
     const group = EXPOSURE_GROUPS.find(candidate => candidate.id === groupId) || EXPOSURE_GROUPS[0]
     const indexedGroup = facetState.groups.find(candidate => candidate.id === group.id)
     const value = `${group.id}:${optionId}`
+    currentValueRef.current = value
     const hasCurrentPage = pageState.key === value
     const images = hasCurrentPage ? pageState.items : []
     const total = hasCurrentPage
@@ -622,6 +676,38 @@ function ExposureExplorer() {
         }
     }, [loadingMore, nextCursor, value])
 
+    const reshuffle = useCallback(async () => {
+        if (reshuffling) return
+        const targetValue = value
+        setReshuffling(true)
+        setLightboxIndex(null)
+        try {
+            const page = await fetchExplorePhotos({
+                mode: 'exposure',
+                value,
+                limit: PAGE_SIZE,
+                seed: createExploreSeed(),
+            })
+            if (currentValueRef.current !== targetValue) return
+            setPageState({
+                key: targetValue,
+                items: page.items,
+                total: page.total ?? page.items.length,
+                nextCursor: page.nextCursor,
+                error: '',
+            })
+        } catch (error) {
+            if (currentValueRef.current === targetValue) {
+                setPageState(current => ({
+                    ...current,
+                    error: error?.message || 'A new shuffle could not be loaded.',
+                }))
+            }
+        } finally {
+            setReshuffling(false)
+        }
+    }, [reshuffling, value])
+
     return (
         <div className="explore-page animate-fade-in pt-[74px]">
             <ExploreHeader title="Exposure Explorer" detail="Browse a random cross-section of the archive by the choices behind each exposure." />
@@ -672,8 +758,15 @@ function ExposureExplorer() {
                 {resultError && <p className="explore-error" role="alert">{resultError}</p>}
                 {!loading && !facetState.error && !resultError && (
                     <div className="explore-results-heading" aria-live="polite">
-                        <p><strong>{total}</strong> {total === 1 ? 'photograph' : 'photographs'}</p>
-                        <span>{group.label} · {group.options.find(option => option.id === optionId)?.label}</span>
+                        <div>
+                            <p><strong>{total}</strong> {total === 1 ? 'photograph' : 'photographs'}</p>
+                            <span>{group.label} · {group.options.find(option => option.id === optionId)?.label}</span>
+                        </div>
+                        <ExploreShuffleButton
+                            label={`${group.label} ${group.options.find(option => option.id === optionId)?.label || ''} photographs`}
+                            loading={reshuffling}
+                            onClick={reshuffle}
+                        />
                     </div>
                 )}
                 {!loading && !facetState.error && !resultError && images.length === 0 && (
@@ -694,7 +787,7 @@ function ExposureExplorer() {
                 )}
                 {nextCursor && (
                     <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore}>
-                        {loadingMore ? 'Loading…' : 'Show another random set'}
+                        {loadingMore ? 'Loading…' : 'Show more'}
                     </button>
                 )}
             </section>
@@ -710,11 +803,37 @@ function ExposureExplorer() {
 
 function GuessSettingsGame() {
     const { images, loading, error } = useExploreSample()
-    const [round, setRound] = useState(null)
+
+    return (
+        <div className="explore-page animate-fade-in pt-[74px]">
+            <ExploreHeader title="Guess the Settings" detail="Look closely at the photograph, then choose the setting you think made it." />
+            <section className="explore-game max-w-7xl mx-auto px-6 pb-20 md:pb-28">
+                <ExploreBackLink />
+                {loading && <div className="explore-loading" role="status">Building a settings round…</div>}
+                {error && <p className="explore-error" role="alert">{error}</p>}
+                {!loading && !error && images.length === 0 && (
+                    <div className="explore-empty"><h2>Not enough settings yet</h2><p>The game needs photographs with complete exposure metadata.</p></div>
+                )}
+                {!loading && !error && images.length > 0 && <SettingsGameBoard images={images} />}
+            </section>
+        </div>
+    )
+}
+
+function createSettingsGame(images) {
+    const deck = buildSettingsDeck(images)
+    const [image, ...remaining] = deck
+    return {
+        remaining,
+        round: buildSettingsRoundForImage(images, image),
+    }
+}
+
+function SettingsGameBoard({ images }) {
+    const [game, setGame] = useState(() => createSettingsGame(images))
     const [selected, setSelected] = useState('')
     const [score, setScore] = useState({ correct: 0, answered: 0 })
-    const initialRound = useMemo(() => buildSettingsRound(images), [images])
-    const activeRound = round || initialRound
+    const activeRound = game.round
 
     const chooseAnswer = value => {
         if (!activeRound || selected) return
@@ -726,77 +845,83 @@ function GuessSettingsGame() {
     }
 
     const nextRound = () => {
-        const previousId = activeRound?.image?.mediaId || activeRound?.image?.id || activeRound?.image?.url || ''
-        setRound(buildSettingsRound(images, previousId))
+        setGame(current => {
+            let deck = current.remaining.length ? current.remaining : buildSettingsDeck(images)
+            const currentId = mediaId(current.round?.image)
+            if (
+                current.remaining.length === 0
+                && deck.length > 1
+                && mediaId(deck[0]) === currentId
+            ) {
+                deck = deck.slice(1).concat(deck[0])
+            }
+            const [image, ...remaining] = deck
+            return {
+                remaining,
+                round: buildSettingsRoundForImage(images, image),
+            }
+        })
         setSelected('')
     }
 
+    if (!activeRound) {
+        return <div className="explore-empty"><h2>Not enough settings yet</h2><p>The game needs photographs with complete exposure metadata.</p></div>
+    }
+
     return (
-        <div className="explore-page animate-fade-in pt-[74px]">
-            <ExploreHeader title="Guess the Settings" detail="Look closely at the photograph, then choose the setting you think made it." />
-            <section className="explore-game max-w-7xl mx-auto px-6 pb-20 md:pb-28">
-                <ExploreBackLink />
-                {loading && <div className="explore-loading" role="status">Building a settings round…</div>}
-                {error && <p className="explore-error" role="alert">{error}</p>}
-                {!loading && !error && !activeRound && (
-                    <div className="explore-empty"><h2>Not enough settings yet</h2><p>The game needs photographs with complete exposure metadata.</p></div>
-                )}
-                {activeRound && (
-                    <div className="explore-game-board">
-                        <div className="explore-game-photo">
-                            <ProgressiveImage
-                                key={mediaId(activeRound.image)}
-                                src={mediaThumbnailUrl(activeRound.image)}
-                                srcSet={mediaPreviewSrcSet(activeRound.image)}
-                                sizes="(max-width: 800px) calc(100vw - 3rem), 58vw"
-                                width={activeRound.image.width || 4}
-                                height={activeRound.image.height || 3}
-                                alt={`A photograph from ${activeRound.image.albumTitle}`}
-                                eager
-                                className="explore-game-image"
-                            />
-                            <span>{activeRound.image.albumTitle}</span>
-                        </div>
-                        <div className="explore-game-question">
-                            <div className="explore-game-score">
-                                <span>04 · Round {score.answered + (selected ? 0 : 1)}</span>
-                                <strong>{score.correct} / {score.answered} correct</strong>
-                            </div>
-                            <h2>{activeRound.prompt}</h2>
-                            <div className="explore-game-options">
-                                {activeRound.options.map(option => {
-                                    const answered = Boolean(selected)
-                                    const className = answered
-                                        ? option === activeRound.answer ? 'is-correct' : option === selected ? 'is-wrong' : ''
-                                        : ''
-                                    return (
-                                        <button
-                                            type="button"
-                                            key={option}
-                                            className={className}
-                                            disabled={answered}
-                                            onClick={() => chooseAnswer(option)}
-                                        >
-                                            {option}
-                                        </button>
-                                    )
-                                })}
-                            </div>
-                            {selected ? (
-                                <div className="explore-game-answer" role="status">
-                                    <strong>{selected === activeRound.answer ? 'Correct.' : `The answer was ${activeRound.answer}.`}</strong>
-                                    <p>
-                                        {activeRound.image.exif.focalLength} · {activeRound.image.exif.focalRatio} · {activeRound.image.exif.shutterSpeed} · {activeRound.image.exif.iso}
-                                    </p>
-                                    <button type="button" onClick={nextRound}>Next photograph →</button>
-                                </div>
-                            ) : (
-                                <button type="button" className="explore-game-skip" onClick={nextRound}>Skip photograph</button>
-                            )}
-                        </div>
+        <div className="explore-game-board">
+            <div className="explore-game-photo">
+                <ProgressiveImage
+                    key={mediaId(activeRound.image)}
+                    src={mediaThumbnailUrl(activeRound.image)}
+                    srcSet={mediaPreviewSrcSet(activeRound.image)}
+                    sizes="(max-width: 800px) calc(100vw - 3rem), 58vw"
+                    width={activeRound.image.width || 4}
+                    height={activeRound.image.height || 3}
+                    alt={`A photograph from ${activeRound.image.albumTitle}`}
+                    blurhash={activeRound.image.blurhash}
+                    eager
+                    className="explore-game-image"
+                />
+                <span>{activeRound.image.albumTitle}</span>
+            </div>
+            <div className="explore-game-question">
+                <div className="explore-game-score">
+                    <span>04 · Round {score.answered + (selected ? 0 : 1)}</span>
+                    <strong>{score.correct} / {score.answered} correct</strong>
+                </div>
+                <h2>{activeRound.prompt}</h2>
+                <div className="explore-game-options">
+                    {activeRound.options.map(option => {
+                        const answered = Boolean(selected)
+                        const className = answered
+                            ? option === activeRound.answer ? 'is-correct' : option === selected ? 'is-wrong' : ''
+                            : ''
+                        return (
+                            <button
+                                type="button"
+                                key={option}
+                                className={className}
+                                disabled={answered}
+                                onClick={() => chooseAnswer(option)}
+                            >
+                                {option}
+                            </button>
+                        )
+                    })}
+                </div>
+                {selected ? (
+                    <div className="explore-game-answer" role="status">
+                        <strong>{selected === activeRound.answer ? 'Correct.' : `The answer was ${activeRound.answer}.`}</strong>
+                        <p>
+                            {activeRound.image.exif.focalLength} · {activeRound.image.exif.focalRatio} · {activeRound.image.exif.shutterSpeed} · {activeRound.image.exif.iso}
+                        </p>
+                        <button type="button" onClick={nextRound}>Next photograph →</button>
                     </div>
+                ) : (
+                    <button type="button" className="explore-game-skip" onClick={nextRound}>Skip photograph</button>
                 )}
-            </section>
+            </div>
         </div>
     )
 }

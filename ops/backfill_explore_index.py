@@ -30,6 +30,8 @@ from explore_index import (  # noqa: E402
     INDEX_RECORD_TYPE,
     READY_RECORD_TYPE,
     desired_index_records,
+    exposure_buckets,
+    exposure_ready_marker,
     ready_marker,
 )
 from media_access import media_id_for_key  # noqa: E402
@@ -85,23 +87,27 @@ def desired_records(albums, preview_records):
             and isinstance(album.get("images"), list)
         ):
             continue
-        media_ids = {
-            media_id_for_key(raw_key)
+        media = {
+            media_id_for_key(raw_key): exposure_buckets(image.get("exif"))
             for image in album["images"]
-            if (raw_key := _raw_key(image))
+            if isinstance(image, dict) and (raw_key := _raw_key(image))
         }
-        eligible[album.get("albumId")] = media_ids
+        eligible[album.get("albumId")] = media
         counts["eligiblePublicPhotoAlbumCount"] += 1
-        counts["eligiblePublicPhotoCount"] += len(media_ids)
+        counts["eligiblePublicPhotoCount"] += len(media)
 
     desired = {}
     indexed_media = set()
     for metadata in preview_records:
         album_id = metadata.get("albumId")
         media_id = metadata.get("mediaId")
-        if media_id not in eligible.get(album_id, set()):
+        album_media = eligible.get(album_id, {})
+        if media_id not in album_media:
             continue
-        records = desired_index_records(metadata, public=True)
+        records = desired_index_records(
+            {**metadata, "exposureBuckets": album_media[media_id]},
+            public=True,
+        )
         entries = [record for record in records if record.get("recordType") == INDEX_RECORD_TYPE]
         if not entries:
             counts["missingExploreMetadataCount"] += 1
@@ -112,6 +118,8 @@ def desired_records(albums, preview_records):
     counts["indexedPhotoCount"] = len(indexed_media)
     marker = ready_marker()
     desired[(marker["albumId"], marker["mediaId"])] = marker
+    exposure_marker = exposure_ready_marker()
+    desired[(exposure_marker["albumId"], exposure_marker["mediaId"])] = exposure_marker
     return desired, counts
 
 
@@ -157,6 +165,7 @@ def apply_plan(table, puts, deletes):
             batch.put_item(Item=item)
     # Read traffic switches only after every entry and definition is durable.
     table.put_item(Item=ready_marker())
+    table.put_item(Item=exposure_ready_marker())
 
 
 def main() -> int:

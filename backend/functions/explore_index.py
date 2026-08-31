@@ -20,9 +20,16 @@ INDEX_PREFIX = "__EXPLORE_V1__"
 FACETS_PARTITION = f"{INDEX_PREFIX}#FACETS"
 SYSTEM_PARTITION = f"{INDEX_PREFIX}#SYSTEM"
 READY_SORT_KEY = "READY"
+EXPOSURE_READY_SORT_KEY = "EXPOSURE_READY"
 COLOR_FAMILIES = frozenset({
     "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "monochrome",
 })
+EXPOSURE_DEFINITIONS = {
+    "aperture": ("wide", "middle", "deep"),
+    "shutter": ("motion", "handheld", "frozen"),
+    "iso": ("clean", "available", "low"),
+    "focal": ("wide", "normal", "telephoto"),
+}
 MEDIA_ID_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 ALBUM_ID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -40,7 +47,75 @@ def facet_partition(mode: str, value: str) -> str:
         if not normalized or len(normalized) > 160:
             raise ValueError("invalid lens facet")
         return f"{INDEX_PREFIX}#LENS#{normalized}"
+    if mode == "exposure":
+        normalized = value.strip().lower() if isinstance(value, str) else ""
+        group, separator, option = normalized.partition(":")
+        if not separator or option not in EXPOSURE_DEFINITIONS.get(group, ()):
+            raise ValueError("unsupported exposure facet")
+        return f"{INDEX_PREFIX}#EXPOSURE#{group}:{option}"
     raise ValueError("unsupported Explore facet mode")
+
+
+def _number_from(value) -> float:
+    match = re.search(r"(\d+(?:\.\d+)?)", str(value or "").replace(",", ""))
+    return float(match.group(1)) if match else 0.0
+
+
+def _shutter_seconds(value) -> float:
+    normalized = re.sub(
+        r"(?:seconds?|secs?|s)$", "", str(value or "").strip().lower()
+    ).strip()
+    fraction = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", normalized)
+    if fraction:
+        denominator = float(fraction.group(2))
+        return float(fraction.group(1)) / denominator if denominator > 0 else 0.0
+    try:
+        numeric = float(normalized)
+    except (TypeError, ValueError):
+        return 0.0
+    return numeric if numeric > 0 else 0.0
+
+
+def exposure_bucket(exif, group: str) -> str | None:
+    if not isinstance(exif, dict):
+        return None
+    if group == "aperture":
+        value = _number_from(exif.get("focalRatio"))
+        if 0 < value <= 2.8:
+            return "wide"
+        if 2.8 < value <= 7.1:
+            return "middle"
+        return "deep" if value > 7.1 else None
+    if group == "shutter":
+        value = _shutter_seconds(exif.get("shutterSpeed"))
+        if value >= (1 / 60):
+            return "motion"
+        if value >= (1 / 320):
+            return "handheld"
+        return "frozen" if value > 0 else None
+    if group == "iso":
+        value = _number_from(exif.get("iso"))
+        if 0 < value <= 200:
+            return "clean"
+        if 200 < value <= 800:
+            return "available"
+        return "low" if value > 800 else None
+    if group == "focal":
+        value = _number_from(exif.get("focalLength"))
+        if 0 < value <= 24:
+            return "wide"
+        if 24 < value <= 70:
+            return "normal"
+        return "telephoto" if value > 70 else None
+    return None
+
+
+def exposure_buckets(exif) -> list[str]:
+    return [
+        f"{group}:{option}"
+        for group in EXPOSURE_DEFINITIONS
+        if (option := exposure_bucket(exif, group))
+    ]
 
 
 def index_sort_key(album_id: str, media_id: str) -> str:
@@ -73,6 +148,13 @@ def metadata_facets(metadata) -> dict[str, str]:
         and lens_key == " ".join(lens.strip().split()).casefold()
     ):
         facets[facet_partition("lens", lens_key)] = " ".join(lens.strip().split())
+    buckets = metadata.get("exposureBuckets")
+    if isinstance(buckets, list):
+        for bucket in set(buckets):
+            try:
+                facets[facet_partition("exposure", bucket)] = bucket
+            except ValueError:
+                continue
     return facets
 
 
@@ -111,6 +193,15 @@ def ready_marker() -> dict:
     }
 
 
+def exposure_ready_marker() -> dict:
+    return {
+        "albumId": SYSTEM_PARTITION,
+        "mediaId": EXPOSURE_READY_SORT_KEY,
+        "recordType": READY_RECORD_TYPE,
+        "indexVersion": INDEX_VERSION,
+    }
+
+
 def desired_index_records(metadata: dict, *, public: bool) -> list[dict]:
     if not public:
         return []
@@ -129,9 +220,19 @@ def index_entry_keys(metadata: dict) -> list[dict]:
         sort_key = index_sort_key(metadata.get("albumId"), metadata.get("mediaId"))
     except (AttributeError, ValueError):
         return []
+    partitions = set(metadata_facets(metadata))
+    # Exposure metadata was added after the original materialized index. Probe
+    # all fixed partitions during reconciliation so legacy rows can never be
+    # stranded when a photo changes or leaves the public catalog.
+    if not isinstance(metadata.get("exposureBuckets"), list):
+        partitions.update(
+            facet_partition("exposure", f"{group}:{option}")
+            for group, options in EXPOSURE_DEFINITIONS.items()
+            for option in options
+        )
     return [
         {"albumId": partition, "mediaId": sort_key}
-        for partition in sorted(metadata_facets(metadata))
+        for partition in sorted(partitions)
     ]
 
 
@@ -165,11 +266,25 @@ def sync_album_index(table, album: dict, metadata_by_id: dict) -> None:
         and album.get("status", "active") == "active"
         and album.get("type", "photo") == "photo"
     )
+    exposure_by_media_id = {}
+    if isinstance(album, dict) and isinstance(album.get("images"), list):
+        for image in album["images"]:
+            if not isinstance(image, dict):
+                continue
+            raw_key = image.get("rawKey") or image.get("key")
+            if not isinstance(raw_key, str) or not raw_key:
+                continue
+            media_id = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:24]
+            exposure_by_media_id[media_id] = exposure_buckets(image.get("exif"))
     records = metadata_by_id.values() if isinstance(metadata_by_id, dict) else []
     with table.batch_writer(overwrite_by_pkeys=["albumId", "mediaId"]) as batch:
         for metadata in records:
             if public:
-                for record in desired_index_records(metadata, public=True):
+                enriched = {
+                    **metadata,
+                    "exposureBuckets": exposure_by_media_id.get(metadata.get("mediaId"), []),
+                }
+                for record in desired_index_records(enriched, public=True):
                     batch.put_item(Item=record)
             else:
                 for key in index_entry_keys(metadata):

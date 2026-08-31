@@ -9,6 +9,7 @@ import {
 } from './api'
 import {
     clearExploreCache,
+    createExploreSeed,
     fetchExploreColors,
     fetchExploreExposures,
     fetchExploreLenses,
@@ -214,6 +215,19 @@ describe('public Explore API', () => {
         expect(request.mock.calls[2][0]).toContain('value=aperture%3Awide')
     })
 
+    it('creates safe shuffle seeds and keeps them in the cache key', async () => {
+        const request = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ items: [], nextCursor: null })))
+        vi.stubGlobal('fetch', request)
+        const seed = createExploreSeed()
+        expect(seed).toMatch(/^[0-9a-f]{16}$/)
+
+        await fetchExplorePhotos({ mode: 'color', value: 'blue', seed })
+        await fetchExplorePhotos({ mode: 'color', value: 'blue', seed: 'fedcba9876543210' })
+        expect(request).toHaveBeenCalledTimes(2)
+        expect(request.mock.calls[0][0]).toContain(`seed=${seed}`)
+        expect(request.mock.calls[1][0]).toContain('seed=fedcba9876543210')
+    })
+
     it('rejects missing filters and unsafe cursors before making a request', async () => {
         const request = vi.fn()
         vi.stubGlobal('fetch', request)
@@ -223,6 +237,10 @@ describe('public Explore API', () => {
             .rejects.toMatchObject({ code: 'INVALID_EXPLORE_FILTER' })
         await expect(fetchExplorePhotos({ mode: 'color', value: 'blue', cursor: 'x'.repeat(4097) }))
             .rejects.toMatchObject({ code: 'BAD_CURSOR' })
+        await expect(fetchExplorePhotos({ mode: 'color', value: 'blue', seed: 'unsafe' }))
+            .rejects.toMatchObject({ code: 'BAD_EXPLORE_SEED' })
+        await expect(fetchExplorePhotos({ mode: 'color', value: 'blue', seed: '0123456789abcdef', cursor: 'next' }))
+            .rejects.toMatchObject({ code: 'BAD_EXPLORE_SEED' })
         expect(request).not.toHaveBeenCalled()
     })
 

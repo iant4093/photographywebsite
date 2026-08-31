@@ -18,6 +18,13 @@ const COLOR_FAMILY_ORDER = Object.freeze([
     'purple',
     'pink',
 ])
+const EXPOSURE_GROUPS = Object.freeze(['aperture', 'shutter', 'iso', 'focal'])
+const EXPOSURE_BUCKETS = new Set([
+    'aperture:wide', 'aperture:middle', 'aperture:deep',
+    'shutter:motion', 'shutter:handheld', 'shutter:frozen',
+    'iso:clean', 'iso:available', 'iso:low',
+    'focal:wide', 'focal:normal', 'focal:telephoto',
+])
 
 function normalizedText(value) {
     return typeof value === 'string' ? value.trim().replaceAll(/\s+/g, ' ').slice(0, 160) : ''
@@ -29,6 +36,58 @@ export function normalizeLens(value) {
 
 export function lensKey(value) {
     return normalizeLens(value).toLocaleLowerCase('en-US')
+}
+
+function numberFrom(value) {
+    const match = String(value || '').replaceAll(',', '').match(/(\d+(?:\.\d+)?)/)
+    return match ? Number(match[1]) : 0
+}
+
+function shutterSeconds(value) {
+    const normalized = String(value || '').trim().toLowerCase().replace(/(?:seconds?|secs?|s)$/, '').trim()
+    const fraction = normalized.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/)
+    if (fraction) {
+        const denominator = Number(fraction[2])
+        return denominator > 0 ? Number(fraction[1]) / denominator : 0
+    }
+    const numeric = Number(normalized)
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0
+}
+
+export function exposureBucket(exif, group) {
+    if (!exif || typeof exif !== 'object') return ''
+    if (group === 'aperture') {
+        const value = numberFrom(exif.focalRatio)
+        if (value > 0 && value <= 2.8) return 'wide'
+        if (value > 2.8 && value <= 7.1) return 'middle'
+        return value > 7.1 ? 'deep' : ''
+    }
+    if (group === 'shutter') {
+        const value = shutterSeconds(exif.shutterSpeed)
+        if (value >= (1 / 60)) return 'motion'
+        if (value >= (1 / 320)) return 'handheld'
+        return value > 0 ? 'frozen' : ''
+    }
+    if (group === 'iso') {
+        const value = numberFrom(exif.iso)
+        if (value > 0 && value <= 200) return 'clean'
+        if (value > 200 && value <= 800) return 'available'
+        return value > 800 ? 'low' : ''
+    }
+    if (group === 'focal') {
+        const value = numberFrom(exif.focalLength)
+        if (value > 0 && value <= 24) return 'wide'
+        if (value > 24 && value <= 70) return 'normal'
+        return value > 70 ? 'telephoto' : ''
+    }
+    return ''
+}
+
+export function exposureBuckets(exif) {
+    return EXPOSURE_GROUPS.flatMap((group) => {
+        const bucket = exposureBucket(exif, group)
+        return bucket ? [`${group}:${bucket}`] : []
+    })
 }
 
 function rgbToHsl(red, green, blue) {
@@ -159,5 +218,9 @@ export function isCompleteExploreMetadata(metadata) {
         && typeof metadata.lens === 'string'
         && metadata.lens.length >= 1
         && metadata.lensKey === lensKey(metadata.lens)
+        && Array.isArray(metadata.exposureBuckets)
+        && metadata.exposureBuckets.every(value => (
+            typeof value === 'string' && EXPOSURE_BUCKETS.has(value)
+        ))
     )
 }

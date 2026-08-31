@@ -486,7 +486,13 @@ class UpdateImageBranchTests(unittest.TestCase):
                 {"rawKey": RAW_KEY_2, "thumbKey": THUMB_KEY},
             ],
         )
-        response, table = self._call({"rawKey": RAW_KEY, "thumbKey": THUMB_KEY_2, "blurhash": "new"}, record)
+        with patch.object(update_image, "invalidate_public_api") as invalidate:
+            response, table = self._call({"rawKey": RAW_KEY, "thumbKey": THUMB_KEY_2, "blurhash": "new"}, record)
+        invalidate.assert_called_once_with(
+            album_id=ALBUM_ID,
+            catalog=True,
+            reason="album-media-updated",
+        )
         self.assertEqual(response["statusCode"], 200)
         self.assertNotIn("coverThumbKey", table.update_item.call_args.kwargs["UpdateExpression"])
         response, _ = self._call(

@@ -63,6 +63,8 @@ def invalidate_public_api(*, album_id=None, catalog=False, reason="public-album"
         paths.extend((
             "/api/public/albums",
             "/api/public/albums?*",
+            "/api/public/explore",
+            "/api/public/explore?*",
             "/api/public/random-photos",
             "/api/public/random-photos?*",
         ))

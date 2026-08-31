@@ -2,6 +2,7 @@ import { ApiError, apiFetch, fetchRandomPhotos } from './api'
 import { isSafeCursor, normalizePage } from './apiResponse'
 
 const EXPLORE_CACHE_TTL_MS = 5 * 60_000
+const EXPLORE_SEED_PATTERN = /^[0-9a-f]{16}$/
 const responseCache = new Map()
 const pendingRequests = new Map()
 
@@ -54,6 +55,12 @@ export function fetchExplorePhotos(params, options = {}) {
         return Promise.reject(new ApiError('Choose an Explore filter first.', { code: 'INVALID_EXPLORE_FILTER' }))
     }
     const query = new URLSearchParams({ mode, value, limit: String(params?.limit || 24) })
+    if (params?.seed) {
+        if (params?.cursor || !EXPLORE_SEED_PATTERN.test(params.seed)) {
+            return Promise.reject(new ApiError('The shuffle session was invalid.', { code: 'BAD_EXPLORE_SEED' }))
+        }
+        query.set('seed', params.seed)
+    }
     if (params?.cursor) {
         if (!isSafeCursor(params.cursor)) {
             return Promise.reject(new ApiError('The pagination cursor was invalid.', { code: 'BAD_CURSOR' }))
@@ -62,6 +69,17 @@ export function fetchExplorePhotos(params, options = {}) {
     }
     const path = `/public/explore?${query}`
     return cachedRequest(path, () => apiFetch(path).then(normalizePage), options.signal)
+}
+
+export function createExploreSeed() {
+    const values = new Uint32Array(2)
+    if (globalThis.crypto?.getRandomValues) {
+        globalThis.crypto.getRandomValues(values)
+    } else {
+        values[0] = Math.floor(Math.random() * 0x1_0000_0000)
+        values[1] = Math.floor(Math.random() * 0x1_0000_0000)
+    }
+    return [...values].map(value => value.toString(16).padStart(8, '0')).join('')
 }
 
 export function fetchExploreLenses(options = {}) {

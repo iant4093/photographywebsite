@@ -9,8 +9,8 @@ WAF is defense in depth.
 
 - The browser API base is `/api`.
 - `/api/public/*` caches only anonymous `GET`/`HEAD` responses and varies only
-  on the reviewed `cursor`, `limit`, `mode`, `type`, and `value` query keys plus
-  compression.
+  on the reviewed `cursor`, `limit`, `mode`, `seed`, `type`, and `value` query
+  keys plus compression.
 - `/api/*` otherwise has caching disabled and forwards only the reviewed
   methods, query strings, and API/auth/CORS headers. It forwards no cookies.
 - CloudFront reaches the TLS 1.2 regional custom domain through the fixed `api`
@@ -28,9 +28,9 @@ WAF is defense in depth.
   A per-IP `/api/` rate rule limits single-source floods, and a separate constant-
   key `/api/` circuit breaker bounds distributed origin traffic. The circuit
   breaker intentionally favors bounded AWS origin spend over API availability;
-  static pages remain outside both rate scopes. The scan-backed Explore route
-  has lower, dedicated per-IP and global limits so arbitrary filter values cannot
-  turn repeated metadata scans into unbounded DynamoDB usage.
+  static pages remain outside both rate scopes. The Explore route has lower,
+  dedicated per-IP and global limits so arbitrary filter values cannot turn
+  repeated requests into unbounded DynamoDB usage.
 
 ## Validate and update
 

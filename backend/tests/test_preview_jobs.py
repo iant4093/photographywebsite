@@ -117,7 +117,14 @@ class PreviewLifecycleTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         load.assert_called_once_with(album, strict=True)
         self.assertEqual(set(delete.call_args.args[0]), {raw_key, *preview_keys.values()})
-        delete_metadata.assert_called_once_with(ALBUM_ID, {media_id}, {media_id: []})
+        delete_metadata.assert_called_once()
+        self.assertEqual(delete_metadata.call_args.args[:2], (ALBUM_ID, {media_id}))
+        index_keys = delete_metadata.call_args.args[2][media_id]
+        self.assertEqual(len(index_keys), 12)
+        self.assertTrue(all(
+            key["albumId"].startswith("__EXPLORE_V1__#EXPOSURE#")
+            for key in index_keys
+        ))
 
     def test_visibility_key_resolution_never_uses_availability_fallback(self):
         album = {"albumId": ALBUM_ID, "images": []}

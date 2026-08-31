@@ -39,6 +39,7 @@ import {
 import {
     EXPLORE_VERSION,
     analyzePixels,
+    exposureBuckets,
     isCompleteExploreMetadata,
     lensKey,
     normalizeLens,
@@ -163,6 +164,7 @@ async function extractExploreMetadata(imageBytes, image) {
         ...colors,
         lens,
         lensKey: lensKey(lens),
+        exposureBuckets: exposureBuckets(image?.exif),
     }
 }
 
@@ -564,7 +566,7 @@ async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, out
     await documentClient.send(new UpdateCommand({
         TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
         Key: { albumId: resolved.job.albumId, mediaId },
-        UpdateExpression: 'SET #status = :ready, sourceSha256 = :sourceSha256, dimensions = :dimensions, completedAt = :completedAt, exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey REMOVE #jobId',
+        UpdateExpression: 'SET #status = :ready, sourceSha256 = :sourceSha256, dimensions = :dimensions, completedAt = :completedAt, exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, exposureBuckets = :exposureBuckets REMOVE #jobId',
         ConditionExpression: '#status = :pending AND #jobId = :jobId AND #previewVersion = :version AND #previewKeys = :keys',
         ExpressionAttributeNames: {
             '#status': 'status',
@@ -589,6 +591,7 @@ async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, out
             ':colorFamilies': exploreMetadata.colorFamilies,
             ':lens': exploreMetadata.lens,
             ':lensKey': exploreMetadata.lensKey,
+            ':exposureBuckets': exploreMetadata.exposureBuckets,
         },
     }))
 }
@@ -600,7 +603,7 @@ async function ensureExploreMetadata(resolved, metadata) {
     await documentClient.send(new UpdateCommand({
         TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
         Key: { albumId: resolved.job.albumId, mediaId: mediaIdForKey(resolved.job.rawKey) },
-        UpdateExpression: 'SET exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, updatedAt = :updatedAt',
+        UpdateExpression: 'SET exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, exposureBuckets = :exposureBuckets, updatedAt = :updatedAt',
         ConditionExpression: '#status = :ready AND #previewVersion = :version AND #previewKeys = :keys',
         ExpressionAttributeNames: {
             '#status': 'status',
@@ -616,6 +619,7 @@ async function ensureExploreMetadata(resolved, metadata) {
             ':colorFamilies': exploreMetadata.colorFamilies,
             ':lens': exploreMetadata.lens,
             ':lensKey': exploreMetadata.lensKey,
+            ':exposureBuckets': exploreMetadata.exposureBuckets,
             ':updatedAt': new Date().toISOString(),
         },
     }))

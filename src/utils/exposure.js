@@ -103,16 +103,27 @@ function shuffled(values, random) {
     return result
 }
 
-export function buildSettingsRound(images, previousId = '', random = Math.random) {
+export function buildSettingsDeck(images, random = Math.random) {
+    return shuffled(images.filter(hasCompleteSettings), random)
+}
+
+export function buildSettingsRoundForImage(images, image, random = Math.random) {
+    if (!image || !hasCompleteSettings(image)) return null
     const eligible = images.filter(hasCompleteSettings)
     if (!eligible.length) return null
-    const alternatives = eligible.filter(image => (image.mediaId || image.id || image.url) !== previousId)
-    const candidates = alternatives.length ? alternatives : eligible
-    const image = candidates[Math.floor(random() * candidates.length)]
     const field = QUIZ_FIELDS[Math.floor(random() * QUIZ_FIELDS.length)]
     const answer = String(field.read(image) || '').trim()
     const observed = eligible.map(candidate => String(field.read(candidate) || '').trim()).filter(Boolean)
     const distractors = shuffled([...new Set([...observed, ...field.defaults].filter(value => value !== answer))], random).slice(0, 3)
     const options = shuffled([answer, ...distractors], random)
     return { image, field: field.id, prompt: field.prompt, answer, options }
+}
+
+export function buildSettingsRound(images, previousId = '', random = Math.random) {
+    const eligible = images.filter(hasCompleteSettings)
+    if (!eligible.length) return null
+    const alternatives = eligible.filter(image => (image.mediaId || image.id || image.url) !== previousId)
+    const candidates = alternatives.length ? alternatives : eligible
+    const image = candidates[Math.floor(random() * candidates.length)]
+    return buildSettingsRoundForImage(eligible, image, random)
 }

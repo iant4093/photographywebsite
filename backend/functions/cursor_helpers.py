@@ -8,7 +8,7 @@ from validation_helpers import ValidationError
 
 ALLOWED_CURSOR_KEY_NAMES = frozenset({
     "after", "albumId", "createdAt", "mediaId", "offset", "ownerSub", "phase", "seed",
-    "version", "visibility",
+    "total", "version", "visibility",
 })
 
 

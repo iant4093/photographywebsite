@@ -114,18 +114,21 @@ bounded `SendMessageBatch` calls and requires the reviewed
 
 ## Explore materialized index
 
-Color and lens discovery use sparse reference rows inside the retained
+Color, lens, and exposure discovery use sparse reference rows inside the retained
 `PreviewMetadataTable`. The public reader always joins those references back to
 the current preview metadata and authoritative public album manifest; index rows
 alone can never make private or deleted media public. Until the READY marker is
-present, the deployed reader retains the bounded scan fallback.
+present, color and lens readers retain the bounded scan fallback. Exposure uses
+its own EXPOSURE_READY marker so a deployment can keep serving the legacy
+five-minute snapshot until all historical exposure rows are durable.
 
 `backfill_explore_index.py` is dry-run by default and prints only aggregate
 counts plus a content-bound plan digest. Apply requires the exact account ID,
 put/delete counts, digest, and `APPLY_EXPLORE_INDEX_BACKFILL` confirmation. The
-script writes the READY marker last, re-reads both source tables, verifies zero
-remaining changes, and only then invalidates the Explore API cache. Run it only
-after the online worker, album visibility, and deletion paths have been deployed.
+script writes both readiness markers last, re-reads both source tables, verifies
+zero remaining changes, and only then invalidates the Explore API cache. Run it
+only after the online worker, album visibility, and deletion paths have been
+deployed.
 
 ## Production change boundary
 

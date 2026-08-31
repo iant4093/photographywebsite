@@ -112,7 +112,7 @@ def handler(event, context):
         if album.get("visibility") == "public":
             invalidate_public_api(
                 album_id=album_id,
-                catalog=is_cover,
+                catalog=True,
                 reason="album-media-updated",
             )
         _audit(event, context, "success", "media_updated")

@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const exploreApi = vi.hoisted(() => ({
+  createExploreSeed: vi.fn(() => '0123456789abcdef'),
   fetchExploreColors: vi.fn(),
   fetchExploreExposures: vi.fn(),
   fetchExploreLenses: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock('../utils/mediaUrls', () => ({
   startBrowserDownload: vi.fn(),
 }))
 vi.mock('../components/ProgressiveImage', () => ({
-  default: ({ alt, src, className }) => <img alt={alt} src={src} className={className} />,
+  default: ({ alt, src, className, blurhash }) => <img alt={alt} src={src} className={className} data-blurhash={blurhash} />,
 }))
 vi.mock('../components/PhotoLightbox', () => ({
   default: ({ images, index, ariaLabel, onClose, onNext, onPrevious, onDownload }) => (
@@ -46,6 +47,7 @@ import Explore from './Explore'
 const photo = {
   albumId: 'album-1', albumTitle: 'Blue Mountain', albumCategory: 'Hikes',
   mediaId: 'media-1', id: 'media-1', thumbnailUrl: 'https://media.test/photo.webp',
+  blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
   previewSrcSet: [{ width: 640, url: 'https://media.test/photo.webp' }],
   palette: ['#123456', '#567890'], width: 1920, height: 1280,
   exif: {
@@ -105,7 +107,7 @@ describe('Explore', () => {
       { mode: 'exposure', value: 'iso:clean', limit: 24 },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ))
-    expect(screen.getByRole('button', { name: /Clean light/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { pressed: true })).toHaveTextContent('Clean light')
   })
 
   it('restores the selected exposure setting from the URL after a refresh', async () => {
@@ -163,7 +165,7 @@ describe('Explore', () => {
     exploreApi.fetchExplorePhotos.mockResolvedValue({ items: [photo, secondPhoto], total: 50, nextCursor: null })
     render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Show another random set' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show more' }))
     expect(await screen.findByText('Green Valley')).toBeInTheDocument()
     expect(screen.getAllByText('Blue Mountain')).toHaveLength(1)
     expect(screen.getAllByText('50')).toHaveLength(2)
@@ -196,6 +198,26 @@ describe('Explore', () => {
     expect(screen.getAllByText(/56mm/).length).toBeGreaterThan(0)
   })
 
+  it('shows every eligible settings photograph once before repeating the deck', async () => {
+    const thirdPhoto = {
+      ...photo,
+      albumId: 'album-3', albumTitle: 'Amber Coast', mediaId: 'media-3', id: 'media-3',
+      thumbnailUrl: 'https://media.test/third.webp',
+    }
+    exploreApi.fetchExploreSample.mockResolvedValue({ images: [photo, secondPhoto, thirdPhoto] })
+    render(<MemoryRouter initialEntries={['/explore/guess-settings']}><Explore /></MemoryRouter>)
+
+    const seen = []
+    for (let index = 0; index < 3; index += 1) {
+      const image = await screen.findByRole('img', { name: /A photograph from/ })
+      seen.push(image.getAttribute('alt'))
+      if (index < 2) fireEvent.click(screen.getByRole('button', { name: 'Skip photograph' }))
+    }
+    expect(new Set(seen).size).toBe(3)
+    fireEvent.click(screen.getByRole('button', { name: 'Skip photograph' }))
+    expect((await screen.findByRole('img', { name: /A photograph from/ })).getAttribute('alt')).not.toBe(seen[2])
+  })
+
   it('browses available colors and opens matching photographs with full metadata', async () => {
     render(<MemoryRouter initialEntries={['/explore/colors']}><Explore /></MemoryRouter>)
     expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
@@ -205,6 +227,7 @@ describe('Explore', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
     expect(screen.getByLabelText('Extracted color palette')).toBeInTheDocument()
+    expect(document.querySelector('.explore-photo-image')).toHaveAttribute('data-blurhash', photo.blurhash)
     fireEvent.click(screen.getByRole('button', { name: 'View photo from Blue Mountain' }))
     expect(screen.getByRole('dialog', { name: 'Photographs in Color Explorer' })).toHaveTextContent('Canon EOS R7')
   })
@@ -253,9 +276,37 @@ describe('Explore', () => {
       .mockResolvedValueOnce({ items: [photo], nextCursor: 'safe-cursor' })
       .mockResolvedValueOnce({ items: [photo, secondPhoto], nextCursor: null })
     render(<MemoryRouter initialEntries={['/explore/colors']}><Explore /></MemoryRouter>)
-    fireEvent.click(await screen.findByRole('button', { name: 'Show another random set' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show more' }))
     expect(await screen.findByText('Green Valley')).toBeInTheDocument()
     expect(screen.getAllByText('Blue Mountain')).toHaveLength(1)
+  })
+
+  it('requests a fresh seeded color shuffle and replaces the current page', async () => {
+    exploreApi.fetchExplorePhotos
+      .mockResolvedValueOnce({ items: [photo], nextCursor: null })
+      .mockResolvedValueOnce({ items: [secondPhoto], nextCursor: null })
+    render(<MemoryRouter initialEntries={['/explore/colors']}><Explore /></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reshuffle Blue photographs' }))
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(screen.queryByText('Blue Mountain')).toBeNull()
+    expect(exploreApi.fetchExplorePhotos).toHaveBeenLastCalledWith({
+      mode: 'color', value: 'blue', limit: 24, seed: '0123456789abcdef',
+    })
+  })
+
+  it('requests a fresh seeded exposure shuffle and preserves the indexed total', async () => {
+    exploreApi.fetchExplorePhotos.mockResolvedValueOnce({
+      items: [secondPhoto], total: 120, nextCursor: null,
+    })
+    render(<MemoryRouter initialEntries={['/explore/exposure']}><Explore /></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reshuffle Aperture Wide open photographs' }))
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(screen.getAllByText('120')).toHaveLength(2)
+    expect(exploreApi.fetchExplorePhotos).toHaveBeenLastCalledWith({
+      mode: 'exposure', value: 'aperture:wide', limit: 24, seed: '0123456789abcdef',
+    })
   })
 
   it('keeps lightbox navigation and downloads available', async () => {

@@ -385,7 +385,7 @@
 
 .linen-site .explore-results-heading {
   display: flex;
-  align-items: baseline;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
   margin-block: clamp(2rem, 4vw, 3.5rem) 1.25rem;
@@ -397,9 +397,48 @@
   text-transform: uppercase;
 }
 
+.linen-site .explore-results-heading > div {
+  display: grid;
+  gap: 0.32rem;
+}
+
 .linen-site .explore-results-heading strong {
   color: var(--color-charcoal);
   font: 400 1.5rem/1 var(--font-serif);
+}
+
+.linen-site .explore-reshuffle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.4rem;
+  padding: 0.55rem 0.75rem;
+  color: var(--color-charcoal);
+  border: 1px solid var(--color-charcoal);
+  background: transparent;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 180ms ease, background-color 180ms ease;
+}
+
+.linen-site .explore-reshuffle svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 1.6;
+}
+
+.linen-site .explore-reshuffle:hover:not(:disabled) {
+  color: var(--color-cream);
+  background: var(--color-charcoal);
+}
+
+.linen-site .explore-reshuffle:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .linen-site .explore-grid {
@@ -873,6 +912,15 @@
 }
 
 @media (max-width: 430px) {
+  .linen-site .explore-results-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .linen-site .explore-reshuffle {
+    width: 100%;
+  }
+
   .linen-site .explore-grid {
     grid-template-columns: 1fr;
   }

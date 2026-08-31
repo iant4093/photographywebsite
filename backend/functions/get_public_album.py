@@ -16,6 +16,8 @@ from boto3.dynamodb.conditions import Attr, Key
 
 from cursor_helpers import decode_cursor, encode_cursor
 from explore_index import (
+    EXPOSURE_DEFINITIONS,
+    EXPOSURE_READY_SORT_KEY,
     FACETS_PARTITION,
     FACET_RECORD_TYPE,
     INDEX_PREFIX,
@@ -24,6 +26,7 @@ from explore_index import (
     READY_RECORD_TYPE,
     READY_SORT_KEY,
     SYSTEM_PARTITION,
+    exposure_bucket,
     facet_partition,
 )
 from media_access import (
@@ -83,15 +86,9 @@ EXPLORE_COLOR_ORDER = (
     "blue", "cyan", "green", "yellow", "orange", "red", "pink", "purple", "monochrome",
 )
 EXPLORE_COLORS = frozenset(EXPLORE_COLOR_ORDER)
-EXPOSURE_DEFINITIONS = {
-    "aperture": ("wide", "middle", "deep"),
-    "shutter": ("motion", "handheld", "frozen"),
-    "iso": ("clean", "available", "low"),
-    "focal": ("wide", "normal", "telephoto"),
-}
 EXPLORE_PROJECTION = (
     "albumId,mediaId,previewVersion,previewKeys,#status,dimensions,exploreVersion,"
-    "palette,colorFamilies,lens,lensKey"
+    "palette,colorFamilies,lens,lensKey,exposureBuckets"
 )
 EXPLORE_INDEX_CURSOR_PATTERN = re.compile(
     r"^[a-f0-9]{16}#[0-9a-f-]{36}#[a-f0-9]{24}$"
@@ -99,6 +96,8 @@ EXPLORE_INDEX_CURSOR_PATTERN = re.compile(
 EXPLORE_INDEX_MAX_EVALUATED = 5000
 _index_readiness = {"ready": False, "expires_at": 0.0}
 _index_readiness_lock = threading.Lock()
+_exposure_index_readiness = {"ready": False, "expires_at": 0.0}
+_exposure_index_readiness_lock = threading.Lock()
 _exposure_items_cache = {"items": None, "expires_at": 0.0}
 _exposure_items_lock = threading.Lock()
 
@@ -128,9 +127,30 @@ def _explore_index_ready():
         return ready
 
 
+def _exposure_index_ready():
+    now = time.monotonic()
+    with _exposure_index_readiness_lock:
+        if now < _exposure_index_readiness["expires_at"]:
+            return _exposure_index_readiness["ready"]
+        item = _preview_table().get_item(
+            Key={"albumId": SYSTEM_PARTITION, "mediaId": EXPOSURE_READY_SORT_KEY},
+            ConsistentRead=False,
+            ProjectionExpression="recordType,indexVersion",
+        ).get("Item")
+        ready = bool(
+            isinstance(item, dict)
+            and item.get("recordType") == READY_RECORD_TYPE
+            and item.get("indexVersion") == INDEX_VERSION
+        )
+        _exposure_index_readiness.update(ready=ready, expires_at=now + (30 if ready else 5))
+        return ready
+
+
 def _reset_explore_index_cache_for_tests():
     with _index_readiness_lock:
         _index_readiness.update(ready=False, expires_at=0.0)
+    with _exposure_index_readiness_lock:
+        _exposure_index_readiness.update(ready=False, expires_at=0.0)
     with _exposure_items_lock:
         _exposure_items_cache.update(items=None, expires_at=0.0)
 
@@ -145,6 +165,22 @@ def _positive_limit(value, default=EXPLORE_DEFAULT_LIMIT, maximum=EXPLORE_MAX_LI
     if parsed < 1 or parsed > maximum:
         raise ValidationError(f"limit must be between 1 and {maximum}")
     return parsed
+
+
+def _explore_seed(value=None):
+    if value in (None, ""):
+        return secrets.token_hex(8)
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{16}", value):
+        raise ValidationError("seed must be 16 lowercase hexadecimal characters")
+    return value
+
+
+def _validate_shuffle_params(params):
+    seed = params.get("seed")
+    if seed not in (None, ""):
+        _explore_seed(seed)
+        if params.get("cursor"):
+            raise ValidationError("seed cannot be combined with a cursor")
 
 
 def _normalized_lens(value):
@@ -285,6 +321,7 @@ def _explore_item(metadata, album):
         "previewSrcSet": previews,
         "width": int(largest.get("width") or image.get("width") or 0),
         "height": int(largest.get("height") or image.get("height") or 0),
+        "blurhash": str(image.get("blurhash") or "")[:200],
         "palette": [value for value in palette[:5] if isinstance(value, str)],
         "lens": str(metadata.get("lens") or "")[:160],
         "exif": safe_exif,
@@ -298,59 +335,9 @@ def _explore_filter(mode, value):
     return base & Attr("lensKey").eq(value.casefold())
 
 
-def _exposure_number(value):
-    match = re.search(r"(\d+(?:\.\d+)?)", str(value or "").replace(",", ""))
-    return float(match.group(1)) if match else 0.0
-
-
-def _shutter_seconds(value):
-    normalized = re.sub(
-        r"(?:seconds?|secs?|s)$", "", str(value or "").strip().lower()
-    ).strip()
-    fraction = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", normalized)
-    if fraction:
-        denominator = float(fraction.group(2))
-        return float(fraction.group(1)) / denominator if denominator > 0 else 0.0
-    try:
-        numeric = float(normalized)
-    except (TypeError, ValueError):
-        return 0.0
-    return numeric if numeric > 0 else 0.0
-
-
 def _exposure_bucket(item, group):
     exif = item.get("exif") if isinstance(item, dict) else None
-    if not isinstance(exif, dict):
-        return None
-    if group == "aperture":
-        value = _exposure_number(exif.get("focalRatio"))
-        if 0 < value <= 2.8:
-            return "wide"
-        if 2.8 < value <= 7.1:
-            return "middle"
-        return "deep" if value > 7.1 else None
-    if group == "shutter":
-        value = _shutter_seconds(exif.get("shutterSpeed"))
-        if value >= (1 / 60):
-            return "motion"
-        if value >= (1 / 320):
-            return "handheld"
-        return "frozen" if value > 0 else None
-    if group == "iso":
-        value = _exposure_number(exif.get("iso"))
-        if 0 < value <= 200:
-            return "clean"
-        if 200 < value <= 800:
-            return "available"
-        return "low" if value > 800 else None
-    if group == "focal":
-        value = _exposure_number(exif.get("focalLength"))
-        if 0 < value <= 24:
-            return "wide"
-        if 24 < value <= 70:
-            return "normal"
-        return "telephoto" if value > 70 else None
-    return None
+    return exposure_bucket(exif, group)
 
 
 def _normalized_exposure_value(value):
@@ -408,11 +395,13 @@ def _all_public_explore_items():
         return cached
 
 
-def _exposure_page_payload(items, value, limit, cursor_value=None):
+def _exposure_page_payload(items, value, limit, cursor_value=None, seed_value=None):
     group, option, normalized = _normalized_exposure_value(value)
     scope = f"explore:exposure:{normalized}"
     cursor = decode_cursor(cursor_value, scope)
     if cursor:
+        if seed_value:
+            raise ValidationError("seed cannot be combined with a cursor")
         seed = cursor.get("seed", "")
         offset_text = cursor.get("offset", "")
         if not re.fullmatch(r"[0-9a-f]{16}", seed) or not offset_text.isdigit():
@@ -421,7 +410,7 @@ def _exposure_page_payload(items, value, limit, cursor_value=None):
         if offset < 1 or offset > 100000:
             raise ValidationError("Invalid cursor")
     else:
-        seed = secrets.token_hex(8)
+        seed = _explore_seed(seed_value)
         offset = 0
 
     matches = [item for item in items if _exposure_bucket(item, group) == option]
@@ -472,7 +461,7 @@ def _exposure_options_response(params):
 
 
 def _exposure_media_response(params):
-    if any(name not in {"mode", "value", "limit", "cursor"} for name in params):
+    if any(name not in {"mode", "value", "limit", "cursor", "seed"} for name in params):
         raise ValidationError("Unsupported explore parameter")
     _normalized_exposure_value(params.get("value"))
     limit = _positive_limit(params.get("limit"))
@@ -481,6 +470,7 @@ def _exposure_media_response(params):
         params.get("value"),
         limit,
         params.get("cursor"),
+        params.get("seed"),
     )
     return json_response(
         200,
@@ -569,30 +559,45 @@ def _index_query_page(partition, *, seed, phase, after, limit):
     )
 
 
-def _indexed_media_payload(mode, value, limit, cursor_value=None):
+def _indexed_media_payload(mode, value, limit, cursor_value=None, seed_value=None, total=None):
     scope = f"explore:{mode}:{value.casefold()}"
     cursor = decode_cursor(cursor_value, scope)
     if cursor and "offset" in cursor:
         return None
     if cursor:
+        if seed_value:
+            raise ValidationError("seed cannot be combined with a cursor")
         if cursor.get("version") != str(INDEX_VERSION):
             raise ValidationError("Invalid cursor")
         seed = cursor.get("seed", "")
         after = cursor.get("after") or None
         phase_text = cursor.get("phase", "")
+        total_text = cursor.get("total")
         if (
             not re.fullmatch(r"[0-9a-f]{16}", seed)
             or phase_text not in {"0", "1"}
             or (after is not None and not EXPLORE_INDEX_CURSOR_PATTERN.fullmatch(after))
         ):
             raise ValidationError("Invalid cursor")
+        if mode == "exposure":
+            if (
+                not isinstance(total_text, str)
+                or not total_text.isdigit()
+                or len(total_text) > 7
+            ):
+                raise ValidationError("Invalid cursor")
+            total = int(total_text)
+            if total > 1_000_000:
+                raise ValidationError("Invalid cursor")
         phase = int(phase_text)
     else:
-        seed = secrets.token_hex(8)
+        seed = _explore_seed(seed_value)
         phase = 0
         after = None
 
     partition = facet_partition(mode, value)
+    if mode == "exposure" and total is None:
+        total = _index_partition_count(partition)
     output = []
     evaluated = 0
     next_key = None
@@ -637,6 +642,8 @@ def _indexed_media_payload(mode, value, limit, cursor_value=None):
             }
             if last_processed:
                 next_key["after"] = last_processed
+            if mode == "exposure":
+                next_key["total"] = str(total)
             break
         if phase == 0:
             phase = 1
@@ -648,29 +655,42 @@ def _indexed_media_payload(mode, value, limit, cursor_value=None):
 
     if evaluated >= EXPLORE_INDEX_MAX_EVALUATED and len(output) < limit:
         raise RuntimeError("Explore index validation exceeded safe limit")
-    return {
+    payload = {
         "items": output,
         "nextCursor": encode_cursor(next_key, scope),
     }
+    if mode == "exposure":
+        payload["total"] = total
+    return payload
 
 
 def _indexed_media_response(params):
-    allowed = {"mode", "value", "limit", "cursor"}
+    allowed = {"mode", "value", "limit", "cursor", "seed"}
     if any(name not in allowed for name in params):
         raise ValidationError("Unsupported explore parameter")
     mode = params.get("mode")
-    if mode not in {"color", "lens"}:
-        raise ValidationError("mode must be color or lens")
+    if mode not in {"color", "lens", "exposure"}:
+        raise ValidationError("mode must be color, lens, or exposure")
     value = params.get("value")
     if mode == "color":
         value = str(value or "").strip().lower()
         if value not in EXPLORE_COLORS:
             raise ValidationError("Unsupported color family")
-    else:
+    elif mode == "lens":
         value = _normalized_lens(value)
+    else:
+        _group, _option, value = _normalized_exposure_value(value)
     limit = _positive_limit(params.get("limit"))
-    payload = _indexed_media_payload(mode, value, limit, params.get("cursor"))
+    payload = _indexed_media_payload(
+        mode,
+        value,
+        limit,
+        params.get("cursor"),
+        params.get("seed"),
+    )
     if payload is None:
+        if mode == "exposure":
+            return _exposure_media_response(params)
         return _scan_explore_media_response(None, params)
     return json_response(
         200,
@@ -720,9 +740,47 @@ def _indexed_options_response(mode):
     )
 
 
+def _indexed_exposure_options_response():
+    definitions = {
+        facet_partition("exposure", f"{group}:{option}"): (group, option)
+        for group, options in EXPOSURE_DEFINITIONS.items()
+        for option in options
+    }
+    counts = _parallel_partition_counts(definitions)
+    groups = []
+    first_value = None
+    for group, options in EXPOSURE_DEFINITIONS.items():
+        rows = []
+        for option in options:
+            value = f"{group}:{option}"
+            count = counts.get(facet_partition("exposure", value), 0)
+            rows.append({"id": option, "photos": count})
+            if first_value is None and count:
+                first_value = value
+        groups.append({"id": group, "options": rows})
+    initial_page = (
+        _indexed_media_payload(
+            "exposure",
+            first_value,
+            EXPLORE_DEFAULT_LIMIT,
+            total=counts.get(facet_partition("exposure", first_value), 0),
+        )
+        if first_value
+        else {"items": [], "total": 0, "nextCursor": None}
+    )
+    return json_response(
+        200,
+        {
+            "items": groups,
+            "initialPage": {"value": first_value, **initial_page},
+        },
+        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
 def _scan_explore_media_response(event, params):
     del event
-    allowed = {"mode", "value", "limit", "cursor"}
+    allowed = {"mode", "value", "limit", "cursor", "seed"}
     if any(name not in allowed for name in params):
         raise ValidationError("Unsupported explore parameter")
     mode = params.get("mode")
@@ -739,6 +797,8 @@ def _scan_explore_media_response(event, params):
     scope = f"explore:{mode}:{value.casefold()}"
     cursor = decode_cursor(params.get("cursor"), scope)
     if cursor:
+        if params.get("seed"):
+            raise ValidationError("seed cannot be combined with a cursor")
         seed = cursor.get("seed", "")
         offset_text = cursor.get("offset", "")
         if not re.fullmatch(r"[0-9a-f]{16}", seed) or not offset_text.isdigit():
@@ -747,7 +807,7 @@ def _scan_explore_media_response(event, params):
         if offset < 1 or offset > 100000:
             raise ValidationError("Invalid cursor")
     else:
-        seed = secrets.token_hex(8)
+        seed = _explore_seed(params.get("seed"))
         offset = 0
     candidates = []
     scan_cursor = None
@@ -883,23 +943,36 @@ def _explore_response(event):
         raise ValidationError("Invalid explore parameters")
     mode = params.get("mode")
     if mode == "exposures":
+        if any(name != "mode" for name in params):
+            raise ValidationError("Exposure options do not accept additional parameters")
+        if _exposure_index_ready():
+            return _indexed_exposure_options_response()
         return _exposure_options_response(params)
     if mode == "exposure":
+        if any(name not in {"mode", "value", "limit", "cursor", "seed"} for name in params):
+            raise ValidationError("Unsupported explore parameter")
+        _normalized_exposure_value(params.get("value"))
+        _positive_limit(params.get("limit"))
+        _validate_shuffle_params(params)
+        if _exposure_index_ready():
+            return _indexed_media_response(params)
         return _exposure_media_response(params)
     if mode in {"colors", "lenses"}:
         if any(name != "mode" for name in params):
             raise ValidationError("Explore options do not accept additional parameters")
     elif mode == "color":
-        if any(name not in {"mode", "value", "limit", "cursor"} for name in params):
+        if any(name not in {"mode", "value", "limit", "cursor", "seed"} for name in params):
             raise ValidationError("Unsupported explore parameter")
         if str(params.get("value") or "").strip().lower() not in EXPLORE_COLORS:
             raise ValidationError("Unsupported color family")
         _positive_limit(params.get("limit"))
+        _validate_shuffle_params(params)
     elif mode == "lens":
-        if any(name not in {"mode", "value", "limit", "cursor"} for name in params):
+        if any(name not in {"mode", "value", "limit", "cursor", "seed"} for name in params):
             raise ValidationError("Unsupported explore parameter")
         _normalized_lens(params.get("value"))
         _positive_limit(params.get("limit"))
+        _validate_shuffle_params(params)
     else:
         raise ValidationError("mode must be color, lens, exposure, colors, lenses, or exposures")
     if _explore_index_ready():

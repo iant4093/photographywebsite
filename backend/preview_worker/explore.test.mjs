@@ -5,6 +5,8 @@ import {
     EXPLORE_VERSION,
     MANUAL_LENS_FALLBACK,
     analyzePixels,
+    exposureBucket,
+    exposureBuckets,
     isCompleteExploreMetadata,
     lensKey,
     normalizeLens,
@@ -18,6 +20,18 @@ test('normalizes stored lenses and applies the manual-lens fallback', () => {
     assert.equal(normalizeLens('  Sigma   18-50mm F2.8  '), 'Sigma 18-50mm F2.8')
     assert.equal(normalizeLens(''), MANUAL_LENS_FALLBACK)
     assert.equal(lensKey('SIGMA 18-50MM'), 'sigma 18-50mm')
+})
+
+test('maps authoritative EXIF values into the fixed exposure index buckets', () => {
+    const exif = {
+        focalRatio: 'f/8', shutterSpeed: '1/30s', iso: 'ISO 1,600', focalLength: '400mm',
+    }
+    assert.equal(exposureBucket(exif, 'aperture'), 'deep')
+    assert.equal(exposureBucket(exif, 'shutter'), 'motion')
+    assert.deepEqual(exposureBuckets(exif), [
+        'aperture:deep', 'shutter:motion', 'iso:low', 'focal:telephoto',
+    ])
+    assert.deepEqual(exposureBuckets({}), [])
 })
 
 test('extracts a deterministic palette and multiple prominent color families', () => {
@@ -94,6 +108,7 @@ test('classifies neutral photographs as monochrome and validates complete metada
         ...result,
         lens: MANUAL_LENS_FALLBACK,
         lensKey: lensKey(MANUAL_LENS_FALLBACK),
+        exposureBuckets: [],
     }
     assert.equal(isCompleteExploreMetadata(metadata), true)
     assert.equal(isCompleteExploreMetadata({ ...metadata, palette: ['invalid'] }), false)

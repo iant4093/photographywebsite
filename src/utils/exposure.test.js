@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+    buildSettingsDeck,
     buildSettingsRound,
+    buildSettingsRoundForImage,
     hasCompleteSettings,
     matchingExposurePhotos,
     parseAperture,
@@ -59,6 +61,18 @@ describe('exposure exploration helpers', () => {
         const round = buildSettingsRound([image, second], image.id, () => 0)
         expect(round.image).toBe(second)
         expect(round.options).toHaveLength(4)
+    })
+
+    it('builds a shuffled no-repeat deck and rounds for its chosen photograph', () => {
+        const second = {
+            id: 'two',
+            exif: { focalRatio: 'f/8', shutterSpeed: '1/30s', iso: 'ISO 1600', focalLength: '17mm' },
+        }
+        const deck = buildSettingsDeck([image, { id: 'bad' }, second], () => 0)
+        expect(deck).toEqual([second, image])
+        expect(new Set(deck).size).toBe(2)
+        expect(buildSettingsRoundForImage([image, second], second, () => 0)?.image).toBe(second)
+        expect(buildSettingsRoundForImage([image], { id: 'bad' }, () => 0)).toBeNull()
     })
 
     it('covers each exposure band boundary', () => {

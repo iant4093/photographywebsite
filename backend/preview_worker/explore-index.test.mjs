@@ -23,18 +23,20 @@ function metadata(changes = {}) {
         colorFamilies: ['blue', 'green'],
         lens: 'Sigma 18-50mm F2.8',
         lensKey: 'sigma 18-50mm f2.8',
+        exposureBuckets: ['aperture:middle', 'shutter:handheld', 'iso:clean', 'focal:normal'],
         ...changes,
     }
 }
 
 test('builds deterministic sparse entries and a lens definition', () => {
     assert.equal(indexSortKey(albumId, mediaId), indexSortKey(albumId, mediaId))
-    assert.equal(metadataFacets(metadata()).size, 3)
+    assert.equal(metadataFacets(metadata()).size, 7)
     const records = desiredIndexRecords(metadata(), true)
-    assert.equal(records.filter(item => item.recordType === EXPLORE_INDEX_RECORD_TYPE).length, 3)
+    assert.equal(records.filter(item => item.recordType === EXPLORE_INDEX_RECORD_TYPE).length, 7)
     assert.equal(records.filter(item => item.recordType === EXPLORE_FACET_RECORD_TYPE).length, 1)
     assert.deepEqual(desiredIndexRecords(metadata(), false), [])
     assert.throws(() => facetPartition('color', 'chartreuse'), /Unsupported/)
+    assert.throws(() => facetPartition('exposure', 'iso:impossible'), /Unsupported/)
 })
 
 test('reconciles stale rows and retries unprocessed writes', async () => {
