@@ -672,10 +672,24 @@ class ReleaseDependencyTests(unittest.TestCase):
             ("CreateUserFunction", "CreateUserFunctionRole"),
             ("EditUserFunction", "EditUserFunctionRole"),
             ("ListUsersFunction", "ListUsersFunctionRole"),
+            ("TagMediaObjectFunction", "TagMediaObjectFunctionRole"),
         ):
             self.assertEqual(
                 rules[(logical_id, "AWS::Lambda::Function", "Role")],
                 frozenset({f"{role_id}.Arn"}),
+            )
+        for logical_id in (
+            "DeleteUserFunctionRole",
+            "EditUserFunctionRole",
+            "GetDownloadUrlFunctionRole",
+            "GetSharedAlbumFunctionRole",
+            "GoogleDriveBackupFunctionRole",
+            "TagMediaObjectFunctionRole",
+            "WorkerZipFunctionRole",
+        ):
+            self.assertIn(
+                "AlbumsTable.Arn",
+                rules[(logical_id, "AWS::IAM::Role", "Policies")],
             )
         base = self.document()
         cases = [
