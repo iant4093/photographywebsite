@@ -452,6 +452,18 @@
   text-transform: uppercase;
 }
 
+.museum-experience-settings label > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.museum-experience-settings output {
+  color: #eee8dc;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
 .museum-experience-settings input {
   width: 100%;
   accent-color: #c59a6a;

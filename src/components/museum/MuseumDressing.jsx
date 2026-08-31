@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
-import { museumHallSconcePlacements, museumPracticalSconcePlacements } from '../../utils/museumSupport'
+import { museumHallSconcePlacements } from '../../utils/museumSupport'
 
 const DARK_BRASS = '#735332'
 let textileDetailTexture = null
@@ -569,29 +569,6 @@ function InstancedWallSconces({ placements }) {
     )
 }
 
-function SconcePracticalLights({ placements, enabled }) {
-    // Keep a small, fixed set of real lights for the life of the scene. These
-    // illuminate the plaster around the visible sconces instead of relying on
-    // additive cards, while avoiding shader recompiles or teleported-light
-    // flashes during room streaming. One practical per hall bay is enough to
-    // create pools of warm/cool contrast without overwhelming low-power GPUs.
-    const practicals = useMemo(
-        () => museumPracticalSconcePlacements(placements),
-        [placements],
-    )
-    return practicals.map(({ side, z }, index) => (
-        <pointLight
-            key={`sconce-practical-${side}-${z}`}
-            position={[side * 4.18, 3.72, z]}
-            color={index % 3 === 2 ? '#e9c6a0' : '#ffc27b'}
-            intensity={enabled ? 48 : 34}
-            distance={7.6}
-            decay={2}
-            castShadow={false}
-        />
-    ))
-}
-
 export default function MuseumDressing({ layout, activeRoomIds = [], materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true, shadowsEnabled = false }) {
     const activeRoomSet = useMemo(() => new Set(activeRoomIds), [activeRoomIds])
     const dressedRooms = useMemo(
@@ -624,9 +601,10 @@ export default function MuseumDressing({ layout, activeRoomIds = [], materials, 
             <InstancedPlants plants={roomPlants} castDynamicShadows={shadowsEnabled} />
             <InstancedRoomBenches rooms={dressedRooms} castDynamicShadows={shadowsEnabled} />
             {/* Place sconces on the solid wall between galleries, clear of the
-                room end walls and arched entry trim. */}
+                room end walls and arched entry trim. Every lens uses the same
+                emissive and baked-light treatment; selective live point lights
+                made isolated fittings look powered while their neighbors did not. */}
             <InstancedWallSconces placements={sconcePlacements} />
-            <SconcePracticalLights placements={sconcePlacements} enabled={reflectionsEnabled} />
         </group>
     )
 }

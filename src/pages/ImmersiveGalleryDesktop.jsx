@@ -16,7 +16,6 @@ import {
     initialMuseumRoomIds,
     isMuseumPositionWalkable,
     MUSEUM_DIMENSIONS,
-    museumArtworkLightIndex,
     museumFloorSurface,
     moveMuseumPosition,
     nearbyMuseumRoomIds,
@@ -34,7 +33,7 @@ import {
 
 const SESSION_KEY = 'ian-photography-museum-position-v2'
 const RETURN_KEY = 'ian-photography-museum-return'
-const PREFERENCES_KEY = 'ian-photography-museum-preferences-v2'
+const PREFERENCES_KEY = 'ian-photography-museum-preferences-v3'
 const HALL_PAINT = '#d8d0c4'
 const ROOM_PAINT = '#d2c9bc'
 // Decorative surfaces sit just inside the structural shell. A small, shared
@@ -70,7 +69,8 @@ const roomPlaqueBatchCache = new Map()
 const roomPlaceholderBatchCache = new Map()
 const coverLoadQueue = []
 const coverUploadQueue = []
-const uploadedCoverTextures = new WeakSet()
+const uploadedCoverTextures = new WeakMap()
+const rendererUploadGenerations = new WeakMap()
 const pendingCoverUploads = new WeakMap()
 const pinnedCoverTextures = new Map()
 let activeCoverLoads = 0
@@ -78,6 +78,7 @@ let coverLoadSequence = 0
 let coverLoadWakeScheduled = false
 let coverUploadSequence = 0
 let coverUploadScheduled = false
+let coverUploadPumpGeneration = 0
 
 function scheduleCoverLoadWake(delay = 72) {
     if (coverLoadWakeScheduled || typeof window === 'undefined') return
@@ -86,6 +87,101 @@ function scheduleCoverLoadWake(delay = 72) {
         coverLoadWakeScheduled = false
         runCoverLoadQueue()
     }, delay)
+}
+
+function rendererUploadGeneration(gl) {
+    return rendererUploadGenerations.get(gl) || 0
+}
+
+function coverTextureWasUploaded(gl, texture) {
+    return uploadedCoverTextures.get(texture)?.get(gl) === rendererUploadGeneration(gl)
+}
+
+function markCoverTextureUploaded(gl, texture) {
+    let rendererEntries = uploadedCoverTextures.get(texture)
+    if (!rendererEntries) {
+        rendererEntries = new WeakMap()
+        uploadedCoverTextures.set(texture, rendererEntries)
+    }
+    rendererEntries.set(gl, rendererUploadGeneration(gl))
+}
+
+function museumDocumentIsVisible() {
+    return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+}
+
+function scheduleCoverUploadPump(delay = 0) {
+    if (coverUploadScheduled || typeof window === 'undefined' || coverUploadQueue.length === 0) return
+    if (!museumDocumentIsVisible()) return
+    coverUploadScheduled = true
+    const generation = coverUploadPumpGeneration
+    window.setTimeout(() => {
+        window.requestAnimationFrame(() => {
+            if (generation !== coverUploadPumpGeneration) return
+            runCoverUploadQueue()
+        })
+    }, delay)
+}
+
+function runCoverUploadQueue() {
+    if (!museumDocumentIsVisible()) {
+        coverUploadScheduled = false
+        return
+    }
+    coverUploadQueue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence)
+    const next = coverUploadQueue.shift()
+    if (!next) {
+        coverUploadScheduled = false
+        return
+    }
+    try {
+        if (!coverTextureWasUploaded(next.gl, next.texture)) {
+            if (next.gl.getContext?.().isContextLost?.()) {
+                throw new Error('The WebGL context is temporarily unavailable')
+            }
+            next.gl.initTexture?.(next.texture)
+            markCoverTextureUploaded(next.gl, next.texture)
+        }
+        next.resolve(next.texture)
+    } catch (cause) {
+        next.reject(cause)
+    } finally {
+        unpinCoverTexture(next.texture)
+        if (pendingCoverUploads.get(next.texture) === next.pending) {
+            pendingCoverUploads.delete(next.texture)
+        }
+        coverUploadScheduled = false
+        scheduleCoverUploadPump(16)
+    }
+}
+
+function invalidateRendererCoverUploads(gl) {
+    rendererUploadGenerations.set(gl, rendererUploadGeneration(gl) + 1)
+    coverTextureCache.forEach(texture => {
+        texture.needsUpdate = true
+    })
+    for (let index = coverUploadQueue.length - 1; index >= 0; index -= 1) {
+        const job = coverUploadQueue[index]
+        if (job.gl !== gl) continue
+        coverUploadQueue.splice(index, 1)
+        unpinCoverTexture(job.texture)
+        if (pendingCoverUploads.get(job.texture) === job.pending) {
+            pendingCoverUploads.delete(job.texture)
+        }
+        job.reject(new Error('The WebGL renderer restarted before the cover was uploaded'))
+    }
+    scheduleCoverUploadPump()
+}
+
+function resumeCoverPipelines() {
+    // A backgrounded browser is allowed to discard an outstanding animation
+    // callback. Supersede that pump instead of trusting its global scheduled
+    // flag, then resume both queues from their preserved jobs.
+    coverUploadPumpGeneration += 1
+    coverUploadScheduled = false
+    coverLoadWakeScheduled = false
+    runCoverLoadQueue()
+    scheduleCoverUploadPump()
 }
 const MuseumDressing = lazy(() => import('../components/museum/MuseumDressing.jsx'))
 
@@ -204,61 +300,28 @@ function trimCoverTextureCache() {
         if ((coverTextureReferences.get(key) || 0) > 0 || (pinnedCoverTextures.get(texture) || 0) > 0) continue
         coverTextureCache.delete(key)
         bytes -= Number(texture?.userData?.museumBytes || 0)
+        texture.userData.museumDisposed = true
         texture?.image?.close?.()
         texture?.dispose()
     }
 }
 
 function enqueueCoverUpload(gl, texture, priority = 0) {
-    if (!texture || uploadedCoverTextures.has(texture)) return Promise.resolve(texture)
+    if (!texture || coverTextureWasUploaded(gl, texture)) return Promise.resolve(texture)
     const pending = pendingCoverUploads.get(texture)
-    if (pending) return pending
+    if (pending) {
+        if (pending.gl === gl) return pending.promise
+        return pending.promise.catch(() => undefined).then(() => enqueueCoverUpload(gl, texture, priority))
+    }
     pinCoverTexture(texture)
+    let pendingRecord
     const upload = new Promise((resolve, reject) => {
-        coverUploadQueue.push({ gl, texture, resolve, reject, priority, sequence: coverUploadSequence++ })
-        if (coverUploadScheduled) return
-        coverUploadScheduled = true
-        // requestIdleCallback is heavily throttled by Firefox and Safari in
-        // precisely the cold-start scenario this queue serves. A deterministic
-        // one-upload-per-frame pump keeps progress visible, never releases a
-        // burst after the veil, and lets newly approached work outrank stale
-        // background requests.
-        const scheduleFlush = callback => window.setTimeout(
-            () => window.requestAnimationFrame(callback),
-            document.visibilityState === 'visible' ? 0 : 48,
-        )
-        const flush = () => {
-            coverUploadQueue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence)
-            const next = coverUploadQueue.shift()
-            if (!next) {
-                coverUploadScheduled = false
-                return
-            }
-            try {
-                if (!uploadedCoverTextures.has(next.texture)) {
-                    if (next.gl.getContext?.().isContextLost?.()) {
-                        throw new Error('The WebGL context is temporarily unavailable')
-                    }
-                    next.gl.initTexture?.(next.texture)
-                    uploadedCoverTextures.add(next.texture)
-                }
-                next.resolve(next.texture)
-            } catch (cause) {
-                // A single failed upload used to throw out of this callback,
-                // leaving coverUploadScheduled=true forever. Every later room
-                // then waited on a queue that could never be pumped. Reject
-                // only this item so useCoverTexture can retry it and always
-                // advance the rest of the collection.
-                next.reject(cause)
-            } finally {
-                unpinCoverTexture(next.texture)
-                pendingCoverUploads.delete(next.texture)
-                scheduleFlush(flush)
-            }
-        }
-        scheduleFlush(flush)
+        pendingRecord = { gl, texture, resolve, reject, priority, sequence: coverUploadSequence++ }
+        coverUploadQueue.push({ ...pendingRecord, pending: pendingRecord })
     })
-    pendingCoverUploads.set(texture, upload)
+    pendingRecord.promise = upload
+    pendingCoverUploads.set(texture, pendingRecord)
+    scheduleCoverUploadPump()
     return upload
 }
 
@@ -267,13 +330,14 @@ async function promoteRevealTextures(gl, textures, onProgress) {
     for (let index = 0; index < pending.length; index += 1) {
         const texture = pending[index]
         const queuedUpload = pendingCoverUploads.get(texture)
-        if (queuedUpload) {
+        if (queuedUpload?.gl === gl) {
             // A mounted painting may already own the GPU upload for the same
             // cached texture. Await that exact job instead of racing it and
             // deleting its promise/refcount bookkeeping out from underneath
             // the consumer.
-            await queuedUpload
-        } else if (!uploadedCoverTextures.has(texture)) {
+            await queuedUpload.promise
+        } else if (!coverTextureWasUploaded(gl, texture)) {
+            if (queuedUpload) await queuedUpload.promise.catch(() => undefined)
             if (gl.getContext?.().isContextLost?.()) {
                 throw new Error('The WebGL context is temporarily unavailable')
             }
@@ -283,7 +347,7 @@ async function promoteRevealTextures(gl, textures, onProgress) {
             // cold start. Two uploads per frame keeps progress smooth without
             // deferring the first real bind until after the reveal.
             gl.initTexture?.(texture)
-            uploadedCoverTextures.add(texture)
+            markCoverTextureUploaded(gl, texture)
         }
         onProgress?.((index + 1) / Math.max(1, pending.length))
         if (index % 2 === 1 && index < pending.length - 1) {
@@ -608,59 +672,6 @@ function CeilingMaterial({ materials, hallLength }) {
             roughness={0.93}
             side={THREE.DoubleSide}
         />
-    )
-}
-
-function StaticSpotlight({
-    position,
-    target,
-    color = '#ffd4a0',
-    intensity = 18,
-    distance = 16,
-    angle = 0.62,
-    penumbra = 0.78,
-    castShadow = false,
-    shadowKey = '',
-}) {
-    const light = useRef(null)
-    const targetObject = useMemo(() => new THREE.Object3D(), [])
-    useEffect(() => {
-        if (!castShadow || !light.current?.shadow) return undefined
-        const shadow = light.current.shadow
-        // The room shell, frames and furniture are already mounted when an
-        // active-room slot changes. Render that shadow once, then keep it
-        // frozen while camera-aware artwork materials come and go; otherwise
-        // a 512px shadow pass needlessly rerenders on every walking frame.
-        targetObject.updateMatrixWorld(true)
-        light.current.updateMatrixWorld(true)
-        shadow.autoUpdate = false
-        shadow.needsUpdate = true
-        return () => {
-            shadow.autoUpdate = true
-        }
-    }, [castShadow, shadowKey, targetObject])
-    return (
-        <>
-            <primitive object={targetObject} position={target} />
-            <spotLight
-                ref={light}
-                position={position}
-                target={targetObject}
-                color={color}
-                intensity={intensity}
-                distance={distance}
-                angle={angle}
-                penumbra={penumbra}
-                decay={2}
-                castShadow={castShadow}
-                shadow-mapSize-width={512}
-                shadow-mapSize-height={512}
-                shadow-bias={-0.00045}
-                shadow-normalBias={0.035}
-                shadow-camera-near={0.8}
-                shadow-camera-far={distance}
-            />
-        </>
     )
 }
 
@@ -1189,6 +1200,11 @@ async function optimizedCoverUrls(album, targetWidth = 960) {
 
 function runCoverLoadQueue() {
     if (coverLoadQueue.length === 0) return
+    // Browsers suspend animation and decoder work while a tab is backgrounded.
+    // Leave queued work intact and let the visibility lifecycle restart it;
+    // repeatedly arming timers here was both wasteful and prone to a stranded
+    // "scheduled" flag after a long alt-tab.
+    if (!museumDocumentIsVisible()) return
     // User input always outranks speculative artwork. Starting a decode while
     // the visitor is actively turning or walking is the most common source of
     // a visible hitch on integrated GPUs, even when decoding itself happens
@@ -1365,6 +1381,7 @@ function requestMuseumCoverTexture(album, targetWidth = 960, priority = targetWi
                 texture.generateMipmaps = false
                 texture.anisotropy = targetWidth <= LOW_RES_COVER_WIDTH ? 2 : 4
                 texture.userData.museumCacheKey = cacheKey
+                texture.userData.museumDisposed = false
                 texture.userData.museumBytes = Math.round(
                     (image.width || image.naturalWidth || targetWidth)
                     * (image.height || image.naturalHeight || targetWidth)
@@ -1521,7 +1538,7 @@ function useCoverTexture(album, targetWidth, priority = targetWidth, onPermanent
         }
     }, [album, cacheKey, gl, invalidate, onPermanentError, priority, targetWidth])
 
-    const activeLoaded = targetWidth ? loaded : null
+    const activeLoaded = targetWidth && !loaded?.userData?.museumDisposed ? loaded : null
 
     useLayoutEffect(() => {
         const referenceKey = activeLoaded?.userData?.museumCacheKey
@@ -1683,7 +1700,7 @@ function GalleryFrameShells({ paintings, materials, compact = false }) {
     )
 }
 
-function Painting({ painting, targetWidth = 0, loadLow = false, lowPriority = 0 }) {
+function Painting({ painting, targetWidth = 0, loadLow = false, lowPriority = 0, onTextureReady, readinessVersion = 0 }) {
     const [baseFailed, setBaseFailed] = useState(false)
     const markBaseFailed = useCallback(() => setBaseFailed(true), [])
     const baseTexture = useCoverTexture(
@@ -1701,6 +1718,15 @@ function Painting({ painting, targetWidth = 0, loadLow = false, lowPriority = 0 
     const displayedBaseTexture = baseTexture || (baseFailed ? unavailableTexture : null)
     const baseMaterial = useRef(null)
     const detailMaterial = useRef(null)
+    const reportedReadiness = useRef(null)
+
+    useEffect(() => {
+        if (!displayedBaseTexture) return
+        const readinessKey = `${painting.id}:${readinessVersion}`
+        if (reportedReadiness.current === readinessKey) return
+        reportedReadiness.current = readinessKey
+        onTextureReady?.(painting.id)
+    }, [displayedBaseTexture, onTextureReady, painting.id, readinessVersion])
 
     useEffect(() => {
         if (!displayedBaseTexture) return
@@ -1767,13 +1793,18 @@ function Painting({ painting, targetWidth = 0, loadLow = false, lowPriority = 0 
     )
 }
 
-function CameraAwareRoomPaintings({ room, paintings = room.paintings, active, foreground, allowDetail, qualityLighting }) {
+function CameraAwareRoomPaintings({ room, paintings = room.paintings, active, foreground, allowDetail, qualityLighting, onTextureReady, readinessVersion }) {
     const { camera } = useThree()
     const baselineSelection = useMemo(() => paintings.map(painting => ({
         painting,
         targetWidth: LOW_RES_COVER_WIDTH,
     })), [paintings])
-    const initialSelection = useMemo(() => baselineSelection.slice(0, Math.min(4, baselineSelection.length)), [baselineSelection])
+    const initialSelection = useMemo(() => [...baselineSelection]
+        .sort((left, right) => (
+            Math.abs(left.painting.position[0] - room.innerX)
+            - Math.abs(right.painting.position[0] - room.innerX)
+        ))
+        .slice(0, Math.min(4, baselineSelection.length)), [baselineSelection, room.innerX])
     // Keep one real cover resident in each inactive room so a doorway never
     // reads as an empty/flat placeholder, while bounding the permanent museum-
     // wide working set. The active and neighboring rooms still promote their
@@ -1977,6 +2008,8 @@ function CameraAwareRoomPaintings({ room, paintings = room.paintings, active, fo
                         targetWidth={targetWidth}
                         loadLow={targetWidth > 0}
                         lowPriority={lowPriority}
+                        onTextureReady={onTextureReady}
+                        readinessVersion={readinessVersion}
                     />
                 )
             })}
@@ -2384,6 +2417,73 @@ function DistanceManagedDoorWall({ side, centerZ, room, materials, sconcePlaceme
     return <DoorWall side={side} centerZ={centerZ} room={room} materials={materials} sconcePlacements={sconcePlacements} />
 }
 
+function AnimatedPortalGate({ side, centerZ, open }) {
+    const { invalidate } = useThree()
+    const leftPanel = useRef(null)
+    const rightPanel = useRef(null)
+    const progress = useRef(open ? 1 : 0)
+    const rotationY = side < 0 ? Math.PI / 2 : -Math.PI / 2
+    const panelWidth = (MUSEUM_DIMENSIONS.doorwayWidth / 2) + 0.12
+    const closedOffset = panelWidth / 2
+    const openTravel = panelWidth + 0.42
+
+    useEffect(() => invalidate(), [invalidate, open])
+    useFrame((_, frameDelta) => {
+        const target = open ? 1 : 0
+        if (progress.current === target) return
+        progress.current = THREE.MathUtils.damp(
+            progress.current,
+            target,
+            open ? 4.8 : 7.5,
+            Math.min(frameDelta, 0.05),
+        )
+        if (Math.abs(progress.current - target) < 0.001) progress.current = target
+        else invalidate()
+        const eased = progress.current * progress.current * (3 - (2 * progress.current))
+        if (leftPanel.current) leftPanel.current.position.x = -closedOffset - (eased * openTravel)
+        if (rightPanel.current) rightPanel.current.position.x = closedOffset + (eased * openTravel)
+    })
+
+    const renderPanel = (direction, ref) => (
+        <group ref={ref} position={[direction * closedOffset, 2.08, 0]}>
+            <mesh receiveShadow>
+                <boxGeometry args={[panelWidth, 4.2, 0.18]} />
+                <meshStandardMaterial color="#2b1119" roughness={0.86} metalness={0.03} />
+            </mesh>
+            <mesh position={[0, 0, -0.105]}>
+                <boxGeometry args={[panelWidth - 0.16, 4.02, 0.035]} />
+                <meshStandardMaterial color="#461b28" roughness={0.92} />
+            </mesh>
+            {[-1, 1].map(edge => (
+                <mesh key={edge} position={[edge * ((panelWidth / 2) - 0.09), 0, -0.14]}>
+                    <boxGeometry args={[0.065, 4.08, 0.055]} />
+                    <meshPhysicalMaterial color="#9b7747" metalness={0.62} roughness={0.4} />
+                </mesh>
+            ))}
+            {[-1.3, 0, 1.3].map(y => (
+                <mesh key={y} position={[0, y, -0.14]}>
+                    <boxGeometry args={[panelWidth - 0.18, 0.045, 0.055]} />
+                    <meshPhysicalMaterial color="#765a36" metalness={0.5} roughness={0.48} />
+                </mesh>
+            ))}
+        </group>
+    )
+
+    return (
+        <group
+            position={[
+                side * (MUSEUM_DIMENSIONS.hallHalfWidth - ((HALL_WALL_THICKNESS / 2) + 0.11)),
+                0,
+                centerZ,
+            ]}
+            rotation={[0, rotationY, 0]}
+        >
+            {renderPanel(-1, leftPanel)}
+            {renderPanel(1, rightPanel)}
+        </group>
+    )
+}
+
 function VaultedCeiling({ layout, centerZ, materials }) {
     const { geometry, ribCurve } = useMemo(() => {
         const radius = 6.35
@@ -2457,17 +2557,14 @@ function VaultedCeiling({ layout, centerZ, materials }) {
     )
 }
 
-const ROOM_LIGHTING_PALETTES = [
-    { warm: '#ffc48f', cool: '#b9d1df', fill: '#efbd8a' },
-    { warm: '#ffd3a9', cool: '#b8c8e0', fill: '#e8c29c' },
-    { warm: '#f4bb86', cool: '#c2d9d2', fill: '#e7b67f' },
-    { warm: '#ffd0a0', cool: '#c9c3df', fill: '#eac29b' },
-]
+const ROOM_LIGHTING_PALETTE = Object.freeze({
+    warm: '#ffd0a0',
+    cool: '#c3d3dc',
+    fill: '#edc096',
+})
 
-function roomLightingPalette(room) {
-    if (!room) return ROOM_LIGHTING_PALETTES[0]
-    const hash = [...room.id].reduce((total, character) => total + character.charCodeAt(0), 0)
-    return ROOM_LIGHTING_PALETTES[hash % ROOM_LIGHTING_PALETTES.length]
+function roomLightingPalette() {
+    return ROOM_LIGHTING_PALETTE
 }
 
 function TransitioningRoomAreaLight({ room, direction, qualityLighting }) {
@@ -2597,95 +2694,9 @@ function TransitioningRoomFill({ room, qualityLighting }) {
     )
 }
 
-function TransitioningArtworkSpot({ room, slot, slotCount, qualityLighting }) {
-    const light = useRef(null)
-    const target = useMemo(() => new THREE.Object3D(), [])
-    const renderedRoom = useRef(room || null)
-    const desiredRoom = useRef(room || null)
-    const placementKey = useRef(null)
-
-    useEffect(() => {
-        desiredRoom.current = room || null
-    }, [room])
-
-    useEffect(() => () => target.removeFromParent(), [target])
-
-    useFrame((state, delta) => {
-        if (!light.current) return
-        const current = renderedRoom.current
-        const desired = desiredRoom.current
-        if (current?.id !== desired?.id) {
-            light.current.intensity = THREE.MathUtils.damp(
-                light.current.intensity,
-                0,
-                16,
-                Math.min(delta, 0.05),
-            )
-            if (light.current.intensity < 0.001) {
-                renderedRoom.current = desired
-                placementKey.current = null
-            }
-            return
-        }
-        const paintings = current?.paintings || []
-        const selectedIndex = museumArtworkLightIndex(paintings.length, slot, slotCount)
-        if (selectedIndex < 0) {
-            light.current.intensity = THREE.MathUtils.damp(light.current.intensity, 0, 14, delta)
-            return
-        }
-        const painting = paintings[selectedIndex]
-        if (!painting) {
-            light.current.intensity = THREE.MathUtils.damp(light.current.intensity, 0, 14, delta)
-            return
-        }
-        const nextKey = `${current.id}:${painting.id}`
-        if (placementKey.current !== nextKey) {
-            const [normalX = 0, , normalZ = 1] = painting.normal || []
-            const [x, , z] = painting.position
-            light.current.position.set(
-                x + (normalX * 1.12),
-                4.72,
-                z + (normalZ * 1.12),
-            )
-            target.position.set(
-                x + (normalX * 0.04),
-                2.58,
-                z + (normalZ * 0.04),
-            )
-            target.updateMatrixWorld(true)
-            light.current.target = target
-            light.current.color.set(slot % 2 ? '#f0cba4' : '#ffd7a9')
-            placementKey.current = nextKey
-        }
-        light.current.intensity = THREE.MathUtils.damp(
-            light.current.intensity,
-                qualityLighting ? 54 : 40,
-            4.2,
-            Math.min(delta, 0.05),
-        )
-    })
-
-    return (
-        <>
-            <primitive object={target} />
-            <spotLight
-                ref={light}
-                color="#ffd3a0"
-                intensity={0}
-                distance={5.4}
-                decay={2}
-                angle={0.48}
-                penumbra={0.88}
-                castShadow={false}
-            />
-        </>
-    )
-}
-
 function FixedRoomLighting({ rooms, qualityLighting }) {
     const room = rooms[0] || null
-    const artworkLightSlots = qualityLighting ? 4 : 2
-    // These four fixtures remain mounted for the lifetime of the scene. Their
+    // These broad fixtures remain mounted for the lifetime of the scene. Their
     // imperative transition code fades to true black before moving, so room
     // changes never remount lights or expose React's intermediate empty state.
     return [
@@ -2702,19 +2713,6 @@ function FixedRoomLighting({ rooms, qualityLighting }) {
             room={room}
             qualityLighting={qualityLighting}
         />,
-        // Two localized real sources provide readable picture-light pools.
-        // The two broad room area lights handle the remaining wall; adding a
-        // forward-rendered light per frame would scale fragment cost with the
-        // archive and undermine the long-session stability this pass targets.
-        ...Array.from({ length: artworkLightSlots }, (_, slot) => (
-            <TransitioningArtworkSpot
-                key={`artwork-light-slot-${slot}`}
-                room={room}
-                slot={slot}
-                slotCount={artworkLightSlots}
-                qualityLighting={qualityLighting}
-            />
-        )),
     ]
 }
 
@@ -2938,29 +2936,65 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
     ], [room.benches, room.centerX, room.centerZ, room.plants])
     const thresholdDepth = ROOM_SHELL_INSET + HALL_WALL_THICKNESS + 0.18
     const thresholdCenterX = room.innerX + (room.side * ((ROOM_SHELL_INSET - HALL_WALL_THICKNESS) / 2))
+    const entrancePaintings = useMemo(() => entranceSightlinePaintings(room, 4), [room])
+    const entrancePaintingIds = useMemo(
+        () => new Set(entrancePaintings.map(painting => painting.id)),
+        [entrancePaintings],
+    )
+    const readyPaintingIdsRef = useRef(new Set())
+    const readyFlushTimer = useRef(null)
+    const [readyPaintingIds, setReadyPaintingIds] = useState(() => new Set())
+    const [readinessVersion, setReadinessVersion] = useState(0)
     const [allowDetail, setAllowDetail] = useState(false)
     // Door architecture and the room shell must change in the same React
     // commit. Deferring residency through a timer let the open portal render
     // for one frame before its interior, which read as a black flash at the
     // threshold on fast machines and as an empty room on slower ones.
-    // Structural room geometry, frames and deterministic placeholders are
-    // permanent. Network state only controls promotion to real cover textures.
-    const interiorResident = true
+    // Inactive interiors stay behind an opaque physical gate and do not enter
+    // the render list. Rendering every concealed room was the largest source
+    // of the long-session slowdown introduced by the prior gate removal.
+    const interiorResident = active
+    const entranceReadyCount = [...entrancePaintingIds]
+        .filter(id => readyPaintingIds.has(id)).length
+    const roomReady = active && entranceReadyCount >= entrancePaintingIds.size
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            readyPaintingIdsRef.current.clear()
+            setReadyPaintingIds(new Set())
+            setReadinessVersion(version => version + 1)
+        }, 0)
+        return () => window.clearTimeout(timer)
+    }, [active])
+    useEffect(() => () => {
+        window.clearTimeout(readyFlushTimer.current)
+        readyFlushTimer.current = null
+    }, [])
+    const markPaintingReady = useCallback((paintingId) => {
+        if (!entrancePaintingIds.has(paintingId) || readyPaintingIdsRef.current.has(paintingId)) return
+        readyPaintingIdsRef.current.add(paintingId)
+        if (readyFlushTimer.current) return
+        readyFlushTimer.current = window.setTimeout(() => {
+            readyFlushTimer.current = null
+            setReadyPaintingIds(new Set(readyPaintingIdsRef.current))
+        }, 32)
+    }, [entrancePaintingIds])
     useEffect(() => {
         if (!import.meta.env.DEV) return
         const current = JSON.parse(document.documentElement.dataset.museumRooms || '{}')
         current[room.id] = {
             active,
             interiorVisible: interiorResident,
-            roomReady: true,
+            roomReady,
+            entranceReady: entranceReadyCount,
+            required: entrancePaintingIds.size,
         }
         document.documentElement.dataset.museumRooms = JSON.stringify(current)
-    }, [active, interiorResident, room.id])
+    }, [active, entrancePaintingIds.size, entranceReadyCount, interiorResident, room.id, roomReady])
     useEffect(() => {
         let timer
         if (!active) {
             timer = window.setTimeout(() => setAllowDetail(false), 0)
-        } else if (!detailed) {
+        } else if (!detailed || !roomReady) {
             timer = window.setTimeout(() => setAllowDetail(false), 0)
         } else {
             // Let the portal complete and the player settle before one nearby
@@ -2970,7 +3004,7 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
         return () => {
             window.clearTimeout(timer)
         }
-    }, [active, detailed])
+    }, [active, detailed, roomReady])
     const roomVariant = useMemo(() => (
         [...room.id].reduce((total, character) => total + character.charCodeAt(0), 0) % 4
     ), [room.id])
@@ -3013,8 +3047,7 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                 thick door is still closed; the portal then waits for its four
                 entrance covers before opening, so visitors never see a shell
                 pop into existence. */}
-            <group>
-            {active ? (
+            <group visible={interiorResident}>
                 <BakedIrradianceFloor
                     position={[room.centerX, -0.11, room.centerZ]}
                     size={[room.depth, roomWidth]}
@@ -3023,12 +3056,6 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                     fixtures={roomFloorFixtures}
                     occluders={roomFloorOccluders}
                 />
-            ) : (
-                <mesh position={[room.centerX, -0.11, room.centerZ]} receiveShadow>
-                    <boxGeometry args={[room.depth, 0.2, roomWidth]} />
-                    <FloorMaterial materials={materials} color="#73573f" />
-                </mesh>
-            )}
             <mesh position={[shellCenterX, 0.012, room.centerZ]} scale={[Math.max(1, shellDepth - 0.48), 0.028, 2.5]} receiveShadow>
                 <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
                 <meshStandardMaterial color="#471f2a" roughness={0.92} />
@@ -3047,7 +3074,7 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                 <boxGeometry args={[shellDepth, 0.18, roomWidth]} />
                 <PlasterMaterial materials={materials} color="#e9e2d8" textured={false} />
             </mesh>
-            {active && interiorResident && (
+            {interiorResident && (
                 <RoomCofferedCeiling
                     room={room}
                     shellCenterX={shellCenterX}
@@ -3146,12 +3173,15 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                 foreground={detailed}
                 allowDetail={allowDetail}
                 qualityLighting={qualityLighting}
+                onTextureReady={markPaintingReady}
+                readinessVersion={readinessVersion}
             />
-            </group>
             <InstancedCeilingFixtures
                 positions={lightXs.map(x => [x, room.centerZ])}
                 ceilingY={ceilingY - 0.06}
             />
+            </group>
+            <AnimatedPortalGate side={room.side} centerZ={room.centerZ} open={roomReady} />
         </group>
     )
 }
@@ -3193,9 +3223,6 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
     // sources are stationary so illumination cannot jump or flash while walking.
     const ceilingLights = [7, ...bays.map(bay => bay.centerZ)]
         .filter(z => z > layout.hallBackZ)
-    const illuminatedHallLights = ceilingLights.filter((_, index) => (
-        index % (reflectionsEnabled ? 2 : 4) === 0
-    ))
     const hallSconcePlacements = useMemo(() => museumHallSconcePlacements(layout), [layout])
     const hallFloorFixtures = useMemo(
         () => [...new Set(hallSconcePlacements.map(placement => Number((placement.z - hallCenterZ).toFixed(3))))],
@@ -3337,21 +3364,6 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                 positions={ceilingLights.map(z => [0, z])}
                 ceilingY={6.92}
             />
-            {illuminatedHallLights.map(z => (
-                <group key={`hall-light-${z}`}>
-                    <StaticSpotlight
-                        position={[0, 5.9, z]}
-                        target={[0, 0, z]}
-                        color="#ffd8aa"
-                        intensity={reflectionsEnabled ? 120 : 92}
-                        distance={18}
-                        angle={0.5}
-                        penumbra={0.82}
-                        castShadow={false}
-                        shadowKey={`hall-key-${z}`}
-                    />
-                </group>
-            ))}
             <MuseumDressing
                 layout={layout}
                 activeRoomIds={residentRoomIds}
@@ -3375,14 +3387,14 @@ function focusedPainting(layout, camera, direction = new THREE.Vector3()) {
         const dy = painting.position[1] - camera.position.y
         const dz = painting.position[2] - camera.position.z
         const distance = Math.hypot(dx, dy, dz)
-        if (distance > 7.2) continue
+        if (distance > 3.8) continue
         const inverseDistance = distance > 0 ? 1 / distance : 0
         const alignment = (
             (direction.x * dx * inverseDistance)
             + (direction.y * dy * inverseDistance)
             + (direction.z * dz * inverseDistance)
         )
-        if (alignment < 0.62) continue
+        if (alignment < 0.76) continue
         const [normalX = 0, normalY = 0, normalZ = 1] = painting.normal || []
         const frontFacing = -(
             (normalX * dx * inverseDistance)
@@ -3502,15 +3514,22 @@ function NativePointerLockControls({ input, onLock, onUnlock }) {
             // so a single browser glitch can never spin or invert the camera.
             const rawX = Number(event.movementX) || 0
             const rawY = Number(event.movementY) || 0
-            const deltaX = THREE.MathUtils.clamp(rawX, -24, 24)
-            const deltaY = THREE.MathUtils.clamp(rawY, -24, 24)
-            input.current.lookX = THREE.MathUtils.clamp(input.current.lookX + deltaX, -56, 56)
-            input.current.lookY = THREE.MathUtils.clamp(input.current.lookY + deltaY, -56, 56)
+            const deltaX = THREE.MathUtils.clamp(rawX, -220, 220)
+            const deltaY = THREE.MathUtils.clamp(rawY, -220, 220)
+            input.current.lookX = THREE.MathUtils.clamp(input.current.lookX + deltaX, -720, 720)
+            input.current.lookY = THREE.MathUtils.clamp(input.current.lookY + deltaY, -720, 720)
+        }
+        const handleLockError = () => {
+            input.current.lookX = 0
+            input.current.lookY = 0
+            onUnlock()
         }
         document.addEventListener('pointerlockchange', handleLockChange)
+        document.addEventListener('pointerlockerror', handleLockError)
         document.addEventListener('mousemove', handleMouseMove)
         return () => {
             document.removeEventListener('pointerlockchange', handleLockChange)
+            document.removeEventListener('pointerlockerror', handleLockError)
             document.removeEventListener('mousemove', handleMouseMove)
         }
     }, [gl, input, onLock, onUnlock])
@@ -3720,9 +3739,9 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
             lookPitch.current = THREE.MathUtils.clamp(touchEuler.x, -0.58, 0.58)
             lookReady.current = true
         }
-        const lookSensitivity = (touchMode ? 0.0027 : 0.00155) * preferences.sensitivity
-        const frameLookX = THREE.MathUtils.clamp(touchInput.current.lookX, -56, 56)
-        const frameLookY = THREE.MathUtils.clamp(touchInput.current.lookY, -56, 56)
+        const lookSensitivity = (touchMode ? 0.003 : 0.0024) * preferences.sensitivity
+        const frameLookX = THREE.MathUtils.clamp(touchInput.current.lookX, -720, 720)
+        const frameLookY = THREE.MathUtils.clamp(touchInput.current.lookY, -720, 720)
         lookYaw.current -= frameLookX * lookSensitivity
         lookYaw.current = THREE.MathUtils.euclideanModulo(lookYaw.current + Math.PI, Math.PI * 2) - Math.PI
         lookPitch.current = THREE.MathUtils.clamp(
@@ -3867,6 +3886,18 @@ function PreviewCamera({ mode, roomIndex, layout }) {
     return null
 }
 
+function CameraPreferenceSync({ preferences, touchMode }) {
+    const { camera, invalidate } = useThree()
+    useEffect(() => {
+        const nextFov = touchMode ? Math.max(68, preferences.fov) : preferences.fov
+        if (Math.abs(camera.fov - nextFov) < 0.01) return
+        camera.fov = nextFov
+        camera.updateProjectionMatrix()
+        invalidate()
+    }, [camera, invalidate, preferences.fov, touchMode])
+    return null
+}
+
 function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, touchMode }) {
     const { camera, gl, invalidate, scene } = useThree()
     const [warmRoomIds] = useState(() => initialRoomIds)
@@ -3900,7 +3931,7 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, touchMode })
                 // burst. Later rooms receive tiny bases immediately after this
                 // compact visible set is resident, while their velvet gates
                 // remain closed until the local entrance set is truly ready.
-                .flatMap(room => room.paintings.slice(0, 2).map(painting => painting.album))
+                .flatMap(room => entranceSightlinePaintings(room, 4).map(painting => painting.album))
                 .filter(Boolean)
                 .map(album => [album.albumId, album]),
         ).values()]
@@ -4290,32 +4321,73 @@ function DevelopmentMuseumTour({ layout, onActiveRoom, onNearbyRooms }) {
     return null
 }
 
-function RendererHealth({ onStatus }) {
-    const { gl } = useThree()
+function RendererHealth({ input, onPause, onStatus }) {
+    const { gl, invalidate } = useThree()
     useEffect(() => {
         const canvas = gl.domElement
+        const resetInput = () => {
+            input.current.moveX = 0
+            input.current.moveY = 0
+            input.current.lookX = 0
+            input.current.lookY = 0
+        }
+        const resume = () => {
+            if (!museumDocumentIsVisible()) return
+            resetInput()
+            resumeCoverPipelines()
+            if (gl.getContext?.().isContextLost?.()) {
+                onStatus('recovering')
+                return
+            }
+            gl.resetState?.()
+            invalidate()
+            window.requestAnimationFrame(() => {
+                invalidate()
+                onStatus('ok')
+            })
+        }
+        const handleVisibility = () => {
+            if (!museumDocumentIsVisible()) {
+                resetInput()
+                onPause()
+                return
+            }
+            window.requestAnimationFrame(resume)
+        }
         const handleLost = (event) => {
             // Opt in to WebGL's restoration path and immediately cover the
             // browser's transparent/default framebuffer. Without this veil a
             // transient driver reset appears as a full-screen white flash.
             event.preventDefault()
+            resetInput()
+            onPause()
+            invalidateRendererCoverUploads(gl)
             onStatus('recovering')
         }
         const handleRestored = () => {
+            invalidateRendererCoverUploads(gl)
             gl.resetState?.()
-            window.requestAnimationFrame(() => onStatus('ok'))
+            resumeCoverPipelines()
+            window.requestAnimationFrame(resume)
         }
         canvas.addEventListener('webglcontextlost', handleLost, false)
         canvas.addEventListener('webglcontextrestored', handleRestored, false)
+        document.addEventListener('visibilitychange', handleVisibility)
+        window.addEventListener('focus', resume)
+        window.addEventListener('pageshow', resume)
         return () => {
             canvas.removeEventListener('webglcontextlost', handleLost, false)
             canvas.removeEventListener('webglcontextrestored', handleRestored, false)
+            document.removeEventListener('visibilitychange', handleVisibility)
+            window.removeEventListener('focus', resume)
+            window.removeEventListener('pageshow', resume)
+            invalidateRendererCoverUploads(gl)
         }
-    }, [gl, onStatus])
+    }, [gl, input, invalidate, onPause, onStatus])
     return null
 }
 
-function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInput, preferences, visualPreview, developmentTour, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInput, preferences, visualPreview, developmentTour, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
     const cinematicShadows = !touchMode && !isFirefoxBrowser()
     return (
@@ -4346,7 +4418,8 @@ function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInpu
                 reflectionsEnabled={!touchMode && !isFirefoxBrowser()}
                 shadowsEnabled={cinematicShadows}
             />
-            <RendererHealth onStatus={onRendererStatus} />
+            <RendererHealth input={touchInput} onPause={onPause} onStatus={onRendererStatus} />
+            <CameraPreferenceSync preferences={preferences} touchMode={touchMode} />
             <SceneWarmup
                 layout={layout}
                 initialRoomIds={controlsEnabled.activeRoomIds}
@@ -4360,7 +4433,7 @@ function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInpu
                 activeRoomIds={controlsEnabled.activeRoomIds}
                 enabled={sceneReady}
             />
-            {import.meta.env.DEV && <DevelopmentPerformanceProbe />}
+            {developmentPerf && <DevelopmentPerformanceProbe />}
             {visualPreview && <PreviewCamera mode={previewMode} roomIndex={previewRoomIndex} layout={layout} />}
             {import.meta.env.DEV && developmentTour && (
                 <DevelopmentMuseumTour
@@ -4416,9 +4489,19 @@ export default function ImmersiveGalleryDesktop() {
     const [sceneVeilVisible, setSceneVeilVisible] = useState(true)
     const [sceneProgress, setSceneProgress] = useState(0.02)
     const [rendererStatus, setRendererStatus] = useState('ok')
+    const [rendererVersion, setRendererVersion] = useState(0)
     const [touchMode, setTouchMode] = useState(() => forceTouchPreview || usesTouchControls())
     const [preferences, setPreferences] = useState(() => readMuseumPreferences(localStorage, PREFERENCES_KEY))
     const touchInput = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 })
+
+    const pauseGallery = useCallback(() => {
+        touchInput.current.moveX = 0
+        touchInput.current.moveY = 0
+        touchInput.current.lookX = 0
+        touchInput.current.lookY = 0
+        setLocked(false)
+        setFocused(null)
+    }, [setFocused, setLocked])
 
     useEffect(() => {
         persistMuseumPreferences(localStorage, PREFERENCES_KEY, preferences)
@@ -4429,6 +4512,19 @@ export default function ImmersiveGalleryDesktop() {
         const timer = window.setTimeout(() => setSceneVeilVisible(false), 160)
         return () => window.clearTimeout(timer)
     }, [sceneReady])
+
+    useEffect(() => {
+        if (rendererStatus !== 'recovering') return undefined
+        const timer = window.setTimeout(() => {
+            pauseGallery()
+            setSceneReady(false)
+            setSceneVeilVisible(true)
+            setSceneProgress(0.02)
+            setRendererVersion(version => version + 1)
+            setRendererStatus('ok')
+        }, 4000)
+        return () => window.clearTimeout(timer)
+    }, [pauseGallery, rendererStatus])
 
     useEffect(() => {
         const pointer = window.matchMedia?.('(pointer: coarse)')
@@ -4477,6 +4573,7 @@ export default function ImmersiveGalleryDesktop() {
     const previewMode = previewParams?.get('museum-preview') || ''
     const previewRoomIndex = Number.parseInt(previewParams?.get('museum-room') || '0', 10) || 0
     const developmentTour = import.meta.env.DEV && previewParams?.get('museum-tour') === '1'
+    const developmentPerf = import.meta.env.DEV && previewParams?.get('museum-perf') === '1'
     const visualPreview = import.meta.env.DEV && ['lobby', 'hall', 'room', 'portal'].includes(previewMode)
     const initialActiveRoomIds = useMemo(
         () => initialMuseumRoomIds(
@@ -4503,6 +4600,19 @@ export default function ImmersiveGalleryDesktop() {
     const updatePreference = useCallback((key, value) => {
         setPreferences(current => ({ ...current, [key]: Number(value) }))
     }, [setPreferences])
+    const beginWalkThrough = useCallback(() => {
+        if (touchMode) {
+            setLocked(true)
+            return
+        }
+        const canvas = document.querySelector('.museum-canvas canvas')
+        if (!canvas?.requestPointerLock) return
+        try {
+            Promise.resolve(canvas.requestPointerLock()).catch(pauseGallery)
+        } catch {
+            pauseGallery()
+        }
+    }, [pauseGallery, setLocked, touchMode])
     if (error) return <CatalogStatus error={error} onRetry={() => {
         setError('')
         setAlbums(null)
@@ -4514,21 +4624,18 @@ export default function ImmersiveGalleryDesktop() {
     return (
         <div className={`museum-experience${touchMode ? ' museum-experience--touch' : ''}`} aria-label="Ian Truong Photography immersive gallery">
             <Canvas
+                key={rendererVersion}
                 className="museum-canvas"
                 camera={{ fov: touchMode ? Math.max(68, preferences.fov) : preferences.fov, near: 0.08, far: 220, position: layout.spawn }}
-                dpr={touchMode ? 0.78 : (isWindowsFirefoxBrowser() ? 0.7 : 0.9)}
+                dpr={touchMode ? 0.68 : (isWindowsFirefoxBrowser() ? 0.68 : 0.8)}
                 frameloop={locked || visualPreview || developmentTour || !sceneReady ? 'always' : 'demand'}
                 performance={{ min: 0.45, max: 1, debounce: 240 }}
-                // One frozen 512 px room key supplies genuine contact depth on
-                // capable desktop browsers. Firefox and touch devices keep the
-                // soft authored grounding path because their drivers exhibited
-                // first-step stalls or full-frame shadow-map flashes.
-                shadows={!touchMode && !isFirefoxBrowser()}
+                shadows={false}
                 gl={{
                     // Firefox on Windows frequently compiles MSAA variants only
                     // after the first camera movement. Browser compositing at a
                     // stable DPR is preferable to that severe cold-start hitch.
-                    antialias: !isWindowsFirefoxBrowser(),
+                    antialias: !touchMode && !isFirefoxBrowser(),
                     powerPreference: 'high-performance',
                     alpha: false,
                     stencil: false,
@@ -4541,16 +4648,6 @@ export default function ImmersiveGalleryDesktop() {
                     // This avoids the crushed-midtones/blown-floor split that
                     // made the prior pass feel flatter despite stronger lights.
                     gl.toneMappingExposure = touchMode ? 1.2 : 1.16
-                    if (!touchMode && !isFirefoxBrowser()) {
-                        gl.shadowMap.enabled = true
-                        // `PCFSoftShadowMap` is deprecated in current Three.js and
-                        // now aliases to PCF after issuing a warning every time a
-                        // WebGL context is compiled. Select the effective mode
-                        // directly so cold starts stay quiet and deterministic.
-                        gl.shadowMap.type = THREE.PCFShadowMap
-                        gl.shadowMap.autoUpdate = false
-                        gl.shadowMap.needsUpdate = true
-                    }
                 }}
             >
                 <Suspense fallback={null}>
@@ -4563,11 +4660,13 @@ export default function ImmersiveGalleryDesktop() {
                         preferences={preferences}
                         visualPreview={visualPreview}
                         developmentTour={developmentTour}
+                        developmentPerf={developmentPerf}
                         previewMode={previewMode}
                         previewRoomIndex={previewRoomIndex}
                         onSceneReady={handleSceneReady}
                         onSceneProgress={setSceneProgress}
                         onRendererStatus={setRendererStatus}
+                        onPause={pauseGallery}
                         onLock={() => setLocked(true)}
                         onUnlock={() => setLocked(false)}
                         onActiveRoom={setActiveRoomId}
@@ -4637,9 +4736,7 @@ export default function ImmersiveGalleryDesktop() {
                     <button
                         id="museum-enter"
                         type="button"
-                        onClick={touchMode
-                            ? () => setLocked(true)
-                            : () => document.querySelector('.museum-canvas canvas')?.requestPointerLock()}
+                        onClick={beginWalkThrough}
                     >
                         {activeRoomId ? 'Continue exploring' : 'Begin walk-through'}
                     </button>
@@ -4648,19 +4745,19 @@ export default function ImmersiveGalleryDesktop() {
                         <summary>Experience settings</summary>
                         <div>
                             <label>
-                                <span>Look sensitivity</span>
+                                <span>Look sensitivity <output>{Math.round(preferences.sensitivity * 100)}%</output></span>
                                 <input type="range" min="0.45" max="1.8" step="0.05" value={preferences.sensitivity} onChange={event => updatePreference('sensitivity', event.target.value)} />
                             </label>
                             <label>
-                                <span>Walking motion</span>
+                                <span>Walking motion <output>{Math.round(preferences.bobStrength * 100)}%</output></span>
                                 <input type="range" min="0" max="1" step="0.05" value={preferences.bobStrength} onChange={event => updatePreference('bobStrength', event.target.value)} />
                             </label>
                             <label>
-                                <span>Field of view</span>
+                                <span>Field of view <output>{preferences.fov}°</output></span>
                                 <input type="range" min="56" max="82" step="1" value={preferences.fov} onChange={event => updatePreference('fov', event.target.value)} />
                             </label>
                             <label>
-                                <span>Footsteps</span>
+                                <span>Footsteps <output>{Math.round(preferences.footstepVolume * 100)}%</output></span>
                                 <input type="range" min="0" max="1" step="0.05" value={preferences.footstepVolume} onChange={event => updatePreference('footstepVolume', event.target.value)} />
                             </label>
                         </div>
