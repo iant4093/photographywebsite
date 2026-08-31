@@ -40,6 +40,7 @@ from media_access import (
     serialize_images,
     validated_preview_keys,
 )
+from random_photo_pools import load_pool_references, normalized_category
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, require_string, validate_uuid
 
@@ -1062,9 +1063,7 @@ def _random_photo_category(event):
     return require_string(params.get("value"), "category", maximum=100)
 
 
-def _random_photos_response(event):
-    category = _random_photo_category(event)
-
+def _scan_random_photo_sample(category):
     sample = []
     total_photos = 0
     for album in _random_photo_albums(category):
@@ -1080,6 +1079,45 @@ def _random_photos_response(event):
             replacement = secrets.randbelow(total_photos)
             if replacement < RANDOM_PHOTO_LIMIT:
                 sample[replacement] = candidate
+
+    return sample, total_photos
+
+
+def _materialized_random_photo_sample(category):
+    try:
+        pool = load_pool_references(_preview_table(), dynamodb, category)
+    except Exception as error:
+        logger.warning(
+            "random_photo_pool_read_failed error_type=%s",
+            type(error).__name__,
+        )
+        return None
+    if pool is None:
+        return None
+
+    references = pool["references"]
+    albums = _batch_albums(item["albumId"] for item in references)
+    sample = []
+    for reference in references:
+        album = albums.get(reference["albumId"])
+        if not _active_public_photo_album(album):
+            return None
+        if category and normalized_category(album.get("category")) != normalized_category(
+            category
+        ):
+            return None
+        media = album.get("images") or _legacy_images(album)
+        image = find_image_by_media_id({**album, "images": media}, reference["mediaId"])
+        if image is None:
+            return None
+        sample.append((album, image))
+    return sample, pool["totalPhotos"]
+
+
+def _random_photos_response(event):
+    category = _random_photo_category(event)
+    materialized = _materialized_random_photo_sample(category)
+    sample, total_photos = materialized or _scan_random_photo_sample(category)
 
     grouped = {}
     for album, image in sample:

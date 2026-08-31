@@ -80,6 +80,15 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertEqual(cache["MinTTL"], 0)
         self.assertEqual(cache["MaxTTL"], 300)
 
+        stats_cache = cloudfront_frontend.public_stats_cache_policy_config(SETTINGS)
+        self.assertEqual(stats_cache["Name"], "IanTruong-API-Public-Stats-v1")
+        self.assertEqual(stats_cache["DefaultTTL"], 86400)
+        self.assertEqual(stats_cache["MaxTTL"], 86400)
+        self.assertEqual(
+            stats_cache["ParametersInCacheKeyAndForwardedToOrigin"],
+            parameters,
+        )
+
         public = cloudfront_frontend.api_origin_request_policy_config(SETTINGS, public=True)
         private = cloudfront_frontend.api_origin_request_policy_config(SETTINGS, public=False)
         self.assertEqual(public["CookiesConfig"], {"CookieBehavior": "none"})
@@ -145,6 +154,18 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertEqual(public["AllowedMethods"]["Items"], ["GET", "HEAD", "OPTIONS"])
         self.assertIn("POST", private["AllowedMethods"]["Items"])
         self.assertEqual(private["CachePolicyId"], "4135ea2d-6df8-44a3-9df3-4b5a84be39ad")
+
+        stats = cloudfront_frontend.api_cache_behavior(
+            default,
+            settings=SETTINGS,
+            path_pattern=SETTINGS["stats_path_pattern"],
+            cache_policy_id="stats-cache",
+            origin_request_policy_id="public-origin",
+            response_policy_id="api-response",
+            public=True,
+        )
+        self.assertEqual(stats["PathPattern"], "/api/public/stats")
+        self.assertEqual(stats["CachePolicyId"], "stats-cache")
 
     def test_origin_upsert_is_exact_and_rejects_id_reuse(self) -> None:
         runtime_value = secrets.token_urlsafe(48)
@@ -457,6 +478,7 @@ class WafAndPreflightTests(unittest.TestCase):
                             },
                             "CacheBehaviors": {
                                 "Items": [
+                                    {"PathPattern": "/api/public/stats"},
                                     {"PathPattern": "/api/public/*"},
                                     {"PathPattern": "/api/*"},
                                 ]

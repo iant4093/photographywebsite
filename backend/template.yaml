@@ -228,6 +228,8 @@ Resources:
       KeySchema:
         - AttributeName: albumId
           KeyType: HASH
+      StreamSpecification:
+        StreamViewType: KEYS_ONLY
       GlobalSecondaryIndexes:
         - IndexName: ShareCodeIndex
           KeySchema:
@@ -1512,6 +1514,64 @@ Resources:
             Method: ANY
             Auth:
               Authorizer: NONE
+
+  RandomPhotoPoolBuilderFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: random_photo_pool_builder.handler
+      Timeout: 120
+      MemorySize: 512
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchWriteItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:Query
+              Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:DescribeStream
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:ListStreams
+              Resource: !GetAtt AlbumsTable.StreamArn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AsyncFailureQueue.Arn
+      Events:
+        AlbumsChanged:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt AlbumsTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 100
+            MaximumBatchingWindowInSeconds: 10
+            MaximumRetryAttempts: 3
+            BisectBatchOnFunctionError: true
+            DestinationConfig:
+              OnFailure:
+                Type: SQS
+                Destination: !GetAtt AsyncFailureQueue.Arn
 
   # Compatibility route: supports public, owner, and admin catalog views.
   GetAlbumsFunction:

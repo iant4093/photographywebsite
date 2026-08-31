@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "allowed_origin_stages": ["s3-website", "s3-rest-oac"],
   "canonical_alias": "iantruongphotography.com",
   "optional_www_alias": "www.iantruongphotography.com",
@@ -16,12 +16,14 @@
     "origin_domain": "origin-api.iantruongphotography.com",
     "verification_header": "X-Origin-Verify",
     "public_path_pattern": "/api/public/*",
+    "stats_path_pattern": "/api/public/stats",
     "private_path_pattern": "/api/*",
     "social_path_patterns": ["album/*", "video/*"],
     "public_query_strings": ["cursor", "limit", "mode", "seed", "type", "value"],
     "public_forward_headers": ["Origin", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
     "private_forward_headers": ["Authorization", "CloudFront-Viewer-Country", "Content-Type", "Origin", "X-Turnstile-Token", "Access-Control-Request-Headers", "Access-Control-Request-Method"],
     "public_cache_policy_name": "IanTruong-API-Public-Catalog-v1",
+    "stats_cache_policy_name": "IanTruong-API-Public-Stats-v1",
     "public_origin_request_policy_name": "IanTruong-API-Public-Origin-v1",
     "private_origin_request_policy_name": "IanTruong-API-Private-Origin-v1",
     "response_policy_name": "IanTruong-API-Security-v1"

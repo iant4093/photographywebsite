@@ -12,7 +12,8 @@ NPM ?= npm
 # This list is intentionally explicit: an unmapped function fails the build
 # instead of falling back to copying the entire functions directory.
 SOURCES_GetPublicAlbumsFunction := cursor_helpers.py front_door.py gallery_order.py get_public_albums.py media_access.py response_helpers.py validation_helpers.py
-SOURCES_GetPublicAlbumFunction := cursor_helpers.py explore_index.py front_door.py get_public_album.py media_access.py response_helpers.py validation_helpers.py
+SOURCES_GetPublicAlbumFunction := cursor_helpers.py explore_index.py front_door.py get_public_album.py media_access.py random_photo_pools.py response_helpers.py validation_helpers.py
+SOURCES_RandomPhotoPoolBuilderFunction := media_access.py random_photo_pool_builder.py random_photo_pools.py validation_helpers.py
 SOURCES_GetAlbumsFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py gallery_order.py get_albums.py media_access.py response_helpers.py validation_helpers.py
 SOURCES_GetAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_album.py media_access.py response_helpers.py validation_helpers.py
 SOURCES_GetSharedAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_shared_album.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py

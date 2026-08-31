@@ -12,6 +12,7 @@ from test_support import response_body
 import get_public_album
 import get_public_albums
 import cursor_helpers
+from media_access import media_id_for_key
 
 
 ALBUM_ID = "11111111-1111-4111-8111-111111111111"
@@ -396,6 +397,45 @@ class PublicAlbumDetailTests(unittest.TestCase):
         self.assertEqual({item["albumId"] for item in body["images"]}, {ALBUM_ID, second_id})
         self.assertEqual({item["albumTitle"] for item in body["images"]}, {"Portfolio", "Second album"})
         load_previews.assert_called_once()
+
+    def test_random_photos_use_the_materialized_pool_without_scanning_albums(self):
+        album = public_album()
+        raw_key = album["images"][0]["rawKey"]
+        reference = {
+            "albumId": ALBUM_ID,
+            "mediaId": media_id_for_key(raw_key),
+        }
+        with patch.object(
+            get_public_album,
+            "load_pool_references",
+            return_value={"references": [reference], "totalPhotos": 3026},
+        ), patch.object(
+            get_public_album, "_preview_table", return_value=MagicMock()
+        ), patch.object(
+            get_public_album, "_batch_albums", return_value={ALBUM_ID: album}
+        ), patch.object(
+            get_public_album, "_random_photo_albums"
+        ) as scan_albums, patch.object(
+            get_public_album,
+            "load_preview_metadata_for_albums",
+            return_value={ALBUM_ID: {}},
+        ), patch.object(
+            get_public_album,
+            "serialize_images",
+            return_value=[{"id": reference["mediaId"], "url": "https://media.example.test/photo.jpg"}],
+        ):
+            response = get_public_album.handler(
+                {
+                    "rawPath": "/public/random-photos",
+                    "requestContext": {"routeKey": "GET /public/random-photos"},
+                    "queryStringParameters": None,
+                },
+                None,
+            )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response_body(response)["totalPhotos"], 3026)
+        scan_albums.assert_not_called()
 
     def test_random_photos_reject_query_parameters(self):
         invalid = (

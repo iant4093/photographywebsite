@@ -130,6 +130,23 @@ zero remaining changes, and only then invalidates the Explore API cache. Run it
 only after the online worker, album visibility, and deletion paths have been
 deployed.
 
+## Random-photo materialized decks
+
+The global and category shuffle endpoints read sharded reference decks from the
+retained `PreviewMetadataTable`. An album-table `KEYS_ONLY` stream invokes the
+single-concurrency builder after content mutations. The builder queries the
+authoritative public album index once, publishes immutable generation shards,
+switches each pool's metadata pointer, and removes superseded shards last.
+
+Public requests derive a new 80-photo window every five minutes and batch-read
+only the required deck shards, albums, and preview metadata. Every reference is
+rechecked against the current authoritative album visibility and media manifest;
+stale or malformed pools fail over to the legacy full scan rather than exposing
+removed media. After first deployment, invoke `RandomPhotoPoolBuilderFunction`
+once and require aggregate `poolCount` and `totalPhotos` output before clearing
+the public random-photo cache. Never log category names, album IDs, or media keys
+during this reconciliation.
+
 ## Production change boundary
 
 Routine production changes run only through the tested `main` release described

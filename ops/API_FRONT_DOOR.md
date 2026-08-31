@@ -11,6 +11,9 @@ WAF is defense in depth.
 - `/api/public/*` caches only anonymous `GET`/`HEAD` responses and varies only
   on the reviewed `cursor`, `limit`, `mode`, `seed`, `type`, and `value` query
   keys plus compression.
+- The exact `/api/public/stats` behavior precedes that wildcard and permits the
+  materialized daily report to remain at the edge for one day. All other public
+  API responses retain the five-minute maximum.
 - `/api/*` otherwise has caching disabled and forwards only the reviewed
   methods, query strings, and API/auth/CORS headers. It forwards no cookies.
 - CloudFront reaches the TLS 1.2 regional custom domain through the fixed `api`

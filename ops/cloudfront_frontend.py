@@ -515,6 +515,17 @@ def public_api_cache_policy_config(settings: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def public_stats_cache_policy_config(settings: dict[str, Any]) -> dict[str, Any]:
+    policy = public_api_cache_policy_config(settings)
+    policy.update({
+        "Name": settings["stats_cache_policy_name"],
+        "Comment": "Daily materialized public statistics; managed in source control",
+        "DefaultTTL": 86400,
+        "MaxTTL": 86400,
+    })
+    return policy
+
+
 def api_origin_request_policy_config(settings: dict[str, Any], *, public: bool) -> dict[str, Any]:
     headers = settings["public_forward_headers"] if public else settings["private_forward_headers"]
     query_config: dict[str, Any] = {"QueryStringBehavior": "all"}
@@ -949,9 +960,16 @@ def main() -> int:
     validate_cache_policy_ids(baseline, args.profile)
 
     api_settings = baseline.get("api_front_door", {})
-    public_api_cache_id = public_api_origin_request_id = private_api_origin_request_id = None
+    public_api_cache_id = public_stats_cache_id = None
+    public_api_origin_request_id = private_api_origin_request_id = None
     api_response_id = None
-    api_policy_actions = {"publicCache": "disabled", "publicOrigin": "disabled", "privateOrigin": "disabled", "response": "disabled"}
+    api_policy_actions = {
+        "publicCache": "disabled",
+        "statsCache": "disabled",
+        "publicOrigin": "disabled",
+        "privateOrigin": "disabled",
+        "response": "disabled",
+    }
     if args.include_api_front_door:
         required = {
             "--api-certificate-arn": args.api_certificate_arn,
@@ -990,6 +1008,9 @@ def main() -> int:
         )
         public_api_cache_id, api_policy_actions["publicCache"] = ensure_cache_policy(
             public_api_cache_policy_config(api_settings), apply=args.apply, profile=args.profile
+        )
+        public_stats_cache_id, api_policy_actions["statsCache"] = ensure_cache_policy(
+            public_stats_cache_policy_config(api_settings), apply=args.apply, profile=args.profile
         )
         public_api_origin_request_id, api_policy_actions["publicOrigin"] = ensure_origin_request_policy(
             api_origin_request_policy_config(api_settings, public=True),
@@ -1165,7 +1186,11 @@ def main() -> int:
     if args.include_fotomoto_print:
         managed_patterns.add(baseline["fotomoto_print"]["path_pattern"])
     if args.include_api_front_door:
-        managed_patterns.update({api_settings["public_path_pattern"], api_settings["private_path_pattern"]})
+        managed_patterns.update({
+            api_settings["stats_path_pattern"],
+            api_settings["public_path_pattern"],
+            api_settings["private_path_pattern"],
+        })
         managed_patterns.update(api_settings.get("social_path_patterns", []))
     preserved = [item for item in existing_behaviors if item.get("PathPattern") not in managed_patterns]
     immutable = [
@@ -1193,9 +1218,18 @@ def main() -> int:
         )]
     api_behaviors = []
     if args.include_api_front_door:
-        assert public_api_cache_id and public_api_origin_request_id
+        assert public_api_cache_id and public_stats_cache_id and public_api_origin_request_id
         assert private_api_origin_request_id and api_response_id
         api_behaviors = [
+            api_cache_behavior(
+                default,
+                settings=api_settings,
+                path_pattern=api_settings["stats_path_pattern"],
+                cache_policy_id=public_stats_cache_id,
+                origin_request_policy_id=public_api_origin_request_id,
+                response_policy_id=api_response_id,
+                public=True,
+            ),
             api_cache_behavior(
                 default,
                 settings=api_settings,
@@ -1229,8 +1263,9 @@ def main() -> int:
             social_behavior["ViewerProtocolPolicy"] = "redirect-to-https"
             associate_viewer_request(social_behavior, social_router_arn)
             api_behaviors.append(social_behavior)
-    # CloudFront selects the first matching ordered behavior, so the narrow
-    # public cache path must precede the cache-disabled catch-all API path.
+    # CloudFront selects the first matching ordered behavior, so the exact
+    # daily stats path precedes the five-minute public wildcard, and both
+    # precede the cache-disabled catch-all API path.
     managed = api_behaviors + print_behaviors + immutable + static
     if request_router_enabled:
         for behavior in preserved:

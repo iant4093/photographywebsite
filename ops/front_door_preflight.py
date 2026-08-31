@@ -63,11 +63,12 @@ def inspect(args: argparse.Namespace) -> dict[str, Any]:
         item.get("PathPattern"): item
         for item in config.get("CacheBehaviors", {}).get("Items", []) or []
     }
-    for required in ("/api/public/*", "/api/*"):
+    for required in ("/api/public/stats", "/api/public/*", "/api/*"):
         if required not in patterns:
             raise RuntimeError(f"required CloudFront behavior is missing: {required}")
-    if "Authorization" in json.dumps(patterns["/api/public/*"], sort_keys=True):
-        raise RuntimeError("public API cache behavior unexpectedly references authorization")
+    for public_pattern in ("/api/public/stats", "/api/public/*"):
+        if "Authorization" in json.dumps(patterns[public_pattern], sort_keys=True):
+            raise RuntimeError("public API cache behavior unexpectedly references authorization")
 
     api_id = stack_resource(args.stack_name, "Api", args.profile, args.region)
     api = aws_json(["apigatewayv2", "get-api", "--api-id", api_id], args.profile, args.region)

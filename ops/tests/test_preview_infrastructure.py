@@ -145,6 +145,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "DeleteAlbumFunction",
             "AddImagesFunction",
             "PreviewWorkerFunction",
+            "RandomPhotoPoolBuilderFunction",
             "DeleteImagesFunction",
         }
         actual_consumers = {
@@ -158,6 +159,28 @@ class PreviewWorkerTests(unittest.TestCase):
         for logical_id in sorted(expected_consumers):
             with self.subTest(function=logical_id):
                 self.assertNotIn("PreviewDataKey", resource_block(logical_id))
+
+    def test_random_photo_pools_rebuild_from_a_bounded_album_stream(self) -> None:
+        albums = resource_block("AlbumsTable")
+        builder = resource_block("RandomPhotoPoolBuilderFunction")
+        self.assertIn("StreamViewType: KEYS_ONLY", albums)
+        for expected in (
+            "Handler: random_photo_pool_builder.handler",
+            "ReservedConcurrentExecutions: 1",
+            "Timeout: 120",
+            "MemorySize: 512",
+            "PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable",
+            "Stream: !GetAtt AlbumsTable.StreamArn",
+            "MaximumBatchingWindowInSeconds: 10",
+            "MaximumRetryAttempts: 3",
+            "BisectBatchOnFunctionError: true",
+            "Destination: !GetAtt AsyncFailureQueue.Arn",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:GetRecords",
+            "s3:ListBucket",
+        ):
+            self.assertIn(expected, builder)
+        self.assertIn("SOURCES_RandomPhotoPoolBuilderFunction", MAKEFILE)
 
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):
