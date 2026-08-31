@@ -13,7 +13,7 @@ export function supportsImmersiveGallery() {
 
 export const DEFAULT_MUSEUM_PREFERENCES = Object.freeze({
     sensitivity: 1,
-    bobStrength: 0.9,
+    bobStrength: 0.24,
     fov: 66,
     footstepVolume: 0.7,
 })

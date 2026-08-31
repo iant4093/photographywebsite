@@ -47,8 +47,25 @@ export function buildMuseumCatalog(albums = []) {
 function makePaintings(room) {
     const wallOffset = (room.width / 2) - 0.12
     return room.albums.map((album, index) => {
-        const row = Math.floor(index / 2)
-        const onNearWall = index % 2 === 0
+        // Give every gallery a focal work on its end wall while retaining the
+        // consistent alternating-wall rhythm for the remaining albums.
+        if (index === 0) {
+            return {
+                id: album.albumId,
+                album,
+                position: [
+                    room.outerX - (room.side * 0.28),
+                    2.65,
+                    room.centerZ,
+                ],
+                rotationY: room.side < 0 ? Math.PI / 2 : -Math.PI / 2,
+                normal: [-room.side, 0, 0],
+                scale: [1, 1, 1],
+            }
+        }
+        const wallIndex = index - 1
+        const row = Math.floor(wallIndex / 2)
+        const onNearWall = wallIndex % 2 === 0
         const z = room.centerZ + (onNearWall ? -wallOffset : wallOffset)
         const x = room.side * (
             MUSEUM_DIMENSIONS.hallHalfWidth
@@ -140,27 +157,6 @@ export function buildMuseumLayout(categories = []) {
         room.paintings = makePaintings(room)
         room.benches = makeBenches(room)
         room.plants = makeRoomPlants(room)
-        room.landmark = {
-            id: `${room.id}-landmark`,
-            position: [
-                // A category with dozens of albums can produce a room more
-                // than 200 metres deep. Pinning the only focal sculpture to
-                // that far wall reduced it to a speck from the entrance. Place
-                // it in the first authored salon instead, while retaining the
-                // former end-wall composition in compact rooms.
-                room.innerX + (room.side * (
-                    room.depth <= 24
-                        ? room.depth - 1.35
-                        : Math.min(18, room.depth * 0.55)
-                )),
-                0,
-                room.centerZ,
-            ],
-            // Collision includes the freestanding backdrop, not only the
-            // sculpture plinth, so visitors cannot ghost through its wings.
-            size: [2.8, 3.8, 4.6],
-            variant: index % 3,
-        }
         return room
     })
 
@@ -218,7 +214,10 @@ export function buildMuseumLayout(categories = []) {
         ...dressing.lobbyPlants,
         ...dressing.hallPlants,
         dressing.terminalSculpture,
-        ...rooms.flatMap(room => [...room.benches, ...room.plants, room.landmark]),
+        ...rooms.flatMap(room => [
+            ...room.benches,
+            ...room.plants,
+        ]),
     ]
 
     return {
@@ -276,7 +275,7 @@ export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
         ...layout.dressing.lobbyPlants,
         ...layout.dressing.hallPlants,
         layout.dressing.terminalSculpture,
-        ...layout.rooms.flatMap(room => [...room.benches, ...room.plants, room.landmark].filter(Boolean)),
+        ...layout.rooms.flatMap(room => [...room.benches, ...room.plants].filter(Boolean)),
     ]
     return !obstacles.some(obstacle => intersectsObstacle(x, z, obstacle, radius))
 }
@@ -378,13 +377,10 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 25) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-    // Keep only the nearest authored room resident. Every inactive doorway is
-    // physically covered by its dimensional velvet portal, so mounting the
-    // sibling across the hall only doubles image planes, frame shells and
-    // shader work without adding anything visible. Its blurhash atlas and tiny
-    // cover bases are still decoded by the background warmup, which lets the
-    // nearest-room handoff remain visually immediate.
-    if (nearby[0]?.contained) return [nearby[0].id]
+    // Keep only the nearest/occupied room mounted. Adjacent entrance artwork
+    // is already warmed by the cover preloader, while mounting two complete
+    // interiors at a threshold briefly doubles draw calls and causes the
+    // visible hitch that used to happen while crossing between spaces.
     return nearby.slice(0, 1).map(room => room.id)
 }
 

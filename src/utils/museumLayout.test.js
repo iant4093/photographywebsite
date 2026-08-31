@@ -209,17 +209,13 @@ describe('museum layout', () => {
         ))).toBe(true)
     })
 
-    it('keeps the focal landmark physical while preserving routes around its backdrop', () => {
+    it('keeps the central viewing axis free of decorative landmarks', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog(Array.from({ length: 30 }, (_, index) => (
             album(`album-${index}`, 'Hikes')
         ))))
         const room = layout.rooms[0]
-        const [landmarkX, , landmarkZ] = room.landmark.position
-
-        expect(isMuseumPositionWalkable(layout, landmarkX, landmarkZ)).toBe(false)
-        expect(isMuseumPositionWalkable(layout, landmarkX, landmarkZ - 3.2)).toBe(true)
-        expect(isMuseumPositionWalkable(layout, landmarkX, landmarkZ + 3.2)).toBe(true)
-        expect((landmarkX - room.innerX) * room.side).toBeLessThanOrEqual(18)
+        expect(room.landmark).toBeUndefined()
+        expect(isMuseumPositionWalkable(layout, room.centerX, room.centerZ)).toBe(true)
     })
 
     it('keeps a closed streaming portal solid and permits entry after it opens', () => {
@@ -302,7 +298,7 @@ describe('museum layout', () => {
         }
     })
 
-    it('preloads only the nearest room without mounting its hidden sibling', () => {
+    it('keeps only the nearest doorway resident for a stable handoff', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'),
             album('b', 'Astro'),
@@ -311,13 +307,13 @@ describe('museum layout', () => {
         ]))
         const [x, , z] = layout.rooms[0].entrance
         expect(nearestMuseumRoom(layout, { x: x + 1, z })).toBe(layout.rooms[0].id)
-        expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([
-            layout.rooms[0].id,
-        ])
-        expect(nearbyMuseumRoomIds(layout, {
+        expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([layout.rooms[0].id])
+        const contained = nearbyMuseumRoomIds(layout, {
             x: layout.rooms[1].centerX,
             z: layout.rooms[1].centerZ,
-        })).toEqual([layout.rooms[1].id])
+        })
+        expect(contained[0]).toBe(layout.rooms[1].id)
+        expect(contained).toEqual([layout.rooms[1].id])
         expect(nearestMuseumRoom(layout, { x: 0, z: 10 }, 1)).toBeNull()
     })
 

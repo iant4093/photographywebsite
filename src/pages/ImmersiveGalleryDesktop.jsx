@@ -34,7 +34,7 @@ import {
 
 const SESSION_KEY = 'ian-photography-museum-position-v2'
 const RETURN_KEY = 'ian-photography-museum-return'
-const PREFERENCES_KEY = 'ian-photography-museum-preferences-v1'
+const PREFERENCES_KEY = 'ian-photography-museum-preferences-v2'
 const HALL_PAINT = '#d8d0c4'
 const ROOM_PAINT = '#d2c9bc'
 // Decorative surfaces sit just inside the structural shell. A small, shared
@@ -49,8 +49,8 @@ const HALL_WALL_THICKNESS = 0.32
 const ROOM_SHELL_INSET = 0.42
 const EMPTY_FIXTURES = Object.freeze([])
 const ARCHITECTURAL_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 2, 0.045)
-const PORTAL_SURROUND_GEOMETRY = makePortalSurroundGeometry(0.42, 0.2)
-const PORTAL_REVEAL_GEOMETRY = makePortalSurroundGeometry(0.13, 0.11)
+const PORTAL_ARCH_STONE_GEOMETRY = makePortalArchGeometry(0.18, 0.12, 0.24)
+const PORTAL_ARCH_REVEAL_GEOMETRY = makePortalArchGeometry(0.01, 0.015, 0.085)
 RectAreaLightUniformsLib.init()
 // Image decoding and GPU promotion are the only workloads in this scene that
 // can create multi-frame stalls. Four concurrent off-thread decodes finish the
@@ -64,6 +64,7 @@ const LOW_POWER_COVER_CACHE_ENTRIES = 42
 const coverTextureCache = new Map()
 const coverTextureLoads = new Map()
 const coverTextureReferences = new Map()
+const coverPreviewCandidateCache = new Map()
 const labelTextureCache = new Map()
 const roomPlaqueBatchCache = new Map()
 const roomPlaceholderBatchCache = new Map()
@@ -72,11 +73,6 @@ const coverUploadQueue = []
 const uploadedCoverTextures = new WeakSet()
 const pendingCoverUploads = new WeakMap()
 const pinnedCoverTextures = new WeakSet()
-// The visual curtain and the player collision must agree about whether a room
-// is enterable. Keeping this outside React avoids a scene-wide rerender on
-// every curtain animation frame while still giving the movement controller a
-// synchronous answer.
-const openMuseumPortalIds = new Set()
 let activeCoverLoads = 0
 let coverLoadSequence = 0
 let coverUploadSequence = 0
@@ -532,37 +528,6 @@ function BakedWallpaperSurface({
     )
 }
 
-let curtainTexture = null
-function getCurtainTexture() {
-    if (curtainTexture || typeof document === 'undefined') return curtainTexture
-    const canvas = document.createElement('canvas')
-    canvas.width = 256
-    canvas.height = 256
-    const context = canvas.getContext('2d')
-    const gradient = context.createLinearGradient(0, 0, canvas.width, 0)
-    for (let index = 0; index <= 16; index += 1) {
-        const position = index / 16
-        const light = index % 2 === 0 ? 31 : 13
-        gradient.addColorStop(position, `hsl(351 45% ${light}%)`)
-    }
-    context.fillStyle = gradient
-    context.fillRect(0, 0, canvas.width, canvas.height)
-    const vignette = context.createLinearGradient(0, 0, 0, canvas.height)
-    vignette.addColorStop(0, 'rgba(255, 224, 198, 0.12)')
-    vignette.addColorStop(0.62, 'rgba(42, 4, 12, 0)')
-    vignette.addColorStop(1, 'rgba(24, 2, 8, 0.32)')
-    context.fillStyle = vignette
-    context.fillRect(0, 0, canvas.width, canvas.height)
-    curtainTexture = new THREE.CanvasTexture(canvas)
-    curtainTexture.colorSpace = THREE.SRGBColorSpace
-    curtainTexture.wrapS = THREE.RepeatWrapping
-    curtainTexture.wrapT = THREE.ClampToEdgeWrapping
-    curtainTexture.repeat.set(1.75, 1)
-    curtainTexture.anisotropy = 2
-    curtainTexture.needsUpdate = true
-    return curtainTexture
-}
-
 function WallpaperPanel({
     materials,
     side,
@@ -877,14 +842,10 @@ function getRoomPlaqueBatch(paintings) {
     canvas.height = rows * tileHeight
     const context = canvas.getContext('2d')
     const parent = new THREE.Matrix4()
-    // A museum caption should support the work, not read as a second framed
-    // object. Keep it close to the lower mat and comfortably narrower than the
-    // photograph so the wall rhythm stays calm at oblique viewing angles.
-    // Real gallery labels sit beside the work rather than forming a bright
-    // subtitle strip beneath every frame. The compact side plaque stays
-    // legible at viewing distance and lets the photographs—not repeated text
-    // bars—establish the room rhythm from the doorway.
-    const local = new THREE.Matrix4().makeTranslation(1.78, -0.72, 0.13)
+    // Keep the caption centered beneath the physical frame. Side-mounted
+    // plaques inherited each painting's rotation and crossed the mat at
+    // oblique viewing angles.
+    const local = new THREE.Matrix4().makeTranslation(0, -1.43, 0.2)
     const rotation = new THREE.Quaternion()
     const position = new THREE.Vector3()
     const scale = new THREE.Vector3()
@@ -898,7 +859,7 @@ function getRoomPlaqueBatch(paintings) {
         const row = Math.floor(index / columns)
         context.drawImage(source, column * tileWidth, row * tileHeight, tileWidth, tileHeight)
 
-        const geometry = new THREE.PlaneGeometry(0.98, 0.38)
+        const geometry = new THREE.PlaneGeometry(1.72, 0.38)
         const uv = geometry.getAttribute('uv')
         for (let vertex = 0; vertex < uv.count; vertex += 1) {
             uv.setXY(
@@ -1024,16 +985,25 @@ async function prepareRoomBatches(rooms, onProgress) {
     const pending = rooms.filter(room => room.paintings.length > 0)
     const placeholderTextures = []
     const plaqueTextures = []
+    let sliceStartedAt = performance.now()
     for (let index = 0; index < pending.length; index += 1) {
         const paintings = pending[index].paintings
         placeholderTextures.push(getRoomPlaceholderBatch(paintings).texture)
         plaqueTextures.push(getRoomPlaqueBatch(paintings).texture)
         onProgress?.((index + 1) / pending.length)
-        // Blurhash decoding and plaque typography are CPU-only. Finish both
-        // room atlases behind the opening veil, but yield between rooms so
-        // Firefox can keep painting determinate progress. This trades a short,
-        // honest loading phase for zero first-entry plaque/placeholder stalls.
-        await new Promise(resolve => window.requestAnimationFrame(resolve))
+        // Blurhash decoding and plaque typography are CPU-only. Build a small
+        // time-bounded batch per frame rather than paying one entire frame for
+        // every category. This keeps Firefox's determinate progress responsive
+        // without making startup scale at 16.7 ms per room as the archive grows.
+        const shouldYield = (
+            index === pending.length - 1
+            || index % 6 === 5
+            || performance.now() - sliceStartedAt >= 8
+        )
+        if (shouldYield) {
+            await new Promise(resolve => window.requestAnimationFrame(resolve))
+            sliceStartedAt = performance.now()
+        }
     }
     return { placeholderTextures, plaqueTextures }
 }
@@ -1045,12 +1015,12 @@ function albumPlaqueSubtitle(album) {
     }) : 'Photographic series'
 }
 
-function LabelPlane({ title, subtitle, position, rotation = [0, 0, 0], size = [3, 0.75] }) {
+function LabelPlane({ title, subtitle, position, rotation = [0, 0, 0], size = [3, 0.75], renderOrder = 0, depthTest = true }) {
     const texture = useLabelTexture(title, subtitle)
     return (
-        <mesh position={position} rotation={rotation}>
+        <mesh position={position} rotation={rotation} renderOrder={renderOrder}>
             <planeGeometry args={size} />
-            <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+            <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} depthTest={depthTest} />
         </mesh>
     )
 }
@@ -1063,7 +1033,7 @@ function CategoryDoorSign({ room, side, centerZ, materials }) {
     // so several valid categories appeared to have no nameplate at runtime.
     const surfaceX = wallX - (side * ((HALL_WALL_THICKNESS / 2) + 0.16))
     return (
-        <group position={[surfaceX, 4.78, centerZ]} rotation={[0, rotationY, 0]}>
+        <group position={[surfaceX, 4.92, centerZ]} rotation={[0, rotationY, 0]} renderOrder={20}>
             <mesh position={[0, 0, -0.025]} scale={[3.38, 0.82, 0.13]} castShadow receiveShadow>
                 <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
                 <meshPhysicalMaterial
@@ -1081,8 +1051,9 @@ function CategoryDoorSign({ room, side, centerZ, materials }) {
             <LabelPlane
                 title={room.name}
                 subtitle={`${room.albums.length} ${room.albums.length === 1 ? 'album' : 'albums'}`}
-                position={[0, 0, 0.09]}
+                position={[0, 0, 0.14]}
                 size={[3.04, 0.52]}
+                renderOrder={22}
             />
         </group>
     )
@@ -1124,14 +1095,21 @@ function useUnavailableArtworkTexture(title, enabled) {
 }
 
 async function optimizedCoverUrls(album, targetWidth = 960) {
-    const srcSet = await albumCoverPreviewSrcSet(album).catch(() => '')
-    const previews = srcSet
-        .split(',')
-        .map((candidate) => {
-            const [url, widthToken = ''] = candidate.trim().split(/\s+/)
-            return { url, width: Number.parseInt(widthToken, 10) || 0 }
-        })
-        .filter(candidate => candidate.url)
+    const albumKey = [album.albumId, album.coverThumbnailUrl, album.coverImageUrl].join('|')
+    let candidates = coverPreviewCandidateCache.get(albumKey)
+    if (!candidates) {
+        candidates = albumCoverPreviewSrcSet(album)
+            .catch(() => '')
+            .then(srcSet => srcSet
+                .split(',')
+                .map((candidate) => {
+                    const [url, widthToken = ''] = candidate.trim().split(/\s+/)
+                    return { url, width: Number.parseInt(widthToken, 10) || 0 }
+                })
+                .filter(candidate => candidate.url))
+        coverPreviewCandidateCache.set(albumKey, candidates)
+    }
+    const previews = [...await candidates]
         .sort((left, right) => (
             Math.abs(left.width - targetWidth) - Math.abs(right.width - targetWidth)
             || right.width - left.width
@@ -1189,7 +1167,7 @@ function enqueueCoverLoad(task, priority = 0) {
     })
 }
 
-function loadHtmlImage(url, highPriority = false) {
+function loadHtmlImage(url, highPriority = false, targetWidth = 0) {
     return new Promise((resolve, reject) => {
         const image = new Image()
         const timeout = window.setTimeout(() => {
@@ -1203,6 +1181,20 @@ function loadHtmlImage(url, highPriority = false) {
         image.fetchPriority = highPriority ? 'high' : 'low'
         image.onload = () => {
             window.clearTimeout(timeout)
+            const sourceWidth = image.naturalWidth || image.width
+            const sourceHeight = image.naturalHeight || image.height
+            if (targetWidth > 0 && sourceWidth > targetWidth * 1.15 && sourceHeight > 0) {
+                // Firefox's ImageBitmap pipeline can release multiple full-size
+                // decodes in one burst. A compact canvas source keeps the later
+                // WebGL upload and retained cache at the size this view asked
+                // for, even when a legacy URL resolves to the original image.
+                const canvas = document.createElement('canvas')
+                canvas.width = Math.max(1, Math.round(targetWidth))
+                canvas.height = Math.max(1, Math.round(sourceHeight * (canvas.width / sourceWidth)))
+                canvas.getContext('2d', { alpha: false })?.drawImage(image, 0, 0, canvas.width, canvas.height)
+                resolve(canvas)
+                return
+            }
             resolve(image)
         }
         image.onerror = () => {
@@ -1213,13 +1205,13 @@ function loadHtmlImage(url, highPriority = false) {
     })
 }
 
-async function loadDecodedImage(url, highPriority = false) {
+async function loadDecodedImage(url, highPriority = false, targetWidth = 0) {
     // Firefox can postpone a group of createImageBitmap decodes until the
     // compositor becomes idle, making a determinate loading bar appear frozen
     // before releasing one enormous upload burst. Its HTML image decoder is
     // independently scheduled and provides much steadier cold-start pacing.
     const firefox = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent)
-    if (firefox || typeof createImageBitmap !== 'function') return loadHtmlImage(url, highPriority)
+    if (firefox || typeof createImageBitmap !== 'function') return loadHtmlImage(url, highPriority, targetWidth)
     const controller = new AbortController()
     const timeout = window.setTimeout(() => controller.abort(), highPriority ? 6500 : 4500)
     try {
@@ -1231,12 +1223,23 @@ async function loadDecodedImage(url, highPriority = false) {
         })
         if (!response.ok) throw new Error(`Museum cover request failed (${response.status})`)
         const blob = await response.blob()
-        return await createImageBitmap(blob, {
+        const decoded = await createImageBitmap(blob, {
             // WebGL ignores Texture.flipY for ImageBitmap sources, so perform
             // the upload-space flip during off-thread decoding instead.
             imageOrientation: 'flipY',
             premultiplyAlpha: 'none',
         })
+        if (targetWidth > 0 && decoded.width > targetWidth * 1.15 && decoded.height > 0) {
+            const resizeHeight = Math.max(1, Math.round(decoded.height * (targetWidth / decoded.width)))
+            const resized = await createImageBitmap(decoded, 0, 0, decoded.width, decoded.height, {
+                resizeWidth: Math.max(1, Math.round(targetWidth)),
+                resizeHeight,
+                resizeQuality: 'high',
+            })
+            decoded.close?.()
+            return resized
+        }
+        return decoded
     } catch (cause) {
         // A timed-out request or a real HTTP miss will not improve by issuing
         // the same request again through an <img>. Only use that path when the
@@ -1247,7 +1250,7 @@ async function loadDecodedImage(url, highPriority = false) {
         }
         // Safari and cross-origin endpoints do not all expose ImageBitmap in
         // the same way. The async HTML image path remains a robust fallback.
-        return loadHtmlImage(url, highPriority)
+        return loadHtmlImage(url, highPriority, targetWidth)
     } finally {
         window.clearTimeout(timeout)
     }
@@ -1279,7 +1282,7 @@ function requestMuseumCoverTexture(album, targetWidth = 960, priority = targetWi
         let lastError = null
         for (const url of urls) {
             try {
-                const image = await loadDecodedImage(url, targetWidth > LOW_RES_COVER_WIDTH)
+                const image = await loadDecodedImage(url, targetWidth > LOW_RES_COVER_WIDTH, targetWidth)
                 const texture = new THREE.Texture(image)
                 cropMuseumCover(texture, image)
                 texture.colorSpace = THREE.SRGBColorSpace
@@ -1413,9 +1416,6 @@ function GalleryFrameShells({ paintings, materials }) {
     const frameProfile = useRef(null)
     const mat = useRef(null)
     const innerLip = useRef(null)
-    const lampBackplate = useRef(null)
-    const lampStem = useRef(null)
-    const lamp = useRef(null)
     const glazing = useRef(null)
     const roundedBacking = useMemo(() => new RoundedBoxGeometry(1, 1, 1, 2, 0.035), [])
     const roundedFrame = useMemo(() => new RoundedBoxGeometry(1, 1, 1, 2, 0.045), [])
@@ -1447,9 +1447,6 @@ function GalleryFrameShells({ paintings, materials }) {
             [frameProfile.current, [0, 0, 0.085], [0, 0, 0], [3.13, 2.23, 0.075]],
             [mat.current, [0, 0, 0.125], [0, 0, 0], [2.96, 2.06, 0.07]],
             [innerLip.current, [0, 0, 0.154], [0, 0, 0], [2.8, 1.9, 0.045]],
-            [lampBackplate.current, [0, 1.64, -0.02], [0, 0, 0], [0.46, 0.2, 0.075]],
-            [lampStem.current, [0, 1.67, 0.13], [-0.12, 0, 0], [0.09, 0.1, 0.35]],
-            [lamp.current, [0, 1.72, 0.28], [0.16, 0, 0], [1.45, 0.08, 0.11]],
             [glazing.current, [0, 0, 0.19], [0, 0, 0], [2.7, 1.8, 1]],
         ]
         paintings.forEach((painting, index) => {
@@ -1528,18 +1525,6 @@ function GalleryFrameShells({ paintings, materials }) {
                     clearcoat={0.3}
                     clearcoatRoughness={0.44}
                 />
-            </instancedMesh>
-            <instancedMesh ref={lampBackplate} args={[undefined, undefined, count]} castShadow>
-                <primitive object={roundedBacking} attach="geometry" />
-                <meshPhysicalMaterial color="#765837" metalness={0.66} roughness={0.34} clearcoat={0.22} />
-            </instancedMesh>
-            <instancedMesh ref={lampStem} args={[undefined, undefined, count]} castShadow>
-                <primitive object={roundedBacking} attach="geometry" />
-                <meshPhysicalMaterial color="#8b6740" metalness={0.7} roughness={0.3} clearcoat={0.26} />
-            </instancedMesh>
-            <instancedMesh ref={lamp} args={[undefined, undefined, count]}>
-                <primitive object={roundedBacking} attach="geometry" />
-                <meshStandardMaterial color="#9b7c59" emissive="#e1a765" emissiveIntensity={0.38} metalness={0.45} roughness={0.42} />
             </instancedMesh>
             <instancedMesh ref={glazing} args={[undefined, undefined, count]} renderOrder={5}>
                 <planeGeometry args={[1, 1]} />
@@ -1643,7 +1628,7 @@ function Painting({ painting, targetWidth = 0, loadLow = false, lowPriority = 0,
     )
 }
 
-function CameraAwareRoomPaintings({ room, active, detailed, allowDetail, qualityLighting, readyPaintingIds, onTextureReady }) {
+function CameraAwareRoomPaintings({ room, active, detailed, allowDetail, qualityLighting, onTextureReady }) {
     const { camera } = useThree()
     const baselineSelection = useMemo(() => room.paintings.map(painting => ({
         painting,
@@ -1698,28 +1683,6 @@ function CameraAwareRoomPaintings({ room, active, detailed, allowDetail, quality
         return () => window.clearTimeout(timer)
     }, [active, initialSelection, seedSelection])
     useEffect(() => {
-        if (!active || !readyPaintingIds?.size) return
-        const resident = baselineSelection.filter(({ painting }) => readyPaintingIds.has(painting.id))
-        if (resident.length <= activationFloorCount.current) return
-        // A revisit must never replay the first-visit streaming reveal for
-        // textures that are already decoded and resident. Remount every ready
-        // work immediately, then let the normal bounded streamer handle only
-        // genuinely missing frames. This removes black-frame flashes on rapid
-        // second and third circuits without creating new network/GPU bursts.
-        activationFloorCount.current = resident.length
-        const residentIds = new Set(resident.map(item => item.painting.id))
-        const promoted = new Map(selectionRef.current.map(item => [item.painting.id, item]))
-        const next = baselineSelection
-            .filter(item => residentIds.has(item.painting.id))
-            .map(item => promoted.get(item.painting.id) || item)
-        const nextKey = next.map(item => `${item.painting.id}:${item.targetWidth}`).join('|')
-        if (nextKey === selectionKey.current) return
-        selectionKey.current = nextKey
-        selectionRef.current = next
-        const timer = window.setTimeout(() => setSelection(next), 0)
-        return () => window.clearTimeout(timer)
-    }, [active, baselineSelection, readyPaintingIds])
-    useEffect(() => {
         if (!import.meta.env.DEV) return
         const current = JSON.parse(document.documentElement.dataset.museumSelections || '{}')
         current[room.id] = {
@@ -1734,14 +1697,14 @@ function CameraAwareRoomPaintings({ room, active, detailed, allowDetail, quality
         if (!active) return
         if (activatedAt.current === null) activatedAt.current = state.clock.elapsedTime
         const activationAge = state.clock.elapsedTime - activatedAt.current
-        // Desktop galleries should eventually finish hanging every authored
-        // work. The old fixed ceiling of twenty left the final bay of larger
-        // collections looking permanently unfinished. Lower-power profiles
-        // retain a conservative cap, while the camera/frustum selection below
-        // still prevents off-screen textures from mounting all at once.
+        // Every authored work is always represented by the room-wide blurhash
+        // atlas, so the gallery never looks unfinished. Keep only a bounded
+        // set of real cover planes near/in front of the visitor; remounting all
+        // previously decoded covers made draw calls and frame subscribers grow
+        // throughout a long visit and caused severe revisit stalls.
         const maximum = detailed
-            ? (qualityLighting ? Math.min(room.paintings.length, 28) : Math.min(room.paintings.length, 18))
-            : Math.min(room.paintings.length, 12)
+            ? Math.min(room.paintings.length, 16)
+            : Math.min(room.paintings.length, 10)
         const warmupDuration = 0.72
         if (activationAge < warmupDuration) {
             const stagedCount = Math.min(
@@ -1796,7 +1759,7 @@ function CameraAwareRoomPaintings({ room, active, detailed, allowDetail, quality
                 // cadence. Admitting one every ~two thirds of a second keeps
                 // traversal responsive on integrated GPUs instead of turning
                 // a long room into a continuous decode/upload benchmark.
-                4 + Math.floor(Math.max(0, activationAge - warmupDuration) / 0.46),
+                4 + Math.floor(Math.max(0, activationAge - warmupDuration) / 0.26),
             ),
         )
         const focusCandidate = candidates.find(({ distance, facing }) => (
@@ -2072,173 +2035,6 @@ function RoomSalonBays({ room, ceilingY, materials }) {
     )
 }
 
-function VelvetCurtainMaterial({ map }) {
-    return (
-        <meshPhysicalMaterial
-            map={map}
-            bumpMap={map}
-            bumpScale={0.035}
-            color="#7b2835"
-            roughness={0.82}
-            sheen={0.7}
-            sheenColor="#c7737b"
-            sheenRoughness={0.76}
-            side={THREE.DoubleSide}
-        />
-    )
-}
-
-function makePleatedCurtainGeometry(width, height, depth = 0.2, pleats = 11) {
-    const geometry = new THREE.BufferGeometry()
-    const positions = []
-    const uvs = []
-    const indices = []
-    const segments = pleats * 2
-
-    const addQuad = (corners, quadUvs) => {
-        const offset = positions.length / 3
-        corners.forEach(([x, y, z]) => positions.push(x, y, z))
-        quadUvs.forEach(([u, v]) => uvs.push(u, v))
-        indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3)
-    }
-
-    const edge = (index, front) => {
-        const ratio = index / segments
-        const x = (-width / 2) + (ratio * width)
-        const fold = Math.sin(ratio * pleats * Math.PI * 2)
-        const z = (front ? depth / 2 : -depth / 2) + (fold * depth * (front ? 0.34 : 0.16))
-        return { ratio, x, z }
-    }
-
-    for (let index = 0; index < segments; index += 1) {
-        const frontA = edge(index, true)
-        const frontB = edge(index + 1, true)
-        const backA = edge(index, false)
-        const backB = edge(index + 1, false)
-        addQuad(
-            [[frontA.x, 0, frontA.z], [frontB.x, 0, frontB.z], [frontB.x, height, frontB.z], [frontA.x, height, frontA.z]],
-            [[frontA.ratio, 0], [frontB.ratio, 0], [frontB.ratio, 1], [frontA.ratio, 1]],
-        )
-        addQuad(
-            [[backB.x, 0, backB.z], [backA.x, 0, backA.z], [backA.x, height, backA.z], [backB.x, height, backB.z]],
-            [[backB.ratio, 0], [backA.ratio, 0], [backA.ratio, 1], [backB.ratio, 1]],
-        )
-        addQuad(
-            [[backA.x, height, backA.z], [frontA.x, height, frontA.z], [frontB.x, height, frontB.z], [backB.x, height, backB.z]],
-            [[frontA.ratio, 0], [frontA.ratio, 1], [frontB.ratio, 1], [frontB.ratio, 0]],
-        )
-        addQuad(
-            [[backB.x, 0, backB.z], [frontB.x, 0, frontB.z], [frontA.x, 0, frontA.z], [backA.x, 0, backA.z]],
-            [[frontB.ratio, 0], [frontB.ratio, 1], [frontA.ratio, 1], [frontA.ratio, 0]],
-        )
-    }
-
-    const frontLeft = edge(0, true)
-    const backLeft = edge(0, false)
-    const frontRight = edge(segments, true)
-    const backRight = edge(segments, false)
-    addQuad(
-        [[backLeft.x, 0, backLeft.z], [frontLeft.x, 0, frontLeft.z], [frontLeft.x, height, frontLeft.z], [backLeft.x, height, backLeft.z]],
-        [[0, 0], [1, 0], [1, 1], [0, 1]],
-    )
-    addQuad(
-        [[frontRight.x, 0, frontRight.z], [backRight.x, 0, backRight.z], [backRight.x, height, backRight.z], [frontRight.x, height, frontRight.z]],
-        [[0, 0], [1, 0], [1, 1], [0, 1]],
-    )
-
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-    geometry.setIndex(indices)
-    geometry.computeVertexNormals()
-    geometry.computeBoundingBox()
-    geometry.computeBoundingSphere()
-    return geometry
-}
-
-function RoomPortalScrim({ room, ready, active, onClosed }) {
-    const left = useRef(null)
-    const right = useRef(null)
-    const progress = useRef(ready ? 1 : 0)
-    const closedReported = useRef(false)
-    const curtainMap = useMemo(() => getCurtainTexture(), [])
-    const panelWidth = (MUSEUM_DIMENSIONS.doorwayWidth / 2) + 0.18
-    const panelHeight = 4.18
-    const curtainGeometry = useMemo(
-        () => makePleatedCurtainGeometry(panelWidth, panelHeight),
-        [panelHeight, panelWidth],
-    )
-    useEffect(() => () => curtainGeometry.dispose(), [curtainGeometry])
-    useEffect(() => {
-        if (!ready) openMuseumPortalIds.delete(room.id)
-        return () => openMuseumPortalIds.delete(room.id)
-    }, [ready, room.id])
-    useFrame((_, delta) => {
-        progress.current = THREE.MathUtils.damp(progress.current, ready ? 1 : 0, ready ? 4.8 : 8, delta)
-        if (ready && progress.current >= 0.88) openMuseumPortalIds.add(room.id)
-        else openMuseumPortalIds.delete(room.id)
-        if (active) {
-            closedReported.current = false
-        } else if (progress.current <= 0.025 && !closedReported.current) {
-            closedReported.current = true
-            onClosed?.()
-        }
-        ;[[-1, left.current], [1, right.current]].forEach(([direction, group]) => {
-            if (!group) return
-            group.position.x = direction * ((panelWidth / 2) + (progress.current * 1.92))
-            group.scale.x = Math.max(0.14, 1 - (progress.current * 0.86))
-        })
-    })
-    const rotationY = room.side < 0 ? Math.PI / 2 : -Math.PI / 2
-    return (
-        <group
-            // The curtain has real depth and retracts into side pockets rather
-            // than vanishing. It therefore holds up from oblique views and can
-            // never reveal an empty portal while a room is still streaming.
-            position={[room.innerX + (room.side * 0.64), 0, room.centerZ]}
-            rotation={[0, rotationY, 0]}
-        >
-            {[-1, 1].map(direction => (
-                <mesh key={`curtain-pocket-${direction}`} position={[direction * 3.02, 2.09, 0]} scale={[0.46, 4.18, 0.34]} castShadow receiveShadow>
-                    <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                    <meshStandardMaterial color="#4a1821" roughness={0.9} />
-                </mesh>
-            ))}
-            {/* The rail physically terminates inside both side pockets, so the
-                curtain no longer appears to hang beneath a floating top cap. */}
-            <mesh position={[0, 4.18, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                <cylinderGeometry args={[0.055, 0.055, 6.04, 12]} />
-                <meshPhysicalMaterial color="#75512f" metalness={0.72} roughness={0.34} />
-            </mesh>
-            {[-1, 1].map(direction => (
-                <mesh key={`curtain-rail-anchor-${direction}`} position={[direction * 3.02, 4.18, 0]}>
-                    <sphereGeometry args={[0.105, 12, 8]} />
-                    <meshPhysicalMaterial color="#75512f" metalness={0.72} roughness={0.34} />
-                </mesh>
-            ))}
-            <group ref={left} position={[-panelWidth / 2, 0, 0]}>
-                <mesh castShadow receiveShadow>
-                    <primitive object={curtainGeometry} attach="geometry" />
-                    <VelvetCurtainMaterial map={curtainMap} />
-                </mesh>
-                <mesh position={[-(panelWidth * 0.28), 1.48, 0.12]} rotation={[Math.PI / 2, 0, 0]}>
-                    <torusGeometry args={[0.14, 0.035, 7, 14]} />
-                    <meshStandardMaterial color="#b98c53" metalness={0.72} roughness={0.28} />
-                </mesh>
-            </group>
-            <group ref={right} position={[panelWidth / 2, 0, 0]}>
-                <mesh castShadow receiveShadow>
-                    <primitive object={curtainGeometry} attach="geometry" />
-                    <VelvetCurtainMaterial map={curtainMap} />
-                </mesh>
-                <mesh position={[panelWidth * 0.28, 1.48, 0.12]} rotation={[Math.PI / 2, 0, 0]}>
-                    <torusGeometry args={[0.14, 0.035, 7, 14]} />
-                    <meshStandardMaterial color="#b98c53" metalness={0.72} roughness={0.28} />
-                </mesh>
-            </group>
-        </group>
-    )
-}
-
 function useArchSpandrelShape() {
     return useMemo(() => {
         const radius = MUSEUM_DIMENSIONS.doorwayWidth / 2
@@ -2281,57 +2077,20 @@ function useArchOpeningShape() {
     }, [])
 }
 
-function makePortalSurroundGeometry(trimWidth, depth) {
-    const openingRadius = MUSEUM_DIMENSIONS.doorwayWidth / 2
+function makePortalArchGeometry(radiusOffset, riseOffset, tubeRadius) {
+    const openingRadius = (MUSEUM_DIMENSIONS.doorwayWidth / 2) + radiusOffset
     const springHeight = 2.7
-    const archRise = 1.55
-    const outerRadius = openingRadius + trimWidth
-    const outerRise = archRise + trimWidth
-    const floorY = 0.06
-    const shape = new THREE.Shape()
-    shape.moveTo(-outerRadius, floorY)
-    shape.lineTo(-outerRadius, springHeight)
-    for (let segment = 0; segment <= 32; segment += 1) {
+    const archRise = 1.55 + riseOffset
+    const points = Array.from({ length: 33 }, (_, segment) => {
         const angle = Math.PI - ((Math.PI * segment) / 32)
-        shape.lineTo(
-            Math.cos(angle) * outerRadius,
-            springHeight + (Math.sin(angle) * outerRise),
-        )
-    }
-    shape.lineTo(outerRadius, floorY)
-    shape.closePath()
-
-    // The opening path runs in the opposite winding order, producing one
-    // continuous surround with real jamb depth instead of a tube balanced on
-    // scaled boxes. The module is built once and shared by every near portal.
-    const opening = new THREE.Path()
-    opening.moveTo(openingRadius, -0.12)
-    opening.lineTo(openingRadius, springHeight)
-    for (let segment = 0; segment <= 32; segment += 1) {
-        const angle = (Math.PI * segment) / 32
-        opening.lineTo(
+        return new THREE.Vector3(
             Math.cos(angle) * openingRadius,
             springHeight + (Math.sin(angle) * archRise),
+            0,
         )
-    }
-    opening.lineTo(-openingRadius, -0.12)
-    opening.closePath()
-    shape.holes.push(opening)
-
-    const geometry = new THREE.ExtrudeGeometry(shape, {
-        depth,
-        bevelEnabled: true,
-        bevelSegments: 3,
-        bevelSize: Math.min(0.045, trimWidth * 0.18),
-        bevelThickness: Math.min(0.04, depth * 0.2),
-        curveSegments: 32,
-        steps: 1,
     })
-    geometry.translate(0, 0, -depth / 2)
-    geometry.computeVertexNormals()
-    geometry.computeBoundingBox()
-    geometry.computeBoundingSphere()
-    return geometry
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.5)
+    return new THREE.TubeGeometry(curve, 48, tubeRadius, 8, false)
 }
 
 function DoorWall({ side, centerZ, room, materials, sconcePlacements = EMPTY_FIXTURES }) {
@@ -2442,16 +2201,16 @@ function DoorWall({ side, centerZ, room, materials, sconcePlacements = EMPTY_FIX
                     <mesh
                         position={[wallX - (side * ((thickness / 2) + 0.018)), 0, centerZ]}
                         rotation={[0, rotationY, 0]}
-                        geometry={PORTAL_SURROUND_GEOMETRY}
+                        geometry={PORTAL_ARCH_STONE_GEOMETRY}
                         castShadow
                         receiveShadow
                     >
                         <PlasterMaterial materials={materials} color="#b8aa96" />
                     </mesh>
                     <mesh
-                        position={[wallX - (side * ((thickness / 2) + 0.13)), 0, centerZ]}
+                        position={[wallX - (side * ((thickness / 2) + 0.145)), 0, centerZ]}
                         rotation={[0, rotationY, 0]}
-                        geometry={PORTAL_REVEAL_GEOMETRY}
+                        geometry={PORTAL_ARCH_REVEAL_GEOMETRY}
                         castShadow
                     >
                         <meshPhysicalMaterial color="#6e5639" metalness={0.34} roughness={0.48} clearcoat={0.18} />
@@ -2540,7 +2299,7 @@ function FarDoorWall({ side, centerZ, room, materials, sconcePlacements = EMPTY_
                     <mesh
                         position={[wallX - (side * ((HALL_WALL_THICKNESS / 2) + 0.052)), 0, centerZ]}
                         rotation={[0, rotationY, 0]}
-                        geometry={PORTAL_SURROUND_GEOMETRY}
+                        geometry={PORTAL_ARCH_STONE_GEOMETRY}
                     >
                         <meshStandardMaterial
                             {...materials.joinery}
@@ -2571,11 +2330,13 @@ function DistanceManagedDoorWall({ side, centerZ, room, materials, forceNear = f
 }
 
 function CameraManagedDoorWall({ side, centerZ, room, materials, forceNear, sconcePlacements }) {
-    void forceNear
-    // Switching two complete opaque wall assemblies while the camera moved
-    // caused a one-frame luminance pop on several GPUs. The authored portal is
-    // inexpensive relative to the photographs and remains visually coherent
-    // at every distance, so use one stable shell for the entire visit.
+    // Distant, nonresident rooms retain an intentional velvet closure instead
+    // of exposing an empty black shell. Residency flips while the threshold is
+    // still far ahead, so the open architectural entrance is stable by the
+    // time a visitor can inspect or cross it.
+    if (!forceNear) {
+        return <FarDoorWall side={side} centerZ={centerZ} room={room} materials={materials} sconcePlacements={sconcePlacements} />
+    }
     return <DoorWall side={side} centerZ={centerZ} room={room} materials={materials} sconcePlacements={sconcePlacements} />
 }
 
@@ -2836,10 +2597,18 @@ function TransitioningArtworkSpot({ room, slot, slotCount, qualityLighting }) {
         }
         const nextKey = `${current.id}:${painting.id}`
         if (placementKey.current !== nextKey) {
-            const normalZ = painting.normal?.[2] || 1
+            const [normalX = 0, , normalZ = 1] = painting.normal || []
             const [x, , z] = painting.position
-            light.current.position.set(x, 4.72, z + (normalZ * 1.12))
-            target.position.set(x, 2.58, z + (normalZ * 0.04))
+            light.current.position.set(
+                x + (normalX * 1.12),
+                4.72,
+                z + (normalZ * 1.12),
+            )
+            target.position.set(
+                x + (normalX * 0.04),
+                2.58,
+                z + (normalZ * 0.04),
+            )
             target.updateMatrixWorld(true)
             light.current.target = target
             light.current.color.set(slot % 2 ? '#f0cba4' : '#ffd7a9')
@@ -3123,16 +2892,18 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
     const roomFloorOccluders = useMemo(() => [
         ...room.benches.map(item => bakedFloorOccluder(item, room.centerX, room.centerZ, 0.14)),
         ...room.plants.map(item => bakedFloorOccluder(item, room.centerX, room.centerZ, 0.075)),
-        ...(room.landmark ? [bakedFloorOccluder(room.landmark, room.centerX, room.centerZ, 0.16)] : []),
-    ], [room.benches, room.centerX, room.centerZ, room.landmark, room.plants])
+    ], [room.benches, room.centerX, room.centerZ, room.plants])
     const thresholdDepth = ROOM_SHELL_INSET + HALL_WALL_THICKNESS + 0.18
     const thresholdCenterX = room.innerX + (room.side * ((ROOM_SHELL_INSET - HALL_WALL_THICKNESS) / 2))
     const [readyPaintingIds, setReadyPaintingIds] = useState(() => new Set())
     const readyPaintingIdsRef = useRef(new Set())
     const readyFlushTimer = useRef(null)
     const [allowDetail, setAllowDetail] = useState(false)
-    const [portalRecoveryReady, setPortalRecoveryReady] = useState(false)
-    const [interiorResident, setInteriorResident] = useState(active)
+    // Door architecture and the room shell must change in the same React
+    // commit. Deferring residency through a timer let the open portal render
+    // for one frame before its interior, which read as a black flash at the
+    // threshold on fast machines and as an empty room on slower ones.
+    const interiorResident = active
     const roomPaintingIds = useMemo(() => new Set(
         room.paintings.slice(0, Math.min(4, room.paintings.length)).map(painting => painting.id),
     ), [room.paintings])
@@ -3142,26 +2913,9 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
     const requiredReadyCount = roomPaintingIds.size
     const entranceReadyCount = [...roomPaintingIds]
         .filter(id => readyPaintingIds.has(id)).length
-    const roomReady = active && (entranceReadyCount >= requiredReadyCount || portalRecoveryReady)
-    useEffect(() => {
-        if (!active) return undefined
-        const timer = window.setTimeout(() => setInteriorResident(true), 0)
-        return () => window.clearTimeout(timer)
-    }, [active])
-    const handlePortalClosed = useCallback(() => {
-        // Keep the outgoing room resident until the physical gate has fully
-        // become its occluder. This prevents an empty portal during handoff.
-        if (!active) setInteriorResident(false)
-    }, [active])
-    useEffect(() => {
-        if (!active || entranceReadyCount >= requiredReadyCount || portalRecoveryReady) return undefined
-        // Network decoders and driver upload callbacks are not guaranteed to
-        // resolve. Never let one abandoned callback permanently seal this and
-        // every later room: after a bounded wait the already-mounted blurhash
-        // atlas and unavailable-artwork cards form a complete safe sightline.
-        const timer = window.setTimeout(() => setPortalRecoveryReady(true), 6200)
-        return () => window.clearTimeout(timer)
-    }, [active, entranceReadyCount, portalRecoveryReady, requiredReadyCount])
+    // Architecture and traversal must never depend on image networking. The
+    // blurhash atlas is the deterministic visual fallback while covers stream.
+    const roomReady = active
     useEffect(() => {
         if (!import.meta.env.DEV) return
         const current = JSON.parse(document.documentElement.dataset.museumRooms || '{}')
@@ -3170,12 +2924,13 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
             interiorVisible: interiorResident,
             roomReady,
             ready: readyPaintingIds.size,
+            entranceReady: entranceReadyCount,
             required: requiredReadyCount,
             readyIds: [...readyPaintingIds],
             requiredIds: [...roomPaintingIds],
         }
         document.documentElement.dataset.museumRooms = JSON.stringify(current)
-    }, [active, interiorResident, readyPaintingIds, requiredReadyCount, room.id, roomPaintingIds, roomReady])
+    }, [active, entranceReadyCount, interiorResident, readyPaintingIds, requiredReadyCount, room.id, roomPaintingIds, roomReady])
     useEffect(() => {
         let timer
         if (!active) {
@@ -3250,6 +3005,20 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                 fixtures={roomFloorFixtures}
                 occluders={roomFloorOccluders}
             />
+            <mesh position={[shellCenterX, 0.012, room.centerZ]} scale={[Math.max(1, shellDepth - 0.48), 0.028, 2.5]} receiveShadow>
+                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
+                <meshStandardMaterial color="#471f2a" roughness={0.92} />
+            </mesh>
+            {[-1, 1].map(direction => (
+                <mesh
+                    key={`room-runner-edge-${direction}`}
+                    position={[shellCenterX, 0.031, room.centerZ + (direction * 1.18)]}
+                    scale={[Math.max(1, shellDepth - 0.52), 0.018, 0.045]}
+                >
+                    <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
+                    <meshPhysicalMaterial color="#a47a43" metalness={0.48} roughness={0.42} />
+                </mesh>
+            ))}
             <mesh position={[shellCenterX, ceilingY, room.centerZ]}>
                 <boxGeometry args={[shellDepth, 0.18, roomWidth]} />
                 <PlasterMaterial materials={materials} color="#e9e2d8" textured={false} />
@@ -3259,13 +3028,6 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                     room={room}
                     shellCenterX={shellCenterX}
                     shellDepth={shellDepth}
-                    ceilingY={ceilingY}
-                    materials={materials}
-                />
-            )}
-            {interiorResident && (
-                <RoomSalonBays
-                    room={room}
                     ceilingY={ceilingY}
                     materials={materials}
                 />
@@ -3340,11 +3102,10 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
             <LabelPlane
                 title={room.name}
                 subtitle={`${room.albums.length} ${room.albums.length === 1 ? 'collection' : 'collections'}`}
-                position={[outerWallX - (room.side * 0.19), 4.65, room.centerZ]}
+                position={[outerWallX - (room.side * 0.29), 3.62, room.centerZ]}
                 rotation={[0, endRotation, 0]}
                 size={[4.25, 0.94]}
             />
-            {interiorResident && <RoomFocalLandmark room={room} materials={materials} />}
             <GalleryFrameShells
                 paintings={interiorResident ? room.paintings : []}
                 materials={materials}
@@ -3355,11 +3116,9 @@ function CategoryRoom({ room, active, detailed, materials, qualityLighting }) {
                 detailed={detailed}
                 allowDetail={allowDetail}
                 qualityLighting={qualityLighting}
-                readyPaintingIds={readyPaintingIds}
                 onTextureReady={markPaintingReady}
             />
             </group>
-            <RoomPortalScrim room={room} ready={roomReady} active={active} onClosed={handlePortalClosed} />
             {interiorResident && (
                 <InstancedCeilingFixtures
                     positions={lightXs.map(x => [x, room.centerZ])}
@@ -3565,14 +3324,21 @@ function focusedPainting(layout, camera, direction = new THREE.Vector3()) {
         const dy = painting.position[1] - camera.position.y
         const dz = painting.position[2] - camera.position.z
         const distance = Math.hypot(dx, dy, dz)
-        if (distance > 4.6) continue
+        if (distance > 6.8) continue
         const inverseDistance = distance > 0 ? 1 / distance : 0
         const alignment = (
             (direction.x * dx * inverseDistance)
             + (direction.y * dy * inverseDistance)
             + (direction.z * dz * inverseDistance)
         )
-        if (alignment < 0.8) continue
+        if (alignment < 0.66) continue
+        const [normalX = 0, normalY = 0, normalZ = 1] = painting.normal || []
+        const frontFacing = -(
+            (normalX * dx * inverseDistance)
+            + (normalY * dy * inverseDistance)
+            + (normalZ * dz * inverseDistance)
+        )
+        if (frontFacing < 0.12) continue
         const score = distance + ((1 - alignment) * 7)
         if (score < bestScore) {
             best = painting
@@ -3872,8 +3638,8 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
             touchEuler.y -= touchInput.current.lookX * lookSensitivity
             touchEuler.x = THREE.MathUtils.clamp(
                 touchEuler.x - (touchInput.current.lookY * (touchMode ? 0.0038 : lookSensitivity)),
-                -1.28,
-                1.28,
+                -0.52,
+                0.52,
             )
             camera.quaternion.setFromEuler(touchEuler)
             touchInput.current.lookX = 0
@@ -3913,7 +3679,6 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
                 { x: camera.position.x, z: camera.position.z },
                 { x: frameMovementX, z: frameMovementZ },
                 0.35,
-                openMuseumPortalIds,
             )
             if (Math.abs(next.x - camera.position.x - frameMovementX) > 0.001) velocity.x *= 0.24
             if (Math.abs(next.z - camera.position.z - frameMovementZ) > 0.001) velocity.z *= 0.24
@@ -3936,22 +3701,17 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
         }
         const stepWave = Math.sin(gaitPhase.current * 2)
         const heelStrike = Math.pow(Math.max(0, stepWave), 8)
-        const headBob = ((stepWave * 0.052) - (heelStrike * 0.018)) * gaitStrength * preferences.bobStrength
-        const breathing = reducedMotion ? 0 : Math.sin(state.clock.elapsedTime * 1.45) * 0.004
+        const headBob = ((stepWave * 0.012) - (heelStrike * 0.004)) * gaitStrength * preferences.bobStrength
+        const breathing = reducedMotion ? 0 : Math.sin(state.clock.elapsedTime * 1.2) * 0.0015
         camera.position.y = layout.spawn[1] + headBob + breathing
         const lateralVelocity = (velocity.x * right.x) + (velocity.z * right.z)
         const lateralLean = THREE.MathUtils.clamp(lateralVelocity / Math.max(1, speed), -1, 1)
         const targetRoll = moving && !reducedMotion
-            ? ((Math.sin(gaitPhase.current) * 0.019 * gaitStrength) - (lateralLean * 0.013)) * preferences.bobStrength
+            ? ((Math.sin(gaitPhase.current) * 0.003 * gaitStrength) - (lateralLean * 0.002)) * preferences.bobStrength
             : 0
         camera.rotation.z = THREE.MathUtils.damp(camera.rotation.z, targetRoll, 9.5, delta)
-        const acceleration = delta > 0
-            ? THREE.MathUtils.clamp((actualSpeed - previousSpeed.current) / delta, -8, 8)
-            : 0
         previousSpeed.current = actualSpeed
-        const targetPitch = moving && !reducedMotion
-            ? ((Math.sin((gaitPhase.current * 2) + 0.7) * 0.012 * gaitStrength) - (acceleration * 0.00115)) * preferences.bobStrength
-            : 0
+        const targetPitch = 0
         cameraPitchOffset.current = THREE.MathUtils.damp(
             previousPitchOffset,
             targetPitch,
@@ -3960,17 +3720,13 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
         )
         camera.rotation.x = THREE.MathUtils.clamp(
             camera.rotation.x + cameraPitchOffset.current,
-            (-Math.PI / 2) + 0.04,
-            (Math.PI / 2) - 0.04,
+            -0.52,
+            0.52,
         )
         // A restrained shoulder-to-shoulder yaw shift completes the gait arc.
         // It is removed before reading mouse input on the next frame, so the
         // animation never accumulates into the visitor's authored look angle.
-        const targetYaw = moving && !reducedMotion
-            ? ((Math.sin(gaitPhase.current) * 0.011) + (lateralLean * 0.0055))
-                * gaitStrength
-                * preferences.bobStrength
-            : 0
+        const targetYaw = 0
         cameraYawOffset.current = THREE.MathUtils.damp(
             previousYawOffset,
             targetYaw,
@@ -3979,7 +3735,7 @@ function PlayerController({ layout, enabled, touchMode, touchInput, preferences,
         )
         camera.rotation.y += cameraYawOffset.current
         const baseFov = touchMode ? Math.max(68, preferences.fov) : preferences.fov
-        const targetFov = baseFov + (speed > 4 ? 2 * gaitStrength : 0)
+        const targetFov = baseFov
         const nextFov = THREE.MathUtils.damp(camera.fov, targetFov, 7, delta)
         if (Math.abs(camera.fov - nextFov) > 0.01) {
             camera.fov = nextFov
@@ -4027,10 +3783,11 @@ function PreviewCamera({ mode, roomIndex, layout }) {
             camera.position.set(x, 2.25, room.centerZ - 4.15)
             camera.lookAt(x + (room.side * 5.5), 2.5, room.centerZ + 1.35)
         } else if (mode === 'portal' && room) {
+            const approachOffset = Math.min(1.5, Math.max(0.8, (room.width / 2) - 2.6))
             camera.position.set(
                 room.side * (MUSEUM_DIMENSIONS.hallHalfWidth - 3.8),
                 2.05,
-                room.centerZ + 4.8,
+                room.centerZ + approachOffset,
             )
             camera.lookAt(room.innerX + (room.side * 1.1), 2.15, room.centerZ)
         } else if (mode === 'hall') {
@@ -4078,7 +3835,7 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, touchMode })
                 // burst. Later rooms receive tiny bases immediately after this
                 // compact visible set is resident, while their velvet gates
                 // remain closed until the local entrance set is truly ready.
-                .flatMap(room => room.paintings.slice(0, 4).map(painting => painting.album))
+                .flatMap(room => room.paintings.slice(0, 2).map(painting => painting.album))
                 .filter(Boolean)
                 .map(album => [album.albumId, album]),
         ).values()]
@@ -4098,13 +3855,11 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, touchMode })
         publishProgress(0.04)
         publishStage('decoding', { roomCount: initialRooms.length, coverCount: coverJobs.length })
 
-        // Plaque canvases are small, but creating dozens during a room-entry
-        // frame is enough to hitch the main thread. Build and cache them while
-        // the opening veil is already present.
-        // Each room uses one precomposed plaque atlas and merged plaque mesh,
-        // replacing one texture bind/draw call per visible painting. Promote
-        // those atlases under the opening veil alongside the cover previews so
-        // entering a room cannot trigger the atlas' first GPU upload.
+        // Prepare the small, deterministic fallback and plaque atlases for
+        // every room behind the opening veil. Doing this one room at a time
+        // after entry caused 200ms+ main-thread stalls when the visitor started
+        // walking. Only two photographic covers are network-warmed here, so
+        // cold start stays bounded while every later room has a complete base.
         let settledCovers = 0
         const preparedRoomBatches = prepareRoomBatches(
             layout.rooms,
@@ -4167,28 +3922,11 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, touchMode })
             // until that browser has genuinely finished. Chromium/Safari keep
             // a bounded fallback for drivers that never resolve the extension.
             try {
-                if (isFirefoxBrowser()) {
-                    // Parallel compile promises can resolve before some
-                    // Windows Firefox drivers finish their first-use variants.
-                    // Pay the deterministic compile cost behind the committed
-                    // veil so it cannot become the visitor's first-step hitch.
-                    await new Promise(resolve => window.requestAnimationFrame(resolve))
-                    gl.compile(scene, camera)
-                    // Firefox can return from shader compilation while queued
-                    // texture uploads are still outstanding on the GPU process.
-                    // Synchronise once, behind the opaque veil, so the visitor
-                    // does not pay that work as a giant first-step hitch with
-                    // temporarily missing paintings.
-                    publishProgress(0.965)
-                    await new Promise(resolve => window.requestAnimationFrame(resolve))
-                    gl.getContext?.().finish?.()
-                } else {
-                    const compile = gl.compileAsync?.(scene, camera) || Promise.resolve()
-                    await Promise.race([
-                        compile,
-                        new Promise(resolve => window.setTimeout(resolve, 1800)),
-                    ])
-                }
+                const compile = gl.compileAsync?.(scene, camera) || Promise.resolve()
+                await Promise.race([
+                    compile,
+                    new Promise(resolve => window.setTimeout(resolve, isFirefoxBrowser() ? 1100 : 1500)),
+                ])
             } finally {
                 window.clearInterval(compileProgressTimer)
             }
@@ -4341,6 +4079,7 @@ function DevelopmentMuseumTour({ layout, onActiveRoom, onNearbyRooms }) {
         maxTextures: 0,
         maxCalls: 0,
         maxTriangles: 0,
+        traversalChecks: new Set(),
     })
     const target = useMemo(() => new THREE.Vector3(), [])
     const lookAt = useMemo(() => new THREE.Vector3(), [])
@@ -4377,33 +4116,22 @@ function DevelopmentMuseumTour({ layout, onActiveRoom, onNearbyRooms }) {
             { duration: 0.9, position: [hallX, layout.spawn[1], room.centerZ] },
         ]
         const phase = phases[tour.phase]
-        target.set(...phase.position)
 
-        // The real player cannot cross a closed portal. Hold the automated
-        // endurance route at the same point until the physical curtain and
-        // collision state agree, recording a bounded failure instead of
-        // teleporting into an unmounted room and masking the defect.
-        if (tour.phase === 2 && !openMuseumPortalIds.has(room.id)) {
-            camera.position.copy(tour.phaseStart)
-            camera.lookAt(room.innerX + (room.side * 3), 2.4, room.centerZ)
-            if (elapsed < 10) {
-                document.documentElement.dataset.museumTour = JSON.stringify({
-                    status: 'waiting-for-portal',
-                    circuit: tour.circuit + 1,
-                    room: room.name,
-                    roomIndex: tour.roomIndex,
-                    waitedMs: Math.round(elapsed * 1000),
-                    portalFailures: tour.portalFailures,
-                    textures: gl.info.memory.textures,
-                })
-                return
+        if (tour.phase === 2) {
+            const checkKey = `${tour.circuit}:${room.id}`
+            if (!tour.traversalChecks.has(checkKey)) {
+                const probe = moveMuseumPosition(
+                    layout,
+                    { x: entranceX, z: room.centerZ },
+                    { x: insideX - entranceX, z: 0 },
+                    0.35,
+                )
+                const enteredDepth = (probe.x - room.innerX) * room.side
+                if (enteredDepth < 1.6) tour.portalFailures.push(`${tour.circuit + 1}:${room.id}:collision`)
+                tour.traversalChecks.add(checkKey)
             }
-            tour.portalFailures.push(`${tour.circuit + 1}:${room.id}`)
-            tour.phase = 5
-            tour.phaseStartedAt = frameState.clock.elapsedTime
-            tour.phaseStart = camera.position.clone()
-            return
         }
+        target.set(...phase.position)
 
         const progress = THREE.MathUtils.smoothstep(Math.min(1, elapsed / phase.duration), 0, 1)
         camera.position.lerpVectors(tour.phaseStart, target, progress)
@@ -4428,7 +4156,7 @@ function DevelopmentMuseumTour({ layout, onActiveRoom, onNearbyRooms }) {
             room: room.name,
             roomIndex: tour.roomIndex,
             phase: tour.phase,
-            portalOpen: openMuseumPortalIds.has(room.id),
+            roomResident: nearbyMuseumRoomIds(layout, position, 20).includes(room.id),
             portalFailures: tour.portalFailures,
             textures: gl.info.memory.textures,
             maxTextures: tour.maxTextures,
@@ -4593,7 +4321,7 @@ export default function ImmersiveGalleryDesktop() {
 
     useEffect(() => {
         if (!sceneReady) return undefined
-        const timer = window.setTimeout(() => setSceneVeilVisible(false), 520)
+        const timer = window.setTimeout(() => setSceneVeilVisible(false), 160)
         return () => window.clearTimeout(timer)
     }, [sceneReady])
 
