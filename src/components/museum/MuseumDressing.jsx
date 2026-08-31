@@ -529,8 +529,12 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
 }
 
 function InstancedWallSconces({ placements }) {
+    const plates = useRef(null)
+    const arms = useRef(null)
     const bases = useRef(null)
     const shades = useRef(null)
+    const bulbs = useRef(null)
+    const halos = useRef(null)
 
     useEffect(() => {
         const matrix = new THREE.Matrix4()
@@ -539,16 +543,29 @@ function InstancedWallSconces({ placements }) {
         const scale = new THREE.Vector3(1, 1, 1)
         placements.forEach(({ side, z }, index) => {
             const x = side * 4.64
-            rotation.setFromEuler(new THREE.Euler(0, side < 0 ? Math.PI / 2 : -Math.PI / 2, 0))
-            matrix.compose(position.set(x - (side * 0.105), 3.69, z), rotation, scale)
+            // The wall plate and light wash face into the hall. The previous
+            // transform was overwritten before it reached an instance, which
+            // left a tilted shade floating beside a vertical brass cylinder.
+            rotation.setFromEuler(new THREE.Euler(0, 0, Math.PI / 2))
+            matrix.compose(position.set(x - (side * 0.035), 3.66, z), rotation, scale)
+            plates.current?.setMatrixAt(index, matrix)
             rotation.identity()
-            matrix.compose(position.set(x, 3.65, z), rotation, scale)
+            matrix.compose(position.set(x - (side * 0.19), 3.66, z), rotation, scale.set(0.34, 0.07, 0.07))
+            arms.current?.setMatrixAt(index, matrix)
+            scale.set(1, 1, 1)
+            matrix.compose(position.set(x - (side * 0.34), 3.67, z), rotation, scale)
             bases.current?.setMatrixAt(index, matrix)
-            rotation.setFromEuler(new THREE.Euler(0, 0, side * -0.26))
-            matrix.compose(position.set(x - (side * 0.19), 3.77, z), rotation, scale)
+            matrix.compose(position.set(x - (side * 0.39), 3.82, z), rotation, scale)
             shades.current?.setMatrixAt(index, matrix)
+            matrix.compose(position.set(x - (side * 0.39), 3.76, z), rotation, scale.set(0.11, 0.11, 0.11))
+            bulbs.current?.setMatrixAt(index, matrix)
+            scale.set(1, 1, 1)
+            rotation.setFromEuler(new THREE.Euler(0, side < 0 ? Math.PI / 2 : -Math.PI / 2, 0))
+            matrix.compose(position.set(x - (side * 0.026), 3.72, z), rotation, scale.set(0.78, 0.78, 0.78))
+            halos.current?.setMatrixAt(index, matrix)
+            scale.set(1, 1, 1)
         })
-        for (const mesh of [bases.current, shades.current]) {
+        for (const mesh of [plates.current, arms.current, bases.current, shades.current, bulbs.current, halos.current]) {
             if (!mesh) continue
             mesh.instanceMatrix.needsUpdate = true
             mesh.computeBoundingSphere?.()
@@ -557,13 +574,36 @@ function InstancedWallSconces({ placements }) {
 
     return (
         <>
+            <instancedMesh ref={halos} args={[undefined, undefined, placements.length]} renderOrder={3}>
+                <circleGeometry args={[0.62, 20]} />
+                <meshBasicMaterial
+                    color="#f1b968"
+                    transparent
+                    opacity={0.12}
+                    depthWrite={false}
+                    blending={THREE.AdditiveBlending}
+                    toneMapped={false}
+                />
+            </instancedMesh>
+            <instancedMesh ref={plates} args={[undefined, undefined, placements.length]} castShadow>
+                <cylinderGeometry args={[0.22, 0.22, 0.09, 14]} />
+                <meshPhysicalMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} clearcoat={0.22} />
+            </instancedMesh>
+            <instancedMesh ref={arms} args={[undefined, undefined, placements.length]} castShadow>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshPhysicalMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} clearcoat={0.2} />
+            </instancedMesh>
             <instancedMesh ref={bases} args={[undefined, undefined, placements.length]} castShadow>
-                <cylinderGeometry args={[0.15, 0.19, 0.48, 10]} />
+                <cylinderGeometry args={[0.15, 0.19, 0.2, 12]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} />
             </instancedMesh>
             <instancedMesh ref={shades} args={[undefined, undefined, placements.length]}>
-                <cylinderGeometry args={[0.24, 0.15, 0.42, 10, 1, true]} />
-                <meshStandardMaterial color="#f2dfbf" emissive="#d99d51" emissiveIntensity={0.32} transparent opacity={0.78} roughness={0.48} side={THREE.DoubleSide} />
+                <cylinderGeometry args={[0.29, 0.18, 0.42, 14, 1, true]} />
+                <meshPhysicalMaterial color="#f3dfbd" emissive="#d99d51" emissiveIntensity={0.7} transparent opacity={0.84} roughness={0.45} side={THREE.DoubleSide} />
+            </instancedMesh>
+            <instancedMesh ref={bulbs} args={[undefined, undefined, placements.length]} renderOrder={4}>
+                <sphereGeometry args={[1, 12, 8]} />
+                <meshBasicMaterial color="#ffd49b" toneMapped={false} />
             </instancedMesh>
         </>
     )
