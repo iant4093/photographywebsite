@@ -318,7 +318,12 @@ class ReleaseIntentTests(unittest.TestCase):
         )
         for rule in role_rules:
             self.assertEqual(rule["action"], "Modify")
-            self.assertEqual(rule["propertyPaths"], ["Policies"])
+            expected_paths = (
+                ["ManagedPolicyArns", "Policies"]
+                if rule["logicalId"] == "RandomPhotoPoolBuilderFunctionRole"
+                else ["Policies"]
+            )
+            self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertTrue(rule["allowProtectedModify"])
             self.assertFalse(rule["allowNoDetails"])
 

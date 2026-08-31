@@ -52,7 +52,7 @@
     {"logicalId": "GetPublicAlbumFunctionGetExplorePermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "RandomPhotoPoolBuilderFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "RandomPhotoPoolBuilderFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "RandomPhotoPoolBuilderFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "RandomPhotoPoolBuilderFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["ManagedPolicyArns", "Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "RandomPhotoPoolBuilderFunctionAlbumsChanged", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GetAlbumsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "GetAlbumFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
