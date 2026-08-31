@@ -3,8 +3,8 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  fetchAlbumsFiltered: vi.fn(), listUsers: vi.fn(), updateAlbum: vi.fn(), updateGalleryOrder: vi.fn(), deleteAlbum: vi.fn(), deleteImages: vi.fn(),
-  requestUploadUrl: vi.fn(), uploadFileToS3: vi.fn(), fetchAlbum: vi.fn(), addImagesToAlbum: vi.fn(), updateImageThumbnail: vi.fn(),
+  fetchAlbumsFilteredPage: vi.fn(), fetchAllAlbums: vi.fn(), readCachedAlbumsPage: vi.fn(), listUsersPage: vi.fn(), updateAlbum: vi.fn(), updateGalleryOrder: vi.fn(), deleteAlbum: vi.fn(), deleteImages: vi.fn(),
+  requestUploadUrl: vi.fn(), uploadFileToS3: vi.fn(), fetchAlbumMediaPage: vi.fn(), addImagesToAlbum: vi.fn(), updateImageThumbnail: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processImage: vi.fn(), processVideo: vi.fn(), extractFrameFromVideoElement: vi.fn() }))
@@ -32,12 +32,14 @@ describe('ManageAlbums', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     auth.getIdToken.mockResolvedValue('admin-token')
-    api.listUsers.mockResolvedValue([{ email: 'client@example.com' }, { email: 'other@example.com' }])
-    api.fetchAlbumsFiltered.mockResolvedValue(albums)
+    api.listUsersPage.mockResolvedValue({ users: [{ email: 'client@example.com', sub: '11111111-1111-4111-8111-111111111111' }, { email: 'other@example.com', sub: '22222222-2222-4222-8222-222222222222' }], nextCursor: null })
+    api.fetchAlbumsFilteredPage.mockResolvedValue({ items: albums, nextCursor: null })
+    api.fetchAllAlbums.mockResolvedValue(albums)
+    api.readCachedAlbumsPage.mockReturnValue(null)
     api.updateAlbum.mockResolvedValue({})
     api.updateGalleryOrder.mockResolvedValue({})
     api.deleteAlbum.mockResolvedValue({})
-    api.fetchAlbum.mockResolvedValue({ images: [] })
+    api.fetchAlbumMediaPage.mockResolvedValue({ album: null, items: [], nextCursor: null })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
   })
 
@@ -49,33 +51,50 @@ describe('ManageAlbums', () => {
     expect(screen.queryByText('Film')).toBeNull()
     expect(screen.getByText('Travel')).toBeInTheDocument()
     expect(screen.getByText('Uncategorized')).toBeInTheDocument()
-    expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', limit: 100, visibility: 'public' }, 'admin-token')
+    expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
+      { type: 'photo', limit: 40, visibility: 'public' },
+      'admin-token',
+      expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
-    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', limit: 100, visibility: 'unlisted' }, 'admin-token'))
+    await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
+      { type: 'photo', limit: 40, visibility: 'unlisted' },
+      'admin-token',
+      expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
+    ))
 
     fireEvent.change(screen.getByPlaceholderText('Search users…'), { target: { value: 'client@' } })
     fireEvent.click(await screen.findByRole('button', { name: 'client@example.com' }))
     expect(await screen.findByText('Viewing albums for: client@example.com')).toBeInTheDocument()
-    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith({ type: 'photo', limit: 100, visibility: 'private', ownerEmail: 'client@example.com' }, 'admin-token'))
+    await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
+      { type: 'photo', limit: 40, visibility: 'private', ownerSub: '11111111-1111-4111-8111-111111111111' },
+      'admin-token',
+      expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
+    ))
     expect(screen.queryByText('Other Client')).toBeNull()
 
     fireEvent.change(screen.getByPlaceholderText('Search users…'), { target: { value: 'missing' } })
     expect(screen.getByText('No users found')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
-    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenLastCalledWith({ type: 'photo', limit: 100, visibility: 'public' }, 'admin-token'))
+    await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenLastCalledWith(
+      { type: 'photo', limit: 40, visibility: 'public' },
+      'admin-token',
+      expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
+    ))
   })
 
   it('persists main-gallery photo order within a category and hides controls elsewhere', async () => {
-    api.fetchAlbumsFiltered.mockResolvedValue([
+    api.fetchAlbumsFilteredPage.mockResolvedValue({ items: [
       { ...albums[0], albumId: 'z-album', title: 'Zulu', galleryOrder: 1 },
       { ...albums[0], albumId: 'a-album', title: 'Alpha', galleryOrder: 0 },
-    ])
+    ], nextCursor: null })
     mounted()
     await screen.findByText('Alpha')
     const titlesBefore = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
     expect(titlesBefore).toEqual(['Alpha', 'Zulu'])
 
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange Gallery' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Zulu earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
       'admin-token', { albumType: 'photo', albumIds: ['z-album', 'a-album'] },
@@ -84,22 +103,23 @@ describe('ManageAlbums', () => {
     expect(titlesAfter).toEqual(['Zulu', 'Alpha'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
-    await waitFor(() => expect(api.fetchAlbumsFiltered).toHaveBeenLastCalledWith(
-      { type: 'photo', limit: 100, visibility: 'unlisted' }, 'admin-token',
+    await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenLastCalledWith(
+      { type: 'photo', limit: 40, visibility: 'unlisted' }, 'admin-token', expect.any(Object),
     ))
     expect(screen.queryByRole('button', { name: /Move .* earlier/ })).toBeNull()
   })
 
   it('persists category order independently from album order', async () => {
-    api.fetchAlbumsFiltered.mockResolvedValue([
+    api.fetchAlbumsFilteredPage.mockResolvedValue({ items: [
       { ...albums[0], albumId: 'hike', title: 'Trail', category: 'Hikes', galleryCategoryOrder: 1 },
       { ...albums[0], albumId: 'astro', title: 'Stars', category: 'Astro', galleryCategoryOrder: 0 },
-    ])
+    ], nextCursor: null })
     mounted()
     await screen.findByText('Trail')
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
       .toEqual(['Astro', 'Hikes'])
 
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange Gallery' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Hikes category earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
       'admin-token', { albumType: 'photo', categoryNames: ['Hikes', 'Astro'] },
@@ -109,14 +129,15 @@ describe('ManageAlbums', () => {
   })
 
   it('supports independent video category and album ordering on the optimized list', async () => {
-    api.fetchAlbumsFiltered.mockResolvedValue([
+    api.fetchAlbumsFilteredPage.mockResolvedValue({ items: [
       { ...albums[3], albumId: 'film-b', title: 'Film B', category: 'Films', galleryOrder: 1, galleryCategoryOrder: 0 },
       { ...albums[3], albumId: 'film-a', title: 'Film A', category: 'Films', galleryOrder: 0, galleryCategoryOrder: 0 },
       { ...albums[3], albumId: 'sport', title: 'Sports Film', category: 'Sports', galleryCategoryOrder: 1 },
-    ])
+    ], nextCursor: null })
     mounted('/admin/albums?type=video')
     await screen.findByText('Film B')
 
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange Gallery' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Film B earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
       'admin-token',
@@ -128,11 +149,12 @@ describe('ManageAlbums', () => {
       'admin-token',
       { albumType: 'video', categoryNames: ['Sports', 'Films'] },
     ))
-    expect(api.fetchAlbumsFiltered).toHaveBeenCalledWith(
-      { type: 'video', limit: 100, visibility: 'public' },
+    expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
+      { type: 'video', limit: 40, visibility: 'public' },
       'admin-token',
+      expect.any(Object),
     )
-    expect(api.fetchAlbum).not.toHaveBeenCalled()
+    expect(api.fetchAlbumMediaPage).not.toHaveBeenCalled()
   })
 
   it('supports metadata editing, cancellation, delete confirmation, and load failures', async () => {
@@ -171,13 +193,13 @@ describe('ManageAlbums', () => {
     expect(screen.queryByText('Summer')).toBeNull()
     first.unmount()
 
-    api.fetchAlbumsFiltered.mockResolvedValueOnce([])
+    api.fetchAlbumsFilteredPage.mockResolvedValueOnce({ items: [], nextCursor: null })
     const empty = mounted()
     expect(await screen.findByText('No albums found.')).toBeInTheDocument()
     empty.unmount()
 
-    api.listUsers.mockRejectedValueOnce(new Error('users failed'))
-    api.fetchAlbumsFiltered.mockRejectedValueOnce(new Error('albums failed'))
+    api.listUsersPage.mockRejectedValueOnce(new Error('users failed'))
+    api.fetchAlbumsFilteredPage.mockRejectedValueOnce(new Error('albums failed'))
     mounted()
     expect(await screen.findByText('No albums found.')).toBeInTheDocument()
     await waitFor(() => expect(console.error).toHaveBeenCalled())
@@ -192,8 +214,8 @@ describe('ManageAlbums', () => {
       thumbnailUrl: 'https://cdn.test/thumb.jpg',
       blurhash: 'hash',
     }
-    api.fetchAlbum.mockResolvedValue({ album: albums[0], images: [mediaItem] })
-    api.deleteImages.mockResolvedValue({})
+    api.fetchAlbumMediaPage.mockResolvedValue({ album: albums[0], items: [mediaItem], nextCursor: null })
+    api.deleteImages.mockResolvedValue({ album: { ...albums[0], imageCount: 0, coverImageUrl: '' } })
 
     mounted()
     await screen.findByText('Summer')
@@ -205,8 +227,9 @@ describe('ManageAlbums', () => {
       coverBlurhash: mediaItem.blurhash,
     }))
 
-    // Cover updates refresh and collapse the panel, so expand it again before removal.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    // Cover updates are local, so the expanded panel remains open for removal.
+    expect(screen.getByTitle('Remove')).toBeInTheDocument()
+    expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledTimes(1)
     fireEvent.click(await screen.findByTitle('Remove'))
     await waitFor(() => expect(api.deleteImages).toHaveBeenCalledWith(
       'admin-token', 'photo', [mediaItem.rawKey],
@@ -216,9 +239,10 @@ describe('ManageAlbums', () => {
 
   it('blocks media mutations when a management key is absent', async () => {
     const confirm = vi.spyOn(window, 'confirm')
-    api.fetchAlbum.mockResolvedValue({
+    api.fetchAlbumMediaPage.mockResolvedValue({
       album: albums[0],
-      images: [{ id: 'opaque-media-id', thumbnailUrl: 'https://cdn.test/thumb.jpg' }],
+      items: [{ id: 'opaque-media-id', thumbnailUrl: 'https://cdn.test/thumb.jpg' }],
+      nextCursor: null,
     })
 
     mounted()
@@ -231,5 +255,32 @@ describe('ManageAlbums', () => {
 
     fireEvent.click(screen.getByTitle('Set as album cover'))
     expect(api.updateAlbum).not.toHaveBeenCalled()
+  })
+
+  it('pages album media without reloading the catalog or replacing loaded items', async () => {
+    api.fetchAlbumMediaPage
+      .mockResolvedValueOnce({
+        album: { ...albums[0], imageCount: 2 },
+        items: [{ rawKey: 'albums/photo/one.jpg', thumbnailUrl: 'https://cdn.test/one.jpg' }],
+        nextCursor: 'media-cursor',
+      })
+      .mockResolvedValueOnce({
+        album: { ...albums[0], imageCount: 2 },
+        items: [{ rawKey: 'albums/photo/two.jpg', thumbnailUrl: 'https://cdn.test/two.jpg' }],
+        nextCursor: null,
+      })
+
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more photos' }))
+
+    await waitFor(() => expect(api.fetchAlbumMediaPage).toHaveBeenLastCalledWith(
+      'admin-token',
+      'photo',
+      { limit: 48, cursor: 'media-cursor' },
+    ))
+    expect(screen.getAllByTitle('Remove')).toHaveLength(2)
+    expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledTimes(1)
   })
 })

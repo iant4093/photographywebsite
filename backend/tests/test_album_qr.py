@@ -132,6 +132,7 @@ class AlbumQrLifecycleTests(unittest.TestCase):
             "body": json.dumps({"visibility": "private"}),
         }
         ordering = Mock()
+        ordering.commit.return_value = {}
         with patch.object(update_album, "verify_front_door_request", return_value=None), patch.object(
             update_album, "require_admin", return_value=None
         ), patch.object(update_album, "table", table), patch.object(
@@ -142,14 +143,14 @@ class AlbumQrLifecycleTests(unittest.TestCase):
             update_album, "tag_album_visibility", side_effect=ordering.restrict_album
         ), patch.object(update_album, "invalidate_public_previews"), patch.object(
             update_album, "tag_preview_visibility"
-        ), patch.object(update_album, "invalidate_public_api"), patch.object(update_album, "_audit"):
-            table.put_item.side_effect = ordering.commit
+        ), patch.object(update_album, "request_public_api_invalidation"), patch.object(update_album, "_audit"):
+            table.update_item.side_effect = ordering.commit
             response = update_album.handler(event, None)
         self.assertEqual(response["statusCode"], 200)
         restrict.assert_called_once_with([old["qrCodeKey"]], "private")
         self.assertLess(
             ordering.mock_calls.index(unittest.mock.call.restrict_qr([old["qrCodeKey"]], "private")),
-            ordering.mock_calls.index(unittest.mock.call.commit(**table.put_item.call_args.kwargs)),
+            ordering.mock_calls.index(unittest.mock.call.commit(**table.update_item.call_args.kwargs)),
         )
 
 

@@ -96,6 +96,48 @@ describe('public API client behavior', () => {
     expect(fetchMock.mock.calls[1][1].headers).toEqual({ Authorization: 'Bearer token' })
   })
 
+  it('loads bounded admin media pages with encoded album and cursor values', async () => {
+    const signed = 'https://x.test/a?X-Amz-Date=20260101T000000Z&X-Amz-Expires=60'
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      album: { albumId: 'a/b', imageCount: 99 },
+      items: [{ rawKey: 'albums/a/b.jpg', url: signed }],
+      nextCursor: 'next/page',
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const page = await api.fetchAlbumMediaPage(
+      'admin-token',
+      'a/b',
+      { limit: 48, cursor: 'next/page' },
+    )
+
+    expect(page.items[0]).toHaveProperty('mediaExpiresAt')
+    expect(page.nextCursor).toBe('next/page')
+    expect(fetchMock.mock.calls[0][0]).toContain('/admin/albums/a%2Fb/media?')
+    expect(fetchMock.mock.calls[0][0]).toContain('limit=48')
+    expect(fetchMock.mock.calls[0][0]).toContain('cursor=next%2Fpage')
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer admin-token' })
+  })
+
+  it('keeps authenticated catalog summaries in memory until logout cache clearing', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'private' }], nextCursor: null }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'fresh' }], nextCursor: null }))
+    vi.stubGlobal('fetch', fetchMock)
+    const params = { visibility: 'private', ownerSub: 'owner-sub', limit: 40 }
+
+    const first = await api.fetchAlbumsPage(params, { token: 'token' })
+    await expect(api.fetchAlbumsPage(params, { token: 'token' })).resolves.toBe(first)
+    expect(api.readCachedAlbumsPage(params, { authenticated: true })).toBe(first)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    api.clearApiCache()
+    await expect(api.fetchAlbumsPage(params, { token: 'token' })).resolves.toMatchObject({
+      items: [{ albumId: 'fresh' }],
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('calls every mutation endpoint with encoded identifiers, authorization, JSON, and null 204 handling', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true })))
     vi.stubGlobal('fetch', fetchMock)

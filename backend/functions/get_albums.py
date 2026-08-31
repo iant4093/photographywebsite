@@ -14,7 +14,13 @@ from auth_helpers import AuthError, auth_error_response, get_verified_claims, is
 from gallery_order import apply_gallery_order, load_gallery_settings
 from media_access import serialize_album_summary
 from response_helpers import error_response, internal_error, json_response
-from validation_helpers import ValidationError, validate_album_type, validate_email, validate_limit
+from validation_helpers import (
+    ValidationError,
+    validate_album_type,
+    validate_email,
+    validate_limit,
+    validate_uuid,
+)
 
 
 logger = logging.getLogger("photography_api.catalog")
@@ -188,9 +194,15 @@ def handler(event, context):
         claims = get_verified_claims(event, required=False)
         admin = bool(claims and is_admin(claims))
         admin_owner_email = validate_email(params.get("ownerEmail")) if params.get("ownerEmail") else None
-        if admin_owner_email and not admin:
+        admin_owner_sub = validate_uuid(params.get("ownerSub")) if params.get("ownerSub") else None
+        if admin_owner_email and admin_owner_sub:
+            raise ValidationError("Provide ownerEmail or ownerSub, not both")
+        if (admin_owner_email or admin_owner_sub) and not admin:
             raise AuthError("Forbidden", 403)
-        requested_visibility = params.get("visibility", "all" if admin_owner_email else "public")
+        requested_visibility = params.get(
+            "visibility",
+            "all" if admin_owner_email or admin_owner_sub else "public",
+        )
         album_type = validate_album_type(params.get("type"), default=None) if params.get("type") else None
         # Catalog summaries are intentionally small and the public inventory is
         # currently below 100, so one bounded query avoids sequential page RTTs.
@@ -204,15 +216,19 @@ def handler(event, context):
             scope = f"public:{album_type or '*'}"
         elif admin and requested_visibility == "all":
             visibility = "all"
-            owner_sub = owner_email = None
-            admin_all = True
-            owner_scope = hashlib.sha256(admin_owner_email.encode("utf-8")).hexdigest()[:16] if admin_owner_email else "*"
+            owner_sub = admin_owner_sub
+            owner_email = None
+            admin_all = not bool(admin_owner_sub)
+            owner_selector = admin_owner_email or admin_owner_sub
+            owner_scope = hashlib.sha256(owner_selector.encode("utf-8")).hexdigest()[:16] if owner_selector else "*"
             scope = f"admin:all:{album_type or '*'}:{owner_scope}"
         elif admin and requested_visibility in {"public", "private", "unlisted"}:
             visibility = requested_visibility
-            owner_sub = owner_email = None
+            owner_sub = admin_owner_sub
+            owner_email = None
             admin_all = False
-            owner_scope = hashlib.sha256(admin_owner_email.encode("utf-8")).hexdigest()[:16] if admin_owner_email else "*"
+            owner_selector = admin_owner_email or admin_owner_sub
+            owner_scope = hashlib.sha256(owner_selector.encode("utf-8")).hexdigest()[:16] if owner_selector else "*"
             scope = f"admin:{visibility}:{album_type or '*'}:{owner_scope}"
         elif requested_visibility == "public":
             visibility = "public"
@@ -238,7 +254,7 @@ def handler(event, context):
             owner_email=owner_email,
             admin_all=admin_all,
             admin_owner_email=admin_owner_email,
-            public_summary_only=visibility == "public" and not admin_owner_email,
+            public_summary_only=visibility == "public" and not admin_owner_email and not admin_owner_sub,
         )
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
@@ -270,7 +286,7 @@ def handler(event, context):
         # request type/limit/cursor and receive the paginated object.
         compatibility_array = (
             claims is None
-            and not any(name in params for name in ("limit", "cursor", "type", "ownerEmail"))
+            and not any(name in params for name in ("limit", "cursor", "type", "ownerEmail", "ownerSub"))
             and requested_visibility in {None, "", "public"}
         )
         cache_control = "public, max-age=60, s-maxage=300" if visibility == "public" and not admin else "no-store"

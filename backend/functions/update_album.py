@@ -11,7 +11,7 @@ from audit_helpers import actor_context, emit_audit_event
 from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_api, invalidate_public_previews
+from cache_invalidation import invalidate_public_previews, request_public_api_invalidation
 from explore_index import sync_album_index
 from album_qr import album_qr_key, write_album_qr
 from media_access import (
@@ -24,6 +24,7 @@ from media_access import (
     validated_album_qr_key,
 )
 from response_helpers import error_response, internal_error, json_response
+from random_pool_refresh import request_random_photo_pool_refresh
 from validation_helpers import (
     ValidationError,
     optional_string,
@@ -37,6 +38,22 @@ from validation_helpers import (
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
+MUTABLE_FIELDS = frozenset({
+    "title",
+    "description",
+    "category",
+    "createdAt",
+    "coverImageUrl",
+    "coverThumbKey",
+    "coverBlurhash",
+    "visibility",
+    "ownerEmail",
+    "ownerSub",
+    "isShared",
+    "shareCode",
+    "qrCodeKey",
+})
+_MISSING = object()
 
 
 def _sync_drive_folder(album):
@@ -117,7 +134,8 @@ def _updated_album(album, body):
     elif new_visibility == "private" and (not updated.get("ownerEmail") or not updated.get("ownerSub")):
         raise ValidationError("Private albums require ownerEmail and ownerSub")
     if new_visibility != "private":
-        updated["ownerEmail"] = ""
+        if old_visibility == "private" or "ownerEmail" in album:
+            updated["ownerEmail"] = ""
         # ownerSub backs OwnerSubCreatedAtIndex and therefore cannot be an
         # empty string. Omission keeps public/unlisted albums out of the index.
         updated.pop("ownerSub", None)
@@ -129,7 +147,8 @@ def _updated_album(album, body):
         elif not sharing:
             updated.pop("shareCode", None)
     else:
-        updated["isShared"] = False
+        if old_visibility == "unlisted" or "isShared" in album:
+            updated["isShared"] = False
         updated.pop("shareCode", None)
     return updated
 
@@ -171,13 +190,30 @@ def handler(event, context):
         _reconcile_album_qr(updated)
         old_visibility = album.get("visibility")
         new_visibility = updated["visibility"]
+        changed_fields = {
+            field
+            for field in MUTABLE_FIELDS
+            if album.get(field, _MISSING) != updated.get(field, _MISSING)
+        }
+        if not changed_fields:
+            _audit(
+                event,
+                context,
+                "success",
+                "album_updated",
+                previous_visibility=old_visibility,
+                visibility=new_visibility,
+            )
+            return json_response(200, serialize_album_summary(album, include_admin=True))
+
+        visibility_changed = old_visibility != new_visibility
         old_qr_key = validated_album_qr_key(album)
         new_qr_key = validated_album_qr_key(updated)
 
         # Restrictive transitions tag first; release-to-public transitions update
         # authorization metadata first. Both orders fail safe (unavailable rather
         # than anonymously exposed) if the second operation fails.
-        if old_visibility == "public" and new_visibility != "public":
+        if visibility_changed and old_visibility == "public" and new_visibility != "public":
             if old_qr_key and old_qr_key != new_qr_key:
                 tag_keys_visibility([old_qr_key], new_visibility)
             tag_album_visibility(updated, new_visibility, include_derivatives=True)
@@ -194,50 +230,71 @@ def handler(event, context):
             "attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) "
             "AND #visibility = :previous_visibility"
         )
-        expression_names = {"#status": "status", "#visibility": "visibility", "#images": "images"}
+        expression_names = {"#status": "status", "#visibility": "visibility"}
         expression_values = {
             ":active": "active",
             ":previous_visibility": old_visibility,
         }
-        if "images" in album:
-            condition += " AND #images = :expected_images"
-            expression_values[":expected_images"] = album["images"]
-        else:
-            condition += " AND attribute_not_exists(#images)"
+        assignments = []
+        removals = []
+        for index, field in enumerate(sorted(changed_fields)):
+            name = f"#field{index}"
+            expression_names[name] = field
+            if field in updated:
+                value = f":value{index}"
+                assignments.append(f"{name} = {value}")
+                expression_values[value] = updated[field]
+            else:
+                removals.append(name)
+        update_parts = []
+        if assignments:
+            update_parts.append("SET " + ", ".join(assignments))
+        if removals:
+            update_parts.append("REMOVE " + ", ".join(removals))
 
-        table.put_item(
-            Item=updated,
+        response = table.update_item(
+            Key={"albumId": album_id},
+            UpdateExpression=" ".join(update_parts),
             ConditionExpression=condition,
             ExpressionAttributeNames=expression_names,
             ExpressionAttributeValues=expression_values,
+            ReturnValues="ALL_NEW",
         )
+        committed = response.get("Attributes") or updated
 
-        if not (old_visibility == "public" and new_visibility != "public"):
-            tag_album_visibility(updated, new_visibility, include_derivatives=True)
-        # A second metadata-table join closes the race with a preview worker
-        # that registered derivatives while this visibility change was in
-        # flight. The worker also re-reads visibility after tagging.
-        tag_preview_visibility(updated, new_visibility)
-        if old_visibility != new_visibility and updated.get("type", "photo") == "photo":
-            metadata_by_id = load_preview_metadata(updated, strict=True)
+        if visibility_changed:
+            if not (old_visibility == "public" and new_visibility != "public"):
+                tag_album_visibility(committed, new_visibility, include_derivatives=True)
+            # A second metadata-table join closes the race with a preview worker
+            # that registered derivatives while this visibility change was in
+            # flight. The worker also re-reads visibility after tagging.
+            tag_preview_visibility(committed, new_visibility)
+        if visibility_changed and committed.get("type", "photo") == "photo":
+            metadata_by_id = load_preview_metadata(committed, strict=True)
             if metadata_by_id:
                 sync_album_index(
                     dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]),
-                    updated,
+                    committed,
                     metadata_by_id,
                 )
-        if old_visibility != "public" and new_visibility == "public":
+        if visibility_changed and old_visibility != "public" and new_visibility == "public":
             # Clear any cached denial produced while the source was protected.
             invalidate_public_previews(album_id, reason="album-visibility-public")
         if old_visibility == "public" or new_visibility == "public":
-            invalidate_public_api(
+            request_public_api_invalidation(
                 album_id=album_id,
                 catalog=True,
                 reason="album-updated",
             )
-        if album.get("title") != updated.get("title") or album.get("category") != updated.get("category"):
+        if (
+            committed.get("type", "photo") == "photo"
+            and ("visibility" in changed_fields or "category" in changed_fields)
+            and (old_visibility == "public" or new_visibility == "public")
+        ):
+            request_random_photo_pool_refresh()
+        if album.get("title") != committed.get("title") or album.get("category") != committed.get("category"):
             try:
-                _sync_drive_folder(updated)
+                _sync_drive_folder(committed)
             except Exception:
                 # Metadata is already committed. Keep edits idempotent and let
                 # the next upload or edit reconcile the Drive folder again.
@@ -260,7 +317,7 @@ def handler(event, context):
             previous_visibility=old_visibility,
             visibility=new_visibility,
         )
-        return json_response(200, serialize_album_summary(updated, include_admin=True))
+        return json_response(200, serialize_album_summary(committed, include_admin=True))
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_album")
         return error_response(400, str(error), code="invalid_album")

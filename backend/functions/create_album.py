@@ -13,15 +13,17 @@ import boto3
 from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
+from album_media_store import activate_album_media, replace_album_media
 from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import get_caller_claims, require_admin
-from cache_invalidation import invalidate_public_api
+from cache_invalidation import request_public_api_invalidation
 from dynamodb_helpers import ensure_album_item_budget
 from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
 from media_helpers import extract_exif_data, start_mediaconvert_job
 from preview_jobs import enqueue_preview_jobs
+from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import (
     ValidationError,
@@ -281,6 +283,16 @@ def handler(event, context):
         item["status"] = "active"
         item.pop("createdBySub", None)
 
+        # Populate the normalized media store only after the legacy manifest is
+        # committed and visible. The version marker is the read cutover: if the
+        # secondary write fails, readers continue using the complete manifest.
+        try:
+            if replace_album_media(album_id, images):
+                activate_album_media(table, album_id, images)
+                item["mediaStoreVersion"] = 1
+        except Exception as error:
+            logger.error("album_media_normalization_failed error_type=%s", type(error).__name__)
+
         if album_type == "photo":
             try:
                 enqueue_preview_jobs(album_id, images)
@@ -336,7 +348,9 @@ def handler(event, context):
                 )
 
         if visibility == "public":
-            invalidate_public_api(catalog=True, reason="album-created")
+            request_public_api_invalidation(catalog=True, reason="album-created")
+            if album_type == "photo":
+                request_random_photo_pool_refresh()
         _audit(event, context, "success", "album_created", media_count=len(images), visibility=visibility)
         return json_response(201, serialize_album_summary(item, include_admin=True))
     except ValidationError as error:

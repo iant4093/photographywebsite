@@ -275,7 +275,11 @@ class ListUsersExpandedTests(unittest.TestCase):
         provider_response = {
             "Users": [
                 {
-                    "Attributes": [{"Name": "email", "Value": "user@example.com"}, {"Value": "ignored"}],
+                    "Attributes": [
+                        {"Name": "email", "Value": "user@example.com"},
+                        {"Name": "sub", "Value": "user-sub"},
+                        {"Value": "ignored"},
+                    ],
                     "UserStatus": "CONFIRMED",
                     "UserCreateDate": created,
                     "Enabled": True,
@@ -284,7 +288,13 @@ class ListUsersExpandedTests(unittest.TestCase):
             ],
             "PaginationToken": "next",
         }
-        event = {"queryStringParameters": {"limit": "2", "paginationToken": " current "}}
+        event = {
+            "queryStringParameters": {
+                "limit": "2",
+                "paginationToken": " current ",
+                "search": 'USER@"',
+            }
+        }
         with patch.object(list_users, "require_admin", return_value=None), patch.object(
             list_users.cognito, "list_users", return_value=provider_response
         ) as provider:
@@ -292,8 +302,10 @@ class ListUsersExpandedTests(unittest.TestCase):
         body = response_body(response)
         self.assertEqual(body["paginationToken"], "next")
         self.assertEqual(body["users"][0]["createdAt"], created.isoformat())
+        self.assertEqual(body["users"][0]["sub"], "user-sub")
         self.assertEqual(body["users"][1]["status"], "UNKNOWN")
         self.assertEqual(provider.call_args.kwargs["PaginationToken"], "current")
+        self.assertEqual(provider.call_args.kwargs["Filter"], 'email ^= "user@\\\""')
 
     def test_validation_and_provider_failure(self):
         with patch.object(list_users, "require_admin", return_value=None), patch.object(

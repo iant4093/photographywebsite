@@ -315,6 +315,48 @@ Resources:
         - Key: DataClassification
           Value: PortfolioConfiguration
 
+  # Normalized media rows remove the album-item size ceiling and allow the
+  # administrator to page through large albums. Legacy manifests remain in the
+  # retained AlbumsTable until the guarded backfill and read cutover are proven.
+  AlbumMediaTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'GoldenHour-AlbumMedia-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: albumId
+          AttributeType: S
+        - AttributeName: mediaId
+          AttributeType: S
+        - AttributeName: orderKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: albumId
+          KeyType: HASH
+        - AttributeName: mediaId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: AlbumOrderIndex
+          KeySchema:
+            - AttributeName: albumId
+              KeyType: HASH
+            - AttributeName: orderKey
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: PrivateCustomerData
+
   PreviewMetadataTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -1414,6 +1456,44 @@ Resources:
         - Key: DataClassification
           Value: OperationalWorkPayloads
 
+  CacheInvalidationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-cache-invalidation-${Stage}'
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 86400
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AsyncFailureQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: OperationalWorkPayloads
+
+  RandomPhotoRefreshQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-random-photo-refresh-${Stage}'
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 86400
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 300
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AsyncFailureQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: OperationalWorkPayloads
+
   # Anonymous-only catalog routes contain no JWT dependency or protected-data
   # branch and are safe to place behind a shared CloudFront cache behavior.
   GetPublicAlbumsFunction:
@@ -1515,6 +1595,29 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  CacheInvalidationWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: cache_invalidation_worker.handler
+      Timeout: 30
+      ReservedConcurrentExecutions: 2
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt CacheInvalidationQueue.QueueName
+        - Statement:
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
+      Events:
+        CacheInvalidationRequests:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt CacheInvalidationQueue.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 10
+
   RandomPhotoPoolBuilderFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -1530,10 +1633,16 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
+        - SQSPollerPolicy:
+            QueueName: !GetAtt RandomPhotoRefreshQueue.QueueName
         - Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt CacheInvalidationQueue.Arn
             - Effect: Allow
               Action:
                 - dynamodb:BatchWriteItem
@@ -1559,6 +1668,8 @@ Resources:
               Action: sqs:SendMessage
               Resource: !GetAtt AsyncFailureQueue.Arn
       Events:
+        # Retain the established mapping for rollback compatibility, but stop
+        # broad rebuilds for title/description/status writes.
         AlbumsChanged:
           Type: DynamoDB
           Properties:
@@ -1568,10 +1679,22 @@ Resources:
             MaximumBatchingWindowInSeconds: 10
             MaximumRetryAttempts: 3
             BisectBatchOnFunctionError: true
+            Enabled: false
             DestinationConfig:
               OnFailure:
                 Type: SQS
                 Destination: !GetAtt AsyncFailureQueue.Arn
+        RefreshRequests:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RandomPhotoRefreshQueue.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 10
+        HourlyReconciliation:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+            Enabled: true
 
   # Compatibility route: supports public, owner, and admin catalog views.
   GetAlbumsFunction:
@@ -1658,6 +1781,85 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+
+  GetAdminAlbumMediaFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: get_album_media.handler
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - DynamoDBReadPolicy:
+            TableName: !Ref AlbumsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !GetAtt AlbumMediaTable.Arn
+                - !Sub '${AlbumMediaTable.Arn}/index/AlbumOrderIndex'
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt PreviewMetadataTable.Arn
+            # Protected album rows are returned with short-lived presigned
+            # object URLs, so the signing role must authorize those reads.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+      Events:
+        GetAdminAlbumMedia:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/albums/{albumId}/media
+            Method: GET
+
+  AlbumMediaBackfillFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: backfill_album_media.handler
+      Timeout: 300
+      MemorySize: 512
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:BatchWriteItem
+              Resource:
+                - !GetAtt AlbumMediaTable.Arn
+                - !Sub '${AlbumMediaTable.Arn}/index/AlbumOrderIndex'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource: !GetAtt AlbumsTable.Arn
+      Events:
+        ContinueAlbumMediaBackfill:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Enabled: true
 
   GetSharedAlbumFunction:
     Type: AWS::Serverless::Function
@@ -1937,6 +2139,9 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           PREVIEW_QUEUE_URL: !Ref PreviewQueue
           IMAGES_BUCKET: !Ref ImagesBucket
@@ -1959,11 +2164,21 @@ Resources:
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
+              Action:
+                - dynamodb:BatchWriteItem
+                - dynamodb:Query
+              Resource: !GetAtt AlbumMediaTable.Arn
+            - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action: sqs:SendMessage
               Resource: !GetAtt PreviewQueue.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource:
+                - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action: cognito-idp:ListUsers
               Resource: !GetAtt UserPool.Arn
@@ -1994,9 +2209,6 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
-            - Effect: Allow
-              Action: cloudfront:CreateInvalidation
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
         - !If
           - HasResendSecret
           - Statement:
@@ -2030,6 +2242,8 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
@@ -2042,13 +2256,18 @@ Resources:
             - Effect: Allow
               Action:
                 - dynamodb:GetItem
-                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action:
                 - dynamodb:BatchGetItem
                 - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource:
+                - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action: s3:ListBucket
               Resource: !GetAtt ImagesBucket.Arn
@@ -2064,9 +2283,7 @@ Resources:
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
-                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
@@ -2089,6 +2306,7 @@ Resources:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
           GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -2099,8 +2317,8 @@ Resources:
               Action: dynamodb:UpdateItem
               Resource: !GetAtt GallerySettingsTable.Arn
             - Effect: Allow
-              Action: cloudfront:CreateInvalidation
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
+              Action: sqs:SendMessage
+              Resource: !GetAtt CacheInvalidationQueue.Arn
       Events:
         UpdateGalleryOrder:
           Type: HttpApi
@@ -2118,6 +2336,9 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
@@ -2131,9 +2352,19 @@ Resources:
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action:
+                - dynamodb:BatchWriteItem
+                - dynamodb:Query
+              Resource: !GetAtt AlbumMediaTable.Arn
+            - Effect: Allow
+              Action:
                 - dynamodb:BatchGetItem
                 - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource:
+                - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket
@@ -2153,9 +2384,7 @@ Resources:
                 - !Sub '${ImagesBucket.Arn}/temp-zips/*'
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
-                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
       Events:
         DeleteAlbum:
           Type: HttpApi
@@ -2175,6 +2404,9 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           PREVIEW_QUEUE_URL: !Ref PreviewQueue
           IMAGES_BUCKET: !Ref ImagesBucket
@@ -2189,11 +2421,19 @@ Resources:
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
+              Action: dynamodb:BatchWriteItem
+              Resource: !GetAtt AlbumMediaTable.Arn
+            - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action: sqs:SendMessage
               Resource: !GetAtt PreviewQueue.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource:
+                - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
                 - s3:GetObject
@@ -2220,9 +2460,6 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt GoogleDriveBackupFunction.Arn
-            - Effect: Allow
-              Action: cloudfront:CreateInvalidation
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         AddImages:
           Type: HttpApi
@@ -2462,6 +2699,9 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
@@ -2474,10 +2714,18 @@ Resources:
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
+              Action: dynamodb:BatchWriteItem
+              Resource: !GetAtt AlbumMediaTable.Arn
+            - Effect: Allow
               Action:
                 - dynamodb:BatchGetItem
                 - dynamodb:BatchWriteItem
               Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource:
+                - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucket
@@ -2493,9 +2741,7 @@ Resources:
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
-              Resource:
-                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
-                - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
       Events:
         DeleteImages:
           Type: HttpApi
@@ -2685,6 +2931,8 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
@@ -2694,6 +2942,12 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt AlbumMediaTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt CacheInvalidationQueue.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucketVersions
@@ -2708,9 +2962,6 @@ Resources:
                 - s3:GetObjectTagging
                 - s3:PutObjectTagging
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
-            - Effect: Allow
-              Action: cloudfront:CreateInvalidation
-              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
       Events:
         UpdateImage:
           Type: HttpApi
@@ -3666,6 +3917,12 @@ Outputs:
   ImagesBucketName:
     Description: Private media bucket
     Value: !Ref ImagesBucket
+  AlbumMediaTableName:
+    Description: Normalized, paginated album media table.
+    Value: !Ref AlbumMediaTable
+  AlbumMediaBackfillFunctionName:
+    Description: Idempotent normalized-media backfill function.
+    Value: !Ref AlbumMediaBackfillFunction
   ImagesDistributionId:
     Description: Media CloudFront distribution ID used by guarded invalidation tooling
     Value: !Ref ImagesCloudFront

@@ -372,7 +372,8 @@ class UpdateAlbumBranchTests(unittest.TestCase):
     def _call(self, body, record=None, *, put_error=None, tag_error=None):
         table = Mock()
         table.get_item.return_value = {"Item": record} if record is not None else {}
-        table.put_item.side_effect = put_error
+        table.update_item.return_value = {}
+        table.update_item.side_effect = put_error
         with patch.object(update_album, "require_admin", return_value=None), patch.object(
             update_album, "table", table
         ), patch.object(update_album, "_reconcile_album_qr", return_value=None
@@ -395,24 +396,39 @@ class UpdateAlbumBranchTests(unittest.TestCase):
         )
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(tag.call_count, 1)
-        self.assertLess(tag.call_args_list[0], table.put_item.call_args) if False else None
         preview.assert_called_once()
 
         response, table, tag, _ = self._call({"visibility": "public"}, album(visibility="private", ownerEmail="x", ownerSub=ALBUM_ID))
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(tag.call_count, 1)
         no_images = {key: value for key, value in album().items() if key != "images"}
-        self.assertIn(
-            "attribute_not_exists(#images)",
-            self._call({"title": "x"}, no_images)[1].put_item.call_args.kwargs["ConditionExpression"],
-        )
+        metadata_update = self._call({"title": "x"}, no_images)[1].update_item.call_args.kwargs
+        self.assertNotIn("images", metadata_update["ConditionExpression"])
+        self.assertNotIn("images", metadata_update["UpdateExpression"])
 
     def test_conflict_provider_validation_and_unexpected_errors(self):
         conditional = client_error("ConditionalCheckFailedException", "PutItem")
         self.assertEqual(self._call({"title": "x"}, album(), put_error=conditional)[0]["statusCode"], 409)
         self.assertEqual(self._call({"title": "x"}, album(), put_error=client_error())[0]["statusCode"], 500)
         self.assertEqual(self._call({"shareCode": "x"}, album())[0]["statusCode"], 400)
-        self.assertEqual(self._call({"title": "x"}, album(), tag_error=RuntimeError("s3"))[0]["statusCode"], 500)
+        self.assertEqual(self._call(
+            {"visibility": "private", "ownerEmail": "owner@example.com", "ownerSub": ALBUM_ID},
+            album(),
+            tag_error=RuntimeError("s3"),
+        )[0]["statusCode"], 500)
+
+    def test_metadata_only_and_noop_updates_skip_media_retagging(self):
+        response, table, tag, preview = self._call({"description": "New"}, album(description="Old"))
+        self.assertEqual(response["statusCode"], 200)
+        table.update_item.assert_called_once()
+        tag.assert_not_called()
+        preview.assert_not_called()
+
+        response, table, tag, preview = self._call({"title": "Album"}, album(title="Album"))
+        self.assertEqual(response["statusCode"], 200)
+        table.update_item.assert_not_called()
+        tag.assert_not_called()
+        preview.assert_not_called()
 
     def test_album_title_and_category_changes_reconcile_existing_drive_folder(self):
         record = album(backupToGoogleDrive=False, title="Old", category="Old category")
@@ -486,7 +502,7 @@ class UpdateImageBranchTests(unittest.TestCase):
                 {"rawKey": RAW_KEY_2, "thumbKey": THUMB_KEY},
             ],
         )
-        with patch.object(update_image, "invalidate_public_api") as invalidate:
+        with patch.object(update_image, "request_public_api_invalidation") as invalidate:
             response, table = self._call({"rawKey": RAW_KEY, "thumbKey": THUMB_KEY_2, "blurhash": "new"}, record)
         invalidate.assert_called_once_with(
             album_id=ALBUM_ID,

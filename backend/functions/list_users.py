@@ -30,6 +30,11 @@ def handler(event, context):
         params = {"UserPoolId": USER_POOL_ID, "Limit": limit}
         if token:
             params["PaginationToken"] = require_string(token, "paginationToken", maximum=4096)
+        if query.get("search"):
+            search = require_string(query["search"], "search", maximum=128).strip().lower()
+            if search:
+                escaped = search.replace("\\", "\\\\").replace('"', '\\"')
+                params["Filter"] = f'email ^= "{escaped}"'
         response = cognito.list_users(**params)
         users = []
         for user in response.get("Users", []):
@@ -42,6 +47,7 @@ def handler(event, context):
             users.append(
                 {
                     "email": attrs.get("email", ""),
+                    "sub": attrs.get("sub", ""),
                     "status": user.get("UserStatus", "UNKNOWN"),
                     "createdAt": created.isoformat() if created else "",
                     "enabled": bool(user.get("Enabled", False)),

@@ -306,6 +306,31 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(captured["admin_all"])
         self.assertNotIn("owner@example.com", decode.call_args.args[1])
 
+    def test_admin_private_owner_sub_uses_owner_index_scope(self):
+        captured = {}
+
+        def fetch(**kwargs):
+            captured.update(kwargs)
+            return [album("private", ownerSub=ALBUM_ID)], None
+
+        event = {
+            "queryStringParameters": {
+                "visibility": "private",
+                "ownerSub": ALBUM_ID,
+                "limit": "40",
+            }
+        }
+        with patch.object(
+            get_albums,
+            "get_verified_claims",
+            return_value=claims(groups=["Admins"]),
+        ), patch.object(get_albums, "_fetch_page", side_effect=fetch):
+            response = get_albums.handler(event, None)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(captured["owner_sub"], ALBUM_ID)
+        self.assertFalse(captured["admin_all"])
+        self.assertIsNone(captured["admin_owner_email"])
+
     def test_non_admin_cannot_list_unlisted(self):
         event = {"queryStringParameters": {"visibility": "unlisted"}}
         with patch.object(get_albums, "get_verified_claims", return_value=claims()):

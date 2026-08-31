@@ -1,19 +1,22 @@
 """Admin-only update of bounded, non-sensitive image metadata."""
 
 import os
+import logging
 
 import boto3
 
 from audit_helpers import actor_context, emit_audit_event
+from album_media_store import deactivate_album_media, update_album_media
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_api
+from cache_invalidation import request_public_api_invalidation
 from deletion_helpers import DeletionTooLargeError, delete_keys_all_versions, preflight_deletion
-from media_access import tag_keys_visibility, validate_album_media_key
+from media_access import media_id_for_key, serialize_images, tag_keys_visibility, validate_album_media_key
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, optional_string, parse_json_body, require_string, validate_uuid
 
 
 table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
+logger = logging.getLogger("photography_api.album_write")
 
 
 def _audit(event, context, outcome, reason_code):
@@ -107,16 +110,45 @@ def handler(event, context):
             ConditionExpression="attribute_exists(albumId)",
             ExpressionAttributeValues=values,
         )
+        if album.get("mediaStoreVersion") == 1:
+            normalized_fields = {}
+            if ":thumbKey" in values:
+                normalized_fields["thumbKey"] = values[":thumbKey"]
+            if ":blurhash" in values:
+                normalized_fields["blurhash"] = values[":blurhash"]
+            try:
+                if not update_album_media(
+                    album_id,
+                    media_id_for_key(raw_key),
+                    normalized_fields,
+                ):
+                    deactivate_album_media(table, album_id)
+            except Exception as error:
+                logger.error("album_media_update_failed error_type=%s", type(error).__name__)
+                deactivate_album_media(table, album_id)
         if obsolete_thumb:
             delete_keys_all_versions([obsolete_thumb])
         if album.get("visibility") == "public":
-            invalidate_public_api(
+            request_public_api_invalidation(
                 album_id=album_id,
                 catalog=True,
                 reason="album-media-updated",
             )
+        updated_image = {**images[target_index]}
+        if ":thumbKey" in values:
+            updated_image["thumbKey"] = values[":thumbKey"]
+        if ":blurhash" in values:
+            updated_image["blurhash"] = values[":blurhash"]
         _audit(event, context, "success", "media_updated")
-        return json_response(200, {"message": "Media metadata updated", "mediaId": raw_key})
+        serialized = serialize_images(
+            {**album, "images": [updated_image]},
+            include_internal=True,
+        )
+        return json_response(200, {
+            "message": "Media metadata updated",
+            "mediaId": raw_key,
+            "item": serialized[0] if serialized else None,
+        })
     except DeletionTooLargeError:
         _audit(event, context, "denied", "deletion_too_large")
         return error_response(

@@ -1,20 +1,24 @@
 """Admin-only album deletion with canonical, version-aware S3 cleanup."""
 
 import os
+import logging
 
 import boto3
 
 from audit_helpers import actor_context, emit_audit_event
+from album_media_store import delete_album_media
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_api, invalidate_public_previews
+from cache_invalidation import invalidate_public_previews, request_public_api_invalidation
 from deletion_helpers import DeletionTooLargeError, delete_prefix_all_versions, preflight_deletion
 from explore_index import index_entry_keys
 from media_access import album_media_prefixes, delete_preview_metadata, load_preview_metadata
+from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_uuid
 
 
 table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
+logger = logging.getLogger("photography_api.album_write")
 
 
 def _audit(event, context, outcome, reason_code, *, deleted_version_count=None):
@@ -75,12 +79,20 @@ def handler(event, context):
             Key={"albumId": album_id},
             ConditionExpression="attribute_exists(albumId)",
         )
+        try:
+            delete_album_media(album_id)
+        except Exception as error:
+            # The album authorization record is gone, so orphaned normalized
+            # rows are inaccessible and can be retried by maintenance safely.
+            logger.error("album_media_cleanup_failed error_type=%s", type(error).__name__)
         if album.get("visibility") == "public":
-            invalidate_public_api(
+            request_public_api_invalidation(
                 album_id=album_id,
                 catalog=True,
                 reason="album-deleted",
             )
+            if album.get("type", "photo") == "photo":
+                request_random_photo_pool_refresh()
         _audit(event, context, "success", "album_deleted", deleted_version_count=deleted_versions)
         return json_response(
             200,

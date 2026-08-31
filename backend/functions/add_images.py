@@ -7,11 +7,13 @@ import os
 import boto3
 
 from audit_helpers import actor_context, emit_audit_event
+from album_media_store import append_album_media, deactivate_album_media
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_api
+from cache_invalidation import request_public_api_invalidation
 from create_album import _extract_exif, _normalize_images, _start_video_jobs
-from media_access import album_known_keys, tag_keys_visibility
+from media_access import album_known_keys, serialize_album_summary, serialize_images, tag_keys_visibility
 from preview_jobs import enqueue_preview_jobs
+from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
 from dynamodb_helpers import ensure_album_item_budget
 from validation_helpers import ValidationError, parse_json_body, validate_uuid
@@ -94,6 +96,13 @@ def handler(event, context):
                     ":active": "active",
                 },
             )
+            if album.get("mediaStoreVersion") == 1:
+                try:
+                    if not append_album_media(album_id, fresh_images, len(existing_images)):
+                        deactivate_album_media(table, album_id)
+                except Exception as error:
+                    logger.error("album_media_append_failed error_type=%s", type(error).__name__)
+                    deactivate_album_media(table, album_id)
         # Always retag the requested keys so a retry can repair a prior partial
         # failure after the DynamoDB append succeeded.
         requested_key_holder = {
@@ -135,13 +144,23 @@ def handler(event, context):
                     context=context, actor_type="service", auth_method="service",
                 )
         if album.get("visibility") == "public" and fresh_images:
-            invalidate_public_api(
+            request_public_api_invalidation(
                 album_id=album_id,
                 catalog=True,
                 reason="album-media-added",
             )
+            if album_type == "photo":
+                request_random_photo_pool_refresh()
         _audit(event, context, "success", "media_added", media_count=len(fresh_images))
-        return json_response(200, {"message": "Images appended successfully", "added": len(fresh_images)})
+        return json_response(200, {
+            "message": "Images appended successfully",
+            "added": len(fresh_images),
+            "album": serialize_album_summary(candidate, include_admin=True),
+            "items": serialize_images(
+                {**candidate, "images": fresh_images},
+                include_internal=True,
+            ),
+        })
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_media")
         return error_response(400, str(error), code="invalid_images")

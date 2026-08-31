@@ -131,6 +131,7 @@ expected_routes = {
     ("GET", "/public/stats"),
     ("GET", "/albums"),
     ("GET", "/albums/{albumId}"),
+    ("GET", "/admin/albums/{albumId}/media"),
     ("GET", "/shared/{shareCode}"),
     ("POST", "/login"),
     ("POST", "/login/challenge"),
@@ -244,11 +245,15 @@ class DataProtectionTests(unittest.TestCase):
 
         update_album = resource_block("UpdateAlbumFunction")
         self.assertIn("dynamodb:GetItem", update_album)
-        self.assertIn("dynamodb:PutItem", update_album)
-        self.assertNotIn("dynamodb:UpdateItem", update_album)
+        self.assertNotIn("dynamodb:PutItem", update_album)
+        self.assertIn("dynamodb:UpdateItem", update_album)
         self.assertIn("GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction", update_album)
         self.assertIn("Action: lambda:InvokeFunction", update_album)
         self.assertIn("Resource: !GetAtt GoogleDriveBackupFunction.Arn", update_album)
+
+        admin_media = resource_block("GetAdminAlbumMediaFunction")
+        self.assertIn("Action: s3:GetObject", admin_media)
+        self.assertIn("${ImagesBucket.Arn}/albums/*", admin_media)
 
         create_zip = resource_block("CreateZipFunction")
         self.assertIn("Action: s3:ListBucket", create_zip)

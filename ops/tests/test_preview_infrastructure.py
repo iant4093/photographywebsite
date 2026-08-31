@@ -147,6 +147,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "PreviewWorkerFunction",
             "RandomPhotoPoolBuilderFunction",
             "DeleteImagesFunction",
+            "GetAdminAlbumMediaFunction",
         }
         actual_consumers = {
             logical_id
@@ -160,7 +161,7 @@ class PreviewWorkerTests(unittest.TestCase):
             with self.subTest(function=logical_id):
                 self.assertNotIn("PreviewDataKey", resource_block(logical_id))
 
-    def test_random_photo_pools_rebuild_from_a_bounded_album_stream(self) -> None:
+    def test_random_photo_pools_use_targeted_refreshes_and_keep_a_disabled_rollback_mapping(self) -> None:
         albums = resource_block("AlbumsTable")
         builder = resource_block("RandomPhotoPoolBuilderFunction")
         self.assertIn("StreamViewType: KEYS_ONLY", albums)
@@ -171,6 +172,9 @@ class PreviewWorkerTests(unittest.TestCase):
             "MemorySize: 512",
             "PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable",
             "Stream: !GetAtt AlbumsTable.StreamArn",
+            "Enabled: false",
+            "Queue: !GetAtt RandomPhotoRefreshQueue.Arn",
+            "Schedule: rate(1 hour)",
             "MaximumBatchingWindowInSeconds: 10",
             "MaximumRetryAttempts: 3",
             "BisectBatchOnFunctionError: true",
@@ -228,8 +232,12 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
         )
         for logical_id in frontend_only:
             block = resource_block(logical_id)
-            self.assertIn("cloudfront:CreateInvalidation", block)
-            self.assertIn("distribution/EIOCCNR8XGQ1B", block)
+            self.assertIn("CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue", block)
+            self.assertIn("sqs:SendMessage", block)
+            self.assertNotIn("distribution/EIOCCNR8XGQ1B", block)
+        worker = resource_block("CacheInvalidationWorkerFunction")
+        self.assertIn("cloudfront:CreateInvalidation", worker)
+        self.assertIn("distribution/EIOCCNR8XGQ1B", worker)
         for logical_id in ("UpdateAlbumFunction", "DeleteAlbumFunction", "DeleteImagesFunction"):
             block = resource_block(logical_id)
             self.assertIn("IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront", block)

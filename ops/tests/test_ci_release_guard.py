@@ -313,6 +313,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "PreviewWorkerFunctionRole",
                 "PreparePrintFunctionRole",
                 "RefreshGoogleDriveUsageFunctionRole",
+                "RandomPhotoPoolBuilderFunctionRole",
             },
         )
         for rule in role_rules:
@@ -408,6 +409,22 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("GetAuditLogFunction", "AWS::Lambda::Function"),
                 ("GetAuditLogFunctionRole", "AWS::IAM::Role"),
                 ("GetAuditLogFunctionGetAuditLogPermission", "AWS::Lambda::Permission"),
+                ("AlbumMediaTable", "AWS::DynamoDB::Table"),
+                ("CacheInvalidationQueue", "AWS::SQS::Queue"),
+                ("RandomPhotoRefreshQueue", "AWS::SQS::Queue"),
+                ("CacheInvalidationWorkerFunction", "AWS::Lambda::Function"),
+                ("CacheInvalidationWorkerFunctionRole", "AWS::IAM::Role"),
+                ("CacheInvalidationWorkerFunctionCacheInvalidationRequests", "AWS::Lambda::EventSourceMapping"),
+                ("GetAdminAlbumMediaFunction", "AWS::Lambda::Function"),
+                ("GetAdminAlbumMediaFunctionRole", "AWS::IAM::Role"),
+                ("GetAdminAlbumMediaFunctionGetAdminAlbumMediaPermission", "AWS::Lambda::Permission"),
+                ("AlbumMediaBackfillFunction", "AWS::Lambda::Function"),
+                ("AlbumMediaBackfillFunctionRole", "AWS::IAM::Role"),
+                ("AlbumMediaBackfillFunctionContinueAlbumMediaBackfill", "AWS::Events::Rule"),
+                ("AlbumMediaBackfillFunctionContinueAlbumMediaBackfillPermission", "AWS::Lambda::Permission"),
+                ("RandomPhotoPoolBuilderFunctionRefreshRequests", "AWS::Lambda::EventSourceMapping"),
+                ("RandomPhotoPoolBuilderFunctionHourlyReconciliation", "AWS::Events::Rule"),
+                ("RandomPhotoPoolBuilderFunctionHourlyReconciliationPermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:

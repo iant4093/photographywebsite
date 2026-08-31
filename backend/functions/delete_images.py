@@ -1,12 +1,14 @@
 """Admin-only, manifest-authorized media deletion."""
 
 import os
+import logging
 
 import boto3
 
 from audit_helpers import actor_context, emit_audit_event
+from album_media_store import deactivate_album_media, delete_album_media
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_api, invalidate_public_previews
+from cache_invalidation import invalidate_public_previews, request_public_api_invalidation
 from deletion_helpers import (
     DeletionTooLargeError,
     delete_keys_all_versions,
@@ -18,14 +20,17 @@ from media_access import (
     delete_preview_metadata,
     load_preview_metadata,
     media_id_for_key,
+    serialize_album_summary,
     validate_album_media_key,
     validated_preview_keys,
 )
 from response_helpers import error_response, internal_error, json_response
+from random_pool_refresh import request_random_photo_pool_refresh
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_list, validate_uuid
 
 
 table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
+logger = logging.getLogger("photography_api.album_write")
 
 
 def _audit(event, context, outcome, reason_code, *, deleted_count=None, deleted_version_count=None):
@@ -168,12 +173,37 @@ def handler(event, context):
                 ":coverBlurhash": cover_blurhash,
             },
         )
+        if album.get("mediaStoreVersion") == 1:
+            try:
+                if not delete_album_media(album_id, removed_media_ids):
+                    deactivate_album_media(table, album_id)
+            except Exception as error:
+                logger.error("album_media_delete_failed error_type=%s", type(error).__name__)
+                deactivate_album_media(table, album_id)
         if album.get("visibility") == "public":
-            invalidate_public_api(
+            request_public_api_invalidation(
                 album_id=album_id,
                 catalog=True,
                 reason="album-media-deleted",
             )
+            if album.get("type", "photo") == "photo":
+                request_random_photo_pool_refresh()
+        updated_album = {
+            "albumId": album_id,
+            "imageCount": len(retained),
+            "coverImageUrl": cover_raw,
+            "coverThumbKey": cover_thumb,
+            "coverBlurhash": cover_blurhash,
+        }
+        try:
+            response_album = serialize_album_summary(
+                {**album, "images": retained, **updated_album},
+                include_admin=True,
+            )
+        except ValidationError:
+            # Compatibility for malformed legacy metadata: the destructive
+            # operation already succeeded, so return only validated raw fields.
+            response_album = updated_album
         _audit(
             event,
             context,
@@ -184,7 +214,12 @@ def handler(event, context):
         )
         return json_response(
             200,
-            {"message": "Media deleted", "deletedCount": len(removed), "deletedObjectVersions": deleted_versions},
+            {
+                "message": "Media deleted",
+                "deletedCount": len(removed),
+                "deletedObjectVersions": deleted_versions,
+                "album": response_album,
+            },
         )
     except DeletionTooLargeError:
         _audit(event, context, "denied", "deletion_too_large")

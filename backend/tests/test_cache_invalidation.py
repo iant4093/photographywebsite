@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from botocore.exceptions import ClientError
 
 import cache_invalidation
+import cache_invalidation_worker
 import validation_helpers
 
 
@@ -75,6 +76,39 @@ class CacheInvalidationTests(unittest.TestCase):
             self.assertFalse(cache_invalidation._create_invalidation("", ["/safe"], "none", strict=False))
             self.assertFalse(cache_invalidation._create_invalidation("frontend", [], "none", strict=False))
         self.client.create_invalidation.assert_not_called()
+
+    def test_public_mutations_enqueue_when_worker_queue_is_configured(self):
+        queue = Mock()
+        with patch.dict(os.environ, {"CACHE_INVALIDATION_QUEUE_URL": "https://sqs.test/cache"}), patch.object(
+            cache_invalidation, "_queue_client", return_value=queue
+        ), patch.object(cache_invalidation, "invalidate_public_api") as synchronous:
+            self.assertTrue(cache_invalidation.request_public_api_invalidation(
+                album_id=ALBUM_ID,
+                catalog=True,
+                reason="album-updated",
+            ))
+
+        synchronous.assert_not_called()
+        request = queue.send_message.call_args.kwargs
+        self.assertEqual(request["QueueUrl"], "https://sqs.test/cache")
+        self.assertIn(ALBUM_ID, request["MessageBody"])
+
+    def test_worker_coalesces_catalog_and_album_invalidations(self):
+        event = {"Records": [
+            {"body": '{"version":1,"albumId":"' + ALBUM_ID + '","catalog":false,"reason":"one"}'},
+            {"body": '{"version":1,"catalog":true,"reason":"two"}'},
+            {"body": "not-json"},
+        ]}
+        with patch.object(cache_invalidation_worker, "invalidate_public_api_batch") as invalidate:
+            result = cache_invalidation_worker.handler(event, None)
+
+        self.assertEqual(result, {"invalidated": True, "albumCount": 1, "catalog": True})
+        invalidate.assert_called_once_with(
+            album_ids={ALBUM_ID},
+            catalog=True,
+            reason="batched-public-mutation",
+            strict=True,
+        )
 
 
 if __name__ == "__main__":

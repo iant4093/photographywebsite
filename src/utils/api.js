@@ -11,6 +11,10 @@ import { annotateMediaExpiry } from './mediaUrls'
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const DEFAULT_TIMEOUT_MS = 15_000
 const PUBLIC_CATALOG_TTL_MS = 5 * 60_000
+// Authenticated catalogs are cached only in this JavaScript process. The auth
+// provider clears the cache on sign-out, and API responses remain `no-store` so
+// protected album data is never persisted by a browser or edge cache.
+const ADMIN_CATALOG_TTL_MS = 60_000
 const PUBLIC_ALBUM_TTL_MS = 5 * 60_000
 const PUBLIC_ALBUM_CACHE_LIMIT = 5
 const catalogCache = new Map()
@@ -159,7 +163,7 @@ export async function apiFetch(path, options = {}, config = {}) {
 
 function normalizeCatalogParams(params = {}) {
     const normalized = {}
-    for (const key of ['visibility', 'ownerEmail', 'type', 'limit', 'cursor']) {
+    for (const key of ['visibility', 'ownerEmail', 'ownerSub', 'type', 'limit', 'cursor']) {
         const value = params[key]
         if (value !== undefined && value !== null && value !== '') normalized[key] = String(value)
     }
@@ -243,9 +247,12 @@ function invalidateAlbumCatalog({ album, deletedAlbumId } = {}) {
     }
 }
 
-export function readCachedAlbumsPage(params = {}) {
+export function readCachedAlbumsPage(params = {}, options = {}) {
     const normalized = normalizeCatalogParams(params)
-    const cached = catalogCache.get(`public:${catalogKey(normalized)}`)
+    const prefix = options.authenticated
+        ? `auth:${normalized.ownerEmail || normalized.ownerSub || 'admin'}`
+        : 'public'
+    const cached = catalogCache.get(`${prefix}:${catalogKey(normalized)}`)
     return cached && cached.expiresAt > Date.now() ? cached.value : null
 }
 
@@ -256,9 +263,9 @@ export function fetchAlbumsPage(params = {}, options = {}) {
 
     const normalized = normalizeCatalogParams(params)
     const isPublic = !options.token
-    const key = `${isPublic ? 'public' : `auth:${normalized.ownerEmail || 'admin'}`}:${catalogKey(normalized)}`
+    const key = `${isPublic ? 'public' : `auth:${normalized.ownerEmail || normalized.ownerSub || 'admin'}`}:${catalogKey(normalized)}`
     const cached = catalogCache.get(key)
-    if (!options.force && isPublic && cached?.expiresAt > Date.now()) {
+    if (!options.force && cached?.expiresAt > Date.now()) {
         return Promise.resolve(cached.value)
     }
 
@@ -294,9 +301,10 @@ export function fetchAlbumsPage(params = {}, options = {}) {
             })
         }
         page.items = page.items.map(annotateMediaExpiry)
-        if (isPublic) {
-            catalogCache.set(key, { value: page, expiresAt: Date.now() + PUBLIC_CATALOG_TTL_MS })
-        }
+        catalogCache.set(key, {
+            value: page,
+            expiresAt: Date.now() + (isPublic ? PUBLIC_CATALOG_TTL_MS : ADMIN_CATALOG_TTL_MS),
+        })
         return page
     }).finally(() => {
         if (catalogRequests.get(key) === record) catalogRequests.delete(key)
@@ -344,6 +352,10 @@ export function fetchRandomPhotos(options = {}) {
 
 export function fetchAlbumsFiltered(params = {}, token = null, options = {}) {
     return fetchAllAlbums(params, { ...options, token })
+}
+
+export function fetchAlbumsFilteredPage(params = {}, token = null, options = {}) {
+    return fetchAlbumsPage(params, { ...options, token })
 }
 
 function normalizeAlbumDetail(data) {
@@ -413,6 +425,26 @@ export function fetchAlbum(albumId, token = null, options = {}) {
     record.promise.catch(() => {})
     publicAlbumRequests.set(key, record)
     return subscribeToCatalogRequest(record, options.signal)
+}
+
+export function fetchAlbumMediaPage(token, albumId, params = {}, options = {}) {
+    const queryParams = new URLSearchParams()
+    if (params.limit) queryParams.set('limit', String(params.limit))
+    if (params.cursor) queryParams.set('cursor', String(params.cursor))
+    const query = queryParams.toString()
+    return apiFetch(
+        `/admin/albums/${encodeURIComponent(albumId)}/media${query ? `?${query}` : ''}`,
+        {
+            headers: authHeaders(token),
+            signal: options.signal,
+        },
+    ).then((payload) => ({
+        album: payload?.album || null,
+        items: Array.isArray(payload?.items)
+            ? payload.items.map(annotateMediaExpiry)
+            : [],
+        nextCursor: isSafeCursor(payload?.nextCursor) ? payload.nextCursor : null,
+    }))
 }
 
 export function prefetchPublicAlbum(albumId) {
@@ -652,29 +684,41 @@ export function createUser(token, email, options = {}) {
     })
 }
 
+export async function listUsersPage(token, params = {}, options = {}) {
+    const queryParams = new URLSearchParams()
+    if (params.limit) queryParams.set('limit', String(params.limit))
+    if (params.cursor) queryParams.set('paginationToken', String(params.cursor))
+    if (params.search) queryParams.set('search', String(params.search))
+    const query = queryParams.toString()
+    const payload = await apiFetch(`/users${query ? `?${query}` : ''}`, {
+        headers: authHeaders(token),
+        signal: options.signal,
+    })
+    if (Array.isArray(payload)) return { users: payload, nextCursor: null }
+    return {
+        users: Array.isArray(payload?.users) ? payload.users : [],
+        nextCursor: payload?.paginationToken || payload?.nextCursor || null,
+    }
+}
+
 export async function listUsers(token, options = {}) {
     const users = []
     const seenCursors = new Set()
     let cursor = null
     do {
-        const query = cursor ? `?paginationToken=${encodeURIComponent(cursor)}` : ''
-        const payload = await apiFetch(`/users${query}`, {
-            headers: authHeaders(token),
-            signal: options.signal,
-        })
-        if (Array.isArray(payload)) {
-            users.push(...payload)
-            cursor = null
-        } else {
-            users.push(...(payload?.users || []))
-            cursor = payload?.paginationToken || payload?.nextCursor || null
-            if (cursor && seenCursors.has(cursor)) {
-                throw new ApiError('The service returned an invalid pagination sequence.', {
-                    code: 'REPEATED_CURSOR',
-                })
-            }
-            if (cursor) seenCursors.add(cursor)
+        const page = await listUsersPage(token, {
+            cursor,
+            limit: options.limit,
+            search: options.search,
+        }, options)
+        users.push(...page.users)
+        cursor = page.nextCursor
+        if (cursor && seenCursors.has(cursor)) {
+            throw new ApiError('The service returned an invalid pagination sequence.', {
+                code: 'REPEATED_CURSOR',
+            })
         }
+        if (cursor) seenCursors.add(cursor)
     } while (cursor)
     return users
 }

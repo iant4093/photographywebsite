@@ -7,6 +7,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
 from media_access import album_media_prefixes, bucket_name
+from cache_invalidation import request_public_api_invalidation
 from random_photo_pools import build_reference_pools, replace_materialized_pools
 
 
@@ -71,4 +72,6 @@ def handler(event, context):
         result["poolCount"],
         result["totalPhotos"],
     )
+    if os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip():
+        request_public_api_invalidation(catalog=True, reason="random-photo-pool-refreshed")
     return result

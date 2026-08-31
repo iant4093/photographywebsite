@@ -64,7 +64,7 @@ class PreviewLifecycleTests(unittest.TestCase):
         ), patch.object(update_album, "_updated_album", return_value=updated), patch.object(
             update_album, "_reconcile_album_qr", return_value=None
         ), patch.object(
-            update_album.table, "put_item"
+            update_album.table, "update_item", return_value={}
         ), patch.object(update_album, "tag_album_visibility"), patch.object(
             update_album, "tag_preview_visibility"
         ) as preview_tag, patch.object(update_album, "_audit"):
@@ -76,18 +76,18 @@ class PreviewLifecycleTests(unittest.TestCase):
         album = {"albumId": ALBUM_ID, "status": "active", "visibility": "public", "images": []}
         updated = {**album, "title": "Updated"}
         event = {"pathParameters": {"albumId": ALBUM_ID}, "body": json.dumps({"title": "Updated"})}
-        conflict = ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
+        conflict = ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
         with patch.object(update_album, "require_admin", return_value=None), patch.object(
             update_album.table, "get_item", return_value={"Item": album}
         ), patch.object(update_album, "_updated_album", return_value=updated), patch.object(
             update_album, "_reconcile_album_qr", return_value=None
         ), patch.object(
-            update_album.table, "put_item", side_effect=conflict
-        ) as put, patch.object(update_album, "tag_album_visibility"), patch.object(update_album, "_audit"):
+            update_album.table, "update_item", side_effect=conflict
+        ) as update, patch.object(update_album, "tag_album_visibility"), patch.object(update_album, "_audit"):
             response = update_album.handler(event, None)
         self.assertEqual(response["statusCode"], 409)
-        self.assertIn("#images = :expected_images", put.call_args.kwargs["ConditionExpression"])
-        self.assertEqual(put.call_args.kwargs["ExpressionAttributeValues"][":expected_images"], [])
+        self.assertNotIn("images", update.call_args.kwargs["ConditionExpression"])
+        self.assertIn("#visibility = :previous_visibility", update.call_args.kwargs["ConditionExpression"])
 
     def test_media_deletion_strictly_loads_and_deletes_external_preview_state(self):
         raw_key = f"albums/{ALBUM_ID}/original/photo.jpg"
