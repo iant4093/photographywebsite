@@ -70,7 +70,6 @@ describe('museum layout', () => {
         for (const prop of [
             ...layout.dressing.lobbyPlants,
             ...layout.dressing.hallPlants,
-            layout.dressing.terminalSculpture,
             ...layout.rooms[0].plants,
         ]) {
             expect(isMuseumPositionWalkable(layout, prop.position[0], prop.position[2])).toBe(false)
@@ -218,30 +217,39 @@ describe('museum layout', () => {
         expect(isMuseumPositionWalkable(layout, room.centerX, room.centerZ)).toBe(true)
     })
 
-    it('keeps a closed streaming portal solid and permits entry after it opens', () => {
+    it('keeps traversal independent from room streaming state', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
         const room = layout.rooms[0]
         const start = {
             x: room.innerX - (room.side * 0.2),
             z: room.centerZ,
         }
-        const closed = moveMuseumPosition(
+        const withoutResidentMedia = moveMuseumPosition(
             layout,
             start,
             { x: room.side * 1.2, z: 0 },
             0.35,
-            new Set(),
         )
-        expect((closed.x - room.innerX) * room.side).toBeLessThanOrEqual(0.29)
+        expect((withoutResidentMedia.x - room.innerX) * room.side).toBeGreaterThan(0.29)
 
         const opened = moveMuseumPosition(
             layout,
             start,
             { x: room.side * 1.2, z: 0 },
             0.35,
-            new Set([room.id]),
         )
         expect((opened.x - room.innerX) * room.side).toBeGreaterThan(0.29)
+    })
+
+    it('reserves the category end wall for its title', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('a', 'Hikes'), album('b', 'Hikes'), album('c', 'Hikes'),
+        ]))
+        const room = layout.rooms[0]
+        expect(room.paintings.every(painting => (
+            painting.rotationY === 0 || painting.rotationY === Math.PI
+        ))).toBe(true)
+        expect(room.paintings.every(painting => painting.position[0] !== room.outerX)).toBe(true)
     })
 
     it('keeps every dynamically generated room entrance traversable at full catalog scale', () => {
@@ -272,8 +280,6 @@ describe('museum layout', () => {
             album(`tour-${index}`, `Gallery ${index}`)
         ))
         const layout = buildMuseumLayout(buildMuseumCatalog(albums))
-        const openPortals = new Set()
-
         for (const room of layout.rooms) {
             const hallPosition = {
                 x: room.innerX - (room.side * 0.24),
@@ -282,8 +288,6 @@ describe('museum layout', () => {
             const nearby = nearbyMuseumRoomIds(layout, hallPosition, 20)
             expect(nearby).toContain(room.id)
 
-            openPortals.clear()
-            openPortals.add(room.id)
             let position = hallPosition
             for (let step = 0; step < 14; step += 1) {
                 position = moveMuseumPosition(
@@ -291,43 +295,37 @@ describe('museum layout', () => {
                     position,
                     { x: room.side * 0.28, z: 0 },
                     0.35,
-                    openPortals,
                 )
             }
             expect((position.x - room.innerX) * room.side).toBeGreaterThan(2.5)
         }
     })
 
-    it('never permits a stale or unloaded room portal during repeated traversal', () => {
+    it('never lets stale streaming state block a portal during repeated traversal', () => {
         const albums = Array.from({ length: 12 }, (_, index) => (
             album(`guarded-${index}`, `Gallery ${index}`)
         ))
         const layout = buildMuseumLayout(buildMuseumCatalog(albums))
 
         for (let circuit = 0; circuit < 5; circuit += 1) {
-            for (const activeRoom of layout.rooms) {
-                const openPortals = new Set([activeRoom.id])
-                for (const room of layout.rooms) {
-                    const start = {
-                        x: room.innerX - (room.side * 0.2),
-                        z: room.centerZ,
-                    }
-                    const result = moveMuseumPosition(
-                        layout,
-                        start,
-                        { x: room.side * 1.2, z: 0 },
-                        0.35,
-                        openPortals,
-                    )
-                    const depth = (result.x - room.innerX) * room.side
-                    if (room.id === activeRoom.id) expect(depth).toBeGreaterThan(0.29)
-                    else expect(depth).toBeLessThanOrEqual(0.29)
+            for (const room of layout.rooms) {
+                const start = {
+                    x: room.innerX - (room.side * 0.2),
+                    z: room.centerZ,
                 }
+                const result = moveMuseumPosition(
+                    layout,
+                    start,
+                    { x: room.side * 1.2, z: 0 },
+                    0.35,
+                )
+                const depth = (result.x - room.innerX) * room.side
+                expect(depth).toBeGreaterThan(0.29)
             }
         }
     })
 
-    it('keeps only the nearest doorway resident for a stable handoff', () => {
+    it('keeps the nearest doorway pair resident for a stable bay handoff', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'),
             album('b', 'Astro'),
@@ -336,13 +334,16 @@ describe('museum layout', () => {
         ]))
         const [x, , z] = layout.rooms[0].entrance
         expect(nearestMuseumRoom(layout, { x: x + 1, z })).toBe(layout.rooms[0].id)
-        expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([layout.rooms[0].id])
+        expect(nearbyMuseumRoomIds(layout, { x: 0, z })).toEqual([
+            layout.rooms[0].id,
+            layout.rooms[1].id,
+        ])
         const contained = nearbyMuseumRoomIds(layout, {
             x: layout.rooms[1].centerX,
             z: layout.rooms[1].centerZ,
         })
         expect(contained[0]).toBe(layout.rooms[1].id)
-        expect(contained).toEqual([layout.rooms[1].id])
+        expect(contained).toEqual([layout.rooms[1].id, layout.rooms[0].id])
         expect(nearestMuseumRoom(layout, { x: 0, z: 10 }, 1)).toBeNull()
     })
 

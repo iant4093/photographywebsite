@@ -47,25 +47,10 @@ export function buildMuseumCatalog(albums = []) {
 function makePaintings(room) {
     const wallOffset = (room.width / 2) - 0.12
     return room.albums.map((album, index) => {
-        // Give every gallery a focal work on its end wall while retaining the
-        // consistent alternating-wall rhythm for the remaining albums.
-        if (index === 0) {
-            return {
-                id: album.albumId,
-                album,
-                position: [
-                    room.outerX - (room.side * 0.28),
-                    2.65,
-                    room.centerZ,
-                ],
-                rotationY: room.side < 0 ? Math.PI / 2 : -Math.PI / 2,
-                normal: [-room.side, 0, 0],
-                scale: [1, 1, 1],
-            }
-        }
-        const wallIndex = index - 1
-        const row = Math.floor(wallIndex / 2)
-        const onNearWall = wallIndex % 2 === 0
+        // Keep the far wall reserved for the category title. Every album hangs
+        // on one of the two long walls in a consistent alternating rhythm.
+        const row = Math.floor(index / 2)
+        const onNearWall = index % 2 === 0
         const z = room.centerZ + (onNearWall ? -wallOffset : wallOffset)
         const x = room.side * (
             MUSEUM_DIMENSIONS.hallHalfWidth
@@ -185,11 +170,6 @@ export function buildMuseumLayout(categories = []) {
             size: [0.34, 1.08, 0.34],
         },
     ])
-    const terminalSculpture = {
-        id: 'terminal-sculpture',
-        position: [0, 0, hallBackZ + 2.05],
-        size: [1.75, 2.9, 1.75],
-    }
     const hallPlants = Array.from({ length: bayCount }, (_, bay) => {
         const side = bay % 2 === 0 ? -1 : 1
         return {
@@ -204,7 +184,6 @@ export function buildMuseumLayout(categories = []) {
         lobbyPlants,
         hallPlants,
         stanchions,
-        terminalSculpture,
     }
     const obstacles = [
         {
@@ -213,7 +192,6 @@ export function buildMuseumLayout(categories = []) {
         },
         ...dressing.lobbyPlants,
         ...dressing.hallPlants,
-        dressing.terminalSculpture,
         ...rooms.flatMap(room => [
             ...room.benches,
             ...room.plants,
@@ -274,7 +252,6 @@ export function isMuseumPositionWalkable(layout, x, z, radius = 0.35) {
         layout.desk,
         ...layout.dressing.lobbyPlants,
         ...layout.dressing.hallPlants,
-        layout.dressing.terminalSculpture,
         ...layout.rooms.flatMap(room => [...room.benches, ...room.plants].filter(Boolean)),
     ]
     return !obstacles.some(obstacle => intersectsObstacle(x, z, obstacle, radius))
@@ -289,27 +266,11 @@ export function museumPlanarAxes(forwardX, forwardZ) {
     }
 }
 
-function crossesClosedMuseumPortal(layout, current, proposed, openRoomIds, radius) {
-    if (!openRoomIds) return false
-    return layout.rooms.some((room) => {
-        if (openRoomIds.has(room.id)) return false
-        if (Math.abs(proposed.z - room.centerZ) > (MUSEUM_DIMENSIONS.doorwayWidth / 2) - radius) return false
-        const previousDepth = (current.x - room.innerX) * room.side
-        const proposedDepth = (proposed.x - room.innerX) * room.side
-        // The curtain sits 0.64m inside the room. Stop the visitor's collision
-        // capsule just in front of it, but always allow somebody already inside
-        // to walk back out if a stream is interrupted.
-        const stopDepth = 0.64 - radius
-        return previousDepth <= stopDepth && proposedDepth > stopDepth
-    })
-}
-
-export function moveMuseumPosition(layout, current, delta, radius = 0.35, openRoomIds = null) {
+export function moveMuseumPosition(layout, current, delta, radius = 0.35) {
     const next = { x: current.x, z: current.z }
     const proposedX = current.x + delta.x
     if (
         isMuseumPositionWalkable(layout, proposedX, current.z, radius)
-        && !crossesClosedMuseumPortal(layout, current, { x: proposedX, z: current.z }, openRoomIds, radius)
     ) next.x = proposedX
     const proposedZ = current.z + delta.z
     if (isMuseumPositionWalkable(layout, next.x, proposedZ, radius)) next.z = proposedZ
@@ -377,11 +338,9 @@ export function nearbyMuseumRoomIds(layout, position, preloadDistance = 25) {
         })
         .filter(room => room.contained || room.distance <= preloadDistance)
         .sort((left, right) => Number(right.contained) - Number(left.contained) || left.distance - right.distance)
-    // Keep only the nearest/occupied room mounted. Adjacent entrance artwork
-    // is already warmed by the cover preloader, while mounting two complete
-    // interiors at a threshold briefly doubles draw calls and causes the
-    // visible hitch that used to happen while crossing between spaces.
-    return nearby.slice(0, 1).map(room => room.id)
+    // Keep both rooms at the current bay warm. Architecture is permanently
+    // resident, while this list only controls real cover promotion and lights.
+    return nearby.slice(0, 2).map(room => room.id)
 }
 
 export function initialMuseumRoomIds(layout, position, preloadDistance = 25, fallbackCount = 2) {

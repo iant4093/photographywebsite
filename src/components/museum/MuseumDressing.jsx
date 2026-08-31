@@ -6,9 +6,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { museumHallSconcePlacements, museumPracticalSconcePlacements } from '../../utils/museumSupport'
 
-const BRASS = '#b58a4f'
 const DARK_BRASS = '#735332'
-const STONE = '#c7bdaf'
 let textileDetailTexture = null
 const BENCH_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 3, 0.1)
 const RUG_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 2, 0.07)
@@ -418,21 +416,6 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
     )
 }
 
-function AbstractSculpture({ sculpture }) {
-    return (
-        <group position={sculpture.position}>
-            <mesh castShadow receiveShadow position={[0, 0.47, 0]}>
-                <RoundedBoxShape size={[1.5, 0.94, 1.5]} radius={0.065} segments={3} />
-                <meshPhysicalMaterial color={STONE} roughness={0.56} clearcoat={0.16} clearcoatRoughness={0.72} />
-            </mesh>
-            <mesh castShadow position={[0, 1.36, 0]} rotation={[0.24, 0.38, 0.18]}>
-                <torusKnotGeometry args={[0.46, 0.14, 48, 8, 2, 3]} />
-                <meshPhysicalMaterial color={BRASS} metalness={0.78} roughness={0.24} clearcoat={0.32} />
-            </mesh>
-        </group>
-    )
-}
-
 function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
     const [x, y, z] = layout.desk.position
     const facadeGeometry = useMemo(() => {
@@ -609,19 +592,24 @@ function SconcePracticalLights({ placements, enabled }) {
     ))
 }
 
-export default function MuseumDressing({ layout, materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true, shadowsEnabled = false }) {
+export default function MuseumDressing({ layout, activeRoomIds = [], materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true, shadowsEnabled = false }) {
+    const activeRoomSet = useMemo(() => new Set(activeRoomIds), [activeRoomIds])
+    const dressedRooms = useMemo(
+        () => layout.rooms.filter(room => activeRoomSet.has(room.id)),
+        [activeRoomSet, layout.rooms],
+    )
     const staticPlants = useMemo(() => [
         ...layout.dressing.lobbyPlants.map((plant, index) => ({ ...plant, renderScale: 1.05, renderVariant: index % 2 })),
         ...layout.dressing.hallPlants.map((plant, index) => ({ ...plant, renderScale: 0.9, renderVariant: (index + 1) % 2 })),
     ], [layout.dressing.hallPlants, layout.dressing.lobbyPlants])
     const roomPlants = useMemo(() => [
-        ...layout.rooms.flatMap((room, roomIndex) => room.plants.map((plant, plantIndex) => ({
+        ...dressedRooms.flatMap((room, roomIndex) => room.plants.map((plant, plantIndex) => ({
             ...plant,
             renderScale: [0.82, 0.94, 1.06][(roomIndex + plantIndex) % 3],
             renderVariant: (roomIndex + plantIndex) % 2,
             rotationY: (plant.rotationY || 0) + (((roomIndex % 3) - 1) * 0.22),
         }))),
-    ], [layout.rooms])
+    ], [dressedRooms])
     const sconcePlacements = useMemo(
         () => museumHallSconcePlacements(layout),
         [layout],
@@ -634,8 +622,7 @@ export default function MuseumDressing({ layout, materials, LabelPlane, PlasterM
             <ReceptionDesk layout={layout} materials={materials} LabelPlane={LabelPlane} WoodMaterial={WoodMaterial} />
             <InstancedPlants plants={staticPlants} />
             <InstancedPlants plants={roomPlants} castDynamicShadows={shadowsEnabled} />
-            <AbstractSculpture sculpture={layout.dressing.terminalSculpture} />
-            <InstancedRoomBenches rooms={layout.rooms} castDynamicShadows={shadowsEnabled} />
+            <InstancedRoomBenches rooms={dressedRooms} castDynamicShadows={shadowsEnabled} />
             {/* Place sconces on the solid wall between galleries, clear of the
                 room end walls and arched entry trim. */}
             <InstancedWallSconces placements={sconcePlacements} />
