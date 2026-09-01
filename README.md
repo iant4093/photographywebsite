@@ -283,7 +283,7 @@ flowchart TB
   managed_security -. posture findings .-> notifications
 ```
 
-An editable companion architecture board is available in [Miro](https://miro.com/app/board/uXjVHsf6LH0=/). It is organized as a six-zone overview plus a detailed resource-inventory appendix.
+An editable companion architecture board is available in [Miro](https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682384166801). The board opens to a giant AWS-icon architecture view and also includes a readable six-zone reference plus a detailed resource-inventory appendix.
 
 ### Architecture notes
 
