@@ -147,6 +147,23 @@ once and require aggregate `poolCount` and `totalPhotos` output before clearing
 the public random-photo cache. Never log category names, album IDs, or media keys
 during this reconciliation.
 
+## Album hover-preview manifests
+
+Public photo-album cards use small immutable JSON manifests instead of loading
+the full album record on ordinary hover. The manifest builder reacts to ready
+preview-metadata changes and targeted cover or visibility refresh messages. It
+selects at most twelve landscape 640px WebP previews, excludes the current
+cover, writes a content-addressed public object, and conditionally publishes the
+pointer only while the album is still active, public, and unchanged. The browser
+then shuffles five frames locally for each hover.
+
+A bounded reconciliation page runs every fifteen minutes and completes a full
+public-album cycle at least daily. Until an album has a valid manifest pointer,
+the existing public album-detail loader remains the compatibility fallback;
+albums explicitly marked unavailable do not issue that extra request. The
+deployment, verification, incident, and rollback procedure is in
+[`HOVER_PREVIEW_MANIFESTS.md`](HOVER_PREVIEW_MANIFESTS.md).
+
 ## Production change boundary
 
 Routine production changes run only through the tested `main` release described

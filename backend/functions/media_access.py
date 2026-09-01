@@ -24,6 +24,8 @@ LEGACY_PREFIX_SEGMENT = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?$")
 PREVIEW_VERSION = 3
 PREVIEW_WIDTHS = (640, 960, 1440, 1920)
 PUBLIC_PREVIEW_PREFIX = "public-previews"
+HOVER_PREVIEW_MANIFEST_VERSION = 1
+HOVER_PREVIEW_MANIFEST_PATTERN = re.compile(r"^hover-([a-f0-9]{24})\.json$")
 ALBUM_QR_KEY_PATTERN = re.compile(r"^albums/([0-9a-f-]{36})/qr/v1/[a-f0-9]{24}\.svg$")
 
 _s3 = None
@@ -201,6 +203,43 @@ def public_preview_key(album_id, preview_key):
     if not re.fullmatch(r"[a-f0-9]{24}-w(?:640|960|1440|1920)\.webp", filename):
         raise ValidationError("Preview key does not match the public preview contract")
     return f"{PUBLIC_PREVIEW_PREFIX}/{album_id}/v{PREVIEW_VERSION}/{filename}"
+
+
+def hover_preview_manifest_key(album_id, version):
+    """Return the canonical immutable object key for one hover manifest."""
+    album_id = validate_uuid(album_id)
+    if not isinstance(version, str) or not re.fullmatch(r"[a-f0-9]{24}", version):
+        raise ValidationError("Hover preview manifest version is invalid")
+    return f"{canonical_album_prefix(album_id)}preview/v{PREVIEW_VERSION}/hover-{version}.json"
+
+
+def public_hover_preview_manifest_key(album_id, manifest_key):
+    """Map a canonical hover manifest to the guarded public preview alias."""
+    album_id = validate_uuid(album_id)
+    manifest_key = normalize_object_key(manifest_key)
+    canonical_prefix = f"{canonical_album_prefix(album_id)}preview/v{PREVIEW_VERSION}/"
+    if not manifest_key.startswith(canonical_prefix):
+        raise ValidationError("Hover preview manifest is outside the album namespace")
+    filename = manifest_key.removeprefix(canonical_prefix)
+    if not HOVER_PREVIEW_MANIFEST_PATTERN.fullmatch(filename):
+        raise ValidationError("Hover preview manifest does not match the public contract")
+    return f"{PUBLIC_PREVIEW_PREFIX}/{album_id}/v{PREVIEW_VERSION}/{filename}"
+
+
+def validated_hover_preview_manifest_key(album):
+    """Return only an exact, version-matched canonical manifest pointer."""
+    if not isinstance(album, dict):
+        return ""
+    key = album.get("hoverPreviewManifestKey")
+    version = album.get("hoverPreviewVersion")
+    if not isinstance(key, str) or not isinstance(version, str):
+        return ""
+    try:
+        expected = hover_preview_manifest_key(album.get("albumId"), version)
+        validated = validate_album_media_key(key, album=album)
+    except ValidationError:
+        return ""
+    return validated if validated == expected else ""
 
 
 def validated_preview_keys(image, album, metadata=None, *, allow_pending=False):
@@ -475,6 +514,16 @@ def serialize_album_summary(album, *, include_admin=False):
         "coverThumbnailUrl": media_url(thumb_key, visibility) if thumb_key else cover_url,
         "coverBlurhash": album.get("coverBlurhash", ""),
     }
+    if visibility == "public" and album.get("type", "photo") == "photo":
+        hover_status = album.get("hoverPreviewStatus")
+        if hover_status in {"ready", "unavailable"}:
+            summary["hoverPreviewStatus"] = hover_status
+        manifest_key = validated_hover_preview_manifest_key(album)
+        if hover_status == "ready" and manifest_key:
+            summary["hoverPreviewManifestUrl"] = public_url(
+                public_hover_preview_manifest_key(album.get("albumId"), manifest_key)
+            )
+            summary["hoverPreviewVersion"] = album.get("hoverPreviewVersion")
     if visibility == "public" and album.get("type") == "video":
         cover_candidates = {value for value in (cover_key, thumb_key) if value}
         cover_video = None
@@ -596,7 +645,12 @@ def tag_keys_visibility(keys, visibility):
 
 
 def album_known_keys(album):
-    keys = [album.get("coverImageUrl", ""), album.get("coverThumbKey", ""), validated_album_qr_key(album)]
+    keys = [
+        album.get("coverImageUrl", ""),
+        album.get("coverThumbKey", ""),
+        validated_album_qr_key(album),
+        validated_hover_preview_manifest_key(album),
+    ]
     for image in album.get("images", []):
         if isinstance(image, dict):
             keys.extend((image.get("rawKey", ""), image.get("key", ""), image.get("thumbKey", ""), image.get("hlsUrl", "")))

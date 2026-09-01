@@ -50,4 +50,19 @@ describe('album hover preview selection', () => {
         }))
         expect(canRunAlbumHoverPreview()).toBe(false)
     })
+
+    it('shuffles already validated manifest frames without requiring responsive metadata', () => {
+        const manifest = {
+            schemaVersion: 1,
+            version: 'a'.repeat(24),
+            images: [
+                { url: 'https://media.example.test/one-w640.webp', width: 640, height: 427 },
+                { url: 'https://media.example.test/two-w640.webp', width: 640, height: 427 },
+            ],
+        }
+        expect(selectAlbumHoverPreviews(manifest, '', () => 0)).toEqual([
+            { url: 'https://media.example.test/two-w640.webp' },
+            { url: 'https://media.example.test/one-w640.webp' },
+        ])
+    })
 })

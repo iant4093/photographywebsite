@@ -53,24 +53,36 @@ class PublicCatalogListTests(unittest.TestCase):
             ):
                 cursor_helpers.decode_cursor(encoded, "public:*")
 
-    def test_upload_timestamp_join_adds_only_the_small_recency_field(self):
+    def test_catalog_join_adds_only_small_non_manifest_summary_fields(self):
         records = [public_album()]
+        version = "a" * 24
+        manifest_key = f"albums/{ALBUM_ID}/preview/v3/hover-{version}.json"
         with patch.object(
             get_public_albums.dynamodb,
             "batch_get_item",
             return_value={
                 "Responses": {
                     get_public_albums.table.name: [
-                        {"albumId": ALBUM_ID, "uploadedAt": "2026-08-24T12:00:00Z"}
+                        {
+                            "albumId": ALBUM_ID,
+                            "uploadedAt": "2026-08-24T12:00:00Z",
+                            "hoverPreviewStatus": "ready",
+                            "hoverPreviewVersion": version,
+                            "hoverPreviewManifestKey": manifest_key,
+                        }
                     ]
                 }
             },
         ) as batch_get:
-            self.assertIs(get_public_albums._hydrate_upload_times(records), records)
+            self.assertIs(get_public_albums._hydrate_summary_fields(records), records)
         self.assertEqual(records[0]["uploadedAt"], "2026-08-24T12:00:00Z")
+        self.assertEqual(records[0]["hoverPreviewManifestKey"], manifest_key)
         self.assertEqual(
             batch_get.call_args.kwargs["RequestItems"][get_public_albums.table.name]["ProjectionExpression"],
-            "albumId, uploadedAt",
+            (
+                "albumId, uploadedAt, hoverPreviewStatus, "
+                "hoverPreviewVersion, hoverPreviewManifestKey"
+            ),
         )
 
     def test_provider_invalid_cursor_key_names_and_values_are_rejected(self):

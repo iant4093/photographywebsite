@@ -46,6 +46,11 @@ dual-version runbook; provider credential rotation is unrelated.
 Inspect queue depth, oldest age, DLQ depth, worker aggregate reason codes, and
 metadata conflict counts. Stop dispatch or the event mapping when failures are
 systematic. Never purge or bulk-redrive; select only proven idempotent messages.
+For hover-preview signals, also compare the builder's native errors with the
+privacy-safe `ManifestBuildFailure` metric, inspect only aggregate reconciliation
+state, and verify one immutable manifest through the public alias. Keep the
+album-detail compatibility path enabled until the catalog reconciliation is
+complete and the refresh queue has no old messages.
 
 ## Authentication and authorization
 

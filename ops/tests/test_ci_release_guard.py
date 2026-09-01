@@ -278,6 +278,7 @@ class ReleaseIntentTests(unittest.TestCase):
         alarm_rules = [
             rule for rule in document["rules"]
             if rule["resourceType"] == "AWS::CloudWatch::Alarm"
+            and rule["action"] == "Modify"
         ]
         self.assertEqual({rule["logicalId"] for rule in alarm_rules}, alarm_ids)
         for rule in alarm_rules:
@@ -430,6 +431,17 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("RandomPhotoPoolBuilderFunctionRefreshRequests", "AWS::Lambda::EventSourceMapping"),
                 ("RandomPhotoPoolBuilderFunctionHourlyReconciliation", "AWS::Events::Rule"),
                 ("RandomPhotoPoolBuilderFunctionHourlyReconciliationPermission", "AWS::Lambda::Permission"),
+                ("HoverPreviewRefreshQueue", "AWS::SQS::Queue"),
+                ("HoverPreviewManifestBuilderFunction", "AWS::Lambda::Function"),
+                ("HoverPreviewManifestBuilderFunctionRole", "AWS::IAM::Role"),
+                ("HoverPreviewManifestBuilderFunctionPreviewMetadataChanged", "AWS::Lambda::EventSourceMapping"),
+                ("HoverPreviewManifestBuilderFunctionRefreshRequests", "AWS::Lambda::EventSourceMapping"),
+                ("HoverPreviewManifestBuilderFunctionBoundedReconciliation", "AWS::Events::Rule"),
+                ("HoverPreviewManifestBuilderFunctionBoundedReconciliationPermission", "AWS::Lambda::Permission"),
+                ("HoverPreviewManifestFailureMetricFilter", "AWS::Logs::MetricFilter"),
+                ("HoverPreviewRefreshQueueAgeAlarm", "AWS::CloudWatch::Alarm"),
+                ("HoverPreviewManifestBuilderErrorsAlarm", "AWS::CloudWatch::Alarm"),
+                ("HoverPreviewManifestFailureAlarm", "AWS::CloudWatch::Alarm"),
             },
         )
         for rule in document["rules"]:

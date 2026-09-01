@@ -22,6 +22,7 @@ export function canRunAlbumHoverPreview() {
 }
 
 export function selectAlbumHoverPreviews(detail, coverImageUrl, random = Math.random) {
+    const isManifest = detail?.schemaVersion === 1 && typeof detail?.version === 'string'
     const coverPath = comparablePath(coverImageUrl)
     const seen = new Set()
     const candidates = (Array.isArray(detail?.images) ? detail.images : [])
@@ -38,6 +39,7 @@ export function selectAlbumHoverPreviews(detail, coverImageUrl, random = Math.ra
             return !coverPath || !imagePaths.includes(coverPath)
         })
         .map((image) => {
+            if (isManifest && typeof image?.url === 'string') return { url: image.url }
             const preview = mediaPreviewCandidates(image)
                 .find(({ width }) => width === ALBUM_HOVER_PREVIEW_WIDTH)
             return preview?.url ? { url: preview.url } : null
@@ -92,7 +94,7 @@ function stylePreviewImage(image) {
     })
 }
 
-export function start({ container, coverImageUrl, loadDetail }) {
+export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
     if (!canRunAlbumHoverPreview()) return { stop() {} }
 
     let active = true
@@ -108,7 +110,24 @@ export function start({ container, coverImageUrl, loadDetail }) {
     }
 
     later(async () => {
-        const detail = await loadDetail()
+        let detail = null
+        let manifestResolved = false
+        if (loadManifest) {
+            try {
+                detail = await loadManifest()
+                manifestResolved = detail !== null
+            } catch {
+                // A missing or malformed manifest falls back to the established
+                // album-detail path during rollout and transient CDN failures.
+            }
+        }
+        if (!manifestResolved && loadDetail) {
+            try {
+                detail = await loadDetail()
+            } catch {
+                return
+            }
+        }
         if (!active) return
         const frames = selectAlbumHoverPreviews(detail, coverImageUrl)
         if (frames.length < 2) return

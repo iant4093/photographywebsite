@@ -34,7 +34,7 @@ describe('AlbumCard intent prefetch', () => {
         vi.unstubAllGlobals()
     })
 
-    it('prefetches the route and public detail only after sustained pointer intent', () => {
+    it('prefetches only route code after sustained hover and reserves album data for navigation intent', () => {
         renderCard()
         const link = screen.getByRole('link', { name: /Public album/ })
         fireEvent.mouseEnter(link)
@@ -42,6 +42,9 @@ describe('AlbumCard intent prefetch', () => {
         expect(prefetchPublicAlbum).not.toHaveBeenCalled()
         act(() => vi.advanceTimersByTime(1))
         expect(preloadAlbumRoute).toHaveBeenCalledWith(album)
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+
+        fireEvent.mouseDown(link)
         expect(prefetchPublicAlbum).toHaveBeenCalledWith(album.albumId)
     })
 
@@ -64,6 +67,16 @@ describe('AlbumCard intent prefetch', () => {
         fireEvent.mouseEnter(button)
         act(() => vi.advanceTimersByTime(200))
         expect(preloadAlbumRoute).not.toHaveBeenCalled()
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+    })
+
+    it('safely cancels a hover while preview code is still loading', () => {
+        renderCard({ preview: true })
+        const link = screen.getByRole('link', { name: /Public album/ })
+        expect(() => {
+            fireEvent.mouseEnter(link)
+            fireEvent.mouseLeave(link)
+        }).not.toThrow()
         expect(prefetchPublicAlbum).not.toHaveBeenCalled()
     })
 
@@ -133,5 +146,52 @@ describe('AlbumCard intent prefetch', () => {
 
         fireEvent.mouseLeave(link)
         expect(document.querySelector('.album-card-image > img[aria-hidden="true"]')).toBeNull()
+    })
+
+    it('uses an immutable hover manifest without fetching the full album detail', async () => {
+        const manifestAlbum = {
+            ...album,
+            hoverPreviewStatus: 'ready',
+            hoverPreviewVersion: 'a'.repeat(24),
+            hoverPreviewManifestUrl: `https://media.example.test/public-previews/${album.albumId}/v3/hover-${'a'.repeat(24)}.json`,
+        }
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            schemaVersion: 1,
+            albumId: album.albumId,
+            version: 'a'.repeat(24),
+            images: ['one', 'two'].map((name) => ({
+                url: `https://media.example.test/public-previews/${album.albumId}/v3/${name === 'one' ? '1' : '2'}${'0'.repeat(23)}-w640.webp`,
+                width: 640,
+                height: 427,
+            })),
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+        vi.stubGlobal('matchMedia', vi.fn((query) => ({
+            matches: query.includes('hover: hover'),
+            media: query,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+        })))
+        vi.stubGlobal('Image', class {
+            constructor() {
+                const image = document.createElement('img')
+                image.decode = () => Promise.resolve()
+                return image
+            }
+        })
+
+        renderCard({ album: manifestAlbum, preview: true })
+        const link = screen.getByRole('link', { name: /Public album/ })
+        fireEvent.mouseEnter(link)
+        await act(async () => { await vi.dynamicImportSettled() })
+        await act(async () => {
+            vi.advanceTimersByTime(650)
+            await Promise.resolve()
+            await Promise.resolve()
+        })
+        await act(async () => { await vi.advanceTimersByTimeAsync(16) })
+
+        expect(globalThis.fetch).toHaveBeenCalledOnce()
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+        expect(document.querySelector('.album-card-image > img[aria-hidden="true"]')).toBeInTheDocument()
     })
 })

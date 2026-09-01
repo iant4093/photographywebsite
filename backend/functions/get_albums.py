@@ -182,6 +182,40 @@ def _fetch_page(
     return items[:limit], cursor_key
 
 
+def _hydrate_public_summary_fields(records):
+    album_ids = [item.get("albumId") for item in records if item.get("albumId")]
+    if not album_ids:
+        return records
+    try:
+        response = dynamodb.batch_get_item(RequestItems={
+            table.name: {
+                "Keys": [{"albumId": album_id} for album_id in album_ids],
+                "ProjectionExpression": (
+                    "albumId, uploadedAt, hoverPreviewStatus, "
+                    "hoverPreviewVersion, hoverPreviewManifestKey"
+                ),
+            }
+        })
+        by_id = {
+            item.get("albumId"): item
+            for item in response.get("Responses", {}).get(table.name, [])
+            if item.get("albumId")
+        }
+        for record in records:
+            hydrated = by_id.get(record.get("albumId"), {})
+            for field in (
+                "uploadedAt",
+                "hoverPreviewStatus",
+                "hoverPreviewVersion",
+                "hoverPreviewManifestKey",
+            ):
+                if field in hydrated:
+                    record[field] = hydrated[field]
+    except Exception as error:
+        logger.warning("public_summary_hover_join_failed error_type=%s", type(error).__name__)
+    return records
+
+
 from front_door import verify_front_door_request
 
 
@@ -245,6 +279,7 @@ def handler(event, context):
             raise AuthError("Forbidden", 403)
 
         start_key = decode_cursor(params.get("cursor"), scope)
+        public_summary_only = visibility == "public" and not admin_owner_email and not admin_owner_sub
         records, last_key = _fetch_page(
             visibility=visibility,
             album_type=album_type,
@@ -254,8 +289,10 @@ def handler(event, context):
             owner_email=owner_email,
             admin_all=admin_all,
             admin_owner_email=admin_owner_email,
-            public_summary_only=visibility == "public" and not admin_owner_email and not admin_owner_sub,
+            public_summary_only=public_summary_only,
         )
+        if public_summary_only:
+            _hydrate_public_summary_fields(records)
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
         gallery_settings = (

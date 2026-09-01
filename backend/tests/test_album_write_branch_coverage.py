@@ -430,6 +430,33 @@ class UpdateAlbumBranchTests(unittest.TestCase):
         tag.assert_not_called()
         preview.assert_not_called()
 
+    def test_cover_change_atomically_detaches_the_stale_hover_manifest(self):
+        current = album(
+            hoverPreviewStatus="ready",
+            hoverPreviewVersion="a" * 24,
+            hoverPreviewManifestKey=(
+                f"albums/{ALBUM_ID}/preview/v3/hover-{'a' * 24}.json"
+            ),
+        )
+        response, table, tag, preview = self._call(
+            {"coverImageUrl": RAW_KEY_2, "coverThumbKey": THUMB_KEY_2},
+            current,
+        )
+        self.assertEqual(response["statusCode"], 200)
+        expression = table.update_item.call_args.kwargs["UpdateExpression"]
+        names = table.update_item.call_args.kwargs["ExpressionAttributeNames"]
+        removed_names = {
+            names[token]
+            for token in expression.split("REMOVE ", 1)[1].split(", ")
+        }
+        self.assertTrue({
+            "hoverPreviewStatus",
+            "hoverPreviewVersion",
+            "hoverPreviewManifestKey",
+        }.issubset(removed_names))
+        tag.assert_not_called()
+        preview.assert_not_called()
+
     def test_album_title_and_category_changes_reconcile_existing_drive_folder(self):
         record = album(backupToGoogleDrive=False, title="Old", category="Old category")
         lambda_client = Mock()

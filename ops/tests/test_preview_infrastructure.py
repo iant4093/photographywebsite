@@ -146,6 +146,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "AddImagesFunction",
             "PreviewWorkerFunction",
             "RandomPhotoPoolBuilderFunction",
+            "HoverPreviewManifestBuilderFunction",
             "DeleteImagesFunction",
             "GetAdminAlbumMediaFunction",
         }
@@ -185,6 +186,49 @@ class PreviewWorkerTests(unittest.TestCase):
         ):
             self.assertIn(expected, builder)
         self.assertIn("SOURCES_RandomPhotoPoolBuilderFunction", MAKEFILE)
+
+    def test_hover_previews_use_bounded_immutable_materialization(self) -> None:
+        metadata = resource_block("PreviewMetadataTable")
+        queue = resource_block("HoverPreviewRefreshQueue")
+        builder = resource_block("HoverPreviewManifestBuilderFunction")
+        update_album = resource_block("UpdateAlbumFunction")
+        rewrite = resource_block("PublicPreviewRewriteFunction")
+
+        self.assertIn("StreamViewType: KEYS_ONLY", metadata)
+        for expected in (
+            "Handler: hover_preview_manifest_builder.handler",
+            "ReservedConcurrentExecutions: 2",
+            "Timeout: 120",
+            "MemorySize: 512",
+            "Stream: !GetAtt PreviewMetadataTable.StreamArn",
+            "Queue: !GetAtt HoverPreviewRefreshQueue.Arn",
+            "Schedule: rate(15 minutes)",
+            "MaximumRetryAttempts: 3",
+            "BisectBatchOnFunctionError: true",
+            "- ReportBatchItemFailures",
+            "${ImagesBucket.Arn}/albums/*/preview/v3/hover-*.json",
+            "s3:GetObjectTagging",
+            "CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue",
+        ):
+            self.assertIn(expected, builder)
+        self.assertIn("VisibilityTimeout: 900", queue)
+        self.assertIn("deadLetterTargetArn: !GetAtt AsyncFailureQueue.Arn", queue)
+        self.assertIn("HOVER_PREVIEW_REFRESH_QUEUE_URL: !Ref HoverPreviewRefreshQueue", update_album)
+        self.assertIn("manifestPattern = /^hover-", rewrite)
+        self.assertIn("SOURCES_HoverPreviewManifestBuilderFunction", MAKEFILE)
+        self.assertIn("hover_preview_refresh.py", MAKEFILE)
+
+        for logical_id in (
+            "HoverPreviewRefreshQueueAgeAlarm",
+            "HoverPreviewManifestBuilderErrorsAlarm",
+            "HoverPreviewManifestFailureAlarm",
+        ):
+            alarm = resource_block(logical_id)
+            self.assertIn("TreatMissingData: notBreaching", alarm)
+            self.assertIn("ian-photography-security-${Stage}", alarm)
+
+        self.assertIn("Album hover-preview manifests", RUNBOOK)
+        self.assertIn("HOVER_PREVIEW_MANIFESTS.md", RUNBOOK)
 
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):

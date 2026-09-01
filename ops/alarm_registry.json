@@ -28,7 +28,7 @@
     },
     {
       "id": "application-async-and-preview",
-      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewMetadataSystemErrorsAlarm"],
+      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewMetadataSystemErrorsAlarm", "HoverPreviewRefreshQueueAgeAlarm", "HoverPreviewManifestBuilderErrorsAlarm", "HoverPreviewManifestFailureAlarm"],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",

@@ -13,6 +13,7 @@ from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import require_admin
 from cache_invalidation import invalidate_public_previews, request_public_api_invalidation
 from explore_index import sync_album_index
+from hover_preview_refresh import request_hover_preview_refresh
 from album_qr import album_qr_key, write_album_qr
 from media_access import (
     load_preview_metadata,
@@ -226,6 +227,24 @@ def handler(event, context):
                 strict=True,
             )
 
+        # A cover or visibility transition invalidates the old frame set. Clear
+        # its catalog pointer in the same conditional write so a newly fetched
+        # catalog can never advertise a stale manifest while the targeted
+        # builder is catching up. Restrictive transitions above still see the
+        # old pointer and tag that object before it is detached.
+        hover_pointer_fields = {
+            "hoverPreviewStatus",
+            "hoverPreviewVersion",
+            "hoverPreviewManifestKey",
+        }
+        invalidate_hover_pointer = (
+            updated.get("type", "photo") == "photo"
+            and {"visibility", "coverImageUrl", "coverThumbKey"}.intersection(changed_fields)
+        )
+        if invalidate_hover_pointer:
+            for field in hover_pointer_fields:
+                updated.pop(field, None)
+
         condition = (
             "attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) "
             "AND #visibility = :previous_visibility"
@@ -237,7 +256,10 @@ def handler(event, context):
         }
         assignments = []
         removals = []
-        for index, field in enumerate(sorted(changed_fields)):
+        mutation_fields = set(changed_fields)
+        if invalidate_hover_pointer:
+            mutation_fields.update(hover_pointer_fields)
+        for index, field in enumerate(sorted(mutation_fields)):
             name = f"#field{index}"
             expression_names[name] = field
             if field in updated:
@@ -292,6 +314,12 @@ def handler(event, context):
             and (old_visibility == "public" or new_visibility == "public")
         ):
             request_random_photo_pool_refresh()
+        if (
+            committed.get("type", "photo") == "photo"
+            and {"visibility", "coverImageUrl", "coverThumbKey"}.intersection(changed_fields)
+            and (old_visibility == "public" or new_visibility == "public")
+        ):
+            request_hover_preview_refresh(album_id)
         if album.get("title") != committed.get("title") or album.get("category") != committed.get("category"):
             try:
                 _sync_drive_folder(committed)

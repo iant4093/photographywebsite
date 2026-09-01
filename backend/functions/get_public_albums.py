@@ -133,8 +133,8 @@ def _fetch_page(*, album_type, limit, start_key):
     return items[:limit], cursor_key
 
 
-def _hydrate_upload_times(records):
-    """Join the tiny non-indexed upload timestamp without hydrating media manifests."""
+def _hydrate_summary_fields(records):
+    """Join non-indexed summary fields without hydrating media manifests."""
     album_ids = [item.get("albumId") for item in records if item.get("albumId")]
     if not album_ids:
         return records
@@ -143,21 +143,30 @@ def _hydrate_upload_times(records):
             RequestItems={
                 table.name: {
                     "Keys": [{"albumId": album_id} for album_id in album_ids],
-                    "ProjectionExpression": "albumId, uploadedAt",
+                    "ProjectionExpression": (
+                        "albumId, uploadedAt, hoverPreviewStatus, "
+                        "hoverPreviewVersion, hoverPreviewManifestKey"
+                    ),
                 }
             }
         )
         if not isinstance(response, dict):
             return records
-        uploaded_by_id = {
-            item.get("albumId"): item.get("uploadedAt")
+        summary_by_id = {
+            item.get("albumId"): item
             for item in response.get("Responses", {}).get(table.name, [])
-            if item.get("albumId") and item.get("uploadedAt")
+            if item.get("albumId")
         }
         for record in records:
-            uploaded_at = uploaded_by_id.get(record.get("albumId"))
-            if uploaded_at:
-                record["uploadedAt"] = uploaded_at
+            hydrated = summary_by_id.get(record.get("albumId"), {})
+            for field in (
+                "uploadedAt",
+                "hoverPreviewStatus",
+                "hoverPreviewVersion",
+                "hoverPreviewManifestKey",
+            ):
+                if field in hydrated:
+                    record[field] = hydrated[field]
     except Exception as error:
         # Recency decoration must never make the public catalog unavailable.
         logger.warning("public_catalog_upload_time_join_failed error_type=%s", type(error).__name__)
@@ -184,7 +193,7 @@ def handler(event, context):
             limit=limit,
             start_key=start_key,
         )
-        _hydrate_upload_times(records)
+        _hydrate_summary_fields(records)
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
         gallery_settings = (
