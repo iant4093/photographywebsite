@@ -315,6 +315,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "PreparePrintFunctionRole",
                 "RefreshGoogleDriveUsageFunctionRole",
                 "RandomPhotoPoolBuilderFunctionRole",
+                "HoverPreviewManifestBuilderFunctionRole",
             },
         )
         for rule in role_rules:

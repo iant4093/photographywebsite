@@ -68,6 +68,7 @@
     {"logicalId": "HoverPreviewManifestBuilderFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "HoverPreviewManifestBuilderFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "HoverPreviewManifestBuilderFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "HoverPreviewManifestBuilderFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "HoverPreviewManifestBuilderFunctionPreviewMetadataChanged", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "HoverPreviewManifestBuilderFunctionRefreshRequests", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "HoverPreviewManifestBuilderFunctionBoundedReconciliation", "resourceType": "AWS::Events::Rule", "action": "Add", "propertyPaths": [], "allowNoDetails": true},

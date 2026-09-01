@@ -208,6 +208,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "- ReportBatchItemFailures",
             "${ImagesBucket.Arn}/albums/*/preview/v3/hover-*.json",
             "s3:GetObjectTagging",
+            "s3:PutObjectTagging",
             "CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue",
         ):
             self.assertIn(expected, builder)

@@ -1694,6 +1694,7 @@ Resources:
                 - s3:GetObject
                 - s3:GetObjectTagging
                 - s3:PutObject
+                - s3:PutObjectTagging
               Resource: !Sub '${ImagesBucket.Arn}/albums/*/preview/v3/hover-*.json'
             - Effect: Allow
               Action: sqs:SendMessage
