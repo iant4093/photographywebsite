@@ -283,6 +283,8 @@ flowchart TB
   managed_security -. posture findings .-> notifications
 ```
 
+An editable companion version of this architecture is available in [Figma/FigJam](https://www.figma.com/board/6jBDPsmlafnu9ITTTVZ7W1?utm_source=other&utm_content=edit_in_figjam&oai_id=v1%2FnTyxrgfX0xTZiKzJMDYG557SUwdyUQEMtBB5awqOeAf60glGHBT3N1&request_id=b004f3f8-e2de-4029-acfc-324d2fdf155b&architecture=true).
+
 ### Architecture notes
 
 1. **Two CloudFront paths serve different purposes.** The existing frontend distribution serves the React application and same-origin `/api` requests. The separate media distribution serves public derivatives and selected media paths from a private S3 origin. The browser never uses the regional API hostname as its normal API base.
