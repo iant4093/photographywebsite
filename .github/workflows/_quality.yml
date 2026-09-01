@@ -166,11 +166,17 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend/requirements*.txt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: backend/preview_worker/package-lock.json
       - uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
         with:
           use-installer: true
           version: 1.154.0
       - run: python -m pip install --disable-pip-version-check -r backend/requirements-dev.txt
+      - run: npm ci --ignore-scripts --prefix backend/preview_worker
       - name: Run ops tests with complete-source branch coverage
         env:
           AWS_EC2_METADATA_DISABLED: 'true'

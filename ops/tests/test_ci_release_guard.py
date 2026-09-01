@@ -2049,6 +2049,18 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("VITE_CLOUDFRONT_DOMAIN: media.example.invalid", quality)
         self.assertIn("VITE_COGNITO_USER_POOL_ID: us-west-2_TESTPOOL", quality)
         self.assertIn("VITE_COGNITO_CLIENT_ID: test-client-id", quality)
+        infrastructure = quality.split("  infrastructure:", 1)[1].split(
+            "  dependency-workflow-security:", 1
+        )[0]
+        self.assertIn("node-version-file: .node-version", infrastructure)
+        self.assertIn(
+            "npm ci --ignore-scripts --prefix backend/preview_worker",
+            infrastructure,
+        )
+        self.assertLess(
+            infrastructure.index("npm ci --ignore-scripts --prefix backend/preview_worker"),
+            infrastructure.index("validate_infrastructure.sh --build"),
+        )
         self.assertRegex(
             quality,
             r"(?s)Validate and build SAM from scratch.*?AWS_EC2_METADATA_DISABLED: 'true'.*?AWS_DEFAULT_REGION: us-west-2.*?validate_infrastructure\.sh --build",
