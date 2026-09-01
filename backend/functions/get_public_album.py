@@ -26,6 +26,10 @@ from explore_index import (
     READY_RECORD_TYPE,
     READY_SORT_KEY,
     SYSTEM_PARTITION,
+    TEMPORAL_VERSION,
+    TEMPORAL_READY_SORT_KEY,
+    TIME_OF_DAY_DEFINITIONS,
+    SEASON_DEFINITIONS,
     exposure_bucket,
     facet_partition,
 )
@@ -87,9 +91,12 @@ EXPLORE_COLOR_ORDER = (
     "blue", "cyan", "green", "yellow", "orange", "red", "pink", "purple", "monochrome",
 )
 EXPLORE_COLORS = frozenset(EXPLORE_COLOR_ORDER)
+EXPLORE_TIME_ORDER = TIME_OF_DAY_DEFINITIONS
+EXPLORE_SEASON_ORDER = SEASON_DEFINITIONS
 EXPLORE_PROJECTION = (
     "albumId,mediaId,previewVersion,previewKeys,#status,dimensions,exploreVersion,"
-    "palette,colorFamilies,lens,lensKey,exposureBuckets"
+    "palette,colorFamilies,lens,lensKey,exposureBuckets,temporalVersion,"
+    "timeOfDayBucket,seasonBucket"
 )
 EXPLORE_INDEX_CURSOR_PATTERN = re.compile(
     r"^[a-f0-9]{16}#[0-9a-f-]{36}#[a-f0-9]{24}$"
@@ -99,6 +106,8 @@ _index_readiness = {"ready": False, "expires_at": 0.0}
 _index_readiness_lock = threading.Lock()
 _exposure_index_readiness = {"ready": False, "expires_at": 0.0}
 _exposure_index_readiness_lock = threading.Lock()
+_temporal_index_readiness = {"ready": False, "expires_at": 0.0}
+_temporal_index_readiness_lock = threading.Lock()
 _exposure_items_cache = {"items": None, "expires_at": 0.0}
 _exposure_items_lock = threading.Lock()
 
@@ -147,11 +156,33 @@ def _exposure_index_ready():
         return ready
 
 
+def _temporal_index_ready():
+    now = time.monotonic()
+    with _temporal_index_readiness_lock:
+        if now < _temporal_index_readiness["expires_at"]:
+            return _temporal_index_readiness["ready"]
+        item = _preview_table().get_item(
+            Key={"albumId": SYSTEM_PARTITION, "mediaId": TEMPORAL_READY_SORT_KEY},
+            ConsistentRead=False,
+            ProjectionExpression="recordType,indexVersion,temporalVersion",
+        ).get("Item")
+        ready = bool(
+            isinstance(item, dict)
+            and item.get("recordType") == READY_RECORD_TYPE
+            and item.get("indexVersion") == INDEX_VERSION
+            and item.get("temporalVersion") == TEMPORAL_VERSION
+        )
+        _temporal_index_readiness.update(ready=ready, expires_at=now + (30 if ready else 5))
+        return ready
+
+
 def _reset_explore_index_cache_for_tests():
     with _index_readiness_lock:
         _index_readiness.update(ready=False, expires_at=0.0)
     with _exposure_index_readiness_lock:
         _exposure_index_readiness.update(ready=False, expires_at=0.0)
+    with _temporal_index_readiness_lock:
+        _temporal_index_readiness.update(ready=False, expires_at=0.0)
     with _exposure_items_lock:
         _exposure_items_cache.update(items=None, expires_at=0.0)
 
@@ -278,7 +309,7 @@ def _active_public_photo_album(album):
 
 
 def _explore_item(metadata, album):
-    if not _active_public_photo_album(album):
+    if not isinstance(metadata, dict) or not _active_public_photo_album(album):
         return None
     media_id = metadata.get("mediaId")
     image = find_image_by_media_id(album, media_id)
@@ -309,7 +340,7 @@ def _explore_item(metadata, album):
     }
     if not safe_exif.get("lens") and metadata.get("lens"):
         safe_exif["lens"] = str(metadata.get("lens"))[:160]
-    return {
+    result = {
         "albumId": album["albumId"],
         "albumTitle": str(album.get("title") or "Untitled Album")[:200],
         "albumCategory": str(album.get("category") or "Uncategorized")[:100],
@@ -327,6 +358,13 @@ def _explore_item(metadata, album):
         "lens": str(metadata.get("lens") or "")[:160],
         "exif": safe_exif,
     }
+    time_of_day = metadata.get("timeOfDayBucket")
+    season = metadata.get("seasonBucket")
+    if time_of_day in EXPLORE_TIME_ORDER:
+        result["timeOfDay"] = time_of_day
+    if season in EXPLORE_SEASON_ORDER:
+        result["season"] = season
+    return result
 
 
 def _explore_filter(mode, value):
@@ -350,6 +388,14 @@ def _normalized_exposure_value(value):
     if option not in EXPOSURE_DEFINITIONS[group]:
         raise ValidationError("Unsupported exposure filter")
     return group, option, f"{group}:{option}"
+
+
+def _normalized_temporal_value(mode, value):
+    normalized = str(value or "").strip().lower()
+    definitions = EXPLORE_TIME_ORDER if mode == "time" else EXPLORE_SEASON_ORDER
+    if mode not in {"time", "season"} or normalized not in definitions:
+        raise ValidationError("Unsupported temporal filter")
+    return normalized
 
 
 def _all_public_explore_items():
@@ -659,6 +705,7 @@ def _indexed_media_payload(mode, value, limit, cursor_value=None, seed_value=Non
     payload = {
         "items": output,
         "nextCursor": encode_cursor(next_key, scope),
+        "seed": seed,
     }
     if mode == "exposure":
         payload["total"] = total
@@ -670,8 +717,8 @@ def _indexed_media_response(params):
     if any(name not in allowed for name in params):
         raise ValidationError("Unsupported explore parameter")
     mode = params.get("mode")
-    if mode not in {"color", "lens", "exposure"}:
-        raise ValidationError("mode must be color, lens, or exposure")
+    if mode not in {"color", "lens", "exposure", "time", "season"}:
+        raise ValidationError("Unsupported Explore mode")
     value = params.get("value")
     if mode == "color":
         value = str(value or "").strip().lower()
@@ -679,8 +726,10 @@ def _indexed_media_response(params):
             raise ValidationError("Unsupported color family")
     elif mode == "lens":
         value = _normalized_lens(value)
-    else:
+    elif mode == "exposure":
         _group, _option, value = _normalized_exposure_value(value)
+    else:
+        value = _normalized_temporal_value(mode, value)
     limit = _positive_limit(params.get("limit"))
     payload = _indexed_media_payload(
         mode,
@@ -692,6 +741,8 @@ def _indexed_media_response(params):
     if payload is None:
         if mode == "exposure":
             return _exposure_media_response(params)
+        if mode in {"time", "season"}:
+            raise ValidationError("Invalid cursor")
         return _scan_explore_media_response(None, params)
     return json_response(
         200,
@@ -773,6 +824,30 @@ def _indexed_exposure_options_response():
         200,
         {
             "items": groups,
+            "initialPage": {"value": first_value, **initial_page},
+        },
+        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
+def _indexed_temporal_options_response(mode):
+    definitions = EXPLORE_TIME_ORDER if mode == "time" else EXPLORE_SEASON_ORDER
+    partitions = {facet_partition(mode, value): value for value in definitions}
+    counts = _parallel_partition_counts(partitions)
+    items = [
+        {"id": value, "photos": counts.get(facet_partition(mode, value), 0)}
+        for value in definitions
+    ]
+    first_value = next((item["id"] for item in items if item["photos"]), None)
+    initial_page = (
+        _indexed_media_payload(mode, first_value, EXPLORE_DEFAULT_LIMIT)
+        if first_value
+        else {"items": [], "nextCursor": None}
+    )
+    return json_response(
+        200,
+        {
+            "items": items,
             "initialPage": {"value": first_value, **initial_page},
         },
         cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
@@ -943,6 +1018,29 @@ def _explore_response(event):
     if not isinstance(params, dict):
         raise ValidationError("Invalid explore parameters")
     mode = params.get("mode")
+    if mode in {"times", "seasons"}:
+        if any(name != "mode" for name in params):
+            raise ValidationError("Temporal options do not accept additional parameters")
+        if not _temporal_index_ready():
+            return error_response(
+                503,
+                "The time and season index is still being prepared.",
+                code="temporal_index_not_ready",
+            )
+        return _indexed_temporal_options_response("time" if mode == "times" else "season")
+    if mode in {"time", "season"}:
+        if any(name not in {"mode", "value", "limit", "cursor", "seed"} for name in params):
+            raise ValidationError("Unsupported explore parameter")
+        _normalized_temporal_value(mode, params.get("value"))
+        _positive_limit(params.get("limit"))
+        _validate_shuffle_params(params)
+        if not _temporal_index_ready():
+            return error_response(
+                503,
+                "The time and season index is still being prepared.",
+                code="temporal_index_not_ready",
+            )
+        return _indexed_media_response(params)
     if mode == "exposures":
         if any(name != "mode" for name in params):
             raise ValidationError("Exposure options do not accept additional parameters")
@@ -975,7 +1073,7 @@ def _explore_response(event):
         _positive_limit(params.get("limit"))
         _validate_shuffle_params(params)
     else:
-        raise ValidationError("mode must be color, lens, exposure, colors, lenses, or exposures")
+        raise ValidationError("Unsupported Explore mode")
     if _explore_index_ready():
         if params.get("mode") == "lenses":
             if any(name != "mode" for name in params):

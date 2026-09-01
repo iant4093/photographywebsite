@@ -24,19 +24,46 @@ function metadata(changes = {}) {
         lens: 'Sigma 18-50mm F2.8',
         lensKey: 'sigma 18-50mm f2.8',
         exposureBuckets: ['aperture:middle', 'shutter:handheld', 'iso:clean', 'focal:normal'],
+        temporalVersion: 1,
+        timeOfDayBucket: 'morning',
+        seasonBucket: 'autumn',
         ...changes,
     }
 }
 
 test('builds deterministic sparse entries and a lens definition', () => {
     assert.equal(indexSortKey(albumId, mediaId), indexSortKey(albumId, mediaId))
-    assert.equal(metadataFacets(metadata()).size, 7)
+    assert.equal(metadataFacets(metadata()).size, 9)
     const records = desiredIndexRecords(metadata(), true)
-    assert.equal(records.filter(item => item.recordType === EXPLORE_INDEX_RECORD_TYPE).length, 7)
+    assert.equal(records.filter(item => item.recordType === EXPLORE_INDEX_RECORD_TYPE).length, 9)
     assert.equal(records.filter(item => item.recordType === EXPLORE_FACET_RECORD_TYPE).length, 1)
     assert.deepEqual(desiredIndexRecords(metadata(), false), [])
     assert.throws(() => facetPartition('color', 'chartreuse'), /Unsupported/)
     assert.throws(() => facetPartition('exposure', 'iso:impossible'), /Unsupported/)
+    assert.throws(() => facetPartition('time', 'golden-hour'), /Unsupported/)
+    assert.throws(() => facetPartition('season', 'monsoon'), /Unsupported/)
+})
+
+test('marks undated temporal metadata complete without creating invented facets', () => {
+    const facets = metadataFacets(metadata({ timeOfDayBucket: '', seasonBucket: '' }))
+    assert.ok(![...facets.keys()].some(key => key.includes('#TIME#') || key.includes('#SEASON#')))
+})
+
+test('rejects partial temporal pairs and probes fixed partitions during pending cleanup', async () => {
+    assert.ok(![...metadataFacets(metadata({ seasonBucket: '' })).keys()].some(key => (
+        key.includes('#TIME#') || key.includes('#SEASON#')
+    )))
+    const calls = []
+    await syncExploreIndex(
+        { async send(command) { calls.push(...command.input.RequestItems.previews); return { UnprocessedItems: {} } } },
+        'previews',
+        metadata({ status: 'pending' }),
+        metadata({ timeOfDayBucket: 'night', seasonBucket: 'winter' }),
+        'public',
+        input => ({ input }),
+    )
+    const deletedTemporal = calls.filter(item => item.DeleteRequest).map(item => item.DeleteRequest.Key.albumId)
+    assert.equal(deletedTemporal.filter(partition => partition.includes('#TIME#') || partition.includes('#SEASON#')).length, 7)
 })
 
 test('reconciles stale rows and retries unprocessed writes', async () => {

@@ -120,11 +120,31 @@ class PreviewLifecycleTests(unittest.TestCase):
         delete_metadata.assert_called_once()
         self.assertEqual(delete_metadata.call_args.args[:2], (ALBUM_ID, {media_id}))
         index_keys = delete_metadata.call_args.args[2][media_id]
-        self.assertEqual(len(index_keys), 12)
-        self.assertTrue(all(
-            key["albumId"].startswith("__EXPLORE_V1__#EXPOSURE#")
-            for key in index_keys
-        ))
+        self.assertEqual(len(index_keys), 21)
+        partitions = {key["albumId"] for key in index_keys}
+        self.assertEqual(
+            len({value for value in partitions if value.startswith("__EXPLORE_V1__#EXPOSURE#")}),
+            12,
+        )
+        self.assertEqual(
+            {value for value in partitions if value.startswith("__EXPLORE_V1__#TIME#")},
+            {
+                "__EXPLORE_V1__#TIME#dawn",
+                "__EXPLORE_V1__#TIME#morning",
+                "__EXPLORE_V1__#TIME#afternoon",
+                "__EXPLORE_V1__#TIME#evening",
+                "__EXPLORE_V1__#TIME#night",
+            },
+        )
+        self.assertEqual(
+            {value for value in partitions if value.startswith("__EXPLORE_V1__#SEASON#")},
+            {
+                "__EXPLORE_V1__#SEASON#winter",
+                "__EXPLORE_V1__#SEASON#spring",
+                "__EXPLORE_V1__#SEASON#summer",
+                "__EXPLORE_V1__#SEASON#autumn",
+            },
+        )
 
     def test_visibility_key_resolution_never_uses_availability_fallback(self):
         album = {"albumId": ALBUM_ID, "images": []}

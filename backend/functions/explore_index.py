@@ -13,6 +13,7 @@ import re
 
 INDEX_VERSION = 1
 EXPLORE_VERSION = 2
+TEMPORAL_VERSION = 1
 INDEX_RECORD_TYPE = "explore-index-v1"
 FACET_RECORD_TYPE = "explore-facet-v1"
 READY_RECORD_TYPE = "explore-ready-v1"
@@ -21,6 +22,7 @@ FACETS_PARTITION = f"{INDEX_PREFIX}#FACETS"
 SYSTEM_PARTITION = f"{INDEX_PREFIX}#SYSTEM"
 READY_SORT_KEY = "READY"
 EXPOSURE_READY_SORT_KEY = "EXPOSURE_READY"
+TEMPORAL_READY_SORT_KEY = "TEMPORAL_READY"
 COLOR_FAMILIES = frozenset({
     "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "monochrome",
 })
@@ -30,6 +32,8 @@ EXPOSURE_DEFINITIONS = {
     "iso": ("clean", "available", "low"),
     "focal": ("wide", "normal", "telephoto"),
 }
+TIME_OF_DAY_DEFINITIONS = ("dawn", "morning", "afternoon", "evening", "night")
+SEASON_DEFINITIONS = ("winter", "spring", "summer", "autumn")
 MEDIA_ID_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 ALBUM_ID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -53,6 +57,16 @@ def facet_partition(mode: str, value: str) -> str:
         if not separator or option not in EXPOSURE_DEFINITIONS.get(group, ()):
             raise ValueError("unsupported exposure facet")
         return f"{INDEX_PREFIX}#EXPOSURE#{group}:{option}"
+    if mode == "time":
+        normalized = value.strip().lower() if isinstance(value, str) else ""
+        if normalized not in TIME_OF_DAY_DEFINITIONS:
+            raise ValueError("unsupported time facet")
+        return f"{INDEX_PREFIX}#TIME#{normalized}"
+    if mode == "season":
+        normalized = value.strip().lower() if isinstance(value, str) else ""
+        if normalized not in SEASON_DEFINITIONS:
+            raise ValueError("unsupported season facet")
+        return f"{INDEX_PREFIX}#SEASON#{normalized}"
     raise ValueError("unsupported Explore facet mode")
 
 
@@ -155,6 +169,15 @@ def metadata_facets(metadata) -> dict[str, str]:
                 facets[facet_partition("exposure", bucket)] = bucket
             except ValueError:
                 continue
+    if (
+        metadata.get("temporalVersion") == TEMPORAL_VERSION
+        and metadata.get("timeOfDayBucket") in TIME_OF_DAY_DEFINITIONS
+        and metadata.get("seasonBucket") in SEASON_DEFINITIONS
+    ):
+        time_of_day = metadata.get("timeOfDayBucket")
+        season = metadata.get("seasonBucket")
+        facets[facet_partition("time", time_of_day)] = time_of_day
+        facets[facet_partition("season", season)] = season
     return facets
 
 
@@ -202,6 +225,16 @@ def exposure_ready_marker() -> dict:
     }
 
 
+def temporal_ready_marker() -> dict:
+    return {
+        "albumId": SYSTEM_PARTITION,
+        "mediaId": TEMPORAL_READY_SORT_KEY,
+        "recordType": READY_RECORD_TYPE,
+        "indexVersion": INDEX_VERSION,
+        "temporalVersion": TEMPORAL_VERSION,
+    }
+
+
 def desired_index_records(metadata: dict, *, public: bool) -> list[dict]:
     if not public:
         return []
@@ -230,6 +263,15 @@ def index_entry_keys(metadata: dict) -> list[dict]:
             for group, options in EXPOSURE_DEFINITIONS.items()
             for option in options
         )
+    # Temporal partitions are fixed and small. Always probe all of them so a
+    # pending repair, malformed legacy row, or bucket change cannot strand a
+    # stale public reference.
+    partitions.update(
+        facet_partition("time", value) for value in TIME_OF_DAY_DEFINITIONS
+    )
+    partitions.update(
+        facet_partition("season", value) for value in SEASON_DEFINITIONS
+    )
     return [
         {"albumId": partition, "mediaId": sort_key}
         for partition in sorted(partitions)

@@ -1,57 +1,28 @@
 import { ApiError, apiFetch, fetchRandomPhotos } from './api'
 import { isSafeCursor, normalizePage } from './apiResponse'
+import { cachedExploreRequest, clearExploreResponseCache } from './exploreState'
 
-const EXPLORE_CACHE_TTL_MS = 5 * 60_000
 const EXPLORE_SEED_PATTERN = /^[0-9a-f]{16}$/
-const responseCache = new Map()
-const pendingRequests = new Map()
 
-function withAbort(promise, signal) {
-    if (!signal) return promise
-    if (signal.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'))
-    return new Promise((resolve, reject) => {
-        const abort = () => reject(new DOMException('Request aborted', 'AbortError'))
-        signal.addEventListener('abort', abort, { once: true })
-        promise.then(
-            value => {
-                signal.removeEventListener('abort', abort)
-                resolve(value)
-            },
-            error => {
-                signal.removeEventListener('abort', abort)
-                reject(error)
-            },
-        )
-    })
-}
-
-function cachedRequest(key, loader, signal) {
-    const cached = responseCache.get(key)
-    if (cached && cached.expiresAt > Date.now()) return withAbort(Promise.resolve(cached.value), signal)
-    if (cached) responseCache.delete(key)
-
-    let request = pendingRequests.get(key)
-    if (!request) {
-        request = loader().then((value) => {
-            responseCache.set(key, { value, expiresAt: Date.now() + EXPLORE_CACHE_TTL_MS })
-            return value
-        }).finally(() => pendingRequests.delete(key))
-        pendingRequests.set(key, request)
+function normalizeExplorePage(payload) {
+    const page = normalizePage(payload)
+    if (typeof payload?.seed === 'string' && EXPLORE_SEED_PATTERN.test(payload.seed)) {
+        page.seed = payload.seed
     }
-    return withAbort(request, signal)
+    return page
 }
 
 function normalizeInitialPage(payload) {
     if (!payload?.initialPage || typeof payload.initialPage !== 'object') return null
     const value = typeof payload.initialPage.value === 'string' ? payload.initialPage.value : ''
     if (!value) return null
-    return { value, ...normalizePage(payload.initialPage) }
+    return { value, ...normalizeExplorePage(payload.initialPage) }
 }
 
 export function fetchExplorePhotos(params, options = {}) {
     const mode = params?.mode
     const value = String(params?.value || '').trim()
-    if (!['color', 'lens', 'exposure'].includes(mode) || !value) {
+    if (!['color', 'lens', 'exposure', 'time', 'season'].includes(mode) || !value) {
         return Promise.reject(new ApiError('Choose an Explore filter first.', { code: 'INVALID_EXPLORE_FILTER' }))
     }
     const query = new URLSearchParams({ mode, value, limit: String(params?.limit || 24) })
@@ -68,7 +39,7 @@ export function fetchExplorePhotos(params, options = {}) {
         query.set('cursor', params.cursor)
     }
     const path = `/public/explore?${query}`
-    return cachedRequest(path, () => apiFetch(path).then(normalizePage), options.signal)
+    return cachedExploreRequest(path, () => apiFetch(path).then(normalizeExplorePage), options.signal)
 }
 
 export function createExploreSeed() {
@@ -84,7 +55,7 @@ export function createExploreSeed() {
 
 export function fetchExploreLenses(options = {}) {
     const path = '/public/explore?mode=lenses'
-    return cachedRequest(path, () => apiFetch(path).then((payload) => ({
+    return cachedExploreRequest(path, () => apiFetch(path).then((payload) => ({
         items: Array.isArray(payload?.items)
             ? payload.items.filter(item => (
                 typeof item?.name === 'string'
@@ -99,7 +70,7 @@ export function fetchExploreLenses(options = {}) {
 
 export function fetchExploreColors(options = {}) {
     const path = '/public/explore?mode=colors'
-    return cachedRequest(path, () => apiFetch(path).then((payload) => ({
+    return cachedExploreRequest(path, () => apiFetch(path).then((payload) => ({
         items: Array.isArray(payload?.items)
             ? payload.items.filter(item => (
                 typeof item?.id === 'string'
@@ -114,7 +85,7 @@ export function fetchExploreColors(options = {}) {
 
 export function fetchExploreExposures(options = {}) {
     const path = '/public/explore?mode=exposures'
-    return cachedRequest(path, () => apiFetch(path).then((payload) => ({
+    return cachedExploreRequest(path, () => apiFetch(path).then((payload) => ({
         items: Array.isArray(payload?.items)
             ? payload.items.filter(group => (
                 typeof group?.id === 'string'
@@ -133,18 +104,45 @@ export function fetchExploreExposures(options = {}) {
     })), options.signal)
 }
 
+function normalizeTemporalOptions(payload) {
+    return {
+        items: Array.isArray(payload?.items)
+            ? payload.items.filter(item => (
+                typeof item?.id === 'string'
+                && item.id
+                && Number.isFinite(Number(item.photos))
+                && Number(item.photos) >= 0
+            )).map(item => ({ id: item.id, photos: Number(item.photos) }))
+            : [],
+        initialPage: normalizeInitialPage(payload),
+    }
+}
+
+export function fetchExploreTimes(options = {}) {
+    const path = '/public/explore?mode=times'
+    return cachedExploreRequest(path, () => apiFetch(path).then(normalizeTemporalOptions), options.signal)
+}
+
+export function fetchExploreSeasons(options = {}) {
+    const path = '/public/explore?mode=seasons'
+    return cachedExploreRequest(path, () => apiFetch(path).then(normalizeTemporalOptions), options.signal)
+}
+
 export function prefetchExploreModule(mode) {
     if (mode === 'sample') return fetchExploreSample()
     if (mode === 'exposure') return fetchExploreExposures()
-    return mode === 'lens' ? fetchExploreLenses() : fetchExploreColors()
+    if (mode === 'lens') return fetchExploreLenses()
+    if (mode === 'color') return fetchExploreColors()
+    if (mode === 'time') return fetchExploreTimes()
+    if (mode === 'season') return fetchExploreSeasons()
+    return Promise.reject(new ApiError('Unsupported Explore module.', { code: 'INVALID_EXPLORE_MODE' }))
 }
 
 export function fetchExploreSample(options = {}) {
     const key = '/public/random-photos:explore-sample'
-    return cachedRequest(key, () => fetchRandomPhotos(), options.signal)
+    return cachedExploreRequest(key, () => fetchRandomPhotos(), options.signal)
 }
 
 export function clearExploreCache() {
-    responseCache.clear()
-    pendingRequests.clear()
+    clearExploreResponseCache()
 }

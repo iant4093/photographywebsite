@@ -5,6 +5,7 @@ import {
     recordPublicCatalogUpsert,
 } from './catalogState'
 import { annotateMediaExpiry } from './mediaUrls'
+import { clearExploreClientState } from './exploreState'
 
 // Production uses the single CloudFront front door. An explicit absolute URL
 // remains available for local/staged rollback while the migration is canaried.
@@ -238,6 +239,7 @@ export function clearApiCache() {
 
 function invalidateAlbumCatalog({ album, deletedAlbumId } = {}) {
     clearApiCache()
+    clearExploreClientState()
     if (album?.albumId) {
         recordPublicCatalogUpsert(album)
     } else if (deletedAlbumId) {
@@ -628,6 +630,7 @@ export async function updateGalleryOrder(token, ordering, options = {}) {
         signal: options.signal,
     })
     clearApiCache()
+    clearExploreClientState()
     invalidateCatalogSnapshots()
     return result
 }

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const exploreApi = vi.hoisted(() => ({
@@ -9,14 +9,22 @@ const exploreApi = vi.hoisted(() => ({
   fetchExploreLenses: vi.fn(),
   fetchExplorePhotos: vi.fn(),
   fetchExploreSample: vi.fn(),
+  fetchExploreSeasons: vi.fn(),
+  fetchExploreTimes: vi.fn(),
   prefetchExploreModule: vi.fn(() => Promise.resolve()),
 }))
 const api = vi.hoisted(() => ({ requestAlbumMediaDownload: vi.fn() }))
 const scroll = vi.hoisted(() => ({ saveVerticalScroll: vi.fn(), useScrollRestoration: vi.fn() }))
+const exploreState = vi.hoisted(() => ({
+  readExploreBrowseState: vi.fn(() => null),
+  saveExploreBrowseScroll: vi.fn(),
+  writeExploreBrowseState: vi.fn(),
+}))
 
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/exploreApi', () => exploreApi)
 vi.mock('../utils/scroll', () => scroll)
+vi.mock('../utils/exploreState', () => exploreState)
 vi.mock('../utils/analytics', () => ({ trackPhotoDownload: vi.fn() }))
 vi.mock('../utils/mediaUrls', () => ({
   mediaFileName: () => 'photo.jpg',
@@ -44,6 +52,21 @@ vi.mock('../components/PhotoLightbox', () => ({
 
 import Explore from './Explore'
 
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{location.pathname}{location.search}</output>
+}
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((done, fail) => {
+    resolve = done
+    reject = fail
+  })
+  return { promise, resolve, reject }
+}
+
 const photo = {
   albumId: 'album-1', albumTitle: 'Blue Mountain', albumCategory: 'Hikes',
   mediaId: 'media-1', id: 'media-1', thumbnailUrl: 'https://media.test/photo.webp',
@@ -58,6 +81,10 @@ const photo = {
 const secondPhoto = {
   ...photo, albumId: 'album-2', albumTitle: 'Green Valley', mediaId: 'media-2', id: 'media-2',
   thumbnailUrl: 'https://media.test/second.webp',
+}
+const thirdPhoto = {
+  ...photo, albumId: 'album-3', albumTitle: 'New Shuffle', mediaId: 'media-3', id: 'media-3',
+  thumbnailUrl: 'https://media.test/third.webp',
 }
 
 describe('Explore', () => {
@@ -83,6 +110,21 @@ describe('Explore', () => {
     })
     exploreApi.fetchExplorePhotos.mockResolvedValue({ items: [photo], nextCursor: null })
     exploreApi.fetchExploreSample.mockResolvedValue({ images: [photo, secondPhoto] })
+    exploreApi.fetchExploreTimes.mockResolvedValue({
+      items: [
+        { id: 'dawn', photos: 2 }, { id: 'morning', photos: 8 }, { id: 'afternoon', photos: 6 },
+        { id: 'evening', photos: 4 }, { id: 'night', photos: 3 },
+      ],
+      initialPage: { value: 'dawn', items: [photo], nextCursor: null, seed: '0123456789abcdef' },
+    })
+    exploreApi.fetchExploreSeasons.mockResolvedValue({
+      items: [
+        { id: 'winter', photos: 3 }, { id: 'spring', photos: 5 },
+        { id: 'summer', photos: 7 }, { id: 'autumn', photos: 4 },
+      ],
+      initialPage: { value: 'winter', items: [photo], nextCursor: null, seed: '0123456789abcdef' },
+    })
+    exploreState.readExploreBrowseState.mockReturnValue(null)
   })
 
   it('presents Explore as a module landing page without loading an index', () => {
@@ -92,8 +134,123 @@ describe('Explore', () => {
     expect(screen.getByRole('link', { name: /Color Explorer/ })).toHaveAttribute('href', '/explore/colors')
     expect(screen.getByRole('link', { name: /Lens Explorer/ })).toHaveAttribute('href', '/explore/lenses')
     expect(screen.getByRole('link', { name: /Exposure Explorer/ })).toHaveAttribute('href', '/explore/exposure')
+    expect(screen.getByRole('link', { name: /Time of Day Explorer/ })).toHaveAttribute('href', '/explore/time-of-day')
+    expect(screen.getByRole('link', { name: /Season Explorer/ })).toHaveAttribute('href', '/explore/seasons')
     expect(screen.getByRole('link', { name: /Guess the Settings/ })).toHaveAttribute('href', '/explore/guess-settings')
     expect(exploreApi.fetchExplorePhotos).not.toHaveBeenCalled()
+  })
+
+  it('browses camera-local time buckets, canonicalizes the URL, and persists the page', async () => {
+    render(
+      <MemoryRouter initialEntries={['/explore/time-of-day?period=unknown']}>
+        <Explore />
+        <LocationProbe />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Time of Day Explorer' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Blue Mountain')).toBeInTheDocument())
+    expect(exploreApi.fetchExploreTimes).toHaveBeenCalledWith(expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/explore/time-of-day?period=dawn'))
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Dawn/ })).toHaveAttribute('aria-pressed', 'true'))
+    expect(exploreState.writeExploreBrowseState).toHaveBeenCalledWith(
+      'time:dawn',
+      expect.objectContaining({ items: [photo], seed: '0123456789abcdef' }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Evening/ }))
+    await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledWith(
+      { mode: 'time', value: 'evening', limit: 24, seed: '0123456789abcdef' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+  })
+
+  it('browses seasons and leaves zero-count fixed choices visibly disabled', async () => {
+    exploreApi.fetchExploreSeasons.mockResolvedValue({
+      items: [
+        { id: 'winter', photos: 0 }, { id: 'spring', photos: 5 },
+        { id: 'summer', photos: 7 }, { id: 'autumn', photos: 4 },
+      ],
+      initialPage: { value: 'spring', items: [photo], nextCursor: null, seed: '0123456789abcdef' },
+    })
+    render(<MemoryRouter initialEntries={['/explore/seasons?season=autumn']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByRole('heading', { name: 'Season Explorer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Winter/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Autumn/ })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledWith(
+      { mode: 'season', value: 'autumn', limit: 24, seed: '0123456789abcdef' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+  })
+
+  it('restores a fresh temporal browsing snapshot without refetching its grid', async () => {
+    exploreState.readExploreBrowseState.mockImplementation(key => key === 'time:dawn' ? {
+      items: [secondPhoto], total: 2, nextCursor: 'cached-cursor', seed: 'fedcba9876543210',
+      scrollY: 420, stale: false,
+    } : null)
+    render(<MemoryRouter initialEntries={['/explore/time-of-day?period=dawn']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(exploreApi.fetchExplorePhotos).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Show more' })).toBeInTheDocument()
+  })
+
+  it('renders a stale temporal snapshot while revalidating it with the same seed', async () => {
+    exploreState.readExploreBrowseState.mockImplementation(key => key === 'season:winter' ? {
+      items: [secondPhoto], total: 3, nextCursor: null, seed: 'fedcba9876543210',
+      scrollY: 0, stale: true,
+    } : null)
+    exploreApi.fetchExplorePhotos.mockResolvedValueOnce({
+      items: [photo], nextCursor: null, seed: 'fedcba9876543210',
+    })
+    render(<MemoryRouter initialEntries={['/explore/seasons?season=winter']}><Explore /></MemoryRouter>)
+
+    expect(await screen.findByText('Blue Mountain')).toBeInTheDocument()
+    expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledWith(
+      { mode: 'season', value: 'winter', limit: 24, seed: 'fedcba9876543210' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('keeps a newer reshuffle when an older stale revalidation finishes late', async () => {
+    const oldRefresh = deferred()
+    exploreState.readExploreBrowseState.mockImplementation(key => key === 'season:winter' ? {
+      items: [secondPhoto], total: 3, nextCursor: null, seed: 'fedcba9876543210',
+      scrollY: 0, stale: true,
+    } : null)
+    exploreApi.fetchExplorePhotos
+      .mockImplementationOnce(() => oldRefresh.promise)
+      .mockResolvedValueOnce({ items: [thirdPhoto], nextCursor: null, seed: '0123456789abcdef' })
+
+    render(<MemoryRouter initialEntries={['/explore/seasons?season=winter']}><Explore /></MemoryRouter>)
+    await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Reshuffle Winter photographs' }))
+    expect(await screen.findByText('New Shuffle')).toBeInTheDocument()
+
+    oldRefresh.resolve({ items: [photo], nextCursor: null, seed: 'fedcba9876543210' })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(screen.getByText('New Shuffle')).toBeInTheDocument()
+    expect(screen.queryByText('Blue Mountain')).not.toBeInTheDocument()
+  })
+
+  it('drops a late load-more result after the temporal explorer unmounts', async () => {
+    const latePage = deferred()
+    exploreState.readExploreBrowseState.mockImplementation(key => key === 'time:dawn' ? {
+      items: [photo], total: 2, nextCursor: 'cached-cursor', seed: 'fedcba9876543210',
+      scrollY: 0, stale: false,
+    } : null)
+    exploreApi.fetchExplorePhotos.mockImplementationOnce(() => latePage.promise)
+    const view = render(<MemoryRouter initialEntries={['/explore/time-of-day?period=dawn']}><Explore /></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Show more' }))
+    await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledTimes(1))
+    view.unmount()
+    latePage.resolve({ items: [secondPhoto], nextCursor: null })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(exploreState.writeExploreBrowseState).not.toHaveBeenCalled()
   })
 
   it('explores the complete exposure index while initially rendering one page', async () => {
@@ -114,7 +271,7 @@ describe('Explore', () => {
     render(<MemoryRouter initialEntries={['/explore/exposure?setting=shutter:frozen']}><Explore /></MemoryRouter>)
 
     expect(await screen.findByRole('tab', { name: 'Shutter speed' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('button', { name: /Frozen action/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /^Frozen action/ })).toHaveAttribute('aria-pressed', 'true')
     await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledWith(
       { mode: 'exposure', value: 'shutter:frozen', limit: 24 },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

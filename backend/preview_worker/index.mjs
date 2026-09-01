@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import exifr from 'exifr'
 import sharp from 'sharp'
 import {
     CopyObjectCommand,
@@ -39,10 +40,12 @@ import {
 import {
     EXPLORE_VERSION,
     analyzePixels,
+    capturedAtFromExif,
     exposureBuckets,
     isCompleteExploreMetadata,
     lensKey,
     normalizeLens,
+    temporalBuckets,
 } from './explore.mjs'
 import { syncExploreIndex } from './explore-index.mjs'
 import {
@@ -64,6 +67,8 @@ import {
     heroWidthsFor,
     parseHeroJob,
 } from './hero.mjs'
+
+const { parse: parseExif } = exifr
 
 const s3 = new S3Client({})
 const cloudfront = new CloudFrontClient({})
@@ -159,12 +164,27 @@ async function extractExploreMetadata(imageBytes, image) {
         .toBuffer({ resolveWithObject: true })
     const colors = analyzePixels(data, info.channels)
     const lens = normalizeLens(image?.exif?.lens)
+    let capturedAt = ''
+    try {
+        const exif = await parseExif(imageBytes, {
+            pick: ['DateTimeOriginal', 'CreateDate'],
+            translateValues: false,
+            reviveValues: false,
+            mergeOutput: true,
+            silentErrors: true,
+        })
+        capturedAt = capturedAtFromExif(exif)
+    } catch {
+        // Temporal metadata is optional. A processed, undated photo remains
+        // complete but is intentionally omitted from time and season facets.
+    }
     return {
         exploreVersion: EXPLORE_VERSION,
         ...colors,
         lens,
         lensKey: lensKey(lens),
         exposureBuckets: exposureBuckets(image?.exif),
+        ...temporalBuckets(capturedAt),
     }
 }
 
@@ -566,7 +586,7 @@ async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, out
     await documentClient.send(new UpdateCommand({
         TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
         Key: { albumId: resolved.job.albumId, mediaId },
-        UpdateExpression: 'SET #status = :ready, sourceSha256 = :sourceSha256, dimensions = :dimensions, completedAt = :completedAt, exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, exposureBuckets = :exposureBuckets REMOVE #jobId',
+        UpdateExpression: 'SET #status = :ready, sourceSha256 = :sourceSha256, dimensions = :dimensions, completedAt = :completedAt, exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, exposureBuckets = :exposureBuckets, temporalVersion = :temporalVersion, timeOfDayBucket = :timeOfDayBucket, seasonBucket = :seasonBucket REMOVE #jobId',
         ConditionExpression: '#status = :pending AND #jobId = :jobId AND #previewVersion = :version AND #previewKeys = :keys',
         ExpressionAttributeNames: {
             '#status': 'status',
@@ -592,18 +612,23 @@ async function commitPreviewMetadata(resolved, mediaId, jobId, sourceDigest, out
             ':lens': exploreMetadata.lens,
             ':lensKey': exploreMetadata.lensKey,
             ':exposureBuckets': exploreMetadata.exposureBuckets,
+            ':temporalVersion': exploreMetadata.temporalVersion,
+            ':timeOfDayBucket': exploreMetadata.timeOfDayBucket,
+            ':seasonBucket': exploreMetadata.seasonBucket,
         },
     }))
 }
 
 async function ensureExploreMetadata(resolved, metadata) {
     if (isCompleteExploreMetadata(metadata)) return metadata
-    const { bytes } = await readObjectBounded(resolved.previewKeys['640'], MAX_OUTPUT_BYTES)
+    // Responsive previews intentionally strip EXIF. Re-read the bounded
+    // original so historical photos can receive trustworthy capture buckets.
+    const { bytes } = await readObjectBounded(resolved.job.rawKey, MAX_SOURCE_BYTES)
     const exploreMetadata = await extractExploreMetadata(bytes, resolved.image)
     await documentClient.send(new UpdateCommand({
         TableName: requiredEnvironment('PREVIEW_METADATA_TABLE'),
         Key: { albumId: resolved.job.albumId, mediaId: mediaIdForKey(resolved.job.rawKey) },
-        UpdateExpression: 'SET exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, exposureBuckets = :exposureBuckets, updatedAt = :updatedAt',
+        UpdateExpression: 'SET exploreVersion = :exploreVersion, palette = :palette, colorFamilies = :colorFamilies, lens = :lens, lensKey = :lensKey, exposureBuckets = :exposureBuckets, temporalVersion = :temporalVersion, timeOfDayBucket = :timeOfDayBucket, seasonBucket = :seasonBucket, updatedAt = :updatedAt',
         ConditionExpression: '#status = :ready AND #previewVersion = :version AND #previewKeys = :keys',
         ExpressionAttributeNames: {
             '#status': 'status',
@@ -620,6 +645,9 @@ async function ensureExploreMetadata(resolved, metadata) {
             ':lens': exploreMetadata.lens,
             ':lensKey': exploreMetadata.lensKey,
             ':exposureBuckets': exploreMetadata.exposureBuckets,
+            ':temporalVersion': exploreMetadata.temporalVersion,
+            ':timeOfDayBucket': exploreMetadata.timeOfDayBucket,
+            ':seasonBucket': exploreMetadata.seasonBucket,
             ':updatedAt': new Date().toISOString(),
         },
     }))
@@ -716,7 +744,7 @@ async function processJob(jobValue) {
     const outputs = await atPreviewStage('source_transform_failed', async () => generateOutputs(sourceBytes))
     const exploreMetadata = await atPreviewStage(
         'source_transform_failed',
-        async () => extractExploreMetadata(outputs['640'].bytes, resolved.image),
+        async () => extractExploreMetadata(sourceBytes, resolved.image),
     )
     for (const width of PREVIEW_WIDTHS) {
         await atPreviewStage(

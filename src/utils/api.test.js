@@ -15,6 +15,8 @@ import {
     fetchExploreLenses,
     fetchExplorePhotos,
     fetchExploreSample,
+    fetchExploreSeasons,
+    fetchExploreTimes,
     prefetchExploreModule,
 } from './exploreApi'
 
@@ -196,11 +198,13 @@ describe('public Explore API', () => {
         vi.unstubAllGlobals()
     })
 
-    it('encodes color, lens, and exposure filters and preserves safe pagination', async () => {
+    it('encodes color, lens, exposure, time, and season filters and preserves safe pagination', async () => {
         const request = vi.fn()
             .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'blue' }], nextCursor: 'next' }))
             .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'lens' }], nextCursor: null }))
             .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'exposure' }], total: 42, nextCursor: null }))
+            .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'time' }], nextCursor: null, seed: '0123456789abcdef' }))
+            .mockResolvedValueOnce(jsonResponse({ items: [{ id: 'season' }], nextCursor: null }))
         vi.stubGlobal('fetch', request)
 
         await expect(fetchExplorePhotos({ mode: 'color', value: 'blue', limit: 12 }))
@@ -209,10 +213,16 @@ describe('public Explore API', () => {
             .resolves.toMatchObject({ items: [{ id: 'lens' }] })
         await expect(fetchExplorePhotos({ mode: 'exposure', value: 'aperture:wide' }))
             .resolves.toMatchObject({ items: [{ id: 'exposure' }], total: 42 })
+        await expect(fetchExplorePhotos({ mode: 'time', value: 'morning' }))
+            .resolves.toMatchObject({ items: [{ id: 'time' }], seed: '0123456789abcdef' })
+        await expect(fetchExplorePhotos({ mode: 'season', value: 'autumn' }))
+            .resolves.toMatchObject({ items: [{ id: 'season' }] })
         expect(request.mock.calls[0][0]).toContain('mode=color')
         expect(request.mock.calls[0][0]).toContain('limit=12')
         expect(request.mock.calls[1][0]).toContain('cursor=next')
         expect(request.mock.calls[2][0]).toContain('value=aperture%3Awide')
+        expect(request.mock.calls[3][0]).toContain('mode=time')
+        expect(request.mock.calls[4][0]).toContain('mode=season')
     })
 
     it('creates safe shuffle seeds and keeps them in the cache key', async () => {
@@ -303,6 +313,30 @@ describe('public Explore API', () => {
         })
     })
 
+    it('normalizes fixed temporal options, zero counts, and bundled shuffle seeds', async () => {
+        const request = vi.fn()
+            .mockResolvedValueOnce(jsonResponse({
+                items: [{ id: 'dawn', photos: 0 }, { id: 'morning', photos: 8 }, { id: '', photos: 2 }],
+                initialPage: {
+                    value: 'morning', items: [{ mediaId: 'photo-1' }], nextCursor: 'next', seed: '0123456789abcdef',
+                },
+            }))
+            .mockResolvedValueOnce(jsonResponse({
+                items: [{ id: 'winter', photos: 3 }, { id: 'broken', photos: 'many' }],
+            }))
+        vi.stubGlobal('fetch', request)
+
+        await expect(fetchExploreTimes()).resolves.toEqual({
+            items: [{ id: 'dawn', photos: 0 }, { id: 'morning', photos: 8 }],
+            initialPage: {
+                value: 'morning', items: [{ mediaId: 'photo-1' }], nextCursor: 'next', seed: '0123456789abcdef',
+            },
+        })
+        await expect(fetchExploreSeasons()).resolves.toEqual({
+            items: [{ id: 'winter', photos: 3 }], initialPage: null,
+        })
+    })
+
     it('normalizes and caches the bundled initial page', async () => {
         const request = vi.fn().mockResolvedValue(jsonResponse({
             items: [{ id: 'blue', photos: 12 }],
@@ -375,6 +409,12 @@ describe('public Explore API', () => {
             if (String(url).includes('mode=exposures')) {
                 return Promise.resolve(jsonResponse({ items: [{ id: 'aperture', options: [] }] }))
             }
+            if (String(url).includes('mode=times')) {
+                return Promise.resolve(jsonResponse({ items: [{ id: 'morning', photos: 1 }] }))
+            }
+            if (String(url).includes('mode=seasons')) {
+                return Promise.resolve(jsonResponse({ items: [{ id: 'autumn', photos: 1 }] }))
+            }
             return Promise.resolve(jsonResponse({ images: [], totalPhotos: 0 }))
         })
         vi.stubGlobal('fetch', request)
@@ -382,6 +422,9 @@ describe('public Explore API', () => {
         await expect(prefetchExploreModule('lens')).resolves.toMatchObject({ initialPage: null })
         await expect(prefetchExploreModule('color')).resolves.toMatchObject({ items: [{ id: 'blue', photos: 1 }] })
         await expect(prefetchExploreModule('exposure')).resolves.toMatchObject({ items: [{ id: 'aperture', options: [] }] })
+        await expect(prefetchExploreModule('time')).resolves.toMatchObject({ items: [{ id: 'morning', photos: 1 }] })
+        await expect(prefetchExploreModule('season')).resolves.toMatchObject({ items: [{ id: 'autumn', photos: 1 }] })
         await expect(prefetchExploreModule('sample')).resolves.toMatchObject({ images: [] })
+        await expect(prefetchExploreModule('unknown')).rejects.toMatchObject({ code: 'INVALID_EXPLORE_MODE' })
     })
 })

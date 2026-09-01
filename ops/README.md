@@ -114,21 +114,40 @@ bounded `SendMessageBatch` calls and requires the reviewed
 
 ## Explore materialized index
 
-Color, lens, and exposure discovery use sparse reference rows inside the retained
-`PreviewMetadataTable`. The public reader always joins those references back to
-the current preview metadata and authoritative public album manifest; index rows
-alone can never make private or deleted media public. Until the READY marker is
-present, color and lens readers retain the bounded scan fallback. Exposure uses
-its own EXPOSURE_READY marker so a deployment can keep serving the legacy
-five-minute snapshot until all historical exposure rows are durable.
+Color, lens, exposure, time-of-day, and season discovery use sparse reference
+rows inside the retained `PreviewMetadataTable`. The public reader always joins
+those references back to the current preview metadata and authoritative public
+album manifest; index rows alone can never make private or deleted media public.
+Until the READY marker is present, color and lens readers retain the bounded scan
+fallback. Exposure uses its own EXPOSURE_READY marker so a deployment can keep
+serving the legacy five-minute snapshot until all historical exposure rows are
+durable. Temporal readers fail closed until their versioned TEMPORAL_READY marker
+exists, so a new API cannot serve a partially backfilled archive.
+
+The preview worker derives only a fixed camera-local time-of-day bucket and a
+Northern Hemisphere meteorological season from capture EXIF. Exact capture
+timestamps are never written to the public index or returned by the Explore API.
+Missing or malformed dates are recorded as processed-but-unclassified instead of
+being inferred from upload time or other mutable data.
 
 `backfill_explore_index.py` is dry-run by default and prints only aggregate
 counts plus a content-bound plan digest. Apply requires the exact account ID,
 put/delete counts, digest, and `APPLY_EXPLORE_INDEX_BACKFILL` confirmation. The
-script writes both readiness markers last, re-reads both source tables, verifies
-zero remaining changes, and only then invalidates the Explore API cache. Run it
-only after the online worker, album visibility, and deletion paths have been
-deployed.
+script writes the legacy READY and EXPOSURE_READY markers after its batch, then
+re-reads both source tables and writes TEMPORAL_READY only after it verifies zero
+remaining changes. It waits for each Explore API cache invalidation before
+continuing. Run it only after the online worker, album visibility, and deletion
+paths have been deployed. For a temporal rollout, first run
+`backfill_explore_metadata.py` with its digest-bound apply guard, wait for the
+preview queue to drain, require the dead-letter queue to remain at zero, and
+require a second metadata dry run to report zero planned jobs. Only then dry-run
+and apply the materialized index backfill. Metadata apply also requires the exact
+AWS account ID and planned job count printed by the reviewed dry run; an
+unchanged digest in another account is never sufficient authorization. Index
+apply removes the temporal readiness marker, lets warm readiness caches expire,
+and invalidates the edge before its first index write. It restores the
+current-version marker only after the post-write inventory is stable, so a failed
+retry remains closed until a later successful reconciliation.
 
 ## Random-photo materialized decks
 

@@ -26,20 +26,26 @@ if str(FUNCTIONS) not in sys.path:
     sys.path.insert(0, str(FUNCTIONS))
 
 from explore_index import (  # noqa: E402
+    EXPLORE_VERSION,
     FACET_RECORD_TYPE,
     INDEX_RECORD_TYPE,
     READY_RECORD_TYPE,
+    SEASON_DEFINITIONS,
+    TEMPORAL_VERSION,
+    TIME_OF_DAY_DEFINITIONS,
     desired_index_records,
     exposure_buckets,
     exposure_ready_marker,
     ready_marker,
+    temporal_ready_marker,
 )
-from media_access import media_id_for_key  # noqa: E402
+from media_access import PREVIEW_VERSION, media_id_for_key  # noqa: E402
 
 
 KNOWN_INDEX_TYPES = {INDEX_RECORD_TYPE, FACET_RECORD_TYPE, READY_RECORD_TYPE}
 CONFIRMATION = "APPLY_EXPLORE_INDEX_BACKFILL"
 DEFAULT_FRONTEND_DISTRIBUTION_ID = "EIOCCNR8XGQ1B"
+TEMPORAL_READINESS_CACHE_DRAIN_SECONDS = 31
 
 
 def scan_table(table) -> list[dict[str, Any]]:
@@ -78,6 +84,10 @@ def desired_records(albums, preview_records):
         "eligiblePublicPhotoCount": 0,
         "indexedPhotoCount": 0,
         "missingExploreMetadataCount": 0,
+        "temporalProcessedPhotoCount": 0,
+        "temporalClassifiedPhotoCount": 0,
+        "temporalUndatedPhotoCount": 0,
+        "missingTemporalMetadataCount": 0,
     }
     for album in albums:
         if not (
@@ -96,25 +106,56 @@ def desired_records(albums, preview_records):
         counts["eligiblePublicPhotoAlbumCount"] += 1
         counts["eligiblePublicPhotoCount"] += len(media)
 
+    preview_by_key = {
+        (item.get("albumId"), item.get("mediaId")): item
+        for item in preview_records
+        if isinstance(item.get("albumId"), str)
+        and isinstance(item.get("mediaId"), str)
+    }
     desired = {}
     indexed_media = set()
-    for metadata in preview_records:
-        album_id = metadata.get("albumId")
-        media_id = metadata.get("mediaId")
-        album_media = eligible.get(album_id, {})
-        if media_id not in album_media:
-            continue
-        records = desired_index_records(
-            {**metadata, "exposureBuckets": album_media[media_id]},
-            public=True,
-        )
-        entries = [record for record in records if record.get("recordType") == INDEX_RECORD_TYPE]
-        if not entries:
-            counts["missingExploreMetadataCount"] += 1
-            continue
-        indexed_media.add((album_id, media_id))
-        for record in records:
-            desired[(record["albumId"], record["mediaId"])] = record
+    for album_id, album_media in eligible.items():
+        for media_id, derived_exposure_buckets in album_media.items():
+            metadata = preview_by_key.get((album_id, media_id), {})
+            time_of_day = metadata.get("timeOfDayBucket")
+            season = metadata.get("seasonBucket")
+            temporal_pair_valid = (
+                time_of_day == "" and season == ""
+            ) or (
+                time_of_day in TIME_OF_DAY_DEFINITIONS
+                and season in SEASON_DEFINITIONS
+            )
+            explore_ready = bool(
+                metadata.get("status") == "ready"
+                and metadata.get("previewVersion") == PREVIEW_VERSION
+                and metadata.get("exploreVersion") == EXPLORE_VERSION
+            )
+            temporal_complete = bool(
+                explore_ready
+                and metadata.get("temporalVersion") == TEMPORAL_VERSION
+                and isinstance(time_of_day, str)
+                and isinstance(season, str)
+                and temporal_pair_valid
+            )
+            if temporal_complete:
+                counts["temporalProcessedPhotoCount"] += 1
+                if time_of_day and season:
+                    counts["temporalClassifiedPhotoCount"] += 1
+                else:
+                    counts["temporalUndatedPhotoCount"] += 1
+            else:
+                counts["missingTemporalMetadataCount"] += 1
+            records = desired_index_records(
+                {**metadata, "exposureBuckets": derived_exposure_buckets},
+                public=True,
+            )
+            entries = [record for record in records if record.get("recordType") == INDEX_RECORD_TYPE]
+            if not explore_ready or not entries:
+                counts["missingExploreMetadataCount"] += 1
+                continue
+            indexed_media.add((album_id, media_id))
+            for record in records:
+                desired[(record["albumId"], record["mediaId"])] = record
     counts["indexedPhotoCount"] = len(indexed_media)
     marker = ready_marker()
     desired[(marker["albumId"], marker["mediaId"])] = marker
@@ -168,6 +209,20 @@ def apply_plan(table, puts, deletes):
     table.put_item(Item=exposure_ready_marker())
 
 
+def invalidate_explore_cache(cloudfront, distribution_id: str, phase: str) -> None:
+    invalidation = cloudfront.create_invalidation(
+        DistributionId=distribution_id,
+        InvalidationBatch={
+            "CallerReference": f"explore-index-backfill-{phase}-{time.time_ns()}",
+            "Paths": {"Quantity": 1, "Items": ["/api/public/explore*"]},
+        },
+    )
+    cloudfront.get_waiter("invalidation_completed").wait(
+        DistributionId=distribution_id,
+        Id=invalidation["Invalidation"]["Id"],
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stack-name", required=True)
@@ -214,32 +269,69 @@ def main() -> int:
         raise SystemExit("Refusing apply: --expected-plan-digest does not match the current plan.")
     if args.confirm != CONFIRMATION:
         raise SystemExit(f"Refusing apply: --confirm must be exactly {CONFIRMATION}.")
+    if inventory["missingTemporalMetadataCount"] or inventory["missingExploreMetadataCount"]:
+        raise SystemExit("Refusing apply: Explore metadata backfill is incomplete.")
 
+    temporal_marker = temporal_ready_marker()
+    preview_table.delete_item(Key={
+        "albumId": temporal_marker["albumId"],
+        "mediaId": temporal_marker["mediaId"],
+    })
+    # Warm readers retain readiness for at most 30 seconds. Let that state
+    # expire, then evict every edge response before changing index rows so a
+    # failed repair remains fail-closed instead of serving a cached snapshot.
+    time.sleep(TEMPORAL_READINESS_CACHE_DRAIN_SECONDS)
+    cloudfront = session.client("cloudfront")
+    invalidate_explore_cache(
+        cloudfront,
+        args.frontend_distribution_id,
+        "closed",
+    )
     apply_plan(preview_table, puts, deletes)
     # Re-read both tables so an upload or visibility edit concurrent with the
     # guarded reconciliation cannot make the READY marker bless stale rows.
     verification_albums = scan_table(session.resource("dynamodb").Table(albums_name))
     verification_records = scan_table(preview_table)
-    verification_desired, _ = desired_records(verification_albums, verification_records)
+    verification_desired, verification_inventory = desired_records(
+        verification_albums,
+        verification_records,
+    )
     remaining_puts, remaining_deletes = build_plan(
         verification_desired,
         current_index_records(verification_records),
     )
-    if not remaining_puts and not remaining_deletes:
-        session.client("cloudfront").create_invalidation(
-            DistributionId=args.frontend_distribution_id,
-            InvalidationBatch={
-                "CallerReference": f"explore-index-backfill-{time.time_ns()}",
-                "Paths": {"Quantity": 1, "Items": ["/api/public/explore*"]},
+    temporal_ready = bool(
+        not remaining_puts
+        and not remaining_deletes
+        and verification_inventory["missingTemporalMetadataCount"] == 0
+        and verification_inventory["missingExploreMetadataCount"] == 0
+    )
+    if temporal_ready:
+        preview_table.put_item(Item=temporal_ready_marker())
+        marker = preview_table.get_item(
+            Key={
+                "albumId": temporal_ready_marker()["albumId"],
+                "mediaId": temporal_ready_marker()["mediaId"],
             },
+            ConsistentRead=True,
+        ).get("Item")
+        if marker != temporal_ready_marker():
+            raise RuntimeError("Temporal readiness marker verification failed")
+        invalidate_explore_cache(
+            cloudfront,
+            args.frontend_distribution_id,
+            "ready",
         )
     print(json.dumps({
         "appliedPutCount": len(puts),
         "appliedDeleteCount": len(deletes),
         "remainingPutCount": len(remaining_puts),
         "remainingDeleteCount": len(remaining_deletes),
+        "remainingTemporalMetadataCount": verification_inventory["missingTemporalMetadataCount"],
+        "remainingExploreMetadataCount": verification_inventory["missingExploreMetadataCount"],
+        "temporalReady": temporal_ready,
     }, indent=2, sort_keys=True))
-    return 1 if remaining_puts or remaining_deletes else 0
+    return 0 if temporal_ready else 1
 
 
 if __name__ == "__main__":

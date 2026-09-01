@@ -6,7 +6,14 @@ from test_support import response_body
 
 import get_public_album
 from media_access import expected_preview_keys, media_id_for_key
-from explore_index import INDEX_RECORD_TYPE, INDEX_VERSION, facet_partition, index_sort_key
+from explore_index import (
+    INDEX_RECORD_TYPE,
+    INDEX_VERSION,
+    READY_RECORD_TYPE,
+    TEMPORAL_VERSION,
+    facet_partition,
+    index_sort_key,
+)
 
 
 ALBUM_ID = "11111111-1111-4111-8111-111111111111"
@@ -65,6 +72,10 @@ def metadata():
         "lens": "Sigma 18-50mm F2.8",
         "lensKey": "sigma 18-50mm f2.8",
         "exposureBuckets": ["aperture:middle", "shutter:handheld", "iso:clean", "focal:wide"],
+        "temporalVersion": 1,
+        "timeOfDayBucket": "morning",
+        "seasonBucket": "autumn",
+        "capturedAtLocal": "must never be public",
     }
 
 
@@ -340,6 +351,9 @@ class ExploreApiTests(unittest.TestCase):
             {"mode": "colors", "cursor": "x"},
             {"mode": "exposure", "value": "aperture:unknown"},
             {"mode": "exposures", "cursor": "x"},
+            {"mode": "time", "value": "golden-hour"},
+            {"mode": "season", "value": "monsoon"},
+            {"mode": "times", "cursor": "x"},
             {"mode": "color", "value": "blue", "seed": "UPPERCASE0000000"},
         ):
             with self.subTest(params=params):
@@ -411,6 +425,93 @@ class ExploreApiTests(unittest.TestCase):
             "exposure", "aperture:wide", get_public_album.EXPLORE_DEFAULT_LIMIT, total=4
         )
         archive.assert_not_called()
+
+    def test_temporal_modes_fail_closed_until_the_guarded_index_is_ready(self):
+        for params in (
+            {"mode": "times"},
+            {"mode": "seasons"},
+            {"mode": "time", "value": "morning"},
+            {"mode": "season", "value": "autumn"},
+        ):
+            with self.subTest(params=params), patch.object(
+                get_public_album, "_temporal_index_ready", return_value=False
+            ):
+                response = get_public_album._explore_response({"queryStringParameters": params})
+                self.assertEqual(response["statusCode"], 503)
+                self.assertEqual(response_body(response)["code"], "temporal_index_not_ready")
+                self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+
+    def test_temporal_readiness_requires_the_current_temporal_version(self):
+        preview_table = Mock()
+        preview_table.get_item.return_value = {
+            "Item": {
+                "recordType": READY_RECORD_TYPE,
+                "indexVersion": INDEX_VERSION,
+            },
+        }
+        with patch.object(get_public_album, "_preview_table", return_value=preview_table):
+            self.assertFalse(get_public_album._temporal_index_ready())
+            get_public_album._reset_explore_index_cache_for_tests()
+            preview_table.get_item.return_value["Item"]["temporalVersion"] = TEMPORAL_VERSION
+            self.assertTrue(get_public_album._temporal_index_ready())
+        self.assertIn(
+            "temporalVersion",
+            preview_table.get_item.call_args.kwargs["ProjectionExpression"],
+        )
+
+    def test_indexed_explore_skips_an_eventually_missing_preview_record(self):
+        self.assertIsNone(get_public_album._explore_item(None, album()))
+
+    def test_temporal_options_keep_fixed_zero_count_choices_and_bundle_the_first_page(self):
+        counts = {
+            facet_partition("time", "morning"): 4,
+            facet_partition("time", "night"): 2,
+        }
+        with patch.object(get_public_album, "_temporal_index_ready", return_value=True), patch.object(
+            get_public_album, "_parallel_partition_counts", return_value=counts
+        ), patch.object(
+            get_public_album,
+            "_indexed_media_payload",
+            return_value={"items": [{"mediaId": MEDIA_ID}], "nextCursor": None, "seed": "0123456789abcdef"},
+        ) as page:
+            response = get_public_album._explore_response({
+                "queryStringParameters": {"mode": "times"},
+            })
+
+        body = response_body(response)
+        self.assertEqual([item["id"] for item in body["items"]], list(get_public_album.EXPLORE_TIME_ORDER))
+        self.assertEqual(body["items"][0], {"id": "dawn", "photos": 0})
+        self.assertEqual(body["initialPage"]["value"], "morning")
+        self.assertEqual(body["initialPage"]["seed"], "0123456789abcdef")
+        page.assert_called_once_with("time", "morning", get_public_album.EXPLORE_DEFAULT_LIMIT)
+
+    def test_temporal_results_use_the_sparse_index_and_expose_only_coarse_buckets(self):
+        reference = {
+            "albumId": facet_partition("season", "autumn"),
+            "mediaId": index_sort_key(ALBUM_ID, MEDIA_ID),
+            "recordType": INDEX_RECORD_TYPE,
+            "indexVersion": INDEX_VERSION,
+            "sourceAlbumId": ALBUM_ID,
+            "sourceMediaId": MEDIA_ID,
+        }
+        with patch.object(get_public_album, "_temporal_index_ready", return_value=True), patch.object(
+            get_public_album, "_index_query_page", return_value={"Items": [reference]}
+        ), patch.object(
+            get_public_album, "_batch_preview_metadata", return_value={(ALBUM_ID, MEDIA_ID): metadata()}
+        ), patch.object(
+            get_public_album, "_batch_albums", return_value={ALBUM_ID: album()}
+        ):
+            response = get_public_album._explore_response({
+                "queryStringParameters": {
+                    "mode": "season", "value": "autumn", "limit": "1",
+                    "seed": "0123456789abcdef",
+                },
+            })
+
+        item = response_body(response)["items"][0]
+        self.assertEqual(item["timeOfDay"], "morning")
+        self.assertEqual(item["season"], "autumn")
+        self.assertNotIn("capturedAtLocal", item)
 
     def test_materialized_exposure_accepts_a_legacy_in_flight_cursor(self):
         expected = {"statusCode": 200, "body": "legacy"}

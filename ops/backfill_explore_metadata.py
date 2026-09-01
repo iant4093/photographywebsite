@@ -27,20 +27,42 @@ from backfill_preview_v3 import (
 
 
 EXPLORE_VERSION = 2
+TEMPORAL_VERSION = 1
 CONFIRMATION = "BACKFILL_EXPLORE_METADATA"
 COLOR_FAMILIES = frozenset({
     "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "monochrome",
 })
 HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
+TIME_OF_DAY_BUCKETS = frozenset({"dawn", "morning", "afternoon", "evening", "night"})
+SEASON_BUCKETS = frozenset({"winter", "spring", "summer", "autumn"})
+EXPOSURE_BUCKETS = frozenset({
+    "aperture:wide", "aperture:middle", "aperture:deep",
+    "shutter:motion", "shutter:handheld", "shutter:frozen",
+    "iso:clean", "iso:available", "iso:low",
+    "focal:wide", "focal:normal", "focal:telephoto",
+})
 
 
 def _complete_explore(record: dict[str, Any] | None) -> bool:
-    if not isinstance(record, dict) or record.get("exploreVersion") != EXPLORE_VERSION:
+    if (
+        not isinstance(record, dict)
+        or record.get("status") != "ready"
+        or record.get("previewVersion") != PREVIEW_VERSION
+        or record.get("exploreVersion") != EXPLORE_VERSION
+    ):
         return False
     palette = record.get("palette")
     families = record.get("colorFamilies")
     lens = record.get("lens")
     lens_key = record.get("lensKey")
+    exposure_buckets = record.get("exposureBuckets")
+    time_of_day = record.get("timeOfDayBucket")
+    season = record.get("seasonBucket")
+    temporal_pair_valid = (
+        time_of_day == "" and season == ""
+    ) or (
+        time_of_day in TIME_OF_DAY_BUCKETS and season in SEASON_BUCKETS
+    )
     return bool(
         isinstance(palette, list)
         and 1 <= len(palette) <= 5
@@ -51,6 +73,12 @@ def _complete_explore(record: dict[str, Any] | None) -> bool:
         and isinstance(lens, str)
         and lens
         and lens_key == lens.casefold()
+        and isinstance(exposure_buckets, list)
+        and all(value in EXPOSURE_BUCKETS for value in exposure_buckets)
+        and record.get("temporalVersion") == TEMPORAL_VERSION
+        and isinstance(time_of_day, str)
+        and isinstance(season, str)
+        and temporal_pair_valid
     )
 
 
@@ -137,6 +165,8 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-stack-name")
     parser.add_argument("--confirm")
+    parser.add_argument("--expected-account-id")
+    parser.add_argument("--expected-job-count", type=int)
     parser.add_argument("--expected-plan-digest")
     args = parser.parse_args()
 
@@ -155,7 +185,8 @@ def main() -> int:
         preview_table,
         (
             "albumId,mediaId,previewVersion,#status,exploreVersion,palette,"
-            "colorFamilies,lens,lensKey"
+            "colorFamilies,lens,lensKey,exposureBuckets,temporalVersion,"
+            "timeOfDayBucket,seasonBucket"
         ),
         args.profile,
         args.region,
@@ -168,6 +199,7 @@ def main() -> int:
         "account": account,
         "stack": args.stack_name,
         "exploreVersion": EXPLORE_VERSION,
+        "temporalVersion": TEMPORAL_VERSION,
         "planDigest": digest,
         **counts,
     }, indent=2, sort_keys=True))
@@ -176,6 +208,10 @@ def main() -> int:
         return 0
     if args.confirm_stack_name != args.stack_name or args.confirm != CONFIRMATION:
         raise SystemExit("Refusing apply: exact stack and confirmation phrase are required")
+    if args.expected_account_id != account:
+        raise SystemExit("Refusing apply: --expected-account-id does not match")
+    if args.expected_job_count != len(jobs):
+        raise SystemExit("Refusing apply: --expected-job-count does not match")
     if args.expected_plan_digest != digest:
         raise SystemExit("Refusing apply: plan digest changed")
     dispatched = dispatch_jobs(jobs, preview_queue_url, args.profile, args.region)

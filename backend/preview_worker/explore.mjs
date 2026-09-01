@@ -1,4 +1,5 @@
 export const EXPLORE_VERSION = 2
+export const TEMPORAL_VERSION = 1
 export const MANUAL_LENS_FALLBACK = 'Sirui Nightwalker 75mm T1.2'
 
 const MAX_PALETTE_COLORS = 5
@@ -25,6 +26,10 @@ const EXPOSURE_BUCKETS = new Set([
     'iso:clean', 'iso:available', 'iso:low',
     'focal:wide', 'focal:normal', 'focal:telephoto',
 ])
+export const TIME_OF_DAY_BUCKETS = Object.freeze(['dawn', 'morning', 'afternoon', 'evening', 'night'])
+export const SEASON_BUCKETS = Object.freeze(['winter', 'spring', 'summer', 'autumn'])
+const TIME_OF_DAY_BUCKET_SET = new Set(TIME_OF_DAY_BUCKETS)
+const SEASON_BUCKET_SET = new Set(SEASON_BUCKETS)
 
 function normalizedText(value) {
     return typeof value === 'string' ? value.trim().replaceAll(/\s+/g, ' ').slice(0, 160) : ''
@@ -88,6 +93,69 @@ export function exposureBuckets(exif) {
         const bucket = exposureBucket(exif, group)
         return bucket ? [`${group}:${bucket}`] : []
     })
+}
+
+function captureParts(value) {
+    if (typeof value !== 'string') return null
+    const match = value.trim().match(/^(\d{4})[:/-](\d{2})[:/-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)
+    if (!match) return null
+    const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match
+    const year = Number(yearText)
+    const month = Number(monthText)
+    const day = Number(dayText)
+    const hour = Number(hourText)
+    const minute = Number(minuteText)
+    const second = Number(secondText)
+    if (
+        year < 1900 || year > 2200
+        || month < 1 || month > 12
+        || day < 1 || day > 31
+        || hour < 0 || hour > 23
+        || minute < 0 || minute > 59
+        || second < 0 || second > 59
+    ) return null
+    const verified = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+    if (
+        verified.getUTCFullYear() !== year
+        || verified.getUTCMonth() + 1 !== month
+        || verified.getUTCDate() !== day
+        || verified.getUTCHours() !== hour
+        || verified.getUTCMinutes() !== minute
+        || verified.getUTCSeconds() !== second
+    ) return null
+    return { month, hour }
+}
+
+export function timeOfDayBucket(hour) {
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) return ''
+    if (hour >= 5 && hour < 8) return 'dawn'
+    if (hour >= 8 && hour < 12) return 'morning'
+    if (hour >= 12 && hour < 17) return 'afternoon'
+    if (hour >= 17 && hour < 21) return 'evening'
+    return 'night'
+}
+
+export function seasonBucket(month) {
+    if (!Number.isInteger(month) || month < 1 || month > 12) return ''
+    if (month === 12 || month <= 2) return 'winter'
+    if (month <= 5) return 'spring'
+    if (month <= 8) return 'summer'
+    return 'autumn'
+}
+
+export function temporalBuckets(capturedAt) {
+    const parts = captureParts(capturedAt)
+    return {
+        temporalVersion: TEMPORAL_VERSION,
+        timeOfDayBucket: parts ? timeOfDayBucket(parts.hour) : '',
+        seasonBucket: parts ? seasonBucket(parts.month) : '',
+    }
+}
+
+export function capturedAtFromExif(exif) {
+    if (!exif || typeof exif !== 'object') return ''
+    return [exif.DateTimeOriginal, exif.CreateDate]
+        .find(value => typeof value === 'string' && captureParts(value)) || ''
 }
 
 function rgbToHsl(red, green, blue) {
@@ -205,6 +273,13 @@ export function analyzePixels(bytes, channels = 3) {
 }
 
 export function isCompleteExploreMetadata(metadata) {
+    const timeOfDay = metadata?.timeOfDayBucket
+    const season = metadata?.seasonBucket
+    const temporalPairIsValid = (
+        timeOfDay === '' && season === ''
+    ) || (
+        TIME_OF_DAY_BUCKET_SET.has(timeOfDay) && SEASON_BUCKET_SET.has(season)
+    )
     return Boolean(
         metadata
         && metadata.exploreVersion === EXPLORE_VERSION
@@ -222,5 +297,9 @@ export function isCompleteExploreMetadata(metadata) {
         && metadata.exposureBuckets.every(value => (
             typeof value === 'string' && EXPOSURE_BUCKETS.has(value)
         ))
+        && metadata.temporalVersion === TEMPORAL_VERSION
+        && typeof timeOfDay === 'string'
+        && typeof season === 'string'
+        && temporalPairIsValid
     )
 }

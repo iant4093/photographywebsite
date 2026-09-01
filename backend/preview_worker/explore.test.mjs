@@ -5,11 +5,15 @@ import {
     EXPLORE_VERSION,
     MANUAL_LENS_FALLBACK,
     analyzePixels,
+    capturedAtFromExif,
     exposureBucket,
     exposureBuckets,
     isCompleteExploreMetadata,
     lensKey,
     normalizeLens,
+    seasonBucket,
+    temporalBuckets,
+    timeOfDayBucket,
 } from './explore.mjs'
 
 function pixels(colors) {
@@ -32,6 +36,48 @@ test('maps authoritative EXIF values into the fixed exposure index buckets', () 
         'aperture:deep', 'shutter:motion', 'iso:low', 'focal:telephoto',
     ])
     assert.deepEqual(exposureBuckets({}), [])
+})
+
+test('maps camera-local capture dates into deterministic time and season buckets', () => {
+    assert.deepEqual(
+        Array.from({ length: 24 }, (_, hour) => timeOfDayBucket(hour)),
+        [
+            'night', 'night', 'night', 'night', 'night',
+            'dawn', 'dawn', 'dawn',
+            'morning', 'morning', 'morning', 'morning',
+            'afternoon', 'afternoon', 'afternoon', 'afternoon', 'afternoon',
+            'evening', 'evening', 'evening', 'evening',
+            'night', 'night', 'night',
+        ],
+    )
+    assert.deepEqual(
+        Array.from({ length: 12 }, (_, index) => seasonBucket(index + 1)),
+        ['winter', 'winter', 'spring', 'spring', 'spring', 'summer', 'summer', 'summer', 'autumn', 'autumn', 'autumn', 'winter'],
+    )
+    assert.deepEqual(temporalBuckets('2024:02:29 06:15:00'), {
+        temporalVersion: 1, timeOfDayBucket: 'dawn', seasonBucket: 'winter',
+    })
+    assert.deepEqual(temporalBuckets('2023:02:29 06:15:00'), {
+        temporalVersion: 1, timeOfDayBucket: '', seasonBucket: '',
+    })
+    assert.deepEqual(temporalBuckets('not-a-date'), {
+        temporalVersion: 1, timeOfDayBucket: '', seasonBucket: '',
+    })
+})
+
+test('prefers original capture EXIF without converting the camera-local clock', () => {
+    assert.equal(capturedAtFromExif({
+        DateTimeOriginal: '2024:11:03 01:30:00',
+        CreateDate: '2024:11:03 08:30:00',
+        ModifyDate: '2025:01:01 12:00:00',
+    }), '2024:11:03 01:30:00')
+    assert.equal(capturedAtFromExif({ CreateDate: '2024:06:01 17:00:00' }), '2024:06:01 17:00:00')
+    assert.equal(capturedAtFromExif({
+        DateTimeOriginal: '0000:00:00 00:00:00',
+        CreateDate: '2024:06:01 17:00:00',
+    }), '2024:06:01 17:00:00')
+    assert.equal(capturedAtFromExif({ ModifyDate: '2024:06:01 17:00:00' }), '')
+    assert.equal(capturedAtFromExif({}), '')
 })
 
 test('extracts a deterministic palette and multiple prominent color families', () => {
@@ -109,9 +155,11 @@ test('classifies neutral photographs as monochrome and validates complete metada
         lens: MANUAL_LENS_FALLBACK,
         lensKey: lensKey(MANUAL_LENS_FALLBACK),
         exposureBuckets: [],
+        ...temporalBuckets(''),
     }
     assert.equal(isCompleteExploreMetadata(metadata), true)
     assert.equal(isCompleteExploreMetadata({ ...metadata, palette: ['invalid'] }), false)
+    assert.equal(isCompleteExploreMetadata({ ...metadata, timeOfDayBucket: 'morning' }), false)
 })
 
 test('rejects malformed pixel buffers', () => {

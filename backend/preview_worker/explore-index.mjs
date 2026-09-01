@@ -14,6 +14,9 @@ const EXPOSURES = new Set([
     'iso:clean', 'iso:available', 'iso:low',
     'focal:wide', 'focal:normal', 'focal:telephoto',
 ])
+const TIMES = new Set(['dawn', 'morning', 'afternoon', 'evening', 'night'])
+const SEASONS = new Set(['winter', 'spring', 'summer', 'autumn'])
+const TEMPORAL_VERSION = 1
 const ALBUM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const MEDIA_ID_PATTERN = /^[a-f0-9]{24}$/
 
@@ -32,6 +35,16 @@ export function facetPartition(mode, value) {
         const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
         if (!EXPOSURES.has(normalized)) throw new Error('Unsupported exposure facet')
         return `${EXPLORE_INDEX_PREFIX}#EXPOSURE#${normalized}`
+    }
+    if (mode === 'time') {
+        const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+        if (!TIMES.has(normalized)) throw new Error('Unsupported time facet')
+        return `${EXPLORE_INDEX_PREFIX}#TIME#${normalized}`
+    }
+    if (mode === 'season') {
+        const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+        if (!SEASONS.has(normalized)) throw new Error('Unsupported season facet')
+        return `${EXPLORE_INDEX_PREFIX}#SEASON#${normalized}`
     }
     throw new Error('Unsupported Explore facet mode')
 }
@@ -60,6 +73,14 @@ export function metadataFacets(metadata) {
         for (const bucket of new Set(metadata.exposureBuckets)) {
             if (EXPOSURES.has(bucket)) facets.set(facetPartition('exposure', bucket), bucket)
         }
+    }
+    if (
+        Number(metadata.temporalVersion) === TEMPORAL_VERSION
+        && TIMES.has(metadata.timeOfDayBucket)
+        && SEASONS.has(metadata.seasonBucket)
+    ) {
+        facets.set(facetPartition('time', metadata.timeOfDayBucket), metadata.timeOfDayBucket)
+        facets.set(facetPartition('season', metadata.seasonBucket), metadata.seasonBucket)
     }
     return facets
 }
@@ -99,6 +120,11 @@ function entryKeys(metadata) {
     if (!Array.isArray(metadata.exposureBuckets)) {
         for (const bucket of EXPOSURES) partitions.add(facetPartition('exposure', bucket))
     }
+    // Temporal partitions are fixed and small. Always probe all of them so a
+    // pending repair, malformed legacy row, or bucket change cannot strand a
+    // stale public reference.
+    for (const bucket of TIMES) partitions.add(facetPartition('time', bucket))
+    for (const bucket of SEASONS) partitions.add(facetPartition('season', bucket))
     return [...partitions].sort().map(albumId => ({ albumId, mediaId: sortKey }))
 }
 

@@ -10,8 +10,15 @@ import {
     fetchExploreLenses,
     fetchExplorePhotos,
     fetchExploreSample,
+    fetchExploreSeasons,
+    fetchExploreTimes,
     prefetchExploreModule,
 } from '../utils/exploreApi'
+import {
+    readExploreBrowseState,
+    saveExploreBrowseScroll,
+    writeExploreBrowseState,
+} from '../utils/exploreState'
 import { buildSettingsDeck, buildSettingsRoundForImage, EXPOSURE_GROUPS } from '../utils/exposure'
 import { trackPhotoDownload } from '../utils/analytics'
 import {
@@ -41,6 +48,37 @@ const COLOR_OPTIONS = Object.freeze([
     { id: 'monochrome', label: 'Monochrome', color: '#77716a' },
 ])
 const COLOR_BY_ID = new Map(COLOR_OPTIONS.map(option => [option.id, option]))
+const TIME_OPTIONS = Object.freeze([
+    { id: 'dawn', label: 'Dawn', detail: '5–8 AM' },
+    { id: 'morning', label: 'Morning', detail: '8 AM–12 PM' },
+    { id: 'afternoon', label: 'Afternoon', detail: '12–5 PM' },
+    { id: 'evening', label: 'Evening', detail: '5–9 PM' },
+    { id: 'night', label: 'Night', detail: '9 PM–5 AM' },
+])
+const SEASON_OPTIONS = Object.freeze([
+    { id: 'winter', label: 'Winter', detail: 'December–February' },
+    { id: 'spring', label: 'Spring', detail: 'March–May' },
+    { id: 'summer', label: 'Summer', detail: 'June–August' },
+    { id: 'autumn', label: 'Autumn', detail: 'September–November' },
+])
+const TEMPORAL_CONFIG = Object.freeze({
+    time: {
+        title: 'Time of Day Explorer',
+        detail: 'Browse photographs by the camera-local hour recorded at capture. Undated photographs are left out rather than guessed.',
+        prompt: 'time of day',
+        queryParam: 'period',
+        options: TIME_OPTIONS,
+        fetchOptions: fetchExploreTimes,
+    },
+    season: {
+        title: 'Season Explorer',
+        detail: 'Move through the archive by Northern Hemisphere meteorological season, using each photograph’s recorded capture date.',
+        prompt: 'season',
+        queryParam: 'season',
+        options: SEASON_OPTIONS,
+        fetchOptions: fetchExploreSeasons,
+    },
+})
 const CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 1080px) 50vw, (min-width: 1440px) 420px, 360px'
 
 function exposureSelection(value) {
@@ -78,6 +116,8 @@ function ExploreLanding() {
             prefetchExploreModule('color'),
             prefetchExploreModule('lens'),
             prefetchExploreModule('exposure'),
+            prefetchExploreModule('time'),
+            prefetchExploreModule('season'),
             prefetchExploreModule('sample'),
         ])
         if (typeof window.requestIdleCallback === 'function') {
@@ -163,13 +203,47 @@ function ExploreLanding() {
                     <span className="explore-module-arrow" aria-hidden="true">→</span>
                 </Link>
                 <Link
+                    to="/explore/time-of-day"
+                    className="explore-module-card editorial-motion-media"
+                    onClick={() => saveVerticalScroll('/explore')}
+                    onPointerEnter={() => warmModule('time')}
+                    onFocus={() => warmModule('time')}
+                >
+                    <span className="explore-module-number">05</span>
+                    <div className="explore-module-time" aria-hidden="true">
+                        <i /><i /><i /><i /><i />
+                    </div>
+                    <div>
+                        <h2>Time of Day Explorer</h2>
+                        <p>Follow the changing character of light from dawn through night.</p>
+                    </div>
+                    <span className="explore-module-arrow" aria-hidden="true">→</span>
+                </Link>
+                <Link
+                    to="/explore/seasons"
+                    className="explore-module-card editorial-motion-media"
+                    onClick={() => saveVerticalScroll('/explore')}
+                    onPointerEnter={() => warmModule('season')}
+                    onFocus={() => warmModule('season')}
+                >
+                    <span className="explore-module-number">06</span>
+                    <div className="explore-module-season" aria-hidden="true">
+                        <i /><i /><i /><i />
+                    </div>
+                    <div>
+                        <h2>Season Explorer</h2>
+                        <p>See the archive shift through winter, spring, summer, and autumn.</p>
+                    </div>
+                    <span className="explore-module-arrow" aria-hidden="true">→</span>
+                </Link>
+                <Link
                     to="/explore/guess-settings"
                     className="explore-module-card editorial-motion-media"
                     onClick={() => saveVerticalScroll('/explore')}
                     onPointerEnter={() => warmModule('sample')}
                     onFocus={() => warmModule('sample')}
                 >
-                    <span className="explore-module-number">05</span>
+                    <span className="explore-module-number">07</span>
                     <div className="explore-module-game" aria-hidden="true">
                         <span>?</span>
                         <i>1/500</i><i>f/2.8</i><i>ISO 400</i>
@@ -189,13 +263,13 @@ function ExploreBackLink() {
     return <Link to="/explore" state={{ restoreExploreScroll: true }} className="explore-back">← All Explore modules</Link>
 }
 
-function ExploreShuffleButton({ label, loading, onClick }) {
+function ExploreShuffleButton({ label, loading, disabled = false, onClick }) {
     return (
         <button
             type="button"
             className="explore-reshuffle"
             onClick={onClick}
-            disabled={loading}
+            disabled={loading || disabled}
             aria-label={`Reshuffle ${label}`}
         >
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -499,6 +573,391 @@ function ExploreModule({ mode }) {
                     shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
                 />
             )}
+        </div>
+    )
+}
+
+function TemporalExplorer({ mode }) {
+    const config = TEMPORAL_CONFIG[mode]
+    const [searchParams, setSearchParams] = useSearchParams()
+    const [facetState, setFacetState] = useState({ items: [], initialPage: null, loading: true, error: '' })
+    const [pageState, setPageState] = useState({ key: '', items: [], nextCursor: null, seed: '', error: '' })
+    const [loadingMoreKey, setLoadingMoreKey] = useState('')
+    const [reshufflingKey, setReshufflingKey] = useState('')
+    const [lightboxIndex, setLightboxIndex] = useState(null)
+    const [lightboxRequestKey, setLightboxRequestKey] = useState('')
+    const restoreRef = useRef(null)
+    const currentRequestKeyRef = useRef('')
+    const pageStateRef = useRef(pageState)
+    const photoOperationRef = useRef({ generation: 0, controller: null })
+
+    useEffect(() => {
+        const controller = new AbortController()
+        config.fetchOptions({ signal: controller.signal })
+            .then(({ items, initialPage }) => {
+                const counts = new Map(items.map(item => [item.id, item.photos]))
+                setFacetState({
+                    items: config.options.map(option => ({ ...option, photos: counts.get(option.id) || 0 })),
+                    initialPage,
+                    loading: false,
+                    error: '',
+                })
+            })
+            .catch(error => {
+                if (error?.name !== 'AbortError') {
+                    setFacetState({
+                        items: [],
+                        initialPage: null,
+                        loading: false,
+                        error: error?.message || 'The temporal index could not be loaded.',
+                    })
+                }
+            })
+        return () => controller.abort()
+    }, [config])
+
+    const requestedValue = searchParams.get(config.queryParam)
+    const activeFacet = useMemo(() => (
+        facetState.items.find(option => option.id === requestedValue && option.photos > 0)
+        || facetState.items.find(option => option.photos > 0)
+        || null
+    ), [facetState.items, requestedValue])
+    const value = activeFacet?.id || ''
+    const requestKey = value ? `${mode}:${value}` : ''
+    const hasCurrentPage = Boolean(requestKey && pageState.key === requestKey)
+    const items = hasCurrentPage ? pageState.items : []
+    const nextCursor = hasCurrentPage ? pageState.nextCursor : null
+    const resultError = hasCurrentPage ? pageState.error : ''
+    const loading = Boolean(requestKey && !hasCurrentPage)
+    const loadingMore = loadingMoreKey === requestKey
+    const reshuffling = reshufflingKey === requestKey
+
+    const cancelPhotoOperation = useCallback(() => {
+        const previous = photoOperationRef.current
+        previous.controller?.abort()
+        photoOperationRef.current = { generation: previous.generation + 1, controller: null }
+    }, [])
+
+    const beginPhotoOperation = useCallback(() => {
+        const previous = photoOperationRef.current
+        previous.controller?.abort()
+        const operation = {
+            generation: previous.generation + 1,
+            controller: new AbortController(),
+        }
+        photoOperationRef.current = operation
+        return operation
+    }, [])
+
+    const photoOperationIsCurrent = useCallback((operation, key) => (
+        photoOperationRef.current.generation === operation.generation
+        && currentRequestKeyRef.current === key
+    ), [])
+
+    useEffect(() => {
+        pageStateRef.current = pageState
+    }, [pageState])
+
+    useEffect(() => {
+        currentRequestKeyRef.current = requestKey
+    }, [requestKey])
+
+    useEffect(() => {
+        cancelPhotoOperation()
+    }, [cancelPhotoOperation, requestKey])
+
+    useEffect(() => () => cancelPhotoOperation(), [cancelPhotoOperation])
+
+    useEffect(() => {
+        if (facetState.loading || facetState.error || !activeFacet || requestedValue === activeFacet.id) return
+        setSearchParams({ [config.queryParam]: activeFacet.id }, { replace: true })
+    }, [activeFacet, config.queryParam, facetState.error, facetState.loading, requestedValue, setSearchParams])
+
+    const commitPage = useCallback((key, next, scrollY = window.scrollY) => {
+        pageStateRef.current = next
+        setPageState(next)
+        writeExploreBrowseState(key, {
+            items: next.items,
+            total: next.total,
+            nextCursor: next.nextCursor,
+            seed: next.seed,
+            scrollY,
+        })
+    }, [])
+
+    useEffect(() => {
+        let disposed = false
+        let effectOperation = null
+        const loadPage = async () => {
+            await Promise.resolve()
+            if (disposed || !requestKey || facetState.loading || facetState.error) return
+            const snapshot = readExploreBrowseState(requestKey)
+            if (snapshot) {
+                const restored = {
+                    key: requestKey,
+                    items: snapshot.items,
+                    total: snapshot.total ?? activeFacet.photos,
+                    nextCursor: snapshot.nextCursor,
+                    seed: snapshot.seed,
+                    error: '',
+                }
+                pageStateRef.current = restored
+                setPageState(restored)
+                restoreRef.current = { key: requestKey, scrollY: snapshot.scrollY }
+                if (!snapshot.stale) return
+            }
+
+            if (!snapshot && facetState.initialPage?.value === value) {
+                commitPage(requestKey, {
+                    key: requestKey,
+                    items: facetState.initialPage.items,
+                    total: activeFacet.photos,
+                    nextCursor: facetState.initialPage.nextCursor,
+                    seed: facetState.initialPage.seed || '',
+                    error: '',
+                })
+                return
+            }
+
+            const seed = snapshot?.seed || createExploreSeed()
+            const operation = beginPhotoOperation()
+            effectOperation = operation
+            try {
+                const page = await fetchExplorePhotos(
+                    { mode, value, limit: PAGE_SIZE, seed },
+                    { signal: operation.controller.signal },
+                )
+                if (disposed || !photoOperationIsCurrent(operation, requestKey)) return
+                const current = pageStateRef.current
+                const cachedTail = current.key === requestKey ? current.items.slice(page.items.length) : []
+                const known = new Set(page.items.map(item => `${item.albumId}:${mediaId(item)}`))
+                const merged = page.items.concat(cachedTail.filter(item => !known.has(`${item.albumId}:${mediaId(item)}`)))
+                commitPage(requestKey, {
+                    key: requestKey,
+                    items: merged,
+                    total: activeFacet.photos,
+                    nextCursor: cachedTail.length ? current.nextCursor : page.nextCursor,
+                    seed: page.seed || seed,
+                    error: '',
+                })
+            } catch (error) {
+                if (error?.name === 'AbortError' || disposed || !photoOperationIsCurrent(operation, requestKey)) return
+                const current = pageStateRef.current
+                pageStateRef.current = current.key === requestKey
+                    ? { ...current, error: error?.message || 'Photographs could not be refreshed.' }
+                    : {
+                        key: requestKey,
+                        items: [],
+                        total: activeFacet.photos,
+                        nextCursor: null,
+                        seed,
+                        error: error?.message || 'Explore photos could not be loaded.',
+                    }
+                setPageState(pageStateRef.current)
+            }
+        }
+        void loadPage()
+        return () => {
+            disposed = true
+            if (effectOperation && photoOperationIsCurrent(effectOperation, requestKey)) {
+                cancelPhotoOperation()
+            }
+        }
+    }, [
+        activeFacet, beginPhotoOperation, cancelPhotoOperation, commitPage, facetState.error,
+        facetState.initialPage, facetState.loading, mode, photoOperationIsCurrent, requestKey, value,
+    ])
+
+    useEffect(() => {
+        if (!requestKey) return undefined
+        const save = () => saveExploreBrowseScroll(requestKey, window.scrollY)
+        window.addEventListener('pagehide', save)
+        return () => {
+            window.removeEventListener('pagehide', save)
+            save()
+        }
+    }, [requestKey])
+
+    useEffect(() => {
+        const restore = restoreRef.current
+        if (!restore || restore.key !== requestKey || !items.length) return undefined
+        restoreRef.current = null
+        let secondFrame = 0
+        const firstFrame = window.requestAnimationFrame(() => {
+            secondFrame = window.requestAnimationFrame(() => {
+                try { window.scrollTo({ top: restore.scrollY, left: 0, behavior: 'instant' }) } catch { /* optional */ }
+            })
+        })
+        return () => {
+            window.cancelAnimationFrame(firstFrame)
+            if (secondFrame) window.cancelAnimationFrame(secondFrame)
+        }
+    }, [items.length, requestKey])
+
+    const chooseFacet = nextValue => {
+        if (nextValue === value) return
+        cancelPhotoOperation()
+        setLoadingMoreKey('')
+        setReshufflingKey('')
+        setSearchParams({ [config.queryParam]: nextValue })
+        setLightboxIndex(null)
+    }
+
+    const openLightbox = useCallback(index => {
+        setLightboxRequestKey(requestKey)
+        setLightboxIndex(index)
+    }, [requestKey])
+
+    const loadMore = useCallback(async () => {
+        if (!nextCursor || loadingMore || reshuffling || loading || !value) return
+        const operation = beginPhotoOperation()
+        setLoadingMoreKey(requestKey)
+        setReshufflingKey('')
+        try {
+            const page = await fetchExplorePhotos(
+                { mode, value, limit: PAGE_SIZE, cursor: nextCursor },
+                { signal: operation.controller.signal },
+            )
+            if (!photoOperationIsCurrent(operation, requestKey)) return
+            const current = pageStateRef.current
+            const known = new Set(current.items.map(item => `${item.albumId}:${mediaId(item)}`))
+            commitPage(requestKey, {
+                ...current,
+                items: current.items.concat(page.items.filter(item => !known.has(`${item.albumId}:${mediaId(item)}`))),
+                nextCursor: page.nextCursor,
+                seed: current.seed || page.seed || '',
+                error: '',
+            })
+        } catch (error) {
+            if (error?.name === 'AbortError' || !photoOperationIsCurrent(operation, requestKey)) return
+            const current = pageStateRef.current
+            if (current.key === requestKey) {
+                pageStateRef.current = { ...current, error: error?.message || 'More photos could not be loaded.' }
+                setPageState(pageStateRef.current)
+            }
+        } finally {
+            if (photoOperationIsCurrent(operation, requestKey)) setLoadingMoreKey('')
+        }
+    }, [
+        beginPhotoOperation, commitPage, loading, loadingMore, mode, nextCursor,
+        photoOperationIsCurrent, requestKey, reshuffling, value,
+    ])
+
+    const reshuffle = useCallback(async () => {
+        if (!value || reshuffling || loadingMore || loading) return
+        const seed = createExploreSeed()
+        const operation = beginPhotoOperation()
+        setReshufflingKey(requestKey)
+        setLoadingMoreKey('')
+        setLightboxIndex(null)
+        try {
+            const page = await fetchExplorePhotos(
+                { mode, value, limit: PAGE_SIZE, seed },
+                { signal: operation.controller.signal },
+            )
+            if (!photoOperationIsCurrent(operation, requestKey)) return
+            commitPage(requestKey, {
+                key: requestKey,
+                items: page.items,
+                total: activeFacet.photos,
+                nextCursor: page.nextCursor,
+                seed: page.seed || seed,
+                error: '',
+            })
+        } catch (error) {
+            if (error?.name === 'AbortError' || !photoOperationIsCurrent(operation, requestKey)) return
+            const current = pageStateRef.current
+            if (current.key === requestKey) {
+                pageStateRef.current = { ...current, error: error?.message || 'A new shuffle could not be loaded.' }
+                setPageState(pageStateRef.current)
+            }
+        } finally {
+            if (photoOperationIsCurrent(operation, requestKey)) setReshufflingKey('')
+        }
+    }, [
+        activeFacet, beginPhotoOperation, commitPage, loading, loadingMore, mode,
+        photoOperationIsCurrent, requestKey, reshuffling, value,
+    ])
+
+    return (
+        <div className="explore-page animate-fade-in pt-[74px]">
+            <ExploreHeader title={config.title} detail={config.detail} />
+            <section className="explore-content max-w-7xl mx-auto px-6 pb-20 md:pb-28">
+                <ExploreBackLink />
+                <section className="explore-filter-panel" aria-labelledby="explore-temporal-filter-title">
+                    <div>
+                        <span>{mode === 'time' ? '05' : '06'}</span>
+                        <h2 id="explore-temporal-filter-title">Choose a {config.prompt}</h2>
+                    </div>
+                    {facetState.loading && <p className="explore-facet-status" role="status">Reading capture metadata…</p>}
+                    {facetState.error && <p className="explore-error explore-facet-error" role="alert">{facetState.error}</p>}
+                    {!facetState.loading && !facetState.error && (
+                        <div className={`explore-temporal-options explore-temporal-options--${mode}`}>
+                            {facetState.items.map(option => (
+                                <button
+                                    type="button"
+                                    key={option.id}
+                                    className={value === option.id ? 'is-active' : ''}
+                                    aria-pressed={value === option.id}
+                                    disabled={option.photos === 0}
+                                    onClick={() => chooseFacet(option.id)}
+                                >
+                                    <i aria-hidden="true" />
+                                    <span><strong>{option.label}</strong><small>{option.detail}</small></span>
+                                    <b>{option.photos}</b>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </section>
+
+                {activeFacet && (
+                    <div className="explore-results-heading" aria-live="polite">
+                        <div>
+                            <p><strong>{activeFacet.photos}</strong> {activeFacet.photos === 1 ? 'photograph' : 'photographs'}</p>
+                            <span>{activeFacet.label}</span>
+                        </div>
+                        <ExploreShuffleButton
+                            label={`${activeFacet.label} photographs`}
+                            loading={reshuffling}
+                            disabled={loadingMore || loading}
+                            onClick={reshuffle}
+                        />
+                    </div>
+                )}
+                {loading && <div className="explore-loading" role="status">Finding photographs…</div>}
+                {resultError && <p className="explore-error" role="alert">{resultError}</p>}
+                {!facetState.loading && !facetState.error && !activeFacet && (
+                    <div className="explore-empty"><h2>No dated photographs yet</h2><p>Photos without trustworthy capture dates are intentionally omitted.</p></div>
+                )}
+                {!loading && activeFacet && items.length === 0 && !resultError && (
+                    <div className="explore-empty"><h2>No photographs found</h2><p>Choose another option and try again.</p></div>
+                )}
+                {items.length > 0 && (
+                    <div className="explore-grid">
+                        {items.map((item, index) => (
+                            <ExploreCard
+                                key={`${item.albumId}:${mediaId(item)}`}
+                                item={item}
+                                index={index}
+                                mode={mode}
+                                onOpen={openLightbox}
+                            />
+                        ))}
+                    </div>
+                )}
+                {nextCursor && (
+                    <button type="button" className="explore-load-more" onClick={loadMore} disabled={loadingMore || reshuffling}>
+                        {loadingMore ? 'Loading…' : 'Show more'}
+                    </button>
+                )}
+            </section>
+            <ExploreSampleLightbox
+                images={items}
+                index={lightboxRequestKey === requestKey ? lightboxIndex : null}
+                setIndex={setLightboxIndex}
+                ariaLabel={`Photographs in ${config.title}`}
+            />
         </div>
     )
 }
@@ -927,11 +1386,14 @@ function SettingsGameBoard({ images }) {
 }
 
 export default function Explore() {
-    const { pathname } = useLocation()
+    const location = useLocation()
+    const { pathname } = location
     if (pathname === '/explore/immersive-gallery') return <ImmersiveGallery />
     if (pathname === '/explore/colors') return <ExploreModule mode="color" />
     if (pathname === '/explore/lenses') return <ExploreModule mode="lens" />
     if (pathname === '/explore/exposure') return <ExposureExplorer />
+    if (pathname === '/explore/time-of-day') return <TemporalExplorer key={location.key} mode="time" />
+    if (pathname === '/explore/seasons') return <TemporalExplorer key={location.key} mode="season" />
     if (pathname === '/explore/guess-settings') return <GuessSettingsGame />
     return <ExploreLanding />
 }

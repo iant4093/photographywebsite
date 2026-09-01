@@ -14,6 +14,7 @@ from explore_index import (
     ready_marker,
     sync_album_index,
     sync_metadata_index,
+    temporal_ready_marker,
 )
 
 
@@ -31,6 +32,9 @@ def metadata(**changes):
         "lens": "Sigma 18-50mm F2.8",
         "lensKey": "sigma 18-50mm f2.8",
         "exposureBuckets": ["aperture:middle", "shutter:handheld", "iso:clean", "focal:normal"],
+        "temporalVersion": 1,
+        "timeOfDayBucket": "morning",
+        "seasonBucket": "autumn",
     }
     record.update(changes)
     return record
@@ -68,20 +72,22 @@ class ExploreIndexTests(unittest.TestCase):
         facets = metadata_facets(record)
         self.assertEqual(set(facets.values()), {
             "blue", "Sigma 18-50mm F2.8", "aperture:middle",
-            "shutter:handheld", "iso:clean", "focal:normal",
+            "shutter:handheld", "iso:clean", "focal:normal", "morning", "autumn",
         })
         self.assertEqual(index_sort_key(ALBUM_ID, MEDIA_ID), index_sort_key(ALBUM_ID, MEDIA_ID))
         self.assertTrue(index_sort_key(ALBUM_ID, MEDIA_ID).endswith(f"#{ALBUM_ID}#{MEDIA_ID}"))
 
     def test_public_records_include_sparse_entries_and_one_lens_definition(self):
         records = desired_index_records(metadata(), public=True)
-        self.assertEqual(sum(item["recordType"] == INDEX_RECORD_TYPE for item in records), 7)
+        self.assertEqual(sum(item["recordType"] == INDEX_RECORD_TYPE for item in records), 9)
         definitions = [item for item in records if item["recordType"] == FACET_RECORD_TYPE]
         self.assertEqual(len(definitions), 1)
         self.assertEqual(definitions[0]["name"], "Sigma 18-50mm F2.8")
         self.assertEqual(desired_index_records(metadata(), public=False), [])
         self.assertEqual(ready_marker()["mediaId"], "READY")
         self.assertEqual(exposure_ready_marker()["mediaId"], "EXPOSURE_READY")
+        self.assertEqual(temporal_ready_marker()["mediaId"], "TEMPORAL_READY")
+        self.assertEqual(temporal_ready_marker()["temporalVersion"], 1)
 
     def test_sync_removes_old_entries_and_writes_current_records(self):
         table = Table()
@@ -90,10 +96,10 @@ class ExploreIndexTests(unittest.TestCase):
         sync_metadata_index(table, previous, current, public=True)
 
         deleted_partitions = {item["albumId"] for item in table.batch.deletes}
-        self.assertEqual(deleted_partitions, {
-            facet_partition("color", "red"),
-            facet_partition("lens", "old lens"),
-        })
+        self.assertIn(facet_partition("color", "red"), deleted_partitions)
+        self.assertIn(facet_partition("lens", "old lens"), deleted_partitions)
+        self.assertNotIn(facet_partition("time", "morning"), deleted_partitions)
+        self.assertNotIn(facet_partition("season", "autumn"), deleted_partitions)
         self.assertEqual(
             {item["albumId"] for item in table.batch.puts if item["recordType"] == INDEX_RECORD_TYPE},
             {
@@ -102,14 +108,40 @@ class ExploreIndexTests(unittest.TestCase):
                 facet_partition("exposure", "shutter:handheld"),
                 facet_partition("exposure", "iso:clean"),
                 facet_partition("exposure", "focal:normal"),
+                facet_partition("time", "morning"),
+                facet_partition("season", "autumn"),
             },
         )
-        self.assertEqual(len(index_entry_keys(current)), 6)
+        self.assertEqual(len(index_entry_keys(current)), 15)
 
     def test_legacy_metadata_probes_every_exposure_partition_for_safe_cleanup(self):
         record = metadata()
         record.pop("exposureBuckets")
-        self.assertEqual(len(index_entry_keys(record)), 15)
+        self.assertEqual(len(index_entry_keys(record)), 24)
+
+    def test_missing_temporal_metadata_probes_every_fixed_partition_for_safe_cleanup(self):
+        record = metadata()
+        record.pop("temporalVersion")
+        record.pop("timeOfDayBucket")
+        record.pop("seasonBucket")
+        keys = index_entry_keys(record)
+        temporal = {
+            item["albumId"] for item in keys
+            if "#TIME#" in item["albumId"] or "#SEASON#" in item["albumId"]
+        }
+        self.assertEqual(len(temporal), 9)
+
+    def test_pending_metadata_still_probes_every_fixed_temporal_partition(self):
+        keys = index_entry_keys(metadata(status="pending"))
+        temporal = {
+            item["albumId"] for item in keys
+            if "#TIME#" in item["albumId"] or "#SEASON#" in item["albumId"]
+        }
+        self.assertEqual(len(temporal), 9)
+        self.assertFalse(any(
+            "#TIME#" in key or "#SEASON#" in key
+            for key in metadata_facets(metadata(seasonBucket=""))
+        ))
 
     def test_album_visibility_sync_derives_exposure_buckets_from_the_manifest(self):
         table = Table()

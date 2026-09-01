@@ -4,6 +4,7 @@ import hashlib
 import pathlib
 import sys
 import unittest
+from unittest.mock import Mock, patch
 
 
 OPS_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -68,10 +69,28 @@ class ExploreBackfillTests(unittest.TestCase):
             colorFamilies=["blue"],
             lens="Test Lens",
             lensKey="test lens",
+            exposureBuckets=[],
+            temporalVersion=1,
+            timeOfDayBucket="morning",
+            seasonBucket="autumn",
         )
         jobs, counts = explore.build_explore_plan([album()], [complete])
         self.assertEqual(jobs, [])
         self.assertEqual(counts["alreadyCompleteCount"], 1)
+
+        partial_temporal = metadata(
+            exploreVersion=2,
+            palette=["#112233"],
+            colorFamilies=["blue"],
+            lens="Test Lens",
+            lensKey="test lens",
+            exposureBuckets=[],
+            temporalVersion=1,
+            timeOfDayBucket="morning",
+            seasonBucket="",
+        )
+        jobs, _ = explore.build_explore_plan([album()], [partial_temporal])
+        self.assertEqual(len(jobs), 1)
 
         malformed = metadata(
             exploreVersion=2,
@@ -104,6 +123,38 @@ class ExploreBackfillTests(unittest.TestCase):
         jobs = [{"albumId": ALBUM_ID, "rawKey": RAW_KEY, "previewVersion": 3}]
         self.assertEqual(explore.plan_digest(jobs), explore.plan_digest(list(jobs)))
         self.assertNotEqual(explore.plan_digest(jobs), explore.plan_digest([]))
+
+    def test_main_binds_apply_to_account_count_and_digest_before_dispatch(self):
+        jobs = [{"albumId": ALBUM_ID, "rawKey": RAW_KEY, "previewVersion": 3}]
+        base_args = [
+            "backfill_explore_metadata.py",
+            "--stack-name", "ian-website",
+            "--apply",
+            "--confirm-stack-name", "ian-website",
+            "--confirm", explore.CONFIRMATION,
+            "--expected-plan-digest", "reviewed-digest",
+        ]
+        dispatch = Mock(return_value=1)
+        with patch.object(explore, "aws_json", return_value={"Account": "123456789012"}), patch.object(
+            explore, "stack_resource", return_value="resource"
+        ), patch.object(explore, "scan_all", return_value=[]), patch.object(
+            explore, "build_explore_plan", return_value=(jobs, {"plannedJobCount": 1})
+        ), patch.object(explore, "plan_digest", return_value="reviewed-digest"), patch.object(
+            explore, "dispatch_jobs", dispatch
+        ):
+            with patch.object(sys, "argv", base_args + [
+                "--expected-account-id", "000000000000", "--expected-job-count", "1",
+            ]), self.assertRaisesRegex(SystemExit, "account-id"):
+                explore.main()
+            with patch.object(sys, "argv", base_args + [
+                "--expected-account-id", "123456789012", "--expected-job-count", "2",
+            ]), self.assertRaisesRegex(SystemExit, "job-count"):
+                explore.main()
+            with patch.object(sys, "argv", base_args + [
+                "--expected-account-id", "123456789012", "--expected-job-count", "1",
+            ]):
+                self.assertEqual(explore.main(), 0)
+        dispatch.assert_called_once()
 
 
 if __name__ == "__main__":
