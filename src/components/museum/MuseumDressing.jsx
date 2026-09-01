@@ -534,7 +534,6 @@ function InstancedWallSconces({ placements }) {
     const bases = useRef(null)
     const shades = useRef(null)
     const bulbs = useRef(null)
-    const halos = useRef(null)
 
     useEffect(() => {
         const matrix = new THREE.Matrix4()
@@ -560,12 +559,8 @@ function InstancedWallSconces({ placements }) {
             matrix.compose(position.set(x - (side * 0.39), 3.76, z), rotation, scale.set(0.11, 0.11, 0.11))
             bulbs.current?.setMatrixAt(index, matrix)
             scale.set(1, 1, 1)
-            rotation.setFromEuler(new THREE.Euler(0, side < 0 ? Math.PI / 2 : -Math.PI / 2, 0))
-            matrix.compose(position.set(x - (side * 0.026), 3.72, z), rotation, scale.set(0.78, 0.78, 0.78))
-            halos.current?.setMatrixAt(index, matrix)
-            scale.set(1, 1, 1)
         })
-        for (const mesh of [plates.current, arms.current, bases.current, shades.current, bulbs.current, halos.current]) {
+        for (const mesh of [plates.current, arms.current, bases.current, shades.current, bulbs.current]) {
             if (!mesh) continue
             mesh.instanceMatrix.needsUpdate = true
             mesh.computeBoundingSphere?.()
@@ -574,34 +569,28 @@ function InstancedWallSconces({ placements }) {
 
     return (
         <>
-            <instancedMesh ref={halos} args={[undefined, undefined, placements.length]} renderOrder={3}>
-                <circleGeometry args={[0.62, 20]} />
-                <meshBasicMaterial
-                    color="#f1b968"
-                    transparent
-                    opacity={0.12}
-                    depthWrite={false}
-                    blending={THREE.AdditiveBlending}
-                    toneMapped={false}
-                />
-            </instancedMesh>
-            <instancedMesh ref={plates} args={[undefined, undefined, placements.length]} castShadow>
+            {/* The baked wall irradiance already supplies the warm light pool.
+                Removing the transparent halo avoids a sorting/fog threshold
+                that made a large tan disc appear only at close range. These
+                tiny fixture batches stay uncullable so every physical part is
+                present from the full length of the corridor. */}
+            <instancedMesh ref={plates} args={[undefined, undefined, placements.length]} castShadow frustumCulled={false}>
                 <cylinderGeometry args={[0.22, 0.22, 0.09, 14]} />
                 <meshPhysicalMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} clearcoat={0.22} />
             </instancedMesh>
-            <instancedMesh ref={arms} args={[undefined, undefined, placements.length]} castShadow>
+            <instancedMesh ref={arms} args={[undefined, undefined, placements.length]} castShadow frustumCulled={false}>
                 <boxGeometry args={[1, 1, 1]} />
                 <meshPhysicalMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} clearcoat={0.2} />
             </instancedMesh>
-            <instancedMesh ref={bases} args={[undefined, undefined, placements.length]} castShadow>
+            <instancedMesh ref={bases} args={[undefined, undefined, placements.length]} castShadow frustumCulled={false}>
                 <cylinderGeometry args={[0.15, 0.19, 0.2, 12]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.76} roughness={0.28} />
             </instancedMesh>
-            <instancedMesh ref={shades} args={[undefined, undefined, placements.length]}>
+            <instancedMesh ref={shades} args={[undefined, undefined, placements.length]} frustumCulled={false}>
                 <cylinderGeometry args={[0.29, 0.18, 0.42, 14, 1, true]} />
                 <meshPhysicalMaterial color="#f3dfbd" emissive="#d99d51" emissiveIntensity={0.7} transparent opacity={0.84} roughness={0.45} side={THREE.DoubleSide} />
             </instancedMesh>
-            <instancedMesh ref={bulbs} args={[undefined, undefined, placements.length]} renderOrder={4}>
+            <instancedMesh ref={bulbs} args={[undefined, undefined, placements.length]} renderOrder={4} frustumCulled={false}>
                 <sphereGeometry args={[1, 12, 8]} />
                 <meshBasicMaterial color="#ffd49b" toneMapped={false} />
             </instancedMesh>

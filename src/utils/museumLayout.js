@@ -3,6 +3,7 @@ import { sortGalleryAlbums, sortGalleryCategories } from './galleryOrder'
 export const MUSEUM_DIMENSIONS = Object.freeze({
     hallHalfWidth: 4.8,
     hallHeight: 7.4,
+    hallWallThickness: 0.32,
     doorwayWidth: 4.6,
     lobbyFrontZ: 14,
     firstBayZ: -7,
@@ -186,6 +187,35 @@ export function buildMuseumLayout(categories = []) {
         hallPlants,
         stanchions,
     }
+    const roomByBayAndSide = new Map(rooms.map(room => [`${room.bay}:${room.side}`, room]))
+    const archRadius = MUSEUM_DIMENSIONS.doorwayWidth / 2
+    const halfBay = MUSEUM_DIMENSIONS.baySpacing / 2
+    const doorPanelOffset = (archRadius + halfBay) / 2
+    const doorPanelDepth = (halfBay - archRadius - 0.7) + 0.02
+    const hallArchitectureObstacles = Array.from({ length: bayCount }, (_, bay) => {
+        const centerZ = MUSEUM_DIMENSIONS.firstBayZ - (bay * MUSEUM_DIMENSIONS.baySpacing)
+        return [-1, 1].flatMap((side) => {
+            const room = roomByBayAndSide.get(`${bay}:${side}`)
+            if (!room) {
+                // FarDoorWall uses one shallow raised slab across an empty side
+                // of an odd final bay. Its visible bounds are x 4.579–4.649 and
+                // z 15.66m; model that exact projection in the planar solver.
+                return [{
+                    kind: 'hall-far-wall-panel',
+                    position: [side * 4.614, 1.35, centerZ],
+                    size: [0.07, 2.12, MUSEUM_DIMENSIONS.baySpacing - 0.84],
+                }]
+            }
+            // DoorWall's nested panel layers occupy x 4.496–4.650. A single
+            // collider around their union keeps the visitor capsule outside
+            // the visible moulding while preserving the full arched doorway.
+            return [-1, 1].map(direction => ({
+                kind: 'hall-door-wall-panel',
+                position: [side * 4.573, 1.42, centerZ + (direction * doorPanelOffset)],
+                size: [0.154, 2.84, doorPanelDepth],
+            }))
+        })
+    }).flat()
     const obstacles = [
         {
             position: [0, 0.69, 6.4],
@@ -193,6 +223,7 @@ export function buildMuseumLayout(categories = []) {
         },
         ...dressing.lobbyPlants,
         ...dressing.hallPlants,
+        ...hallArchitectureObstacles,
         ...rooms.flatMap(room => [
             ...room.benches,
             ...room.plants,
@@ -385,10 +416,11 @@ export function museumEndWallPlacardPose(room = {}) {
     }
 }
 
-export function museumRoomGateOpen({ active = false, requested = false, baseReady = false } = {}) {
-    // Preparing the two rooms nearest the visitor is an I/O concern. Only the
-    // singular room they actually approach may animate and become passable.
-    return Boolean(active && requested && baseReady)
+export function museumRoomGateOpen({ active = false, requested = false } = {}) {
+    // Artwork streaming is an I/O concern, not a physical lock. The room shell
+    // and blurhash/colour placeholders are already resident, so the singular
+    // approached curtain may animate immediately while compact covers finish.
+    return Boolean(active && requested)
 }
 
 export function museumArtworkDetailWidth(distance, {
@@ -398,7 +430,7 @@ export function museumArtworkDetailWidth(distance, {
 } = {}) {
     const numericDistance = Number(distance)
     if (!Number.isFinite(numericDistance) || numericDistance < 0) return 0
-    if (focused && numericDistance <= 4.2) {
+    if (focused && numericDistance <= 6.2) {
         return Number(inspectionWidth) >= 1440 ? 1440 : 960
     }
     // A three-metre release band prevents a painting at the boundary from

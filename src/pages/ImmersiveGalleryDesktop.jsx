@@ -51,7 +51,7 @@ const GOLD = '#9b7747'
 const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
 const WALLPAPER_TILE_SIZE = 3.4
-const HALL_WALL_THICKNESS = 0.32
+const HALL_WALL_THICKNESS = MUSEUM_DIMENSIONS.hallWallThickness
 const ROOM_SHELL_INSET = 0.42
 const EMPTY_FIXTURES = Object.freeze([])
 const ARCHITECTURAL_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 2, 0.045)
@@ -63,12 +63,13 @@ const MUSEUM_ARTWORK_PLANE_GEOMETRY = new THREE.PlaneGeometry(2.66, 1.76)
 // can create multi-frame stalls. Keep every authored frame photographic at a
 // compact base tier, then selectively sharpen what the visitor can inspect.
 const DEFAULT_COVER_LOAD_CONCURRENCY = 2
-const BASE_COVER_WIDTH = 256
+const BASE_COVER_WIDTH = 320
 const NEAR_COVER_WIDTH = 640
 const LOW_POWER_INSPECTION_COVER_WIDTH = 960
 const INSPECTION_COVER_WIDTH = 1440
 const COVER_FRAME_ASPECT = 2.66 / 1.76
 const MAX_NEAR_COVERS = 6
+const MAX_ANTICIPATORY_BASE_COVERS = 76
 const MUSEUM_MOVEMENT_KEYS = new Set([
     'KeyW', 'KeyA', 'KeyS', 'KeyD',
     'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
@@ -78,7 +79,7 @@ const INTERACTION_SAFE_COVER_PRIORITY = 9000
 const DESKTOP_COVER_CACHE_BUDGET = 48 * 1024 * 1024
 const LOW_POWER_COVER_CACHE_BUDGET = 30 * 1024 * 1024
 const DESKTOP_COVER_CACHE_ENTRIES = 104
-const LOW_POWER_COVER_CACHE_ENTRIES = 72
+const LOW_POWER_COVER_CACHE_ENTRIES = 88
 const coverTextureCache = new Map()
 const coverTextureLoads = new Map()
 const coverTextureReferences = new Map()
@@ -1598,12 +1599,13 @@ async function optimizedCoverUrls(album, targetWidth = 960) {
     const generatedPreviews = (targetWidth <= BASE_COVER_WIDTH ? previews.slice(0, 1) : previews)
         .map(candidate => candidate.url)
     return [...new Set((targetWidth <= BASE_COVER_WIDTH ? [
-        // The canonical thumbnail is guaranteed for legacy albums. Keep it
-        // ahead of speculative generated previews so a missing preview cannot
-        // hold up the room's complete base layer.
+        // Current albums share the immutable 640px response with their near
+        // tier, so the compact base resize usually costs no second download.
+        // Legacy thumbnails remain the guaranteed fallback when a generated
+        // preview is unavailable.
+        ...generatedPreviews,
         canonicalCover,
         album.coverThumbnailUrl,
-        ...generatedPreviews,
         album.coverImageUrl,
     ] : [
         ...generatedPreviews,
@@ -2458,6 +2460,7 @@ function RoomCeilingPracticalLights({ fixtureXs, fixtureCeilingY, room, qualityL
 function BasePainting({ painting, active, priority, onTextureReady, onTexturePending, readinessVersion = 0 }) {
     const [baseFailed, setBaseFailed] = useState(false)
     const markBaseFailed = useCallback(() => setBaseFailed(true), [])
+    const baseMaterial = useRef(null)
     const baseTexture = useCoverTexture(
         painting.album,
         active ? BASE_COVER_WIDTH : 0,
@@ -2479,6 +2482,22 @@ function BasePainting({ painting, active, priority, onTextureReady, onTexturePen
         reportedReadiness.current = readinessKey
         onTextureReady?.(painting.id)
     }, [active, displayedBaseTexture, onTexturePending, onTextureReady, painting.id, readinessVersion])
+    useLayoutEffect(() => {
+        if (!displayedBaseTexture || !baseMaterial.current) return
+        // The merged blurhash/colour placeholder remains directly behind every
+        // frame, so a late compact cover can resolve as a short photographic
+        // sharpen instead of visibly popping onto the wall.
+        baseMaterial.current.opacity = 0
+        requestMuseumFrames(3)
+    }, [displayedBaseTexture])
+    useFrame((_, delta) => {
+        if (!displayedBaseTexture || !baseMaterial.current || baseMaterial.current.opacity >= 1) return
+        baseMaterial.current.opacity = Math.min(
+            1,
+            baseMaterial.current.opacity + (Math.min(delta, 0.05) * 4),
+        )
+        requestMuseumFrames(2)
+    })
 
     return (
         <group
@@ -2490,9 +2509,13 @@ function BasePainting({ painting, active, priority, onTextureReady, onTexturePen
             <mesh visible={Boolean(displayedBaseTexture)} position={[0, 0, 0.181]} renderOrder={3}>
                 <primitive object={MUSEUM_ARTWORK_PLANE_GEOMETRY} attach="geometry" />
                 <meshBasicMaterial
+                    ref={baseMaterial}
                     map={displayedBaseTexture}
                     color="#ffffff"
                     toneMapped={false}
+                    transparent
+                    depthWrite={false}
+                    opacity={0}
                 />
             </mesh>
         </group>
@@ -2502,12 +2525,23 @@ function BasePainting({ painting, active, priority, onTextureReady, onTexturePen
 function DetailPainting({ painting, targetWidth }) {
     const detailTexture = useCoverTexture(painting.album, targetWidth, targetWidth)
     const detailMaterial = useRef(null)
+    const hasDisplayedDetail = useRef(false)
     const loadedWidth = Number(detailTexture?.userData?.museumTargetWidth) || 0
     const displayTexture = loadedWidth > BASE_COVER_WIDTH ? detailTexture : null
 
     useLayoutEffect(() => {
-        if (!displayTexture || !detailMaterial.current) return
-        detailMaterial.current.opacity = 0
+        if (!displayTexture) {
+            hasDisplayedDetail.current = false
+            return
+        }
+        if (!detailMaterial.current) return
+        // Only fade the first promoted preview over the compact room cover.
+        // When a 640px preview upgrades to 1440px, preserve the existing opaque
+        // layer and swap its aligned texture in place. Resetting opacity here
+        // exposed the compact base again and made the quality change look like
+        // an obvious blur/flash even though the sharper texture was ready.
+        detailMaterial.current.opacity = hasDisplayedDetail.current ? 1 : 0
+        hasDisplayedDetail.current = true
         requestMuseumFrames(3)
     }, [displayTexture])
     useEffect(() => {
@@ -2529,7 +2563,7 @@ function DetailPainting({ painting, targetWidth }) {
         if (!displayTexture || !detailMaterial.current || detailMaterial.current.opacity >= 1) return
         detailMaterial.current.opacity = Math.min(
             1,
-            detailMaterial.current.opacity + (Math.min(delta, 0.05) * 1.8),
+            detailMaterial.current.opacity + (Math.min(delta, 0.05) * 4),
         )
         requestMuseumFrames(2)
     })
@@ -2612,18 +2646,18 @@ function CameraAwareRoomPaintings({ room, paintings = room.paintings, active, fo
             .sort((left, right) => left.distance - right.distance)
 
         const focusCandidate = candidates.find(({ distance, facing }) => (
-            distance < 3.4 && facing > 0.72
+            distance < 5.2 && facing > 0.68
         ))
         const focus = detailFocus.current
         if (focusCandidate?.painting.id !== focus.candidateId) {
             focus.candidateId = focusCandidate?.painting.id || null
             focus.since = state.clock.elapsedTime
         }
-        if (focusCandidate && state.clock.elapsedTime - focus.since >= 0.64) {
+        if (focusCandidate && state.clock.elapsedTime - focus.since >= 0.48) {
             focus.inspectionId = focusCandidate.painting.id
         }
         const retainedInspection = candidates.find(({ painting, distance, facing }) => (
-            painting.id === focus.inspectionId && distance <= 4.2 && facing > 0.55
+            painting.id === focus.inspectionId && distance <= 6.2 && facing > 0.5
         ))
         if (!retainedInspection) {
             focus.inspectionId = null
@@ -3516,7 +3550,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
     const interiorResident = retainMuseumRoomPresentation(active, gateClosed)
     const baseReadyCount = baseReady ? roomPaintingIds.size : 0
     const roomReady = active && baseReady
-    const gateOpen = museumRoomGateOpen({ active, requested: gateRequested, baseReady })
+    const gateOpen = museumRoomGateOpen({ active, requested: gateRequested })
     const publishBaseReady = useCallback((nextReady) => {
         if (baseReadyRef.current === nextReady) return
         baseReadyRef.current = nextReady
@@ -3726,7 +3760,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
                 materials={materials}
             />
             <RoomPlaqueBatch paintings={presentationPaintings} />
-            <RoomPlaceholderBatch paintings={presentationPaintings} visible={!baseReady} />
+            <RoomPlaceholderBatch paintings={presentationPaintings} />
             <InstancedPictureLights paintings={presentationPaintings} />
             <CameraAwareRoomPaintings
                 room={room}
@@ -4608,7 +4642,7 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, onRendererSt
         const warmAlbums = [...new Map(
             initialRooms
                 // The first prepared bay is fully photographic before the veil
-                // lifts. These compact 256px assets replace the former set of
+                // lifts. These compact 320px assets replace the former set of
                 // larger uploads that continued into the visitor's first walk.
                 .flatMap(room => room.paintings.map(painting => painting.album))
                 .filter(Boolean)
@@ -4739,6 +4773,7 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, onRendererSt
 }
 
 function AnticipatoryRoomPreloader({ layout, activeRoomId, activeRoomIds, enabled }) {
+    const { gl } = useThree()
     useEffect(() => {
         if (!enabled || !layout.rooms.length || navigator.connection?.saveData) return undefined
 
@@ -4747,7 +4782,16 @@ function AnticipatoryRoomPreloader({ layout, activeRoomId, activeRoomIds, enable
         const currentRoom = layout.rooms.find(room => room.id === activeRoomId)
             || layout.rooms.find(room => (activeRoomIds || []).includes(room.id))
             || layout.rooms[0]
-        const candidateRooms = prioritizeMuseumPreloadRooms(layout.rooms, currentRoom.id, 2)
+        // Work outward from the visitor through a cache-bounded archive window.
+        // Compact bases are decoded and promoted only in quiet frames, making
+        // later curtains independent from I/O without shifting uploads back
+        // onto walking frames. The current 74-cover archive fits in one window;
+        // larger future catalogs reprioritize the nearest 76 on each room move.
+        const candidateRooms = prioritizeMuseumPreloadRooms(
+            layout.rooms,
+            currentRoom.id,
+            layout.rooms.length,
+        )
         const jobs = []
 
         candidateRooms.forEach((room, roomOffset) => {
@@ -4767,7 +4811,10 @@ function AnticipatoryRoomPreloader({ layout, activeRoomId, activeRoomIds, enable
 
         const uniqueJobs = [...new Map(
             jobs.map(job => [`${job.album.albumId}:${job.width}`, job]),
-        ).values()]
+        ).values()].slice(0, MAX_ANTICIPATORY_BASE_COVERS).filter((job) => {
+            const cached = cachedCoverTexture(job.album, job.width)
+            return !cached || !coverTextureWasUploaded(gl, cached)
+        })
         const pause = isFirefoxBrowser() ? 120 : 72
         const schedule = (callback, delay = 0) => {
             if (cancelled) return
@@ -4780,7 +4827,9 @@ function AnticipatoryRoomPreloader({ layout, activeRoomId, activeRoomIds, enable
         const runCovers = async (index = 0) => {
             if (cancelled || index >= uniqueJobs.length) return
             const job = uniqueJobs[index]
-            await createMuseumCoverTexture(job.album, job.width, job.priority).catch(() => undefined)
+            await createMuseumCoverTexture(job.album, job.width, job.priority)
+                .then(texture => enqueueCoverUpload(gl, texture, job.priority))
+                .catch(() => undefined)
             if (cancelled) return
             schedule(() => runCovers(index + 1), pause)
         }
@@ -4790,7 +4839,7 @@ function AnticipatoryRoomPreloader({ layout, activeRoomId, activeRoomIds, enable
             cancelled = true
             cancelScheduled()
         }
-    }, [activeRoomId, activeRoomIds, enabled, layout])
+    }, [activeRoomId, activeRoomIds, enabled, gl, layout])
 
     return null
 }

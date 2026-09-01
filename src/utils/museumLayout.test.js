@@ -113,6 +113,45 @@ describe('museum layout', () => {
         }
     })
 
+    it('treats raised hallway wall panels as solid without narrowing doorways', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left-a', 'Hikes'),
+            album('right-a', 'Astro'),
+        ]))
+        // Use the rear pair so the intentionally collidable hall plant on the
+        // front-left panel does not mask the architecture boundary itself.
+        const panelZ = MUSEUM_DIMENSIONS.firstBayZ
+            - (((MUSEUM_DIMENSIONS.doorwayWidth / 2) + (MUSEUM_DIMENSIONS.baySpacing / 2)) / 2)
+
+        for (const side of [-1, 1]) {
+            expect(isMuseumPositionWalkable(layout, side * 4.136, panelZ)).toBe(true)
+            expect(isMuseumPositionWalkable(layout, side * 4.156, panelZ)).toBe(false)
+            expect(isMuseumPositionWalkable(layout, side * 4.4, MUSEUM_DIMENSIONS.firstBayZ)).toBe(true)
+        }
+
+        const slid = moveMuseumPosition(
+            layout,
+            { x: 4.13, z: panelZ },
+            // 4.16 remains inside the old broad hall bound, so rejection here
+            // specifically proves the raised panel collider owns the stop.
+            { x: 0.03, z: 0.2 },
+        )
+        expect(slid.x).toBe(4.13)
+        expect(slid.z).toBeCloseTo(panelZ + 0.2)
+    })
+
+    it('treats the raised slab on an empty odd-bay wall as solid', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left-a', 'Hikes'),
+            album('right-a', 'Astro'),
+            album('left-b', 'Portraits'),
+        ]))
+        const finalBayZ = MUSEUM_DIMENSIONS.firstBayZ - MUSEUM_DIMENSIONS.baySpacing
+
+        expect(isMuseumPositionWalkable(layout, 4.219, finalBayZ)).toBe(true)
+        expect(isMuseumPositionWalkable(layout, 4.239, finalBayZ)).toBe(false)
+    })
+
     it('lets the movement controller cross every doorway in both directions', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('left-a', 'Hikes'),
@@ -434,7 +473,7 @@ describe('museum layout', () => {
 
     it('separates room preparation from the singular curtain request', () => {
         expect(museumRoomGateOpen({ active: true, requested: false, baseReady: true })).toBe(false)
-        expect(museumRoomGateOpen({ active: true, requested: true, baseReady: false })).toBe(false)
+        expect(museumRoomGateOpen({ active: true, requested: true, baseReady: false })).toBe(true)
         expect(museumRoomGateOpen({ active: false, requested: true, baseReady: true })).toBe(false)
         expect(museumRoomGateOpen({ active: true, requested: true, baseReady: true })).toBe(true)
     })
@@ -446,7 +485,9 @@ describe('museum layout', () => {
         expect(museumArtworkDetailWidth(19)).toBe(0)
         expect(museumArtworkDetailWidth(3.1, { focused: true })).toBe(1440)
         expect(museumArtworkDetailWidth(3.1, { focused: true, inspectionWidth: 960 })).toBe(960)
-        expect(museumArtworkDetailWidth(4.3, { focused: true })).toBe(640)
+        expect(museumArtworkDetailWidth(5.2, { focused: true })).toBe(1440)
+        expect(museumArtworkDetailWidth(6.3, { focused: true })).toBe(640)
+        expect(museumArtworkDetailWidth(3.1, { focused: false, currentWidth: 1440 })).toBe(640)
         expect(museumArtworkDetailWidth(12, { currentWidth: 1440 })).toBe(640)
         expect(museumArtworkDetailWidth(22, { currentWidth: 1440 })).toBe(0)
     })
