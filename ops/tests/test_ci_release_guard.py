@@ -736,7 +736,22 @@ class ReleaseDependencyTests(unittest.TestCase):
                 "GetAdminAlbumMediaFunctionRole",
                 "AWS::IAM::Role",
                 "Policies",
-            ): {"ImagesBucket.Arn"},
+            ): {"ImagesBucket.Arn", "PreviewMetadataTable.Arn"},
+            (
+                "GetAlbumFunctionRole",
+                "AWS::IAM::Role",
+                "Policies",
+            ): {"ImagesBucket.Arn", "PreviewMetadataTable.Arn"},
+            (
+                "GetSharedAlbumFunctionRole",
+                "AWS::IAM::Role",
+                "Policies",
+            ): {
+                "AlbumsTable.Arn",
+                "ImagesBucket.Arn",
+                "PreviewMetadataTable.Arn",
+                "RateLimitTable.Arn",
+            },
             (
                 "AlbumMediaBackfillFunctionContinueAlbumMediaBackfill",
                 "AWS::Events::Rule",
@@ -874,6 +889,40 @@ class ReleaseDependencyTests(unittest.TestCase):
                 release_dependencies=dependencies,
             ),
             {"Add": 0, "Modify": 6, "Total": 6},
+        )
+
+    def test_preview_stream_change_allows_only_the_observed_read_role_cascades(self):
+        dependencies = release_guard.load_release_dependencies(json.loads(
+            (ROOT / "ops/ci/release_dependencies.json").read_text(encoding="utf-8")
+        ))
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        changes = []
+        for logical_id in (
+            "GetAdminAlbumMediaFunctionRole",
+            "GetAlbumFunctionRole",
+            "GetSharedAlbumFunctionRole",
+        ):
+            item = change(
+                logical_id=logical_id,
+                resource_type="AWS::IAM::Role",
+                property_name="Policies",
+            )
+            item["ResourceChange"]["Details"][0].update({
+                "Evaluation": "Dynamic",
+                "ChangeSource": "ResourceAttribute",
+                "CausingEntity": "PreviewMetadataTable.Arn",
+            })
+            changes.append(item)
+
+        self.assertEqual(
+            release_guard.gate_change_set(
+                [{"Changes": changes}],
+                release_intent=intent,
+                release_dependencies=dependencies,
+            ),
+            {"Add": 0, "Modify": 3, "Total": 3},
         )
 
 
