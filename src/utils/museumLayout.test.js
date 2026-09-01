@@ -5,11 +5,13 @@ import {
     isMuseumPositionWalkable,
     initialMuseumRoomIds,
     MUSEUM_DIMENSIONS,
+    museumArtworkDetailWidth,
     museumArtworkLightIndex,
     museumCeilingLightPose,
+    museumEndWallPlacardPose,
     museumFloorSurface,
-    museumPictureLightPose,
     museumPlanarAxes,
+    museumRoomGateOpen,
     museumRoomCeilingFixtureXs,
     moveMuseumPosition,
     nearbyMuseumRoomIds,
@@ -397,7 +399,7 @@ describe('museum layout', () => {
         expect(retainMuseumRoomPresentation(true, false)).toBe(true)
     })
 
-    it('anchors picture and ceiling light sources to their modeled fixtures', () => {
+    it('anchors live ceiling light sources to their modeled fixtures', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('a', 'Hikes'), album('b', 'Hikes'), album('c', 'Hikes'), album('d', 'Hikes'),
             album('e', 'Hikes'), album('f', 'Hikes'), album('g', 'Hikes'), album('h', 'Hikes'),
@@ -408,18 +410,43 @@ describe('museum layout', () => {
         expect(fixtureXs).toHaveLength(4)
         expect(fixtureXs.every(x => room.paintings.some(painting => painting.position[0] === x))).toBe(true)
 
-        for (const painting of [room.paintings[0], room.paintings[1]]) {
-            const pose = museumPictureLightPose(painting)
-            expect(pose.source[1] - painting.position[1]).toBeCloseTo(1.245)
-            expect(pose.source[2] - painting.position[2]).toBeCloseTo(painting.normal[2] * 0.52)
-            expect(pose.target[2] - painting.position[2]).toBeCloseTo(painting.normal[2] * 0.04)
-        }
-
         const ceilingPose = museumCeilingLightPose(fixtureXs[1], room.centerZ, 6.09)
         expect(fixtureXs).toContain(ceilingPose.source[0])
         expect(ceilingPose.source[1]).toBeCloseTo(5.948)
         expect(ceilingPose.source[2]).toBe(room.centerZ)
         expect(ceilingPose.target).toEqual([fixtureXs[1], 0.12, room.centerZ])
+    })
+
+    it('centers the end-wall label on its backing without visible depth parallax', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left', 'Hikes'),
+            album('right', 'Portraits'),
+        ]))
+        for (const room of layout.rooms) {
+            const pose = museumEndWallPlacardPose(room)
+            expect(pose.backing[1]).toBe(3.08)
+            expect(pose.label[1]).toBe(pose.backing[1])
+            expect(pose.label[2]).toBe(pose.backing[2])
+            expect(Math.abs(pose.label[0] - pose.backing[0])).toBeCloseTo(0.035)
+            expect(pose.rotationY).toBe(room.side < 0 ? Math.PI / 2 : -Math.PI / 2)
+        }
+    })
+
+    it('separates room preparation from the singular curtain request', () => {
+        expect(museumRoomGateOpen({ active: true, requested: false, baseReady: true })).toBe(false)
+        expect(museumRoomGateOpen({ active: true, requested: true, baseReady: false })).toBe(false)
+        expect(museumRoomGateOpen({ active: false, requested: true, baseReady: true })).toBe(false)
+        expect(museumRoomGateOpen({ active: true, requested: true, baseReady: true })).toBe(true)
+    })
+
+    it('uses stable 640px and 960px detail tiers above the all-room base layer', () => {
+        expect(museumArtworkDetailWidth(30)).toBe(0)
+        expect(museumArtworkDetailWidth(17.9)).toBe(640)
+        expect(museumArtworkDetailWidth(19, { currentWidth: 640 })).toBe(640)
+        expect(museumArtworkDetailWidth(19)).toBe(0)
+        expect(museumArtworkDetailWidth(7, { focused: true })).toBe(960)
+        expect(museumArtworkDetailWidth(12, { currentWidth: 960 })).toBe(960)
+        expect(museumArtworkDetailWidth(22, { currentWidth: 960 })).toBe(0)
     })
 
     it('keeps the nearest doorway pair resident for a stable bay handoff', () => {

@@ -370,28 +370,37 @@ export function museumRoomCeilingFixtureXs(room = {}, requestedFixtures = 4) {
     ))
 }
 
-function transformMuseumPaintingPoint(painting, [localX, localY, localZ]) {
-    const [x = 0, y = 0, z = 0] = painting?.position || []
-    const [scaleX = 1, scaleY = 1, scaleZ = 1] = painting?.scale || []
-    const rotationY = Number(painting?.rotationY) || 0
-    const scaledX = localX * scaleX
-    const scaledZ = localZ * scaleZ
-    const cosine = Math.cos(rotationY)
-    const sine = Math.sin(rotationY)
-    return [
-        x + (scaledX * cosine) + (scaledZ * sine),
-        y + (localY * scaleY),
-        z - (scaledX * sine) + (scaledZ * cosine),
-    ]
+export function museumEndWallPlacardPose(room = {}) {
+    const side = Number(room.side) < 0 ? -1 : 1
+    const outerX = Number(room.outerX) || 0
+    const centerZ = Number(room.centerZ) || 0
+    const centerY = 3.08
+    return {
+        backing: [outerX - (side * 0.145), centerY, centerZ],
+        // The backing is 0.055 m deep. Keep the label only a few millimetres
+        // proud of its gallery-facing surface so an oblique view cannot turn
+        // that physical separation into visible parallax.
+        label: [outerX - (side * 0.18), centerY, centerZ],
+        rotationY: side < 0 ? Math.PI / 2 : -Math.PI / 2,
+    }
 }
 
-export function museumPictureLightPose(painting) {
-    return {
-        // These are the same authored local coordinates used by
-        // InstancedPictureLights for the diffuser and artwork face.
-        source: transformMuseumPaintingPoint(painting, [0, 1.245, 0.52]),
-        target: transformMuseumPaintingPoint(painting, [0, 0, 0.04]),
-    }
+export function museumRoomGateOpen({ active = false, requested = false, baseReady = false } = {}) {
+    // Preparing the two rooms nearest the visitor is an I/O concern. Only the
+    // singular room they actually approach may animate and become passable.
+    return Boolean(active && requested && baseReady)
+}
+
+export function museumArtworkDetailWidth(distance, { focused = false, currentWidth = 0 } = {}) {
+    const numericDistance = Number(distance)
+    if (!Number.isFinite(numericDistance) || numericDistance < 0) return 0
+    if (focused && numericDistance <= 7.5) return 960
+    // A three-metre release band prevents a painting at the boundary from
+    // repeatedly mounting and cancelling its 640px upgrade while the camera
+    // sways or the visitor takes a small step.
+    const nearLimit = Number(currentWidth) >= 640 ? 21 : 18
+    if (Number(currentWidth) >= 960 && numericDistance <= nearLimit) return 960
+    return numericDistance <= nearLimit ? 640 : 0
 }
 
 export function museumCeilingLightPose(x, z, fixtureCeilingY) {

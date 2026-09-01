@@ -609,12 +609,11 @@ function InstancedWallSconces({ placements }) {
     )
 }
 
-export default function MuseumDressing({ layout, activeRoomIds = [], materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true, shadowsEnabled = false }) {
-    const activeRoomSet = useMemo(() => new Set(activeRoomIds), [activeRoomIds])
-    const dressedRooms = useMemo(
-        () => layout.rooms.filter(room => activeRoomSet.has(room.id)),
-        [activeRoomSet, layout.rooms],
-    )
+export default function MuseumDressing({ layout, materials, LabelPlane, PlasterMaterial, WoodMaterial, reflectionsEnabled = true, shadowsEnabled = false }) {
+    // The production catalog currently has a small furniture set. Keeping one
+    // stable all-room instance allocation is cheaper than reconstructing plant
+    // and bench meshes every time the visitor crosses a preparation radius.
+    const dressedRooms = layout.rooms
     const staticPlants = useMemo(() => [
         ...layout.dressing.lobbyPlants.map((plant, index) => ({ ...plant, renderScale: 1.05, renderVariant: index % 2 })),
         ...layout.dressing.hallPlants.map((plant, index) => ({ ...plant, renderScale: 0.9, renderVariant: (index + 1) % 2 })),
