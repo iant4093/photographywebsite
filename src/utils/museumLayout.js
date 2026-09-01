@@ -391,15 +391,20 @@ export function museumRoomGateOpen({ active = false, requested = false, baseRead
     return Boolean(active && requested && baseReady)
 }
 
-export function museumArtworkDetailWidth(distance, { focused = false, currentWidth = 0 } = {}) {
+export function museumArtworkDetailWidth(distance, {
+    focused = false,
+    currentWidth = 0,
+    inspectionWidth = 1440,
+} = {}) {
     const numericDistance = Number(distance)
     if (!Number.isFinite(numericDistance) || numericDistance < 0) return 0
-    if (focused && numericDistance <= 7.5) return 960
+    if (focused && numericDistance <= 4.2) {
+        return Number(inspectionWidth) >= 1440 ? 1440 : 960
+    }
     // A three-metre release band prevents a painting at the boundary from
     // repeatedly mounting and cancelling its 640px upgrade while the camera
     // sways or the visitor takes a small step.
     const nearLimit = Number(currentWidth) >= 640 ? 21 : 18
-    if (Number(currentWidth) >= 960 && numericDistance <= nearLimit) return 960
     return numericDistance <= nearLimit ? 640 : 0
 }
 

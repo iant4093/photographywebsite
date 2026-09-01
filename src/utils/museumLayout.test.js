@@ -439,14 +439,16 @@ describe('museum layout', () => {
         expect(museumRoomGateOpen({ active: true, requested: true, baseReady: true })).toBe(true)
     })
 
-    it('uses stable 640px and 960px detail tiers above the all-room base layer', () => {
+    it('uses a single close inspection tier without retaining it at room distance', () => {
         expect(museumArtworkDetailWidth(30)).toBe(0)
         expect(museumArtworkDetailWidth(17.9)).toBe(640)
         expect(museumArtworkDetailWidth(19, { currentWidth: 640 })).toBe(640)
         expect(museumArtworkDetailWidth(19)).toBe(0)
-        expect(museumArtworkDetailWidth(7, { focused: true })).toBe(960)
-        expect(museumArtworkDetailWidth(12, { currentWidth: 960 })).toBe(960)
-        expect(museumArtworkDetailWidth(22, { currentWidth: 960 })).toBe(0)
+        expect(museumArtworkDetailWidth(3.1, { focused: true })).toBe(1440)
+        expect(museumArtworkDetailWidth(3.1, { focused: true, inspectionWidth: 960 })).toBe(960)
+        expect(museumArtworkDetailWidth(4.3, { focused: true })).toBe(640)
+        expect(museumArtworkDetailWidth(12, { currentWidth: 1440 })).toBe(640)
+        expect(museumArtworkDetailWidth(22, { currentWidth: 1440 })).toBe(0)
     })
 
     it('keeps the nearest doorway pair resident for a stable bay handoff', () => {
