@@ -283,7 +283,7 @@ flowchart TB
   managed_security -. posture findings .-> notifications
 ```
 
-An editable companion version of this architecture is available in [Figma/FigJam](https://www.figma.com/board/6jBDPsmlafnu9ITTTVZ7W1?utm_source=other&utm_content=edit_in_figjam&oai_id=v1%2FnTyxrgfX0xTZiKzJMDYG557SUwdyUQEMtBB5awqOeAf60glGHBT3N1&request_id=b004f3f8-e2de-4029-acfc-324d2fdf155b&architecture=true).
+An editable companion architecture board is available in [Miro](https://miro.com/app/board/uXjVHsf6LH0=/). It is organized as a six-zone overview plus a detailed resource-inventory appendix.
 
 ### Architecture notes
 
