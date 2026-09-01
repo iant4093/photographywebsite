@@ -6,12 +6,16 @@ import {
     initialMuseumRoomIds,
     MUSEUM_DIMENSIONS,
     museumArtworkLightIndex,
+    museumCeilingLightPose,
     museumFloorSurface,
+    museumPictureLightPose,
     museumPlanarAxes,
+    museumRoomCeilingFixtureXs,
     moveMuseumPosition,
     nearbyMuseumRoomIds,
     nearestMuseumRoom,
     prioritizeMuseumPreloadRooms,
+    retainMuseumRoomPresentation,
 } from './museumLayout'
 
 const album = (albumId, category, extra = {}) => ({
@@ -217,28 +221,79 @@ describe('museum layout', () => {
         expect(isMuseumPositionWalkable(layout, room.centerX, room.centerZ)).toBe(true)
     })
 
-    it('keeps traversal independent from room streaming state', () => {
+    it('blocks entry at a closed curtain, opens with the real gate, and always permits exit', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
         const room = layout.rooms[0]
         const start = {
-            x: room.innerX - (room.side * 0.2),
+            x: room.innerX - (room.side * 0.4),
             z: room.centerZ,
         }
-        const withoutResidentMedia = moveMuseumPosition(
+        const closed = moveMuseumPosition(
             layout,
             start,
             { x: room.side * 1.2, z: 0 },
             0.35,
+            new Set(),
         )
-        expect((withoutResidentMedia.x - room.innerX) * room.side).toBeGreaterThan(0.29)
+        expect((closed.x - room.innerX) * room.side).toBeLessThanOrEqual(
+            MUSEUM_DIMENSIONS.portalGateDepth - 0.35,
+        )
 
         const opened = moveMuseumPosition(
             layout,
             start,
             { x: room.side * 1.2, z: 0 },
             0.35,
+            new Set([room.id]),
         )
         expect((opened.x - room.innerX) * room.side).toBeGreaterThan(0.29)
+
+        const exited = moveMuseumPosition(
+            layout,
+            { x: room.innerX + (room.side * 0.8), z: room.centerZ },
+            { x: room.side * -1.2, z: 0 },
+            0.35,
+            new Set(),
+        )
+        expect((exited.x - room.innerX) * room.side).toBeLessThan(0)
+    })
+
+    it('cannot tunnel through a closed curtain with a large diagonal step', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
+        const room = layout.rooms[0]
+        const result = moveMuseumPosition(
+            layout,
+            {
+                x: room.innerX - (room.side * 0.7),
+                z: room.centerZ - 0.25,
+            },
+            { x: room.side * 4.5, z: 0.4 },
+            0.35,
+            new Set(),
+        )
+
+        expect((result.x - room.innerX) * room.side).toBeLessThanOrEqual(
+            MUSEUM_DIMENSIONS.portalGateDepth - 0.35,
+        )
+    })
+
+    it('cannot use a large diagonal step to enter through the wall beside a portal', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
+        const room = layout.rooms[0]
+        const start = {
+            x: room.innerX - (room.side * 0.7),
+            z: room.centerZ + 2.05,
+        }
+        const result = moveMuseumPosition(
+            layout,
+            start,
+            { x: room.side * 4.5, z: -2.05 },
+            0.35,
+            new Set([room.id]),
+        )
+
+        expect((result.x - room.innerX) * room.side).toBeLessThanOrEqual(-0.35)
+        expect(result.z).toBeCloseTo(room.centerZ)
     })
 
     it('reserves the category end wall for its title', () => {
@@ -301,7 +356,7 @@ describe('museum layout', () => {
         }
     })
 
-    it('never lets stale streaming state block a portal during repeated traversal', () => {
+    it('does not retain stale passability through repeated curtain cycles', () => {
         const albums = Array.from({ length: 12 }, (_, index) => (
             album(`guarded-${index}`, `Gallery ${index}`)
         ))
@@ -313,16 +368,58 @@ describe('museum layout', () => {
                     x: room.innerX - (room.side * 0.2),
                     z: room.centerZ,
                 }
-                const result = moveMuseumPosition(
+                const closed = moveMuseumPosition(
                     layout,
                     start,
                     { x: room.side * 1.2, z: 0 },
                     0.35,
+                    new Set(),
                 )
-                const depth = (result.x - room.innerX) * room.side
-                expect(depth).toBeGreaterThan(0.29)
+                expect((closed.x - room.innerX) * room.side).toBeLessThanOrEqual(
+                    MUSEUM_DIMENSIONS.portalGateDepth - 0.35,
+                )
+                const opened = moveMuseumPosition(
+                    layout,
+                    start,
+                    { x: room.side * 1.2, z: 0 },
+                    0.35,
+                    new Set([room.id]),
+                )
+                expect((opened.x - room.innerX) * room.side).toBeGreaterThan(0.29)
             }
         }
+    })
+
+    it('keeps a retiring room furnished until its curtain is fully closed', () => {
+        expect(retainMuseumRoomPresentation(true, true)).toBe(true)
+        expect(retainMuseumRoomPresentation(false, false)).toBe(true)
+        expect(retainMuseumRoomPresentation(false, true)).toBe(false)
+        expect(retainMuseumRoomPresentation(true, false)).toBe(true)
+    })
+
+    it('anchors picture and ceiling light sources to their modeled fixtures', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('a', 'Hikes'), album('b', 'Hikes'), album('c', 'Hikes'), album('d', 'Hikes'),
+            album('e', 'Hikes'), album('f', 'Hikes'), album('g', 'Hikes'), album('h', 'Hikes'),
+            album('i', 'Hikes'), album('j', 'Hikes'),
+        ]))
+        const room = layout.rooms[0]
+        const fixtureXs = museumRoomCeilingFixtureXs(room, 4)
+        expect(fixtureXs).toHaveLength(4)
+        expect(fixtureXs.every(x => room.paintings.some(painting => painting.position[0] === x))).toBe(true)
+
+        for (const painting of [room.paintings[0], room.paintings[1]]) {
+            const pose = museumPictureLightPose(painting)
+            expect(pose.source[1] - painting.position[1]).toBeCloseTo(1.245)
+            expect(pose.source[2] - painting.position[2]).toBeCloseTo(painting.normal[2] * 0.52)
+            expect(pose.target[2] - painting.position[2]).toBeCloseTo(painting.normal[2] * 0.04)
+        }
+
+        const ceilingPose = museumCeilingLightPose(fixtureXs[1], room.centerZ, 6.09)
+        expect(fixtureXs).toContain(ceilingPose.source[0])
+        expect(ceilingPose.source[1]).toBeCloseTo(5.948)
+        expect(ceilingPose.source[2]).toBe(room.centerZ)
+        expect(ceilingPose.target).toEqual([fixtureXs[1], 0.12, room.centerZ])
     })
 
     it('keeps the nearest doorway pair resident for a stable bay handoff', () => {

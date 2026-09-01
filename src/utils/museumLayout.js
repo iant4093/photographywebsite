@@ -9,6 +9,7 @@ export const MUSEUM_DIMENSIONS = Object.freeze({
     baySpacing: 16.5,
     roomSpan: 12.5,
     paintingSpacing: 5.6,
+    portalGateDepth: 0.25,
 })
 
 function normalizedCategory(value) {
@@ -266,11 +267,41 @@ export function museumPlanarAxes(forwardX, forwardZ) {
     }
 }
 
-export function moveMuseumPosition(layout, current, delta, radius = 0.35) {
+function crossesMuseumRoomBoundary(layout, current, proposed, passableRoomIds, radius) {
+    return layout.rooms.some((room) => {
+        const previousDepth = (current.x - room.innerX) * room.side
+        const proposedDepth = (proposed.x - room.innerX) * room.side
+        const transverseDistance = Math.abs(proposed.z - room.centerZ)
+        if (transverseDistance > (room.width / 2) + radius) return false
+        const insideDoorway = transverseDistance
+            <= (MUSEUM_DIMENSIONS.doorwayWidth / 2) - radius
+        if (!insideDoorway) {
+            // A large diagonal step must not jump directly from the hall into
+            // room bounds through the solid wall beside the portal.
+            const wallStopDepth = -radius
+            return previousDepth <= wallStopDepth && proposedDepth > wallStopDepth
+        }
+        if (!passableRoomIds || passableRoomIds.has(room.id)) return false
+        // Collision follows the actual curtain plane. Entry is blocked until
+        // the animated panels report a safely open aperture, while movement
+        // from the room back into the hall is intentionally never trapped.
+        const stopDepth = MUSEUM_DIMENSIONS.portalGateDepth - radius
+        return previousDepth <= stopDepth && proposedDepth > stopDepth
+    })
+}
+
+export function moveMuseumPosition(layout, current, delta, radius = 0.35, passableRoomIds = null) {
     const next = { x: current.x, z: current.z }
     const proposedX = current.x + delta.x
     if (
         isMuseumPositionWalkable(layout, proposedX, current.z, radius)
+        && !crossesMuseumRoomBoundary(
+            layout,
+            current,
+            { x: proposedX, z: current.z },
+            passableRoomIds,
+            radius,
+        )
     ) next.x = proposedX
     const proposedZ = current.z + delta.z
     if (isMuseumPositionWalkable(layout, next.x, proposedZ, radius)) next.z = proposedZ
@@ -324,6 +355,58 @@ export function museumArtworkLightIndex(paintingCount, slot, requestedSlots) {
     // small two- or three-work room this deliberately resolves to every work;
     // larger collections receive evenly distributed localized light pools.
     return Math.round((slot * (count - 1)) / (activeSlotCount - 1))
+}
+
+export function museumRoomCeilingFixtureXs(room = {}, requestedFixtures = 4) {
+    const rowXs = [...new Set((room.paintings || [])
+        .map(painting => Number(painting?.position?.[0]))
+        .filter(Number.isFinite))]
+    const fixtureCount = Math.min(
+        rowXs.length,
+        Math.max(0, Math.floor(Number(requestedFixtures) || 0)),
+    )
+    return Array.from({ length: fixtureCount }, (_, slot) => (
+        rowXs[museumArtworkLightIndex(rowXs.length, slot, fixtureCount)]
+    ))
+}
+
+function transformMuseumPaintingPoint(painting, [localX, localY, localZ]) {
+    const [x = 0, y = 0, z = 0] = painting?.position || []
+    const [scaleX = 1, scaleY = 1, scaleZ = 1] = painting?.scale || []
+    const rotationY = Number(painting?.rotationY) || 0
+    const scaledX = localX * scaleX
+    const scaledZ = localZ * scaleZ
+    const cosine = Math.cos(rotationY)
+    const sine = Math.sin(rotationY)
+    return [
+        x + (scaledX * cosine) + (scaledZ * sine),
+        y + (localY * scaleY),
+        z - (scaledX * sine) + (scaledZ * cosine),
+    ]
+}
+
+export function museumPictureLightPose(painting) {
+    return {
+        // These are the same authored local coordinates used by
+        // InstancedPictureLights for the diffuser and artwork face.
+        source: transformMuseumPaintingPoint(painting, [0, 1.245, 0.52]),
+        target: transformMuseumPaintingPoint(painting, [0, 0, 0.04]),
+    }
+}
+
+export function museumCeilingLightPose(x, z, fixtureCeilingY) {
+    return {
+        // InstancedCeilingFixtures places its lens 0.142 m below this datum.
+        source: [Number(x) || 0, (Number(fixtureCeilingY) || 0) - 0.142, Number(z) || 0],
+        target: [Number(x) || 0, 0.12, Number(z) || 0],
+    }
+}
+
+export function retainMuseumRoomPresentation(active, gateClosed) {
+    // Retirement is delayed only for the physical closing interval. A room
+    // prepares immediately when active, remains furnished behind a closing
+    // curtain, and can release its batched presentation once fully concealed.
+    return Boolean(active) || !gateClosed
 }
 
 export function nearbyMuseumRoomIds(layout, position, preloadDistance = 25) {
