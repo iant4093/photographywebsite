@@ -397,6 +397,88 @@ class PublicCatalogProbeTests(unittest.TestCase):
         with self.assertRaises(public_load.ProbeError):
             public_load.validate_detail(payload, ALBUM_ONE)
 
+    def test_public_schema_validates_hover_preview_discriminated_union(self):
+        version = "a" * 24
+        manifest_url = (
+            f"https://media.example.test/public-previews/{ALBUM_ONE}/v3/"
+            f"hover-{version}.json"
+        )
+        ready_metadata = {
+            "hoverPreviewStatus": "ready",
+            "hoverPreviewManifestUrl": manifest_url,
+            "hoverPreviewVersion": version,
+        }
+        ready_summary = summary() | ready_metadata
+        self.assertEqual(public_load.validate_summary(ready_summary), ready_summary)
+        unavailable_summary = summary() | {"hoverPreviewStatus": "unavailable"}
+        self.assertEqual(
+            public_load.validate_summary(unavailable_summary),
+            unavailable_summary,
+        )
+        ready_detail = detail()
+        ready_detail["album"].update(ready_metadata)
+        self.assertEqual(public_load.validate_detail(ready_detail, ALBUM_ONE), 1)
+        unavailable_detail = detail()
+        unavailable_detail["album"]["hoverPreviewStatus"] = "unavailable"
+        self.assertEqual(public_load.validate_detail(unavailable_detail, ALBUM_ONE), 1)
+
+        invalid_summaries = [
+            summary() | {"hoverPreviewStatus": "ready"},
+            summary() | {
+                "hoverPreviewStatus": "ready",
+                "hoverPreviewManifestUrl": manifest_url,
+            },
+            summary() | {
+                "hoverPreviewStatus": "ready",
+                "hoverPreviewVersion": version,
+            },
+            summary() | {"hoverPreviewStatus": "pending"},
+            summary() | {"hoverPreviewManifestUrl": manifest_url},
+            summary() | {"hoverPreviewVersion": version},
+            summary() | ready_metadata | {"type": "video"},
+            summary() | ready_metadata | {"hoverPreviewVersion": "A" * 24},
+            summary() | ready_metadata | {"hoverPreviewVersion": "a" * 23},
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": manifest_url.replace(ALBUM_ONE, ALBUM_TWO)
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": manifest_url.replace(version, "b" * 24)
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": manifest_url.replace("/v3/", "/v2/")
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": manifest_url.replace("hover-", "manifest-")
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": manifest_url.replace(
+                    "https://media.example.test",
+                    "https://other.example.test",
+                )
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": manifest_url.replace("https://", "http://")
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": manifest_url.replace("https://", "https://user:pass@")
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": f"{manifest_url}?X-Amz-Signature=secret"
+            },
+            summary() | ready_metadata | {
+                "hoverPreviewManifestUrl": f"{manifest_url}#fragment"
+            },
+            summary() | {
+                "hoverPreviewStatus": "unavailable",
+                "hoverPreviewManifestUrl": manifest_url,
+                "hoverPreviewVersion": version,
+            },
+            summary() | {"hoverPreviewManifestKey": "albums/private/manifest.json"},
+        ]
+        for value in invalid_summaries:
+            with self.subTest(value=value), self.assertRaises(public_load.ProbeError):
+                public_load.validate_summary(value)
+
     def test_cache_and_detail_field_guards_fail_closed(self):
         for headers in (
             {"content-type": "text/html", "cache-control": "public, s-maxage=1"},

@@ -33,7 +33,16 @@ SUMMARY_FIELDS = {
     "coverThumbnailUrl",
     "coverBlurhash",
 }
-SUMMARY_OPTIONAL_FIELDS = {"galleryCategoryOrder", "coverHlsUrl", "coverThumbnailTime"}
+HOVER_PREVIEW_FIELDS = {
+    "hoverPreviewStatus",
+    "hoverPreviewManifestUrl",
+    "hoverPreviewVersion",
+}
+SUMMARY_OPTIONAL_FIELDS = {
+    "galleryCategoryOrder",
+    "coverHlsUrl",
+    "coverThumbnailTime",
+} | HOVER_PREVIEW_FIELDS
 DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl", "downloadUrl"}
 IMAGE_OPTIONAL_FIELDS = {
@@ -56,6 +65,7 @@ FORBIDDEN_PUBLIC_FIELDS = {
     "thumbKey",
     "hlsKey",
     "previewKeys",
+    "hoverPreviewManifestKey",
     "mediaConvertJobId",
     "backupToGoogleDrive",
     "expiresAt",
@@ -184,6 +194,45 @@ def validate_summary(value: object) -> dict:
             or not 0 <= cover_time <= 86400
         ):
             raise ProbeError("album summary has invalid cover preview metadata")
+    hover_fields = fields & HOVER_PREVIEW_FIELDS
+    if hover_fields:
+        hover_status = item.get("hoverPreviewStatus")
+        if item["type"] != "photo":
+            raise ProbeError("album summary has invalid hover preview metadata")
+        if hover_status == "unavailable":
+            if hover_fields != {"hoverPreviewStatus"}:
+                raise ProbeError("album summary has invalid hover preview metadata")
+        elif hover_status == "ready":
+            if hover_fields != HOVER_PREVIEW_FIELDS:
+                raise ProbeError("album summary has invalid hover preview metadata")
+            version = item["hoverPreviewVersion"]
+            if not isinstance(version, str) or not re.fullmatch(r"[a-f0-9]{24}", version):
+                raise ProbeError("album summary has invalid hover preview metadata")
+            manifest_url = item["hoverPreviewManifestUrl"]
+            _public_url(manifest_url)
+            parsed_manifest = urllib.parse.urlsplit(manifest_url)
+            expected_path = (
+                f"/public-previews/{item['albumId']}/v3/hover-{version}.json"
+            )
+            if (
+                parsed_manifest.path != expected_path
+                or parsed_manifest.query
+                or parsed_manifest.fragment
+            ):
+                raise ProbeError("album summary has invalid hover preview metadata")
+            cover_url = item.get("coverImageUrl") or item.get("coverThumbnailUrl")
+            if cover_url:
+                parsed_cover = urllib.parse.urlsplit(cover_url)
+                if (
+                    parsed_cover.scheme,
+                    parsed_cover.netloc,
+                ) != (
+                    parsed_manifest.scheme,
+                    parsed_manifest.netloc,
+                ):
+                    raise ProbeError("album summary has invalid hover preview metadata")
+        else:
+            raise ProbeError("album summary has invalid hover preview metadata")
     for name in (
         "title",
         "description",
