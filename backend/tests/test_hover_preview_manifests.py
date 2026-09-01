@@ -65,6 +65,25 @@ def metadata_for(source, *, ready=True, width=640, height=427):
 
 
 class HoverPreviewManifestContractTests(unittest.TestCase):
+    def test_helper_contracts_fail_closed_for_malformed_values(self):
+        self.assertEqual(builder._comparable_key(None), "")
+        self.assertEqual(builder._comparable_key(""), "")
+        self.assertEqual(
+            builder._comparable_key("https://cdn.test/albums/example%20image.jpg?token=ignored"),
+            "albums/example image.jpg",
+        )
+        self.assertIsNone(builder._dimension({}, "640"))
+        self.assertIsNone(builder._dimension({"dimensions": {"640": {"width": "bad", "height": 1}}}, "640"))
+        self.assertIsNone(builder._dimension({"dimensions": {"640": {"width": 0, "height": 1}}}, "640"))
+        self.assertEqual(
+            builder.build_hover_manifest(album([]), "not-a-list", {}),
+            {"status": "unavailable", "images": []},
+        )
+        self.assertEqual(
+            builder.build_hover_manifest(album([]), [None, {"rawKey": "outside/album.jpg"}], {}),
+            {"status": "unavailable", "images": []},
+        )
+
     def test_build_is_deterministic_bounded_and_excludes_cover_non_landscape_and_pending(self):
         sources = [image("cover")]
         sources.extend(image(f"landscape-{index}") for index in range(15))
@@ -264,6 +283,20 @@ class HoverPreviewManifestProviderTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 builder._publish_manifest(manifest)
 
+        access_denied = ClientError({"Error": {"Code": "AccessDenied"}}, "PutObject")
+        with patch.object(builder.s3, "put_object", side_effect=access_denied):
+            with self.assertRaises(ClientError):
+                builder._publish_manifest(manifest)
+
+    def test_pointer_condition_guards_absent_cover_and_count_fields(self):
+        condition, names, values = builder._pointer_condition({"albumId": ALBUM_ID})
+        self.assertIn("attribute_not_exists(coverImageUrl)", condition)
+        self.assertIn("attribute_not_exists(coverThumbKey)", condition)
+        self.assertIn("attribute_not_exists(imageCount)", condition)
+        self.assertEqual(names["#visibility"], "visibility")
+        self.assertNotIn(":cover", values)
+        self.assertNotIn(":count", values)
+
     def test_loads_normalized_and_legacy_album_media(self):
         normalized = album([], mediaStoreVersion=builder.MEDIA_STORE_VERSION)
         with patch.object(builder, "query_album_media", side_effect=[
@@ -275,6 +308,38 @@ class HoverPreviewManifestProviderTests(unittest.TestCase):
 
 
 class HoverPreviewOrchestrationTests(unittest.TestCase):
+    def test_event_and_reconciliation_query_guards(self):
+        with self.assertRaises(ValidationError):
+            builder._record_album_id({
+                "eventSource": "aws:sqs",
+                "body": json.dumps({"version": 2, "albumId": ALBUM_ID}),
+            })
+        with self.assertRaises(ValidationError):
+            builder._record_album_id({"eventSource": "unsupported"})
+
+        unavailable_index = ClientError(
+            {"Error": {"Code": "ResourceNotFoundException"}},
+            "Query",
+        )
+        scan_result = {"Items": [], "LastEvaluatedKey": None}
+        with patch.dict(os.environ, {"PUBLIC_SUMMARY_INDEX": "public-summary-test"}), patch.object(
+            builder.albums_table, "query", side_effect=unavailable_index
+        ) as query, patch.object(builder.albums_table, "scan", return_value=scan_result) as scan:
+            self.assertEqual(
+                builder._query_reconciliation_page({"albumId": ALBUM_ID}, limit=0),
+                scan_result,
+            )
+        self.assertEqual(query.call_args.kwargs["Limit"], 1)
+        self.assertEqual(scan.call_args.kwargs["ExclusiveStartKey"], {"albumId": ALBUM_ID})
+
+        access_denied = ClientError({"Error": {"Code": "AccessDeniedException"}}, "Query")
+        with patch.dict(os.environ, {"PUBLIC_SUMMARY_INDEX": "public-summary-test"}), patch.object(
+            builder.albums_table, "query", side_effect=access_denied
+        ), patch.object(builder.albums_table, "scan") as scan:
+            with self.assertRaises(ClientError):
+                builder._query_reconciliation_page(None)
+        scan.assert_not_called()
+
     def test_refresh_helper_validates_and_queues_without_failing_album_edits(self):
         queue = Mock()
         with patch.dict(os.environ, {"HOVER_PREVIEW_REFRESH_QUEUE_URL": "https://sqs.test/hover"}), patch.object(
