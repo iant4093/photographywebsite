@@ -23,7 +23,9 @@ HIGH_CONFIDENCE_TOKENS = (
 )
 CREDENTIALED_URL = re.compile(
     rb"https?://(?P<username>[^\s/:@]{1,128}):"
-    rb"(?P<password>[^\s/@]{8,256})@(?P<host>[^\s/]+)"
+    # Source/markup delimiters cannot stand in for a missing URL hostname.
+    # Complete URLs inside quoted strings still match up to the delimiter.
+    rb"(?P<password>[^\s/@]{8,256})@(?P<host>[^\s/\"'`<>]+)"
 )
 SYNTHETIC_URL_HOSTS = frozenset({b"host.com", b"endpoint", b"domain"})
 PRIVATE_KEY_BEGIN = re.compile(rb"-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY)-----")

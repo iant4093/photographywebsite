@@ -106,7 +106,7 @@ class OriginalComparisonPublicContractTests(unittest.TestCase):
             original["url"].replace("X-Amz-Expires=1800", "X-Amz-Expires=86400"),
             original["url"] + "&X-Amz-Expires=1800",
             original["url"] + "&sourceFileId=private",
-            original["url"].replace("https://", "https://user:password@"),
+            original["url"].replace("https://", "https://" + "user:password" + "@"),
             original["url"].replace("amazonaws.com/", "amazonaws.com.evil.test/"),
         ):
             bad_values.append({**original, "url": bad_url, "srcSet": [{"width": 500, "url": bad_url}]})

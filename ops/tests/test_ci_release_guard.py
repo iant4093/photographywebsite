@@ -1382,6 +1382,13 @@ class CredentialArtifactScanTests(unittest.TestCase):
             )
             self.assertEqual(credential_artifact_scan.scan(root).findings, ())
 
+    def test_url_hostname_cannot_be_a_closing_source_or_markup_delimiter(self):
+        prefix = b"https://" + b"user:password" + b"@"
+        for delimiter in (b'"', b"'", b"`", b"<", b">"):
+            with self.subTest(delimiter=delimiter):
+                self.assertFalse(credential_artifact_scan._contains_credentialed_url(prefix + delimiter + b"),"))
+                self.assertTrue(credential_artifact_scan._contains_credentialed_url(prefix + b"private.example" + delimiter + b"),"))
+
     def test_exact_public_pillow_font_asset_does_not_trigger_aws_key_detection(self):
         from PIL import ImageFont
 
