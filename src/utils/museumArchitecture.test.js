@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Matrix4, Vector3 } from 'three'
 import { createMuseumArchBand } from './museumArchitecture'
-import { MUSEUM_DIMENSIONS, MUSEUM_PORTAL, museumDoorAssemblyPose, buildMuseumCatalog, buildMuseumLayout, isMuseumPositionWalkable } from './museumLayout'
+import { MUSEUM_DIMENSIONS, MUSEUM_PORTAL, MUSEUM_VAULT, museumVaultHeightAt, museumDoorAssemblyPose, buildMuseumCatalog, buildMuseumLayout, isMuseumPositionWalkable } from './museumLayout'
 
 describe('museum doorway joinery', () => {
     it('meets the arch at the capital without crossing it or leaving vertical gaps', () => {
@@ -17,7 +17,7 @@ describe('museum doorway joinery', () => {
         expect(arch.boundingBox.min.z).toBeCloseTo(0)
         expect(arch.boundingBox.max.z).toBeCloseTo(MUSEUM_PORTAL.depth)
         // The sign clears the crown instead of crossing its raised moulding.
-        expect(MUSEUM_PORTAL.signHeight - 0.86 / 2 - arch.boundingBox.max.y).toBeGreaterThan(0.09)
+        expect(MUSEUM_PORTAL.signHeight - MUSEUM_PORTAL.signSurroundHeight / 2 - arch.boundingBox.max.y).toBeGreaterThan(0.08)
         expect(arch.getAttribute('position').count / 3).toBeLessThan(450)
         arch.dispose()
     })
@@ -40,11 +40,29 @@ describe('museum doorway joinery', () => {
         for (const side of [-1, 1]) {
             const pose = museumDoorAssemblyPose(side, -7)
             const rotation = new Matrix4().makeRotationY(pose.rotationY)
-            const rear = new Vector3(0, 0, -0.09).applyMatrix4(rotation).add(new Vector3(...pose.sign))
+            const rear = new Vector3(0, 0, MUSEUM_PORTAL.signRear).applyMatrix4(rotation).add(new Vector3(...pose.sign))
             const spandrelFace = MUSEUM_DIMENSIONS.hallHalfWidth - MUSEUM_DIMENSIONS.hallWallThickness / 2 - 0.02
             expect(rear.x).toBeCloseTo(side * spandrelFace)
             expect(pose.trim[0]).toBeCloseTo(rear.x)
             expect(new Vector3(0, 0, 1).applyMatrix4(rotation).x).toBeCloseTo(-side)
         }
+    })
+
+    it('clears the full sign surround beneath the curved roof on both sides of every bay', () => {
+        for (const side of [-1, 1]) {
+            for (const centerZ of [-7, -23.5, -40, -56.5, -73]) {
+                const pose = museumDoorAssemblyPose(side, centerZ)
+                const rotation = new Matrix4().makeRotationY(pose.rotationY)
+                for (const x of [-MUSEUM_PORTAL.signSurroundWidth / 2, MUSEUM_PORTAL.signSurroundWidth / 2]) {
+                    for (const z of [MUSEUM_PORTAL.signRear, -0.09]) {
+                        const corner = new Vector3(x, MUSEUM_PORTAL.signSurroundHeight / 2, z)
+                            .applyMatrix4(rotation).add(new Vector3(...pose.sign))
+                        expect(museumVaultHeightAt(corner.x) - corner.y).toBeGreaterThan(0.35)
+                    }
+                }
+            }
+        }
+        expect(museumVaultHeightAt(0)).toBeCloseTo(MUSEUM_VAULT.fixtureY + 0.07)
+        expect(MUSEUM_DIMENSIONS.hallHeight).toBeGreaterThan(museumVaultHeightAt(0))
     })
 })

@@ -3,14 +3,16 @@ import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { museumReadingProps } from '../../utils/museumDecor'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { museumHallSconcePlacements } from '../../utils/museumSupport'
+import { MUSEUM_DIMENSIONS } from '../../utils/museumLayout'
 import { MUSEUM_PLANT_FORM, MUSEUM_PLANT_LEAF_MESH, museumPlantLeaves } from '../../utils/museumPlants'
 
 const DARK_BRASS = '#735332'
 let textileDetailTexture = null
 const BENCH_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 3, 0.1)
-const RUG_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 2, 0.07)
 const BENCH_PALETTES = [
     { base: '#342126', cushion: '#75464f', rugOuter: '#3e282c', rugInner: '#5b3940', rugBorder: '#8a744f', rugCenter: '#48292f' },
     { base: '#252c31', cushion: '#4f6570', rugOuter: '#273137', rugInner: '#3f535d', rugBorder: '#9a8257', rugCenter: '#30444e' },
@@ -253,6 +255,109 @@ function RunnerCarpet({ layout }) {
     )
 }
 
+function SalonRugs({ benches }) {
+    const rug = useMemo(() => {
+        const canvas = document.createElement('canvas')
+        const tile = 256
+        canvas.width = tile
+        canvas.height = tile * BENCH_PALETTES.length
+        const context = canvas.getContext('2d')
+        BENCH_PALETTES.forEach((palette, index) => {
+            context.save()
+            context.translate(0, index * tile)
+            context.fillStyle = palette.rugOuter
+            context.fillRect(0, 0, tile, tile)
+            context.fillStyle = palette.rugInner
+            context.fillRect(10, 10, 236, 236)
+            context.strokeStyle = palette.rugBorder
+            context.lineWidth = 3
+            context.strokeRect(16, 16, 224, 224)
+            context.lineWidth = 1
+            context.strokeRect(25, 25, 206, 206)
+            context.fillStyle = palette.rugCenter
+            context.fillRect(30, 30, 196, 196)
+            // Woven geometry gives each reading area a quieter, finer pattern
+            // than four stacked slabs. One small atlas serves every salon.
+            for (let y = 48; y < 224; y += 32) {
+                for (let x = 48; x < 224; x += 32) {
+                    context.beginPath()
+                    context.moveTo(x, y - 5)
+                    context.lineTo(x + 4, y)
+                    context.lineTo(x, y + 5)
+                    context.lineTo(x - 4, y)
+                    context.closePath()
+                    context.stroke()
+                }
+            }
+            context.globalAlpha = 0.1
+            context.strokeStyle = '#eadbc1'
+            for (let line = 2; line < tile; line += 3) {
+                context.beginPath()
+                context.moveTo(1, line)
+                context.lineTo(tile - 1, line)
+                context.stroke()
+            }
+            context.restore()
+        })
+        const texture = new THREE.CanvasTexture(canvas)
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.anisotropy = 4
+        const parts = benches.map(({ bench, variant }) => {
+            const geometry = new THREE.PlaneGeometry(bench.size[0] + 1.15, bench.size[2] + 0.95)
+            const uv = geometry.getAttribute('uv')
+            const row = variant % BENCH_PALETTES.length
+            for (let index = 0; index < uv.count; index += 1) {
+                // Keep samples inside the tile so distant mip levels cannot
+                // borrow a contrasting edge from the next colorway.
+                uv.setXY(index, 0.015 + uv.getX(index) * 0.97, 1 - (row + 0.015 + (1 - uv.getY(index)) * 0.97) / BENCH_PALETTES.length)
+            }
+            geometry.rotateX(-Math.PI / 2)
+            geometry.rotateY(bench.rotationY || 0)
+            geometry.translate(bench.position[0], 0.049, bench.position[2])
+            return geometry
+        })
+        const geometry = mergeGeometries(parts)
+        parts.forEach(part => part.dispose())
+        return { geometry, texture }
+    }, [benches])
+    useEffect(() => () => {
+        rug.geometry.dispose()
+        rug.texture.dispose()
+    }, [rug])
+    return (
+        <mesh geometry={rug.geometry} receiveShadow>
+            <meshStandardMaterial map={rug.texture} roughness={0.97} />
+        </mesh>
+    )
+}
+
+function ReadingRoomDetails({ layout }) {
+    const geometry = useMemo(() => {
+        const parts = museumReadingProps(layout).map(part => {
+            const next = part.shape === 'cylinder'
+                ? new THREE.CylinderGeometry(1, 1, 1, 12)
+                : new THREE.BoxGeometry(1, 1, 1)
+            next.scale(...part.size)
+            next.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(...part.rotation)))
+            next.translate(...part.position)
+            const color = new THREE.Color(part.color)
+            const values = new Float32Array(next.getAttribute('position').count * 3)
+            for (let index = 0; index < values.length; index += 3) color.toArray(values, index)
+            next.setAttribute('color', new THREE.BufferAttribute(values, 3))
+            return next
+        })
+        const merged = mergeGeometries(parts)
+        parts.forEach(part => part.dispose())
+        return merged
+    }, [layout])
+    useEffect(() => () => geometry.dispose(), [geometry])
+    return (
+        <mesh geometry={geometry}>
+            <meshStandardMaterial vertexColors roughness={0.67} metalness={0.12} />
+        </mesh>
+    )
+}
+
 function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
     const benches = useMemo(() => rooms.flatMap((room, roomIndex) => (
         room.benches.map((bench, benchIndex) => ({
@@ -267,10 +372,6 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
     const trimBands = useRef(null)
     const tuftButtons = useRef(null)
     const legs = useRef(null)
-    const rugOuter = useRef(null)
-    const rugInner = useRef(null)
-    const rugBorder = useRef(null)
-    const rugCenter = useRef(null)
     const textileDetail = useMemo(() => getTextileDetailTexture(), [])
 
     useEffect(() => {
@@ -319,30 +420,11 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
 
             bases.current?.setColorAt(index, new THREE.Color(palette.base))
             cushions.current?.setColorAt(index, new THREE.Color(palette.cushion))
-            rugOuter.current?.setColorAt(index, new THREE.Color(palette.rugOuter))
-            rugInner.current?.setColorAt(index, new THREE.Color(palette.rugInner))
-            rugBorder.current?.setColorAt(index, new THREE.Color(palette.rugBorder))
-            rugCenter.current?.setColorAt(index, new THREE.Color(palette.rugCenter))
-
-            const rugParent = new THREE.Matrix4().compose(
-                position.set(bench.position[0], 0.024, bench.position[2]),
-                rotation,
-                parentScale,
-            )
-            const placeRug = (mesh, y, size) => {
-                local.compose(position.set(0, y, 0), localRotation.identity(), scale.set(...size))
-                matrix.multiplyMatrices(rugParent, local)
-                mesh?.setMatrixAt(index, matrix)
-            }
-            placeRug(rugOuter.current, 0, [width + 1.15, 0.035, depth + 0.95])
-            placeRug(rugInner.current, 0.021, [width + 0.78, 0.022, depth + 0.58])
-            placeRug(rugBorder.current, 0.029, [width + 0.58, 0.016, depth + 0.38])
-            placeRug(rugCenter.current, 0.035, [width + 0.44, 0.012, depth + 0.24])
 
             for (const x of [-0.56, 0.56]) {
                 for (const direction of [-1, 1]) {
                     local.compose(
-                        position.set(x, -0.23, direction * ((depth / 2) - 0.18)),
+                        position.set(x, -0.245, direction * ((depth / 2) - 0.18)),
                         localRotation.identity(),
                         scale.set(1, 1, 1),
                     )
@@ -352,7 +434,7 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
                 }
             }
         })
-        for (const mesh of [bases.current, cushions.current, trimBands.current, tuftButtons.current, legs.current, rugOuter.current, rugInner.current, rugBorder.current, rugCenter.current]) {
+        for (const mesh of [bases.current, cushions.current, trimBands.current, tuftButtons.current, legs.current]) {
             if (!mesh) continue
             mesh.instanceMatrix.needsUpdate = true
             if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
@@ -377,13 +459,10 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
                 <meshPhysicalMaterial color="#ffffff" vertexColors roughness={0.82} sheen={0.32} sheenColor="#d9b4b0" />
             </instancedMesh>
             <instancedMesh ref={legs} args={[undefined, undefined, benches.length * 4]} castShadow={castDynamicShadows}>
-                <cylinderGeometry args={[0.055, 0.075, 0.25, 10]} />
+                <cylinderGeometry args={[0.055, 0.075, 0.28, 10]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.72} roughness={0.28} />
             </instancedMesh>
-            <instancedMesh ref={rugOuter} args={[RUG_ROUNDED_BOX, undefined, benches.length]}><meshStandardMaterial color="#ffffff" vertexColors roughness={0.98} /></instancedMesh>
-            <instancedMesh ref={rugInner} args={[RUG_ROUNDED_BOX, undefined, benches.length]}><meshStandardMaterial color="#ffffff" vertexColors roughness={0.97} /></instancedMesh>
-            <instancedMesh ref={rugBorder} args={[RUG_ROUNDED_BOX, undefined, benches.length]}><meshStandardMaterial color="#ffffff" vertexColors roughness={0.88} /></instancedMesh>
-            <instancedMesh ref={rugCenter} args={[RUG_ROUNDED_BOX, undefined, benches.length]}><meshStandardMaterial color="#ffffff" vertexColors roughness={0.98} /></instancedMesh>
+            <SalonRugs benches={benches} />
         </>
     )
 }
@@ -463,9 +542,9 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
         <group position={[0, 0, z]}>
             {[-3.65, 3.65].map(x => (
                 <group key={x}>
-                    <mesh position={[x, 3.7, 0]} receiveShadow>
-                        <RoundedBoxShape size={[2.25, 7.4, 0.28]} radius={0.065} segments={3} />
-                        <PlasterMaterial materials={materials} color="#d8d1c5" />
+                    <mesh position={[x, MUSEUM_DIMENSIONS.hallHeight / 2, 0]} receiveShadow>
+                        <RoundedBoxShape size={[2.25, MUSEUM_DIMENSIONS.hallHeight, 0.28]} radius={0.065} segments={3} />
+                        <PlasterMaterial materials={materials} color="#d8d1c5" textured={false} />
                     </mesh>
                     <mesh position={[x, 1.45, -0.17]}>
                         <RoundedBoxShape size={[1.6, 2.25, 0.06]} radius={0.045} segments={3} />
@@ -477,7 +556,9 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
                 <group key={x} position={[x, 2.25, -0.03]}>
                     <mesh>
                         <RoundedBoxShape size={[2.18, 4.5, 0.1]} radius={0.035} segments={3} />
-                        <meshPhysicalMaterial color="#8fa5aa" transparent opacity={0.23} roughness={0.08} metalness={0.05} transmission={0.24} />
+                        {/* Frosted daylight glass needs no offscreen refraction
+                            pass, keeping the added gallery detail affordable. */}
+                        <meshStandardMaterial color="#abc2cd" emissive="#829fb5" emissiveIntensity={0.3} roughness={0.72} />
                     </mesh>
                     {[-1, 1].map(axis => (
                         <mesh key={axis} position={[axis * 1.08, 0, 0.06]}>
@@ -491,11 +572,11 @@ function LobbyEntrance({ materials, LabelPlane, PlasterMaterial }) {
                     </mesh>
                 </group>
             ))}
-            <mesh position={[0, 5.35, 0]}>
-                <RoundedBoxShape size={[5.1, 1.65, 0.28]} radius={0.07} segments={3} />
-                <PlasterMaterial materials={materials} color="#d8d1c5" />
+            <mesh position={[0, (MUSEUM_DIMENSIONS.hallHeight + 4.525) / 2, 0]}>
+                <RoundedBoxShape size={[5.1, MUSEUM_DIMENSIONS.hallHeight - 4.525, 0.28]} radius={0.07} segments={3} />
+                <PlasterMaterial materials={materials} color="#d8d1c5" textured={false} />
             </mesh>
-            <LabelPlane title="The Photography Archive" subtitle="Est. 2026" position={[0, 5.4, -0.18]} rotation={[0, Math.PI, 0]} size={[4.35, 0.92]} />
+            <LabelPlane title="The Photography Archive" subtitle="Est. 2026" position={[0, 5.4, -0.145]} rotation={[0, Math.PI, 0]} size={[4.35, 0.92]} />
         </group>
     )
 }
@@ -595,6 +676,7 @@ export default function MuseumDressing({ layout, materials, LabelPlane, PlasterM
             <InstancedPlants plants={staticPlants} />
             <InstancedPlants plants={roomPlants} castDynamicShadows={shadowsEnabled} />
             <InstancedRoomBenches rooms={dressedRooms} castDynamicShadows={shadowsEnabled} />
+            <ReadingRoomDetails layout={layout} />
             {/* Place sconces on the solid wall between galleries, clear of the
                 room end walls and arched entry trim. Every lens uses the same
                 emissive and baked-light treatment; selective live point lights

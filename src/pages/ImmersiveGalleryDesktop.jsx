@@ -16,6 +16,8 @@ import {
     isMuseumPositionWalkable,
     MUSEUM_DIMENSIONS,
     MUSEUM_PORTAL,
+    MUSEUM_VAULT,
+    museumVaultHeightAt,
     museumDoorAssemblyPose,
     MUSEUM_ARTWORK_SURFACES,
     museumArtworkDetailWidth,
@@ -40,7 +42,19 @@ import {
     readMuseumPreferences,
     sampleBakedWallIrradiance,
 } from '../utils/museumSupport'
-import { MUSEUM_BASE_COVER_WIDTH, MUSEUM_VISIBLE_COVER_PRIORITY, museumCoverUploadAllowed, museumPreloadPaintings } from '../utils/museumStreaming'
+import {
+    MUSEUM_BASE_COVER_WIDTH,
+    MUSEUM_NEAR_COVER_WIDTH,
+    MUSEUM_VISIBLE_COVER_PRIORITY,
+    MUSEUM_DETAIL_BLEND_SECONDS,
+    museumArtworkFallbackWidths,
+    museumArtworkPreviewCandidates,
+    museumArtworkRequestWidth,
+    museumArtworkTransitionProgress,
+    museumCoverLoadAllowed,
+    museumCoverUploadAllowed,
+    museumPreloadPaintings,
+} from '../utils/museumStreaming'
 import { MuseumRoomArchitecture, MuseumCofferedCeiling, MuseumAtmosphere } from '../components/museum/MuseumAtmosphere'
 import { createMuseumFrameDriver } from '../utils/museumFrameDriver'
 import { createMuseumArchBand } from '../utils/museumArchitecture'
@@ -72,7 +86,7 @@ const MUSEUM_ARTWORK_PLANE_GEOMETRY = new THREE.PlaneGeometry(2.66, 1.76)
 // compact base tier, then selectively sharpen what the visitor can inspect.
 const DEFAULT_COVER_LOAD_CONCURRENCY = 3
 const BASE_COVER_WIDTH = MUSEUM_BASE_COVER_WIDTH
-const NEAR_COVER_WIDTH = 640
+const NEAR_COVER_WIDTH = MUSEUM_NEAR_COVER_WIDTH
 const LOW_POWER_INSPECTION_COVER_WIDTH = 960
 const INSPECTION_COVER_WIDTH = 1440
 const COVER_FRAME_ASPECT = 2.66 / 1.76
@@ -1069,7 +1083,7 @@ function WallpaperPanel({
 
 function CeilingMaterial({ materials, hallLength }) {
     const ceilingMaps = useMemo(() => Object.fromEntries(
-        Object.entries(materials.plaster).map(([name, source]) => [name, configureTexture(source, {
+        Object.entries(materials.plaster).filter(([name]) => name === 'normalMap' || name === 'roughnessMap').map(([name, source]) => [name, configureTexture(source, {
             color: name === 'map',
             repeat: [3.5, Math.max(2, hallLength / 5.5)],
         })]),
@@ -1078,8 +1092,11 @@ function CeilingMaterial({ materials, hallLength }) {
     return (
         <meshStandardMaterial
             {...ceilingMaps}
-            normalScale={[0.32, 0.32]}
-            color="#eee7dc"
+            normalScale={[0.09, 0.09]}
+            color="#e3ddd2"
+            emissive="#9cabbc"
+            emissiveIntensity={0.12}
+            vertexColors
             roughness={0.93}
             side={THREE.DoubleSide}
         />
@@ -1510,6 +1527,10 @@ function CategoryDoorSign({ room, side, centerZ, materials }) {
     // same shallow assembly, including when viewed from directly underneath.
     return (
         <group position={pose.sign} rotation={[0, pose.rotationY, 0]}>
+            <mesh position={[0, 0, -0.14]} scale={[MUSEUM_PORTAL.signSurroundWidth, MUSEUM_PORTAL.signSurroundHeight, 0.1]}>
+                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
+                <meshStandardMaterial color="#eee5d6" roughness={0.72} />
+            </mesh>
             <mesh position={[0, 0, -0.025]} scale={[3.24, 0.86, 0.13]} castShadow receiveShadow>
                 <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
                 <meshPhysicalMaterial
@@ -1641,18 +1662,23 @@ function runCoverLoadQueue() {
         0,
     )
     const interactionBusy = museumInteractionIsBusy()
-    const hasInteractionSafeWork = coverLoadQueue.some(job => (
-        job.priority >= INTERACTION_SAFE_COVER_PRIORITY
-    ))
+    const inputPending = Boolean(navigator.scheduling?.isInputPending?.())
+    const canLoad = job => museumCoverLoadAllowed({
+        width: job.targetWidth,
+        priority: job.priority,
+        interactionBusy,
+        inputPending,
+    })
+    const hasInteractionSafeWork = coverLoadQueue.some(canLoad)
     if (
-        (navigator.scheduling?.isInputPending?.() || interactionBusy)
+        (inputPending || interactionBusy)
         && oldestWait < 850
         && !(interactionBusy && hasInteractionSafeWork)
     ) {
         scheduleCoverLoadWake(72)
         return
     }
-    if (interactionBusy && !hasInteractionSafeWork) {
+    if (inputPending || (interactionBusy && !hasInteractionSafeWork)) {
         scheduleCoverLoadWake(72)
         return
     }
@@ -1663,9 +1689,7 @@ function runCoverLoadQueue() {
         // Within the same tier, preserve scene order so the first visible rooms
         // are never starved behind the far end of the museum.
         coverLoadQueue.sort((left, right) => right.priority - left.priority || left.sequence - right.sequence)
-        const eligibleIndex = interactionBusy
-            ? coverLoadQueue.findIndex(job => job.priority >= INTERACTION_SAFE_COVER_PRIORITY)
-            : 0
+        const eligibleIndex = coverLoadQueue.findIndex(canLoad)
         if (eligibleIndex < 0) {
             scheduleCoverLoadWake(72)
             break
@@ -1698,7 +1722,7 @@ function runCoverLoadQueue() {
     }
 }
 
-function enqueueCoverLoad(task, priority = 0) {
+function enqueueCoverLoad(task, priority = 0, targetWidth = 0) {
     let queuedJob = null
     const request = new Promise((resolve, reject) => {
         queuedJob = {
@@ -1706,6 +1730,7 @@ function enqueueCoverLoad(task, priority = 0) {
             resolve,
             reject,
             priority,
+            targetWidth,
             sequence: coverLoadSequence++,
             enqueuedAt: typeof performance !== 'undefined' ? performance.now() : Date.now(),
             controller: null,
@@ -1995,7 +2020,7 @@ function requestMuseumCoverTexture(album, targetWidth = 960, priority = targetWi
             }
         }
         throw lastError || new Error('Museum cover is unavailable')
-    }, priority)
+    }, priority, targetWidth)
     const request = queuedRequest.finally(() => {
         if (coverTextureLoads.get(cacheKey) === requestRecord) coverTextureLoads.delete(cacheKey)
     })
@@ -2065,8 +2090,7 @@ function useCoverTexture(album, targetWidth, priority = targetWidth, onPermanent
     const cacheKey = coverCacheKey(album, targetWidth)
     const pendingLease = useRef(null)
     const [loaded, setLoaded] = useState(() => (
-        [cachedCoverTexture(album, targetWidth),
-            targetWidth > BASE_COVER_WIDTH ? cachedCoverTexture(album, BASE_COVER_WIDTH) : null]
+        museumArtworkFallbackWidths(targetWidth).map(width => cachedCoverTexture(album, width))
             .find(texture => texture && coverTextureWasUploaded(gl, texture)) || null
     ))
 
@@ -2552,28 +2576,102 @@ function BasePainting({ painting, active, priority, onTextureReady, onTexturePen
     )
 }
 
+function prepareMuseumArtworkMaterial(shader, blendUniforms) {
+    Object.assign(shader.uniforms, blendUniforms)
+    shader.fragmentShader = `uniform sampler2D museumPreviousMap;
+uniform float museumDetailBlend;
+${shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+// One draw for every tier. The extra sample runs only during the transition.
+if (museumDetailBlend < 1.0) {
+    vec3 previousColor = texture2D(museumPreviousMap, vMapUv).rgb;
+    diffuseColor.rgb = mix(previousColor, diffuseColor.rgb, museumDetailBlend);
+}`)}`
+}
+
+function MuseumArtworkShaderWarmup() {
+    const texture = useMemo(() => {
+        const pixel = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1)
+        pixel.colorSpace = THREE.SRGBColorSpace
+        pixel.needsUpdate = true
+        return pixel
+    }, [])
+    const uniforms = useMemo(() => ({
+        museumPreviousMap: { value: texture },
+        museumDetailBlend: { value: 1 },
+    }), [texture])
+    const prepareMaterial = useCallback(shader => prepareMuseumArtworkMaterial(shader, uniforms), [uniforms])
+    useEffect(() => () => texture.dispose(), [texture])
+    // Three.compile traverses hidden meshes. Holding this one material for the
+    // scene lifetime keeps its program cached after the opaque startup veil,
+    // so the first photograph promotion never compiles a new visible program.
+    return (
+        <mesh visible={false}>
+            <primitive object={MUSEUM_ARTWORK_PLANE_GEOMETRY} attach="geometry" />
+            <meshBasicMaterial
+                map={texture}
+                onBeforeCompile={prepareMaterial}
+                customProgramCacheKey={() => 'museum-artwork-blend-v1'}
+                color="#ffffff"
+                toneMapped={false}
+                transparent
+                depthWrite={false}
+                opacity={0}
+            />
+        </mesh>
+    )
+}
+
 function DetailPainting({ painting, targetWidth }) {
-    const detailTexture = useCoverTexture(painting.album, targetWidth, targetWidth)
+    const { gl } = useThree()
+    const [preparedWidth, setPreparedWidth] = useState(() => (
+        [targetWidth, NEAR_COVER_WIDTH].find(width => {
+            const texture = cachedCoverTexture(painting.album, width)
+            return texture && coverTextureWasUploaded(gl, texture)
+        }) || 0
+    ))
+    const requestWidth = museumArtworkRequestWidth(targetWidth, preparedWidth)
+    // Foreground detail outranks speculative archive bases only while idle.
+    // Load eligibility uses width independently, so this priority cannot let a
+    // larger decode or GPU upload slip onto a navigation frame.
+    const detailTexture = useCoverTexture(painting.album, requestWidth, 9700 + (requestWidth / 10))
     const detailMaterial = useRef(null)
-    const hasDisplayedDetail = useRef(false)
+    const transition = useRef({ displayed: null, previous: null, elapsed: MUSEUM_DETAIL_BLEND_SECONDS, revealElapsed: 0 })
+    const blendUniforms = useMemo(() => ({
+        museumPreviousMap: { value: null },
+        museumDetailBlend: { value: 1 },
+    }), [])
+    const prepareMaterial = useCallback(shader => prepareMuseumArtworkMaterial(shader, blendUniforms), [blendUniforms])
     const loadedWidth = Number(detailTexture?.userData?.museumTargetWidth) || 0
     const displayTexture = loadedWidth > BASE_COVER_WIDTH ? detailTexture : null
 
+    useEffect(() => {
+        if (loadedWidth <= preparedWidth) return undefined
+        return scheduleMuseumVisibleTask(() => setPreparedWidth(loadedWidth), 0)
+    }, [loadedWidth, preparedWidth])
     useLayoutEffect(() => {
-        if (!displayTexture) {
-            hasDisplayedDetail.current = false
-            return
-        }
-        if (!detailMaterial.current) return
-        // Only fade the first promoted preview over the compact room cover.
-        // When a 640px preview upgrades to 1440px, preserve the existing opaque
-        // layer and swap its aligned texture in place. Resetting opacity here
-        // exposed the compact base again and made the quality change look like
-        // an obvious blur/flash even though the sharper texture was ready.
-        detailMaterial.current.opacity = hasDisplayedDetail.current ? 1 : 0
-        hasDisplayedDetail.current = true
+        if (!displayTexture || !detailMaterial.current) return
+        const current = transition.current
+        if (current.displayed === displayTexture) return
+        if (current.previous) unpinCoverTexture(current.previous)
+        // Hold the actual previous tier until its blend completes. The hook
+        // releases its reference when a new texture attaches; this short lease
+        // prevents cache eviction from turning the old sampler black mid-fade.
+        current.previous = current.displayed?.userData.museumDisposed ? null : current.displayed
+        if (current.previous) pinCoverTexture(current.previous)
+        blendUniforms.museumPreviousMap.value = current.previous || displayTexture
+        blendUniforms.museumDetailBlend.value = current.previous ? 0 : 1
+        // Keep the first reveal progressing if a cached sharp texture arrives
+        // mid-reveal; promoting it must not suddenly make the layer opaque.
+        current.displayed = displayTexture
+        current.elapsed = 0
         requestMuseumFrames(3)
-    }, [displayTexture])
+    }, [blendUniforms, displayTexture])
+    useEffect(() => () => {
+        const current = transition.current
+        if (current.previous) unpinCoverTexture(current.previous)
+        current.previous = null
+        blendUniforms.museumPreviousMap.value = null
+    }, [blendUniforms])
     useEffect(() => {
         if (!import.meta.env.DEV || !displayTexture) return undefined
         const current = JSON.parse(document.documentElement.dataset.museumDetailTextures || '{}')
@@ -2590,11 +2688,19 @@ function DetailPainting({ painting, targetWidth }) {
         }
     }, [displayTexture, painting.id, targetWidth])
     useFrame((_, delta) => {
-        if (!displayTexture || !detailMaterial.current || detailMaterial.current.opacity >= 1) return
-        detailMaterial.current.opacity = Math.min(
-            1,
-            detailMaterial.current.opacity + (Math.min(delta, 0.05) * 4),
-        )
+        const current = transition.current
+        if (!displayTexture || !detailMaterial.current || current.elapsed >= MUSEUM_DETAIL_BLEND_SECONDS) return
+        const progress = museumArtworkTransitionProgress(current.elapsed, current.revealElapsed, delta)
+        current.elapsed = progress.elapsed
+        current.revealElapsed = progress.revealElapsed
+        detailMaterial.current.opacity = progress.opacity
+        const blend = progress.blend
+        if (current.previous) blendUniforms.museumDetailBlend.value = blend
+        if (blend >= 1 && current.previous) {
+            unpinCoverTexture(current.previous)
+            current.previous = null
+            blendUniforms.museumPreviousMap.value = current.displayed
+        }
         requestMuseumFrames(2)
     })
 
@@ -2610,6 +2716,8 @@ function DetailPainting({ painting, targetWidth }) {
                 <meshBasicMaterial
                     ref={detailMaterial}
                     map={displayTexture}
+                    onBeforeCompile={prepareMaterial}
+                    customProgramCacheKey={() => 'museum-artwork-blend-v1'}
                     color="#ffffff"
                     toneMapped={false}
                     transparent
@@ -2665,18 +2773,17 @@ function CameraAwareRoomPaintings({ room, paintings = room.paintings, active, fo
         frustum.setFromProjectionMatrix(projection)
         camera.getWorldDirection(viewDirection)
 
-        const candidates = paintings.map((painting) => {
+        const candidates = museumArtworkPreviewCandidates(paintings.map((painting) => {
             sphere.center.set(...painting.position)
             toPainting.copy(sphere.center).sub(camera.position)
             const distance = toPainting.length()
             const facing = distance > 0 ? viewDirection.dot(toPainting.multiplyScalar(1 / distance)) : 1
             const visible = frustum.intersectsSphere(sphere) && facing > -0.12
             return { painting, distance, facing, visible }
-        }).filter(candidate => candidate.visible && candidate.distance < 24)
-            .sort((left, right) => left.distance - right.distance)
+        }), new Set(detailSelectionRef.current.map(item => item.painting.id)))
 
-        const focusCandidate = candidates.find(({ distance, facing }) => (
-            distance < 5.2 && facing > 0.68
+        const focusCandidate = candidates.find(({ distance, facing, visible }) => (
+            visible && distance < 5.2 && facing > 0.68
         ))
         const focus = detailFocus.current
         if (focusCandidate?.painting.id !== focus.candidateId) {
@@ -3206,8 +3313,7 @@ function AnimatedPortalGate({ roomId, side, centerZ, open, onPassabilityChange, 
 
 function VaultedCeiling({ layout, centerZ, materials }) {
     const { geometry, ribCurve } = useMemo(() => {
-        const radius = 6.35
-        const centerY = 0.85
+        const radius = MUSEUM_VAULT.radius
         const start = Math.acos(MUSEUM_DIMENSIONS.hallHalfWidth / radius)
         const end = Math.PI - start
         const count = 32
@@ -3218,13 +3324,19 @@ function VaultedCeiling({ layout, centerZ, materials }) {
         const backZ = centerZ - (layout.hallLength / 2) + 0.14
         const positions = []
         const uvs = []
+        const colors = []
         const indices = []
         for (let index = 0; index <= count; index += 1) {
             const ratio = index / count
             const angle = start + (ratio * (end - start))
             const x = radius * Math.cos(angle)
-            const y = centerY + (radius * Math.sin(angle))
+            const y = museumVaultHeightAt(x)
             positions.push(x, y, frontZ, x, y, backZ)
+            // Cool indirect light in the crown meets warmer reflected light
+            // at the wall. These colors cost no extra light or texture sample.
+            const edge = Math.pow(Math.abs(x) / MUSEUM_DIMENSIONS.hallHalfWidth, 3)
+            const tint = [0.76 + edge * 0.24, 0.82 + edge * 0.1, 0.96 - edge * 0.2]
+            colors.push(...tint, ...tint)
             uvs.push(ratio, 0, ratio, 1)
             if (index < count) {
                 const current = index * 2
@@ -3235,11 +3347,13 @@ function VaultedCeiling({ layout, centerZ, materials }) {
         const shell = new THREE.BufferGeometry()
         shell.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
         shell.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+        shell.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
         shell.setIndex(indices)
         shell.computeVertexNormals()
         const points = Array.from({ length: 29 }, (_, index) => {
             const angle = start + ((index / 28) * (end - start))
-            return new THREE.Vector3(radius * Math.cos(angle), centerY + radius * Math.sin(angle), 0)
+            const x = radius * Math.cos(angle)
+            return new THREE.Vector3(x, museumVaultHeightAt(x), 0)
         })
         return {
             geometry: shell,
@@ -3255,20 +3369,26 @@ function VaultedCeiling({ layout, centerZ, materials }) {
         values.push(layout.hallBackZ + 0.3)
         return values
     }, [layout.hallBackZ])
+    const ribs = useRef(null)
+    const ribGeometry = useMemo(() => new THREE.TubeGeometry(ribCurve, 30, MUSEUM_VAULT.ribRadius, 6, false), [ribCurve])
+    useEffect(() => () => ribGeometry.dispose(), [ribGeometry])
+    useLayoutEffect(() => {
+        const matrix = new THREE.Matrix4()
+        ribZs.forEach((z, index) => ribs.current.setMatrixAt(index, matrix.makeTranslation(0, 0, z)))
+        ribs.current.instanceMatrix.needsUpdate = true
+        ribs.current.computeBoundingSphere()
+    }, [ribZs])
 
     return (
         <group>
             <mesh geometry={geometry} receiveShadow>
                 <CeilingMaterial materials={materials} hallLength={layout.hallLength} />
             </mesh>
-            {ribZs.map(z => (
-                <mesh key={z} position={[0, 0, z]}>
-                    <tubeGeometry args={[ribCurve, 30, 0.075, 6, false]} />
-                    <meshStandardMaterial color="#b9ab97" roughness={0.7} />
-                </mesh>
-            ))}
+            <instancedMesh ref={ribs} args={[ribGeometry, undefined, ribZs.length]}>
+                <meshStandardMaterial color="#b9ab97" roughness={0.7} />
+            </instancedMesh>
             {[-1, 1].map(side => (
-                <mesh key={side} position={[side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.06), 4.98, centerZ + 0.14]} scale={[0.16, 0.22, Math.max(1, layout.hallLength - 0.28)]}>
+                <mesh key={side} position={[side * (MUSEUM_DIMENSIONS.hallHalfWidth - 0.06), MUSEUM_VAULT.corniceY, centerZ + 0.14]} scale={[0.16, 0.22, Math.max(1, layout.hallLength - 0.28)]}>
                     <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
                     <meshStandardMaterial color="#b8aa95" roughness={0.72} />
                 </mesh>
@@ -3573,10 +3693,10 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
         if (!active || !detailed) {
             return scheduleMuseumVisibleTask(() => setAllowDetail(false), 0)
         }
-        // Let the portal complete and the player settle before one nearby
-        // painting upgrades. This visible-task timer is rearmed after a long
-        // background pause instead of silently retaining stale detail work.
-        return scheduleMuseumVisibleTask(() => setAllowDetail(true), 700)
+        // Queue medium previews during the approach instead of waiting for the
+        // visitor to stand inside. The shared decoder/upload queues still hold
+        // every larger texture until navigation input has settled.
+        return scheduleMuseumVisibleTask(() => setAllowDetail(true), 120)
     }, [active, detailed])
     const roomVariant = useMemo(() => (
         [...room.id].reduce((total, character) => total + character.charCodeAt(0), 0) % 4
@@ -3941,7 +4061,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
             )}
             <InstancedCeilingFixtures
                 positions={ceilingLights.map(z => [0, z])}
-                ceilingY={6.92}
+                ceilingY={MUSEUM_VAULT.fixtureY}
             />
             <MuseumDressing
                 layout={layout}
@@ -4532,8 +4652,8 @@ function PreviewCamera({ mode, roomIndex, layout }) {
             camera.position.set(room.innerX - room.side * 1.45, 1.8, room.centerZ + 2.65)
             camera.lookAt(room.innerX, 3, room.centerZ + 2.3)
         } else if (mode === 'sign' && room) {
-            camera.position.set(room.innerX - room.side * 0.85, 3.2, room.centerZ + 2.1)
-            camera.lookAt(room.innerX - room.side * 0.18, 5.18, room.centerZ)
+            camera.position.set(0, 1.7, room.centerZ + 0.65)
+            camera.lookAt(room.innerX - room.side * 0.18, MUSEUM_PORTAL.signHeight, room.centerZ)
         } else if (mode === 'plant' && room) {
             const plant = room.plants[0]
             camera.position.set(plant.position[0] - room.side * 1.6, 1.7, plant.position[2] + 1.45)
@@ -4561,6 +4681,12 @@ function PreviewCamera({ mode, roomIndex, layout }) {
                 room.centerZ + approachOffset,
             )
             camera.lookAt(room.innerX + (room.side * 1.1), 2.15, room.centerZ)
+        } else if (mode === 'entrance') {
+            camera.position.set(0, 2.1, 9.4)
+            camera.lookAt(0, 4.8, MUSEUM_DIMENSIONS.lobbyFrontZ)
+        } else if (mode === 'reception') {
+            camera.position.set(3.05, 2.5, 8.5)
+            camera.lookAt(0, 1.5, layout.desk.position[2])
         } else if (mode === 'hall') {
             camera.position.set(0, 1.95, 1.5)
             camera.lookAt(0, 2.3, MUSEUM_DIMENSIONS.firstBayZ - 14)
@@ -4753,7 +4879,7 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, onRendererSt
         }
     }, [camera, gl, layout, onProgress, onReady, onRendererStatus, scene, touchMode, warmRoomIds])
 
-    return null
+    return <MuseumArtworkShaderWarmup />
 }
 
 function AnticipatoryRoomPreloader({ layout, activeRoomId, activeRoomIds, enabled }) {
@@ -5192,15 +5318,15 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                 actual architectural fixtures establish contrast. The previous
                 high ambient/hemisphere pair flattened every room into the same
                 brightness and made practical lights visually irrelevant. */}
-            <ambientLight intensity={touchMode ? 0.29 : 0.27} color="#f0dcc2" />
-            <hemisphereLight args={['#b8ccd7', '#241712', touchMode ? 0.32 : 0.3]} />
+            <ambientLight intensity={touchMode ? 0.25 : 0.22} color="#f0dcc2" />
+            <hemisphereLight args={['#c3d5e1', '#38251c', touchMode ? 0.42 : 0.4]} />
             <directionalLight
                 position={[-6, 10, 12]}
-                intensity={touchMode ? 0.2 : (cinematicShadows ? 0.11 : 0.155)}
+                intensity={touchMode ? 0.28 : 0.26}
                 color="#dce8ef"
                 castShadow={false}
             />
-            <directionalLight position={[7, 6, -12]} intensity={0.055} color="#d69e6a" castShadow={false} />
+            <directionalLight position={[7, 6, -12]} intensity={0.085} color="#e3b680" castShadow={false} />
             <MainHall
                 layout={layout}
                 activeRoomId={controlsEnabled.activeRoomId}
@@ -5399,7 +5525,7 @@ export default function ImmersiveGalleryDesktop() {
     const developmentTour = import.meta.env.DEV && previewParams?.get('museum-tour') === '1'
     const developmentPerf = import.meta.env.DEV && previewParams?.get('museum-perf') === '1'
     const roomPreviewModes = useMemo(() => ['room', 'inspect', 'portal', 'end', 'join', 'plaques', 'arch', 'sign', 'plant'], [])
-    const visualPreview = import.meta.env.DEV && ['lobby', 'hall', ...roomPreviewModes].includes(previewMode)
+    const visualPreview = import.meta.env.DEV && ['lobby', 'hall', 'entrance', 'reception', ...roomPreviewModes].includes(previewMode)
     const initialActiveRoomIds = useMemo(
         () => initialMuseumRoomIds(
             layout,

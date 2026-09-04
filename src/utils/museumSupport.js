@@ -75,18 +75,22 @@ export function sampleBakedWallIrradiance({
         * Math.pow(Math.max(0, 1 - Math.abs(normalizedY - 0.64) / 0.58), 1.35)
     const centralLift = Math.max(0, 1 - (normalizedX * normalizedX))
 
-    const base = 0.735
+    // Bake warm fixture pools against a slightly cooler interstitial bounce.
+    // This is sampled only while building wall vertices, so the stronger
+    // warm/cool separation adds no lights, textures, or fragment work.
+    const base = 0.715
         + (lowerBounce * 0.075)
-        + (fixturePool * (mode === 'hall' ? 0.155 : 0.13))
+        + (fixturePool * (mode === 'hall' ? 0.20 : 0.17))
         + (centralLift * 0.035)
         - (crownOcclusion * 0.065)
         - (edgeOcclusion * 0.045)
-    const warmth = lowerBounce * 0.052 + fixturePool * 0.075
+    const warmth = lowerBounce * 0.052 + fixturePool * 0.085
+    const coolBounce = (1 - fixturePool) * (1 - lowerBounce) * 0.03
 
     return [
         Math.min(1, Math.max(0.58, base + warmth)),
-        Math.min(1, Math.max(0.58, base + (warmth * 0.48))),
-        Math.min(1, Math.max(0.56, base - (warmth * 0.28))),
+        Math.min(1, Math.max(0.58, base + (warmth * 0.48) + coolBounce * 0.45)),
+        Math.min(1, Math.max(0.56, base - (warmth * 0.28) + coolBounce)),
     ]
 }
 

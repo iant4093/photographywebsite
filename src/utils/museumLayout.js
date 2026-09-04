@@ -3,7 +3,7 @@ import { MUSEUM_PLANT_FORM, museumPlantFoliageRadius } from './museumPlants'
 
 export const MUSEUM_DIMENSIONS = Object.freeze({
     hallHalfWidth: 4.8,
-    hallHeight: 7.4,
+    hallHeight: 8.5,
     hallWallThickness: 0.32,
     roomWallThickness: 0.24,
     roomCeilingY: 6.15,
@@ -21,12 +21,27 @@ export const MUSEUM_DIMENSIONS = Object.freeze({
     portalGateDepth: 0.25,
 })
 
+export const MUSEUM_VAULT = Object.freeze({
+    radius: 6.35,
+    centerY: 1.95,
+    ribRadius: 0.075,
+    corniceY: 6.08,
+    fixtureY: 8.23,
+})
+
+export function museumVaultHeightAt(x) {
+    return MUSEUM_VAULT.centerY + Math.sqrt(Math.max(0, MUSEUM_VAULT.radius ** 2 - x ** 2))
+}
+
 export const MUSEUM_PORTAL = Object.freeze({
     springHeight: 2.7,
     rise: 1.55,
     bandWidth: 0.4,
     depth: 0.26,
-    signHeight: 5.18,
+    signHeight: 5.3,
+    signSurroundWidth: 3.6,
+    signSurroundHeight: 1.12,
+    signRear: -0.19,
     // Ordered from the floor to the spring line. Adjacent sections share a
     // face instead of putting the arch through an oversized capital.
     pierSections: [
@@ -45,7 +60,7 @@ export function museumDoorAssemblyPose(side, centerZ) {
     return {
         rotationY: side < 0 ? Math.PI / 2 : -Math.PI / 2,
         trim: [side * surface, 0, centerZ],
-        sign: [side * (surface - 0.09), MUSEUM_PORTAL.signHeight, centerZ],
+        sign: [side * (surface + MUSEUM_PORTAL.signRear), MUSEUM_PORTAL.signHeight, centerZ],
     }
 }
 
@@ -552,7 +567,7 @@ export function museumArtworkDetailWidth(distance, {
     // A three-metre release band prevents a painting at the boundary from
     // repeatedly mounting and cancelling its 640px upgrade while the camera
     // sways or the visitor takes a small step.
-    const nearLimit = Number(currentWidth) >= 640 ? 21 : 18
+    const nearLimit = Number(currentWidth) >= 640 ? 27 : 24
     return numericDistance <= nearLimit ? 640 : 0
 }
 
