@@ -258,8 +258,6 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
     const bases = useRef(null)
     const cushions = useRef(null)
     const trimBands = useRef(null)
-    const backrests = useRef(null)
-    const armrests = useRef(null)
     const tuftButtons = useRef(null)
     const legs = useRef(null)
     const rugOuter = useRef(null)
@@ -278,7 +276,6 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
         const scale = new THREE.Vector3()
         const parentScale = new THREE.Vector3(1, 1, 1)
         let legIndex = 0
-        let armIndex = 0
         let tuftIndex = 0
         benches.forEach(({ bench, variant }, index) => {
             const [width, height, depth] = bench.size
@@ -295,36 +292,11 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
             place(bases.current, [0, 0.04, 0], [width, height * 0.72, depth])
             place(cushions.current, [0, height * 0.44, 0], [width + 0.04, height * 0.28, depth + 0.04])
             place(trimBands.current, [0, height * 0.25, 0], [width + 0.075, 0.055, depth + 0.075])
-            // Gallery benches are deliberately symmetrical ottomans. The old
-            // one-sided backrest shifted their visual mass off the exact room
-            // axis even though the collision/body origin was centered.
-            place(
-                backrests.current,
-                [0, 0, 0],
-                [0.001, 0.001, 0.001],
-            )
-
-            for (const side of [-1, 1]) {
-                local.compose(
-                    position.set(side * ((width / 2) - 0.12), height * 0.42, 0.02),
-                    localRotation.identity(),
-                    scale.set(
-                        0.001,
-                        0.001,
-                        0.001,
-                    ),
-                )
-                matrix.multiplyMatrices(parent, local)
-                armrests.current?.setMatrixAt(armIndex, matrix)
-                armrests.current?.setColorAt(armIndex, new THREE.Color(palette.cushion))
-                armIndex += 1
-            }
-
             // Six inset upholstery buttons catch grazing picture light and
             // break the broad cushion into human-scale detail. The instances
             // are cheaper than separate hero meshes but remove the blockout
             // look at the visitor's nearest recurring prop.
-            for (const along of [-0.54, 0, 0.54]) {
+            for (const along of [-0.36, 0, 0.36]) {
                 for (const across of [-0.22, 0.22]) {
                     local.compose(
                         position.set(along * width, (height * 0.59) + 0.018, across * depth),
@@ -340,7 +312,6 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
 
             bases.current?.setColorAt(index, new THREE.Color(palette.base))
             cushions.current?.setColorAt(index, new THREE.Color(palette.cushion))
-            backrests.current?.setColorAt(index, new THREE.Color(palette.cushion))
             rugOuter.current?.setColorAt(index, new THREE.Color(palette.rugOuter))
             rugInner.current?.setColorAt(index, new THREE.Color(palette.rugInner))
             rugBorder.current?.setColorAt(index, new THREE.Color(palette.rugBorder))
@@ -364,7 +335,7 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
             for (const x of [-0.56, 0.56]) {
                 for (const direction of [-1, 1]) {
                     local.compose(
-                        position.set(x, -0.37, direction * ((depth / 2) - 0.18)),
+                        position.set(x, -0.23, direction * ((depth / 2) - 0.18)),
                         localRotation.identity(),
                         scale.set(1, 1, 1),
                     )
@@ -374,7 +345,7 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
                 }
             }
         })
-        for (const mesh of [bases.current, cushions.current, trimBands.current, backrests.current, armrests.current, tuftButtons.current, legs.current, rugOuter.current, rugInner.current, rugBorder.current, rugCenter.current]) {
+        for (const mesh of [bases.current, cushions.current, trimBands.current, tuftButtons.current, legs.current, rugOuter.current, rugInner.current, rugBorder.current, rugCenter.current]) {
             if (!mesh) continue
             mesh.instanceMatrix.needsUpdate = true
             if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
@@ -394,18 +365,12 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
             <instancedMesh ref={trimBands} args={[BENCH_ROUNDED_BOX, undefined, benches.length]} castShadow={castDynamicShadows}>
                 <meshPhysicalMaterial color="#9a7441" metalness={0.7} roughness={0.28} clearcoat={0.28} clearcoatRoughness={0.42} />
             </instancedMesh>
-            <instancedMesh ref={backrests} args={[BENCH_ROUNDED_BOX, undefined, benches.length]} castShadow={castDynamicShadows}>
-                <meshPhysicalMaterial color="#ffffff" vertexColors bumpMap={textileDetail} bumpScale={0.022} roughness={0.86} sheen={0.55} sheenColor="#d5abb0" sheenRoughness={0.78} emissive="#271216" emissiveIntensity={0.08} />
-            </instancedMesh>
-            <instancedMesh ref={armrests} args={[BENCH_ROUNDED_BOX, undefined, benches.length * 2]} castShadow={castDynamicShadows}>
-                <meshPhysicalMaterial color="#ffffff" vertexColors bumpMap={textileDetail} bumpScale={0.022} roughness={0.86} sheen={0.55} sheenColor="#d5abb0" sheenRoughness={0.78} emissive="#271216" emissiveIntensity={0.08} />
-            </instancedMesh>
             <instancedMesh ref={tuftButtons} args={[undefined, undefined, benches.length * 6]} castShadow={castDynamicShadows}>
                 <sphereGeometry args={[1, 8, 5]} />
                 <meshPhysicalMaterial color="#ffffff" vertexColors roughness={0.82} sheen={0.32} sheenColor="#d9b4b0" />
             </instancedMesh>
             <instancedMesh ref={legs} args={[undefined, undefined, benches.length * 4]} castShadow={castDynamicShadows}>
-                <cylinderGeometry args={[0.055, 0.075, 0.6, 10]} />
+                <cylinderGeometry args={[0.055, 0.075, 0.25, 10]} />
                 <meshStandardMaterial color={DARK_BRASS} metalness={0.72} roughness={0.28} />
             </instancedMesh>
             <instancedMesh ref={rugOuter} args={[RUG_ROUNDED_BOX, undefined, benches.length]}><meshStandardMaterial color="#ffffff" vertexColors roughness={0.98} /></instancedMesh>

@@ -5,6 +5,7 @@ import {
     isMuseumPositionWalkable,
     initialMuseumRoomIds,
     MUSEUM_DIMENSIONS,
+    MUSEUM_ARTWORK_SURFACES,
     museumArtworkDetailWidth,
     museumArtworkLightIndex,
     museumCeilingLightPose,
@@ -13,6 +14,8 @@ import {
     museumPlanarAxes,
     museumRoomGateOpen,
     museumRoomCeilingFixtureXs,
+    museumRoomShell,
+    museumRoomRibXs,
     moveMuseumPosition,
     nearbyMuseumRoomIds,
     nearestMuseumRoom,
@@ -32,6 +35,60 @@ const album = (albumId, category, extra = {}) => ({
 })
 
 describe('museum layout', () => {
+    it('seals both mirrored room shells into the structural hall without moving the far wall', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([
+            album('left', 'Left'), album('right', 'Right'),
+        ]))
+        for (const room of layout.rooms) {
+            const shell = museumRoomShell(room)
+            const hallOuterFace = room.innerX + room.side * MUSEUM_DIMENSIONS.hallWallThickness / 2
+            expect((hallOuterFace - shell.innerX) * room.side).toBeGreaterThanOrEqual(0.039)
+            expect(shell.centerX + room.side * shell.depth / 2).toBeCloseTo(room.outerX)
+            const fixtureBottom = MUSEUM_DIMENSIONS.roomFixtureY - 0.142
+            expect(fixtureBottom).toBeLessThan(5.98 - 0.025 / 2)
+        }
+    })
+
+    it('mounts frames clear of wallpaper and keeps every image layer in front of the solid lip', () => {
+        const surface = MUSEUM_ARTWORK_SURFACES
+        const wallpaper = MUSEUM_DIMENSIONS.roomWallThickness / 2 + MUSEUM_DIMENSIONS.wallSurfaceGap
+        const backingRear = MUSEUM_DIMENSIONS.artworkWallOffset + surface.backing - surface.backingDepth / 2
+        expect(backingRear).toBeGreaterThan(wallpaper)
+        expect(MUSEUM_DIMENSIONS.artworkWallOffset + surface.plaque).toBeGreaterThan(wallpaper)
+        // The caption's top edge clears the lower edge of the backing.
+        expect(surface.plaqueY + 0.38 / 2).toBeLessThan(-0.025 - 2.52 / 2)
+        const orderedSurfaces = [surface.lip + surface.lipDepth / 2, surface.placeholder, surface.base, surface.detail, surface.glass]
+        expect(orderedSurfaces.every((value, i) => i === 0 || value > orderedSurfaces[i - 1])).toBe(true)
+    })
+
+    it('stops the visitor before entering a projecting frame on either long wall', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Left'), album('b', 'Left')]))
+        for (const painting of layout.rooms[0].paintings) {
+            const direction = painting.normal[2]
+            expect(isMuseumPositionWalkable(layout, painting.position[0], painting.position[2] + direction * 0.1)).toBe(false)
+            expect(isMuseumPositionWalkable(layout, painting.position[0], painting.position[2] + direction * 0.7)).toBe(true)
+        }
+    })
+
+    it('keeps architectural piers between photographs at every supported room scale', () => {
+        for (const count of [1, 2, 3, 6, 26, 74, 240]) {
+            const rooms = buildMuseumLayout(buildMuseumCatalog([
+                ...Array.from({ length: count }, (_, i) => album(`left-${i}`, 'Left')),
+                ...Array.from({ length: count }, (_, i) => album(`right-${i}`, 'Right')),
+            ])).rooms
+            for (const room of rooms) {
+                const ribs = museumRoomRibXs(room)
+                expect(ribs.length).toBeLessThanOrEqual(6)
+                for (const x of ribs) {
+                    for (const painting of room.paintings) {
+                        // 3.42 m frame backing + 20 cm pier + visible air gap.
+                        expect(Math.abs(x - painting.position[0])).toBeGreaterThan(1.91)
+                    }
+                }
+            }
+        }
+    })
+
     it('builds a public, deduplicated, dynamically ordered photo catalog', () => {
         const catalog = buildMuseumCatalog([
             album('hike-2', 'Hikes', { galleryOrder: 1, galleryCategoryOrder: 0 }),

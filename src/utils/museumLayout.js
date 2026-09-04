@@ -4,6 +4,13 @@ export const MUSEUM_DIMENSIONS = Object.freeze({
     hallHalfWidth: 4.8,
     hallHeight: 7.4,
     hallWallThickness: 0.32,
+    roomWallThickness: 0.24,
+    roomCeilingY: 6.15,
+    roomFixtureY: 5.91,
+    // Four centimetres of structural overlap seals both mirrored wall joins.
+    roomShellInset: 0.12,
+    artworkWallOffset: 0.26,
+    wallSurfaceGap: 0.018,
     doorwayWidth: 4.6,
     lobbyFrontZ: 14,
     firstBayZ: -7,
@@ -11,6 +18,19 @@ export const MUSEUM_DIMENSIONS = Object.freeze({
     roomSpan: 12.5,
     paintingSpacing: 5.6,
     portalGateDepth: 0.25,
+})
+
+export const MUSEUM_ARTWORK_SURFACES = Object.freeze({
+    backing: -0.08,
+    backingDepth: 0.08,
+    plaque: -0.105,
+    plaqueY: -1.51,
+    lip: 0.154,
+    lipDepth: 0.045,
+    placeholder: 0.179,
+    base: 0.181,
+    detail: 0.185,
+    glass: 0.19,
 })
 
 function normalizedCategory(value) {
@@ -47,7 +67,7 @@ export function buildMuseumCatalog(albums = []) {
 }
 
 function makePaintings(room) {
-    const wallOffset = (room.width / 2) - 0.12
+    const wallOffset = (room.width / 2) - MUSEUM_DIMENSIONS.artworkWallOffset
     return room.albums.map((album, index) => {
         // Keep the far wall reserved for the category title. Every album hangs
         // on one of the two long walls in a consistent alternating rhythm.
@@ -68,6 +88,26 @@ function makePaintings(room) {
             scale: [1, 1, 1],
         }
     })
+}
+
+export function museumRoomShell(room) {
+    const inset = MUSEUM_DIMENSIONS.roomShellInset
+    return {
+        depth: room.depth - inset,
+        centerX: room.centerX + (room.side * inset / 2),
+        innerX: room.innerX + (room.side * inset),
+    }
+}
+
+export function museumRoomRibXs(room) {
+    const rows = [...new Set(room.paintings.map(painting => painting.position[0]))]
+    // Align piers to gaps between actual frames, never to furniture placement.
+    // A bounded set of ribs gives long galleries a rhythm at constant cost.
+    const gaps = rows.slice(0, -1).map((x, index) => (x + rows[index + 1]) / 2)
+    const count = Math.min(6, Math.ceil(gaps.length / 3))
+    return Array.from({ length: count }, (_, index) => (
+        gaps[Math.min(gaps.length - 1, Math.floor((index + 0.5) * gaps.length / count))]
+    ))
 }
 
 function makeBenches(room) {
@@ -227,6 +267,17 @@ export function buildMuseumLayout(categories = []) {
         ...rooms.flatMap(room => [
             ...room.benches,
             ...room.plants,
+            // A smooth continuous stop follows the outermost artwork surface.
+            // Without it a camera could enter the now correctly wall-mounted
+            // frames; individual frame colliders would snag a wall-following walk.
+            ...[-1, 1].map(direction => {
+                const projection = MUSEUM_DIMENSIONS.artworkWallOffset + MUSEUM_ARTWORK_SURFACES.glass
+                return {
+                    kind: 'room-wall-presentation',
+                    position: [room.centerX, 2.65, room.centerZ + direction * (room.width / 2 - projection / 2)],
+                    size: [room.depth, 5.8, projection],
+                }
+            }),
         ]),
     ]
 
