@@ -75,6 +75,9 @@ CAUSING_ENTITY_RE = re.compile(
     r"^[A-Za-z][A-Za-z0-9]{0,254}\.[A-Za-z][A-Za-z0-9]{0,254}$"
 )
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+# This is an introduction-only contract. Once deployed, this parameter follows
+# the same preservation rules as every existing parameter (including false).
+REVIEWED_PARAMETER_ADDITIONS = {"OriginalComparisonsEnabled": "true"}
 
 
 class GateError(ValueError):
@@ -307,11 +310,37 @@ def gate_change_set(
     return counts
 
 
-def previous_parameter_payload(
-    stack: dict[str, Any], *, release_sha: str | None = None
-) -> list[dict[str, Any]]:
-    """Produce UsePreviousValue entries without reading or reproducing values."""
+def _validated_parameter_additions(additions: Any) -> dict[str, str]:
+    if additions is None:
+        return {}
+    if not isinstance(additions, dict) or (
+        additions and additions != REVIEWED_PARAMETER_ADDITIONS
+    ):
+        raise GateError("parameter additions differ from the exact reviewed contract")
+    return dict(additions)
 
+
+def load_parameter_additions(document: Any) -> dict[str, str]:
+    """Load the exact versioned introduction of the original-comparison flag."""
+
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"version", "additions"}
+        or type(document.get("version")) is not int
+        or document["version"] != 1
+        or document.get("additions") != REVIEWED_PARAMETER_ADDITIONS
+    ):
+        raise GateError("parameter additions policy differs from the reviewed contract")
+    return _validated_parameter_additions(document["additions"])
+
+
+def previous_parameter_payload(
+    stack: dict[str, Any], *, release_sha: str | None = None,
+    parameter_additions: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Preserve deployed values and explicitly introduce reviewed new values."""
+
+    additions = _validated_parameter_additions(parameter_additions)
     parameters = stack.get("Parameters")
     if not isinstance(parameters, list):
         raise GateError("stack is missing Parameters")
@@ -330,6 +359,9 @@ def previous_parameter_payload(
             result.append({"ParameterKey": key, "UsePreviousValue": True})
     if release_sha is not None and "ReleaseSha" not in seen:
         result.append({"ParameterKey": "ReleaseSha", "ParameterValue": release_sha})
+    for key, value in additions.items():
+        if key not in seen:
+            result.append({"ParameterKey": key, "ParameterValue": value})
     return result
 
 
@@ -339,9 +371,11 @@ def require_preserved_parameters(
     *,
     release_sha: str,
     resolved_values: bool = False,
+    parameter_additions: dict[str, str] | None = None,
 ) -> None:
     """Prove preserved request markers or their exact provider-resolved values."""
 
+    additions = _validated_parameter_additions(parameter_additions)
     if not re.fullmatch(r"[0-9a-f]{40}", release_sha):
         raise GateError("release SHA must be an exact lowercase commit SHA")
 
@@ -362,8 +396,9 @@ def require_preserved_parameters(
 
     current = indexed(stack.get("Parameters"), "stack")
     planned = indexed(change_parameters, "change set")
-    if set(planned) != set(current):
-        raise GateError("change set parameter keys differ from the deployed stack")
+    introduced = set(additions) - set(current)
+    if set(planned) != set(current) | introduced:
+        raise GateError("change set parameter keys differ from the preserved stack and reviewed additions")
     for key, parameter in planned.items():
         if key == "ReleaseSha":
             if (
@@ -371,6 +406,12 @@ def require_preserved_parameters(
                 or parameter.get("ParameterValue") != release_sha
             ):
                 raise GateError("change set release SHA is not exact")
+        elif key in introduced:
+            if (
+                parameter.get("ParameterValue") != additions[key]
+                or parameter.get("UsePreviousValue", False) is not False
+            ):
+                raise GateError("change set introduction differs from the reviewed parameter value")
         elif resolved_values:
             deployed = current[key]
             if (
@@ -603,6 +644,7 @@ def main(argv: list[str] | None = None) -> int:
     parameters.add_argument("stack_json")
     parameters.add_argument("output_json")
     parameters.add_argument("--release-sha")
+    parameters.add_argument("--parameter-additions")
     invariants = subparsers.add_parser("stack-invariants")
     invariants.add_argument("stack_json")
     change_set = subparsers.add_parser("gate-change-set")
@@ -614,6 +656,7 @@ def main(argv: list[str] | None = None) -> int:
     preserved.add_argument("change_parameters_json")
     preserved.add_argument("--release-sha", required=True)
     preserved.add_argument("--resolved-values", action="store_true")
+    preserved.add_argument("--parameter-additions")
     environment = subparsers.add_parser("template-environment-policy")
     environment.add_argument("template")
     environment.add_argument("policy_json")
@@ -635,7 +678,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "previous-parameters":
             payload = previous_parameter_payload(
-                _read_json(args.stack_json), release_sha=args.release_sha
+                _read_json(args.stack_json), release_sha=args.release_sha,
+                parameter_additions=(
+                    load_parameter_additions(_read_json(args.parameter_additions))
+                    if args.parameter_additions else None
+                ),
             )
             Path(args.output_json).write_text(json.dumps(payload), encoding="utf-8")
         elif args.command == "stack-invariants":
@@ -655,6 +702,10 @@ def main(argv: list[str] | None = None) -> int:
                 _read_json(args.change_parameters_json),
                 release_sha=args.release_sha,
                 resolved_values=args.resolved_values,
+                parameter_additions=(
+                    load_parameter_additions(_read_json(args.parameter_additions))
+                    if args.parameter_additions else None
+                ),
             )
         elif args.command == "template-environment-policy":
             require_environment_contract(

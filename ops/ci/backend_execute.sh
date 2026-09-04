@@ -6,6 +6,7 @@ set -euo pipefail
 : "${CHANGE_SET_NAME:?CHANGE_SET_NAME is required}"
 : "${EXPECTED_RELEASE_SHA:?EXPECTED_RELEASE_SHA is required}"
 : "${EXPECTED_TEMPLATE_SHA256:?EXPECTED_TEMPLATE_SHA256 is required}"
+: "${PARAMETER_ADDITIONS_PATH:=ops/ci/release_parameter_additions.json}"
 
 workspace="${RUNNER_TEMP:?RUNNER_TEMP is required}/backend-execute"
 mkdir -p "$workspace"
@@ -17,6 +18,7 @@ aws cloudformation describe-stacks \
 python3 ops/ci/release_guard.py stack-invariants "$workspace/stack.json"
 EXPECTED_STACK_NAME="$STACK_NAME" \
 EXPECTED_STACK_PARAMETERS_PATH="$workspace/stack.json" \
+PARAMETER_ADDITIONS_PATH="$PARAMETER_ADDITIONS_PATH" \
 CHANGE_PAGES_PATH="$workspace/change-pages.json" \
   ./ops/ci/collect_change_set.sh
 

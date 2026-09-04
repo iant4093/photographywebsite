@@ -130,6 +130,8 @@ scheduled indexer and SQS worker activate, upload completion dispatches jobs,
 and APIs include comparison state. Existing photos are backfilled automatically
 by reconciliation; no separate raw-file upload or destructive migration is
 required. The initial backfill is asynchronous and may span multiple schedules.
+The release's exact parameter-addition contract explicitly introduces this flag
+as `true` on its first deployment; it does not override an existing value.
 
 For staged activation or rollback, change `OriginalComparisonsEnabled` through
 a reviewed stack-parameter change. `false` disables the schedule and event

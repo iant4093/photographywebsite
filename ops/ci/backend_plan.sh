@@ -8,6 +8,7 @@ for name in "${required[@]}"; do
     exit 2
   fi
 done
+: "${PARAMETER_ADDITIONS_PATH:=ops/ci/release_parameter_additions.json}"
 
 workspace="${RUNNER_TEMP:?RUNNER_TEMP is required}/backend-plan"
 mkdir -p "$workspace"
@@ -27,7 +28,8 @@ aws cloudformation describe-stacks \
 python3 ops/ci/release_guard.py stack-invariants "$workspace/stack.json"
 python3 ops/ci/release_guard.py previous-parameters \
   "$workspace/stack.json" "$workspace/parameters.json" \
-  --release-sha "${GITHUB_SHA:?GITHUB_SHA is required}"
+  --release-sha "${GITHUB_SHA:?GITHUB_SHA is required}" \
+  --parameter-additions "$PARAMETER_ADDITIONS_PATH"
 python3 ops/ci/release_guard.py template-environment-policy \
   backend/template.yaml ops/ci/template_environment_policy.json --template-kind source
 python3 ops/ci/release_guard.py template-environment-policy \
@@ -124,6 +126,7 @@ EXPECTED_RELEASE_SHA="$GITHUB_SHA" \
 EXPECTED_TEMPLATE_SHA256="$packaged_template_sha" \
 EXPECTED_STACK_PARAMETERS_PATH="$workspace/stack.json" \
 EXPECTED_REQUESTED_PARAMETERS_PATH="$workspace/parameters.json" \
+PARAMETER_ADDITIONS_PATH="$PARAMETER_ADDITIONS_PATH" \
 CHANGE_PAGES_PATH="$workspace/change-pages.json" \
   ./ops/ci/collect_change_set.sh
 

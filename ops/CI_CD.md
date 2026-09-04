@@ -59,6 +59,11 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   resource type, action, and CloudFormation property path to match an exact
   reviewed rule. Wildcards, duplicate rules, unknown properties, and
   unexplained detail-free changes fail closed.
+- The exact `ops/ci/release_parameter_additions.json` contract permits
+  `OriginalComparisonsEnabled=true` only when introducing that parameter for
+  the first time. Planning and execution both validate it. Once present, its
+  current value is preserved like every other parameter, including `false`.
+  Other additions or changes to existing values remain rejected.
 - Backend execution uses a separate role and must reach `UPDATE_COMPLETE` before
   frontend deployment. Empty backend changes are an explicit safe no-op.
 - Frontend deployment never deletes S3 objects. Fingerprinted assets receive

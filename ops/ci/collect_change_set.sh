@@ -10,6 +10,7 @@ set -euo pipefail
 : "${CHANGE_PAGES_PATH:?CHANGE_PAGES_PATH is required}"
 : "${RELEASE_INTENT_PATH:=ops/ci/release_intent.json}"
 : "${RELEASE_DEPENDENCIES_PATH:=ops/ci/release_dependencies.json}"
+: "${PARAMETER_ADDITIONS_PATH:=ops/ci/release_parameter_additions.json}"
 
 status="$(aws cloudformation describe-change-set \
   --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
@@ -52,11 +53,13 @@ aws cloudformation describe-change-set \
 if [[ -n "${EXPECTED_REQUESTED_PARAMETERS_PATH:-}" ]]; then
   python3 ops/ci/release_guard.py preserved-parameters \
     "$EXPECTED_STACK_PARAMETERS_PATH" "$EXPECTED_REQUESTED_PARAMETERS_PATH" \
-    --release-sha "$EXPECTED_RELEASE_SHA"
+    --release-sha "$EXPECTED_RELEASE_SHA" \
+    --parameter-additions "$PARAMETER_ADDITIONS_PATH"
 fi
 python3 ops/ci/release_guard.py preserved-parameters \
   "$EXPECTED_STACK_PARAMETERS_PATH" "$parameters_path" \
-  --release-sha "$EXPECTED_RELEASE_SHA" --resolved-values
+  --release-sha "$EXPECTED_RELEASE_SHA" --resolved-values \
+  --parameter-additions "$PARAMETER_ADDITIONS_PATH"
 
 mkdir -p "$(dirname "$CHANGE_PAGES_PATH")"
 echo '[]' > "$CHANGE_PAGES_PATH"

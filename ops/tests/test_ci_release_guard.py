@@ -2137,6 +2137,23 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("previous-parameters", plan)
         self.assertIn("EXPECTED_REQUESTED_PARAMETERS_PATH", plan)
         self.assertIn("--release-sha", plan)
+        parameter_policy = "ops/ci/release_parameter_additions.json"
+        self.assertEqual(
+            release_guard.load_parameter_additions(json.loads(
+                (ROOT / parameter_policy).read_text(encoding="utf-8")
+            )),
+            {"OriginalComparisonsEnabled": "true"},
+        )
+        for helper in (plan, execute, collect):
+            self.assertIn(
+                '${PARAMETER_ADDITIONS_PATH:=' + parameter_policy + '}', helper
+            )
+        for helper in (plan, execute):
+            self.assertIn('PARAMETER_ADDITIONS_PATH="$PARAMETER_ADDITIONS_PATH"', helper)
+        self.assertIn('--parameter-additions "$PARAMETER_ADDITIONS_PATH"', plan)
+        self.assertEqual(
+            collect.count('--parameter-additions "$PARAMETER_ADDITIONS_PATH"'), 2
+        )
         self.assertIn("ARTIFACT_KMS_KEY_ARN", plan)
         self.assertIn("release_artifact_contract.json", plan)
         self.assertNotIn(".rules | length", plan)
