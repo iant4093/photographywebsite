@@ -55,6 +55,8 @@ describe('museum layout', () => {
         const backingRear = MUSEUM_DIMENSIONS.artworkWallOffset + surface.backing - surface.backingDepth / 2
         expect(backingRear).toBeGreaterThan(wallpaper)
         expect(MUSEUM_DIMENSIONS.artworkWallOffset + surface.plaque).toBeGreaterThan(wallpaper)
+        expect(MUSEUM_DIMENSIONS.artworkWallOffset + surface.plaqueBacking - surface.plaqueBackingDepth / 2).toBeCloseTo(wallpaper)
+        expect(surface.plaqueBacking + surface.plaqueBackingDepth / 2).toBeLessThan(surface.plaque)
         // The caption's top edge clears the lower edge of the backing.
         expect(surface.plaqueY + 0.38 / 2).toBeLessThan(-0.025 - 2.52 / 2)
         const orderedSurfaces = [surface.lip + surface.lipDepth / 2, surface.placeholder, surface.base, surface.detail, surface.glass]

@@ -1,4 +1,5 @@
 import { sortGalleryAlbums, sortGalleryCategories } from './galleryOrder'
+import { MUSEUM_PLANT_FORM, museumPlantFoliageRadius } from './museumPlants'
 
 export const MUSEUM_DIMENSIONS = Object.freeze({
     hallHalfWidth: 4.8,
@@ -20,11 +21,41 @@ export const MUSEUM_DIMENSIONS = Object.freeze({
     portalGateDepth: 0.25,
 })
 
+export const MUSEUM_PORTAL = Object.freeze({
+    springHeight: 2.7,
+    rise: 1.55,
+    bandWidth: 0.4,
+    depth: 0.26,
+    signHeight: 5.18,
+    // Ordered from the floor to the spring line. Adjacent sections share a
+    // face instead of putting the arch through an oversized capital.
+    pierSections: [
+        { name: 'foot', y: 0.0975, height: 0.125, width: 0.64, depth: 0.32, color: '#796449' },
+        { name: 'base', y: 0.22, height: 0.12, width: 0.54, depth: 0.3, color: '#ad9c84' },
+        { name: 'shaft', y: 1.38, height: 2.2, width: 0.4, depth: 0.26, color: '#b8aa96' },
+        { name: 'capital', y: 2.54, height: 0.12, width: 0.52, depth: 0.3, color: '#ad9c84' },
+        { name: 'abacus', y: 2.65, height: 0.1, width: 0.6, depth: 0.32, color: '#796449' },
+    ],
+})
+
+export function museumDoorAssemblyPose(side, centerZ) {
+    // The spandrel's bevel projects 2 cm into the hall. Seat the trim and the
+    // sign's rear face on it, rather than retaining an arbitrary hover offset.
+    const surface = MUSEUM_DIMENSIONS.hallHalfWidth - MUSEUM_DIMENSIONS.hallWallThickness / 2 - 0.02
+    return {
+        rotationY: side < 0 ? Math.PI / 2 : -Math.PI / 2,
+        trim: [side * surface, 0, centerZ],
+        sign: [side * (surface - 0.09), MUSEUM_PORTAL.signHeight, centerZ],
+    }
+}
+
 export const MUSEUM_ARTWORK_SURFACES = Object.freeze({
     backing: -0.08,
     backingDepth: 0.08,
     plaque: -0.105,
     plaqueY: -1.51,
+    plaqueBacking: -0.114,
+    plaqueBackingDepth: 0.016,
     lip: 0.154,
     lipDepth: 0.045,
     placeholder: 0.179,
@@ -138,15 +169,25 @@ function makeBenches(room) {
     })
 }
 
-function makeRoomPlants(room) {
-    const insetX = room.outerX - (room.side * 0.72)
-    const insetZ = (room.width / 2) - 0.78
-    return [-1, 1].map(direction => ({
-        id: `${room.id}-plant-${direction}`,
-        position: [insetX, 0, room.centerZ + (direction * insetZ)],
-        size: [0.9, 1.75, 0.9],
-        rotationY: direction * 0.34,
-    }))
+function makePlant({ renderScale, renderVariant, ...plant }) {
+    const radius = museumPlantFoliageRadius(renderScale, renderVariant)
+    return { ...plant, renderScale, renderVariant, size: [radius * 2, 1.95 * renderScale, radius * 2] }
+}
+
+function makeRoomPlants(room, roomIndex) {
+    return [-1, 1].map((direction, plantIndex) => {
+        const renderScale = [0.82, 0.94, 1.06][(roomIndex + plantIndex) % 3]
+        const renderVariant = (roomIndex + plantIndex) % 2
+        // Reserve the complete foliage envelope plus the deepest corner trim.
+        const inset = museumPlantFoliageRadius(renderScale, renderVariant) + 0.3 + MUSEUM_PLANT_FORM.wallClearance
+        return makePlant({
+            id: `${room.id}-plant-${direction}`,
+            position: [room.outerX - room.side * inset, 0, room.centerZ + direction * (room.width / 2 - inset)],
+            rotationY: direction * 0.34 + ((roomIndex % 3) - 1) * 0.22,
+            renderScale,
+            renderVariant,
+        })
+    })
 }
 
 export function buildMuseumLayout(categories = []) {
@@ -183,7 +224,7 @@ export function buildMuseumLayout(categories = []) {
         }
         room.paintings = makePaintings(room)
         room.benches = makeBenches(room)
-        room.plants = makeRoomPlants(room)
+        room.plants = makeRoomPlants(room, index)
         return room
     })
 
@@ -192,12 +233,18 @@ export function buildMuseumLayout(categories = []) {
         - ((bayCount - 1) * MUSEUM_DIMENSIONS.baySpacing)
         - 11
 
-    const lobbyPlants = [-1, 1].map(side => ({
-        id: `lobby-plant-${side}`,
-        position: [side * 4.02, 0, 11.12],
-        size: [0.94, 1.9, 0.94],
-        rotationY: side * 0.28,
-    }))
+    const lobbyPlants = [-1, 1].map((side, index) => {
+        const renderScale = 1.05
+        const renderVariant = index % 2
+        const inset = museumPlantFoliageRadius(renderScale, renderVariant) + MUSEUM_PLANT_FORM.wallClearance
+        return makePlant({
+            id: `lobby-plant-${side}`,
+            position: [side * (4.56 - inset), 0, 11.12],
+            rotationY: side * 0.28,
+            renderScale,
+            renderVariant,
+        })
+    })
     // Keep the welcome ropes tucked alongside the desk rather than projecting
     // into the route visitors use to enter the main hall.
     const stanchions = [-1, 1].flatMap(side => [
@@ -214,12 +261,16 @@ export function buildMuseumLayout(categories = []) {
     ])
     const hallPlants = Array.from({ length: bayCount }, (_, bay) => {
         const side = bay % 2 === 0 ? -1 : 1
-        return {
+        const renderScale = 0.9
+        const renderVariant = (bay + 1) % 2
+        const inset = museumPlantFoliageRadius(renderScale, renderVariant) + MUSEUM_PLANT_FORM.wallClearance
+        return makePlant({
             id: `hall-plant-${bay}`,
-            position: [side * 4.02, 0, MUSEUM_DIMENSIONS.firstBayZ - (bay * MUSEUM_DIMENSIONS.baySpacing) + 5.3],
-            size: [0.86, 1.7, 0.86],
+            position: [side * (4.56 - inset), 0, MUSEUM_DIMENSIONS.firstBayZ - (bay * MUSEUM_DIMENSIONS.baySpacing) + 5.3],
             rotationY: side * 0.42,
-        }
+            renderScale,
+            renderVariant,
+        })
     })
 
     const dressing = {
@@ -249,11 +300,25 @@ export function buildMuseumLayout(categories = []) {
             // DoorWall's nested panel layers occupy x 4.496–4.650. A single
             // collider around their union keeps the visitor capsule outside
             // the visible moulding while preserving the full arched doorway.
-            return [-1, 1].map(direction => ({
+            return [-1, 1].flatMap(direction => [{
                 kind: 'hall-door-wall-panel',
                 position: [side * 4.573, 1.42, centerZ + (direction * doorPanelOffset)],
                 size: [0.154, 2.84, doorPanelDepth],
-            }))
+            }, {
+                kind: 'hall-door-pier',
+                position: [
+                    museumDoorAssemblyPose(side, centerZ).trim[0] - side * MUSEUM_PORTAL.depth / 2,
+                    MUSEUM_PORTAL.springHeight / 2,
+                    centerZ + direction * (archRadius + MUSEUM_PORTAL.bandWidth / 2),
+                ],
+                // Include the widest plinth so the camera cannot cut through
+                // a projecting column while sliding along the hall wall.
+                size: [
+                    Math.max(...MUSEUM_PORTAL.pierSections.map(section => section.depth)),
+                    MUSEUM_PORTAL.springHeight,
+                    Math.max(...MUSEUM_PORTAL.pierSections.map(section => section.width)),
+                ],
+            }])
         })
     }).flat()
     const obstacles = [

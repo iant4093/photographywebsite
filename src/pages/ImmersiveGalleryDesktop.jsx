@@ -15,6 +15,8 @@ import {
     initialMuseumRoomIds,
     isMuseumPositionWalkable,
     MUSEUM_DIMENSIONS,
+    MUSEUM_PORTAL,
+    museumDoorAssemblyPose,
     MUSEUM_ARTWORK_SURFACES,
     museumArtworkDetailWidth,
     museumArtworkLightIndex,
@@ -41,6 +43,7 @@ import {
 import { MUSEUM_BASE_COVER_WIDTH, MUSEUM_VISIBLE_COVER_PRIORITY, museumCoverUploadAllowed, museumPreloadPaintings } from '../utils/museumStreaming'
 import { MuseumRoomArchitecture, MuseumCofferedCeiling, MuseumAtmosphere } from '../components/museum/MuseumAtmosphere'
 import { createMuseumFrameDriver } from '../utils/museumFrameDriver'
+import { createMuseumArchBand } from '../utils/museumArchitecture'
 
 const SESSION_KEY = 'ian-photography-museum-position-v2'
 const RETURN_KEY = 'ian-photography-museum-return'
@@ -49,7 +52,7 @@ const MOTION_OVERRIDE_KEY = 'ian-photography-museum-motion-override-v1'
 const HALL_PAINT = '#d8d0c4'
 const ROOM_PAINT = '#d2c9bc'
 // Decorative surfaces sit just inside the structural shell. A small, shared
-// inset plus polygonOffset avoids z-fighting without letting wallpaper float
+// inset avoids z-fighting without letting wallpaper float
 // through moulding at the end of a bay.
 const WALL_SURFACE_GAP = MUSEUM_DIMENSIONS.wallSurfaceGap
 const GOLD = '#9b7747'
@@ -60,8 +63,8 @@ const HALL_WALL_THICKNESS = MUSEUM_DIMENSIONS.hallWallThickness
 const ROOM_SHELL_INSET = MUSEUM_DIMENSIONS.roomShellInset
 const EMPTY_FIXTURES = Object.freeze([])
 const ARCHITECTURAL_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 2, 0.045)
-const PORTAL_ARCH_STONE_GEOMETRY = makePortalArchGeometry(0.18, 0.12, 0.24)
-const PORTAL_ARCH_REVEAL_GEOMETRY = makePortalArchGeometry(0.01, 0.015, 0.085)
+const PORTAL_ARCH_STONE_GEOMETRY = createMuseumArchBand(0, MUSEUM_PORTAL.bandWidth, MUSEUM_PORTAL.depth)
+const PORTAL_ARCH_REVEAL_GEOMETRY = createMuseumArchBand(0.035, 0.08, 0.018)
 const PORTAL_CURTAIN_GEOMETRY = makePortalCurtainGeometry()
 const MUSEUM_ARTWORK_PLANE_GEOMETRY = new THREE.PlaneGeometry(2.66, 1.76)
 // Image decoding and GPU promotion are the only workloads in this scene that
@@ -965,9 +968,6 @@ function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8
             sheen={0.16}
             sheenColor="#6d242d"
             sheenRoughness={0.88}
-            polygonOffset
-            polygonOffsetFactor={-1}
-            polygonOffsetUnits={-2}
             side={side}
             vertexColors={vertexColors}
         />
@@ -1505,17 +1505,11 @@ function LabelPlane({ title, subtitle, position, rotation = [0, 0, 0], size = [3
 }
 
 function CategoryDoorSign({ room, side, centerZ, materials }) {
-    const wallX = side * MUSEUM_DIMENSIONS.hallHalfWidth
-    const rotationY = side < 0 ? Math.PI / 2 : -Math.PI / 2
-    // Keep the plaque as one hall-facing assembly. The earlier nested local
-    // transforms placed its label behind the moulding on one side of the hall,
-    // so several valid categories appeared to have no nameplate at runtime.
-    // Sit the complete plaque clearly proud of the hall-side wallpaper. The
-    // arch reveal and plaque previously shared almost the same depth, allowing
-    // the sign to disappear into the spandrel at normal walking angles.
-    const surfaceX = wallX - (side * ((HALL_WALL_THICKNESS / 2) + 0.38))
+    const pose = museumDoorAssemblyPose(side, centerZ)
+    // The back face touches the spandrel; every visible layer belongs to the
+    // same shallow assembly, including when viewed from directly underneath.
     return (
-        <group position={[surfaceX, 4.92, centerZ]} rotation={[0, rotationY, 0]} renderOrder={20}>
+        <group position={pose.sign} rotation={[0, pose.rotationY, 0]}>
             <mesh position={[0, 0, -0.025]} scale={[3.24, 0.86, 0.13]} castShadow receiveShadow>
                 <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
                 <meshPhysicalMaterial
@@ -1533,9 +1527,8 @@ function CategoryDoorSign({ room, side, centerZ, materials }) {
             <LabelPlane
                 title={room.name}
                 subtitle={`${room.albums.length} ${room.albums.length === 1 ? 'album' : 'albums'}`}
-                position={[0, 0, 0.14]}
+                position={[0, 0, 0.081]}
                 size={[2.88, 0.66]}
-                renderOrder={22}
             />
         </group>
     )
@@ -2230,6 +2223,7 @@ function useCoverTexture(album, targetWidth, priority = targetWidth, onPermanent
 function GalleryFrameShells({ paintings, materials, compact = false }) {
     const shadow = useRef(null)
     const backing = useRef(null)
+    const plaqueBacking = useRef(null)
     const frame = useRef(null)
     const frameProfile = useRef(null)
     const mat = useRef(null)
@@ -2256,7 +2250,8 @@ function GalleryFrameShells({ paintings, materials, compact = false }) {
             // Keep the assembly physically coherent from the side. The former
             // 4.15 x 4.45 backing projected far beyond a 3.24 x 2.34 frame and
             // read as a second square slab behind every landscape photograph.
-            [shadow.current, [0.09, -0.1, -0.105], [0, 0, 0], [3.46, 2.56, 1]],
+            [shadow.current, [0.09, -0.09, -0.116], [0, 0, 0], [3.46, 2.44, 1]],
+            [plaqueBacking.current, [0, MUSEUM_ARTWORK_SURFACES.plaqueY, MUSEUM_ARTWORK_SURFACES.plaqueBacking], [0, 0, 0], [1.72, 0.38, MUSEUM_ARTWORK_SURFACES.plaqueBackingDepth]],
             [backing.current, [0, -0.025, MUSEUM_ARTWORK_SURFACES.backing], [0, 0, 0], [3.42, 2.52, MUSEUM_ARTWORK_SURFACES.backingDepth]],
             [frame.current, [0, 0, 0], [0, 0, 0], [3.24, 2.34, 0.14]],
             // The two nested profiles are shared instanced layers, not a set
@@ -2297,10 +2292,11 @@ function GalleryFrameShells({ paintings, materials, compact = false }) {
                     transparent
                     opacity={0.24}
                     depthWrite={false}
-                    polygonOffset
-                    polygonOffsetFactor={-1}
-                    polygonOffsetUnits={-1}
                 />
+            </instancedMesh>}
+            {!compact && <instancedMesh ref={plaqueBacking} args={[undefined, undefined, count]}>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshStandardMaterial color="#493826" roughness={0.76} />
             </instancedMesh>}
             <instancedMesh ref={backing} args={[undefined, undefined, count]} castShadow receiveShadow>
                 <primitive object={roundedBacking} attach="geometry" />
@@ -2892,8 +2888,8 @@ function RoomSalonBays({ room, ceilingY, materials }) {
 function useArchSpandrelShape() {
     return useMemo(() => {
         const radius = MUSEUM_DIMENSIONS.doorwayWidth / 2
-        const springHeight = 2.7
-        const archRise = 1.55
+        const springHeight = MUSEUM_PORTAL.springHeight
+        const archRise = MUSEUM_PORTAL.rise
         const shape = new THREE.Shape()
         shape.moveTo(-radius, springHeight)
         for (let segment = 0; segment <= 24; segment += 1) {
@@ -2908,22 +2904,6 @@ function useArchSpandrelShape() {
         shape.closePath()
         return shape
     }, [])
-}
-
-function makePortalArchGeometry(radiusOffset, riseOffset, tubeRadius) {
-    const openingRadius = (MUSEUM_DIMENSIONS.doorwayWidth / 2) + radiusOffset
-    const springHeight = 2.7
-    const archRise = 1.55 + riseOffset
-    const points = Array.from({ length: 33 }, (_, segment) => {
-        const angle = Math.PI - ((Math.PI * segment) / 32)
-        return new THREE.Vector3(
-            Math.cos(angle) * openingRadius,
-            springHeight + (Math.sin(angle) * archRise),
-            0,
-        )
-    })
-    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.5)
-    return new THREE.TubeGeometry(curve, 48, tubeRadius, 8, false)
 }
 
 function makePortalCurtainGeometry() {
@@ -2957,6 +2937,7 @@ function DoorWall({ side, centerZ, room, materials, sconcePlacements = EMPTY_FIX
     const thickness = HALL_WALL_THICKNESS
     const rotationY = side < 0 ? Math.PI / 2 : -Math.PI / 2
     const spandrelShape = useArchSpandrelShape()
+    const doorwayPose = museumDoorAssemblyPose(side, centerZ)
     const archRadius = MUSEUM_DIMENSIONS.doorwayWidth / 2
     const halfBay = MUSEUM_DIMENSIONS.baySpacing / 2
     const pierWidth = halfBay - archRadius
@@ -3057,57 +3038,30 @@ function DoorWall({ side, centerZ, room, materials, sconcePlacements = EMPTY_FIX
             ))}
             {room && (
                 <>
-                    <mesh
-                        position={[wallX - (side * ((thickness / 2) + 0.018)), 0, centerZ]}
-                        rotation={[0, rotationY, 0]}
-                        geometry={PORTAL_ARCH_STONE_GEOMETRY}
-                        castShadow
-                        receiveShadow
-                    >
-                        <PlasterMaterial materials={materials} color="#b8aa96" />
-                    </mesh>
-                    <mesh
-                        position={[wallX - (side * ((thickness / 2) + 0.145)), 0, centerZ]}
-                        rotation={[0, rotationY, 0]}
-                        geometry={PORTAL_ARCH_REVEAL_GEOMETRY}
-                        castShadow
-                    >
-                        <meshPhysicalMaterial color="#6e5639" metalness={0.34} roughness={0.48} clearcoat={0.18} />
-                    </mesh>
-                    {[-1, 1].map(direction => (
-                        <group key={direction} position={[wallX, 1.42, centerZ + direction * (archRadius + 0.18)]}>
-                            <mesh scale={[0.46, 2.84, 0.38]} castShadow receiveShadow>
-                                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                                <PlasterMaterial materials={materials} color="#b8aa96" textured={false} />
-                            </mesh>
-                            <mesh position={[-side * 0.038, 0, 0]} scale={[0.12, 2.46, 0.22]}>
-                                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                                <meshStandardMaterial color="#8b7861" roughness={0.74} />
-                            </mesh>
-                            {[-0.13, 0.13].map(offset => (
-                                <mesh key={offset} position={[-side * 0.246, 0, offset]} scale={[0.05, 2.38, 0.055]}>
-                                    <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                                    <meshStandardMaterial color="#c2b39d" roughness={0.7} />
+                    <group position={doorwayPose.trim} rotation={[0, rotationY, 0]}>
+                        <mesh geometry={PORTAL_ARCH_STONE_GEOMETRY} castShadow receiveShadow>
+                            <PlasterMaterial materials={materials} color="#b8aa96" textured={false} />
+                        </mesh>
+                        <mesh position={[0, 0, MUSEUM_PORTAL.depth]} geometry={PORTAL_ARCH_REVEAL_GEOMETRY}>
+                            <meshPhysicalMaterial color="#927044" metalness={0.4} roughness={0.42} />
+                        </mesh>
+                        {[-1, 1].map(direction => (
+                            <group key={direction} position={[direction * (archRadius + MUSEUM_PORTAL.bandWidth / 2), 0, MUSEUM_PORTAL.depth / 2]}>
+                                {/* Bases and capitals meet at shared elevations. The
+                                    arch starts exactly at the capital's top face. */}
+                                {MUSEUM_PORTAL.pierSections.map(section => (
+                                    <mesh key={section.name} position={[0, section.y, 0]} scale={[section.width, section.height, section.depth]} castShadow receiveShadow>
+                                        <boxGeometry args={[1, 1, 1]} />
+                                        <meshStandardMaterial color={section.color} roughness={0.72} />
+                                    </mesh>
+                                ))}
+                                <mesh position={[0, 1.38, MUSEUM_PORTAL.depth / 2 + 0.004]} scale={[0.045, 2.02, 0.012]}>
+                                    <boxGeometry args={[1, 1, 1]} />
+                                    <meshPhysicalMaterial color="#927044" metalness={0.4} roughness={0.42} />
                                 </mesh>
-                            ))}
-                            <mesh position={[0, 1.48, 0]} scale={[0.56, 0.2, 0.58]} castShadow>
-                                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                                <meshStandardMaterial color="#ad9c84" roughness={0.72} />
-                            </mesh>
-                            <mesh position={[0, 1.66, 0]} scale={[0.66, 0.12, 0.68]} castShadow>
-                                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                                <meshPhysicalMaterial color="#70583b" metalness={0.18} roughness={0.58} />
-                            </mesh>
-                            <mesh position={[0, -1.47, 0]} scale={[0.58, 0.2, 0.62]} castShadow>
-                                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                                <meshStandardMaterial color="#ad9c84" roughness={0.72} />
-                            </mesh>
-                            <mesh position={[0, -1.64, 0]} scale={[0.68, 0.12, 0.72]} castShadow>
-                                <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                                <meshPhysicalMaterial color="#70583b" metalness={0.18} roughness={0.58} />
-                            </mesh>
-                        </group>
-                    ))}
+                            </group>
+                        ))}
+                    </group>
                     <CategoryDoorSign room={room} side={side} centerZ={centerZ} materials={materials} />
                 </>
             )}
@@ -4570,6 +4524,20 @@ function PreviewCamera({ mode, roomIndex, layout }) {
                 painting.position[2] + (normalZ * 2.25),
             )
             camera.lookAt(...painting.position)
+        } else if (mode === 'plaques' && room) {
+            const painting = room.paintings[0]
+            camera.position.set(painting.position[0] - room.side * 1.8, 1.65, painting.position[2] + 1.2)
+            camera.lookAt(painting.position[0] + room.side * 11, 1.8, painting.position[2])
+        } else if (mode === 'arch' && room) {
+            camera.position.set(room.innerX - room.side * 1.45, 1.8, room.centerZ + 2.65)
+            camera.lookAt(room.innerX, 3, room.centerZ + 2.3)
+        } else if (mode === 'sign' && room) {
+            camera.position.set(room.innerX - room.side * 0.85, 3.2, room.centerZ + 2.1)
+            camera.lookAt(room.innerX - room.side * 0.18, 5.18, room.centerZ)
+        } else if (mode === 'plant' && room) {
+            const plant = room.plants[0]
+            camera.position.set(plant.position[0] - room.side * 1.6, 1.7, plant.position[2] + 1.45)
+            camera.lookAt(plant.position[0], 0.95, plant.position[2])
         } else if (mode === 'room' && room) {
             const x = room.innerX + (room.side * 4.2)
             camera.position.set(x, 2.25, room.centerZ - 4.15)
@@ -5430,7 +5398,7 @@ export default function ImmersiveGalleryDesktop() {
     const previewRoomIndex = Number.parseInt(previewParams?.get('museum-room') || '0', 10) || 0
     const developmentTour = import.meta.env.DEV && previewParams?.get('museum-tour') === '1'
     const developmentPerf = import.meta.env.DEV && previewParams?.get('museum-perf') === '1'
-    const roomPreviewModes = useMemo(() => ['room', 'inspect', 'portal', 'end', 'join'], [])
+    const roomPreviewModes = useMemo(() => ['room', 'inspect', 'portal', 'end', 'join', 'plaques', 'arch', 'sign', 'plant'], [])
     const visualPreview = import.meta.env.DEV && ['lobby', 'hall', ...roomPreviewModes].includes(previewMode)
     const initialActiveRoomIds = useMemo(
         () => initialMuseumRoomIds(

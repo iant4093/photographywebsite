@@ -1,10 +1,11 @@
 /* eslint-disable react-hooks/immutability -- Three.js scene environment state is managed by the renderer lifecycle. */
 import { useThree } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { museumHallSconcePlacements } from '../../utils/museumSupport'
+import { MUSEUM_PLANT_FORM, MUSEUM_PLANT_LEAF_MESH, museumPlantLeaves } from '../../utils/museumPlants'
 
 const DARK_BRASS = '#735332'
 let textileDetailTexture = null
@@ -45,16 +46,19 @@ function getTextileDetailTexture() {
     return textileDetailTexture
 }
 
-const LEAVES = [
-    [-0.14, 0.56, 0.02, -0.48, 0.12, 0.36, 0.84],
-    [0.18, 0.67, 0.08, 0.42, -0.18, -0.28, 0.78],
-    [-0.03, 0.86, -0.12, -0.08, 0.52, 0.12, 0.92],
-    [0.26, 0.94, 0.05, 0.34, 0.08, -0.5, 0.72],
-    [-0.28, 1.02, 0.09, -0.42, -0.1, 0.48, 0.76],
-    [0.05, 1.15, -0.08, 0.08, -0.44, 0.04, 0.7],
-    [0.2, 1.27, 0.02, 0.28, 0.3, -0.18, 0.61],
-    [-0.17, 1.32, -0.02, -0.3, 0.18, 0.3, 0.64],
-]
+const PLANT_LEAF_GEOMETRY = new THREE.BufferGeometry()
+PLANT_LEAF_GEOMETRY.setAttribute('position', new THREE.Float32BufferAttribute(MUSEUM_PLANT_LEAF_MESH.positions, 3))
+PLANT_LEAF_GEOMETRY.setIndex(MUSEUM_PLANT_LEAF_MESH.indices)
+PLANT_LEAF_GEOMETRY.computeVertexNormals()
+const PLANT_POT_GEOMETRY = new THREE.LatheGeometry([
+    new THREE.Vector2(0, 0),
+    new THREE.Vector2(MUSEUM_PLANT_FORM.potBottomRadius, 0),
+    new THREE.Vector2(MUSEUM_PLANT_FORM.potTopRadius, MUSEUM_PLANT_FORM.potHeight - 0.015),
+    new THREE.Vector2(MUSEUM_PLANT_FORM.potTopRadius - 0.005, MUSEUM_PLANT_FORM.potHeight),
+    new THREE.Vector2(MUSEUM_PLANT_FORM.soilRadius, MUSEUM_PLANT_FORM.potHeight),
+    new THREE.Vector2(MUSEUM_PLANT_FORM.soilRadius - 0.01, MUSEUM_PLANT_FORM.soilY),
+], 12)
+const PLANT_LEAF_COLORS = ['#527744', '#63834c', '#3e673c', '#73905b'].map(color => new THREE.Color(color))
 
 function EnvironmentLighting({ intensity = 0.22 }) {
     const { gl, scene } = useThree()
@@ -98,7 +102,7 @@ function InstancedPlants({ plants, castDynamicShadows = false }) {
     const leaves = useRef(null)
     const plantCount = plants.length
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!plantCount) return
         const root = new THREE.Matrix4()
         const local = new THREE.Matrix4()
@@ -107,6 +111,10 @@ function InstancedPlants({ plants, castDynamicShadows = false }) {
         const rotation = new THREE.Quaternion()
         const scale = new THREE.Vector3()
         const rootRotation = new THREE.Quaternion()
+        const stemStart = new THREE.Vector3()
+        const stemEnd = new THREE.Vector3()
+        const stemDirection = new THREE.Vector3()
+        const up = new THREE.Vector3(0, 1, 0)
         let stemIndex = 0
         let leafIndex = 0
 
@@ -126,38 +134,39 @@ function InstancedPlants({ plants, castDynamicShadows = false }) {
                 rootRotation,
                 scale.set(renderScale, renderScale, renderScale),
             )
-            setLocalMatrix(pots.current, plantIndex, [0, 0.32, 0], [0, 0, 0], [1, 1, 1])
-            setLocalMatrix(soil.current, plantIndex, [0, 0.64, 0], [0, 0, 0], [1, 1, 1])
-            for (const [stemOffset, stem] of [[-0.11, 0.96, 0.05, -0.1], [0.12, 1.04, -0.04, 0.12], [0, 1.15, 0.02, 0]].entries()) {
-                const visibleScale = renderVariant === 1 && stemOffset < 2 ? 0.001 : 1
-                setLocalMatrix(stems.current, stemIndex, stem.slice(0, 3), [stem[3], 0, stem[3]], [visibleScale, visibleScale, visibleScale])
+            setLocalMatrix(pots.current, plantIndex, [0, 0, 0], [0, 0, 0], [1, 1, 1])
+            setLocalMatrix(soil.current, plantIndex, [0, MUSEUM_PLANT_FORM.soilY, 0], [-Math.PI / 2, 0, 0], [1, 1, 1])
+            museumPlantLeaves(renderVariant).forEach((leaf, sourceIndex) => {
+                // Each petiole terminates at its own leaf root. Leaves occupy
+                // separate radial sectors, so no stalk pierces another blade.
+                stemStart.set(...leaf.stemStart)
+                stemEnd.set(...leaf.position)
+                stemDirection.subVectors(stemEnd, stemStart)
+                const stemLength = stemDirection.length()
+                rotation.setFromUnitVectors(up, stemDirection.normalize())
+                local.compose(
+                    position.copy(stemStart).add(stemEnd).multiplyScalar(0.5),
+                    rotation,
+                    scale.set(MUSEUM_PLANT_FORM.stemRadius, stemLength, MUSEUM_PLANT_FORM.stemRadius),
+                )
+                matrix.multiplyMatrices(root, local)
+                stems.current?.setMatrixAt(stemIndex, matrix)
                 stemIndex += 1
-            }
-            LEAVES.forEach(([x, y, z, rx, ry, rz, leafScale], sourceIndex) => {
-                const palmAngle = (sourceIndex / LEAVES.length) * Math.PI * 2
-                const palmRadius = 0.16 + ((sourceIndex % 2) * 0.08)
-                const leafPosition = renderVariant === 1
-                    ? [Math.cos(palmAngle) * palmRadius, 1.42 + ((sourceIndex % 3) * 0.035), Math.sin(palmAngle) * palmRadius]
-                    : [x, y, z]
-                const leafRotation = renderVariant === 1
-                    ? [-0.62 + ((sourceIndex % 3) * 0.12), palmAngle, (sourceIndex % 2 ? 0.2 : -0.2)]
-                    : [rx, ry, rz]
-                const leafSize = renderVariant === 1
-                    ? [0.15 * leafScale, 0.045, 1.1 * leafScale]
-                    : [0.34 * leafScale, 0.055, 0.76 * leafScale]
                 setLocalMatrix(
                     leaves.current,
                     leafIndex,
-                    leafPosition,
-                    leafRotation,
-                    leafSize,
+                    leaf.position,
+                    [-leaf.lift, leaf.angle, 0, 'YXZ'],
+                    [leaf.width, leaf.length, leaf.length],
                 )
+                leaves.current?.setColorAt(leafIndex, PLANT_LEAF_COLORS[(sourceIndex + plantIndex) % PLANT_LEAF_COLORS.length])
                 leafIndex += 1
             })
         })
         for (const mesh of [pots.current, soil.current, stems.current, leaves.current]) {
             if (!mesh) continue
             mesh.instanceMatrix.needsUpdate = true
+            if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
             mesh.computeBoundingSphere?.()
         }
     }, [plantCount, plants])
@@ -165,26 +174,24 @@ function InstancedPlants({ plants, castDynamicShadows = false }) {
     if (!plantCount) return null
     return (
         <>
-            <instancedMesh ref={pots} args={[undefined, undefined, plantCount]} castShadow={castDynamicShadows} receiveShadow>
-                <cylinderGeometry args={[0.34, 0.43, 0.64, 10, 1, false]} />
+            <instancedMesh ref={pots} args={[PLANT_POT_GEOMETRY, undefined, plantCount]} castShadow={castDynamicShadows} receiveShadow>
                 <meshPhysicalMaterial
-                    color="#817267"
-                    roughness={0.32}
-                    clearcoat={0.34}
+                    color="#a1937d"
+                    roughness={0.48}
+                    clearcoat={0.18}
                     clearcoatRoughness={0.68}
                 />
             </instancedMesh>
             <instancedMesh ref={soil} args={[undefined, undefined, plantCount]}>
-                <cylinderGeometry args={[0.32, 0.32, 0.07, 10]} />
+                <circleGeometry args={[MUSEUM_PLANT_FORM.soilRadius - 0.01, 12]} />
                 <meshStandardMaterial color="#2a2119" roughness={1} />
             </instancedMesh>
-            <instancedMesh ref={stems} args={[undefined, undefined, plantCount * 3]} castShadow={castDynamicShadows}>
-                <cylinderGeometry args={[0.022, 0.032, 0.92, 6]} />
-                <meshStandardMaterial color="#425638" roughness={0.88} />
+            <instancedMesh ref={stems} args={[undefined, undefined, plantCount * MUSEUM_PLANT_FORM.leafCount]} castShadow={castDynamicShadows}>
+                <cylinderGeometry args={[1, 1, 1, 5, 1, true]} />
+                <meshStandardMaterial color="#3f5e37" roughness={0.88} />
             </instancedMesh>
-            <instancedMesh ref={leaves} args={[undefined, undefined, plantCount * LEAVES.length]} castShadow={castDynamicShadows}>
-                <sphereGeometry args={[1, 7, 4]} />
-                <meshStandardMaterial color="#586f49" roughness={0.78} side={THREE.DoubleSide} />
+            <instancedMesh ref={leaves} args={[PLANT_LEAF_GEOMETRY, undefined, plantCount * MUSEUM_PLANT_FORM.leafCount]} castShadow={castDynamicShadows}>
+                <meshStandardMaterial color="#ffffff" roughness={0.68} side={THREE.DoubleSide} />
             </instancedMesh>
         </>
     )
@@ -569,16 +576,11 @@ export default function MuseumDressing({ layout, materials, LabelPlane, PlasterM
     // and bench meshes every time the visitor crosses a preparation radius.
     const dressedRooms = layout.rooms
     const staticPlants = useMemo(() => [
-        ...layout.dressing.lobbyPlants.map((plant, index) => ({ ...plant, renderScale: 1.05, renderVariant: index % 2 })),
-        ...layout.dressing.hallPlants.map((plant, index) => ({ ...plant, renderScale: 0.9, renderVariant: (index + 1) % 2 })),
+        ...layout.dressing.lobbyPlants,
+        ...layout.dressing.hallPlants,
     ], [layout.dressing.hallPlants, layout.dressing.lobbyPlants])
     const roomPlants = useMemo(() => [
-        ...dressedRooms.flatMap((room, roomIndex) => room.plants.map((plant, plantIndex) => ({
-            ...plant,
-            renderScale: [0.82, 0.94, 1.06][(roomIndex + plantIndex) % 3],
-            renderVariant: (roomIndex + plantIndex) % 2,
-            rotationY: (plant.rotationY || 0) + (((roomIndex % 3) - 1) * 0.22),
-        }))),
+        ...dressedRooms.flatMap(room => room.plants),
     ], [dressedRooms])
     const sconcePlacements = useMemo(
         () => museumHallSconcePlacements(layout),
