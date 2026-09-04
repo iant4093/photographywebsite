@@ -24,6 +24,9 @@ are **dry-run by default** and require multiple exact production guards to apply
 - [`FOTOMOTO_PRINTS.md`](FOTOMOTO_PRINTS.md) defines the isolated print-store
   origin, private-gallery capability boundary, Free-plan preview handoff, and
   manual print-ready upload procedure.
+- [`PHOTO_ORIGINAL_COMPARISONS.md`](PHOTO_ORIGINAL_COMPARISONS.md) covers the
+  read-only Drive matcher, private Before/After previews, automatic backfill,
+  separate guarded CloudFront CSP rollout, and failure recovery.
 - `dns_hardening.py` manages CAA and `www` alias records after CloudFront is
   ready for `www`.
 - `dnssec-key-template.yaml` is a deliberately separate, explicit DNSSEC stack.

@@ -45,6 +45,11 @@ from media_access import (
     validated_preview_keys,
 )
 from random_photo_pools import load_pool_references, normalized_category
+from original_comparison_access import (
+    load_original_comparisons_for_albums,
+    original_comparisons_enabled,
+    serialize_original_comparison,
+)
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, require_string, validate_uuid
 
@@ -308,6 +313,70 @@ def _active_public_photo_album(album):
     )
 
 
+def _explore_json_response(status_code, body, **kwargs):
+    """Sign originals only for the selected page, after fresh public access checks.
+
+    Explore can return cached edited DTOs or an initial page inside facet results.
+    Rechecking the source album prevents those caches granting access to originals
+    after an album changes visibility; no signed URLs enter the shared item cache.
+    """
+    if not original_comparisons_enabled():
+        return json_response(status_code, body, **kwargs)
+    initial = body.get("initialPage") if isinstance(body.get("initialPage"), dict) else {}
+    lists = [body.get("items", []), initial.get("items", [])]
+    candidates = [
+        item for items in lists if isinstance(items, list) for item in items
+        if isinstance(item, dict) and isinstance(item.get("albumId"), str)
+        and isinstance(item.get("mediaId"), str)
+    ]
+    if not candidates:
+        return json_response(status_code, body, **kwargs)
+    before_by_identity = {}
+    try:
+        albums = _batch_albums(item["albumId"] for item in candidates)
+        verified = {}
+        grouped = {}
+        for item in candidates:
+            album = albums.get(item["albumId"])
+            if not _active_public_photo_album(album):
+                continue
+            image = find_image_by_media_id(album, item["mediaId"])
+            if image is None:
+                continue
+            identity = (item["albumId"], item["mediaId"])
+            verified[identity] = (album, image)
+            group = grouped.setdefault(album["albumId"], {"album": album, "images": []})
+            group["images"].append(image)
+        metadata = load_original_comparisons_for_albums(
+            [(group["album"], group["images"]) for group in grouped.values()],
+        )
+        for identity, (album, image) in verified.items():
+            before_by_identity[identity] = serialize_original_comparison(
+                image, album, metadata.get(identity[0], {}).get(identity[1]),
+            )
+    except Exception as error:
+        logger.error("explore_original_read_failed error_type=%s", type(error).__name__)
+        before_by_identity = {
+            (item["albumId"], item["mediaId"]): {"status": "failed"} for item in candidates
+        }
+
+    def enrich(items):
+        output = []
+        for item in items:
+            if not isinstance(item, dict) or "albumId" not in item or "mediaId" not in item:
+                output.append(item)
+                continue
+            before = before_by_identity.get((item["albumId"], item["mediaId"]))
+            if before is not None:
+                output.append({**item, "before": before})
+        return output
+
+    body = {**body, "items": enrich(lists[0])}
+    if initial:
+        body["initialPage"] = {**initial, "items": enrich(lists[1])}
+    return json_response(status_code, body, **kwargs)
+
+
 def _explore_item(metadata, album):
     if not isinstance(metadata, dict) or not _active_public_photo_album(album):
         return None
@@ -497,7 +566,7 @@ def _exposure_options_response(params):
         if first_value
         else {"items": [], "total": 0, "nextCursor": None}
     )
-    return json_response(
+    return _explore_json_response(
         200,
         {
             "items": groups,
@@ -519,7 +588,7 @@ def _exposure_media_response(params):
         params.get("cursor"),
         params.get("seed"),
     )
-    return json_response(
+    return _explore_json_response(
         200,
         payload,
         cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
@@ -744,7 +813,7 @@ def _indexed_media_response(params):
         if mode in {"time", "season"}:
             raise ValidationError("Invalid cursor")
         return _scan_explore_media_response(None, params)
-    return json_response(
+    return _explore_json_response(
         200,
         payload,
         cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
@@ -782,7 +851,7 @@ def _indexed_options_response(mode):
         if first_value
         else {"items": [], "nextCursor": None}
     )
-    return json_response(
+    return _explore_json_response(
         200,
         {
             "items": items,
@@ -820,7 +889,7 @@ def _indexed_exposure_options_response():
         if first_value
         else {"items": [], "total": 0, "nextCursor": None}
     )
-    return json_response(
+    return _explore_json_response(
         200,
         {
             "items": groups,
@@ -844,7 +913,7 @@ def _indexed_temporal_options_response(mode):
         if first_value
         else {"items": [], "nextCursor": None}
     )
-    return json_response(
+    return _explore_json_response(
         200,
         {
             "items": items,
@@ -923,7 +992,7 @@ def _scan_explore_media_response(event, params):
         if output and next_offset < len(matches)
         else None
     )
-    return json_response(
+    return _explore_json_response(
         200,
         {"items": output, "nextCursor": encode_cursor(next_key, scope)},
         cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
@@ -964,7 +1033,7 @@ def _lens_options_response(params):
         if isinstance(key, str) and key and isinstance(label, str) and label:
             row = counts.setdefault(key, {"name": label[:160], "photos": 0})
             row["photos"] += 1
-    return json_response(
+    return _explore_json_response(
         200,
         {"items": sorted(counts.values(), key=lambda item: (-item["photos"], item["name"].casefold()))},
         cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
@@ -1006,7 +1075,7 @@ def _color_options_response(params):
         for family in set(families):
             if family in counts:
                 counts[family] += 1
-    return json_response(
+    return _explore_json_response(
         200,
         {"items": [{"id": family, "photos": counts[family]} for family in EXPLORE_COLOR_ORDER if counts[family]]},
         cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
@@ -1386,6 +1455,12 @@ def _html_response(body):
         f"https://{bucket}.s3.amazonaws.com "
         f"https://{bucket}.s3.{os.environ.get('AWS_REGION', 'us-west-2')}.amazonaws.com"
     )
+    original_bucket = os.environ.get("ORIGINAL_PREVIEW_BUCKET", "").strip()
+    if original_bucket:
+        s3_origins += (
+            f" https://{original_bucket}.s3.amazonaws.com"
+            f" https://{original_bucket}.s3.{os.environ.get('AWS_REGION', 'us-west-2')}.amazonaws.com"
+        )
     content_security_policy = (
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
         "form-action 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; "

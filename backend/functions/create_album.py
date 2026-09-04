@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import os
+import re
 import secrets
 
 import boto3
@@ -23,6 +24,7 @@ from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
 from media_helpers import extract_exif_data, start_mediaconvert_job
 from preview_jobs import enqueue_preview_jobs
+from original_comparison_jobs import request_original_comparisons
 from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import (
@@ -106,6 +108,15 @@ def _normalize_images(value, album_id, album_type, *, album=None):
         if thumb_key:
             thumb_key = validate_album_media_key(thumb_key, **key_scope)
         item = {"rawKey": raw_key}
+        if album_type == "photo" and image.get("originalFilename") is not None:
+            filename = image["originalFilename"]
+            if not isinstance(filename, str) or len(filename) > 4096:
+                raise ValidationError(f"images[{index}].originalFilename must be a filename")
+            # Keep the camera/export filename separately; storage keys stay random.
+            filename = filename.replace("\\", "/").rsplit("/", 1)[-1]
+            filename = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", filename).strip()[:255]
+            if filename and filename not in {".", ".."}:
+                item["originalFilename"] = filename
         if thumb_key:
             item["thumbKey"] = thumb_key
         for dimension in ("width", "height"):
@@ -294,6 +305,7 @@ def handler(event, context):
             logger.error("album_media_normalization_failed error_type=%s", type(error).__name__)
 
         if album_type == "photo":
+            request_original_comparisons(album_id, images)
             try:
                 enqueue_preview_jobs(album_id, images)
             except Exception as error:

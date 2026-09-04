@@ -10,6 +10,9 @@ import {
     heroCoverUrl,
     heroManifestSrcSet,
     mediaDisplayUrl,
+    mediaBeforeCandidates,
+    mediaBeforeDisplayUrl,
+    mediaBeforeSrcSet,
     mediaExpiresAt,
     mediaFileName,
     mediaHlsUrl,
@@ -20,6 +23,7 @@ import {
     normalizeHeroManifest,
     resolveMediaDownloadUrl,
     signedUrlExpiresAt,
+    uploadOriginalFilename,
 } from './mediaUrls'
 
 const HERO_VERSION = '0123456789abcdef0123456789abcdef'
@@ -39,6 +43,39 @@ const heroManifest = {
 
 describe('media URL compatibility', () => {
     afterEach(() => vi.unstubAllGlobals())
+    it('preserves a bounded upload filename independently of storage keys', () => {
+        expect(uploadOriginalFilename('C:\\camera\\DSC_0001.JPG\n')).toBe('DSC_0001.JPG')
+        expect(uploadOriginalFilename('/shoot/DSC_0002.JPG')).toBe('DSC_0002.JPG')
+        expect(uploadOriginalFilename('x'.repeat(300))).toHaveLength(255)
+        expect(uploadOriginalFilename('../..')).toBe('')
+        expect(uploadOriginalFilename(null)).toBe('')
+    })
+
+    it('supports small original previews and includes their private URL expiry on public photos', () => {
+        const url = 'https://private.example/before.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=1800'
+        const media = {
+            url: 'https://public.example/edited.webp',
+            before: { status: 'ready', url, srcSet: [{ width: 500, url }], expiresAt: Date.UTC(2026, 6, 20, 12, 30) },
+        }
+        expect(mediaBeforeCandidates(media)).toEqual([{ width: 500, url }])
+        expect(mediaBeforeSrcSet(media)).toBe(`${url} 500w`)
+        expect(mediaBeforeDisplayUrl(media)).toBe(url)
+        expect(mediaExpiresAt(media)).toBe(Date.UTC(2026, 6, 20, 12, 30))
+        expect(annotateMediaExpiry(media).mediaExpiresAt).toBe(Date.UTC(2026, 6, 20, 12, 30))
+        expect(mediaBeforeDisplayUrl({ before: { status: 'ready', url } })).toBe(url)
+    })
+
+    it('rejects malformed original URLs and responsive widths without falling back to edited URLs', () => {
+        const before = { status: 'ready', url: 'javascript:alert(1)', srcSet: [{ width: 640, url: 'https://example.test/photo.webp, evil' }] }
+        expect(mediaBeforeDisplayUrl({ before, url: 'https://example.test/edited.webp' })).toBe('')
+        expect(mediaBeforeSrcSet({ before })).toBe('')
+        const url = 'https://example.test/photo.webp'
+        for (const widths of [[640, 640], [1921], [0], [1.5]]) {
+            expect(mediaBeforeCandidates({ before: { status: 'ready', srcSet: widths.map((width) => ({ width, url })) } })).toEqual([])
+        }
+        expect(mediaBeforeDisplayUrl({ before: { status: 'unavailable', url } })).toBe('')
+        expect(mediaExpiresAt({ before: { status: 'unavailable', expiresAt: 1800000000000 } })).toBeNull()
+    })
     it('preserves absolute URLs and resolves legacy CDN keys', () => {
         expect(cdnUrl('https://example.com/signed')).toBe('https://example.com/signed')
         expect(cdnUrl('/albums/example.jpg')).toMatch(/\/albums\/example\.jpg$/)

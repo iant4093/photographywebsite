@@ -85,7 +85,8 @@ def normalize_policy(value: Any) -> Any:
 
 
 def render_csp(
-    baseline: dict[str, Any], *, media_domain: str, api_id: str, region: str, bucket: str
+    baseline: dict[str, Any], *, media_domain: str, api_id: str, region: str, bucket: str,
+    original_preview_bucket: str | None = None,
 ) -> str:
     s3_origins = " ".join(
         sorted(
@@ -95,12 +96,24 @@ def render_csp(
             }
         )
     )
-    return baseline["content_security_policy_template"].format(
+    policy = baseline["content_security_policy_template"].format(
         media_origin=f"https://{media_domain}",
         api_origin=f"https://{api_id}.execute-api.{region}.amazonaws.com",
         cognito_origin=f"https://cognito-idp.{region}.amazonaws.com",
         s3_origins=s3_origins,
     )
+    if original_preview_bucket:
+        origins = (
+            f"https://{original_preview_bucket}.s3.amazonaws.com "
+            f"https://{original_preview_bucket}.s3.{region}.amazonaws.com"
+        )
+        policy = ";".join(
+            f"{directive.rstrip()} {origins}"
+            if directive.strip().split(" ", 1)[0] in {"img-src", "connect-src"}
+            else directive
+            for directive in policy.split(";")
+        )
+    return policy
 
 
 def render_print_csp(baseline: dict[str, Any], *, media_domain: str) -> str:
@@ -914,6 +927,7 @@ def main() -> int:
         api_id=api_id,
         region=args.region,
         bucket=media_bucket,
+        original_preview_bucket=stack_resource(args.stack_name, "OriginalPreviewBucket", args.profile, args.region),
     )
     if args.include_fotomoto_print:
         baseline["fotomoto_print"]["content_security_policy"] = render_print_csp(

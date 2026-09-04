@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 from pathlib import Path
 import sys
@@ -8,6 +9,7 @@ import tempfile
 import unittest
 from unittest import mock
 import urllib.error
+import urllib.parse
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,6 +65,64 @@ def detail(album_id=ALBUM_ONE, count=1):
         for index in range(count)
     ]
     return {"album": album, "images": images}
+
+
+def original_descriptor(album_id=ALBUM_ONE, media_id="a" * 24):
+    stamp = "20260904T120000Z"
+    query = urllib.parse.urlencode({
+        "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+        "X-Amz-Credential": "ASIA" + "A" * 16 + "/20260904/us-west-2/s3/aws4_request",
+        "X-Amz-Date": stamp, "X-Amz-Expires": "1800", "X-Amz-SignedHeaders": "host",
+        "X-Amz-Signature": "a" * 64, "X-Amz-Security-Token": "synthetic-session",
+    })
+    url = f"https://originals-test.s3.us-west-2.amazonaws.com/before/{album_id}/{media_id}/{'b' * 32}/w500.webp?{query}"
+    expiry = int(datetime.datetime(2026, 9, 4, 12, 30, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+    return {"status": "ready", "url": url, "srcSet": [{"width": 500, "url": url}], "width": 500, "height": 333, "expiresAt": expiry}
+
+
+class OriginalComparisonPublicContractTests(unittest.TestCase):
+    def test_only_photos_accept_exact_ready_or_state_only_comparisons(self):
+        for before in (original_descriptor(), {"status": "pending"}, {"status": "unavailable"}, {"status": "failed"}):
+            payload = detail()
+            payload["images"][0].update(id="a" * 24, before=before)
+            self.assertEqual(public_load.validate_detail(payload, ALBUM_ONE), 1)
+            payload["album"]["type"] = "video"
+            with self.assertRaises(public_load.ProbeError):
+                public_load.validate_detail(payload, ALBUM_ONE)
+
+    def test_private_evidence_cross_image_keys_and_unsigned_or_unbounded_urls_are_rejected(self):
+        original = original_descriptor()
+        bad_values = [
+            {**original, "sourceFileId": "private-id"},
+            {"status": "pending", "sourcePath": "private-path"},
+            {**original, "width": True}, {**original, "expiresAt": 1},
+            {**original, "srcSet": [{"width": 500, "url": original["url"]}] * 2},
+        ]
+        for bad_url in (
+            original["url"].split("?")[0],
+            original["url"].replace(ALBUM_ONE, ALBUM_TWO),
+            original["url"].replace("a" * 24 + "/", "c" * 24 + "/"),
+            original["url"].replace("w500.webp", "../w500.webp"),
+            original["url"].replace("X-Amz-Expires=1800", "X-Amz-Expires=86400"),
+            original["url"] + "&X-Amz-Expires=1800",
+            original["url"] + "&sourceFileId=private",
+            original["url"].replace("https://", "https://user:password@"),
+            original["url"].replace("amazonaws.com/", "amazonaws.com.evil.test/"),
+        ):
+            bad_values.append({**original, "url": bad_url, "srcSet": [{"width": 500, "url": bad_url}]})
+        for before in bad_values:
+            with self.subTest(fields=sorted(before)), self.assertRaises(public_load.ProbeError):
+                public_load.validate_before(before, ALBUM_ONE, "a" * 24)
+        with self.assertRaises(public_load.ProbeError):
+            public_load.validate_before(original, ALBUM_ONE, "a" * 24, expected_bucket="wrong-bucket")
+        with self.assertRaises(public_load.ProbeError):
+            public_load.validate_before(original, ALBUM_ONE, "a" * 24, region="us-east-1")
+
+    def test_signed_provider_urls_remain_forbidden_for_edited_media(self):
+        payload = detail()
+        payload["images"][0]["url"] = original_descriptor()["url"]
+        with self.assertRaises(public_load.ProbeError):
+            public_load.validate_detail(payload, ALBUM_ONE)
 
 
 class FrontendArtifactBudgetTests(unittest.TestCase):

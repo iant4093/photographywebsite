@@ -462,6 +462,7 @@ function UserDashboard() {
                     onDownload={downloadImage}
                     onPrint={printImage}
                     canShare={false}
+                    onBeforeRefresh={() => requestSelectedRefresh('original-status')}
                     onMediaError={() => requestSelectedRefresh('media-error')}
                 />
             )}

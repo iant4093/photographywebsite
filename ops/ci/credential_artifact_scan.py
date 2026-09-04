@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import fnmatch
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,16 @@ PRIVATE_KEY_METADATA_LINE = re.compile(
     rb"(?:Proc-Type:[ \t]*4,ENCRYPTED|DEK-Info:[ \t]*[A-Z0-9-]+,[0-9A-Fa-f]+)"
 )
 AWS_DOCUMENTATION_ACCESS_KEY_IDS = {b"AKIA" + b"IOSFODNN7EXAMPLE"}
+# Pillow 12.3.0's public embedded default font happens to contain an AWS-shaped
+# substring. Trust only the exact, independently verified upstream source bytes
+# at their package path, and only for this detector. Any edit (including an
+# appended credential) invalidates the exception; all other detectors still run.
+# https://github.com/python-pillow/Pillow/blob/12.3.0/src/PIL/ImageFont.py
+VERIFIED_PUBLIC_AWS_LIKE_ASSETS = {
+    ("PIL", "ImageFont.py"): frozenset({
+        "24fa5feeb91b4bf63eaad0ebba08a8161e9c889d9fd056a37c928134097b9649",
+    }),
+}
 FORBIDDEN_FILENAMES = (
     "google_oauth_token.json",
     "voice-assistant-*.json",
@@ -90,6 +101,11 @@ def _forbidden_filename(name: str, relative: str, payload: bytes) -> bool:
     if not any(fnmatch.fnmatchcase(lowered, pattern) for pattern in FORBIDDEN_FILENAMES):
         return False
     return not _is_iam_credentials_discovery_schema(relative, payload)
+
+
+def _is_verified_public_aws_like_asset(relative: str, payload: bytes) -> bool:
+    hashes = VERIFIED_PUBLIC_AWS_LIKE_ASSETS.get(tuple(Path(relative).parts[-2:]))
+    return bool(hashes and hashlib.sha256(payload).hexdigest() in hashes)
 
 
 def _contains_private_key_block(payload: bytes) -> bool:
@@ -210,7 +226,7 @@ def scan(root: Path) -> ScanReport:
         if any(
             match.group(0) not in AWS_DOCUMENTATION_ACCESS_KEY_IDS
             for match in AWS_ACCESS_KEY_ID.finditer(payload)
-        ):
+        ) and not _is_verified_public_aws_like_asset(relative, payload):
             findings.append(Finding("aws_access_key_id", relative))
         for kind in _high_confidence_token_kinds(payload):
             findings.append(Finding(kind, relative))

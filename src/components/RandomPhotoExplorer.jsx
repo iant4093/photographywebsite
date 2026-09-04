@@ -13,6 +13,7 @@ import { trackPhotoDownload } from '../utils/analytics'
 import { openPrintOrder } from '../utils/printOrders'
 import { cacheRandomPhotoSession, readRandomPhotoSession } from '../utils/randomPhotoSession'
 import { shareUrlForAlbumPhoto } from '../utils/share'
+import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 
 const LIGHTBOX_SIZES = '(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)'
 
@@ -38,6 +39,7 @@ function RandomPhotoExplorer({ category = '', prefetch = false, variant = 'link'
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+    const { images: lightboxPhotos, refreshOriginal } = usePhotoOriginalRefresh(photos)
     const normalizedCategory = useMemo(() => category.trim(), [category])
     const buttonLabel = normalizedCategory
         ? `Shuffle ${normalizedCategory} photos`
@@ -190,7 +192,7 @@ function RandomPhotoExplorer({ category = '', prefetch = false, variant = 'link'
             )}
             {open && (
                 <PhotoLightbox
-                    images={photos}
+                    images={lightboxPhotos}
                     index={index}
                     ariaLabel={lightboxLabel}
                     loading={loading}
@@ -201,6 +203,7 @@ function RandomPhotoExplorer({ category = '', prefetch = false, variant = 'link'
                     onRetry={error ? handleRetry : undefined}
                     onDownload={handleDownload}
                     onPrint={handlePrint}
+                    onBeforeRefresh={refreshOriginal}
                     shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
                 />
             )}

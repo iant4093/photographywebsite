@@ -18,7 +18,7 @@ import {
     addImagesToAlbum,
     updateImageThumbnail,
 } from '../utils/api'
-import { mediaDisplayUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
+import { mediaDisplayUrl, mediaThumbnailUrl, uploadOriginalFilename } from '../utils/mediaUrls'
 import { mapWithConcurrency } from '../utils/concurrency'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 
@@ -812,6 +812,7 @@ function ManageAlbums() {
                         blurhash,
                         width,
                         height,
+                        originalFilename: uploadOriginalFilename(file.name),
                     }
                 })
 

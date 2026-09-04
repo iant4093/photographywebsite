@@ -32,4 +32,9 @@ arguments=(
 if [[ -n "${EXPECTED_RELEASE_SHA:-}" ]]; then
   arguments+=(--expected-release-sha "$EXPECTED_RELEASE_SHA")
 fi
+if [[ -n "${ORIGINAL_PREVIEW_BUCKET_NAME:-}" ]]; then
+  arguments+=(--original-preview-bucket-name "$ORIGINAL_PREVIEW_BUCKET_NAME")
+elif [[ "$MEDIA_BUCKET_NAME" =~ ^goldenhour-images-([0-9]{12})-([a-z0-9-]+)$ ]]; then
+  arguments+=(--original-preview-bucket-name "goldenhour-originals-${BASH_REMATCH[1]}-${BASH_REMATCH[2]}")
+fi
 python3 ops/ci/public_posture_smoke.py "${arguments[@]}"

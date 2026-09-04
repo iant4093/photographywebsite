@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import PhotoLightbox from './PhotoLightbox'
 
 vi.mock('../utils/mediaUrls', () => ({
+  mediaBeforeDisplayUrl: image => image?.before?.status === 'ready' ? image.before.url || '' : '',
+  mediaBeforeSrcSet: image => (image?.before?.srcSet || []).map(({ url, width }) => `${url} ${width}w`).join(', '),
   mediaDisplayUrl: image => image.url,
   mediaId: image => image.id,
   mediaPreviewSrcSet: () => '',
@@ -15,6 +17,7 @@ const landscape = {
   thumbnailUrl: 'https://media.test/landscape-thumb.jpg',
   width: 1920,
   height: 1280,
+  before: { status: 'pending' },
   exif: {
     model: 'Canon EOS R7',
     lens: 'Sigma 18-50mm F2.8',
@@ -25,6 +28,19 @@ const landscape = {
   },
 }
 const portrait = { ...landscape, id: 'portrait', width: 1280, height: 1920 }
+const comparisonPhoto = {
+  ...landscape,
+  before: {
+    status: 'ready',
+    url: 'https://media.test/original.jpg?signature=one',
+    srcSet: [
+      { width: 640, url: 'https://media.test/original-640.jpg?signature=one' },
+      { width: 1920, url: 'https://media.test/original-1920.jpg?signature=one' },
+    ],
+    width: 6000,
+    height: 4000,
+  },
+}
 
 describe('PhotoLightbox', () => {
   it('shows the complete safe camera settings and uses one intrinsic media frame', () => {
@@ -219,5 +235,186 @@ describe('PhotoLightbox', () => {
 
     expect(screen.queryByRole('button', { name: 'Share photo' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Download photo' })).toBeInTheDocument()
+  })
+
+  it('offers comparison immediately before share and loads the complete original only on request', () => {
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} />)
+    const edited = screen.getByAltText('Full size preview')
+    fireEvent.load(edited)
+    const toggle = screen.getByRole('button', { name: 'Show original photo' })
+    expect(toggle.nextElementSibling).toBe(screen.getByRole('button', { name: 'Share photo' }))
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('After — Edited')
+
+    fireEvent.click(toggle)
+    const original = screen.getByAltText('Before — Camera JPG')
+    expect(original).toHaveAttribute('src', comparisonPhoto.before.url)
+    expect(original).toHaveAttribute('srcset', 'https://media.test/original-640.jpg?signature=one 640w, https://media.test/original-1920.jpg?signature=one 1920w')
+    expect(original).toHaveAttribute('width', '6000')
+    expect(original).toHaveAttribute('height', '4000')
+    expect(original).toHaveClass('object-contain')
+    expect(original).toHaveStyle({ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: 'hidden' })
+    expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
+    expect(edited).toBeVisible()
+
+    fireEvent.load(original)
+    expect(original).toBeVisible()
+    expect(edited).not.toBeVisible()
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('Before — Camera JPG')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
+    expect(edited).toBeVisible()
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('resets comparison on navigation, return, and reopen and ignores detached original events', () => {
+    const onMediaError = vi.fn()
+    const props = { images: [comparisonPhoto, portrait], ariaLabel: 'Viewer', onClose: vi.fn(), onMediaError }
+    const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
+    fireEvent.load(screen.getByAltText('Full size preview'))
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    fireEvent.load(original)
+
+    rerender(<PhotoLightbox {...props} index={1} />)
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('After — Edited')
+    fireEvent.load(original)
+    fireEvent.error(original)
+    expect(onMediaError).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Show original photo' })).toHaveAttribute('aria-pressed', 'false')
+    rerender(<PhotoLightbox {...props} index={0} />)
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    fireEvent.load(screen.getByAltText('Before — Camera JPG'))
+    unmount()
+
+    render(<PhotoLightbox {...props} index={0} />)
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('After — Edited')
+  })
+
+  it('keeps the edit on original failure, refreshes once, and supports an explicit retry', () => {
+    const onMediaError = vi.fn().mockResolvedValue(undefined)
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onMediaError={onMediaError} />)
+    const edited = screen.getByAltText('Full size preview')
+    fireEvent.load(edited)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    fireEvent.error(original)
+    fireEvent.error(original)
+    expect(onMediaError).toHaveBeenCalledOnce()
+    expect(edited).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Original could not be loaded.')
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry original' }))
+    expect(onMediaError).toHaveBeenCalledTimes(2)
+    const retry = screen.getByAltText('Before — Camera JPG')
+    expect(retry).not.toBe(original)
+    fireEvent.error(retry)
+    expect(onMediaError).toHaveBeenCalledTimes(2)
+    expect(edited).toBeVisible()
+  })
+
+  it('recovers an expired URL when the parent refreshes its before descriptor', () => {
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onMediaError: vi.fn() }
+    const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    fireEvent.load(screen.getByAltText('Full size preview'))
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const expired = screen.getByAltText('Before — Camera JPG')
+    fireEvent.error(expired)
+    const refreshed = { ...comparisonPhoto, before: { ...comparisonPhoto.before, url: 'https://media.test/original.jpg?signature=two', srcSet: [] } }
+    rerender(<PhotoLightbox {...props} images={[refreshed]} />)
+    const original = screen.getByAltText('Before — Camera JPG')
+    expect(original).toHaveAttribute('src', refreshed.before.url)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
+    fireEvent.load(expired)
+    expect(original).not.toBeVisible()
+    fireEvent.load(original)
+    expect(original).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Before — Camera JPG')
+  })
+
+  it('checks pending matches on request and shows the required message for a missing original', () => {
+    const onMediaError = vi.fn()
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh: onMediaError }
+    const { rerender } = render(<PhotoLightbox {...props} images={[landscape]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(screen.getByRole('status')).toHaveTextContent('Checking original…')
+    expect(onMediaError).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(onMediaError).toHaveBeenCalledTimes(2)
+    rerender(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
+    expect(screen.getByAltText('Before — Camera JPG')).toBeInTheDocument()
+
+    rerender(<PhotoLightbox {...props} images={[{ ...landscape, before: { status: 'unavailable' } }]} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Unable to locate original')
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry original' })).toBeNull()
+  })
+
+  it('keeps downloads and print orders tied to the edited photo with explicit labels in before mode', () => {
+    const onDownload = vi.fn()
+    const onPrint = vi.fn().mockResolvedValue(undefined)
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onDownload={onDownload} onPrint={onPrint} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    fireEvent.load(screen.getByAltText('Before — Camera JPG'))
+    fireEvent.click(screen.getByRole('button', { name: 'Download edited photo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Order a print of the edited photo' }))
+    expect(onDownload).toHaveBeenCalledWith(expect.any(Object), comparisonPhoto, 0)
+    expect(onPrint).toHaveBeenCalledWith(expect.any(Object), comparisonPhoto, 0)
+  })
+
+  it('uses the original-specific refresh callback while routing edited image errors separately', () => {
+    const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+    const onMediaError = vi.fn()
+    render(<PhotoLightbox images={[landscape]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onBeforeRefresh={onBeforeRefresh} onMediaError={onMediaError} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(onBeforeRefresh).toHaveBeenCalledWith(expect.any(Object), landscape)
+    expect(onMediaError).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'Show edited photo' })).toHaveFocus()
+    fireEvent.error(screen.getByAltText('Full size preview'))
+    expect(onMediaError).toHaveBeenCalledOnce()
+  })
+
+  it('does not expose original comparison for legacy demo image strings', () => {
+    render(<PhotoLightbox images={['https://media.test/demo.jpg']} index={0} ariaLabel="Viewer" onClose={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Show original photo' })).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('does not expose original comparison when the API omits its descriptor', () => {
+    const onMediaError = vi.fn()
+    render(<PhotoLightbox images={[{ ...landscape, before: undefined }]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onMediaError={onMediaError} />)
+    expect(screen.queryByRole('button', { name: 'Show original photo' })).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(onMediaError).not.toHaveBeenCalled()
+  })
+
+  it('hides a requested comparison and status when refreshed data omits the descriptor', () => {
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender } = render(<PhotoLightbox {...props} images={[landscape]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(screen.getByRole('status')).toHaveTextContent('Original is being prepared.')
+    rerender(<PhotoLightbox {...props} images={[{ ...landscape, before: undefined }]} />)
+    expect(screen.queryByRole('button', { name: 'Show edited photo' })).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByAltText('Full size preview')).toBeInTheDocument()
+  })
+
+  it.each(['pending', 'failed'])('does not send a %s original status to the protected-media error handler', (status) => {
+    const onMediaError = vi.fn()
+    render(<PhotoLightbox images={[{ ...landscape, before: { status } }]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onMediaError={onMediaError} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(onMediaError).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry original' })).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent(status === 'pending' ? 'Original is being prepared.' : 'Original could not be loaded.')
   })
 })

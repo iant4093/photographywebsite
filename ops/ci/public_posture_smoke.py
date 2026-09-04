@@ -74,6 +74,7 @@ class PostureConfig:
     aws_region: str
     expected_release_sha: str = ""
     timeout: float = 20.0
+    original_preview_bucket_name: str = ""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -151,6 +152,13 @@ def validate_config(config: PostureConfig) -> PostureConfig:
         raise PostureError("media domain is invalid")
     if not BUCKET_RE.fullmatch(config.media_bucket_name):
         raise PostureError("media bucket name is invalid")
+    original_bucket = config.original_preview_bucket_name
+    if not original_bucket:
+        known_media_bucket = re.fullmatch(r"goldenhour-images-([0-9]{12})-([a-z0-9-]+)", config.media_bucket_name)
+        if known_media_bucket:
+            original_bucket = f"goldenhour-originals-{known_media_bucket[1]}-{known_media_bucket[2]}"
+    if original_bucket and (not BUCKET_RE.fullmatch(original_bucket) or original_bucket == config.media_bucket_name):
+        raise PostureError("original preview bucket name is invalid")
     if not re.fullmatch(r"[a-z]{2}(?:-gov)?-[a-z]+-[0-9]", config.aws_region):
         raise PostureError("AWS region is invalid")
     if config.expected_release_sha and not SHA_RE.fullmatch(config.expected_release_sha):
@@ -170,6 +178,7 @@ def validate_config(config: PostureConfig) -> PostureConfig:
         config.aws_region,
         config.expected_release_sha,
         config.timeout,
+        original_bucket,
     )
 
 
@@ -256,14 +265,32 @@ def _require_public_stats(response: RawResponse) -> bool:
     return True
 
 
-def _inspect_media_urls(value: object, expected_host: str, candidates: list[tuple[int, str]]) -> None:
+def _inspect_media_urls(value: object, expected_host: str, candidates: list[tuple[int, str]], *,
+                        original_bucket: str = "", region: str = "", original_candidates: list[str] | None = None,
+                        album_id: str = "") -> None:
+    kwargs = {"original_bucket": original_bucket, "region": region, "original_candidates": original_candidates, "album_id": album_id}
     if isinstance(value, list):
         for item in value:
-            _inspect_media_urls(item, expected_host, candidates)
+            _inspect_media_urls(item, expected_host, candidates, **kwargs)
         return
     if not isinstance(value, dict):
         return
+    if isinstance(value.get("album"), dict):
+        kwargs["album_id"] = value["album"].get("albumId", "")
+    elif isinstance(value.get("albumId"), str):
+        kwargs["album_id"] = value["albumId"]
     for key, item in value.items():
+        if key == "before":
+            if not kwargs["album_id"] or not isinstance(value.get("id"), str):
+                raise PostureError("original comparison is outside a photo DTO")
+            if isinstance(item, dict) and item.get("status") == "ready" and not original_bucket:
+                raise PostureError("original preview bucket is not configured for verification")
+            urls = catalog_probe.validate_before(item, kwargs["album_id"], value["id"], expected_bucket=original_bucket, region=region)
+            if urls and item["expiresAt"] <= int(time.time() * 1000):
+                raise PostureError("original preview URLs have expired")
+            if original_candidates is not None:
+                original_candidates.extend(urls)
+            continue
         if key in MEDIA_FIELDS and item:
             if not isinstance(item, str):
                 raise PostureError("public media URL is not a string")
@@ -277,7 +304,7 @@ def _inspect_media_urls(value: object, expected_host: str, candidates: list[tupl
             ):
                 raise PostureError("public media URL bypasses the exact CDN")
             candidates.append((MEDIA_FIELDS[key], item))
-        _inspect_media_urls(item, expected_host, candidates)
+        _inspect_media_urls(item, expected_host, candidates, **kwargs)
 
 
 def run_posture(
@@ -372,11 +399,14 @@ def run_posture(
         raise PostureError("protected endpoint allowed a hostile origin")
 
     media_candidates: list[tuple[int, str]] = []
+    original_candidates: list[str] = []
 
     def catalog_request(url: str, timeout: float) -> tuple[object, dict[str, str]]:
         response = requester(url, timeout, {"Accept": "application/json"}, MAX_JSON_BYTES)
         payload = _require_json(response, 200)
-        _inspect_media_urls(payload, config.media_domain, media_candidates)
+        _inspect_media_urls(payload, config.media_domain, media_candidates,
+                            original_bucket=config.original_preview_bucket_name, region=config.aws_region,
+                            original_candidates=original_candidates)
         return payload, response.headers
 
     catalog_metrics = catalog_probe.run_catalog_probe(
@@ -405,6 +435,18 @@ def run_posture(
     if direct_bucket.status != 403:
         raise PostureError("direct media bucket access is not denied")
 
+    original_checks = 0
+    if original_candidates:
+        signed_url = original_candidates[0]
+        original = requester(signed_url, config.timeout, {"Range": "bytes=0-0"}, 65_536)
+        if original.status not in {200, 206} or "image/webp" not in original.headers.get("content-type", "").lower() or "set-cookie" in original.headers:
+            raise PostureError("signed original preview is unavailable")
+        unsigned_url = urllib.parse.urlsplit(signed_url)._replace(query="").geturl()
+        unsigned = requester(unsigned_url, config.timeout, {"Range": "bytes=0-0"}, 65_536)
+        if unsigned.status != 403:
+            raise PostureError("original preview bucket permits unsigned access")
+        original_checks = 2
+
     return {
         "albumCount": int(catalog_metrics["albumCount"]),
         "catalogComplete": True,
@@ -412,6 +454,7 @@ def run_posture(
         "detailCount": int(catalog_metrics["detailCount"]),
         "directEndpointChecks": 2,
         "mediaAuthorizationChecks": 2,
+        "originalAuthorizationChecks": original_checks,
         "privacyRouteChecks": privacy_routes,
         "publicStatsChecks": 1,
         "publicStatsReady": stats_ready,
@@ -461,6 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--execute-api-url", required=True)
     parser.add_argument("--media-domain", required=True)
     parser.add_argument("--media-bucket-name", required=True)
+    parser.add_argument("--original-preview-bucket-name", default="")
     parser.add_argument("--aws-region", required=True)
     parser.add_argument("--expected-release-sha", default="")
     parser.add_argument("--timeout", type=float, default=20.0)
@@ -479,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.aws_region,
                 args.expected_release_sha,
                 args.timeout,
+                args.original_preview_bucket_name,
             ),
             attempts=args.attempts,
             retry_delay=args.retry_delay,

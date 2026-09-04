@@ -201,6 +201,7 @@ describe('AlbumGallery', () => {
     gallery(<AlbumGallery />, '/album/a1')
     await screen.findByText('Wild Album')
     await act(async () => expiry.refresh('media-error'))
+    expect(api.fetchAlbum).toHaveBeenLastCalledWith('a1', null, expect.objectContaining({ force: true }))
     expect(await screen.findByRole('alert')).toHaveTextContent('photo links expired')
 
     urls.resolveMediaDownloadUrl.mockRejectedValueOnce(new Error('download failed'))

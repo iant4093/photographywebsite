@@ -52,6 +52,13 @@ state, and verify one immutable manifest through the public alias. Keep the
 album-detail compatibility path enabled until the catalog reconciliation is
 complete and the refresh queue has no old messages.
 
+For `OriginalComparisonFailureAlarm` and `OriginalIndexRefreshErrorsAlarm`,
+compare comparison DLQ depth and worker errors with private index freshness.
+Follow [photo-original failure recovery](PHOTO_ORIGINAL_COMPARISONS.md#failure-recovery-and-retention)
+to check the read-only Drive boundary and retry only proven idempotent website
+jobs. Preserve the published index, retained private previews, and raw archive;
+an unavailable original is a matching result rather than an indexing outage.
+
 ## Authentication and authorization
 
 Group denials by stable reason, route template, status, and release. Separate a

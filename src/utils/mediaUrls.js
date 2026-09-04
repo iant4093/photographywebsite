@@ -51,6 +51,37 @@ export function mediaPreviewSrcSet(media) {
         : ''
 }
 
+export function uploadOriginalFilename(value) {
+    if (typeof value !== 'string') return ''
+    const filename = Array.from(value.replace(/\\/g, '/').split('/').pop())
+        .filter((character) => {
+            const code = character.codePointAt(0)
+            return code > 31 && (code < 127 || code > 159)
+        }).join('').trim().slice(0, 255)
+    return filename === '.' || filename === '..' ? '' : filename
+}
+
+export function mediaBeforeCandidates(media) {
+    const before = media?.before
+    if (before?.status !== 'ready' || !Array.isArray(before.srcSet) || before.srcSet.length > 4) return []
+    const candidates = before.srcSet.map((candidate) => ({
+        width: Number(candidate?.width),
+        url: safePreviewUrl(candidate?.url),
+    })).sort((left, right) => left.width - right.width)
+    return candidates.every(({ width, url }, index) => (
+        Number.isSafeInteger(width) && width > 0 && width <= 1920 && url
+        && (index === 0 || width > candidates[index - 1].width)
+    )) ? candidates : []
+}
+
+export function mediaBeforeSrcSet(media) {
+    return mediaBeforeCandidates(media).map(({ width, url }) => `${url} ${width}w`).join(', ')
+}
+
+export function mediaBeforeDisplayUrl(media) {
+    return media?.before?.status === 'ready' ? safePreviewUrl(media.before.url) : ''
+}
+
 function parseAwsDate(value) {
     const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value || '')
     if (!match) return null
@@ -97,6 +128,14 @@ export function mediaExpiresAt(media) {
         .map(signedUrlExpiresAt)
         .filter(Number.isFinite)
     if (explicitExpiry) expiries.push(explicitExpiry)
+    if (media.before?.status === 'ready') {
+        const beforeExpiry = mediaExpiresAt({
+            url: mediaBeforeDisplayUrl(media),
+            expiresAt: media.before.expiresAt,
+        })
+        if (beforeExpiry) expiries.push(beforeExpiry)
+        expiries.push(...mediaBeforeCandidates(media).map(({ url }) => signedUrlExpiresAt(url)).filter(Number.isFinite))
+    }
     return expiries.length > 0 ? Math.min(...expiries) : null
 }
 

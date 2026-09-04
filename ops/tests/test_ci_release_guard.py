@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import datetime
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import tarfile
 import unittest
+import urllib.parse
 from unittest.mock import patch
 
 
@@ -308,6 +310,9 @@ class ReleaseIntentTests(unittest.TestCase):
                 "UpdateImageFunctionRole",
                 "CreateZipFunctionRole",
                 "GetAlbumsFunctionRole",
+                "GetAlbumFunctionRole",
+                "GetSharedAlbumFunctionRole",
+                "GetAdminAlbumMediaFunctionRole",
                 "GetPublicAlbumFunctionRole",
                 "GetPublicAlbumsFunctionRole",
                 "HeroCoverFunctionRole",
@@ -443,6 +448,20 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("HoverPreviewRefreshQueueAgeAlarm", "AWS::CloudWatch::Alarm"),
                 ("HoverPreviewManifestBuilderErrorsAlarm", "AWS::CloudWatch::Alarm"),
                 ("HoverPreviewManifestFailureAlarm", "AWS::CloudWatch::Alarm"),
+                ("OriginalComparisonTable", "AWS::DynamoDB::Table"),
+                ("OriginalPreviewBucket", "AWS::S3::Bucket"),
+                ("OriginalPreviewBucketPolicy", "AWS::S3::BucketPolicy"),
+                ("OriginalComparisonDeadLetterQueue", "AWS::SQS::Queue"),
+                ("OriginalComparisonQueue", "AWS::SQS::Queue"),
+                ("OriginalComparisonFailureAlarm", "AWS::CloudWatch::Alarm"),
+                ("OriginalIndexRefreshErrorsAlarm", "AWS::CloudWatch::Alarm"),
+                ("OriginalIndexRefreshFunction", "AWS::Lambda::Function"),
+                ("OriginalIndexRefreshFunctionRole", "AWS::IAM::Role"),
+                ("OriginalComparisonWorkerFunction", "AWS::Lambda::Function"),
+                ("OriginalComparisonWorkerFunctionRole", "AWS::IAM::Role"),
+                ("OriginalIndexRefreshFunctionRefreshOriginalIndex", "AWS::Events::Rule"),
+                ("OriginalIndexRefreshFunctionRefreshOriginalIndexPermission", "AWS::Lambda::Permission"),
+                ("OriginalComparisonWorkerFunctionOriginalComparisonJobs", "AWS::Lambda::EventSourceMapping"),
             },
         )
         for rule in document["rules"]:
@@ -737,12 +756,22 @@ class ReleaseDependencyTests(unittest.TestCase):
                 "GetAdminAlbumMediaFunctionRole",
                 "AWS::IAM::Role",
                 "Policies",
-            ): {"ImagesBucket.Arn", "PreviewMetadataTable.Arn"},
+            ): {
+                "ImagesBucket.Arn",
+                "OriginalComparisonTable.Arn",
+                "OriginalPreviewBucket.Arn",
+                "PreviewMetadataTable.Arn",
+            },
             (
                 "GetAlbumFunctionRole",
                 "AWS::IAM::Role",
                 "Policies",
-            ): {"ImagesBucket.Arn", "PreviewMetadataTable.Arn"},
+            ): {
+                "ImagesBucket.Arn",
+                "OriginalComparisonTable.Arn",
+                "OriginalPreviewBucket.Arn",
+                "PreviewMetadataTable.Arn",
+            },
             (
                 "GetSharedAlbumFunctionRole",
                 "AWS::IAM::Role",
@@ -750,6 +779,8 @@ class ReleaseDependencyTests(unittest.TestCase):
             ): {
                 "AlbumsTable.Arn",
                 "ImagesBucket.Arn",
+                "OriginalComparisonTable.Arn",
+                "OriginalPreviewBucket.Arn",
                 "PreviewMetadataTable.Arn",
                 "RateLimitTable.Arn",
             },
@@ -1351,6 +1382,65 @@ class CredentialArtifactScanTests(unittest.TestCase):
             )
             self.assertEqual(credential_artifact_scan.scan(root).findings, ())
 
+    def test_exact_public_pillow_font_asset_does_not_trigger_aws_key_detection(self):
+        from PIL import ImageFont
+
+        # The pinned build dependency contains the complete public font, so this
+        # regression uses its real bytes rather than a fabricated benign token.
+        payload = Path(ImageFont.__file__).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(payload).hexdigest(),
+            "24fa5feeb91b4bf63eaad0ebba08a8161e9c889d9fd056a37c928134097b9649",
+        )
+        self.assertTrue(credential_artifact_scan.AWS_ACCESS_KEY_ID.search(payload))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "OriginalComparisonWorkerFunction" / "PIL" / "ImageFont.py"
+            module.parent.mkdir(parents=True)
+            module.write_bytes(payload)
+            self.assertEqual(credential_artifact_scan.scan(root).findings, ())
+
+    def test_public_font_exception_requires_exact_content_and_package_path(self):
+        from PIL import ImageFont
+
+        public_source = Path(ImageFont.__file__).read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "PIL" / "ImageFont.py"
+            module.parent.mkdir(parents=True)
+            # Even a harmless edit requires a fresh public-source verification.
+            module.write_bytes(public_source + b"\n# changed\n")
+            self.assertEqual(
+                [finding.kind for finding in credential_artifact_scan.scan(root).findings],
+                ["aws_access_key_id"],
+            )
+            module.unlink()
+            (root / "renamed.py").write_bytes(public_source)
+            self.assertEqual(
+                [finding.kind for finding in credential_artifact_scan.scan(root).findings],
+                ["aws_access_key_id"],
+            )
+
+    def test_public_font_exception_cannot_hide_appended_credentials_or_weaken_boundaries(self):
+        from PIL import ImageFont
+
+        public_source = Path(ImageFont.__file__).read_bytes()
+        credential = access_key_id("ASIA", "1234567890ABCDEF").encode()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "PIL" / "ImageFont.py"
+            module.parent.mkdir(parents=True)
+            module.write_bytes(public_source + b'\nsecret = "' + credential + b'"\n')
+            (root / "other.py").write_bytes(b"prefix" + credential + b"suffix")
+            report = credential_artifact_scan.scan(root)
+            self.assertEqual(
+                {(finding.kind, finding.path) for finding in report.findings},
+                {("aws_access_key_id", "PIL/ImageFont.py"), ("aws_access_key_id", "other.py")},
+            )
+            with patch("sys.stdout") as stdout:
+                self.assertEqual(credential_artifact_scan.main([str(root)]), 1)
+            self.assertNotIn(credential.decode(), "".join(str(call) for call in stdout.write.call_args_list))
+
     def test_real_credentialed_urls_are_detected_without_echoing_values(self):
         urls = (
             credentialed_url(
@@ -1739,6 +1829,61 @@ class PublicPostureSmokeTests(unittest.TestCase):
         self.assertEqual(metrics["mediaAuthorizationChecks"], 2)
         self.assertEqual(metrics["publicStatsChecks"], 1)
         self.assertTrue(metrics["publicStatsReady"])
+
+    def original_descriptor(self):
+        issued = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+        query = urllib.parse.urlencode({
+            "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+            "X-Amz-Credential": "ASIA" + "A" * 16 + f"/{issued:%Y%m%d}/us-west-2/s3/aws4_request",
+            "X-Amz-Date": issued.strftime("%Y%m%dT%H%M%SZ"), "X-Amz-Expires": "1800",
+            "X-Amz-SignedHeaders": "host", "X-Amz-Signature": "a" * 64,
+        })
+        url = f"https://originals-test.s3.us-west-2.amazonaws.com/before/{self.ALBUM_ID}/{'a' * 24}/{'b' * 32}/w500.webp?{query}"
+        return {"status": "ready", "url": url, "srcSet": [{"width": 500, "url": url}], "width": 500, "height": 333, "expiresAt": int((issued.timestamp() + 1800) * 1000)}
+
+    def test_ready_original_checks_exact_private_bucket_and_unsigned_denial(self):
+        original = self.original_descriptor()
+        underlying = self.requester()
+        signed_reads = []
+
+        def request(url, timeout, headers, max_bytes):
+            if url.startswith("https://originals-test.s3.us-west-2.amazonaws.com/"):
+                signed_reads.append(bool(urllib.parse.urlsplit(url).query))
+                return self.response(206, b"x", content_type="image/webp") if "?" in url else self.response(403, b"denied", content_type="application/xml")
+            response = underlying(url, timeout, headers, max_bytes)
+            if url == f"https://site.test/api/public/albums/{self.ALBUM_ID}":
+                payload = json.loads(response.body)
+                payload["images"][0].update(id="a" * 24, before=original)
+                response = replace(response, body=json.dumps(payload).encode())
+            return response
+
+        metrics = public_posture_smoke.run_posture(replace(self.config(), original_preview_bucket_name="originals-test"), requester=request)
+        self.assertEqual(metrics["originalAuthorizationChecks"], 2)
+        self.assertEqual(signed_reads, [True, False])
+        with self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke.run_posture(self.config(), requester=request)
+
+        def public_original(url, timeout, headers, max_bytes):
+            if url.startswith("https://originals-test.s3.us-west-2.amazonaws.com/"):
+                return self.response(206, b"x", content_type="image/webp")
+            return request(url, timeout, headers, max_bytes)
+        with self.assertRaisesRegex(public_posture_smoke.PostureError, "unsigned access"):
+            public_posture_smoke.run_posture(replace(self.config(), original_preview_bucket_name="originals-test"), requester=public_original)
+
+    def test_original_bucket_derivation_is_exact_and_edited_urls_stay_cdn_only(self):
+        config = public_posture_smoke.validate_config(replace(self.config(), media_bucket_name="goldenhour-images-111111111111-prod"))
+        self.assertEqual(config.original_preview_bucket_name, "goldenhour-originals-111111111111-prod")
+        with self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke.validate_config(replace(self.config(), original_preview_bucket_name="media-bucket"))
+        with self.assertRaises(public_posture_smoke.PostureError):
+            public_posture_smoke._inspect_media_urls({"url": self.original_descriptor()["url"]}, "media.test", [], original_bucket="originals-test", region="us-west-2")
+
+    def test_original_pending_status_stays_valid_without_unsigned_url_exception(self):
+        payload = {"album": {"albumId": self.ALBUM_ID}, "images": [{"id": "a" * 24, "before": {"status": "pending"}}]}
+        public_posture_smoke._inspect_media_urls(payload, "media.test", [])
+        payload["images"][0]["before"] = {"status": "pending", "url": "https://originals-test.s3.amazonaws.com/private"}
+        with self.assertRaises(public_posture_smoke.catalog_probe.ProbeError):
+            public_posture_smoke._inspect_media_urls(payload, "media.test", [])
 
     def test_public_stats_allows_exact_initial_bootstrap_response(self):
         response = self.response(

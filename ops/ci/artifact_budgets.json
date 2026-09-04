@@ -31,6 +31,14 @@
       "PreviewWorkerFunction": {
         "uncompressedBytes": 70000000,
         "fileCount": 5000
+      },
+      "OriginalIndexRefreshFunction": {
+        "uncompressedBytes": 25000000,
+        "fileCount": 700
+      },
+      "OriginalComparisonWorkerFunction": {
+        "uncompressedBytes": 50000000,
+        "fileCount": 900
       }
     }
   }

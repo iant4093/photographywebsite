@@ -61,7 +61,7 @@ function AlbumGallery() {
             } catch {
                 // Not logged in, token stays null
             }
-            const data = await fetchAlbum(albumId, token, { signal })
+            const data = await fetchAlbum(albumId, token, { signal, force: background })
             setAlbum(data.album || data)
             const nextImages = data.images || []
             setImages(nextImages)
@@ -361,6 +361,7 @@ function AlbumGallery() {
                                 canShare={album.visibility === 'public'}
                                 shareTitle={`${album.title} — Ian Truong Photography`}
                                 shareUrl={image => shareUrlForAlbumPhoto(albumId, mediaId(image))}
+                                onBeforeRefresh={() => requestMediaRefresh('original-status')}
                                 onMediaError={() => requestMediaRefresh('media-error')}
                             />
                         )}

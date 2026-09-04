@@ -43,6 +43,47 @@
   display: contents;
 }
 
+.linen-photo-lightbox .linen-lightbox-action-buttons {
+  flex-wrap: wrap;
+}
+
+.linen-photo-lightbox .linen-lightbox-original {
+  transition: none;
+}
+
+.linen-photo-lightbox .linen-lightbox-before[aria-pressed="true"] {
+  border-color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.16);
+  color: white;
+}
+
+.linen-photo-lightbox .linen-lightbox-before-status {
+  display: grid;
+  justify-items: center;
+  gap: 0.15rem;
+  max-width: 100%;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+}
+
+.linen-photo-lightbox .linen-lightbox-before-status > span {
+  white-space: normal;
+}
+
+.linen-photo-lightbox .linen-lightbox-actions .linen-lightbox-before-retry {
+  width: auto;
+  min-height: 0;
+  padding: 0.15rem 0.3rem;
+  color: white;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
 @media (max-width: 720px) {
   .linen-responsive-lightbox {
     display: grid !important;
@@ -131,7 +172,7 @@
 
   .linen-photo-lightbox .linen-lightbox-action-buttons {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, auto));
+    grid-template-columns: repeat(2, minmax(0, auto));
     justify-content: center;
     width: 100%;
     gap: 0.3rem;
@@ -262,10 +303,11 @@
     z-index: 10;
     grid-row: 1;
     grid-column: 2;
-    align-self: center;
+    align-self: start;
+    margin-top: 3.15rem;
     justify-self: center;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
     gap: 0.4rem;
@@ -286,6 +328,9 @@
     grid-column: 2;
     align-self: end;
     justify-self: stretch;
+    max-height: calc(100% - 6.2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     flex-direction: column;
     width: 100%;
     gap: 0.25rem;
@@ -381,6 +426,25 @@
   .linen-photo-lightbox .linen-lightbox-actions,
   .linen-photo-lightbox .linen-lightbox-actions > div {
     gap: 0.2rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-action-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-actions .linen-lightbox-action-buttons button {
+    min-height: 2.4rem;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-action-buttons button svg {
+    display: none;
+  }
+
+  .linen-photo-lightbox .linen-lightbox-action-buttons button span {
+    white-space: normal;
+    line-height: 1.2;
   }
 
   .linen-photo-lightbox .linen-lightbox-actions button {

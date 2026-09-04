@@ -31,6 +31,7 @@ MEDIA_FIELDS = frozenset({
     "exif",
     "thumbnailTime",
     "mediaConvertJobId",
+    "originalFilename",
 })
 
 

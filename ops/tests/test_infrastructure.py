@@ -914,7 +914,7 @@ class IdentityAndSecretTests(unittest.TestCase):
             TEMPLATE.count("RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'"),
             8,
         )
-        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 18)
+        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 20)
 
     def test_free_print_plan_has_no_vendor_credential_or_original_staging_path(self) -> None:
         print_function = resource_block("PreparePrintFunction")

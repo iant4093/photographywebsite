@@ -14,6 +14,7 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from validation_helpers import ALLOWED_VISIBILITIES, ValidationError, validate_uuid
+from original_comparison_access import load_original_comparisons_for_albums, serialize_original_comparison
 
 
 VISIBILITY_TAG_KEY = "visibility"
@@ -274,6 +275,18 @@ def validated_preview_keys(image, album, metadata=None, *, allow_pending=False):
 
 
 def load_preview_metadata_for_albums(album_images, *, strict=False):
+    """Merge both derivative types while keeping archive evidence private."""
+    album_images = list(album_images)
+    results = _load_derivative_metadata_for_albums(album_images, strict=strict)
+    before_by_album = load_original_comparisons_for_albums(album_images)
+    for album_id, by_media in before_by_album.items():
+        target = results.setdefault(album_id, {})
+        for media_id, metadata in by_media.items():
+            target[media_id] = {**target.get(media_id, {}), "_before": metadata}
+    return results
+
+
+def _load_derivative_metadata_for_albums(album_images, *, strict=False):
     """Batch-read derivative state for media sampled from multiple albums.
 
     DynamoDB accepts up to 100 keys per batch. Grouping the keys here avoids a
@@ -417,6 +430,11 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
             }
             for width in PREVIEW_WIDTHS
         ]
+    before = serialize_original_comparison(
+        source, album, preview_metadata.get("_before") if isinstance(preview_metadata, dict) else None,
+    )
+    if before is not None:
+        result["before"] = before
     if visibility == "public":
         result["downloadUrl"] = public_url(key)
     else:
@@ -433,6 +451,8 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
         result["hlsUrl"] = media_url(hls_key, visibility)
     if include_internal:
         result.update({"rawKey": key, "thumbKey": thumb_key, "hlsKey": hls_key})
+        if "originalFilename" in source:
+            result["originalFilename"] = source["originalFilename"]
         if preview_keys:
             result.update({"previewVersion": PREVIEW_VERSION, "previewKeys": preview_keys})
         if "mediaConvertJobId" in source:

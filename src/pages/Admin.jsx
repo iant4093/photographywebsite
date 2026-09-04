@@ -7,6 +7,7 @@ import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums }
 import { mapWithConcurrency } from '../utils/concurrency'
 import { processImage } from '../utils/mediaUtils'
 import { currentLocalDateInputValue } from '../utils/date'
+import { uploadOriginalFilename } from '../utils/mediaUrls'
 
 // Upload page — create album for main gallery or specific user
 function Upload() {
@@ -119,7 +120,7 @@ function Upload() {
 
                 completedUploads += 1
                 setProgress({ current: completedUploads, total: photoFiles.length })
-                return { rawKey, thumbKey, blurhash, width, height }
+                return { rawKey, thumbKey, blurhash, width, height, originalFilename: uploadOriginalFilename(file.name) }
             })
 
             // Create album — cover is auto-set to first image by backend

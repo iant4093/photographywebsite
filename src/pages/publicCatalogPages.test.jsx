@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
+  fetchAlbum: vi.fn(),
   fetchAlbumsPage: vi.fn(),
   fetchRandomPhotos: vi.fn(),
   requestAlbumMediaDownload: vi.fn(),
@@ -174,6 +175,28 @@ describe('Home complete public catalog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(api.fetchRandomPhotos).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes the selected random original without reshuffling or resetting its position', async () => {
+    catalog.getCatalogSnapshot.mockReturnValue({ items: [], nextCursor: null })
+    catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
+    const first = { id: 'first', albumId: 'album-one', url: 'https://media.test/first.jpg', thumbnailUrl: 'https://media.test/first-thumb.jpg' }
+    const second = { id: 'second', albumId: 'album-two', url: 'https://media.test/second.jpg', thumbnailUrl: 'https://media.test/second-thumb.jpg', before: { status: 'pending' } }
+    api.fetchRandomPhotos.mockResolvedValue({ images: [first, second] })
+    api.fetchAlbum.mockResolvedValue({ images: [{ ...second, before: { status: 'unavailable' } }] })
+    routed(<Home />)
+    fireEvent.click(await screen.findByRole('button', { name: /explore random photos/i }))
+    await screen.findByAltText('Full size preview')
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    await screen.findByText('Unable to locate original')
+    expect(api.fetchAlbum).toHaveBeenCalledWith('album-two', null, { force: true, signal: expect.any(AbortSignal) })
+    expect(api.fetchRandomPhotos).toHaveBeenCalledOnce()
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', second.url)
+    fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', first.url)
   })
 
   it('opens a category-scoped shuffle without substituting the cached album cover', async () => {

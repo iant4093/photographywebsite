@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 from pathlib import Path
 import re
@@ -46,6 +47,7 @@ SUMMARY_OPTIONAL_FIELDS = {
 DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl", "downloadUrl"}
 IMAGE_OPTIONAL_FIELDS = {
+    "before",
     "previewSrcSet",
     "width",
     "height",
@@ -156,6 +158,68 @@ def _exact_fields(value: object, allowed: set[str], label: str) -> dict:
     if set(value) & FORBIDDEN_PUBLIC_FIELDS:
         raise ProbeError(f"{label} contains a forbidden field")
     return value
+
+
+def validate_before(value: object, album_id: str, media_id: str, *, expected_bucket: str = "", region: str = "") -> list[str]:
+    """Permit signed S3 delivery only inside the exact original-preview DTO."""
+    if not isinstance(value, dict) or value.get("status") not in {"ready", "pending", "unavailable", "failed"}:
+        raise ProbeError("original comparison status is invalid")
+    if value["status"] != "ready":
+        if set(value) != {"status"}:
+            raise ProbeError("original comparison state exposes unexpected fields")
+        return []
+    if set(value) != {"status", "url", "srcSet", "width", "height", "expiresAt"}:
+        raise ProbeError("original comparison exceeds the public field allowlist")
+    if not isinstance(media_id, str) or not re.fullmatch(r"[a-f0-9]{24}", media_id):
+        raise ProbeError("original comparison media identifier is invalid")
+    if any(isinstance(value[field], bool) or not isinstance(value[field], int) or not 0 < value[field] <= 100000 for field in ("width", "height")):
+        raise ProbeError("original comparison dimensions are invalid")
+    if isinstance(value["expiresAt"], bool) or not isinstance(value["expiresAt"], int):
+        raise ProbeError("original comparison expiry is invalid")
+    candidates = value["srcSet"]
+    if not isinstance(candidates, list) or not 1 <= len(candidates) <= 4:
+        raise ProbeError("original comparison source set is invalid")
+    allowed_widths = {min(width, value["width"]) for width in (640, 960, 1440, 1920)}
+    urls, previous_width, identity = [], 0, None
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or set(candidate) != {"width", "url"}:
+            raise ProbeError("original preview candidate exceeds the public allowlist")
+        width, url = candidate["width"], candidate["url"]
+        if isinstance(width, bool) or not isinstance(width, int) or width not in allowed_widths or width <= previous_width or not isinstance(url, str):
+            raise ProbeError("original preview candidate is invalid")
+        previous_width = width
+        parsed = urllib.parse.urlsplit(url)
+        host = re.fullmatch(r"([a-z0-9][a-z0-9.-]{1,61}[a-z0-9])\.s3(?:\.([a-z]{2}(?:-gov)?-[a-z]+-[0-9]))?\.amazonaws\.com", parsed.netloc)
+        path = re.fullmatch(rf"/before/{re.escape(album_id)}/{media_id}/([a-f0-9]{{32}})/w{width}\.webp", parsed.path)
+        if parsed.scheme != "https" or not host or not path or parsed.fragment or (expected_bucket and host[1] != expected_bucket) or (region and host[2] and host[2] != region):
+            raise ProbeError("original preview is outside its exact private S3 namespace")
+        if identity is not None and identity != (parsed.netloc, path[1]):
+            raise ProbeError("original preview candidates do not share one immutable source")
+        identity = (parsed.netloc, path[1])
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        required = {"X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-SignedHeaders", "X-Amz-Signature"}
+        if not required <= set(query) or set(query) - required - {"X-Amz-Security-Token"} or any(len(items) != 1 or not items[0] for items in query.values()):
+            raise ProbeError("original preview signature parameters are invalid")
+        signature = {key: items[0] for key, items in query.items()}
+        credential = signature["X-Amz-Credential"].split("/")
+        if (signature["X-Amz-Algorithm"] != "AWS4-HMAC-SHA256" or signature["X-Amz-Expires"] != "1800"
+                or signature["X-Amz-SignedHeaders"] != "host" or not re.fullmatch(r"[a-f0-9]{64}", signature["X-Amz-Signature"])
+                or not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", signature["X-Amz-Date"])
+                or len(credential) != 5 or not re.fullmatch(r"(?:AKIA|ASIA)[A-Z0-9]{16}", credential[0])
+                or credential[1] != signature["X-Amz-Date"][:8] or credential[3:] != ["s3", "aws4_request"]
+                or not re.fullmatch(r"[a-z]{2}(?:-gov)?-[a-z]+-[0-9]", credential[2])
+                or (region and credential[2] != region) or (host[2] and credential[2] != host[2])):
+            raise ProbeError("original preview signature contract is invalid")
+        try:
+            issued = datetime.datetime.strptime(signature["X-Amz-Date"], "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()
+        except ValueError as error:
+            raise ProbeError("original preview signature date is invalid") from error
+        if abs(value["expiresAt"] - int((issued + 1800) * 1000)) > 5000:
+            raise ProbeError("original comparison expiry differs from its signed URLs")
+        urls.append(url)
+    if value["url"] != urls[-1]:
+        raise ProbeError("original comparison default URL is not its largest preview")
+    return urls
 
 
 def validate_summary(value: object) -> dict:
@@ -282,6 +346,10 @@ def validate_detail(payload: object, expected_album_id: str) -> int:
             _public_url(image[name])
         if "hlsUrl" in image:
             _public_url(image["hlsUrl"])
+        if "before" in image:
+            if album["type"] != "photo":
+                raise ProbeError("video exposes an original photo comparison")
+            validate_before(image["before"], expected_album_id, image["id"])
         if "previewSrcSet" in image:
             preview = image["previewSrcSet"]
             if not isinstance(preview, list) or not preview:

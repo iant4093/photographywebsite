@@ -405,7 +405,12 @@ class CloudFrontMainTests(unittest.TestCase):
         raise AssertionError(arguments)
 
     def run_main(self, *arguments, config=None, certificate_good=True, apply_update=None):
-        stack_values = iter(["MEDIA", "API", "BUCKET"])
+        stack_values = {
+            "ImagesCloudFront": "MEDIA",
+            "Api": "API",
+            "ImagesBucket": "BUCKET",
+            "OriginalPreviewBucket": "ORIGINAL-BUCKET",
+        }
         fake_aws = lambda args, profile=None: self.fake_aws(
             args, profile=profile, config=config, certificate_good=certificate_good
         )
@@ -413,7 +418,7 @@ class CloudFrontMainTests(unittest.TestCase):
             cloudfront_frontend.argparse.ArgumentParser, "parse_args", wraps=None
         ) if False else patch.object(
             cloudfront_frontend, "discover_distribution_by_alias", return_value={"Id": "FRONT"}
-        ), patch.object(cloudfront_frontend, "stack_resource", side_effect=lambda *unused: next(stack_values)), patch.object(
+        ), patch.object(cloudfront_frontend, "stack_resource", side_effect=lambda stack, logical_id, *unused: stack_values[logical_id]), patch.object(
             cloudfront_frontend, "aws_json", side_effect=fake_aws
         ), patch.object(cloudfront_frontend, "validate_cache_policy_ids"), patch.object(
             cloudfront_frontend,

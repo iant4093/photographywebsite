@@ -13,6 +13,7 @@ from cache_invalidation import request_public_api_invalidation
 from create_album import _extract_exif, _normalize_images, _start_video_jobs
 from media_access import album_known_keys, serialize_album_summary, serialize_images, tag_keys_visibility
 from preview_jobs import enqueue_preview_jobs
+from original_comparison_jobs import request_original_comparisons
 from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
 from dynamodb_helpers import ensure_album_item_budget
@@ -113,6 +114,7 @@ def handler(event, context):
         tag_keys_visibility(album_known_keys(requested_key_holder), album["visibility"])
 
         if album_type == "photo" and fresh_images:
+            request_original_comparisons(album_id, fresh_images)
             try:
                 enqueue_preview_jobs(album_id, fresh_images)
             except Exception as error:

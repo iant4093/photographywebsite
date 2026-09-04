@@ -33,6 +33,7 @@ import './Explore.css'
 import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForAlbumPhoto } from '../utils/share'
 import { saveVerticalScroll, useScrollRestoration } from '../utils/scroll'
+import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 
 const PAGE_SIZE = 24
 const ImmersiveGallery = lazy(() => import('./ImmersiveGallery'))
@@ -364,6 +365,7 @@ function ExploreModule({ mode }) {
     currentRequestKeyRef.current = requestKey
     const hasCurrentPage = Boolean(requestKey && pageState.key === requestKey)
     const items = hasCurrentPage ? pageState.items : []
+    const { images: lightboxPhotos, refreshOriginal } = usePhotoOriginalRefresh(items)
     const nextCursor = hasCurrentPage ? pageState.nextCursor : null
     const resultError = hasCurrentPage ? pageState.error : ''
     const loading = Boolean(requestKey && !hasCurrentPage)
@@ -562,7 +564,7 @@ function ExploreModule({ mode }) {
 
             {lightboxIndex !== null && items[lightboxIndex] && (
                 <PhotoLightbox
-                    images={items}
+                    images={lightboxPhotos}
                     index={lightboxIndex}
                     ariaLabel={`Photographs in ${isColor ? 'Color' : 'Lens'} Explorer`}
                     onClose={() => setLightboxIndex(null)}
@@ -570,6 +572,7 @@ function ExploreModule({ mode }) {
                     onPrevious={() => setLightboxIndex(current => (current - 1 + items.length) % items.length)}
                     onDownload={handleDownload}
                     onPrint={handlePrint}
+                    onBeforeRefresh={refreshOriginal}
                     shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
                 />
             )}
@@ -979,6 +982,7 @@ function useExploreSample() {
 }
 
 function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
+    const { images: lightboxPhotos, refreshOriginal } = usePhotoOriginalRefresh(images)
     const handleDownload = useCallback(async (event, image) => {
         event.stopPropagation()
         try {
@@ -1007,7 +1011,7 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
     if (index === null || !images[index]) return null
     return (
         <PhotoLightbox
-            images={images}
+            images={lightboxPhotos}
             index={index}
             ariaLabel={ariaLabel}
             onClose={() => setIndex(null)}
@@ -1015,6 +1019,7 @@ function ExploreSampleLightbox({ images, index, setIndex, ariaLabel }) {
             onPrevious={() => setIndex(current => (current - 1 + images.length) % images.length)}
             onDownload={handleDownload}
             onPrint={handlePrint}
+            onBeforeRefresh={refreshOriginal}
             shareUrl={image => shareUrlForAlbumPhoto(image.albumId, mediaId(image))}
             shareTitle="Ian Truong Photography"
         />

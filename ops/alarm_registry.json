@@ -28,7 +28,7 @@
     },
     {
       "id": "application-async-and-preview",
-      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewMetadataSystemErrorsAlarm", "HoverPreviewRefreshQueueAgeAlarm", "HoverPreviewManifestBuilderErrorsAlarm", "HoverPreviewManifestFailureAlarm"],
+      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewMetadataSystemErrorsAlarm", "HoverPreviewRefreshQueueAgeAlarm", "HoverPreviewManifestBuilderErrorsAlarm", "HoverPreviewManifestFailureAlarm", "OriginalComparisonFailureAlarm", "OriginalIndexRefreshErrorsAlarm"],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",

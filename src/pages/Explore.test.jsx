@@ -13,7 +13,7 @@ const exploreApi = vi.hoisted(() => ({
   fetchExploreTimes: vi.fn(),
   prefetchExploreModule: vi.fn(() => Promise.resolve()),
 }))
-const api = vi.hoisted(() => ({ requestAlbumMediaDownload: vi.fn() }))
+const api = vi.hoisted(() => ({ fetchAlbum: vi.fn(), requestAlbumMediaDownload: vi.fn() }))
 const scroll = vi.hoisted(() => ({ saveVerticalScroll: vi.fn(), useScrollRestoration: vi.fn() }))
 const exploreState = vi.hoisted(() => ({
   readExploreBrowseState: vi.fn(() => null),
@@ -38,10 +38,12 @@ vi.mock('../components/ProgressiveImage', () => ({
   default: ({ alt, src, className, blurhash }) => <img alt={alt} src={src} className={className} data-blurhash={blurhash} />,
 }))
 vi.mock('../components/PhotoLightbox', () => ({
-  default: ({ images, index, ariaLabel, onClose, onNext, onPrevious, onDownload }) => (
+  default: ({ images, index, ariaLabel, onClose, onNext, onPrevious, onDownload, onBeforeRefresh }) => (
     <div role="dialog" aria-label={ariaLabel}>
       <p>{images[index].albumTitle}</p>
       <p>{images[index].exif?.model}</p>
+      <p data-testid="original-status">{images[index].before?.status || 'pending'}</p>
+      <button type="button" onClick={event => onBeforeRefresh(event, images[index])}>Refresh original</button>
       <button type="button" onClick={onNext}>Next photo</button>
       <button type="button" onClick={onPrevious}>Previous photo</button>
       <button type="button" onClick={event => onDownload(event, images[index])}>Download photo</button>
@@ -125,6 +127,28 @@ describe('Explore', () => {
       initialPage: { value: 'winter', items: [photo], nextCursor: null, seed: '0123456789abcdef' },
     })
     exploreState.readExploreBrowseState.mockReturnValue(null)
+  })
+
+  it.each(['/explore/colors', '/explore/time-of-day?period=dawn'])('refreshes only the selected original in %s without resetting navigation', async (path) => {
+    exploreApi.fetchExplorePhotos.mockResolvedValue({ items: [photo, secondPhoto], nextCursor: null })
+    exploreApi.fetchExploreTimes.mockResolvedValue({
+      items: [{ id: 'dawn', photos: 2 }],
+      initialPage: { value: 'dawn', items: [photo, secondPhoto], nextCursor: null, seed: '0123456789abcdef' },
+    })
+    api.fetchAlbum.mockResolvedValue({ images: [{ id: 'media-2', before: { status: 'unavailable' } }] })
+    render(<MemoryRouter initialEntries={[path]}><Explore /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: 'View photo from Blue Mountain' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('Green Valley')
+    const browseRequests = exploreApi.fetchExplorePhotos.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh original' }))
+    await waitFor(() => expect(screen.getByTestId('original-status')).toHaveTextContent('unavailable'))
+    expect(api.fetchAlbum).toHaveBeenCalledWith('album-2', null, { force: true, signal: expect.any(AbortSignal) })
+    expect(screen.getByRole('dialog')).toHaveTextContent('Green Valley')
+    expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledTimes(browseRequests)
+    fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('Blue Mountain')
+    expect(screen.getByTestId('original-status')).toHaveTextContent('pending')
   })
 
   it('presents Explore as a module landing page without loading an index', () => {

@@ -142,6 +142,26 @@ describe('SharedAlbum access and gallery', () => {
     expect(screen.getByRole('heading', { name: 'Verify Access' })).toBeInTheDocument()
   })
 
+  it('keeps a verified shared gallery and its selected photo open when an original is still pending', async () => {
+    api.fetchSharedAlbum.mockResolvedValueOnce({
+      ...photoData,
+      images: photoData.images.map(image => ({ ...image, before: { status: 'pending' } })),
+    })
+    renderShared('/sharedalbum/code-1?photo=p2')
+    fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
+    await screen.findByRole('dialog', { name: 'Photo viewer for Shared Photos' })
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(screen.getByText('Original is being prepared.')).toBeInTheDocument()
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://x.test/p2-full')
+    expect(screen.queryByText(/gallery session expired/i)).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Verify Access' })).toBeNull()
+    expect(refresh.request).not.toHaveBeenCalled()
+    expect(api.fetchSharedAlbum).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+  })
+
   it('downloads a ZIP with rate-limit state and reports worker errors', async () => {
     let finish
     zip.pollZipJob.mockImplementation(({ onStatus }) => {

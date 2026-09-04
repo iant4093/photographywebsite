@@ -183,6 +183,27 @@
     {"logicalId": "GetSiteHealthFunctionGetSiteHealthPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GetAuditLogFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GetAuditLogFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "GetAuditLogFunctionGetAuditLogPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true}
+    {"logicalId": "GetAuditLogFunctionGetAuditLogPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonTable", "resourceType": "AWS::DynamoDB::Table", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalPreviewBucket", "resourceType": "AWS::S3::Bucket", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalPreviewBucketPolicy", "resourceType": "AWS::S3::BucketPolicy", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonDeadLetterQueue", "resourceType": "AWS::SQS::Queue", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonQueue", "resourceType": "AWS::SQS::Queue", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonFailureAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonFailureAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
+    {"logicalId": "OriginalIndexRefreshErrorsAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalIndexRefreshErrorsAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
+    {"logicalId": "OriginalIndexRefreshFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalIndexRefreshFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
+    {"logicalId": "OriginalIndexRefreshFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonWorkerFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonWorkerFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
+    {"logicalId": "OriginalComparisonWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalIndexRefreshFunctionRefreshOriginalIndex", "resourceType": "AWS::Events::Rule", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalIndexRefreshFunctionRefreshOriginalIndexPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "OriginalComparisonWorkerFunctionOriginalComparisonJobs", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "GetAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "GetSharedAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "GetAdminAlbumMediaFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true}
   ]
 }
