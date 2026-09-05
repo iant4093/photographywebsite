@@ -1,7 +1,7 @@
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useNavigationType } from 'react-router'
-import { fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
+import { fetchAlbumForViewing, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
 import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
@@ -74,6 +74,9 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
     const trackedAlbumRef = useRef(null)
     const albumRequestScopeRef = useRef(null)
     const { getIdToken } = useAuth()
+    // Start the first grid row immediately at the current column breakpoint.
+    const eagerImageCount = window.matchMedia?.('(min-width: 1024px)').matches ? 3
+        : window.matchMedia?.('(min-width: 640px)').matches ? 2 : 1
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
 
@@ -84,14 +87,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
         if (requestSignal.aborted) return undefined
         if (!background) setLoading(true)
         try {
-            let token = null
-            try {
-                token = await getIdToken()
-            } catch {
-                // Not logged in, token stays null
-            }
-            if (requestSignal.aborted) return undefined
-            const data = await fetchAlbum(albumId, token, { signal: requestSignal, force: background })
+            const data = await fetchAlbumForViewing(albumId, getIdToken, { signal: requestSignal, force: background })
             // A background original-status request can finish after navigation,
             // including when a provider has already delivered its response.
             if (requestSignal.aborted) return undefined
@@ -355,6 +351,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                                 <div className="linen-photo-viewport">
                                                     <ProgressiveImage
                                                         src={thumbUrl}
+                                                        eager={index < eagerImageCount}
                                                         srcSet={mediaPreviewSrcSet(img) || undefined}
                                                         blurhash={img.blurhash}
                                                         width={img.width}

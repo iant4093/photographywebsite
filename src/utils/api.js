@@ -431,6 +431,36 @@ export function fetchAlbum(albumId, token = null, options = {}) {
     return subscribeToCatalogRequest(record, options.signal)
 }
 
+// Gallery views use the same public response regardless of sign-in state.
+// Management callers keep using fetchAlbum directly for its authenticated DTO.
+export async function fetchAlbumForViewing(albumId, getIdToken, options = {}) {
+    const ensureActive = () => {
+        if (options.signal?.aborted) throw new DOMException('Request aborted', 'AbortError')
+    }
+    ensureActive()
+    try {
+        const data = await fetchAlbum(albumId, null, options)
+        ensureActive()
+        return data
+    } catch (publicError) {
+        ensureActive()
+        // The public endpoint hides all non-public albums behind a 404.
+        // Network, rate-limit, and server failures do not benefit from auth.
+        if (publicError?.status !== 404 || typeof getIdToken !== 'function') throw publicError
+        let token = null
+        try {
+            token = await getIdToken()
+        } catch {
+            // Signed-out visitors keep the public endpoint's not-found result.
+        }
+        ensureActive()
+        if (!token) throw publicError
+        const data = await fetchAlbum(albumId, token, options)
+        ensureActive()
+        return data
+    }
+}
+
 export function fetchAlbumMediaPage(token, albumId, params = {}, options = {}) {
     const queryParams = new URLSearchParams()
     if (params.limit) queryParams.set('limit', String(params.limit))

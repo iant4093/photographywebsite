@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     clearApiCache,
     fetchAlbum,
+    fetchAlbumForViewing,
     fetchAlbumsPage,
     fetchRandomPhotos,
     prefetchPublicAlbum,
@@ -163,6 +164,125 @@ describe('public album detail cache', () => {
         expect(request).toHaveBeenCalledTimes(2)
         await expect(prefetchPublicAlbum('missing')).resolves.toBeNull()
         expect(request).toHaveBeenCalledTimes(3)
+    })
+})
+
+describe('album viewing access', () => {
+    beforeEach(() => {
+        clearApiCache()
+        vi.stubGlobal('window', {
+            setTimeout: globalThis.setTimeout,
+            clearTimeout: globalThis.clearTimeout,
+        })
+    })
+
+    afterEach(() => {
+        clearApiCache()
+        vi.useRealTimers()
+        vi.unstubAllGlobals()
+    })
+
+    it('shares a public prefetch and its cached result without acquiring a signed-in token', async () => {
+        let resolveRequest
+        const request = vi.fn(() => new Promise((resolve) => { resolveRequest = resolve }))
+        const getIdToken = vi.fn().mockResolvedValue('admin-token')
+        vi.stubGlobal('fetch', request)
+
+        const prefetch = prefetchPublicAlbum('public-album')
+        const viewing = fetchAlbumForViewing('public-album', getIdToken)
+        expect(request).toHaveBeenCalledOnce()
+        expect(getIdToken).not.toHaveBeenCalled()
+        resolveRequest(jsonResponse({ album: { visibility: 'public' }, images: [] }))
+
+        await expect(viewing).resolves.toBe(await prefetch)
+        await expect(fetchAlbumForViewing('public-album', getIdToken)).resolves.toBe(await viewing)
+        expect(request).toHaveBeenCalledOnce()
+        expect(request.mock.calls[0][0]).toMatch(/\/public\/albums\/public-album$/)
+        expect(request.mock.calls[0][1].headers.Authorization).toBeUndefined()
+        expect(getIdToken).not.toHaveBeenCalled()
+    })
+
+    it('uses the authenticated route for protected albums without caching the private response', async () => {
+        const request = vi.fn()
+            .mockResolvedValueOnce(new Response('', { status: 404 }))
+            .mockResolvedValueOnce(jsonResponse({ album: { visibility: 'private' }, images: [] }))
+        const getIdToken = vi.fn().mockResolvedValue('owner-token')
+        const signal = new AbortController().signal
+        vi.stubGlobal('fetch', request)
+
+        await expect(fetchAlbumForViewing('private/id', getIdToken, { signal, force: true }))
+            .resolves.toMatchObject({ album: { visibility: 'private' } })
+        expect(getIdToken).toHaveBeenCalledOnce()
+        expect(request.mock.calls[0][0]).toMatch(/\/public\/albums\/private%2Fid$/)
+        expect(request.mock.calls[1]).toEqual([
+            expect.stringMatching(/\/albums\/private%2Fid$/),
+            expect.objectContaining({ headers: { Authorization: 'Bearer owner-token' }, cache: 'no-store' }),
+        ])
+        expect(readCachedPublicAlbum('private/id')).toBeNull()
+    })
+
+    it.each(['missing', 'rejected', 'empty'])('does not repeat an unauthenticated request when the session is %s', async (session) => {
+        const request = vi.fn().mockResolvedValue(new Response('', { status: 404 }))
+        const getIdToken = session === 'missing' ? undefined : vi.fn()
+        if (session === 'rejected') getIdToken.mockRejectedValue(new Error('No active user session.'))
+        if (session === 'empty') getIdToken.mockResolvedValue(null)
+        vi.stubGlobal('fetch', request)
+
+        await expect(fetchAlbumForViewing('unavailable', getIdToken)).rejects.toMatchObject({ status: 404 })
+        expect(request).toHaveBeenCalledOnce()
+    })
+
+    it.each([400, 403, 429, 503, 'network'])('does not retry with authentication after a %s failure', async (status) => {
+        vi.useFakeTimers()
+        const request = status === 'network'
+            ? vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+            : vi.fn(() => Promise.resolve(new Response('', { status })))
+        const getIdToken = vi.fn().mockResolvedValue('admin-token')
+        vi.stubGlobal('fetch', request)
+
+        const result = expect(fetchAlbumForViewing('album', getIdToken)).rejects.toMatchObject(
+            status === 'network' ? { code: 'NETWORK_ERROR' } : { status },
+        )
+        await vi.runAllTimersAsync()
+        await result
+        expect(getIdToken).not.toHaveBeenCalled()
+        expect(request.mock.calls.every(([url]) => url.endsWith('/public/albums/album'))).toBe(true)
+    })
+
+    it('rejects canceled views before reading a cached response or starting a request', async () => {
+        const request = vi.fn().mockResolvedValue(jsonResponse({ album: { visibility: 'public' }, images: [] }))
+        const getIdToken = vi.fn()
+        vi.stubGlobal('fetch', request)
+        await prefetchPublicAlbum('cached')
+        const controller = new AbortController()
+        controller.abort()
+
+        for (const albumId of ['cached', 'uncached']) {
+            await expect(fetchAlbumForViewing(albumId, getIdToken, { signal: controller.signal }))
+                .rejects.toMatchObject({ name: 'AbortError' })
+        }
+        expect(request).toHaveBeenCalledOnce()
+        expect(getIdToken).not.toHaveBeenCalled()
+    })
+
+    it('does not start a protected request if the view is canceled during token acquisition', async () => {
+        let resolveToken
+        let tokenRequested
+        const acquired = new Promise((resolve) => { tokenRequested = resolve })
+        const getIdToken = vi.fn(() => {
+            tokenRequested()
+            return new Promise((resolve) => { resolveToken = resolve })
+        })
+        const request = vi.fn().mockResolvedValue(new Response('', { status: 404 }))
+        vi.stubGlobal('fetch', request)
+        const controller = new AbortController()
+        const result = fetchAlbumForViewing('private', getIdToken, { signal: controller.signal })
+
+        await acquired
+        controller.abort()
+        resolveToken('owner-token')
+        await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+        expect(request).toHaveBeenCalledOnce()
     })
 })
 

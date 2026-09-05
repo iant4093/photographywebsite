@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   fetchAlbum: vi.fn(),
+  fetchAlbumForViewing: vi.fn(),
   requestAlbumOriginalComparison: vi.fn(),
   requestAlbumMediaDownload: vi.fn(),
   requestAlbumZip: vi.fn(),
@@ -80,7 +81,7 @@ describe('AlbumGallery', () => {
     expiry.hook.mockReset()
     expiry.refresh.mockReset()
     auth.getIdToken.mockResolvedValue('token')
-    api.fetchAlbum.mockReset().mockResolvedValue(photoData)
+    api.fetchAlbumForViewing.mockReset().mockResolvedValue(photoData)
     urls.resolveMediaDownloadUrl.mockImplementation((request) => request().then((value) => value.downloadUrl))
     api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'https://x.test/download' })
     zip.pollZipJob.mockResolvedValue('https://x.test/photos.zip')
@@ -91,7 +92,7 @@ describe('AlbumGallery', () => {
   it('loads a protected/public-compatible album and exercises lightbox navigation and download', async () => {
     gallery(<AlbumGallery />, '/album/a1')
     expect(await screen.findByRole('heading', { name: 'Wild Album' })).toBeInTheDocument()
-    expect(api.fetchAlbum).toHaveBeenCalledWith('a1', 'token', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(api.fetchAlbumForViewing).toHaveBeenCalledWith('a1', auth.getIdToken, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     const firstPhoto = screen.getByRole('img', { name: 'Item 1 from Wild Album' })
     expect(firstPhoto).toHaveAttribute('srcset')
     const firstPhotoButton = screen.getByRole('button', { name: 'Open item 1 from Wild Album' })
@@ -159,7 +160,7 @@ describe('AlbumGallery', () => {
     const fresh = original(now, 'fresh')
     api.requestAlbumOriginalComparison.mockRejectedValueOnce(new Error('Network unavailable')).mockResolvedValueOnce({ before: fresh })
     const data = before => ({ ...photoData, images: [{ ...photoData.images[0], before }] })
-    api.fetchAlbum.mockResolvedValueOnce(data(previous)).mockResolvedValue(data(fresh))
+    api.fetchAlbumForViewing.mockResolvedValueOnce(data(previous)).mockResolvedValue(data(fresh))
     expiry.hook.mockImplementation((_items, refresh) => {
       expiry.refresh.mockImplementation(reason => refresh(reason))
     })
@@ -175,19 +176,19 @@ describe('AlbumGallery', () => {
     // A failed comparison request exposes retry without reloading the gallery.
     expiry.refresh.mockImplementationOnce(() => Promise.resolve(false))
     await act(async () => { fireEvent.error(beforeImage) })
-    expect(api.fetchAlbum).toHaveBeenCalledTimes(2)
+    expect(api.fetchAlbumForViewing).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: 'Retry original' }))
     await waitFor(() => expect(document.querySelector('.linen-lightbox-original')).toHaveAttribute('src', fresh.url))
     expect(expiry.hook.mock.lastCall[0][0].before).toBe(previous)
     expect(api.requestAlbumOriginalComparison).toHaveBeenCalledTimes(2)
     expect(api.requestAlbumOriginalComparison).toHaveBeenLastCalledWith('a1', 'one', 'token', { signal: expect.any(AbortSignal) })
     expect(expiry.refresh).not.toHaveBeenCalled()
-    expect(api.fetchAlbum).toHaveBeenCalledTimes(2)
-    expect(api.fetchAlbum).toHaveBeenLastCalledWith('a1', 'token', expect.objectContaining({ force: true }))
+    expect(api.fetchAlbumForViewing).toHaveBeenCalledTimes(2)
+    expect(api.fetchAlbumForViewing).toHaveBeenLastCalledWith('a1', auth.getIdToken, expect.objectContaining({ force: true }))
   })
 
   it('hides album and lightbox sharing for a specific-user photo album', async () => {
-    api.fetchAlbum.mockResolvedValueOnce({
+    api.fetchAlbumForViewing.mockResolvedValueOnce({
       ...photoData,
       album: { ...photoData.album, visibility: 'private', qrCodeUrl: '' },
     })
@@ -226,9 +227,9 @@ describe('AlbumGallery', () => {
     expect(screen.getByRole('img', { name: 'QR code linking to Wild Album' })).toHaveAttribute('src', 'https://x.test/photo-qr.svg')
   })
 
-  it('uses a public token fallback and reports initial/background/download failures', async () => {
+  it('reports initial/background/download failures while signed out', async () => {
     auth.getIdToken.mockRejectedValue(new Error('anonymous'))
-    api.fetchAlbum.mockRejectedValueOnce(new Error('missing'))
+    api.fetchAlbumForViewing.mockRejectedValueOnce(new Error('missing'))
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const first = gallery(<AlbumGallery />, '/album/missing')
     expect(await screen.findByText(/may not exist or you may not have access/)).toBeInTheDocument()
@@ -236,12 +237,12 @@ describe('AlbumGallery', () => {
     expect(screen.getByText('Photo archive')).toBeInTheDocument()
     first.unmount()
 
-    api.fetchAlbum.mockResolvedValueOnce(photoData).mockRejectedValueOnce(new Error('refresh failed'))
+    api.fetchAlbumForViewing.mockResolvedValueOnce(photoData).mockRejectedValueOnce(new Error('refresh failed'))
     expiry.hook.mockImplementationOnce((_items, refresh) => { expiry.refresh.mockImplementation((reason) => refresh(reason).catch(() => false)) })
     gallery(<AlbumGallery />, '/album/a1')
     await screen.findByText('Wild Album')
     await act(async () => expiry.refresh('media-error'))
-    expect(api.fetchAlbum).toHaveBeenLastCalledWith('a1', null, expect.objectContaining({ force: true }))
+    expect(api.fetchAlbumForViewing).toHaveBeenLastCalledWith('a1', auth.getIdToken, expect.objectContaining({ force: true }))
     expect(await screen.findByRole('alert')).toHaveTextContent('photo links expired')
 
     urls.resolveMediaDownloadUrl.mockRejectedValueOnce(new Error('download failed'))
@@ -252,7 +253,7 @@ describe('AlbumGallery', () => {
   })
 
   it('shows an empty loaded album', async () => {
-    api.fetchAlbum.mockResolvedValue({ createdAt: '2026-01-01' })
+    api.fetchAlbumForViewing.mockResolvedValue({ createdAt: '2026-01-01' })
     gallery(<AlbumGallery />, '/album/a1')
     expect(await screen.findByText('No photos in this album yet.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Download All' })).toBeNull()
@@ -270,7 +271,7 @@ describe('AlbumGallery', () => {
       album: { ...photoData.album, albumId: 'a2', title: 'New Album' },
       images: photoData.images.map(image => ({ ...image, id: `new-${image.id}`, url: `https://x.test/new-${image.id}` })),
     }
-    api.fetchAlbum.mockResolvedValueOnce(photoData)
+    api.fetchAlbumForViewing.mockResolvedValueOnce(photoData)
       .mockReturnValueOnce(pendingRefresh)
       .mockResolvedValueOnce(nextAlbum)
     expiry.hook.mockImplementation((_items, refresh) => {
@@ -280,8 +281,8 @@ describe('AlbumGallery', () => {
     await screen.findByRole('heading', { name: 'Wild Album' })
     let refreshRequest
     act(() => { refreshRequest = expiry.refresh('original-status') })
-    await waitFor(() => expect(api.fetchAlbum).toHaveBeenCalledTimes(2))
-    const oldSignal = api.fetchAlbum.mock.calls[1][2].signal
+    await waitFor(() => expect(api.fetchAlbumForViewing).toHaveBeenCalledTimes(2))
+    const oldSignal = api.fetchAlbumForViewing.mock.calls[1][2].signal
     expect(oldSignal.aborted).toBe(false)
 
     fireEvent.click(screen.getByRole('link', { name: 'Open another album' }))
@@ -311,7 +312,7 @@ describe('AlbumGallery', () => {
   })
 
   it('silently handles an aborted initial album request', async () => {
-    api.fetchAlbum.mockRejectedValue(new DOMException('aborted', 'AbortError'))
+    api.fetchAlbumForViewing.mockRejectedValue(new DOMException('aborted', 'AbortError'))
     gallery(<AlbumGallery />, '/album/a1')
     expect(await screen.findByText('This album could not be loaded.')).toBeInTheDocument()
   })

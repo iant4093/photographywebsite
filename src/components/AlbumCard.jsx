@@ -31,21 +31,22 @@ function AlbumCard({
         void preloadAlbumRoute(album)
     }, [album])
     const prefetchDetail = useCallback(() => prefetchPublicAlbum(albumId), [albumId])
-    const prefetchNavigation = useCallback(() => {
-        preloadRoute()
-        return prefetchDetail()
-    }, [prefetchDetail, preloadRoute])
-    const scheduleRoutePrefetch = useCallback(() => {
-        if (!canPrefetch || intentTimer.current !== null) return
-        intentTimer.current = window.setTimeout(() => {
-            intentTimer.current = null
-            preloadRoute()
-        }, 140)
-    }, [canPrefetch, preloadRoute])
     const cancelPrefetch = useCallback(() => {
         if (intentTimer.current !== null) window.clearTimeout(intentTimer.current)
         intentTimer.current = null
     }, [])
+    const prefetchNavigation = useCallback(() => {
+        cancelPrefetch()
+        preloadRoute()
+        return prefetchDetail()
+    }, [cancelPrefetch, prefetchDetail, preloadRoute])
+    const scheduleNavigationPrefetch = useCallback(() => {
+        if (!canPrefetch || intentTimer.current !== null) return
+        intentTimer.current = window.setTimeout(() => {
+            intentTimer.current = null
+            void prefetchNavigation()
+        }, 250)
+    }, [canPrefetch, prefetchNavigation])
 
     const stopHoverPreview = useCallback(() => {
         hoverController.current?.stop?.()
@@ -76,7 +77,7 @@ function AlbumCard({
     useEffect(() => () => {
         cancelPrefetch()
         stopHoverPreview()
-    }, [cancelPrefetch, stopHoverPreview])
+    }, [albumId, canPrefetch, cancelPrefetch, stopHoverPreview])
 
     useEffect(() => {
         if (!previewIdentity) return undefined
@@ -185,7 +186,7 @@ function AlbumCard({
             to={targetRoute}
             onMouseEnter={() => {
                 onMouseEnter?.()
-                scheduleRoutePrefetch()
+                scheduleNavigationPrefetch()
                 scheduleHoverPreview()
             }}
             onMouseLeave={() => {

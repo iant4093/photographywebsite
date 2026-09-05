@@ -34,38 +34,74 @@ describe('AlbumCard intent prefetch', () => {
         vi.unstubAllGlobals()
     })
 
-    it('prefetches only route code after sustained hover and reserves album data for navigation intent', () => {
+    it('prefetches route code and album data only after sustained hover', () => {
         renderCard()
         const link = screen.getByRole('link', { name: /Public album/ })
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
         fireEvent.mouseEnter(link)
-        act(() => vi.advanceTimersByTime(139))
+        act(() => vi.advanceTimersByTime(249))
+        expect(preloadAlbumRoute).not.toHaveBeenCalled()
         expect(prefetchPublicAlbum).not.toHaveBeenCalled()
         act(() => vi.advanceTimersByTime(1))
         expect(preloadAlbumRoute).toHaveBeenCalledWith(album)
-        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
-
-        fireEvent.mouseDown(link)
-        expect(prefetchPublicAlbum).toHaveBeenCalledWith(album.albumId)
+        expect(prefetchPublicAlbum).toHaveBeenCalledExactlyOnceWith(album.albumId)
     })
 
-    it('cancels incidental hover and starts immediately for touch intent', () => {
+    it('cancels incidental hover', () => {
         renderCard()
         const link = screen.getByRole('link', { name: /Public album/ })
         fireEvent.mouseEnter(link)
+        act(() => vi.advanceTimersByTime(100))
         fireEvent.mouseLeave(link)
-        act(() => vi.advanceTimersByTime(200))
+        act(() => vi.advanceTimersByTime(300))
+        expect(preloadAlbumRoute).not.toHaveBeenCalled()
         expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+    })
 
-        fireEvent.touchStart(link)
+    it.each(['focus', 'mouseDown', 'touchStart'])('starts immediately on %s and clears pending hover work', (event) => {
+        renderCard()
+        const link = screen.getByRole('link', { name: /Public album/ })
+        fireEvent.mouseEnter(link)
+        fireEvent[event](link)
         expect(preloadAlbumRoute).toHaveBeenCalledWith(album)
-        expect(prefetchPublicAlbum).toHaveBeenCalledWith(album.albumId)
+        expect(prefetchPublicAlbum).toHaveBeenCalledExactlyOnceWith(album.albumId)
+        act(() => vi.advanceTimersByTime(300))
+        expect(prefetchPublicAlbum).toHaveBeenCalledTimes(1)
+    })
+
+    it('prefetches only the hovered album in a catalog', () => {
+        const secondAlbum = { ...album, albumId: '22222222-2222-4222-8222-222222222222', title: 'Second album' }
+        render(<MemoryRouter><AlbumCard album={album} /><AlbumCard album={secondAlbum} /></MemoryRouter>)
+        act(() => vi.advanceTimersByTime(300))
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+        fireEvent.mouseEnter(screen.getByRole('link', { name: /Second album/ }))
+        act(() => vi.advanceTimersByTime(250))
+        expect(prefetchPublicAlbum).toHaveBeenCalledExactlyOnceWith(secondAlbum.albumId)
+    })
+
+    it('cancels pending hover work when the card unmounts', () => {
+        const view = renderCard()
+        fireEvent.mouseEnter(screen.getByRole('link', { name: /Public album/ }))
+        view.unmount()
+        act(() => vi.advanceTimersByTime(300))
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+    })
+
+    it('cancels pending hover work if the card no longer represents a public album', () => {
+        const view = renderCard()
+        fireEvent.mouseEnter(screen.getByRole('link', { name: /Public album/ }))
+        view.rerender(<MemoryRouter><AlbumCard album={{ ...album, visibility: 'private' }} /></MemoryRouter>)
+        act(() => vi.advanceTimersByTime(300))
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+        fireEvent.focus(screen.getByRole('link', { name: /Public album/ }))
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
     })
 
     it('never speculates for dashboard buttons', () => {
         renderCard({ onOpen: vi.fn() })
         const button = screen.getByRole('button', { name: /Public album/ })
         fireEvent.mouseEnter(button)
-        act(() => vi.advanceTimersByTime(200))
+        act(() => vi.advanceTimersByTime(300))
         expect(preloadAlbumRoute).not.toHaveBeenCalled()
         expect(prefetchPublicAlbum).not.toHaveBeenCalled()
     })
@@ -148,7 +184,7 @@ describe('AlbumCard intent prefetch', () => {
         expect(document.querySelector('.album-card-image > img[aria-hidden="true"]')).toBeNull()
     })
 
-    it('uses an immutable hover manifest without fetching the full album detail', async () => {
+    it('keeps manifest-based previews while independently warming album navigation data', async () => {
         const manifestAlbum = {
             ...album,
             hoverPreviewStatus: 'ready',
@@ -191,7 +227,7 @@ describe('AlbumCard intent prefetch', () => {
         await act(async () => { await vi.advanceTimersByTimeAsync(16) })
 
         expect(globalThis.fetch).toHaveBeenCalledOnce()
-        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
+        expect(prefetchPublicAlbum).toHaveBeenCalledExactlyOnceWith(album.albumId)
         expect(document.querySelector('.album-card-image > img[aria-hidden="true"]')).toBeInTheDocument()
     })
 })

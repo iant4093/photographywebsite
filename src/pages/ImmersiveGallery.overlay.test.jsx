@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const canvasState = vi.hoisted(() => ({ scene: null, camera: null, mounts: 0, unmounts: 0 }))
 const api = vi.hoisted(() => ({
-    fetchAlbum: vi.fn(), fetchAllAlbums: vi.fn(), requestAlbumMediaDownload: vi.fn(),
+    fetchAlbumForViewing: vi.fn(), fetchAllAlbums: vi.fn(), requestAlbumMediaDownload: vi.fn(),
     requestAlbumPrintSession: vi.fn(), requestAlbumZip: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
@@ -55,7 +55,7 @@ beforeEach(() => {
     canvasState.mounts = 0
     canvasState.unmounts = 0
     auth.getIdToken.mockResolvedValue(null)
-    api.fetchAlbum.mockReset().mockResolvedValue({ album, images: [image] })
+    api.fetchAlbumForViewing.mockReset().mockResolvedValue({ album, images: [image] })
     localStorage.clear()
     sessionStorage.clear()
     Object.defineProperty(document, 'pointerLockElement', { configurable: true, writable: true, value: null })
