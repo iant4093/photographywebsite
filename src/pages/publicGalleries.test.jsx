@@ -6,6 +6,8 @@ const api = vi.hoisted(() => ({
   fetchAlbum: vi.fn(),
   fetchAlbumForViewing: vi.fn(),
   requestAlbumOriginalComparison: vi.fn(),
+  fetchAlbumsPage: vi.fn(),
+  prefetchPublicAlbum: vi.fn(),
   requestAlbumMediaDownload: vi.fn(),
   requestAlbumZip: vi.fn(),
 }))
@@ -51,6 +53,14 @@ vi.mock('../components/VideoPlayer', () => ({ default: ({ videoInfo, onMediaErro
 
 import AlbumGallery from './AlbumGallery'
 import VideoGallery from './VideoGallery'
+import { clearCatalogSnapshots } from '../utils/catalogState'
+
+beforeEach(() => {
+  clearCatalogSnapshots()
+  window.sessionStorage.clear()
+  api.fetchAlbumsPage.mockReset().mockResolvedValue({ items: [], nextCursor: null })
+  api.prefetchPublicAlbum.mockReset().mockResolvedValue({ images: [] })
+})
 
 function gallery(ui, path, navigateTo) {
   return render(
@@ -88,6 +98,30 @@ describe('AlbumGallery', () => {
     window.history.replaceState({ idx: 0 }, '')
   })
   afterEach(() => vi.restoreAllMocks())
+
+  it('opens a related photo album using the shared catalog card without retaining the previous lightbox', async () => {
+    const relatedAlbum = {
+      albumId: 'a2', title: 'More Wildlife', category: 'Wildlife', type: 'photo', visibility: 'public', createdAt: '2026-01-04',
+    }
+    const currentAlbum = { ...photoData.album, category: 'Wildlife' }
+    api.fetchAlbumForViewing.mockImplementation(async (albumId) => ({
+      album: albumId === 'a2' ? relatedAlbum : currentAlbum,
+      images: photoData.images,
+    }))
+    api.fetchAlbumsPage.mockResolvedValue({ items: [currentAlbum, relatedAlbum], nextCursor: null })
+    gallery(<AlbumGallery />, '/album/a1?photo=two')
+    await screen.findByRole('dialog', { name: 'Photo viewer for Wild Album' })
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
+
+    const relatedLink = await screen.findByRole('link', { name: /More Wildlife/ })
+    expect(relatedLink).toHaveClass('album-card')
+    expect(relatedLink).toHaveAttribute('href', '/album/a2')
+    fireEvent.click(relatedLink)
+
+    expect(await screen.findByRole('heading', { name: 'More Wildlife', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(api.fetchAlbumForViewing).toHaveBeenCalledWith('a2', auth.getIdToken, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  })
 
   it('loads a protected/public-compatible album and exercises lightbox navigation and download', async () => {
     gallery(<AlbumGallery />, '/album/a1')
@@ -337,6 +371,47 @@ describe('VideoGallery', () => {
     api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'https://x.test/video-download' })
     zip.pollZipJob.mockResolvedValue('https://x.test/videos.zip')
     window.history.replaceState({ idx: 0 }, '')
+  })
+
+  it('opens a related single-video album with the main catalog autoplay behavior', async () => {
+    const currentAlbum = { ...videoData.album, albumId: 'v-album', category: 'Films', type: 'video' }
+    const relatedAlbum = {
+      albumId: 'v-related', title: 'Related Film', category: 'Films', type: 'video', visibility: 'public', imageCount: 1,
+    }
+    api.fetchAlbum.mockImplementation(async (albumId) => ({
+      album: albumId === 'v-related' ? relatedAlbum : currentAlbum,
+      images: albumId === 'v-related' ? [{ ...videoData.images[0], id: 'related-video' }] : videoData.images,
+    }))
+    api.fetchAlbumsPage.mockResolvedValue({ items: [currentAlbum, relatedAlbum], nextCursor: null })
+    gallery(<VideoGallery />, '/video/v-album')
+
+    const relatedLink = await screen.findByRole('link', { name: /Related Film/ })
+    expect(relatedLink).toHaveClass('album-card')
+    expect(relatedLink).toHaveAttribute('href', '/video/v-related?play=1')
+    fireEvent.click(relatedLink)
+
+    expect(await screen.findByRole('dialog', { name: 'Video player for Related Film' })).toBeInTheDocument()
+    expect(screen.getByText('Playing related-video')).toBeInTheDocument()
+    expect(screen.queryByText('Playing v1')).toBeNull()
+  })
+
+  it('does not carry an exact-video deep link into a related multi-video album', async () => {
+    const currentAlbum = { ...videoData.album, albumId: 'v-album', category: 'Films', type: 'video' }
+    const relatedAlbum = {
+      albumId: 'v-related', title: 'More Films', category: 'Films', type: 'video', visibility: 'public', imageCount: 2,
+    }
+    api.fetchAlbum.mockImplementation(async (albumId) => ({
+      album: albumId === 'v-related' ? relatedAlbum : currentAlbum,
+      images: videoData.images,
+    }))
+    api.fetchAlbumsPage.mockResolvedValue({ items: [currentAlbum, relatedAlbum], nextCursor: null })
+    gallery(<VideoGallery />, '/video/v-album?video=v2')
+    await screen.findByRole('dialog', { name: 'Video player for Video Album' })
+    fireEvent.click(screen.getByRole('button', { name: 'Close video player' }))
+    fireEvent.click(await screen.findByRole('link', { name: /More Films/ }))
+
+    expect(await screen.findByRole('heading', { name: 'More Films', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('auto-plays a deep link and navigates videos by buttons and keyboard', async () => {

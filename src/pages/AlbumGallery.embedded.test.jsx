@@ -80,6 +80,8 @@ describe('embedded album gallery', () => {
         })
         render(<AlbumGalleryContent albumId="a1" embedded />)
         await screen.findByRole('heading', { name: 'Coastal Light' })
+        // The heading can commit before ProgressiveImage's lazy-observer effects run.
+        await waitFor(() => expect(observer.observe).toHaveBeenCalledTimes(5 - firstRowCount))
 
         for (let index = 0; index < 5; index++) {
             const image = screen.queryByRole('img', { name: `Item ${index + 1} from Coastal Light` })

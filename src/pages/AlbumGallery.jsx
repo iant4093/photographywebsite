@@ -8,6 +8,7 @@ import SkeletonGrid from '../components/SkeletonGrid'
 import PhotoLightbox from '../components/PhotoLightbox'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
+import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import { useScrollRestoration } from '../utils/scroll'
 import { useLocation } from 'react-router'
 import {
@@ -60,7 +61,7 @@ function AlbumGallery() {
 }
 
 export function AlbumGalleryContent({ albumId, embedded = false, onBack, initialPhotoId = '', onSharedPhotoClose }) {
-    const initialSharedPhotoIdRef = useRef(embedded ? '' : initialPhotoId)
+    const initialSharedPhotoIdRef = useRef({ albumId, photoId: embedded ? '' : initialPhotoId })
 
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
@@ -132,7 +133,11 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
             setDownloading(false)
             setZipError('')
             setZipStatus('')
-            return loadAlbum({ signal: controller.signal, openPhotoId: initialSharedPhotoIdRef.current })
+            const sharedPhoto = initialSharedPhotoIdRef.current
+            return loadAlbum({
+                signal: controller.signal,
+                openPhotoId: sharedPhoto.albumId === albumId ? sharedPhoto.photoId : '',
+            })
         }).catch(() => {})
         return () => {
             controller.abort()
@@ -167,6 +172,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
 
     const closeLightbox = useCallback(() => {
         setLightboxIndex(null)
+        initialSharedPhotoIdRef.current.photoId = null
         if (!embedded) onSharedPhotoClose?.()
     }, [embedded, onSharedPhotoClose])
 
@@ -377,6 +383,8 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                 </div>
                             )}
                         </div>
+
+                        {!embedded && <ExploreMoreAlbums album={album} mediaType="photo" />}
 
                         {/* Lightbox Overlay */}
                         {lightboxIndex !== null && images[lightboxIndex] && (

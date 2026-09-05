@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({
   fetchSharedAlbum: vi.fn(),
   requestSharedOriginalComparison: vi.fn(),
+  fetchAlbumsPage: vi.fn(),
+  prefetchPublicAlbum: vi.fn(),
   requestSharedAlbumZip: vi.fn(),
   requestSharedMediaDownload: vi.fn(),
 }))
@@ -50,6 +52,7 @@ vi.mock('../components/ProgressiveImage', () => ({ default: ({ alt, src, srcSet,
 vi.mock('../components/VideoPlayer', () => ({ default: ({ videoInfo, onMediaError }) => <button onClick={onMediaError}>Video {videoInfo.id}</button> }))
 
 import SharedAlbum from './SharedAlbum'
+import { clearCatalogSnapshots } from '../utils/catalogState'
 
 function renderShared(path = '/sharedalbum') {
   return render(
@@ -73,11 +76,41 @@ const photoData = {
 describe('SharedAlbum access and gallery', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clearCatalogSnapshots()
+    window.sessionStorage.clear()
     refresh.callback = null
+    api.fetchAlbumsPage.mockReset().mockResolvedValue({ items: [], nextCursor: null })
+    api.prefetchPublicAlbum.mockReset().mockResolvedValue({ images: [] })
     api.fetchSharedAlbum.mockResolvedValue(photoData)
     urls.resolveMediaDownloadUrl.mockImplementation((request) => request().then((value) => value.downloadUrl))
     api.requestSharedMediaDownload.mockResolvedValue({ downloadUrl: 'https://x.test/file' })
     zip.pollZipJob.mockResolvedValue('https://x.test/archive')
+  })
+
+  it.each(['photo', 'video'])('shows public %s recommendations only after the shared gallery loads', async (mediaType) => {
+    api.fetchSharedAlbum.mockResolvedValue({
+      ...photoData,
+      album: { ...photoData.album, albumId: 'shared-current', type: mediaType, category: 'Travel' },
+    })
+    api.fetchAlbumsPage.mockResolvedValue({
+      items: [
+        { albumId: 'public-other', title: 'Public Travel', category: 'Travel', type: mediaType, visibility: 'public', imageCount: 2 },
+        { albumId: 'private-other', title: 'Private Travel', category: 'Travel', type: mediaType, visibility: 'private' },
+      ],
+      nextCursor: null,
+    })
+    renderShared('/sharedalbum/code-1')
+    expect(screen.queryByRole('heading', { name: /Explore more/i })).toBeNull()
+    expect(api.fetchAlbumsPage).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
+
+    const relatedLink = await screen.findByRole('link', { name: /Public Travel/ })
+    expect(relatedLink).toHaveAttribute('href', `/${mediaType === 'video' ? 'video' : 'album'}/public-other`)
+    expect(screen.queryByText('Private Travel')).toBeNull()
+    expect(api.fetchAlbumsPage).toHaveBeenCalledWith(
+      expect.objectContaining({ visibility: 'public', type: mediaType }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
   })
 
   it('requires verification, accepts a full pasted URL, and fetches with a purpose-bound token', async () => {

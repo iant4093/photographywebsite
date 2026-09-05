@@ -9,6 +9,7 @@ import AccessibleLightbox from '../components/AccessibleLightbox'
 import LightboxShareButton from '../components/LightboxShareButton'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
+import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import {
     mediaFileName,
     mediaId,
@@ -36,7 +37,7 @@ export default function VideoGallery() {
     const [zipStatus, setZipStatus] = useState('')
     const { getIdToken } = useAuth()
     const autoPlayFirst = searchParams.get('play') === '1'
-    const initialSharedVideoIdRef = useRef(searchParams.get('video'))
+    const initialSharedVideoIdRef = useRef({ albumId, videoId: searchParams.get('video') })
     const trackedAlbumRef = useRef(null)
     const zipControllerRef = useRef(null)
 
@@ -61,8 +62,9 @@ export default function VideoGallery() {
             setLoadError('')
             setMediaError('')
             if (!background) {
-                const requestedIndex = initialSharedVideoIdRef.current
-                    ? fetchedImages.findIndex(video => mediaId(video) === initialSharedVideoIdRef.current)
+                const sharedVideo = initialSharedVideoIdRef.current
+                const requestedIndex = sharedVideo.albumId === albumId && sharedVideo.videoId
+                    ? fetchedImages.findIndex(video => mediaId(video) === sharedVideo.videoId)
                     : -1
                 if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
                 else if (autoPlayFirst && fetchedImages.length > 0) setLightboxIndex(0)
@@ -122,6 +124,7 @@ export default function VideoGallery() {
 
     const closeLightbox = useCallback(() => {
         setLightboxIndex(null)
+        initialSharedVideoIdRef.current.videoId = null
         if (!searchParams.get('video')) return
         const nextParams = new URLSearchParams(searchParams)
         nextParams.delete('video')
@@ -318,6 +321,8 @@ export default function VideoGallery() {
                     )
                 })}
             </div>
+
+            <ExploreMoreAlbums album={album} mediaType="video" />
 
             {/* Video Lightbox Player */}
             {lightboxIndex !== null && images[lightboxIndex] && (

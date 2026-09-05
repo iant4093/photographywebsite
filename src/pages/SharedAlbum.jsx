@@ -18,6 +18,7 @@ import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
+import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import AccessibleLightbox from '../components/AccessibleLightbox'
 import PhotoLightbox from '../components/PhotoLightbox'
 import LightboxShareButton from '../components/LightboxShareButton'
@@ -428,6 +429,8 @@ export default function SharedAlbum() {
                     </div>
                 )}
             </div>
+
+            <ExploreMoreAlbums album={album} mediaType={album.type === 'video' ? 'video' : 'photo'} />
 
             {lightboxIndex !== null && images[lightboxIndex] && album.type !== 'video' && (
                 <PhotoLightbox
