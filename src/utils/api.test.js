@@ -127,8 +127,23 @@ describe('public album detail cache', () => {
 
         await fetchAlbum('album-6', null, { force: true })
         expect(request).toHaveBeenCalledTimes(7)
+        expect(request).toHaveBeenLastCalledWith(expect.stringMatching(/\/public\/albums\/album-6$/), expect.objectContaining({ cache: 'no-store' }))
         vi.advanceTimersByTime(5 * 60_000 + 1)
         expect(readCachedPublicAlbum('album-6')).toBeNull()
+    })
+
+    it('fetches changing original states again without browser caching or changing the album URL', async () => {
+        const request = vi.fn()
+            .mockResolvedValueOnce(jsonResponse({ albumId: 'progress', images: [{ id: 'photo', before: { status: 'pending' } }] }))
+            .mockResolvedValueOnce(jsonResponse({ albumId: 'progress', images: [{ id: 'photo', before: { status: 'ready' } }] }))
+        vi.stubGlobal('fetch', request)
+
+        expect((await fetchAlbum('progress')).images[0].before.status).toBe('pending')
+        expect(request.mock.calls[0][1].cache).toBeUndefined()
+        expect((await fetchAlbum('progress', null, { force: true })).images[0].before.status).toBe('ready')
+        expect(request.mock.calls[1][0]).toBe(request.mock.calls[0][0])
+        expect(request.mock.calls[1][1].cache).toBe('no-store')
+        expect(readCachedPublicAlbum('progress').images[0].before.status).toBe('ready')
     })
 
     it('never caches authenticated album data and hides speculative failures', async () => {
@@ -138,11 +153,13 @@ describe('public album detail cache', () => {
             .mockResolvedValueOnce(new Response('', { status: 404 }))
         vi.stubGlobal('fetch', request)
 
-        await fetchAlbum('private', 'secret-token')
+        await fetchAlbum('private', 'secret-token', { force: true })
         await fetchAlbum('private', 'secret-token')
         expect(request).toHaveBeenNthCalledWith(1, expect.stringMatching(/\/albums\/private$/), expect.objectContaining({
             headers: { Authorization: 'Bearer secret-token' },
+            cache: 'no-store',
         }))
+        expect(request.mock.calls[1][1].cache).toBeUndefined()
         expect(request).toHaveBeenCalledTimes(2)
         await expect(prefetchPublicAlbum('missing')).resolves.toBeNull()
         expect(request).toHaveBeenCalledTimes(3)

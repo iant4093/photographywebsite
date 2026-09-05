@@ -43,6 +43,7 @@ function UserDashboard() {
     const [zipError, setZipError] = useState('')
     const [zipStatus, setZipStatus] = useState('')
     const zipControllerRef = useRef(null)
+    const selectedImageScopeRef = useRef(null)
 
     // Lightbox state — store index instead of URL for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -116,24 +117,37 @@ function UserDashboard() {
 
     // Reset to albums list when navigating to this page (e.g. clicking Dashboard in nav)
     useEffect(() => {
+        selectedImageScopeRef.current?.controller.abort()
+        selectedImageScopeRef.current = null
         const frame = requestAnimationFrame(() => {
             setSelectedAlbum(null)
             setImages([])
             setLightboxIndex(null)
+            setLoadingImages(false)
         })
-        return () => cancelAnimationFrame(frame)
-    }, [location.key])
+        return () => {
+            cancelAnimationFrame(frame)
+            selectedImageScopeRef.current?.controller.abort()
+            selectedImageScopeRef.current = null
+        }
+    }, [location.key, userEmail])
 
     const loadSelectedImages = useCallback(async (album, { background = false } = {}) => {
         if (!album) return []
+        const scope = selectedImageScopeRef.current
+        if (!scope || scope.albumId !== album.albumId || scope.controller.signal.aborted) return []
+        const { signal } = scope.controller
         if (!background) setLoadingImages(true)
         try {
             const token = await getIdToken()
-            const data = await fetchAlbum(album.albumId, token)
+            if (signal.aborted) return []
+            const data = await fetchAlbum(album.albumId, token, { signal, force: background })
+            if (signal.aborted) return []
             setImages(data.images || [])
             setMediaError('')
             return data.images || []
         } catch (err) {
+            if (signal.aborted) return []
             if (err?.name !== 'AbortError') {
                 console.error('Failed to load images:', err)
                 setMediaError(background
@@ -142,7 +156,7 @@ function UserDashboard() {
             }
             throw err
         } finally {
-            if (!background) setLoadingImages(false)
+            if (!background && !signal.aborted) setLoadingImages(false)
         }
     }, [getIdToken])
 
@@ -155,6 +169,8 @@ function UserDashboard() {
     // Open photo album to view images inline
     async function openAlbum(album) {
         savedScrollY.current = window.scrollY
+        selectedImageScopeRef.current?.controller.abort()
+        selectedImageScopeRef.current = null
 
         if (album.type === 'video') {
             const isSingleVideo = album.imageCount === 1
@@ -163,8 +179,10 @@ function UserDashboard() {
             return
         }
 
+        selectedImageScopeRef.current = { albumId: album.albumId, controller: new AbortController() }
         setSelectedAlbum(album)
         setImages([])
+        setLightboxIndex(null)
         setMediaError('')
         await loadSelectedImages(album).catch(() => {})
     }
@@ -318,7 +336,15 @@ function UserDashboard() {
                     /* Album detail view */
                     <div className="linen-gallery-page linen-gallery-page-embedded animate-fade-in">
                         <button
-                            onClick={() => { setSelectedAlbum(null); setImages([]); requestAnimationFrame(() => window.scrollTo({ top: savedScrollY.current, behavior: 'instant' })) }}
+                            onClick={() => {
+                                selectedImageScopeRef.current?.controller.abort()
+                                selectedImageScopeRef.current = null
+                                setSelectedAlbum(null)
+                                setImages([])
+                                setLightboxIndex(null)
+                                setLoadingImages(false)
+                                requestAnimationFrame(() => window.scrollTo({ top: savedScrollY.current, behavior: 'instant' }))
+                            }}
                             className="linen-gallery-back inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

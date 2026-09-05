@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -50,9 +50,10 @@ vi.mock('../components/VideoPlayer', () => ({ default: ({ videoInfo, onMediaErro
 import AlbumGallery from './AlbumGallery'
 import VideoGallery from './VideoGallery'
 
-function gallery(ui, path) {
+function gallery(ui, path, navigateTo) {
   return render(
     <MemoryRouter initialEntries={['/previous', path]} initialIndex={1}>
+      {navigateTo && <Link to={navigateTo}>Open another album</Link>}
       <Routes>
         <Route path="/album/:albumId" element={ui} />
         <Route path="/video/:albumId" element={ui} />
@@ -78,7 +79,7 @@ describe('AlbumGallery', () => {
     expiry.hook.mockReset()
     expiry.refresh.mockReset()
     auth.getIdToken.mockResolvedValue('token')
-    api.fetchAlbum.mockResolvedValue(photoData)
+    api.fetchAlbum.mockReset().mockResolvedValue(photoData)
     urls.resolveMediaDownloadUrl.mockImplementation((request) => request().then((value) => value.downloadUrl))
     api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'https://x.test/download' })
     zip.pollZipJob.mockResolvedValue('https://x.test/photos.zip')
@@ -218,6 +219,48 @@ describe('AlbumGallery', () => {
     expect(screen.queryByRole('button', { name: 'Download All' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Back to Albums' }))
     expect(screen.getByText('Photo archive')).toBeInTheDocument()
+  })
+
+  it.each(['success', 'failure'])('ignores a late background %s after changing album routes', async (outcome) => {
+    let resolveRefresh, rejectRefresh
+    const pendingRefresh = new Promise((resolve, reject) => {
+      resolveRefresh = resolve
+      rejectRefresh = reject
+    })
+    const nextAlbum = {
+      album: { ...photoData.album, albumId: 'a2', title: 'New Album' },
+      images: photoData.images.map(image => ({ ...image, id: `new-${image.id}`, url: `https://x.test/new-${image.id}` })),
+    }
+    api.fetchAlbum.mockResolvedValueOnce(photoData)
+      .mockReturnValueOnce(pendingRefresh)
+      .mockResolvedValueOnce(nextAlbum)
+    expiry.hook.mockImplementation((_items, refresh) => {
+      expiry.refresh.mockImplementation(reason => refresh(reason).catch(() => false))
+    })
+    gallery(<AlbumGallery />, '/album/a1', '/album/a2')
+    await screen.findByRole('heading', { name: 'Wild Album' })
+    let refreshRequest
+    act(() => { refreshRequest = expiry.refresh('original-status') })
+    await waitFor(() => expect(api.fetchAlbum).toHaveBeenCalledTimes(2))
+    const oldSignal = api.fetchAlbum.mock.calls[1][2].signal
+    expect(oldSignal.aborted).toBe(false)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Open another album' }))
+    await screen.findByRole('heading', { name: 'New Album' })
+    expect(oldSignal.aborted).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Open item 2 from New Album' }))
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/new-two')
+
+    await act(async () => {
+      if (outcome === 'success') resolveRefresh(photoData)
+      else rejectRefresh(new Error('Old album refresh failed'))
+      await refreshRequest
+    })
+    expect(screen.getByText('New Album', { selector: 'h1' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Photo viewer for New Album' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/new-two')
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.queryByRole('alert', { hidden: true })).toBeNull()
   })
 
   it('returns to an existing history entry when the album was opened in-app', async () => {

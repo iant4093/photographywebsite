@@ -400,6 +400,7 @@ export function fetchAlbum(albumId, token = null, options = {}) {
         return apiFetch(`${albumPath}/${encodeURIComponent(key)}`, {
             headers: authHeaders(token),
             signal: options.signal,
+            ...(options.force ? { cache: 'no-store' } : {}),
         }).then(normalizeAlbumDetail)
     }
 
@@ -418,6 +419,7 @@ export function fetchAlbum(albumId, token = null, options = {}) {
     const record = { controller, subscribers: 0, promise: null }
     record.promise = apiFetch(`${albumPath}/${encodeURIComponent(key)}`, {
         signal: controller.signal,
+        ...(options.force ? { cache: 'no-store' } : {}),
     }).then(normalizeAlbumDetail).then((data) => {
         setCachedPublicAlbum(key, data)
         return data

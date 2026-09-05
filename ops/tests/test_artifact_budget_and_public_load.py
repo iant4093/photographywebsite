@@ -403,6 +403,55 @@ class PublicCatalogProbeTests(unittest.TestCase):
                         requester=lambda _url, _timeout: next(iterator),
                     )
 
+    def test_pending_and_failed_original_details_can_bypass_caches_without_changing_catalog_contract(self):
+        for status in ("pending", "failed"):
+            with self.subTest(status=status):
+                payload = detail(count=1)
+                payload["images"][0]["before"] = {"status": status}
+                fresh_headers = {"content-type": "application/json", "cache-control": "private, no-store"}
+                responses = iter([
+                    ({"items": [summary(count=1)], "nextCursor": None}, PUBLIC_HEADERS),
+                    (payload, fresh_headers),
+                ])
+                metrics = public_load.run_catalog_probe(
+                    "https://api.staging.example.test/dev", limit=100, max_pages=1,
+                    detail_sample=1, timeout=5, requester=lambda _url, _timeout: next(responses),
+                )
+                self.assertEqual(metrics["detailCount"], 1)
+                # Warm responses from the previous release retain their bounded TTL.
+                public_load._validate_detail_cache_headers(PUBLIC_HEADERS, payload)
+
+    def test_uncached_detail_exception_rejects_cookies_cached_copies_and_stable_or_invalid_payloads(self):
+        payload = detail()
+        payload["images"][0]["before"] = {"status": "pending"}
+        fresh = {"content-type": "application/json", "cache-control": "private, no-store"}
+        for headers in (
+            fresh | {"set-cookie": "session=bad"},
+            fresh | {"age": "10"},
+            fresh | {"x-cache": "Hit from cloudfront"},
+            fresh | {"content-type": "text/html"},
+            fresh | {"cache-control": "private"},
+            fresh | {"cache-control": "private, no-store, public"},
+        ):
+            with self.subTest(headers=headers), self.assertRaises(public_load.ProbeError):
+                public_load._validate_detail_cache_headers(headers, payload)
+        for stable in (detail(), detail() | {"images": []}):
+            with self.assertRaises(public_load.ProbeError):
+                public_load._validate_detail_cache_headers(fresh, stable)
+        payload["images"][0]["before"] = {"status": "unavailable"}
+        with self.assertRaises(public_load.ProbeError):
+            public_load._validate_detail_cache_headers(fresh, payload)
+        payload["images"][0]["before"] = {"status": "pending", "privateField": "forbidden"}
+        responses = iter([
+            ({"items": [summary(count=1)], "nextCursor": None}, PUBLIC_HEADERS),
+            (payload, fresh),
+        ])
+        with self.assertRaises(public_load.ProbeError):
+            public_load.run_catalog_probe(
+                "https://api.staging.example.test/dev", limit=100, max_pages=1,
+                detail_sample=1, timeout=5, requester=lambda _url, _timeout: next(responses),
+            )
+
     def test_public_schema_rejects_private_fields_signed_urls_and_exif_expansion(self):
         ordered_summary = summary() | {"galleryCategoryOrder": 2}
         self.assertEqual(public_load.validate_summary(ordered_summary), ordered_summary)

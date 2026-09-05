@@ -1556,10 +1556,19 @@ def handler(event, context):
             "album": serialize_album_detail(album),
             "images": serialize_images(album),
         }
+        # Original generation can complete between lightbox status polls. A
+        # cached pending/failed descriptor would hide that completed work.
+        originals_changing = album.get("type", "photo") == "photo" and any(
+            image.get("before", {}).get("status") in {"pending", "failed"}
+            for image in body["images"]
+        )
         return json_response(
             200,
             body,
-            cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=60",
+            cache_control=(
+                "private, no-store" if originals_changing else
+                "public, max-age=60, s-maxage=300, stale-while-revalidate=60"
+            ),
         )
     except ValidationError as error:
         return error_response(400, str(error), code="invalid_request")

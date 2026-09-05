@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import PhotoLightbox from './PhotoLightbox'
 
@@ -296,7 +296,7 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('status')).toHaveTextContent('After — Edited')
   })
 
-  it('keeps the edit on original failure, refreshes once, and supports an explicit retry', () => {
+  it('keeps the edit on original failure, refreshes once, and supports an explicit retry', async () => {
     const onMediaError = vi.fn().mockResolvedValue(undefined)
     render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onMediaError={onMediaError} />)
     const edited = screen.getByAltText('Full size preview')
@@ -310,6 +310,7 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Original could not be loaded.')
     expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
 
+    await act(async () => {})
     fireEvent.click(screen.getByRole('button', { name: 'Retry original' }))
     expect(onMediaError).toHaveBeenCalledTimes(2)
     const retry = screen.getByAltText('Before — Camera JPG')
@@ -343,18 +344,18 @@ describe('PhotoLightbox', () => {
     const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh: onMediaError }
     const { rerender } = render(<PhotoLightbox {...props} images={[landscape]} />)
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
-    expect(screen.getByRole('status')).toHaveTextContent('Checking original…')
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing original…')
     expect(onMediaError).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
-    expect(onMediaError).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
     rerender(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
     expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
     expect(screen.getByAltText('Before — Camera JPG')).toBeInTheDocument()
 
     rerender(<PhotoLightbox {...props} images={[{ ...landscape, before: { status: 'unavailable' } }]} />)
     expect(screen.getByRole('status')).toHaveTextContent('Unable to locate original')
+    expect(document.querySelector('.linen-lightbox-before-tooltip')).toHaveTextContent('Unable to locate original')
     expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Retry original' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Unable to locate original' })).toHaveAttribute('title', 'Unable to locate original')
   })
 
   it('keeps downloads and print orders tied to the edited photo with explicit labels in before mode', () => {
@@ -376,9 +377,7 @@ describe('PhotoLightbox', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
     expect(onBeforeRefresh).toHaveBeenCalledWith(expect.any(Object), landscape)
     expect(onMediaError).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
-    expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
-    expect(screen.getByRole('button', { name: 'Show edited photo' })).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Cancel loading original' })).toHaveAttribute('aria-busy', 'true')
     fireEvent.error(screen.getByAltText('Full size preview'))
     expect(onMediaError).toHaveBeenCalledOnce()
   })
@@ -401,7 +400,7 @@ describe('PhotoLightbox', () => {
     const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn() }
     const { rerender } = render(<PhotoLightbox {...props} images={[landscape]} />)
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
-    expect(screen.getByRole('status')).toHaveTextContent('Original is being prepared.')
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing original…')
     rerender(<PhotoLightbox {...props} images={[{ ...landscape, before: undefined }]} />)
     expect(screen.queryByRole('button', { name: 'Show edited photo' })).toBeNull()
     expect(screen.queryByRole('status')).toBeNull()
@@ -415,6 +414,140 @@ describe('PhotoLightbox', () => {
     expect(onMediaError).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Retry original' })).toBeNull()
-    expect(screen.getByRole('status')).toHaveTextContent(status === 'pending' ? 'Original is being prepared.' : 'Original could not be loaded.')
+    expect(screen.getByRole('status')).toHaveTextContent(status === 'pending' ? 'Preparing original…' : 'Original could not be loaded.')
+    if (status === 'failed') {
+      fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
+      expect(onMediaError).not.toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: 'Show original photo' })).toBeInTheDocument()
+      expect(document.querySelector('.linen-lightbox-before-tooltip')).toBeNull()
+    }
+  })
+
+  it('uses one comparison button for failure retry and keeps action text and highlighting stable', async () => {
+    const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh, onDownload: vi.fn(), onPrint: vi.fn() }
+    const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    const toggle = screen.getByRole('button', { name: 'Show original photo' })
+    const actionButtons = document.querySelector('.linen-lightbox-action-buttons')
+    const actionCount = actionButtons.querySelectorAll('button').length
+    const afterWord = toggle.querySelector('[data-label="After"] > span')
+    const beforeWord = toggle.querySelector('[data-label="Before"] > span')
+    expect(afterWord).toHaveClass('is-active')
+    expect(beforeWord).not.toHaveClass('is-active')
+    expect(screen.getByRole('status')).toHaveClass('linen-lightbox-before-status')
+    expect(document.querySelector('.linen-lightbox-before-retry')).toBeNull()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveTextContent('Before/After')
+    expect(afterWord).toHaveClass('is-active')
+    fireEvent.load(screen.getByAltText('Before — Camera JPG'))
+    expect(beforeWord).toHaveClass('is-active')
+    expect(afterWord).not.toHaveClass('is-active')
+    expect(screen.getByRole('button', { name: 'Download edited photo' })).toHaveTextContent(/^Download$/)
+    expect(screen.getByRole('button', { name: 'Order a print of the edited photo' })).toHaveTextContent(/^Order a Print$/)
+
+    rerender(<PhotoLightbox {...props} images={[{ ...comparisonPhoto, before: { status: 'failed' } }]} />)
+    expect(screen.getByRole('button', { name: 'Retry original' })).toBe(toggle)
+    expect(actionButtons.querySelectorAll('button')).toHaveLength(actionCount)
+    fireEvent.click(toggle)
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    await act(async () => {})
+  })
+
+  it('polls a selected pending original at a bounded rate and stops once its descriptor is ready', async () => {
+    vi.useFakeTimers()
+    try {
+      const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+      const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh }
+      const { rerender, unmount } = render(<PhotoLightbox {...props} images={[landscape]} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+      expect(onBeforeRefresh).toHaveBeenCalledOnce()
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(4)
+      await act(async () => { await vi.advanceTimersByTimeAsync(59_999) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(4)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(5)
+      rerender(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+      fireEvent.load(screen.getByAltText('Before — Camera JPG'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(5)
+      expect(screen.getByRole('button', { name: 'Show edited photo' })).toHaveAttribute('aria-pressed', 'true')
+      unmount()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('does not overlap a slow initial refresh and cancels scheduled checks on navigation and unmount', async () => {
+    vi.useFakeTimers()
+    try {
+      let finish
+      const onBeforeRefresh = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue(undefined)
+      const props = { images: [landscape, portrait], ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh }
+      const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledOnce()
+      rerender(<PhotoLightbox {...props} index={1} />)
+      await act(async () => { finish(); await vi.advanceTimersByTimeAsync(120_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledOnce()
+      expect(screen.getByRole('button', { name: 'Show original photo' })).toHaveAttribute('aria-pressed', 'false')
+      fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+      unmount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(['selected', 'replaced', 'left', 'unmounted'])('serializes another image retry and discards obsolete queued reads when %s', async (selection) => {
+    let finish
+    const onBeforeRefresh = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue(undefined)
+    const failed = { ...portrait, before: { status: 'failed' } }
+    const next = { ...failed, id: 'next' }
+    const props = { images: [landscape, failed, next], ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh }
+    const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    rerender(<PhotoLightbox {...props} index={1} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry original' }))
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+
+    if (selection === 'replaced') {
+      rerender(<PhotoLightbox {...props} index={2} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    } else if (selection === 'left') {
+      rerender(<PhotoLightbox {...props} index={0} />)
+      rerender(<PhotoLightbox {...props} index={1} />)
+    } else if (selection === 'unmounted') unmount()
+
+    await act(async () => { finish() })
+    if (selection === 'selected' || selection === 'replaced') {
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+      expect(onBeforeRefresh.mock.calls[1][1]).toBe(selection === 'selected' ? failed : next)
+    } else expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    if (selection !== 'unmounted') unmount()
+  })
+
+  it('pauses pending checks while hidden and cancels them when the same comparison button is toggled off', async () => {
+    vi.useFakeTimers()
+    const visibility = vi.spyOn(document, 'visibilityState', 'get')
+    try {
+      visibility.mockReturnValue('visible')
+      const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+      const { unmount } = render(<PhotoLightbox images={[landscape]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onBeforeRefresh={onBeforeRefresh} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+      visibility.mockReturnValue('hidden')
+      fireEvent(document, new Event('visibilitychange'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledOnce()
+      visibility.mockReturnValue('visible')
+      fireEvent(document, new Event('visibilitychange'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel loading original' }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+      unmount()
+    } finally { visibility.mockRestore(); vi.useRealTimers() }
   })
 })

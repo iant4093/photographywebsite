@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -42,9 +42,10 @@ vi.mock('framer-motion', () => ({
 
 import UserDashboard from './UserDashboard'
 
-function mounted() {
+function mounted(withDashboardNavigation = false) {
   return render(
     <MemoryRouter initialEntries={['/dashboard']}>
+      {withDashboardNavigation && <Link to="/dashboard">Reset dashboard</Link>}
       <Routes>
         <Route path="/dashboard" element={<UserDashboard />} />
         <Route path="/video/:id" element={<div>Video destination</div>} />
@@ -71,7 +72,7 @@ describe('UserDashboard', () => {
     auth.userEmail = 'viewer@example.com'
     auth.getIdToken.mockResolvedValue('token')
     api.fetchAlbumsFiltered.mockResolvedValue(albums)
-    api.fetchAlbum.mockResolvedValue({ images })
+    api.fetchAlbum.mockReset().mockResolvedValue({ images })
     api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'download' })
     api.requestAlbumZip.mockResolvedValue({ status: 'ready', url: 'zip' })
     urls.resolveMediaDownloadUrl.mockImplementation((request) => request().then((value) => value.downloadUrl))
@@ -120,7 +121,7 @@ describe('UserDashboard', () => {
     fireEvent.click((await screen.findByText('Portraits')).closest('.cursor-pointer'))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Download All' })).toBeEnabled())
     expect(screen.getByRole('button', { name: 'Back to Albums' })).toBeInTheDocument()
-    expect(api.fetchAlbum).toHaveBeenCalledWith('photo', 'token')
+    expect(api.fetchAlbum).toHaveBeenCalledWith('photo', 'token', expect.objectContaining({ signal: expect.any(AbortSignal), force: false }))
     const first = screen.getByRole('img', { name: 'Photo 1 from Portraits' })
     expect(first).toHaveAttribute('srcset')
     api.fetchAlbum.mockRejectedValueOnce(new Error('expired'))
@@ -145,6 +146,64 @@ describe('UserDashboard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to Albums' }))
     expect(await screen.findByText('Your Photos')).toBeInTheDocument()
     expect(window.scrollTo).toHaveBeenCalledWith({ top: 250, behavior: 'instant' })
+  })
+
+  it.each([
+    ['selection', 'success'], ['selection', 'failure'],
+    ['route', 'success'], ['route', 'failure'],
+  ])('ignores a late background %s change response with %s', async (navigation, outcome) => {
+    let resolveRefresh, rejectRefresh
+    const pendingRefresh = new Promise((resolve, reject) => {
+      resolveRefresh = resolve
+      rejectRefresh = reject
+    })
+    const nextImages = images.map(image => ({ ...image, id: `new-${image.id}`, url: `https://x.test/new-${image.id}` }))
+    api.fetchAlbum.mockResolvedValueOnce({ images })
+      .mockReturnValueOnce(pendingRefresh)
+      .mockResolvedValueOnce({ images: nextImages })
+    mounted(true)
+    fireEvent.click((await screen.findByText('Portraits')).closest('.cursor-pointer'))
+    const first = await screen.findByRole('img', { name: 'Photo 1 from Portraits' })
+    fireEvent.error(first)
+    await waitFor(() => expect(api.fetchAlbum).toHaveBeenCalledTimes(2))
+    const oldSignal = api.fetchAlbum.mock.calls[1][2].signal
+    expect(oldSignal.aborted).toBe(false)
+    expect(api.fetchAlbum.mock.calls[1][2].force).toBe(true)
+
+    fireEvent.click(screen.getByRole(navigation === 'route' ? 'link' : 'button', {
+      name: navigation === 'route' ? 'Reset dashboard' : 'Back to Albums',
+    }))
+    expect(oldSignal.aborted).toBe(true)
+    fireEvent.click((await screen.findByText('Uncategorized photos')).closest('.cursor-pointer'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open item 2 from Uncategorized photos' }))
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/new-two')
+
+    await act(async () => {
+      if (outcome === 'success') resolveRefresh({ images })
+      else rejectRefresh(new Error('Old selection refresh failed'))
+      await pendingRefresh.catch(() => {})
+    })
+    expect(screen.getByText('Uncategorized photos', { selector: 'h2' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Photo viewer for Uncategorized photos' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/new-two')
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.queryByRole('alert', { hidden: true })).toBeNull()
+  })
+
+  it('keeps the selected photo open when the current album refresh completes', async () => {
+    let finish
+    api.fetchAlbum.mockResolvedValueOnce({ images })
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    mounted()
+    fireEvent.click((await screen.findByText('Portraits')).closest('.cursor-pointer'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open item 2 from Portraits' }))
+    fireEvent.error(screen.getByRole('img', { name: 'Full size preview' }))
+    await waitFor(() => expect(api.fetchAlbum).toHaveBeenCalledTimes(2))
+    const refreshedImages = images.map(image => ({ ...image, url: `${image.url}?fresh=1` }))
+    await act(async () => finish({ images: refreshedImages }))
+    expect(screen.getByRole('dialog', { name: 'Photo viewer for Portraits' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/two-full?fresh=1')
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
   })
 
   it('downloads an album ZIP with status feedback and surfaces ZIP/download errors', async () => {

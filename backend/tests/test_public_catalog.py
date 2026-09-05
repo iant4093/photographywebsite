@@ -371,6 +371,38 @@ class PublicAlbumDetailTests(unittest.TestCase):
             {"album": {"albumId": ALBUM_ID}, "images": [{"url": "https://media.example.test/photo"}]},
         )
 
+    def test_public_detail_does_not_cache_changing_originals(self):
+        stable = {"id": "ready", "before": {"status": "ready"}}
+        for status in ("pending", "failed"):
+            with self.subTest(status=status), patch.object(
+                get_public_album.table, "get_item", return_value={"Item": public_album()}
+            ), patch.object(
+                get_public_album, "serialize_album_detail", return_value={"albumId": ALBUM_ID}
+            ), patch.object(
+                get_public_album, "serialize_images", return_value=[stable, {"id": "changing", "before": {"status": status}}]
+            ):
+                response = get_public_album.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(response["headers"]["Cache-Control"], "private, no-store")
+            self.assertEqual(response_body(response)["images"][1]["before"]["status"], status)
+
+    def test_public_detail_keeps_stable_and_video_cache_policy(self):
+        cases = (
+            ("photo", [{"before": {"status": "ready"}}, {"before": {"status": "unavailable"}}]),
+            ("photo", []),
+            ("photo", [{"id": "feature-disabled"}]),
+            ("video", [{"id": "video"}]),
+        )
+        for album_type, images in cases:
+            with self.subTest(album_type=album_type, images=images), patch.object(
+                get_public_album.table, "get_item", return_value={"Item": public_album(type=album_type)}
+            ), patch.object(
+                get_public_album, "serialize_album_detail", return_value={"albumId": ALBUM_ID}
+            ), patch.object(get_public_album, "serialize_images", return_value=images):
+                response = get_public_album.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
+            self.assertEqual(response["statusCode"], 200)
+            self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=60, s-maxage=300, stale-while-revalidate=60")
+
     def test_random_photos_are_sampled_only_from_public_photo_albums(self):
         second_id = "22222222-2222-4222-8222-222222222222"
         albums = [

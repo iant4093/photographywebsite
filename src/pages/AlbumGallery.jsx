@@ -47,12 +47,17 @@ function AlbumGallery() {
     const [zipStatus, setZipStatus] = useState('')
     const zipControllerRef = useRef(null)
     const trackedAlbumRef = useRef(null)
+    const albumRequestScopeRef = useRef(null)
     const { getIdToken } = useAuth()
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
     const sharedPhotoId = new URLSearchParams(location.search).get('photo')
 
     const loadAlbum = useCallback(async ({ signal, background = false, openPhotoId = '' } = {}) => {
+        const scope = albumRequestScopeRef.current
+        if (!signal && (!scope || scope.albumId !== albumId)) return undefined
+        const requestSignal = signal || scope.controller.signal
+        if (requestSignal.aborted) return undefined
         if (!background) setLoading(true)
         try {
             let token = null
@@ -61,7 +66,11 @@ function AlbumGallery() {
             } catch {
                 // Not logged in, token stays null
             }
-            const data = await fetchAlbum(albumId, token, { signal, force: background })
+            if (requestSignal.aborted) return undefined
+            const data = await fetchAlbum(albumId, token, { signal: requestSignal, force: background })
+            // A background original-status request can finish after navigation,
+            // including when a provider has already delivered its response.
+            if (requestSignal.aborted) return undefined
             setAlbum(data.album || data)
             const nextImages = data.images || []
             setImages(nextImages)
@@ -73,6 +82,7 @@ function AlbumGallery() {
             setMediaError('')
             return data
         } catch (err) {
+            if (requestSignal.aborted) return undefined
             if (err?.name !== 'AbortError') {
                 console.error("Failed to load album:", err)
                 const message = background
@@ -83,13 +93,14 @@ function AlbumGallery() {
             }
             throw err
         } finally {
-            if (!background && !signal?.aborted) setLoading(false)
+            if (!background && !requestSignal.aborted) setLoading(false)
         }
     }, [albumId, getIdToken])
 
     // Fetch album data on mount and clear stale content when the route changes.
     useEffect(() => {
         const controller = new AbortController()
+        albumRequestScopeRef.current = { albumId, controller }
         Promise.resolve().then(() => {
             if (controller.signal.aborted) return
             setAlbum(null)
@@ -99,7 +110,10 @@ function AlbumGallery() {
             setMediaError('')
             return loadAlbum({ signal: controller.signal, openPhotoId: initialSharedPhotoIdRef.current })
         }).catch(() => {})
-        return () => controller.abort()
+        return () => {
+            controller.abort()
+            if (albumRequestScopeRef.current?.controller === controller) albumRequestScopeRef.current = null
+        }
     }, [albumId, loadAlbum])
 
     useEffect(() => () => zipControllerRef.current?.abort(), [])

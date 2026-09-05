@@ -137,6 +137,26 @@ def _validate_cache_headers(headers: dict[str, str]) -> None:
         raise ProbeError("public response unexpectedly sets a cookie")
 
 
+def _validate_detail_cache_headers(headers: dict[str, str], payload: dict) -> None:
+    # Only a validated photo detail with changing originals may opt out of
+    # caching. Previously cached public responses remain valid during rollout;
+    # their existing bounded TTL expires without relaxing any DTO/access checks.
+    changing_originals = payload["album"]["type"] == "photo" and any(
+        image.get("before", {}).get("status") in {"pending", "failed"}
+        for image in payload["images"]
+    )
+    directives = {part.strip().lower() for part in headers.get("cache-control", "").split(",")}
+    if changing_originals and directives == {"private", "no-store"}:
+        if "application/json" not in headers.get("content-type", "").lower():
+            raise ProbeError("public response is not application/json")
+        if "set-cookie" in headers:
+            raise ProbeError("public response unexpectedly sets a cookie")
+        if headers.get("age") or "hit" in headers.get("x-cache", "").lower():
+            raise ProbeError("uncached original status was served from cache")
+        return
+    _validate_cache_headers(headers)
+
+
 def _public_url(value: object, *, allow_empty: bool = False) -> None:
     if allow_empty and value == "":
         return
@@ -418,8 +438,8 @@ def run_catalog_probe(
         encoded = urllib.parse.quote(album_id, safe="")
         payload, headers = requester(f"{base_url}/public/albums/{encoded}", timeout)
         requests += 1
-        _validate_cache_headers(headers)
         count = validate_detail(payload, album_id)
+        _validate_detail_cache_headers(headers, payload)
         if count != expected_counts[album_id]:
             raise ProbeError("catalog and detail image counts do not match")
         image_count += count

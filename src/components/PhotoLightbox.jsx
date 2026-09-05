@@ -11,9 +11,40 @@ import {
 import LightboxShareButton from './LightboxShareButton'
 
 const PHOTO_CROSSFADE_MS = 360
+const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
+const ORIGINAL_REFRESH_SLOW_INTERVAL_MS = 60_000
 
 function freshComparison(id) {
     return { id, requested: false, attempt: 0, loadedKey: null, failedKey: null }
+}
+
+function runOriginalRefresh(requestRef, callback, event, image, isCurrent) {
+    const key = mediaId(image) || image
+    const active = requestRef.current
+    if (active) {
+        if (active.key === key) return active.promise
+        if (active.queued?.key === key) return active.queued.promise
+        // Keep only the latest waiting selection, so rapid navigation cannot
+        // build a queue of obsolete reads behind one slow request.
+        active.queued?.resolve()
+        let resolve
+        const promise = new Promise((complete) => { resolve = complete })
+        active.queued = { key, callback, event, image, isCurrent, promise, resolve }
+        return promise
+    }
+    let result
+    try { result = callback(event, image) } catch { /* Keep the edit available. */ }
+    const request = { key, promise: null, queued: null }
+    request.promise = Promise.resolve(result).catch(() => {}).finally(() => {
+        if (requestRef.current !== request) return
+        requestRef.current = null
+        const queued = request.queued
+        if (queued?.isCurrent()) {
+            runOriginalRefresh(requestRef, queued.callback, queued.event, queued.image, queued.isCurrent).then(queued.resolve)
+        } else queued?.resolve()
+    })
+    requestRef.current = request
+    return request.promise
 }
 
 function PhotoLightbox({
@@ -46,7 +77,8 @@ function PhotoLightbox({
     const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
     const [comparison, setComparison] = useState(() => freshComparison(activeId))
     const refreshedOriginalsRef = useRef(new Set())
-    const beforeToggleRef = useRef(null)
+    const originalRequestRef = useRef(null)
+    const originalRefreshRef = useRef({ callback: onBeforeRefresh, image: activeImage, id: activeId, requested: false })
     const before = activeImage && typeof activeImage === 'object' ? activeImage.before : null
     const beforeUrl = mediaBeforeDisplayUrl(activeImage)
     const beforeSrcSet = mediaBeforeSrcSet(activeImage)
@@ -56,6 +88,7 @@ function PhotoLightbox({
     const comparisonRequested = comparison.id === activeId && comparison.requested
     const showingBefore = comparisonRequested && beforeIsReady && comparison.loadedKey === beforeRequestKey
     const beforeLoadFailed = comparison.failedKey === beforeRequestKey
+    const hasBeforeRefresh = Boolean(onBeforeRefresh)
 
     // Reset during an identity change so returning to a previous photograph also
     // starts with its edit, without resetting the existing navigation crossfade.
@@ -66,6 +99,58 @@ function PhotoLightbox({
         transitionTimerRef.current = null
         refreshedOriginalsRef.current.clear()
     }, [activeId])
+
+    useEffect(() => {
+        if (originalRefreshRef.current.id !== activeId || !comparisonRequested) {
+            const active = originalRequestRef.current
+            active?.queued?.resolve()
+            if (active) active.queued = null
+        }
+        originalRefreshRef.current = { callback: onBeforeRefresh, image: activeImage, id: activeId, requested: comparisonRequested }
+    }, [onBeforeRefresh, activeImage, activeId, comparisonRequested])
+
+    useEffect(() => () => {
+        originalRefreshRef.current.requested = false
+        const active = originalRequestRef.current
+        active?.queued?.resolve()
+        if (active) active.queued = null
+    }, [])
+
+    useEffect(() => {
+        if (!comparisonRequested || before?.status !== 'pending' || !hasBeforeRefresh) return undefined
+        let cancelled = false
+        let inFlight = false
+        let attempts = 0
+        let timer = null
+        const schedule = () => {
+            if (cancelled || inFlight || document.visibilityState === 'hidden') return
+            timer = window.setTimeout(poll, attempts < 3 ? ORIGINAL_REFRESH_INTERVAL_MS : ORIGINAL_REFRESH_SLOW_INTERVAL_MS)
+        }
+        const poll = async () => {
+            timer = null
+            if (cancelled || document.visibilityState === 'hidden') return
+            inFlight = true
+            attempts += 1
+            try {
+                const { callback, image } = originalRefreshRef.current
+                await runOriginalRefresh(originalRequestRef, callback, undefined, image, () => !cancelled && document.visibilityState !== 'hidden')
+            } catch { /* Leave the selected edit available; the next check is bounded. */ }
+            inFlight = false
+            schedule()
+        }
+        const handleVisibility = () => {
+            window.clearTimeout(timer)
+            timer = null
+            schedule()
+        }
+        document.addEventListener('visibilitychange', handleVisibility)
+        schedule()
+        return () => {
+            cancelled = true
+            window.clearTimeout(timer)
+            document.removeEventListener('visibilitychange', handleVisibility)
+        }
+    }, [activeId, before?.status, comparisonRequested, comparison.attempt, hasBeforeRefresh])
 
     if (!activeImage && !loading && !emptyMessage) return null
 
@@ -115,16 +200,25 @@ function PhotoLightbox({
         const refresh = onBeforeRefresh || (allowMediaError ? onMediaError : undefined)
         if (!refresh || refreshedOriginalsRef.current.has(beforeSourceKey)) return
         refreshedOriginalsRef.current.add(beforeSourceKey)
-        // A caller may return its refresh promise. Keep its failure in the
-        // recoverable viewer state rather than creating an unhandled rejection.
-        try {
-            Promise.resolve(refresh(event, activeImage)).catch(() => {})
-        } catch { /* The retry control remains available. */ }
+        // Immediate checks, retries, and scheduled checks share one in-flight
+        // promise so a slow first request cannot trigger overlapping reads.
+        return runOriginalRefresh(originalRequestRef, refresh, event, activeImage, () => (
+            originalRefreshRef.current.id === activeId && originalRefreshRef.current.requested && document.visibilityState !== 'hidden'
+        ))
     }
 
     const handleBeforeToggle = (event) => {
+        if (comparisonRequested && (beforeLoadFailed || (before?.status === 'failed' && onBeforeRefresh))) {
+            refreshedOriginalsRef.current.delete(beforeSourceKey)
+            setComparison((current) => ({ ...current, attempt: current.attempt + 1, loadedKey: null, failedKey: null }))
+            refreshOriginal(event, beforeLoadFailed)
+            return
+        }
         setComparison((current) => ({ ...current, requested: !current.requested }))
-        if (!comparisonRequested && !beforeIsReady && before?.status !== 'unavailable') refreshOriginal(event)
+        if (!comparisonRequested && !beforeIsReady && before?.status !== 'unavailable') {
+            refreshedOriginalsRef.current.delete(beforeSourceKey)
+            refreshOriginal(event)
+        }
     }
 
     const handleBeforeLoad = (event) => {
@@ -146,20 +240,22 @@ function PhotoLightbox({
         refreshOriginal(event, true)
     }
 
-    const handleBeforeRetry = (event) => {
-        beforeToggleRef.current?.focus()
-        refreshedOriginalsRef.current.delete(beforeSourceKey)
-        setComparison((current) => ({ ...current, attempt: current.attempt + 1, loadedKey: null, failedKey: null }))
-        refreshOriginal(event, beforeLoadFailed)
-    }
-
     let beforeMessage = ''
     if (comparisonRequested && !showingBefore) {
         if (before?.status === 'unavailable') beforeMessage = 'Unable to locate original'
         else if (beforeLoadFailed || before?.status === 'failed') beforeMessage = 'Original could not be loaded.'
         else if (beforeIsReady) beforeMessage = 'Loading original…'
-        else beforeMessage = onBeforeRefresh ? 'Checking original…' : 'Original is being prepared.'
+        else beforeMessage = 'Preparing original…'
     }
+    const beforeBusy = comparisonRequested && !showingBefore && !beforeLoadFailed && (before?.status === 'pending' || beforeIsReady)
+    const beforeHasError = comparisonRequested && (beforeLoadFailed || before?.status === 'failed')
+    const beforeNeedsRetry = beforeHasError && (beforeLoadFailed || hasBeforeRefresh)
+    const beforeUnavailable = comparisonRequested && before?.status === 'unavailable'
+    const beforeButtonLabel = beforeNeedsRetry ? 'Retry original'
+        : beforeUnavailable ? 'Unable to locate original'
+            : beforeBusy ? 'Cancel loading original'
+                : comparisonRequested ? 'Show edited photo' : 'Show original photo'
+    const beforeTitle = beforeMessage || (showingBefore ? 'Before — Camera JPG. Show edited photo' : 'After — Edited. Show original camera JPG')
 
     return (
         <AccessibleLightbox
@@ -328,17 +424,27 @@ function PhotoLightbox({
                         {hasOriginalComparison && (
                             <button
                                 type="button"
-                                ref={beforeToggleRef}
                                 onClick={handleBeforeToggle}
                                 className="linen-lightbox-before inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
-                                aria-label={comparisonRequested ? 'Show edited photo' : 'Show original photo'}
+                                aria-label={beforeButtonLabel}
                                 aria-pressed={showingBefore}
-                                title={comparisonRequested ? 'Show edited photo' : 'Show original camera JPG'}
+                                aria-busy={beforeBusy || undefined}
+                                title={beforeNeedsRetry ? `${beforeTitle} Click to retry.` : beforeTitle}
                             >
-                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v18M9 5H5a2 2 0 00-2 2v10a2 2 0 002 2h4m6-14h4a2 2 0 012 2v10a2 2 0 01-2 2h-4M3 16l4-4 2 2m6-3 6 6" />
+                                <svg className={`linen-lightbox-before-indicator h-5 w-5 ${beforeBusy ? 'is-spinning' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    {beforeBusy ? (
+                                        <path strokeLinecap="round" strokeWidth={1.5} d="M12 3a9 9 0 109 9" />
+                                    ) : beforeHasError || beforeUnavailable ? (
+                                        <><circle cx="12" cy="12" r="9" strokeWidth={1.5} /><path strokeLinecap="round" strokeWidth={1.5} d="M12 7v6m0 4h.01" /></>
+                                    ) : (
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v18M9 5H5a2 2 0 00-2 2v10a2 2 0 002 2h4m6-14h4a2 2 0 012 2v10a2 2 0 01-2 2h-4M3 16l4-4 2 2m6-3 6 6" />
+                                    )}
                                 </svg>
-                                <span>Before / After</span>
+                                <span className="linen-lightbox-before-label" aria-hidden="true">
+                                    <span className="linen-lightbox-before-word" data-label="Before"><span className={showingBefore ? 'is-active' : ''}>Before</span></span>
+                                    <span>/</span>
+                                    <span className="linen-lightbox-before-word" data-label="After"><span className={!showingBefore ? 'is-active' : ''}>After</span></span>
+                                </span>
                             </button>
                         )}
                         {canShare && (
@@ -361,7 +467,7 @@ function PhotoLightbox({
                                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                                 </svg>
-                                <span>{showingBefore ? 'Download Edit' : 'Download'}</span>
+                                <span>Download</span>
                             </button>
                         )}
                         {onPrint && (
@@ -375,21 +481,17 @@ function PhotoLightbox({
                                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" />
                                 </svg>
-                                <span>{printing ? 'Preparing…' : showingBefore ? 'Print the Edit' : 'Order a Print'}</span>
+                                <span>{printing ? 'Preparing…' : 'Order a Print'}</span>
                             </button>
                         )}
                     </div>
+                    {hasOriginalComparison && (beforeHasError || beforeUnavailable) && (
+                        <span className="linen-lightbox-before-tooltip" aria-hidden="true">{beforeMessage}</span>
+                    )}
                     {hasOriginalComparison && (
-                        <div className="linen-lightbox-before-status" role="status" aria-live="polite" aria-atomic="true">
-                            <span>{showingBefore ? 'Before — Camera JPG' : 'After — Edited'}</span>
-                            {beforeMessage && <span>{beforeMessage}</span>}
-                            {comparisonRequested && (beforeLoadFailed || (before?.status === 'failed' && onBeforeRefresh)) && (
-                                <button type="button" onClick={handleBeforeRetry} className="linen-lightbox-before-retry">Retry original</button>
-                            )}
-                            {comparisonRequested && !beforeIsReady && before?.status !== 'unavailable' && before?.status !== 'failed' && onBeforeRefresh && (
-                                <button type="button" onClick={handleBeforeRetry} className="linen-lightbox-before-retry">Check again</button>
-                            )}
-                        </div>
+                        <span className="linen-lightbox-before-status" role="status" aria-live="polite" aria-atomic="true">
+                            {showingBefore ? 'Before — Camera JPG' : 'After — Edited'}{beforeMessage ? `. ${beforeMessage}` : ''}
+                        </span>
                     )}
                     <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">
                         {index + 1} / {images.length}

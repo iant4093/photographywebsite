@@ -2,8 +2,22 @@
 
 This feature adds a Before/After toggle immediately before Share in the photo
 lightbox. It starts on the edited photo and shows the full original framing when
-toggled. Navigation resets to the edit. Video lightboxes and video album files
+toggled. The button emphasizes the displayed side without adding a status row
+or changing the toolbar size. Loading and failure indicators stay within the
+button; descriptive status is available to assistive technology and in its
+tooltip. Navigation resets to the edit. Video lightboxes and video album files
 are excluded.
+
+While a requested original is still pending, viewers with a status-refresh
+callback check again automatically while visible, backing off for longer waits.
+Checks stop on navigation, cancellation, or completion. A verified share-code
+viewer retains its existing access boundary: it needs a fresh security check to
+reread that protected album, so a pending status never triggers its media-error
+or re-verification flow automatically.
+
+Forced album refreshes bypass the browser cache. Public photo details containing
+pending or failed originals are served with `private, no-store` so processing
+updates are visible on the next check; completed details retain normal caching.
 
 ## Implementation and validation status
 

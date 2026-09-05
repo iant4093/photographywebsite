@@ -151,7 +151,7 @@ describe('SharedAlbum access and gallery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
     await screen.findByRole('dialog', { name: 'Photo viewer for Shared Photos' })
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
-    expect(screen.getByText('Original is being prepared.')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing original…')
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
     expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://x.test/p2-full')
     expect(screen.queryByText(/gallery session expired/i)).toBeNull()
