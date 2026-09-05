@@ -233,8 +233,10 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         listen(video, 'seeked', () => { void play() })
 
         if (nativeHls) {
-            listen(video, 'loadedmetadata', seekToCover, { once: true })
-            video.src = selected.hlsUrl
+            // Let Safari apply the cover position when its native HLS player
+            // is ready; seeking from loadedmetadata can interrupt startup.
+            const source = selected.hlsUrl.split('#', 1)[0]
+            video.src = selected.startTime > 0.01 ? `${source}#t=${selected.startTime}` : source
             video.load()
             // preload is only a hint. Request playback after hover intent even
             // if a cold native HLS stream has not loaded its metadata yet.

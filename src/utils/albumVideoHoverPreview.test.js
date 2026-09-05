@@ -123,7 +123,7 @@ describe('video album hover previews', () => {
         finalHover.stop()
     })
 
-    it('starts a cold stream without waiting for seeked, then resets', async () => {
+    it('starts a cold stream at its media fragment without waiting for seeked, then resets', async () => {
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
         const onPlaybackEnd = vi.fn()
@@ -152,7 +152,8 @@ describe('video album hover previews', () => {
         expect(video).toHaveAttribute('muted')
         Object.defineProperty(video, 'duration', { configurable: true, value: 30 })
         video.dispatchEvent(new Event('loadedmetadata'))
-        expect(video.currentTime).toBe(5)
+        expect(video.src).toBe('https://media.test/hls/cover.m3u8#t=5')
+        expect(video.currentTime).toBe(0)
         expect(video.play).toHaveBeenCalledOnce()
         expect(onPlaybackStart).toHaveBeenCalledOnce()
         expect(video.style.opacity).toBe('1')
@@ -178,7 +179,7 @@ describe('video album hover previews', () => {
 
         await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
         expect(loadDetail).not.toHaveBeenCalled()
-        expect(container.querySelector('video')?.src).toBe('https://media.test/hls/summary.m3u8')
+        expect(container.querySelector('video')?.src).toBe('https://media.test/hls/summary.m3u8#t=3')
     })
 
     it('requests native playback before cold-stream metadata arrives', async () => {
@@ -208,10 +209,68 @@ describe('video album hover previews', () => {
 
         Object.defineProperty(video, 'duration', { configurable: true, value: 30 })
         video.dispatchEvent(new Event('loadedmetadata'))
-        expect(video.currentTime).toBe(5)
+        expect(video.src).toBe('https://media.test/hls/cover.m3u8#t=5')
+        expect(video.currentTime).toBe(0)
         resolvePlayback()
         await Promise.resolve()
         expect(onPlaybackStart).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it('lets native HLS position the cover without JavaScript seeks during cold startup', async () => {
+        let resolvePlayback
+        HTMLMediaElement.prototype.play.mockImplementationOnce(function () {
+            setPaused(this, false)
+            return new Promise((resolve) => { resolvePlayback = resolve })
+        })
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8', coverThumbnailTime: 5 },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        const seek = vi.spyOn(video, 'currentTime', 'set')
+        Object.defineProperty(video, 'duration', { configurable: true, value: 30 })
+
+        // Safari exposes metadata before its native player is ready to seek.
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 1 })
+        video.dispatchEvent(new Event('loadedmetadata'))
+        expect(seek).not.toHaveBeenCalled()
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+        video.dispatchEvent(new Event('loadeddata'))
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 3 })
+        video.dispatchEvent(new Event('canplay'))
+        video.dispatchEvent(new Event('seeked'))
+        expect(seek).not.toHaveBeenCalled()
+        expect(video.src).toBe('https://media.test/hls/cover.m3u8#t=5')
+        expect(video.play).toHaveBeenCalledOnce()
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+        expect(video.style.opacity).toBe('0')
+
+        resolvePlayback()
+        await Promise.resolve()
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(video.style.opacity).toBe('1')
+        controller.stop()
+    })
+
+    it.each([
+        [3.25, '#t=3.25'],
+        [0, ''],
+    ])('keeps native HLS query parameters and replaces old fragments at cover time %s', async (startTime, fragment) => {
+        const container = document.createElement('div')
+        const source = 'https://media.test/hls/cover.m3u8?version=4&token=a%2Bb'
+        const controller = start({
+            container,
+            album: { coverHlsUrl: `${source}#t=1,2`, coverThumbnailTime: startTime },
+            loadDetail: vi.fn(),
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        expect(container.querySelector('video')?.src).toBe(`${source}${fragment}`)
         controller.stop()
     })
 
@@ -313,6 +372,10 @@ describe('video album hover previews', () => {
         await Promise.resolve()
         expect(video.play).toHaveBeenCalledOnce()
         expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(instance.loadSource).toHaveBeenCalledWith('https://media.test/hls/cover.m3u8')
+        Object.defineProperty(video, 'duration', { configurable: true, value: 30 })
+        video.dispatchEvent(new Event('loadedmetadata'))
+        expect(video.currentTime).toBe(5)
         controller.stop()
         expect(instance.destroy).toHaveBeenCalledOnce()
     })
