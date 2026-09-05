@@ -163,11 +163,27 @@ describe('distributed gallery displays', () => {
                 surfaces.add(part.surface)
                 const geometry = createMuseumDisplayPartGeometry(part)
                 triangles += geometry.getAttribute('position').count / 3
+                for (const name of ['position', 'normal', 'uv', 'museumRoughness', 'museumMetalness']) {
+                    const attribute = geometry.getAttribute(name)
+                    expect(attribute.count).toBe(geometry.getAttribute('position').count)
+                    expect(attribute.array.every(Number.isFinite)).toBe(true)
+                }
+                const normals = geometry.getAttribute('normal')
+                expect(Array.from({ length: normals.count }, (_, index) => (
+                    Math.abs(normals.getX(index) ** 2 + normals.getY(index) ** 2 + normals.getZ(index) ** 2 - 1) < 1e-5
+                )).every(Boolean)).toBe(true)
+                if (part.objectId || part.detail?.startsWith('catalog-')) {
+                    // A printed catalog should never inherit furniture grain,
+                    // even though it remains inside the same three batches.
+                    expect(part.surface).toBe('ceramic')
+                    expect(part.roughness).toBeGreaterThanOrEqual(0.86)
+                    expect(part.metalness).toBe(0)
+                }
                 geometry.dispose()
             }
         }
         expect(surfaces.size).toBe(3)
-        expect(triangles).toBeLessThan(24_000)
+        expect(triangles).toBeLessThan(30_000)
         const enormous = layoutFor([1000])
         expect(museumGalleryDisplays(enormous).filter(display => display.kind === 'reading-stand')).toHaveLength(4)
     })
@@ -188,5 +204,113 @@ describe('distributed gallery displays', () => {
         }
         expect([...edges.values()].every(count => count === 2)).toBe(true)
         geometry.dispose()
+    })
+
+    it('gives the open catalogs a clear binding gutter and keeps them on their sloped lecterns', () => {
+        const stands = museumGalleryDisplays(layoutFor([26, 26])).filter(display => display.kind === 'reading-stand')
+        expect(new Set(stands.map(display => display.rotationY)).size).toBe(2)
+        const point = new THREE.Vector3()
+        for (const stand of stands) {
+            const parts = museumGalleryDisplayParts(stand)
+            const pageBounds = []
+            for (const part of parts.filter(item => item.detail?.startsWith('catalog-'))) {
+                const geometry = createMuseumDisplayPartGeometry(part)
+                const inverseFrame = new THREE.Matrix4()
+                    .makeRotationY(stand.rotationY).setPosition(...stand.position).invert()
+                geometry.applyMatrix4(inverseFrame)
+                geometry.translate(0, -1.18, 0)
+                geometry.rotateX(-0.34)
+                geometry.computeBoundingBox()
+                const bounds = geometry.boundingBox.clone()
+                if (part.detail === 'catalog-page') {
+                    // The low page edges rest on the cloth cover; their raised
+                    // outer edges form a shallow open-book profile.
+                    expect(bounds.min.y).toBeGreaterThanOrEqual(0.0405)
+                    expect(bounds.min.y).toBeLessThan(0.041)
+                    expect(bounds.max.y).toBeGreaterThan(0.062)
+                    pageBounds.push(bounds)
+                }
+                for (let index = 0; index < geometry.getAttribute('position').count; index += 1) {
+                    point.fromBufferAttribute(geometry.getAttribute('position'), index)
+                    expect(Math.abs(point.x)).toBeLessThan(0.295)
+                    expect(Math.abs(point.z)).toBeLessThan(0.222)
+                }
+                geometry.dispose()
+            }
+            expect(pageBounds).toHaveLength(2)
+            pageBounds.sort((a, b) => a.min.x - b.min.x)
+            expect(pageBounds[0].max.x).toBeLessThan(-0.007)
+            expect(pageBounds[1].min.x).toBeGreaterThan(0.007)
+        }
+    })
+
+    it('keeps paper blocks between their covers when book stacks are rotated', () => {
+        const consoles = museumGalleryDisplays(layoutFor([6, 6])).filter(display => display.kind === 'console')
+        for (const console of consoles) {
+            const parts = museumGalleryDisplayParts(console)
+            for (const paper of parts.filter(part => part.detail === 'book-paper')) {
+                const covers = parts.filter(part => part.objectId === paper.objectId && part.detail === 'book-cover')
+                expect(covers).toHaveLength(2)
+                expect(paper.size[0]).toBeLessThan(covers[0].size[0])
+                expect(paper.size[2]).toBeLessThan(covers[0].size[2])
+                const bounds = [paper, ...covers].map(part => {
+                    const geometry = createMuseumDisplayPartGeometry(part)
+                    geometry.computeBoundingBox()
+                    const box = geometry.boundingBox.clone()
+                    geometry.dispose()
+                    return box
+                })
+                expect(bounds[0].min.y).toBeCloseTo(bounds[1].max.y, 6)
+                expect(bounds[0].max.y).toBeCloseTo(bounds[2].min.y, 6)
+            }
+        }
+    })
+
+    it('projects metre-scale grain before transforming display casework', () => {
+        for (const shape of ['box', 'chamfer']) {
+            const part = { shape, position: [0, 0, 0], size: [1.8, 0.1, 0.6], rotation: [0, 0, 0], color: '#ffffff' }
+            const local = createMuseumDisplayPartGeometry(part)
+            const moved = createMuseumDisplayPartGeometry({ ...part, position: [15, 0, -20], rotation: [0, Math.PI / 2, 0] })
+            expect([...local.getAttribute('uv').array]).toEqual([...moved.getAttribute('uv').array])
+            const uvs = local.getAttribute('uv')
+            const u = Array.from({ length: uvs.count }, (_, index) => uvs.getX(index))
+            const v = Array.from({ length: uvs.count }, (_, index) => uvs.getY(index))
+            expect(Math.max(...u) - Math.min(...u)).toBeCloseTo(1.8, 5)
+            expect(Math.max(...v) - Math.min(...v)).toBeCloseTo(0.6, 5)
+            local.dispose()
+            moved.dispose()
+        }
+    })
+
+    it('retains matte paper and fabric alongside glazed ceramic and metal in the existing batches', () => {
+        for (const [surface, overrides, roughness, metalness] of [
+            ['wood', {}, 0.96, 0], ['brass', {}, 0.34, 0.8], ['ceramic', {}, 0.4, 0],
+            ['wood', { roughness: 0.9, metalness: 0 }, 0.9, 0],
+            ['wood', { roughness: 0.86, metalness: 0 }, 0.86, 0],
+        ]) {
+            const geometry = createMuseumDisplayPartGeometry({ surface, ...overrides, shape: 'box', position: [0, 0, 0], size: [1, 1, 1], rotation: [0, 0, 0], color: '#ffffff' })
+            for (const [name, value] of [['museumRoughness', roughness], ['museumMetalness', metalness]]) {
+                const attribute = geometry.getAttribute(name)
+                expect(attribute.count).toBe(geometry.getAttribute('position').count)
+                expect([...attribute.array].every(item => Math.abs(item - value) < 1e-6)).toBe(true)
+            }
+            geometry.dispose()
+        }
+    })
+
+    it('closes both vessel interiors with a solid foot and an open, thick rim', () => {
+        for (const shape of ['vase', 'bud-vase']) {
+            const geometry = createMuseumDisplayPartGeometry({ shape, position: [0, 0, 0], size: [1, 1, 1], rotation: [0, 0, 0], color: '#ffffff', surface: 'ceramic' })
+            const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
+            const mesh = new THREE.Mesh(geometry, material)
+            mesh.updateMatrixWorld()
+            const downward = new THREE.Raycaster(new THREE.Vector3(0.01, 2, 0.01), new THREE.Vector3(0, -1, 0)).intersectObject(mesh)
+            const upward = new THREE.Raycaster(new THREE.Vector3(0.01, -1, 0.01), new THREE.Vector3(0, 1, 0)).intersectObject(mesh)
+            expect(downward[0].point.y).toBeGreaterThan(0.10)
+            expect(downward[0].point.y).toBeLessThan(0.13)
+            expect(upward[0].point.y).toBeCloseTo(0, 6)
+            geometry.dispose()
+            material.dispose()
+        }
     })
 })

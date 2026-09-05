@@ -58,6 +58,12 @@ function primitive(shape) {
     else if (shape === 'vase') geometry = new THREE.LatheGeometry([
         [0, 0], [0.66, 0], [0.78, 0.10], [0.90, 0.37], [0.66, 0.70],
         [0.40, 0.84], [0.40, 1], [0.31, 1], [0.30, 0.82],
+        [0.56, 0.66], [0.78, 0.37], [0.59, 0.12], [0, 0.12],
+    ].map(point => new THREE.Vector2(...point)), 12)
+    else if (shape === 'bud-vase') geometry = new THREE.LatheGeometry([
+        [0, 0], [0.57, 0], [0.86, 0.13], [1, 0.35], [0.84, 0.58],
+        [0.30, 0.76], [0.29, 1], [0.20, 1], [0.20, 0.73],
+        [0.74, 0.52], [0.85, 0.33], [0.50, 0.11], [0, 0.11],
     ].map(point => new THREE.Vector2(...point)), 12)
     else geometry = new THREE.BoxGeometry(1, 1, 1)
     if (geometry.index) {
@@ -72,11 +78,36 @@ function primitive(shape) {
 export function createMuseumDisplayPartGeometry(part) {
     const geometry = primitive(part.shape).clone()
     geometry.scale(...part.size)
+    if (!part.shape || part.shape === 'box' || part.shape === 'chamfer') {
+        // Project in local metres before rotation. This preserves timber grain
+        // scale on slender legs and broad tops, including the bevel faces.
+        const positions = geometry.getAttribute('position')
+        const normals = geometry.getAttribute('normal')
+        const uvs = geometry.getAttribute('uv')
+        for (let index = 0; index < positions.count; index += 1) {
+            const x = Math.abs(normals.getX(index))
+            const y = Math.abs(normals.getY(index))
+            const z = Math.abs(normals.getZ(index))
+            const u = x > y && x > z ? positions.getZ(index) : positions.getX(index)
+            const v = y >= x && y > z ? positions.getZ(index) : positions.getY(index)
+            uvs.setXY(index, u, v)
+        }
+    }
     geometry.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(...part.rotation)))
     geometry.translate(...part.position)
     const color = new THREE.Color(part.color)
     const colors = new Float32Array(geometry.getAttribute('position').count * 3)
     for (let index = 0; index < colors.length; index += 3) color.toArray(colors, index)
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    const defaults = {
+        // Walnut's absolute roughness map provides the final response (~.53);
+        // this coefficient only leaves a little room for its satin finish.
+        wood: { roughness: 0.96, metalness: 0 },
+        brass: { roughness: 0.34, metalness: 0.8 },
+        ceramic: { roughness: 0.4, metalness: 0 },
+    }[part.surface || 'wood']
+    const count = geometry.getAttribute('position').count
+    geometry.setAttribute('museumRoughness', new THREE.Float32BufferAttribute(new Float32Array(count).fill(part.roughness ?? defaults.roughness), 1))
+    geometry.setAttribute('museumMetalness', new THREE.Float32BufferAttribute(new Float32Array(count).fill(part.metalness ?? defaults.metalness), 1))
     return geometry
 }

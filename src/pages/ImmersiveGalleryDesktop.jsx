@@ -1,6 +1,5 @@
 /* eslint-disable react-hooks/immutability -- Three.js cameras are intentionally mutable scene objects. */
-import { useTexture } from '@react-three/drei/core/Texture.js'
-import { addAfterEffect, Canvas, useFrame, useThree } from '@react-three/fiber'
+import { addAfterEffect, Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { decode as decodeBlurhash } from 'blurhash'
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
@@ -60,6 +59,8 @@ import { MuseumRoomArchitecture, MuseumCofferedCeiling, MuseumAtmosphere } from 
 import MuseumChandeliers from '../components/museum/MuseumChandeliers'
 import { createMuseumFrameDriver } from '../utils/museumFrameDriver'
 import { createMuseumArchBand } from '../utils/museumArchitecture'
+import { MUSEUM_MATERIAL_TEXTURES, MUSEUM_MATERIAL_TILE_METERS } from '../utils/museumMaterialAssets'
+import { createMuseumThresholdFloorGeometry, museumFloorTextureTransform, museumSurfaceTextureTransform } from '../utils/museumMaterialMapping'
 import {
     advanceMuseumJump,
     createMuseumJumpState,
@@ -83,11 +84,18 @@ const WALL_SURFACE_GAP = MUSEUM_DIMENSIONS.wallSurfaceGap
 const GOLD = '#9b7747'
 const INK = '#171411'
 const TEXTURE_ROOT = '/assets/museum/textures'
+const MATERIAL_SOURCES = Object.freeze({
+    ...MUSEUM_MATERIAL_TEXTURES,
+    wallpaperColor: `${TEXTURE_ROOT}/museum_wallpaper_oxblood_authored_1024.jpg`,
+})
+const MATERIAL_SOURCE_ENTRIES = Object.entries(MATERIAL_SOURCES)
+const MATERIAL_SOURCE_URLS = MATERIAL_SOURCE_ENTRIES.map(([, url]) => url)
 const WALLPAPER_TILE_SIZE = 3.4
 const HALL_WALL_THICKNESS = MUSEUM_DIMENSIONS.hallWallThickness
 const ROOM_SHELL_INSET = MUSEUM_DIMENSIONS.roomShellInset
 const EMPTY_FIXTURES = Object.freeze([])
 const ARCHITECTURAL_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 2, 0.045)
+const THRESHOLD_FLOOR_GEOMETRY = createMuseumThresholdFloorGeometry(ARCHITECTURAL_ROUNDED_BOX)
 const PORTAL_ARCH_STONE_GEOMETRY = createMuseumArchBand(0, MUSEUM_PORTAL.bandWidth, MUSEUM_PORTAL.depth)
 const PORTAL_ARCH_REVEAL_GEOMETRY = createMuseumArchBand(0.035, 0.08, 0.018)
 const PORTAL_CURTAIN_GEOMETRY = makePortalCurtainGeometry()
@@ -814,13 +822,14 @@ function safeSessionPosition(layout) {
     return { x: layout.spawn[0], z: layout.spawn[2] }
 }
 
-function configureTexture(source, { color = false, repeat = [1, 1] } = {}) {
+function configureTexture(source, { color = false, repeat = [1, 1], offset = [0, 0] } = {}) {
     const texture = source.clone()
     texture.wrapS = THREE.RepeatWrapping
     texture.wrapT = THREE.RepeatWrapping
     texture.repeat.set(...repeat)
+    texture.offset.set(...offset)
     texture.anisotropy = 4
-    if (color) texture.colorSpace = THREE.SRGBColorSpace
+    texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace
     texture.needsUpdate = true
     return texture
 }
@@ -860,15 +869,12 @@ function createBakedOcclusionTexture({
 }
 
 function useMuseumMaterials() {
-    const sources = useTexture({
-        plasterColor: `${TEXTURE_ROOT}/white_plaster_02_diff_1k.jpg`,
-        plasterNormal: `${TEXTURE_ROOT}/white_plaster_02_nor_gl_1k.jpg`,
-        plasterRoughness: `${TEXTURE_ROOT}/white_plaster_02_rough_1k.jpg`,
-        woodColor: `${TEXTURE_ROOT}/wood_floor_diff_1k.jpg`,
-        woodNormal: `${TEXTURE_ROOT}/wood_floor_nor_gl_1k.jpg`,
-        woodRoughness: `${TEXTURE_ROOT}/wood_floor_rough_1k.jpg`,
-        wallpaperColor: `${TEXTURE_ROOT}/museum_wallpaper_oxblood_authored_1024.jpg`,
-    })
+    // Decode sources without also eagerly uploading their unused default
+    // sampler variants. Warmup uploads the configured, shared repeat textures.
+    const loadedTextures = useLoader(THREE.TextureLoader, MATERIAL_SOURCE_URLS)
+    const sources = useMemo(() => Object.fromEntries(
+        MATERIAL_SOURCE_ENTRIES.map(([name], index) => [name, loadedTextures[index]]),
+    ), [loadedTextures])
     const materials = useMemo(() => {
         // A single generic edge vignette made every surface respond like the
         // same flat card. These compact authored profiles ground walls at the
@@ -900,32 +906,37 @@ function useMuseumMaterials() {
         })
         return ({
         plaster: {
-            map: configureTexture(sources.plasterColor, { color: true, repeat: [5, 3] }),
             normalMap: configureTexture(sources.plasterNormal, { repeat: [5, 3] }),
             roughnessMap: configureTexture(sources.plasterRoughness, { repeat: [5, 3] }),
             aoMap: plasterOcclusion,
         },
         floor: {
-            map: configureTexture(sources.woodColor, { color: true, repeat: [11, 5] }),
-            normalMap: configureTexture(sources.woodNormal, { repeat: [11, 5] }),
-            roughnessMap: configureTexture(sources.woodRoughness, { repeat: [11, 5] }),
+            map: configureTexture(sources.woodColor, { color: true, repeat: [1, 1] }),
+            normalMap: configureTexture(sources.woodNormal, { repeat: [1, 1] }),
+            roughnessMap: configureTexture(sources.woodRoughness, { repeat: [1, 1] }),
             aoMap: floorOcclusion,
         },
         joinery: {
-            map: configureTexture(sources.woodColor, { color: true, repeat: [2, 1] }),
-            normalMap: configureTexture(sources.woodNormal, { repeat: [2, 1] }),
-            roughnessMap: configureTexture(sources.woodRoughness, { repeat: [2, 1] }),
+            map: configureTexture(sources.joineryColor, { color: true }),
+            normalMap: configureTexture(sources.joineryNormal),
+            roughnessMap: configureTexture(sources.joineryRoughness),
             aoMap: joineryOcclusion,
         },
         wallpaper: {
             map: configureTexture(sources.wallpaperColor, { color: true }),
-            // Velvet's micro-surface must not be inferred from its printed
-            // motif. Reuse the neutral plaster micro-normal/roughness data as
-            // independent weave-scale response until the color pattern is no
-            // longer mistaken for physical relief under grazing light.
-            normalMap: configureTexture(sources.plasterNormal, { repeat: [2.5, 2.5] }),
-            roughnessMap: configureTexture(sources.plasterRoughness, { repeat: [2.5, 2.5] }),
+            normalMap: configureTexture(sources.fabricNormal),
+            roughnessMap: configureTexture(sources.fabricRoughness),
             aoMap: wallpaperOcclusion,
+        },
+        brass: {
+            roughnessMap: configureTexture(sources.brassRoughness, { repeat: [4, 4] }),
+        },
+        ceramic: {
+            roughnessMap: configureTexture(sources.ceramicRoughness, { repeat: [3, 3] }),
+        },
+        fabric: {
+            normalMap: configureTexture(sources.fabricNormal, { repeat: [12, 8] }),
+            roughnessMap: configureTexture(sources.fabricRoughness, { repeat: [12, 8] }),
         },
     })
     }, [sources])
@@ -945,7 +956,7 @@ function PlasterMaterial({ materials, color = HALL_PAINT, side, roughness = 0.88
             emissive="#8d6f59"
             emissiveIntensity={0.055}
             roughness={roughness}
-            normalScale={textured ? [0.42, 0.42] : undefined}
+            normalScale={textured ? [0.23, 0.23] : undefined}
             aoMapIntensity={textured ? 0.58 : 0}
             side={side}
         />
@@ -962,6 +973,14 @@ function applyBakedBounceToEmission(shader) {
 }
 
 function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8c8b4', side = THREE.FrontSide, shapeUv = false, phase = 0, reverseU = false, vertexColors = false }) {
+    const surfaceMaps = useMemo(() => {
+        const transform = museumSurfaceTextureTransform({ width, height, center: centerZ, shapeUv, reverseU, phase, tileSize: MUSEUM_MATERIAL_TILE_METERS.fabric })
+        return {
+            normalMap: configureTexture(materials.wallpaper.normalMap, transform),
+            roughnessMap: configureTexture(materials.wallpaper.roughnessMap, transform),
+        }
+    }, [materials.wallpaper, width, height, centerZ, shapeUv, reverseU, phase])
+    useEffect(() => () => Object.values(surfaceMaps).forEach(texture => texture.dispose()), [surfaceMaps])
     const map = useMemo(() => {
         const next = materials.wallpaper.map.clone()
         next.wrapS = THREE.RepeatWrapping
@@ -988,9 +1007,8 @@ function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8
     return (
         <meshPhysicalMaterial
             map={map}
-            normalMap={materials.wallpaper.normalMap}
-            normalScale={[0.11, 0.11]}
-            roughnessMap={materials.wallpaper.roughnessMap}
+            {...surfaceMaps}
+            normalScale={[0.25, 0.25]}
             aoMap={materials.wallpaper.aoMap}
             aoMapIntensity={0.46}
             color={color}
@@ -1125,20 +1143,27 @@ function CeilingMaterial({ materials, hallLength }) {
     )
 }
 
-function FloorMaterial({ materials, color = '#8b6948', vertexColors = false }) {
+function FloorMaterial({ materials, color = '#a18a73', vertexColors = false, width = 1, depth = 1, centerX = 0, centerZ = 0 }) {
+    const floorMaps = useMemo(() => {
+        const transform = museumFloorTextureTransform({ width, depth, centerX, centerZ })
+        return Object.fromEntries(['map', 'normalMap', 'roughnessMap'].map(name => [
+            name, configureTexture(materials.floor[name], { ...transform, color: name === 'map' }),
+        ]))
+    }, [materials.floor, width, depth, centerX, centerZ])
+    useEffect(() => () => Object.values(floorMaps).forEach(texture => texture.dispose()), [floorMaps])
     return (
         <meshPhysicalMaterial
             {...materials.floor}
+            {...floorMaps}
             normalScale={[0.26, 0.26]}
             color={color}
             emissive="#3f2b20"
             emissiveIntensity={0.065}
-            metalness={0.015}
-            roughness={0.56}
+            metalness={0}
+            roughness={0.96}
             aoMapIntensity={0.5}
             clearcoat={0.12}
             clearcoatRoughness={0.48}
-            envMapIntensity={0.22}
             vertexColors={vertexColors}
             onBeforeCompile={applyBakedBounceToEmission}
         />
@@ -1178,7 +1203,7 @@ function BakedIrradianceFloor({
 
     return (
         <mesh position={position} geometry={geometry} receiveShadow>
-            <FloorMaterial materials={materials} color={color} vertexColors />
+            <FloorMaterial materials={materials} color={color} vertexColors width={width} depth={depth} centerX={position[0]} centerZ={position[2]} />
         </mesh>
     )
 }
@@ -1195,11 +1220,11 @@ function bakedFloorOccluder(item, originX, originZ, strength = 0.1) {
     }
 }
 
-function WoodMaterial({ materials, color = '#6f4d31', roughness = 0.55 }) {
+function WoodMaterial({ materials, color = '#bba18b', roughness = 0.95 }) {
     return (
         <meshStandardMaterial
             {...materials.joinery}
-            normalScale={[0.46, 0.46]}
+            normalScale={[0.2, 0.2]}
             color={color}
             roughness={roughness}
             aoMapIntensity={0.46}
@@ -2352,8 +2377,7 @@ function GalleryFrameShells({ paintings, materials, compact = false }) {
             <instancedMesh ref={frame} args={[undefined, undefined, count]} castShadow receiveShadow>
                 <primitive object={roundedFrame} attach="geometry" />
                 <meshPhysicalMaterial
-                    {...materials.joinery}
-                    normalScale={[0.32, 0.32]}
+                    {...materials.brass}
                     color={GOLD}
                     roughness={0.34}
                     metalness={0.66}
@@ -2364,8 +2388,7 @@ function GalleryFrameShells({ paintings, materials, compact = false }) {
             {!compact && <instancedMesh ref={frameProfile} args={[undefined, undefined, count]} castShadow receiveShadow>
                 <primitive object={roundedFrame} attach="geometry" />
                 <meshPhysicalMaterial
-                    {...materials.joinery}
-                    normalScale={[0.25, 0.25]}
+                    {...materials.brass}
                     color="#8f6736"
                     roughness={0.3}
                     metalness={0.72}
@@ -3619,6 +3642,12 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
     const lightXs = useMemo(() => museumRoomCeilingFixtureXs(room, 4), [room])
     const endPlacardPose = useMemo(() => museumEndWallPlacardPose(room), [room])
     const { depth: shellDepth, centerX: shellCenterX } = museumRoomShell(room)
+    const runnerMaps = useMemo(() => Object.fromEntries(
+        Object.entries(materials.fabric).map(([name, texture]) => [name, configureTexture(texture, {
+            repeat: [Math.max(1, shellDepth - 0.48) / MUSEUM_MATERIAL_TILE_METERS.fabric, 2.5 / MUSEUM_MATERIAL_TILE_METERS.fabric],
+        })]),
+    ), [materials.fabric, shellDepth])
+    useEffect(() => () => Object.values(runnerMaps).forEach(texture => texture.dispose()), [runnerMaps])
     const ribXs = useMemo(() => museumRoomRibXs(room), [room])
     const roomFloorFixtures = useMemo(
         () => lightXs.map(x => Number((x - room.centerX).toFixed(3))),
@@ -3735,8 +3764,8 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
         <group>
             <group>
                 <mesh position={[thresholdCenterX, -0.02, room.centerZ]} scale={[thresholdDepth, 0.16, MUSEUM_DIMENSIONS.doorwayWidth - 0.18]} receiveShadow>
-                    <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                    <FloorMaterial materials={materials} color="#73573f" />
+                    <primitive object={THRESHOLD_FLOOR_GEOMETRY} attach="geometry" />
+                    <FloorMaterial materials={materials} color="#a18a73" width={thresholdDepth} depth={MUSEUM_DIMENSIONS.doorwayWidth - 0.18} centerX={thresholdCenterX} centerZ={room.centerZ} />
                 </mesh>
                 <mesh position={[thresholdCenterX, 0.055, room.centerZ]} scale={[thresholdDepth - 0.08, 0.025, MUSEUM_DIMENSIONS.doorwayWidth - 0.38]}>
                     <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
@@ -3765,13 +3794,13 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
                     position={[room.centerX, -0.11, room.centerZ]}
                     size={[room.depth, roomWidth]}
                     materials={materials}
-                    color="#73573f"
+                    color="#a18a73"
                     fixtures={roomFloorFixtures}
                     occluders={roomFloorOccluders}
                 />
             <mesh position={[shellCenterX, 0.012, room.centerZ]} scale={[Math.max(1, shellDepth - 0.48), 0.028, 2.5]} receiveShadow>
                 <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
-                <meshStandardMaterial color="#471f2a" roughness={0.92} />
+                <meshStandardMaterial {...runnerMaps} normalScale={[0.26, 0.26]} color="#471f2a" roughness={0.96} />
             </mesh>
             {[-1, 1].map(direction => (
                 <mesh
@@ -3953,7 +3982,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                 position={[0, -0.11, hallCenterZ]}
                 size={[MUSEUM_DIMENSIONS.hallHalfWidth * 2, layout.hallLength]}
                 materials={materials}
-                color="#73573f"
+                color="#a18a73"
                 mode="hall"
                 fixtures={hallFloorFixtures}
                 occluders={hallFloorOccluders}
@@ -4087,6 +4116,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
             <MuseumChandeliers
                 positions={chandelierPositions}
                 ceilingY={museumVaultHeightAt(0)}
+                materials={materials}
             />
             <MuseumDressing
                 layout={layout}

@@ -7,7 +7,7 @@ import { createMuseumChandelierGeometry } from '../../utils/museumChandeliers'
 // rebuilt or uploaded while the visitor moves through the museum.
 const GEOMETRY = createMuseumChandelierGeometry()
 
-export default function MuseumChandeliers({ positions, ceilingY }) {
+export default function MuseumChandeliers({ positions, ceilingY, materials }) {
     const brass = useRef(null)
     const opal = useRef(null)
     const light = useRef(null)
@@ -29,10 +29,10 @@ export default function MuseumChandeliers({ positions, ceilingY }) {
     return (
         <group>
             <instancedMesh ref={brass} args={[GEOMETRY.brass, undefined, positions.length]}>
-                <meshStandardMaterial color="#ac8751" metalness={0.82} roughness={0.28} envMapIntensity={1.3} />
+                <meshStandardMaterial {...materials.brass} color="#ac8751" metalness={0.82} roughness={0.34} />
             </instancedMesh>
             <instancedMesh ref={opal} args={[GEOMETRY.opal, undefined, positions.length]}>
-                <meshStandardMaterial color="#ece3d1" roughness={0.38} emissive="#ffe2b3" emissiveIntensity={0.84} />
+                <meshStandardMaterial {...materials.ceramic} color="#ece3d1" roughness={0.42} emissive="#ffe2b3" emissiveIntensity={0.84} />
             </instancedMesh>
             <instancedMesh ref={light} args={[GEOMETRY.light, undefined, positions.length]}>
                 <meshStandardMaterial color="#fff2d5" roughness={0.55} emissive="#ffdc99" emissiveIntensity={1.5} side={THREE.DoubleSide} />

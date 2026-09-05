@@ -6,13 +6,14 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { museumGalleryDisplayParts, museumGalleryDisplays, museumReadingProps } from '../../utils/museumDecor'
 import { createMuseumDisplayPartGeometry } from '../../utils/museumDisplayGeometry'
+import { applyMuseumDisplayResponse } from '../../utils/museumMaterialResponse'
+import { MUSEUM_MATERIAL_TILE_METERS } from '../../utils/museumMaterialAssets'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { museumHallSconcePlacements } from '../../utils/museumSupport'
 import { MUSEUM_DIMENSIONS } from '../../utils/museumLayout'
 import { MUSEUM_PLANT_FORM, MUSEUM_PLANT_LEAF_MESH, museumPlantLeaves } from '../../utils/museumPlants'
 
 const DARK_BRASS = '#735332'
-let textileDetailTexture = null
 const BENCH_ROUNDED_BOX = new RoundedBoxGeometry(1, 1, 1, 3, 0.1)
 const BENCH_PALETTES = [
     { base: '#342126', cushion: '#75464f', rugOuter: '#3e282c', rugInner: '#5b3940', rugBorder: '#8a744f', rugCenter: '#48292f' },
@@ -20,39 +21,33 @@ const BENCH_PALETTES = [
     { base: '#352d22', cushion: '#70604b', rugOuter: '#393128', rugInner: '#5b4e3d', rugBorder: '#a28958', rugCenter: '#493d30' },
 ]
 
-function getTextileDetailTexture() {
-    if (textileDetailTexture || typeof document === 'undefined') return textileDetailTexture
-    const canvas = document.createElement('canvas')
-    canvas.width = 64
-    canvas.height = 64
-    const context = canvas.getContext('2d')
-    context.fillStyle = '#777'
-    context.fillRect(0, 0, 64, 64)
-    context.strokeStyle = 'rgba(235,235,235,.3)'
-    context.lineWidth = 1
-    for (let offset = -64; offset < 128; offset += 5) {
-        context.beginPath()
-        context.moveTo(offset, 0)
-        context.lineTo(offset - 64, 64)
-        context.stroke()
-        context.beginPath()
-        context.moveTo(offset, 0)
-        context.lineTo(offset + 64, 64)
-        context.stroke()
-    }
-    textileDetailTexture = new THREE.CanvasTexture(canvas)
-    textileDetailTexture.wrapS = THREE.RepeatWrapping
-    textileDetailTexture.wrapT = THREE.RepeatWrapping
-    textileDetailTexture.repeat.set(8, 12)
-    textileDetailTexture.anisotropy = 2
-    textileDetailTexture.needsUpdate = true
-    return textileDetailTexture
+function useTextileMaps(materials, width, depth) {
+    const maps = useMemo(() => Object.fromEntries(
+        Object.entries(materials.fabric).map(([name, source]) => {
+            const texture = source.clone()
+            texture.repeat.set(width / MUSEUM_MATERIAL_TILE_METERS.fabric, depth / MUSEUM_MATERIAL_TILE_METERS.fabric)
+            texture.needsUpdate = true
+            return [name, texture]
+        }),
+    ), [materials.fabric, width, depth])
+    useEffect(() => () => Object.values(maps).forEach(texture => texture.dispose()), [maps])
+    return maps
 }
 
 const PLANT_LEAF_GEOMETRY = new THREE.BufferGeometry()
 PLANT_LEAF_GEOMETRY.setAttribute('position', new THREE.Float32BufferAttribute(MUSEUM_PLANT_LEAF_MESH.positions, 3))
 PLANT_LEAF_GEOMETRY.setIndex(MUSEUM_PLANT_LEAF_MESH.indices)
 PLANT_LEAF_GEOMETRY.computeVertexNormals()
+// A lifted midrib and darker edges modulate each existing leaf instance; this
+// adds natural variation without an alpha texture or extra foliage polygons.
+const leafColors = MUSEUM_PLANT_LEAF_MESH.positions.flatMap((_, index, positions) => {
+    if (index % 3) return []
+    const edge = Math.min(1, Math.abs(positions[index]) / 0.115)
+    const tip = positions[index + 2]
+    const shade = 0.74 + (1 - edge) * 0.22 - Math.max(0, tip - 0.75) * 0.2
+    return [shade * 0.94, shade, shade * 0.88]
+})
+PLANT_LEAF_GEOMETRY.setAttribute('color', new THREE.Float32BufferAttribute(leafColors, 3))
 const PLANT_POT_GEOMETRY = new THREE.LatheGeometry([
     new THREE.Vector2(0, 0),
     new THREE.Vector2(MUSEUM_PLANT_FORM.potBottomRadius, 0),
@@ -115,7 +110,7 @@ function RoundedBoxShape({ size, radius = 0.08, segments = 3 }) {
     return <primitive object={geometry} attach="geometry" />
 }
 
-function InstancedPlants({ plants, castDynamicShadows = false }) {
+function InstancedPlants({ plants, materials, castDynamicShadows = false }) {
     const pots = useRef(null)
     const soil = useRef(null)
     const stems = useRef(null)
@@ -196,8 +191,9 @@ function InstancedPlants({ plants, castDynamicShadows = false }) {
         <>
             <instancedMesh ref={pots} args={[PLANT_POT_GEOMETRY, undefined, plantCount]} castShadow={castDynamicShadows} receiveShadow>
                 <meshPhysicalMaterial
-                    color="#a1937d"
-                    roughness={0.48}
+                    {...materials.ceramic}
+                    color="#b6ab96"
+                    roughness={0.51}
                     clearcoat={0.18}
                     clearcoatRoughness={0.68}
                 />
@@ -211,13 +207,14 @@ function InstancedPlants({ plants, castDynamicShadows = false }) {
                 <meshStandardMaterial color="#3f5e37" roughness={0.88} />
             </instancedMesh>
             <instancedMesh ref={leaves} args={[PLANT_LEAF_GEOMETRY, undefined, plantCount * MUSEUM_PLANT_FORM.leafCount]} castShadow={castDynamicShadows}>
-                <meshStandardMaterial color="#ffffff" roughness={0.68} side={THREE.DoubleSide} />
+                <meshStandardMaterial color="#ffffff" vertexColors roughness={0.58} side={THREE.DoubleSide} />
             </instancedMesh>
         </>
     )
 }
 
-function RunnerCarpet({ layout }) {
+function RunnerCarpet({ layout, materials }) {
+    const textileMaps = useTextileMaps(materials, 3.1, layout.hallLength - 0.72)
     const texture = useMemo(() => {
         const canvas = document.createElement('canvas')
         canvas.width = 256
@@ -261,7 +258,7 @@ function RunnerCarpet({ layout }) {
         <group>
             <mesh position={[0, 0.018, centerZ]} receiveShadow>
                 <boxGeometry args={[3.1, 0.045, layout.hallLength - 0.72]} />
-                <meshStandardMaterial map={texture} bumpMap={texture} roughness={0.97} bumpScale={0.012} />
+                <meshStandardMaterial map={texture} {...textileMaps} roughness={0.97} normalScale={[0.28, 0.28]} />
             </mesh>
             {[-1.56, 1.56].map(x => (
                 <mesh key={x} position={[x, 0.034, centerZ]}>
@@ -376,7 +373,7 @@ function ReadingRoomDetails({ layout }) {
     )
 }
 
-function GalleryDisplayFurniture({ layout }) {
+function GalleryDisplayFurniture({ layout, materials }) {
     const geometries = useMemo(() => {
         const bySurface = { wood: [], brass: [], ceramic: [] }
         for (const display of museumGalleryDisplays(layout)) {
@@ -394,18 +391,18 @@ function GalleryDisplayFurniture({ layout }) {
     useEffect(() => () => {
         Object.values(geometries).forEach(geometry => geometry?.dispose())
     }, [geometries])
-    // Three global material batches hold every display station. No live lights,
-    // shadow passes, texture downloads, or per-frame transforms are introduced.
+    // Three global material batches hold every display station. All stations
+    // share the same compact material maps; none adds a live light or shadow pass.
     return (
         <group>
-            {geometries.wood && <mesh geometry={geometries.wood}><meshStandardMaterial vertexColors roughness={0.57} metalness={0.08} /></mesh>}
-            {geometries.brass && <mesh geometry={geometries.brass}><meshStandardMaterial vertexColors roughness={0.32} metalness={0.74} /></mesh>}
-            {geometries.ceramic && <mesh geometry={geometries.ceramic}><meshStandardMaterial vertexColors roughness={0.43} metalness={0.03} /></mesh>}
+            {geometries.wood && <mesh geometry={geometries.wood}><meshStandardMaterial map={materials.joinery.map} normalMap={materials.joinery.normalMap} normalScale={[0.2, 0.2]} roughnessMap={materials.joinery.roughnessMap} vertexColors roughness={1} metalness={1} onBeforeCompile={applyMuseumDisplayResponse} /></mesh>}
+            {geometries.brass && <mesh geometry={geometries.brass}><meshStandardMaterial {...materials.brass} vertexColors roughness={1} metalness={1} onBeforeCompile={applyMuseumDisplayResponse} /></mesh>}
+            {geometries.ceramic && <mesh geometry={geometries.ceramic}><meshStandardMaterial {...materials.ceramic} vertexColors roughness={1} metalness={1} onBeforeCompile={applyMuseumDisplayResponse} /></mesh>}
         </group>
     )
 }
 
-function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
+function InstancedRoomBenches({ rooms, materials, castDynamicShadows = false }) {
     const benches = useMemo(() => rooms.flatMap((room, roomIndex) => (
         room.benches.map((bench, benchIndex) => ({
             bench,
@@ -419,7 +416,8 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
     const trimBands = useRef(null)
     const tuftButtons = useRef(null)
     const legs = useRef(null)
-    const textileDetail = useMemo(() => getTextileDetailTexture(), [])
+    const [benchWidth = 1.86, , benchDepth = 3.2] = benches[0]?.bench.size || []
+    const textileMaps = useTextileMaps(materials, benchWidth + 0.04, benchDepth + 0.04)
 
     useEffect(() => {
         const parent = new THREE.Matrix4()
@@ -493,10 +491,10 @@ function InstancedRoomBenches({ rooms, castDynamicShadows = false }) {
     return (
         <>
             <instancedMesh ref={bases} args={[BENCH_ROUNDED_BOX, undefined, benches.length]} castShadow={castDynamicShadows}>
-                <meshStandardMaterial color="#ffffff" vertexColors roughness={0.96} />
+                <meshStandardMaterial color="#ffffff" vertexColors {...textileMaps} normalScale={[0.25, 0.25]} roughness={0.96} />
             </instancedMesh>
             <instancedMesh ref={cushions} args={[BENCH_ROUNDED_BOX, undefined, benches.length]} castShadow={castDynamicShadows}>
-                <meshPhysicalMaterial color="#ffffff" vertexColors bumpMap={textileDetail} bumpScale={0.026} roughness={0.82} sheen={0.68} sheenColor="#d5abb0" sheenRoughness={0.72} emissive="#271216" emissiveIntensity={0.1} />
+                <meshPhysicalMaterial color="#ffffff" vertexColors {...textileMaps} normalScale={[0.3, 0.3]} roughness={0.82} sheen={0.68} sheenColor="#d5abb0" sheenRoughness={0.72} emissive="#271216" emissiveIntensity={0.1} />
             </instancedMesh>
             <instancedMesh ref={trimBands} args={[BENCH_ROUNDED_BOX, undefined, benches.length]} castShadow={castDynamicShadows}>
                 <meshPhysicalMaterial color="#9a7441" metalness={0.7} roughness={0.28} clearcoat={0.28} clearcoatRoughness={0.42} />
@@ -553,11 +551,11 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
                 <meshPhysicalMaterial color="#281a14" roughness={0.62} clearcoat={0.12} />
             </mesh>
             <mesh geometry={facadeGeometry} castShadow receiveShadow>
-                <WoodMaterial materials={materials} color="#704834" roughness={0.44} />
+                <WoodMaterial materials={materials} color="#bba18b" roughness={0.95} />
             </mesh>
             <mesh position={[0, 0.76, 0]} castShadow receiveShadow>
                 <RoundedBoxShape size={[layout.desk.size[0] + 0.18, 0.12, layout.desk.size[2] + 0.12]} radius={0.06} segments={4} />
-                <meshPhysicalMaterial color="#d1c7b8" roughness={0.38} clearcoat={0.34} clearcoatRoughness={0.52} />
+                <meshPhysicalMaterial {...materials.ceramic} color="#d1c7b8" roughness={0.48} clearcoat={0.16} clearcoatRoughness={0.52} />
             </mesh>
             <mesh position={[0, 0.04, 0.592]} castShadow>
                 <RoundedBoxShape size={[3.16, 0.82, 0.055]} radius={0.045} segments={4} />
@@ -565,7 +563,7 @@ function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
             </mesh>
             <mesh position={[0, 0.04, 0.626]}>
                 <RoundedBoxShape size={[3.0, 0.69, 0.018]} radius={0.035} segments={3} />
-                <meshStandardMaterial color="#3c261d" roughness={0.7} />
+                <meshStandardMaterial {...materials.joinery} normalScale={[0.2, 0.2]} color="#90725e" roughness={0.95} />
             </mesh>
             {[-1.86, -1.56, -1.26, 1.26, 1.56, 1.86].map(fluteX => (
                 <mesh key={fluteX} position={[fluteX, -0.02, 0.565]} castShadow>
@@ -717,14 +715,14 @@ export default function MuseumDressing({ layout, materials, LabelPlane, PlasterM
     return (
         <group>
             <EnvironmentLighting intensity={reflectionsEnabled ? 0.22 : 0.15} />
-            <RunnerCarpet layout={layout} />
+            <RunnerCarpet layout={layout} materials={materials} />
             <LobbyEntrance materials={materials} LabelPlane={LabelPlane} PlasterMaterial={PlasterMaterial} />
             <ReceptionDesk layout={layout} materials={materials} LabelPlane={LabelPlane} WoodMaterial={WoodMaterial} />
-            <InstancedPlants plants={staticPlants} />
-            <InstancedPlants plants={roomPlants} castDynamicShadows={shadowsEnabled} />
-            <InstancedRoomBenches rooms={dressedRooms} castDynamicShadows={shadowsEnabled} />
+            <InstancedPlants plants={staticPlants} materials={materials} />
+            <InstancedPlants plants={roomPlants} materials={materials} castDynamicShadows={shadowsEnabled} />
+            <InstancedRoomBenches rooms={dressedRooms} materials={materials} castDynamicShadows={shadowsEnabled} />
             <ReadingRoomDetails layout={layout} />
-            <GalleryDisplayFurniture layout={layout} />
+            <GalleryDisplayFurniture layout={layout} materials={materials} />
             {/* Place sconces on the solid wall between galleries, clear of the
                 room end walls and arched entry trim. Every lens uses the same
                 emissive and baked-light treatment; selective live point lights
