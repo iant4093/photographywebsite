@@ -120,7 +120,7 @@ class ObservabilityTemplateTests(unittest.TestCase):
             self.assertIn("ian-photography-" + edge + "-5xx-${Stage}", waf)
             self.assertIn("ian-photography-" + edge + "-5xx-${Stage}", notifications)
         self.assertIn('"edge.alarm": ("high", "edge-health")', notifications)
-        self.assertIn('"eventName":"edge.alarm"', notifications)
+        self.assertIn('"ian-photography-frontend-5xx-" + STAGE: "edge.alarm"', notifications)
 
     def test_validation_lists_and_release_identity_remain_complete(self):
         self.assertIn("VITE_RELEASE_SHA: ${{ github.sha }}", WORKFLOW)

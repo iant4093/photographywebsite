@@ -142,8 +142,8 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("KmsMasterKeyId", NOTIFICATIONS)
         self.assertIn("events.amazonaws.com", NOTIFICATIONS)
         self.assertIn("cloudwatch.amazonaws.com", NOTIFICATIONS)
-        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 2)
-        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 2)
+        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 1)
+        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 1)
         self.assertIn("SqsManagedSseEnabled: true", NOTIFICATIONS)
         self.assertIn("MetricName: ApproximateNumberOfMessagesVisible", NOTIFICATIONS)
         self.assertIn("AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'", NOTIFICATIONS)
@@ -215,7 +215,8 @@ class SecurityTemplateTests(unittest.TestCase):
             resource_block(NOTIFICATIONS, "SecurityEventDlqAlarm"),
         )
         waf_forward = resource_block(NOTIFICATIONS, "WafAlarmForwardRule")
-        self.assertIn('"eventName":"waf.alarm"', waf_forward)
+        self.assertIn("InputTransformer:", waf_forward)
+        self.assertIn("$.detail.alarmName", waf_forward)
         self.assertIn("region: [us-east-1]", waf_forward)
 
     def test_singletons_require_explicit_confirmed_absent_modes(self) -> None:
@@ -473,6 +474,14 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertEqual(result, {"forwarded": 1})
         self.assertEqual(len(published), 1)
         self.assertEqual(json.loads(published[0]["Message"]), valid)
+
+        for name, expected in (("frontend-5xx", "edge.alarm"), ("media-5xx", "edge.alarm"), ("waf-blocked", "waf.alarm")):
+            signal = {"schemaVersion": 1, "alarmName": "ian-photography-" + name + "-prod", "stage": "prod"}
+            result = namespace["_validated"](json.dumps(signal))
+            self.assertEqual(result["eventName"], expected)
+            self.assertNotIn("alarmName", result)
+        with self.assertRaises(ValueError):
+            namespace["_validated"](json.dumps({"schemaVersion": 1, "alarmName": "unrelated-account-alarm", "stage": "prod"}))
 
         tampered = {**valid, "severity": "high", "private": "must-not-forward"}
         with self.assertRaisesRegex(ValueError, "invalid security signal shape"):

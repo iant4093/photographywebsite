@@ -124,7 +124,7 @@
     },
     {
       "id": "edge-health",
-      "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm", "EdgeAlarmForwardRule"],
+      "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm"],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#edge-health",

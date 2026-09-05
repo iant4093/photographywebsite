@@ -95,7 +95,9 @@ class AccountSecurityBaselineTests(unittest.TestCase):
                 resource_type = type_match.group("type") if type_match else ""
                 if resource_type == "AWS::CloudWatch::Alarm":
                     declared.add(logical_id)
-                elif resource_type == "AWS::Events::Rule" and '"eventName"' in body:
+                elif resource_type == "AWS::Events::Rule" and (
+                    '"eventName"' in body or '"alarmName":<alarmName>' in body
+                ):
                     declared.add(logical_id)
                 elif resource_type == "AWS::Budgets::Budget":
                     notifications = re.findall(

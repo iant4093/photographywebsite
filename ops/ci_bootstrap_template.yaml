@@ -791,7 +791,9 @@ Resources:
               - events:RemoveTargets
               - events:TagResource
               - events:UntagResource
-            Resource: !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/${ApplicationStackName}-*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/${ApplicationStackName}-*'
+              - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/ian-photography-waf-alarm-prod'
   CloudFormationExecutionDataAndMessagingPolicy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: RetainExceptOnCreate

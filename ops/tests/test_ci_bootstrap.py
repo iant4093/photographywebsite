@@ -764,6 +764,8 @@ fi
     def test_eventbridge_rule_lifecycle_is_scoped_to_application_rules(self):
         execution = execution_permissions()
         rules = statement_block(execution, "ManageStackEventBridgeRules")
+        self.assertIn("rule/ian-photography-waf-alarm-prod", rules)
+        self.assertNotIn("rule/ian-photography-*", rules)
         for action in (
             "events:DeleteRule",
             "events:DescribeRule",

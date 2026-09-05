@@ -99,7 +99,6 @@ Resources:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-edge-alarm-${Stage}'
 
   SecurityEventDlq:
     Type: AWS::SQS::Queue
@@ -134,7 +133,6 @@ Resources:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-edge-alarm-${Stage}'
 
   SecuritySignalProcessorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -234,6 +232,19 @@ Resources:
                   value = json.loads(body)
               except (TypeError, ValueError) as error:
                   raise ValueError("invalid security signal json") from error
+              if isinstance(value, dict) and set(value) == {"schemaVersion", "alarmName", "stage"}:
+                  names = {
+                      "ian-photography-waf-blocked-" + STAGE: "waf.alarm",
+                      "ian-photography-frontend-5xx-" + STAGE: "edge.alarm",
+                      "ian-photography-media-5xx-" + STAGE: "edge.alarm",
+                  }
+                  event_name = names.get(value.get("alarmName"))
+                  if event_name is None or value["schemaVersion"] != 1 or value["stage"] != STAGE:
+                      raise ValueError("unknown edge alarm signal")
+                  severity, anchor = CONTRACTS[event_name]
+                  value = {"schemaVersion": 1, "eventName": event_name,
+                           "severity": severity, "stage": STAGE,
+                           "runbook": "ops/ALARM_REGISTRY.md#" + anchor}
               if not isinstance(value, dict) or set(value) != KEYS:
                   raise ValueError("invalid security signal shape")
               contract = CONTRACTS.get(value.get("eventName"))
@@ -284,7 +295,7 @@ Resources:
       - SecurityEventDlqPolicy
     Properties:
       Name: !Sub 'ian-photography-waf-alarm-${Stage}'
-      Description: Converts exact us-east-1 WAF alarm transitions into one privacy-safe security signal.
+      Description: Converts exact us-east-1 website edge and WAF alarms into validated fixed signals.
       EventPattern:
         source: [aws.cloudwatch]
         detail-type: [CloudWatch Alarm State Change]
@@ -293,35 +304,6 @@ Resources:
         detail:
           alarmName:
             - !Sub 'ian-photography-waf-blocked-${Stage}'
-          state:
-            value: [ALARM]
-      State: ENABLED
-      Targets:
-        - Id: SecuritySignalQueue
-          Arn: !GetAtt SecuritySignalQueue.Arn
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"waf.alarm","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#waf-observation"}
-          DeadLetterConfig:
-            Arn: !GetAtt SecurityEventDlq.Arn
-          RetryPolicy:
-            MaximumEventAgeInSeconds: 3600
-            MaximumRetryAttempts: 10
-
-  EdgeAlarmForwardRule:
-    Type: AWS::Events::Rule
-    DependsOn:
-      - SecuritySignalQueuePolicy
-      - SecurityEventDlqPolicy
-    Properties:
-      Name: !Sub 'ian-photography-edge-alarm-${Stage}'
-      Description: Converts exact us-east-1 CloudFront alarm transitions into one privacy-safe security signal.
-      EventPattern:
-        source: [aws.cloudwatch]
-        detail-type: [CloudWatch Alarm State Change]
-        account: [!Ref AWS::AccountId]
-        region: [us-east-1]
-        detail:
-          alarmName:
             - !Sub 'ian-photography-frontend-5xx-${Stage}'
             - !Sub 'ian-photography-media-5xx-${Stage}'
           state:
@@ -330,8 +312,11 @@ Resources:
       Targets:
         - Id: SecuritySignalQueue
           Arn: !GetAtt SecuritySignalQueue.Arn
-          Input: !Sub >-
-            {"schemaVersion":1,"eventName":"edge.alarm","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#edge-health"}
+          InputTransformer:
+            InputPathsMap:
+              alarmName: $.detail.alarmName
+            InputTemplate: !Sub >-
+              {"schemaVersion":1,"alarmName":<alarmName>,"stage":"${Stage}"}
           DeadLetterConfig:
             Arn: !GetAtt SecurityEventDlq.Arn
           RetryPolicy:
