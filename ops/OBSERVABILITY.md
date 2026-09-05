@@ -1,10 +1,9 @@
 # Website monitoring and cost controls
 
-The home-region `ian-photography-observability` stack retains ownership of both
-CloudFront monitoring subscriptions with `RealtimeMetricsSubscriptionStatus:
-Disabled`. Its dashboard contains only free request/error metrics. Keeping the
-subscriptions explicitly disabled prevents a later deployment from re-enabling
-paid metrics or leaving unmanaged resources behind.
+The home-region `ian-photography-observability` stack owns a dashboard containing
+only free request/error metrics. The two paid CloudFront monitoring subscriptions
+have been removed from both AWS and the template, so future stack deployments do
+not recreate them.
 
 The existing `ian-photography-front-door-waf` stack owns the frontend and media
 5xx alarms in **us-east-1**, where CloudFront publishes its metrics. Pass the
@@ -35,14 +34,20 @@ paid CloudFront or API route metrics.
 
 Run `cfn-lint` on the affected templates, the operations suite, backend health
 and audit tests, and frontend checks. The read-only `observability_preflight.py`
-update mode accepts enabled or disabled subscriptions only when both exact
-resources are owned by the existing stack. Create mode still requires confirmed
-absence. It never mutates AWS resources.
+update mode accepts confirmed absence after retirement. Before retirement it
+accepts enabled or disabled subscriptions only when both exact resources are
+owned by the existing stack. Create mode requires confirmed absence. It never
+mutates AWS resources.
 
 Deploy notification forwarding before the new us-east-1 alarms. Confirm the
 new alarms read real CloudFront data and have their exact EventBridge route,
 then update the home observability stack to remove the two obsolete alarms and
-disable the additional metrics. Deploy the application metric/health changes
+paid subscriptions. For legacy subscriptions, first change only their
+`DeletionPolicy` from `Retain` to `Delete`, then remove their resources in a second
+reviewed change set. The deployed CloudFormation resource provider has no update
+handler and rejects changing an existing subscription to `Disabled`. Deleting a
+monitoring subscription disables additional metrics without changing its
+distribution. Deploy the application metric/health changes
 and UI copy. Review each CloudFormation change set, preserve live secret
 parameters and unrelated resources, and verify final drift and public health.
 

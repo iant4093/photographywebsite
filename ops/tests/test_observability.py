@@ -54,19 +54,11 @@ class ObservabilityTemplateTests(unittest.TestCase):
             text=True,
         )
 
-    def test_paid_cloudfront_singletons_are_exact_retained_and_preflighted(self):
-        for logical_id, parameter in (
-            ("FrontendMonitoringSubscription", "FrontendDistributionId"),
-            ("MediaMonitoringSubscription", "MediaDistributionId"),
-        ):
-            block = resource_block(logical_id)
-            self.assertIn("Type: AWS::CloudFront::MonitoringSubscription", block)
-            self.assertIn("DeletionPolicy: Retain", block)
-            self.assertIn("UpdateReplacePolicy: Retain", block)
-            self.assertIn(f"DistributionId: !Ref {parameter}", block)
-            self.assertIn("RealtimeMetricsSubscriptionStatus: Disabled", block)
+    def test_paid_cloudfront_subscriptions_are_absent_and_retirement_is_preflighted(self):
+        self.assertNotIn("AWS::CloudFront::MonitoringSubscription", TEMPLATE)
         self.assertIn("DistributionIdsMustBeDistinct", TEMPLATE)
         self.assertIn("observability_preflight.py", RUNBOOK)
+        self.assertIn("DeletionPolicy", RUNBOOK)
 
     def test_unused_browser_and_synthetic_components_are_removed(self):
         for removed in (
@@ -93,8 +85,6 @@ class ObservabilityTemplateTests(unittest.TestCase):
         self.assertEqual(
             set(re.findall(r"(?m)^  ([A-Za-z][A-Za-z0-9]+):$", resources)),
             {
-                "FrontendMonitoringSubscription",
-                "MediaMonitoringSubscription",
                 "ObservabilityDashboard",
             },
         )
@@ -226,7 +216,11 @@ class MonitoringSubscriptionTests(unittest.TestCase):
         ), self.assertRaisesRegex(SystemExit, "already exists"):
             observability_preflight.validate_preflight(**self.base())
 
-    def test_update_requires_enabled_exact_stack_owned_subscriptions(self):
+    def test_update_requires_absence_or_exact_stack_owned_subscriptions(self):
+        with patch.object(observability_preflight, "aws_json", side_effect=self.aws_for()), patch.object(observability_preflight, "monitoring_subscription", return_value=None):
+            report = observability_preflight.validate_preflight(**self.base(deployment_mode="update"))
+        self.assertEqual(report["monitoringSubscriptionOwnership"], "confirmed-absent")
+        self.assertEqual(report["existingSubscriptionCount"], 0)
         enabled = {
             "MonitoringSubscription": {
                 "RealtimeMetricsSubscriptionConfig": {

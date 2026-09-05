@@ -181,7 +181,7 @@ generic provider's `kms:Decrypt` is still denied. The backup freshness
 these exceptions to the exact source properties and continue to forbid direct
 Lambda invocation, queue message reads, and KMS decryption.
 
-The observability stack contains only disabled CloudFront subscriptions and a
+The observability stack contains only a
 free-metric dashboard, so the scheduled audit can use ordinary whole-stack drift
 detection without a service-specific exclusion or posture
 bypass. The edge alarms belong to the us-east-1 WAF stack. Browser telemetry and

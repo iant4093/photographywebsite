@@ -2,8 +2,8 @@
 """Read-only ownership preflight for paid CloudFront monitoring subscriptions.
 
 Create mode requires both distributions to have no monitoring subscription.
-Update mode requires both existing subscriptions to be owned by the exact
-CloudFormation stack and logical resources in ``observability_template.yaml``.
+Update mode accepts confirmed absence after retirement, or requires both legacy
+subscriptions to be owned by the exact CloudFormation stack before retirement.
 The helper calls only STS, CloudFront GET, and CloudFormation describe APIs.
 """
 
@@ -159,6 +159,8 @@ def validate_preflight(
                 "Refusing create: a paid monitoring subscription already exists; "
                 "inventory its owner before importing or removing it."
             )
+        ownership = "confirmed-absent"
+    elif not existing:
         ownership = "confirmed-absent"
     else:
         if existing != ["frontend", "media"]:

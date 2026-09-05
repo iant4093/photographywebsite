@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Retained CloudFront edge observability for Ian Truong Photography. The stack
-  keeps additional metrics disabled and owns a dashboard of free metrics; it does not collect browser telemetry or run
+  Free CloudFront edge observability for Ian Truong Photography. The stack
+  owns a dashboard of free metrics without paid monitoring subscriptions; it does not collect browser telemetry or run
   synthetic browser probes.
 
 Parameters:
@@ -32,26 +32,6 @@ Rules:
         AssertDescription: Frontend and media distributions must have distinct IDs.
 
 Resources:
-  FrontendMonitoringSubscription:
-    Type: AWS::CloudFront::MonitoringSubscription
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      DistributionId: !Ref FrontendDistributionId
-      MonitoringSubscription:
-        RealtimeMetricsSubscriptionConfig:
-          RealtimeMetricsSubscriptionStatus: Disabled
-
-  MediaMonitoringSubscription:
-    Type: AWS::CloudFront::MonitoringSubscription
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      DistributionId: !Ref MediaDistributionId
-      MonitoringSubscription:
-        RealtimeMetricsSubscriptionConfig:
-          RealtimeMetricsSubscriptionStatus: Disabled
-
   ObservabilityDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
