@@ -6,7 +6,6 @@ import {
     mediaDisplayUrl,
     mediaId,
     mediaPreviewSrcSet,
-    mediaThumbnailUrl,
 } from '../utils/mediaUrls'
 import LightboxShareButton from './LightboxShareButton'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
@@ -102,7 +101,6 @@ function PhotoLightbox({
     const [preview, setPreview] = useState(() => ({ id: activeId, ready: null, outgoing: null }))
     const loadedImageId = preview.ready?.id
     const outgoingImage = preview.outgoing
-    const thumbUrl = activeImage ? mediaThumbnailUrl(activeImage) : ''
     const activeRawUrl = activeImage ? mediaDisplayUrl(activeImage) : ''
     const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
     const [comparison, setComparison] = useState(() => freshComparison(activeId))
@@ -347,15 +345,6 @@ function PhotoLightbox({
                             className="linen-lightbox-media absolute inset-0"
                             style={{ gridTemplate: 'minmax(0, 1fr) / minmax(0, 1fr)' }}
                         >
-                            <img
-                                key={`placeholder-${activeId}`}
-                                src={thumbUrl}
-                                alt=""
-                                width={activeImage.width}
-                                height={activeImage.height}
-                                style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: showingBefore || loadedImageId === activeId ? 'hidden' : undefined }}
-                                className={`linen-lightbox-placeholder object-contain blur-sm opacity-50 z-10 pointer-events-none ${showingBefore || loadedImageId === activeId ? 'is-placeholder-hidden' : ''}`}
-                            />
                             {outgoingImage && (
                                 <img
                                     key={`outgoing-${activeId}`}

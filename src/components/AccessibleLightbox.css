@@ -80,16 +80,6 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
   transition-delay: 0s, 360ms;
 }
 
-.linen-photo-lightbox .linen-lightbox-placeholder {
-  transition:
-    opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
-    visibility 0s linear 360ms;
-}
-
-.linen-photo-lightbox .linen-lightbox-placeholder.is-placeholder-hidden {
-  opacity: 0;
-}
-
 .linen-photo-lightbox .linen-lightbox-before[aria-pressed="true"] {
   border-color: rgba(255, 255, 255, 0.8);
   background: rgba(255, 255, 255, 0.16);
@@ -174,8 +164,7 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
   }
 
   .linen-photo-lightbox .linen-lightbox-edited,
-  .linen-photo-lightbox .linen-lightbox-original,
-  .linen-photo-lightbox .linen-lightbox-placeholder {
+  .linen-photo-lightbox .linen-lightbox-original {
     transition: none !important;
   }
 

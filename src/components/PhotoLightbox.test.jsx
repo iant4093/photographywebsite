@@ -8,7 +8,6 @@ vi.mock('../utils/mediaUrls', () => ({
   mediaDisplayUrl: image => image.url,
   mediaId: image => image.id,
   mediaPreviewSrcSet: () => '',
-  mediaThumbnailUrl: image => image.thumbnailUrl,
 }))
 
 const landscape = {
@@ -128,7 +127,7 @@ describe('PhotoLightbox', () => {
       expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeInTheDocument()
       act(() => vi.advanceTimersByTime(400))
       expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
-      expect(document.querySelector('.linen-lightbox-placeholder')).not.toHaveClass('is-placeholder-hidden')
+      expect(document.querySelector('.linen-lightbox-placeholder')).toBeNull()
       expect(screen.getByAltText('Full size preview')).not.toHaveClass('is-loaded')
       fireEvent.load(screen.getByAltText('Full size preview'))
       expect(screen.getByAltText('Full size preview')).toHaveClass('is-loaded')
@@ -364,8 +363,6 @@ describe('PhotoLightbox', () => {
     render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} />)
     const edited = screen.getByAltText('Full size preview')
     fireEvent.load(edited)
-    const placeholder = document.querySelector('.linen-lightbox-placeholder')
-    expect(placeholder).toHaveClass('is-placeholder-hidden')
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
     const original = screen.getByAltText('Before — Camera JPG')
     let finishDecode
@@ -380,7 +377,6 @@ describe('PhotoLightbox', () => {
     expect(edited).toHaveClass('is-comparison-hidden')
 
     fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
-    expect(placeholder).toHaveClass('is-placeholder-hidden')
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
     expect(original.decode).toHaveBeenCalledOnce()
     expect(screen.getByAltText('Before — Camera JPG')).toBe(original)
