@@ -172,15 +172,33 @@ describe('museum layout', () => {
         }
     })
 
+    it('keeps display stations solid while preserving the aisle and every doorway', () => {
+        const layout = buildMuseumLayout(buildMuseumCatalog(
+            Array.from({ length: 36 }, (_, index) => album(`display-${index}`, `Room ${Math.floor(index / 12)}`)),
+        ))
+        expect(layout.dressing.displays.length).toBeGreaterThan(6)
+        for (const display of layout.dressing.displays) {
+            expect(layout.obstacles).toContain(display)
+            expect(isMuseumPositionWalkable(layout, display.position[0], display.position[2])).toBe(false)
+        }
+        for (let z = 3; z > layout.hallBackZ + 0.5; z -= 0.2) {
+            expect(isMuseumPositionWalkable(layout, 0, z)).toBe(true)
+        }
+        for (const room of layout.rooms) {
+            for (let x = 0; x <= 6; x += 0.2) {
+                expect(isMuseumPositionWalkable(layout, room.side * x, room.centerZ)).toBe(true)
+            }
+        }
+    })
+
     it('treats raised hallway wall panels as solid without narrowing doorways', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([
             album('left-a', 'Hikes'),
             album('right-a', 'Astro'),
         ]))
-        // Use the rear pair so the intentionally collidable hall plant on the
-        // front-left panel does not mask the architecture boundary itself.
-        const panelZ = MUSEUM_DIMENSIONS.firstBayZ
-            - (((MUSEUM_DIMENSIONS.doorwayWidth / 2) + (MUSEUM_DIMENSIONS.baySpacing / 2)) / 2)
+        // Sample the clear strip between the pier and the display station so
+        // furniture cannot mask the architecture boundary itself.
+        const panelZ = MUSEUM_DIMENSIONS.firstBayZ + 3.45
 
         for (const side of [-1, 1]) {
             expect(isMuseumPositionWalkable(layout, side * 4.136, panelZ)).toBe(true)

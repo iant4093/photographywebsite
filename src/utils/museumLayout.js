@@ -1,5 +1,6 @@
 import { sortGalleryAlbums, sortGalleryCategories } from './galleryOrder'
 import { MUSEUM_PLANT_FORM, museumPlantFoliageRadius } from './museumPlants'
+import { museumGalleryDisplays } from './museumDecor'
 
 export const MUSEUM_DIMENSIONS = Object.freeze({
     hallHalfWidth: 4.8,
@@ -293,6 +294,8 @@ export function buildMuseumLayout(categories = []) {
         hallPlants,
         stanchions,
     }
+    dressing.displays = museumGalleryDisplays({ rooms, dressing })
+    for (const room of rooms) room.displays = dressing.displays.filter(display => display.roomId === room.id)
     const roomByBayAndSide = new Map(rooms.map(room => [`${room.bay}:${room.side}`, room]))
     const archRadius = MUSEUM_DIMENSIONS.doorwayWidth / 2
     const halfBay = MUSEUM_DIMENSIONS.baySpacing / 2
@@ -343,6 +346,7 @@ export function buildMuseumLayout(categories = []) {
         },
         ...dressing.lobbyPlants,
         ...dressing.hallPlants,
+        ...dressing.displays,
         ...hallArchitectureObstacles,
         ...rooms.flatMap(room => [
             ...room.benches,

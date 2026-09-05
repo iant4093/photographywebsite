@@ -41,6 +41,7 @@ import {
     persistMuseumPreferences,
     readMuseumPreferences,
     sampleBakedWallIrradiance,
+    sampleBakedVaultIrradiance,
 } from '../utils/museumSupport'
 import {
     MUSEUM_BASE_COVER_WIDTH,
@@ -56,8 +57,18 @@ import {
     museumPreloadPaintings,
 } from '../utils/museumStreaming'
 import { MuseumRoomArchitecture, MuseumCofferedCeiling, MuseumAtmosphere } from '../components/museum/MuseumAtmosphere'
+import MuseumChandeliers from '../components/museum/MuseumChandeliers'
 import { createMuseumFrameDriver } from '../utils/museumFrameDriver'
 import { createMuseumArchBand } from '../utils/museumArchitecture'
+import {
+    advanceMuseumJump,
+    createMuseumJumpState,
+    museumKeyboardTargetsControl,
+    museumLandingOffset,
+    pressMuseumJump,
+    releaseMuseumJump,
+    resetMuseumJump,
+} from '../utils/museumMovement'
 
 const SESSION_KEY = 'ian-photography-museum-position-v2'
 const RETURN_KEY = 'ian-photography-museum-return'
@@ -941,6 +952,15 @@ function PlasterMaterial({ materials, color = HALL_PAINT, side, roughness = 0.88
     )
 }
 
+function applyBakedBounceToEmission(shader) {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `
+        #include <emissivemap_fragment>
+        #if defined(USE_COLOR) || defined(USE_COLOR_ALPHA)
+            totalEmissiveRadiance *= vColor.rgb;
+        #endif
+    `)
+}
+
 function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8c8b4', side = THREE.FrontSide, shapeUv = false, phase = 0, reverseU = false, vertexColors = false }) {
     const map = useMemo(() => {
         const next = materials.wallpaper.map.clone()
@@ -976,7 +996,7 @@ function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8
             color={color}
             emissiveMap={map}
             emissive="#d6a27b"
-            emissiveIntensity={0.7}
+            emissiveIntensity={0.43}
             roughness={0.84}
             metalness={0}
             sheen={0.16}
@@ -984,6 +1004,7 @@ function WallpaperMaterial({ materials, width, height, centerZ = 0, color = '#d8
             sheenRoughness={0.88}
             side={side}
             vertexColors={vertexColors}
+            onBeforeCompile={applyBakedBounceToEmission}
         />
     )
 }
@@ -1093,10 +1114,11 @@ function CeilingMaterial({ materials, hallLength }) {
         <meshStandardMaterial
             {...ceilingMaps}
             normalScale={[0.09, 0.09]}
-            color="#e3ddd2"
-            emissive="#9cabbc"
-            emissiveIntensity={0.12}
+            color="#d4c8b4"
+            emissive="#a38d71"
+            emissiveIntensity={0.065}
             vertexColors
+            onBeforeCompile={applyBakedBounceToEmission}
             roughness={0.93}
             side={THREE.DoubleSide}
         />
@@ -1107,17 +1129,18 @@ function FloorMaterial({ materials, color = '#8b6948', vertexColors = false }) {
     return (
         <meshPhysicalMaterial
             {...materials.floor}
-            normalScale={[0.42, 0.42]}
+            normalScale={[0.26, 0.26]}
             color={color}
             emissive="#3f2b20"
             emissiveIntensity={0.065}
             metalness={0.015}
-            roughness={0.8}
+            roughness={0.56}
             aoMapIntensity={0.5}
-            clearcoat={0.025}
-            clearcoatRoughness={0.86}
-            envMapIntensity={0.08}
+            clearcoat={0.12}
+            clearcoatRoughness={0.48}
+            envMapIntensity={0.22}
             vertexColors={vertexColors}
+            onBeforeCompile={applyBakedBounceToEmission}
         />
     )
 }
@@ -3311,12 +3334,12 @@ function AnimatedPortalGate({ roomId, side, centerZ, open, onPassabilityChange, 
     )
 }
 
-function VaultedCeiling({ layout, centerZ, materials }) {
+function VaultedCeiling({ layout, centerZ, materials, fixtures }) {
     const { geometry, ribCurve } = useMemo(() => {
         const radius = MUSEUM_VAULT.radius
         const start = Math.acos(MUSEUM_DIMENSIONS.hallHalfWidth / radius)
         const end = Math.PI - start
-        const count = 32
+        const count = 24
         const frontZ = centerZ + (layout.hallLength / 2)
         // Stop the vault just in front of the terminal wall. Ending on the
         // exact same plane produced the striped/hatched z-fighting visible at
@@ -3326,22 +3349,21 @@ function VaultedCeiling({ layout, centerZ, materials }) {
         const uvs = []
         const colors = []
         const indices = []
-        for (let index = 0; index <= count; index += 1) {
-            const ratio = index / count
-            const angle = start + (ratio * (end - start))
-            const x = radius * Math.cos(angle)
-            const y = museumVaultHeightAt(x)
-            positions.push(x, y, frontZ, x, y, backZ)
-            // Cool indirect light in the crown meets warmer reflected light
-            // at the wall. These colors cost no extra light or texture sample.
-            const edge = Math.pow(Math.abs(x) / MUSEUM_DIMENSIONS.hallHalfWidth, 3)
-            const tint = [0.76 + edge * 0.24, 0.82 + edge * 0.1, 0.96 - edge * 0.2]
-            colors.push(...tint, ...tint)
-            uvs.push(ratio, 0, ratio, 1)
-            if (index < count) {
-                const current = index * 2
-                const next = current + 2
-                indices.push(current, next, current + 1, next, next + 1, current + 1)
+        const depthSegments = Math.min(96, Math.max(8, Math.ceil(layout.hallLength / 1.8)))
+        for (let row = 0; row <= depthSegments; row += 1) {
+            const z = frontZ + (backZ - frontZ) * row / depthSegments
+            for (let index = 0; index <= count; index += 1) {
+                const ratio = index / count
+                const angle = start + (ratio * (end - start))
+                const x = radius * Math.cos(angle)
+                positions.push(x, museumVaultHeightAt(x), z)
+                colors.push(...sampleBakedVaultIrradiance({ x, z, halfWidth: MUSEUM_DIMENSIONS.hallHalfWidth, fixtures }))
+                uvs.push(ratio, row / depthSegments)
+                if (row < depthSegments && index < count) {
+                    const current = row * (count + 1) + index
+                    const next = current + count + 1
+                    indices.push(current, current + 1, next, current + 1, next + 1, next)
+                }
             }
         }
         const shell = new THREE.BufferGeometry()
@@ -3359,7 +3381,7 @@ function VaultedCeiling({ layout, centerZ, materials }) {
             geometry: shell,
             ribCurve: new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.5),
         }
-    }, [centerZ, layout.hallLength])
+    }, [centerZ, fixtures, layout.hallLength])
     useEffect(() => () => geometry.dispose(), [geometry])
     const ribZs = useMemo(() => {
         const values = [MUSEUM_DIMENSIONS.lobbyFrontZ - 0.3]
@@ -3605,7 +3627,8 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
     const roomFloorOccluders = useMemo(() => [
         ...room.benches.map(item => bakedFloorOccluder(item, room.centerX, room.centerZ, 0.14)),
         ...room.plants.map(item => bakedFloorOccluder(item, room.centerX, room.centerZ, 0.075)),
-    ], [room.benches, room.centerX, room.centerZ, room.plants])
+        ...(room.displays || EMPTY_FIXTURES).map(item => bakedFloorOccluder(item, room.centerX, room.centerZ, 0.15)),
+    ], [room.benches, room.centerX, room.centerZ, room.displays, room.plants])
     const thresholdDepth = ROOM_SHELL_INSET + HALL_WALL_THICKNESS + 0.18
     const thresholdCenterX = room.innerX + (room.side * ((ROOM_SHELL_INSET - HALL_WALL_THICKNESS) / 2))
     const roomPaintingIds = useMemo(
@@ -3910,18 +3933,20 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
     const tailLength = Math.max(0, tailFrontZ - layout.hallBackZ)
     // Keep fixtures between the transverse ceiling ribs. Their matching light
     // sources are stationary so illumination cannot jump or flash while walking.
-    const ceilingLights = [7, ...bays.map(bay => bay.centerZ)]
-        .filter(z => z > layout.hallBackZ)
+    const ceilingLights = useMemo(() => [7, ...bays.map(bay => bay.centerZ)]
+        .filter(z => z > layout.hallBackZ), [bays, layout.hallBackZ])
+    const chandelierPositions = useMemo(() => ceilingLights.map(z => [0, z]), [ceilingLights])
     const hallSconcePlacements = useMemo(() => museumHallSconcePlacements(layout), [layout])
     const hallFloorFixtures = useMemo(
-        () => [...new Set(hallSconcePlacements.map(placement => Number((placement.z - hallCenterZ).toFixed(3))))],
-        [hallCenterZ, hallSconcePlacements],
+        () => ceilingLights.map(z => z - hallCenterZ),
+        [ceilingLights, hallCenterZ],
     )
     const hallFloorOccluders = useMemo(() => [
         bakedFloorOccluder(layout.desk, 0, hallCenterZ, 0.16),
         ...layout.dressing.lobbyPlants.map(item => bakedFloorOccluder(item, 0, hallCenterZ, 0.075)),
         ...layout.dressing.hallPlants.map(item => bakedFloorOccluder(item, 0, hallCenterZ, 0.075)),
-    ], [hallCenterZ, layout.desk, layout.dressing.hallPlants, layout.dressing.lobbyPlants])
+        ...layout.dressing.displays.filter(item => !item.roomId).map(item => bakedFloorOccluder(item, 0, hallCenterZ, 0.15)),
+    ], [hallCenterZ, layout.desk, layout.dressing.displays, layout.dressing.hallPlants, layout.dressing.lobbyPlants])
     return (
         <group>
             <BakedIrradianceFloor
@@ -3933,7 +3958,7 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                 fixtures={hallFloorFixtures}
                 occluders={hallFloorOccluders}
             />
-            <VaultedCeiling layout={layout} centerZ={hallCenterZ} materials={materials} />
+            <VaultedCeiling layout={layout} centerZ={hallCenterZ} materials={materials} fixtures={ceilingLights} />
             {[-1, 1].map(side => (
                 <group key={side}>
                     <mesh position={[
@@ -4059,9 +4084,9 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                     enabled={Boolean(detailedRoom)}
                 />
             )}
-            <InstancedCeilingFixtures
-                positions={ceilingLights.map(z => [0, z])}
-                ceilingY={MUSEUM_VAULT.fixtureY}
+            <MuseumChandeliers
+                positions={chandelierPositions}
+                ceilingY={museumVaultHeightAt(0)}
             />
             <MuseumDressing
                 layout={layout}
@@ -4145,6 +4170,7 @@ function MuseumTouchControls({ input, onPause }) {
         input.current.moveY = 0
         input.current.lookX = 0
         input.current.lookY = 0
+        resetMuseumJump(input.current.jump)
     }, [input])
 
     return (
@@ -4187,6 +4213,29 @@ function MuseumTouchControls({ input, onPause }) {
                 <div ref={knob} className="museum-joystick-knob" />
                 <span>Move</span>
             </div>
+            <button
+                className="museum-touch-jump"
+                type="button"
+                aria-label="Jump"
+                onPointerDown={(event) => {
+                    event.preventDefault()
+                    event.currentTarget.setPointerCapture(event.pointerId)
+                    pressMuseumJump(input.current.jump)
+                    markMuseumInteractionBusy()
+                }}
+                onPointerUp={() => releaseMuseumJump(input.current.jump)}
+                onPointerCancel={() => releaseMuseumJump(input.current.jump)}
+                onLostPointerCapture={() => releaseMuseumJump(input.current.jump)}
+                onClick={(event) => {
+                    // Keyboard and assistive activation have no pointer-down.
+                    if (event.detail !== 0) return
+                    pressMuseumJump(input.current.jump)
+                    releaseMuseumJump(input.current.jump)
+                }}
+            >
+                <span aria-hidden="true">↑</span>
+                Jump
+            </button>
             <button className="museum-touch-pause" type="button" onClick={onPause}>Pause</button>
         </div>
     )
@@ -4331,7 +4380,7 @@ function playMuseumFootstep(audio, stepIndex, speedRatio, volume = 1, surface = 
     source.stop(now + 0.09)
 }
 
-function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchInput, preferences, motionSuppressed, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchInput, preferences, motionSuppressed, developmentJump, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const { camera } = useThree()
     const keys = useRef(new Set())
     const lastRoom = useRef(null)
@@ -4349,6 +4398,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
     const cameraYawOffset = useRef(0)
     const previousSpeed = useRef(0)
     const lookReady = useRef(false)
+    const jumpProbe = useRef({ elapsed: 0, peak: 0, takeoffs: 0, landings: 0, steps: 0, lastReport: -1 })
     const touchEuler = useMemo(() => new THREE.Euler(0, 0, 0, 'YXZ'), [])
     const forward = useMemo(() => new THREE.Vector3(), [])
     const right = useMemo(() => new THREE.Vector3(), [])
@@ -4421,6 +4471,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             touchInput.current.lookX = 0
             touchInput.current.lookY = 0
             keys.current.clear()
+            resetMuseumJump(touchInput.current.jump)
             velocity.set(0, 0, 0)
             previousSpeed.current = 0
             cameraPitchOffset.current = 0
@@ -4445,25 +4496,51 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
 
     useEffect(() => {
         const onKeyDown = (event) => {
+            if (!enabled || event.defaultPrevented || event.isComposing || museumKeyboardTargetsControl(event)) return
             keys.current.add(event.code)
+            if (event.code === 'Space') {
+                event.preventDefault()
+                if (!event.repeat) {
+                    pressMuseumJump(touchInput.current.jump)
+                    markMuseumInteractionBusy()
+                }
+            }
             if (!event.repeat && MUSEUM_MOVEMENT_KEYS.has(event.code)) markMuseumInteractionBusy()
             if (event.code === 'KeyE' && enabled) {
                 const painting = focusedPainting(layout, camera, focusDirection)
                 if (painting) onOpenAlbum(painting.album)
             }
         }
-        const onKeyUp = event => keys.current.delete(event.code)
+        const onKeyUp = (event) => {
+            keys.current.delete(event.code)
+            if (event.code === 'Space') releaseMuseumJump(touchInput.current.jump)
+        }
         window.addEventListener('keydown', onKeyDown)
         window.addEventListener('keyup', onKeyUp)
         return () => {
             window.removeEventListener('keydown', onKeyDown)
             window.removeEventListener('keyup', onKeyUp)
         }
-    }, [camera, enabled, focusDirection, layout, onOpenAlbum])
+    }, [camera, enabled, focusDirection, layout, onOpenAlbum, touchInput])
 
     useFrame((state, frameDelta) => {
         if (!enabled) return
         const delta = Math.min(frameDelta, 0.05)
+        const jump = touchInput.current.jump
+        if (import.meta.env.DEV && developmentJump) {
+            // Exercise the actual input latch and controller, including holding
+            // through contact and retrying in air, without native pointer lock.
+            const probe = jumpProbe.current
+            probe.elapsed += delta
+            const t = probe.elapsed
+            const pressed = (t >= 0.15 && t < 1.2)
+                || (t >= 1.3 && t < 1.4)
+                || (t >= 1.5 && t < 1.6)
+                || (t >= 2.2 && t < 2.3)
+            if (pressed) pressMuseumJump(jump)
+            else releaseMuseumJump(jump)
+        }
+        advanceMuseumJump(jump, delta)
         if (!lookReady.current) {
             touchEuler.setFromQuaternion(camera.quaternion, 'YXZ')
             lookYaw.current = touchEuler.y
@@ -4530,33 +4607,35 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             camera.position.x - previousPositionX,
             camera.position.z - previousPositionZ,
         ) / Math.max(delta, 1 / 240)
-        if (actualSpeed > 0.12 || Math.abs(frameLookX) + Math.abs(frameLookY) > 0.5) {
+        if (actualSpeed > 0.12 || !jump.grounded || Math.abs(frameLookX) + Math.abs(frameLookY) > 0.5) {
             markMuseumInteractionBusy()
         }
-        const gaitStrength = motionSuppressed ? 0 : THREE.MathUtils.clamp(actualSpeed / 3.25, 0, 1.35)
+        const gaitStrength = motionSuppressed || !jump.grounded ? 0 : THREE.MathUtils.clamp(actualSpeed / 3.25, 0, 1.35)
         const motionStrength = gaitStrength * preferences.bobStrength
-        gaitPhase.current += actualSpeed * delta * 2.35
+        if (jump.grounded) gaitPhase.current += actualSpeed * delta * 2.35
         const footstepIndex = Math.floor(gaitPhase.current / Math.PI)
-        if (actualSpeed > 0.48 && footstepIndex !== lastFootstep.current) {
+        if (jump.grounded && (jump.landed || (actualSpeed > 0.48 && footstepIndex !== lastFootstep.current))) {
             lastFootstep.current = footstepIndex
             playMuseumFootstep(
                 footstepAudio.current,
                 footstepIndex,
-                actualSpeed / 3.25,
-                preferences.footstepVolume,
+                jump.landed ? 0.75 : actualSpeed / 3.25,
+                preferences.footstepVolume * (jump.landed ? 0.8 : 1),
                 museumFloorSurface(layout, camera.position),
             )
+            if (import.meta.env.DEV && developmentJump) jumpProbe.current.steps += 1
         }
         const stepWave = Math.sin(gaitPhase.current * 2)
         const heelStrike = Math.pow(Math.max(0, stepWave), 8)
         const headBob = ((stepWave * 0.052) - (heelStrike * 0.018)) * motionStrength
-        const breathing = motionSuppressed
+        const breathing = motionSuppressed || !jump.grounded
             ? 0
             : Math.sin(state.clock.elapsedTime * 1.45) * 0.004 * preferences.bobStrength
-        camera.position.y = layout.spawn[1] + headBob + breathing
+        const landing = museumLandingOffset(jump, motionSuppressed ? 0 : preferences.bobStrength)
+        camera.position.y = layout.spawn[1] + jump.height + headBob + breathing + landing
         const lateralVelocity = (velocity.x * right.x) + (velocity.z * right.z)
         const lateralLean = THREE.MathUtils.clamp(lateralVelocity / Math.max(1, speed), -1, 1)
-        const targetRoll = moving && !motionSuppressed
+        const targetRoll = moving && jump.grounded && !motionSuppressed
             ? ((Math.sin(gaitPhase.current) * 0.019 * gaitStrength) - (lateralLean * 0.013)) * preferences.bobStrength
             : 0
         cameraRoll.current = THREE.MathUtils.damp(cameraRoll.current, targetRoll, 9.5, delta)
@@ -4564,7 +4643,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             ? THREE.MathUtils.clamp((actualSpeed - previousSpeed.current) / delta, -8, 8)
             : 0
         previousSpeed.current = actualSpeed
-        const targetPitch = moving && !motionSuppressed
+        const targetPitch = moving && jump.grounded && !motionSuppressed
             ? ((Math.sin((gaitPhase.current * 2) + 0.7) * 0.012 * gaitStrength) - (acceleration * 0.00115))
                 * preferences.bobStrength
             : 0
@@ -4574,7 +4653,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             moving ? 12 : 8,
             delta,
         )
-        const targetYaw = moving && !motionSuppressed
+        const targetYaw = moving && jump.grounded && !motionSuppressed
             ? ((Math.sin(gaitPhase.current) * 0.011) + (lateralLean * 0.0055))
                 * gaitStrength
                 * preferences.bobStrength
@@ -4597,6 +4676,28 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         if (Math.abs(camera.fov - nextFov) > 0.01) {
             camera.fov = nextFov
             camera.updateProjectionMatrix()
+        }
+
+        if (import.meta.env.DEV && developmentJump) {
+            const probe = jumpProbe.current
+            probe.peak = Math.max(probe.peak, jump.height)
+            if (jump.tookOff) probe.takeoffs += 1
+            if (jump.landed) probe.landings += 1
+            if (probe.elapsed - probe.lastReport >= 0.1 && probe.lastReport < 3.5) {
+                probe.lastReport = probe.elapsed
+                document.documentElement.dataset.museumJumpProbe = JSON.stringify({
+                    status: probe.elapsed >= 3.4 ? 'complete' : 'running',
+                    elapsed: probe.elapsed,
+                    peak: probe.peak,
+                    height: jump.height,
+                    eyeHeight: camera.position.y,
+                    grounded: jump.grounded,
+                    takeoffs: probe.takeoffs,
+                    landings: probe.landings,
+                    steps: probe.steps,
+                    motionSuppressed,
+                })
+            }
         }
 
         if (state.clock.elapsedTime - lastProbeAt.current > 0.05) {
@@ -4658,6 +4759,13 @@ function PreviewCamera({ mode, roomIndex, layout }) {
             const plant = room.plants[0]
             camera.position.set(plant.position[0] - room.side * 1.6, 1.7, plant.position[2] + 1.45)
             camera.lookAt(plant.position[0], 0.95, plant.position[2])
+        } else if (mode === 'display' || mode === 'sculpture') {
+            const display = layout.dressing.displays.find(item => !item.roomId && item.kind === (mode === 'sculpture' ? 'sculpture' : 'console'))
+            if (display) {
+                const side = Math.sign(display.position[0])
+                camera.position.set(display.position[0] - side * 2.8, 1.7, display.position[2] + 2.3)
+                camera.lookAt(display.position[0], 1.1, display.position[2])
+            }
         } else if (mode === 'room' && room) {
             const x = room.innerX + (room.side * 4.2)
             camera.position.set(x, 2.25, room.centerZ - 4.15)
@@ -5186,6 +5294,7 @@ function RendererHealth({ input, onPause, onStatus }) {
             input.current.moveY = 0
             input.current.lookX = 0
             input.current.lookY = 0
+            resetMuseumJump(input.current.jump)
         }
         const resume = () => {
             if (!museumDocumentIsForeground() || forcedRecovery.current) return
@@ -5295,7 +5404,7 @@ function RendererHealth({ input, onPause, onStatus }) {
     return null
 }
 
-const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
     const cinematicShadows = !touchMode && !isFirefoxBrowser()
     const inspectionWidth = useMemo(
@@ -5310,7 +5419,7 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
     return (
         <>
             <MuseumFrameDriver
-                continuous={controlsEnabled.locked || visualPreview || developmentTour || !sceneReady}
+                continuous={controlsEnabled.locked || visualPreview || developmentTour || developmentJump || !sceneReady}
             />
             <color attach="background" args={[INK]} />
             <fog attach="fog" args={['#151310', 30, 120]} />
@@ -5318,15 +5427,15 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                 actual architectural fixtures establish contrast. The previous
                 high ambient/hemisphere pair flattened every room into the same
                 brightness and made practical lights visually irrelevant. */}
-            <ambientLight intensity={touchMode ? 0.25 : 0.22} color="#f0dcc2" />
-            <hemisphereLight args={['#c3d5e1', '#38251c', touchMode ? 0.42 : 0.4]} />
+            <ambientLight intensity={touchMode ? 0.20 : 0.18} color="#efd4ac" />
+            <hemisphereLight args={['#cfbfa7', '#241713', touchMode ? 0.34 : 0.31]} />
             <directionalLight
                 position={[-6, 10, 12]}
-                intensity={touchMode ? 0.28 : 0.26}
-                color="#dce8ef"
+                intensity={touchMode ? 0.32 : 0.30}
+                color="#ead8bd"
                 castShadow={false}
             />
-            <directionalLight position={[7, 6, -12]} intensity={0.085} color="#e3b680" castShadow={false} />
+            <directionalLight position={[7, 6, -12]} intensity={0.12} color="#b4cadb" castShadow={false} />
             <MainHall
                 layout={layout}
                 activeRoomId={controlsEnabled.activeRoomId}
@@ -5370,18 +5479,19 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                 <>
                     <PlayerController
                         layout={layout}
-                        enabled={controlsEnabled.locked}
+                        enabled={controlsEnabled.locked || (developmentJump && sceneReady)}
                         passableRoomIds={passableRoomIds}
                         touchMode={touchMode}
                         touchInput={touchInput}
                         preferences={preferences}
                         motionSuppressed={motionSuppressed}
+                        developmentJump={developmentJump}
                         onActiveRoom={onActiveRoom}
                         onNearbyRooms={onNearbyRooms}
                         onFocusedPainting={onFocusedPainting}
                         onOpenAlbum={onOpenAlbum}
                     />
-                    {!touchMode && <NativePointerLockControls input={touchInput} onLock={onLock} onUnlock={onUnlock} />}
+                    {!touchMode && !developmentJump && <NativePointerLockControls input={touchInput} onLock={onLock} onUnlock={onUnlock} />}
                 </>
             )}
         </>
@@ -5429,7 +5539,7 @@ export default function ImmersiveGalleryDesktop() {
             return false
         }
     })
-    const touchInput = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0 })
+    const touchInput = useRef({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, jump: createMuseumJumpState() })
 
     useEffect(() => {
         resumeCoverPipelines()
@@ -5442,6 +5552,7 @@ export default function ImmersiveGalleryDesktop() {
         touchInput.current.moveY = 0
         touchInput.current.lookX = 0
         touchInput.current.lookY = 0
+        resetMuseumJump(touchInput.current.jump)
         setLocked(false)
         setFocused(null)
     }, [setFocused, setLocked])
@@ -5523,9 +5634,10 @@ export default function ImmersiveGalleryDesktop() {
     const previewMode = previewParams?.get('museum-preview') || ''
     const previewRoomIndex = Number.parseInt(previewParams?.get('museum-room') || '0', 10) || 0
     const developmentTour = import.meta.env.DEV && previewParams?.get('museum-tour') === '1'
+    const developmentJump = import.meta.env.DEV && previewParams?.get('museum-jump') === '1'
     const developmentPerf = import.meta.env.DEV && previewParams?.get('museum-perf') === '1'
     const roomPreviewModes = useMemo(() => ['room', 'inspect', 'portal', 'end', 'join', 'plaques', 'arch', 'sign', 'plant'], [])
-    const visualPreview = import.meta.env.DEV && ['lobby', 'hall', 'entrance', 'reception', ...roomPreviewModes].includes(previewMode)
+    const visualPreview = import.meta.env.DEV && ['lobby', 'hall', 'entrance', 'reception', 'display', 'sculpture', ...roomPreviewModes].includes(previewMode)
     const initialActiveRoomIds = useMemo(
         () => initialMuseumRoomIds(
             layout,
@@ -5651,6 +5763,7 @@ export default function ImmersiveGalleryDesktop() {
                         motionSuppressed={motionSuppressed}
                         visualPreview={visualPreview}
                         developmentTour={developmentTour}
+                        developmentJump={developmentJump}
                         developmentPerf={developmentPerf}
                         previewMode={previewMode}
                         previewRoomIndex={previewRoomIndex}
@@ -5711,13 +5824,14 @@ export default function ImmersiveGalleryDesktop() {
                     <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span>
                     <span><kbd>Mouse</kbd> Look</span>
                     <span><kbd>Shift</kbd> Walk faster</span>
+                    <span><kbd>Space</kbd> Jump</span>
                     <span><kbd>Esc</kbd> Pause</span>
                 </div>
             )}
-            {sceneReady && touchMode && locked && !visualPreview && (
+            {sceneReady && touchMode && locked && !visualPreview && !developmentJump && (
                 <MuseumTouchControls input={touchInput} onPause={() => setLocked(false)} />
             )}
-            {sceneReady && !locked && !visualPreview && !developmentTour && (
+            {sceneReady && !locked && !visualPreview && !developmentTour && !developmentJump && (
                 <div className="museum-entry-panel">
                     <span className="museum-entry-number">The virtual archive</span>
                     <h1>{activeRoomId ? 'Gallery paused' : 'Enter the gallery'}</h1>
@@ -5731,7 +5845,7 @@ export default function ImmersiveGalleryDesktop() {
                     >
                         {activeRoomId ? 'Continue exploring' : 'Begin walk-through'}
                     </button>
-                    <div>{touchMode ? 'Use the joystick to move · Drag the view to look around' : <><kbd>WASD</kbd> to move · <kbd>Mouse</kbd> to look · <kbd>Esc</kbd> to pause</>}</div>
+                    <div>{touchMode ? 'Joystick to move · Drag to look · Tap Jump to hop' : <><kbd>WASD</kbd> to move · <kbd>Mouse</kbd> to look · <kbd>Space</kbd> to jump · <kbd>Esc</kbd> to pause</>}</div>
                     <details className="museum-experience-settings">
                         <summary>Experience settings</summary>
                         <div>

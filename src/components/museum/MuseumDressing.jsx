@@ -4,7 +4,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { museumReadingProps } from '../../utils/museumDecor'
+import { museumGalleryDisplayParts, museumGalleryDisplays, museumReadingProps } from '../../utils/museumDecor'
+import { createMuseumDisplayPartGeometry } from '../../utils/museumDisplayGeometry'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { museumHallSconcePlacements } from '../../utils/museumSupport'
 import { MUSEUM_DIMENSIONS } from '../../utils/museumLayout'
@@ -68,6 +69,23 @@ function EnvironmentLighting({ intensity = 0.22 }) {
     useEffect(() => {
         const pmrem = new THREE.PMREMGenerator(gl)
         const environmentScene = new RoomEnvironment()
+        // Author the existing one-time reflection capture as a lamplit salon.
+        // Darker surroundings and small warm sources give brass and polished
+        // timber highlights without another runtime light or reflection pass.
+        environmentScene.traverse(object => {
+            if (object.isLight) {
+                object.color.set('#f2cea0')
+                object.intensity *= 0.75
+            }
+            const material = object.material
+            if (!material) return
+            if (material.emissiveIntensity > 1) {
+                material.emissive.set(object.position.z > 14 ? '#c3d7e7' : '#ffd49b')
+                material.emissiveIntensity *= object.position.z > 14 ? 0.5 : 0.85
+            } else {
+                material.color.set(object.isInstancedMesh ? '#46342c' : '#9a8872')
+            }
+        })
         const environment = pmrem.fromScene(environmentScene, 0.035).texture
         const previous = scene.environment
         const previousIntensity = scene.environmentIntensity
@@ -355,6 +373,35 @@ function ReadingRoomDetails({ layout }) {
         <mesh geometry={geometry}>
             <meshStandardMaterial vertexColors roughness={0.67} metalness={0.12} />
         </mesh>
+    )
+}
+
+function GalleryDisplayFurniture({ layout }) {
+    const geometries = useMemo(() => {
+        const bySurface = { wood: [], brass: [], ceramic: [] }
+        for (const display of museumGalleryDisplays(layout)) {
+            for (const part of museumGalleryDisplayParts(display)) {
+                bySurface[part.surface].push(createMuseumDisplayPartGeometry(part))
+            }
+        }
+        return Object.fromEntries(Object.entries(bySurface).map(([surface, parts]) => {
+            const merged = parts.length ? mergeGeometries(parts) : null
+            parts.forEach(part => part.dispose())
+            merged?.computeBoundingSphere()
+            return [surface, merged]
+        }))
+    }, [layout])
+    useEffect(() => () => {
+        Object.values(geometries).forEach(geometry => geometry?.dispose())
+    }, [geometries])
+    // Three global material batches hold every display station. No live lights,
+    // shadow passes, texture downloads, or per-frame transforms are introduced.
+    return (
+        <group>
+            {geometries.wood && <mesh geometry={geometries.wood}><meshStandardMaterial vertexColors roughness={0.57} metalness={0.08} /></mesh>}
+            {geometries.brass && <mesh geometry={geometries.brass}><meshStandardMaterial vertexColors roughness={0.32} metalness={0.74} /></mesh>}
+            {geometries.ceramic && <mesh geometry={geometries.ceramic}><meshStandardMaterial vertexColors roughness={0.43} metalness={0.03} /></mesh>}
+        </group>
     )
 }
 
@@ -677,6 +724,7 @@ export default function MuseumDressing({ layout, materials, LabelPlane, PlasterM
             <InstancedPlants plants={roomPlants} castDynamicShadows={shadowsEnabled} />
             <InstancedRoomBenches rooms={dressedRooms} castDynamicShadows={shadowsEnabled} />
             <ReadingRoomDetails layout={layout} />
+            <GalleryDisplayFurniture layout={layout} />
             {/* Place sconces on the solid wall between galleries, clear of the
                 room end walls and arched entry trim. Every lens uses the same
                 emissive and baked-light treatment; selective live point lights

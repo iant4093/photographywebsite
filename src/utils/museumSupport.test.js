@@ -10,6 +10,7 @@ import {
     persistMuseumPreferences,
     readMuseumPreferences,
     sampleBakedFloorIrradiance,
+    sampleBakedVaultIrradiance,
     sampleBakedWallIrradiance,
     supportsImmersiveGallery,
 } from './museumSupport'
@@ -74,8 +75,8 @@ describe('baked museum wall irradiance', () => {
         const lower = sampleBakedWallIrradiance({ horizontal: 0, vertical: -2, width: 12, height: 6 })
         const upper = sampleBakedWallIrradiance({ horizontal: 0, vertical: 2.8, width: 12, height: 6 })
         expect(sampleBakedWallIrradiance({ horizontal: 0, vertical: -2, width: 12, height: 6 })).toEqual(lower)
-        expect(lower.every(value => value >= 0.56 && value <= 1)).toBe(true)
-        expect(upper.every(value => value >= 0.56 && value <= 1)).toBe(true)
+        expect(lower.every(value => value >= 0.46 && value <= 1)).toBe(true)
+        expect(upper.every(value => value >= 0.46 && value <= 1)).toBe(true)
         expect(lower[0] - lower[2]).toBeGreaterThan(upper[0] - upper[2])
     })
 
@@ -131,8 +132,22 @@ describe('baked museum wall irradiance', () => {
             mode: 'hall',
             fixtures: [2],
         })
-        expect(atWallFixture[0]).toBeGreaterThan(betweenWallFixtures[0])
-        expect(atFloorFixture[0]).toBeGreaterThan(awayFromFloorFixture[0])
+        expect(atWallFixture[0] / betweenWallFixtures[0]).toBeGreaterThan(1.35)
+        expect(atFloorFixture[0] / awayFromFloorFixture[0]).toBeGreaterThan(1.35)
+    })
+
+    it('aligns warm vault bounce with chandeliers and keeps gaps cooler', () => {
+        const fixtures = [7, -7, -23.5]
+        const atLamp = sampleBakedVaultIrradiance({ x: 0, z: -7, fixtures })
+        const between = sampleBakedVaultIrradiance({ x: 0, z: -15.25, fixtures })
+        expect(atLamp[0] / between[0]).toBeGreaterThan(1.6)
+        expect(atLamp[0]).toBeGreaterThan(atLamp[2])
+        expect(between[2]).toBeGreaterThan(between[0])
+        for (const x of [-4.8, 0, 4.8]) {
+            for (let z = -30; z < 14; z += 0.5) {
+                expect(sampleBakedVaultIrradiance({ x, z, fixtures }).every(value => Number.isFinite(value) && value >= 0.3 && value <= 1)).toBe(true)
+            }
+        }
     })
 
     it('grounds static furniture with geometry-aligned floor occlusion', () => {
@@ -145,13 +160,12 @@ describe('baked museum wall irradiance', () => {
             occluders,
         })
         const openFloor = sampleBakedFloorIrradiance({
-            across: -5,
-            along: 3.5,
+            across: 1.5,
+            along: -2,
             width: 18,
             depth: 12,
-            occluders,
         })
-        expect(beneathBench[0]).toBeLessThan(openFloor[0])
+        expect(openFloor[0] - beneathBench[0]).toBeGreaterThan(0.1)
         expect(Math.min(...beneathBench)).toBeGreaterThanOrEqual(0.5)
     })
 

@@ -65,7 +65,7 @@ function PictureLightWash({ paintings }) {
                         float spread = 0.12 + down * 0.38;
                         float pool = exp(-2.0 * pow((vUv.x - 0.5) / spread, 2.0));
                         pool *= smoothstep(0.0, 0.24, vUv.y) * smoothstep(0.0, 0.22, down);
-                        gl_FragColor = vec4(0.88, 0.56, 0.28, pool * 0.19);
+                        gl_FragColor = vec4(0.96, 0.68, 0.37, pool * 0.25);
                     }
                 `}
             />
@@ -93,8 +93,8 @@ export function MuseumCofferedCeiling({ room, shellCenterX, shellDepth }) {
     }, [room, shellCenterX, shellDepth])
     return (
         <group>
-            <ArchitectureBatch items={panels.surround} color="#95836d" />
-            <ArchitectureBatch items={panels.inset} color="#d8d9d0" />
+            <ArchitectureBatch items={panels.surround} color="#82705b" />
+            <ArchitectureBatch items={panels.inset} color="#d1c2a8" />
         </group>
     )
 }

@@ -360,6 +360,41 @@
   pointer-events: auto;
 }
 
+.museum-touch-jump {
+  position: absolute;
+  right: max(1.4rem, env(safe-area-inset-right));
+  bottom: max(3rem, calc(env(safe-area-inset-bottom) + 2rem));
+  display: grid;
+  place-content: center;
+  gap: 0.05rem;
+  width: 4.2rem;
+  aspect-ratio: 1;
+  padding: 0;
+  color: #eee8dc;
+  border: 1px solid rgba(238, 232, 220, 0.5);
+  border-radius: 50%;
+  background: rgba(23, 20, 17, 0.72);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.museum-touch-jump > span {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.museum-touch-jump:active {
+  background: rgba(131, 97, 62, 0.88);
+}
+
+.museum-touch-jump:focus-visible {
+  outline: 2px solid #eee8dc;
+  outline-offset: 3px;
+}
+
 .museum-entry-panel {
   position: fixed;
   z-index: 20;
@@ -604,6 +639,12 @@
     top: 50%;
     right: max(0.7rem, env(safe-area-inset-right));
     transform: translateY(-50%);
+  }
+
+  .museum-touch-jump {
+    right: max(0.7rem, env(safe-area-inset-right));
+    bottom: max(0.7rem, env(safe-area-inset-bottom));
+    width: 3.6rem;
   }
 
   .museum-interaction--touch {

@@ -66,7 +66,7 @@ export function sampleBakedWallIrradiance({
     const fixtureSpacing = mode === 'hall' ? 7.9 : Math.max(3.6, safeWidth / 3.2)
     const fixtureWave = 0.5 + (Math.cos(((horizontal / fixtureSpacing) + phase) * Math.PI * 2) * 0.5)
     const analyticPool = Math.pow(fixtureWave, mode === 'hall' ? 3.1 : 2.45)
-    const fixtureRadius = mode === 'hall' ? 3.3 : 2.65
+    const fixtureRadius = mode === 'hall' ? 2.5 : 1.9
     const measuredPool = fixtures.reduce((total, fixture) => {
         const distance = Math.abs(horizontal - Number(fixture || 0)) / fixtureRadius
         return total + Math.exp(-0.5 * distance * distance)
@@ -78,20 +78,31 @@ export function sampleBakedWallIrradiance({
     // Bake warm fixture pools against a slightly cooler interstitial bounce.
     // This is sampled only while building wall vertices, so the stronger
     // warm/cool separation adds no lights, textures, or fragment work.
-    const base = 0.715
+    const base = 0.60
         + (lowerBounce * 0.075)
-        + (fixturePool * (mode === 'hall' ? 0.20 : 0.17))
+        + (fixturePool * (mode === 'hall' ? 0.30 : 0.29))
         + (centralLift * 0.035)
         - (crownOcclusion * 0.065)
         - (edgeOcclusion * 0.045)
-    const warmth = lowerBounce * 0.052 + fixturePool * 0.085
+    const warmth = lowerBounce * 0.052 + fixturePool * 0.10
     const coolBounce = (1 - fixturePool) * (1 - lowerBounce) * 0.03
 
     return [
-        Math.min(1, Math.max(0.58, base + warmth)),
-        Math.min(1, Math.max(0.58, base + (warmth * 0.48) + coolBounce * 0.45)),
-        Math.min(1, Math.max(0.56, base - (warmth * 0.28) + coolBounce)),
+        Math.min(1, Math.max(0.48, base + warmth)),
+        Math.min(1, Math.max(0.48, base + (warmth * 0.48) + coolBounce * 0.45)),
+        Math.min(1, Math.max(0.46, base - (warmth * 0.28) + coolBounce)),
     ]
+}
+
+export function sampleBakedVaultIrradiance({ x = 0, z = 0, halfWidth = 4.8, fixtures = [] } = {}) {
+    const edge = Math.min(1, Math.abs(x) / Math.max(0.01, halfWidth))
+    // Broad opaline bounce reaches the crown above each chandelier. The warm
+    // pools and cooler spaces between them are authored once into vertices.
+    const pool = Math.min(1, fixtures.reduce((total, fixtureZ) => (
+        total + Math.exp(-0.5 * (((z - fixtureZ) / 3.1) ** 2 + (x / 3.2) ** 2))
+    ), 0))
+    const base = 0.43 + pool * 0.39 - edge ** 4 * 0.07
+    return [base + pool * 0.14, base + pool * 0.048, base + (1 - pool) * 0.09 - pool * 0.065]
 }
 
 export function sampleBakedFloorIrradiance({
@@ -111,13 +122,14 @@ export function sampleBakedFloorIrradiance({
         ? Math.max(0, (acrossRatio - 0.28) / 0.72)
         : Math.max(0, (alongRatio - 0.34) / 0.66)
     const fixtureAxis = mode === 'hall' ? along : across
-    const fixtureRadius = mode === 'hall' ? 4.5 : 3.2
+    const fixtureRadius = mode === 'hall' ? 3.4 : 2.65
     const measuredPool = fixtures.reduce((total, fixture) => {
         const distance = Math.abs(fixtureAxis - Number(fixture || 0)) / fixtureRadius
         return total + Math.exp(-0.5 * distance * distance)
     }, 0)
     const fallbackWave = 0.5 + (Math.cos((fixtureAxis / (mode === 'hall' ? 8.25 : Math.max(2.8, width / 3))) * Math.PI) * 0.5)
-    const fixturePool = fixtures.length ? Math.min(1, measuredPool) : fallbackWave
+    const fixturePool = (fixtures.length ? Math.min(1, measuredPool) : fallbackWave)
+        * (mode === 'hall' ? 0.6 + 0.4 * Math.exp(-0.5 * (across / 2.6) ** 2) : 1)
     const centerRatio = mode === 'hall' ? acrossRatio : Math.min(1, Math.abs(across) / halfWidth)
     const centralLift = Math.max(0, 1 - ((Math.max(0, centerRatio - 0.12)) / 0.8))
     const contactOcclusion = Math.min(0.19, occluders.reduce((total, occluder) => {
@@ -153,16 +165,16 @@ export function sampleBakedFloorIrradiance({
             : 1 - (0.14 * Math.pow(insideDistance, 4))
         return total + (footprint * strength)
     }, 0))
-    const base = 0.72
-        + (edgeBounce * 0.13)
-        + (fixturePool * 0.1)
+    const base = 0.64
+        + (edgeBounce * 0.09)
+        + (fixturePool * 0.24)
         + (centralLift * 0.04)
         - contactOcclusion
 
     return [
-        Math.min(1, base + (edgeBounce * 0.045)),
-        Math.min(1, base + (edgeBounce * 0.018)),
-        Math.min(1, base - (edgeBounce * 0.025)),
+        Math.min(1, base + (edgeBounce * 0.045) + fixturePool * 0.06),
+        Math.min(1, base + (edgeBounce * 0.018) + fixturePool * 0.017),
+        Math.min(1, base - (edgeBounce * 0.025) - fixturePool * 0.025),
     ]
 }
 
