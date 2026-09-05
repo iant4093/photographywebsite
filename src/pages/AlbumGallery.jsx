@@ -18,6 +18,7 @@ import {
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
+import { reuseOriginalPreviews } from '../utils/originalPreviewReuse'
 import { pollZipJob } from '../utils/zipDownload'
 import { navigateBackOr } from '../utils/navigation'
 import { openPrintOrder } from '../utils/printOrders'
@@ -53,7 +54,7 @@ function AlbumGallery() {
     const [lightboxIndex, setLightboxIndex] = useState(null)
     const sharedPhotoId = new URLSearchParams(location.search).get('photo')
 
-    const loadAlbum = useCallback(async ({ signal, background = false, openPhotoId = '' } = {}) => {
+    const loadAlbum = useCallback(async ({ signal, background = false, openPhotoId = '', reuseOriginals = true } = {}) => {
         const scope = albumRequestScopeRef.current
         if (!signal && (!scope || scope.albumId !== albumId)) return undefined
         const requestSignal = signal || scope.controller.signal
@@ -73,7 +74,8 @@ function AlbumGallery() {
             if (requestSignal.aborted) return undefined
             setAlbum(data.album || data)
             const nextImages = data.images || []
-            setImages(nextImages)
+            setImages(current => background && reuseOriginals
+                ? reuseOriginalPreviews(current, nextImages, { albumId }) : nextImages)
             if (!background && openPhotoId) {
                 const requestedIndex = nextImages.findIndex(image => mediaId(image) === openPhotoId)
                 if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
@@ -126,7 +128,7 @@ function AlbumGallery() {
     }, [album, albumId])
 
     const refreshMedia = useCallback(
-        () => loadAlbum({ background: true }),
+        reason => loadAlbum({ background: true, reuseOriginals: reason !== 'media-error' }),
         [loadAlbum],
     )
     const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)
@@ -375,7 +377,9 @@ function AlbumGallery() {
                                 canShare={album.visibility === 'public'}
                                 shareTitle={`${album.title} — Ian Truong Photography`}
                                 shareUrl={image => shareUrlForAlbumPhoto(albumId, mediaId(image))}
-                                onBeforeRefresh={() => requestMediaRefresh('original-status')}
+                                onBeforeRefresh={(event, _image, context) => requestMediaRefresh(
+                                    event?.type === 'error' || context?.reason === 'media-error' ? 'media-error' : 'original-status'
+                                )}
                                 onMediaError={() => requestMediaRefresh('media-error')}
                             />
                         )}

@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
 const auth = vi.hoisted(() => ({ userEmail: 'viewer@example.com', getIdToken: vi.fn() }))
 const urls = vi.hoisted(() => ({ startBrowserDownload: vi.fn(), resolveMediaDownloadUrl: vi.fn() }))
 const zip = vi.hoisted(() => ({ pollZipJob: vi.fn() }))
+const expiry = vi.hoisted(() => ({ hook: vi.fn() }))
 const scroll = vi.hoisted(() => ({
   useScrollRestoration: vi.fn(), saveVerticalScroll: vi.fn(), getSavedScroll: vi.fn(),
   isRevealed: vi.fn(() => false), markAsRevealed: vi.fn(),
@@ -23,22 +24,31 @@ vi.mock('../utils/mediaUrls', async (importOriginal) => ({
 vi.mock('../utils/zipDownload', () => zip)
 vi.mock('../utils/scroll', () => scroll)
 vi.mock('../utils/useMediaExpiryRefresh', () => ({
-  useMediaExpiryRefresh: (_items, callback) => (reason) => Promise.resolve(callback(reason)).catch(() => false),
+  useMediaExpiryRefresh: (items, callback) => {
+    expiry.hook(items, callback)
+    return reason => Promise.resolve(callback(reason)).catch(() => false)
+  },
 }))
 vi.mock('../components/ProgressiveImage', () => ({ default: ({ alt, src, srcSet, onError }) => <img alt={alt} src={src} srcSet={srcSet} onError={onError} /> }))
 vi.mock('../components/ScrollRow', () => ({ default: ({ children, scrollKey }) => <div data-testid={scrollKey}>{children}</div> }))
 vi.mock('../components/SkeletonGrid', () => ({ default: () => <div role="status">Loading private albums</div> }))
-vi.mock('framer-motion', () => ({
-  AnimatePresence: ({ children }) => children,
-  motion: new Proxy({}, { get: (_target, tag) => ({ children, ...props }) => {
-    const Tag = tag
-    const {
-      onViewportEnter, variants: _variants, initial: _initial, animate: _animate, exit: _exit,
-      transition: _transition, whileInView: _whileInView, viewport: _viewport, ...domProps
-    } = props
-    return <Tag onMouseEnter={onViewportEnter} {...domProps}>{children}</Tag>
-  } }),
-}))
+vi.mock('framer-motion', () => {
+  const components = new Map()
+  return {
+    AnimatePresence: ({ children }) => children,
+    motion: new Proxy({}, { get: (_target, tag) => {
+      if (!components.has(tag)) components.set(tag, ({ children, ...props }) => {
+        const Tag = tag
+        const {
+          onViewportEnter, variants: _variants, initial: _initial, animate: _animate, exit: _exit,
+          transition: _transition, whileInView: _whileInView, viewport: _viewport, ...domProps
+        } = props
+        return <Tag onMouseEnter={onViewportEnter} {...domProps}>{children}</Tag>
+      })
+      return components.get(tag)
+    } }),
+  }
+})
 
 import UserDashboard from './UserDashboard'
 
@@ -204,6 +214,33 @@ describe('UserDashboard', () => {
     expect(screen.getByRole('dialog', { name: 'Photo viewer for Portraits' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/two-full?fresh=1')
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
+  })
+
+  it('preserves a verified original during authorized status refresh but replaces failed URLs', async () => {
+    const now = Date.now()
+    const original = (issuedAt, signature) => {
+      const date = new Date(issuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+      const url = `https://originals.example.test/before/photo/one/w640.webp?X-Amz-Date=${date}&X-Amz-Expires=1800&X-Amz-Signature=${signature}`
+      return { status: 'ready', width: 640, height: 480, url, srcSet: [{ width: 640, url }], expiresAt: issuedAt + 1_800_000 }
+    }
+    const previous = original(now - 60_000, 'old')
+    const fresh = original(now, 'fresh')
+    api.fetchAlbum.mockResolvedValueOnce({ images: [{ ...images[0], before: previous }] })
+      .mockResolvedValue({ images: [{ ...images[0], before: fresh }] })
+    mounted()
+    fireEvent.click((await screen.findByText('Portraits')).closest('.cursor-pointer'))
+    await screen.findByRole('button', { name: 'Open item 1 from Portraits' })
+    await act(async () => { await expiry.hook.mock.lastCall[1]('original-status') })
+    expect(expiry.hook.mock.lastCall[0][0].before).toBe(previous)
+    fireEvent.click(screen.getByRole('button', { name: 'Open item 1 from Portraits' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const beforeImage = document.querySelector('.linen-lightbox-original')
+    expect(beforeImage).toHaveAttribute('src', previous.url)
+    fireEvent.error(beforeImage)
+    await waitFor(() => expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh))
+    await waitFor(() => expect(document.querySelector('.linen-lightbox-original')).toHaveAttribute('src', fresh.url))
+    expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh)
+    expect(api.fetchAlbum).toHaveBeenLastCalledWith('photo', 'token', expect.objectContaining({ force: true }))
   })
 
   it('downloads an album ZIP with status feedback and surfaces ZIP/download errors', async () => {

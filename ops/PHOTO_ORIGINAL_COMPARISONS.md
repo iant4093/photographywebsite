@@ -19,6 +19,22 @@ Forced album refreshes bypass the browser cache. Public photo details containing
 pending or failed originals are served with `private, no-store` so processing
 updates are visible on the next check; completed details retain normal caching.
 
+Ready previews load only when Before is first requested. The browser chooses a
+WebP variant using the image's fitted display width and its pixel density. A
+ready toggle does not fetch album metadata or contact Google Drive. Preview
+responses use `Cache-Control: private, max-age=1800`; the signed URLs also expire
+after 30 minutes. The current original remains mounted after its first successful
+load so repeated toggles can reuse it immediately. Navigation or a changed
+preview source releases that retained image. Other originals are not prefetched.
+
+Background album refreshes can preserve an existing preview URL only when the
+fresh authorized response confirms the same album, photo, dimensions, variants,
+and storage assets. Reuse requires at least one minute of remaining validity,
+keeps the earlier expiry, and never extends access. An actual image-load error
+forces fresh URLs. Discovery views apply one album response to every matching
+photo already in their deck, reducing repeated status lookups while preserving
+the current selection and ignoring results for replaced source data.
+
 ## Implementation and validation status
 
 Pre-deployment validation was performed locally. The counts below describe the

@@ -12,6 +12,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const lastScrollY = useRef(0)
     const visibleRef = useRef(true)
     const menuToggleRef = useRef(null)
+    const menuRef = useRef(null)
     const photoActive = pathname === '/' || pathname.startsWith('/album/')
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/')
     const searchActive = pathname === '/search'
@@ -33,7 +34,8 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
         let frame = null
         const update = () => {
             frame = null
-            if (document.documentElement.hasAttribute('data-lightbox-scroll-lock')) return
+            if (document.documentElement.hasAttribute('data-lightbox-scroll-lock')
+                || document.documentElement.hasAttribute('data-menu-scroll-lock')) return
             const currentScrollY = window.scrollY
             if (currentScrollY === lastScrollY.current) return
             const nextVisible = currentScrollY < 10 || currentScrollY < lastScrollY.current
@@ -55,14 +57,32 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
         }
     }, [])
 
-    // Lock body scroll when menu is open
+    // Keep touch scrolling inside the menu while preserving the page underneath.
     useEffect(() => {
-        if (isMenuOpen) {
-            document.body.style.overflow = 'hidden'
-        } else {
-            document.body.style.overflow = 'unset'
+        if (!isMenuOpen) return undefined
+        const body = document.body
+        const root = document.documentElement
+        const scrollPosition = { left: window.scrollX, top: window.scrollY }
+        const bodyStyles = Object.fromEntries(
+            ['overflow', 'overscrollBehavior', 'position', 'top', 'left', 'right', 'width']
+                .map(property => [property, body.style[property]]),
+        )
+        const rootStyles = { overflow: root.style.overflow, overscrollBehavior: root.style.overscrollBehavior }
+        const previousLock = root.getAttribute('data-menu-scroll-lock')
+        root.setAttribute('data-menu-scroll-lock', '')
+        Object.assign(root.style, { overflow: 'hidden', overscrollBehavior: 'none' })
+        Object.assign(body.style, {
+            overflow: 'hidden', overscrollBehavior: 'none', position: 'fixed',
+            top: `-${scrollPosition.top}px`, left: `-${scrollPosition.left}px`, right: '0', width: '100%',
+        })
+        if (menuRef.current) menuRef.current.scrollTop = 0
+        return () => {
+            Object.assign(body.style, bodyStyles)
+            Object.assign(root.style, rootStyles)
+            window.scrollTo({ ...scrollPosition, behavior: 'instant' })
+            if (previousLock === null) root.removeAttribute('data-menu-scroll-lock')
+            else root.setAttribute('data-menu-scroll-lock', previousLock)
         }
-        return () => { document.body.style.overflow = 'unset' }
     }, [isMenuOpen])
 
     useEffect(() => {
@@ -79,7 +99,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     return (
         <>
             {/* Top Navigation Bar */}
-            <nav className={`linen-nav fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'menu-is-open bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
+            <nav className={`linen-nav fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isMenuOpen || isVisible ? 'translate-y-0' : '-translate-y-full'} ${isMenuOpen ? 'menu-is-open bg-transparent border-transparent' : 'bg-cream/80 backdrop-blur-md border-b border-warm-border'}`}>
                 <div className="linen-nav-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
                     <div className="linen-brand-cluster flex items-center gap-3 z-50 relative">
@@ -170,6 +190,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
 
             {/* Fullscreen Overlay Menu */}
             <div
+                ref={menuRef}
                 id="site-menu"
                 aria-hidden={!isMenuOpen}
                 inert={isMenuOpen ? undefined : true}

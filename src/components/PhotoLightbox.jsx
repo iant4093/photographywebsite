@@ -9,6 +9,7 @@ import {
     mediaThumbnailUrl,
 } from '../utils/mediaUrls'
 import LightboxShareButton from './LightboxShareButton'
+import useContainedImageSizes from '../hooks/useContainedImageSizes'
 
 const PHOTO_CROSSFADE_MS = 360
 const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
@@ -18,29 +19,34 @@ function freshComparison(id) {
     return { id, requested: false, attempt: 0, loadedKey: null, failedKey: null }
 }
 
-function runOriginalRefresh(requestRef, callback, event, image, isCurrent) {
+function runOriginalRefresh(requestRef, callback, event, image, isCurrent, context = { reason: 'original-status' }) {
     const key = mediaId(image) || image
     const active = requestRef.current
     if (active) {
         if (active.key === key) return active.promise
-        if (active.queued?.key === key) return active.queued.promise
+        if (active.queued?.key === key) {
+            if (context.reason === 'media-error') {
+                Object.assign(active.queued, { callback, event, image, isCurrent, context })
+            }
+            return active.queued.promise
+        }
         // Keep only the latest waiting selection, so rapid navigation cannot
         // build a queue of obsolete reads behind one slow request.
         active.queued?.resolve()
         let resolve
         const promise = new Promise((complete) => { resolve = complete })
-        active.queued = { key, callback, event, image, isCurrent, promise, resolve }
+        active.queued = { key, callback, event, image, isCurrent, context, promise, resolve }
         return promise
     }
     let result
-    try { result = callback(event, image) } catch { /* Keep the edit available. */ }
+    try { result = callback(event, image, context) } catch { /* Keep the edit available. */ }
     const request = { key, promise: null, queued: null }
     request.promise = Promise.resolve(result).catch(() => {}).finally(() => {
         if (requestRef.current !== request) return
         requestRef.current = null
         const queued = request.queued
         if (queued?.isCurrent()) {
-            runOriginalRefresh(requestRef, queued.callback, queued.event, queued.image, queued.isCurrent).then(queued.resolve)
+            runOriginalRefresh(requestRef, queued.callback, queued.event, queued.image, queued.isCurrent, queued.context).then(queued.resolve)
         } else queued?.resolve()
     })
     requestRef.current = request
@@ -65,6 +71,7 @@ function PhotoLightbox({
     loading = false,
     emptyMessage = '',
 }) {
+    const { containerRef, sizesFor } = useContainedImageSizes()
     const [loadedImageId, setLoadedImageId] = useState(null)
     const [settledImage, setSettledImage] = useState(null)
     const [printing, setPrinting] = useState(false)
@@ -194,7 +201,7 @@ function PhotoLightbox({
         }
     }
 
-    const refreshOriginal = (event, allowMediaError = false) => {
+    const refreshOriginal = (event, allowMediaError = false, isRetry = false) => {
         // Checking a processing status is not a media failure. In protected
         // viewers the error callback may require an entirely new access check.
         const refresh = onBeforeRefresh || (allowMediaError ? onMediaError : undefined)
@@ -204,14 +211,14 @@ function PhotoLightbox({
         // promise so a slow first request cannot trigger overlapping reads.
         return runOriginalRefresh(originalRequestRef, refresh, event, activeImage, () => (
             originalRefreshRef.current.id === activeId && originalRefreshRef.current.requested && document.visibilityState !== 'hidden'
-        ))
+        ), { reason: allowMediaError || isRetry ? 'media-error' : 'original-status' })
     }
 
     const handleBeforeToggle = (event) => {
         if (comparisonRequested && (beforeLoadFailed || (before?.status === 'failed' && onBeforeRefresh))) {
             refreshedOriginalsRef.current.delete(beforeSourceKey)
             setComparison((current) => ({ ...current, attempt: current.attempt + 1, loadedKey: null, failedKey: null }))
-            refreshOriginal(event, beforeLoadFailed)
+            refreshOriginal(event, beforeLoadFailed, true)
             return
         }
         setComparison((current) => ({ ...current, requested: !current.requested }))
@@ -282,39 +289,14 @@ function PhotoLightbox({
                 </svg>
             </button>
 
-            {images.length > 1 && (
-                <nav className="linen-lightbox-nav" aria-label="Photo navigation">
-                    <button
-                        type="button"
-                        onClick={(event) => { event.stopPropagation(); onPrevious() }}
-                        className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                        aria-label="Previous photo"
-                    >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                        </svg>
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={(event) => { event.stopPropagation(); onNext() }}
-                        className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                        aria-label="Next photo"
-                    >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                    </button>
-                </nav>
-            )}
-
             <div
                 className={`linen-lightbox-content flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0 ${hasPhotoMetadata ? 'has-photo-metadata' : ''}`}
                 onClick={(event) => event.stopPropagation()}
             >
-                <div className="flex-1 min-h-0 flex items-center justify-center w-full relative">
+                <div className="linen-lightbox-media-stage flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {activeImage ? (
                         <div
+                            ref={containerRef}
                             className="linen-lightbox-media absolute inset-0"
                             style={{ gridTemplate: 'minmax(0, 1fr) / minmax(0, 1fr)' }}
                         >
@@ -331,7 +313,7 @@ function PhotoLightbox({
                                 <img
                                     src={settledImage.rawUrl}
                                     srcSet={settledImage.previewSrcSet || undefined}
-                                    sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
+                                    sizes={sizesFor(settledImage.image)}
                                     alt=""
                                     aria-hidden="true"
                                     width={settledImage.image.width}
@@ -345,7 +327,7 @@ function PhotoLightbox({
                                 key={`preview-${activeId}`}
                                 src={activeRawUrl}
                                 srcSet={previewSrcSet || undefined}
-                                sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
+                                sizes={sizesFor(activeImage)}
                                 alt="Full size preview"
                                 aria-hidden={showingBefore || undefined}
                                 onLoad={handleFullImageLoad}
@@ -356,12 +338,12 @@ function PhotoLightbox({
                                 style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: showingBefore ? 'hidden' : undefined }}
                                 className={`linen-lightbox-photo object-contain relative z-30 ${loadedImageId === activeId ? 'is-loaded' : ''}`}
                             />
-                            {comparisonRequested && beforeIsReady && !beforeLoadFailed && (
+                            {(comparisonRequested || comparison.loadedKey === beforeRequestKey) && beforeIsReady && !beforeLoadFailed && (
                                 <img
                                     key={`original-${beforeRequestKey}`}
                                     src={beforeUrl}
                                     srcSet={beforeSrcSet || undefined}
-                                    sizes="(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)"
+                                    sizes={sizesFor(before)}
                                     alt="Before — Camera JPG"
                                     aria-hidden={!showingBefore || undefined}
                                     onLoad={handleBeforeLoad}
@@ -395,109 +377,139 @@ function PhotoLightbox({
                         </div>
                     )}
                 </div>
+            </div>
 
-                {hasPhotoMetadata && (
-                    <div className="linen-lightbox-metadata shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
-                        {activeImage.exif.model && (
-                            <p className="text-white font-medium text-sm md:text-base drop-shadow-md">
-                                {activeImage.exif.model}
-                            </p>
+            <div className="linen-lightbox-footer">
+                {(images.length > 1 || hasPhotoMetadata) && (
+                    <nav className={`linen-lightbox-nav ${images.length > 1 ? 'has-navigation' : ''}`} aria-label="Photo navigation">
+                        {images.length > 1 && (
+                            <button
+                                type="button"
+                                onClick={(event) => { event.stopPropagation(); onPrevious() }}
+                                className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                aria-label="Previous photo"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                </svg>
+                            </button>
                         )}
-                        {activeImage.exif.lens && (
-                            <p className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
-                                {activeImage.exif.lens}
-                            </p>
+                        {hasPhotoMetadata && (
+                            <div className="linen-lightbox-metadata shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
+                                {activeImage.exif.model && (
+                                    <p title={activeImage.exif.model} className="text-white font-medium text-sm md:text-base drop-shadow-md">
+                                        {activeImage.exif.model}
+                                    </p>
+                                )}
+                                {activeImage.exif.lens && (
+                                    <p title={activeImage.exif.lens} className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
+                                        {activeImage.exif.lens}
+                                    </p>
+                                )}
+                                <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
+                                    {activeImage.exif.focalLength && <span>{activeImage.exif.focalLength}</span>}
+                                    {activeImage.exif.focalRatio && <span>{activeImage.exif.focalRatio}</span>}
+                                    {activeImage.exif.shutterSpeed && <span>{activeImage.exif.shutterSpeed}</span>}
+                                    {activeImage.exif.iso && <span>{activeImage.exif.iso}</span>}
+                                </div>
+                            </div>
                         )}
-                        <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
-                            {activeImage.exif.focalLength && <span>{activeImage.exif.focalLength}</span>}
-                            {activeImage.exif.focalRatio && <span>{activeImage.exif.focalRatio}</span>}
-                            {activeImage.exif.shutterSpeed && <span>{activeImage.exif.shutterSpeed}</span>}
-                            {activeImage.exif.iso && <span>{activeImage.exif.iso}</span>}
+                        {images.length > 1 && (
+                            <button
+                                type="button"
+                                onClick={(event) => { event.stopPropagation(); onNext() }}
+                                className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                aria-label="Next photo"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                            </button>
+                        )}
+                    </nav>
+                )}
+
+                {activeImage && (
+                    <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
+                        <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
+                            {hasOriginalComparison && (
+                                <button
+                                    type="button"
+                                    onClick={handleBeforeToggle}
+                                    className="linen-lightbox-before inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
+                                    aria-label={beforeButtonLabel}
+                                    aria-pressed={showingBefore}
+                                    aria-busy={beforeBusy || undefined}
+                                    title={beforeNeedsRetry ? `${beforeTitle} Click to retry.` : beforeTitle}
+                                >
+                                    <svg className={`linen-lightbox-before-indicator h-5 w-5 ${beforeBusy ? 'is-spinning' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        {beforeBusy ? (
+                                            <path strokeLinecap="round" strokeWidth={1.5} d="M12 3a9 9 0 109 9" />
+                                        ) : beforeHasError || beforeUnavailable ? (
+                                            <><circle cx="12" cy="12" r="9" strokeWidth={1.5} /><path strokeLinecap="round" strokeWidth={1.5} d="M12 7v6m0 4h.01" /></>
+                                        ) : (
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v18M9 5H5a2 2 0 00-2 2v10a2 2 0 002 2h4m6-14h4a2 2 0 012 2v10a2 2 0 01-2 2h-4M3 16l4-4 2 2m6-3 6 6" />
+                                        )}
+                                    </svg>
+                                    <span className="linen-lightbox-before-label" aria-hidden="true">
+                                        <span className="linen-lightbox-before-word" data-label="Before"><span className={showingBefore ? 'is-active' : ''}>Before</span></span>
+                                        <span>/</span>
+                                        <span className="linen-lightbox-before-word" data-label="After"><span className={!showingBefore ? 'is-active' : ''}>After</span></span>
+                                    </span>
+                                </button>
+                            )}
+                            {canShare && (
+                                <LightboxShareButton
+                                    media={activeImage}
+                                    index={index}
+                                    mediaType="photo"
+                                    shareTitle={shareTitle}
+                                    shareUrl={shareUrl}
+                                />
+                            )}
+                            {onDownload && (
+                                <button
+                                    type="button"
+                                    onClick={(event) => onDownload(event, activeImage, index)}
+                                    className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
+                                    title={showingBefore ? 'Download Edited Photo' : 'Download Photo'}
+                                    aria-label={showingBefore ? 'Download edited photo' : 'Download photo'}
+                                >
+                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    <span>Download</span>
+                                </button>
+                            )}
+                            {onPrint && (
+                                <button
+                                    type="button"
+                                    onClick={handlePrint}
+                                    disabled={printing}
+                                    className="linen-lightbox-print inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation"
+                                    aria-label={showingBefore ? 'Order a print of the edited photo' : 'Order a print of this photo'}
+                                >
+                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" />
+                                    </svg>
+                                    <span>{printing ? 'Preparing…' : 'Order a Print'}</span>
+                                </button>
+                            )}
                         </div>
+                        {hasOriginalComparison && (beforeHasError || beforeUnavailable) && (
+                            <span className="linen-lightbox-before-tooltip" aria-hidden="true">{beforeMessage}</span>
+                        )}
+                        {hasOriginalComparison && (
+                            <span className="linen-lightbox-before-status" role="status" aria-live="polite" aria-atomic="true">
+                                {showingBefore ? 'Before — Camera JPG' : 'After — Edited'}{beforeMessage ? `. ${beforeMessage}` : ''}
+                            </span>
+                        )}
+                        <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">
+                            {index + 1} / {images.length}
+                        </span>
                     </div>
                 )}
             </div>
-
-            {activeImage && (
-                <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
-                    <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
-                        {hasOriginalComparison && (
-                            <button
-                                type="button"
-                                onClick={handleBeforeToggle}
-                                className="linen-lightbox-before inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
-                                aria-label={beforeButtonLabel}
-                                aria-pressed={showingBefore}
-                                aria-busy={beforeBusy || undefined}
-                                title={beforeNeedsRetry ? `${beforeTitle} Click to retry.` : beforeTitle}
-                            >
-                                <svg className={`linen-lightbox-before-indicator h-5 w-5 ${beforeBusy ? 'is-spinning' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    {beforeBusy ? (
-                                        <path strokeLinecap="round" strokeWidth={1.5} d="M12 3a9 9 0 109 9" />
-                                    ) : beforeHasError || beforeUnavailable ? (
-                                        <><circle cx="12" cy="12" r="9" strokeWidth={1.5} /><path strokeLinecap="round" strokeWidth={1.5} d="M12 7v6m0 4h.01" /></>
-                                    ) : (
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v18M9 5H5a2 2 0 00-2 2v10a2 2 0 002 2h4m6-14h4a2 2 0 012 2v10a2 2 0 01-2 2h-4M3 16l4-4 2 2m6-3 6 6" />
-                                    )}
-                                </svg>
-                                <span className="linen-lightbox-before-label" aria-hidden="true">
-                                    <span className="linen-lightbox-before-word" data-label="Before"><span className={showingBefore ? 'is-active' : ''}>Before</span></span>
-                                    <span>/</span>
-                                    <span className="linen-lightbox-before-word" data-label="After"><span className={!showingBefore ? 'is-active' : ''}>After</span></span>
-                                </span>
-                            </button>
-                        )}
-                        {canShare && (
-                            <LightboxShareButton
-                                media={activeImage}
-                                index={index}
-                                mediaType="photo"
-                                shareTitle={shareTitle}
-                                shareUrl={shareUrl}
-                            />
-                        )}
-                        {onDownload && (
-                            <button
-                                type="button"
-                                onClick={(event) => onDownload(event, activeImage, index)}
-                                className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
-                                title={showingBefore ? 'Download Edited Photo' : 'Download Photo'}
-                                aria-label={showingBefore ? 'Download edited photo' : 'Download photo'}
-                            >
-                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                                <span>Download</span>
-                            </button>
-                        )}
-                        {onPrint && (
-                            <button
-                                type="button"
-                                onClick={handlePrint}
-                                disabled={printing}
-                                className="linen-lightbox-print inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation"
-                                aria-label={showingBefore ? 'Order a print of the edited photo' : 'Order a print of this photo'}
-                            >
-                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" />
-                                </svg>
-                                <span>{printing ? 'Preparing…' : 'Order a Print'}</span>
-                            </button>
-                        )}
-                    </div>
-                    {hasOriginalComparison && (beforeHasError || beforeUnavailable) && (
-                        <span className="linen-lightbox-before-tooltip" aria-hidden="true">{beforeMessage}</span>
-                    )}
-                    {hasOriginalComparison && (
-                        <span className="linen-lightbox-before-status" role="status" aria-live="polite" aria-atomic="true">
-                            {showingBefore ? 'Before — Camera JPG' : 'After — Edited'}{beforeMessage ? `. ${beforeMessage}` : ''}
-                        </span>
-                    )}
-                    <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">
-                        {index + 1} / {images.length}
-                    </span>
-                </div>
-            )}
         </AccessibleLightbox>
     )
 }

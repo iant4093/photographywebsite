@@ -17,6 +17,21 @@ function deferred() {
 }
 
 describe('usePhotoOriginalRefresh', () => {
+    it('refreshes every matching deck photo after checking just one, without adding album-only photos', async () => {
+        vi.mocked(fetchAlbum).mockResolvedValueOnce({ images: [
+            { id: first.id, before: ready },
+            { id: second.id, before: { status: 'unavailable' } },
+            { id: 'not-in-deck', before: ready },
+        ] })
+        const unrelated = { ...first, albumId: 'another-album' }
+        const { result } = renderHook(() => usePhotoOriginalRefresh([second, unrelated, first]))
+        await act(async () => { await result.current.refreshOriginal(null, first) })
+        expect(fetchAlbum).toHaveBeenCalledOnce()
+        expect(result.current.images).toEqual([
+            { ...second, before: { status: 'unavailable' } }, unrelated, { ...first, before: ready },
+        ])
+    })
+
     it('deduplicates album reads and updates only matching original descriptors without changing a deck', async () => {
         const request = deferred()
         vi.mocked(fetchAlbum).mockReturnValueOnce(request.promise)
@@ -54,6 +69,45 @@ describe('usePhotoOriginalRefresh', () => {
             await refresh
         })
         expect(result.current.images).toEqual([newer])
+    })
+
+    it('does not attach an old response to removed or replaced photos even if their descriptor reference is unchanged', async () => {
+        const request = deferred()
+        vi.mocked(fetchAlbum).mockReturnValueOnce(request.promise)
+        const { result, rerender } = renderHook(({ images }) => usePhotoOriginalRefresh(images), { initialProps: { images: [first, second] } })
+        let refresh
+        act(() => { refresh = result.current.refreshOriginal(null, first) })
+        const replaced = { ...second, palette: ['#ffffff'] }
+        rerender({ images: [replaced] })
+        await act(async () => {
+            request.resolve({ images: [{ id: first.id, before: ready }, { id: second.id, before: ready }] })
+            await refresh
+        })
+        expect(result.current.images).toEqual([replaced])
+    })
+
+    it('reuses safe ready URLs across status refreshes but replaces the URL that failed to load', async () => {
+        const now = Date.now()
+        const descriptor = (issuedAt, signature) => {
+            const date = new Date(issuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+            const url = `https://originals.example.test/before/photo/w640.webp?X-Amz-Date=${date}&X-Amz-Expires=1800&X-Amz-Signature=${signature}`
+            return { status: 'ready', url, srcSet: [{ width: 640, url }], width: 640, height: 480, expiresAt: issuedAt + 1_800_000 }
+        }
+        const oldBefore = descriptor(now - 60_000, 'old')
+        const newBefore = descriptor(now, 'fresh')
+        const source = { ...first, before: oldBefore }
+        vi.mocked(fetchAlbum).mockResolvedValue({ images: [{ id: first.id, before: newBefore }] })
+        const { result } = renderHook(() => usePhotoOriginalRefresh([source]))
+        await act(async () => { await result.current.refreshOriginal(null, source) })
+        expect(result.current.images[0].before).toBe(oldBefore)
+        await act(async () => { await result.current.refreshOriginal({ type: 'error' }, result.current.images[0]) })
+        expect(result.current.images[0].before).toBe(newBefore)
+        const retried = descriptor(now + 1000, 'retry')
+        vi.mocked(fetchAlbum).mockResolvedValueOnce({ images: [{ id: first.id, before: retried }] })
+        await act(async () => {
+            await result.current.refreshOriginal({ type: 'click' }, result.current.images[0], { reason: 'media-error' })
+        })
+        expect(result.current.images[0].before).toBe(retried)
     })
 
     it('reports missing photos and refresh failures while preserving the photo itself', async () => {

@@ -50,6 +50,10 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('dialog', { name: 'Photo viewer' })).toHaveTextContent('Canon EOS R7')
     expect(document.querySelector('.linen-lightbox-content')).toHaveClass('has-photo-metadata')
     expect(document.querySelector('.linen-lightbox-metadata')).toHaveTextContent('Canon EOS R7')
+    const navigation = screen.getByRole('navigation', { name: 'Photo navigation' })
+    expect(navigation.children[0]).toHaveAccessibleName('Previous photo')
+    expect(navigation.children[1]).toHaveClass('linen-lightbox-metadata')
+    expect(navigation.children[2]).toHaveAccessibleName('Next photo')
     expect(screen.getByRole('dialog')).toHaveTextContent('Sigma 18-50mm F2.8')
     expect(screen.getByRole('dialog')).toHaveTextContent('18mm')
     expect(screen.getByRole('dialog')).toHaveTextContent('f/4')
@@ -265,8 +269,28 @@ describe('PhotoLightbox', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
     expect(edited).toBeVisible()
-    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(screen.getByAltText('Before — Camera JPG')).toBe(original)
+    expect(original).not.toBeVisible()
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(toggle)
+    expect(screen.getByAltText('Before — Camera JPG')).toBe(original)
+    expect(original).toBeVisible()
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('removes a retained original if its signed source changes while showing the edit', () => {
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    fireEvent.load(original)
+    fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
+    expect(original.isConnected).toBe(true)
+    rerender(<PhotoLightbox {...props} images={[{ ...comparisonPhoto, before: { ...comparisonPhoto.before, url: 'https://media.test/refreshed.jpg', srcSet: [] } }]} />)
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(screen.getByAltText('Before — Camera JPG')).not.toBe(original)
+    expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
   })
 
   it('resets comparison on navigation, return, and reopen and ignores detached original events', () => {
@@ -375,7 +399,7 @@ describe('PhotoLightbox', () => {
     const onMediaError = vi.fn()
     render(<PhotoLightbox images={[landscape]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onBeforeRefresh={onBeforeRefresh} onMediaError={onMediaError} />)
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
-    expect(onBeforeRefresh).toHaveBeenCalledWith(expect.any(Object), landscape)
+    expect(onBeforeRefresh).toHaveBeenCalledWith(expect.any(Object), landscape, { reason: 'original-status' })
     expect(onMediaError).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Cancel loading original' })).toHaveAttribute('aria-busy', 'true')
     fireEvent.error(screen.getByAltText('Full size preview'))
@@ -386,6 +410,18 @@ describe('PhotoLightbox', () => {
     render(<PhotoLightbox images={['https://media.test/demo.jpg']} index={0} ariaLabel="Viewer" onClose={vi.fn()} />)
     expect(screen.queryByRole('button', { name: 'Show original photo' })).toBeNull()
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('marks original load errors and retry clicks as media errors so signed URLs are refreshed', async () => {
+    const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onBeforeRefresh={onBeforeRefresh} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    fireEvent.error(screen.getByAltText('Before — Camera JPG'))
+    expect(onBeforeRefresh).toHaveBeenLastCalledWith(expect.any(Object), comparisonPhoto, { reason: 'media-error' })
+    await act(async () => {})
+    fireEvent.click(screen.getByRole('button', { name: 'Retry original' }))
+    expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+    expect(onBeforeRefresh).toHaveBeenLastCalledWith(expect.any(Object), comparisonPhoto, { reason: 'media-error' })
   })
 
   it('does not expose original comparison when the API omits its descriptor', () => {
@@ -524,6 +560,7 @@ describe('PhotoLightbox', () => {
     if (selection === 'selected' || selection === 'replaced') {
       expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
       expect(onBeforeRefresh.mock.calls[1][1]).toBe(selection === 'selected' ? failed : next)
+      expect(onBeforeRefresh.mock.calls[1][2]).toEqual({ reason: selection === 'selected' ? 'media-error' : 'original-status' })
     } else expect(onBeforeRefresh).toHaveBeenCalledOnce()
     if (selection !== 'unmounted') unmount()
   })

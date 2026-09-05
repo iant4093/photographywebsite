@@ -346,30 +346,6 @@ export default function VideoGallery() {
                         </svg>
                     </button>
 
-                    {/* Navigation Arrows (only if > 1 video) */}
-                    {images.length > 1 && (
-                        <nav className="linen-lightbox-nav" aria-label="Video navigation">
-                            <button
-                                onClick={goPrev}
-                                className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                aria-label="Previous video"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                </svg>
-                            </button>
-                            <button
-                                onClick={goNext}
-                                className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                aria-label="Next video"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        </nav>
-                    )}
-
                     {/* React Player Container */}
                     <div className="linen-lightbox-content flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black rounded-none md:rounded-xl overflow-hidden">
                         <VideoPlayer
@@ -380,36 +356,61 @@ export default function VideoGallery() {
                         />
                     </div>
 
-                    {/* Share, download & counter */}
-                    <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
-                        <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
-                            {album.visibility === 'public' && (
-                                <LightboxShareButton
-                                    media={images[lightboxIndex]}
-                                    index={lightboxIndex}
-                                    mediaType="video"
-                                    shareTitle={`${album.title} — Ian Truong Photography`}
-                                    shareUrl={video => shareUrlForAlbumVideo(albumId, mediaId(video))}
-                                />
-                            )}
-                            <button
-                                type="button"
-                                onClick={downloadOriginal}
-                                className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
-                                title="Download Video"
-                                aria-label="Download video"
-                            >
-                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                                <span>Download</span>
-                            </button>
-                        </div>
+                    <div className="linen-lightbox-footer">
                         {images.length > 1 && (
-                            <span className="text-white/70 text-sm font-medium drop-shadow-md">
-                                {lightboxIndex + 1} / {images.length}
-                            </span>
+                            <nav className="linen-lightbox-nav" aria-label="Video navigation">
+                                <button
+                                    onClick={goPrev}
+                                    className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                    aria-label="Previous video"
+                                >
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                </button>
+                                <button
+                                    onClick={goNext}
+                                    className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
+                                    aria-label="Next video"
+                                >
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                            </nav>
                         )}
+
+                        {/* Share, download & counter */}
+                        <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
+                            <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
+                                {album.visibility === 'public' && (
+                                    <LightboxShareButton
+                                        media={images[lightboxIndex]}
+                                        index={lightboxIndex}
+                                        mediaType="video"
+                                        shareTitle={`${album.title} — Ian Truong Photography`}
+                                        shareUrl={video => shareUrlForAlbumVideo(albumId, mediaId(video))}
+                                    />
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={downloadOriginal}
+                                    className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
+                                    title="Download Video"
+                                    aria-label="Download video"
+                                >
+                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    <span>Download</span>
+                                </button>
+                            </div>
+                            {images.length > 1 && (
+                                <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">
+                                    {lightboxIndex + 1} / {images.length}
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </AccessibleLightbox>
             )}

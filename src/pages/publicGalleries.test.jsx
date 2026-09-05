@@ -147,6 +147,42 @@ describe('AlbumGallery', () => {
     expect(screen.getByRole('heading', { name: 'Wild Album' })).toBeInTheDocument()
   })
 
+  it('reuses verified original URLs on status refresh and replaces them after a media error', async () => {
+    const now = Date.now()
+    const original = (issuedAt, signature) => {
+      const date = new Date(issuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+      const url = `https://originals.example.test/before/a1/one/w640.webp?X-Amz-Date=${date}&X-Amz-Expires=1800&X-Amz-Signature=${signature}`
+      return { status: 'ready', width: 640, height: 480, url, srcSet: [{ width: 640, url }], expiresAt: issuedAt + 1_800_000 }
+    }
+    const previous = original(now - 60_000, 'old')
+    const fresh = original(now, 'fresh')
+    const data = before => ({ ...photoData, images: [{ ...photoData.images[0], before }] })
+    api.fetchAlbum.mockResolvedValueOnce(data(previous)).mockResolvedValue(data(fresh))
+    expiry.hook.mockImplementation((_items, refresh) => {
+      expiry.refresh.mockImplementation(reason => refresh(reason))
+    })
+    gallery(<AlbumGallery />, '/album/a1')
+    await screen.findByRole('heading', { name: 'Wild Album' })
+    await act(async () => { await expiry.hook.mock.lastCall[1]('original-status') })
+    expect(expiry.hook.mock.lastCall[0][0].before).toBe(previous)
+    expect(expiry.hook.mock.lastCall[0][0].mediaExpiresAt).toBeLessThanOrEqual(previous.expiresAt)
+    fireEvent.click(screen.getByRole('button', { name: 'Open item 1 from Wild Album' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const beforeImage = document.querySelector('.linen-lightbox-original')
+    expect(beforeImage).toHaveAttribute('src', previous.url)
+    // The existing media refresh cooldown can suppress the automatic attempt.
+    // The subsequent retry click must still replace the URL that failed.
+    expiry.refresh.mockImplementationOnce(() => Promise.resolve(false))
+    await act(async () => { fireEvent.error(beforeImage) })
+    expect(api.fetchAlbum).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry original' }))
+    await waitFor(() => expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh))
+    await waitFor(() => expect(document.querySelector('.linen-lightbox-original')).toHaveAttribute('src', fresh.url))
+    expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh)
+    expect(expiry.refresh).toHaveBeenLastCalledWith('media-error')
+    expect(api.fetchAlbum).toHaveBeenLastCalledWith('a1', 'token', expect.objectContaining({ force: true }))
+  })
+
   it('hides album and lightbox sharing for a specific-user photo album', async () => {
     api.fetchAlbum.mockResolvedValueOnce({
       ...photoData,

@@ -17,6 +17,7 @@ import {
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
+import { reuseOriginalPreviews } from '../utils/originalPreviewReuse'
 import { pollZipJob } from '../utils/zipDownload'
 import PhotoLightbox from '../components/PhotoLightbox'
 import { openPrintOrder } from '../utils/printOrders'
@@ -132,7 +133,7 @@ function UserDashboard() {
         }
     }, [location.key, userEmail])
 
-    const loadSelectedImages = useCallback(async (album, { background = false } = {}) => {
+    const loadSelectedImages = useCallback(async (album, { background = false, reuseOriginals = true } = {}) => {
         if (!album) return []
         const scope = selectedImageScopeRef.current
         if (!scope || scope.albumId !== album.albumId || scope.controller.signal.aborted) return []
@@ -143,7 +144,9 @@ function UserDashboard() {
             if (signal.aborted) return []
             const data = await fetchAlbum(album.albumId, token, { signal, force: background })
             if (signal.aborted) return []
-            setImages(data.images || [])
+            const nextImages = data.images || []
+            setImages(current => background && reuseOriginals
+                ? reuseOriginalPreviews(current, nextImages, { albumId: album.albumId }) : nextImages)
             setMediaError('')
             return data.images || []
         } catch (err) {
@@ -161,7 +164,7 @@ function UserDashboard() {
     }, [getIdToken])
 
     const refreshSelectedMedia = useCallback(
-        () => selectedAlbum ? loadSelectedImages(selectedAlbum, { background: true }) : Promise.resolve(),
+        reason => selectedAlbum ? loadSelectedImages(selectedAlbum, { background: true, reuseOriginals: reason !== 'media-error' }) : Promise.resolve(),
         [loadSelectedImages, selectedAlbum],
     )
     const requestSelectedRefresh = useMediaExpiryRefresh(images, refreshSelectedMedia)
@@ -488,7 +491,9 @@ function UserDashboard() {
                     onDownload={downloadImage}
                     onPrint={printImage}
                     canShare={false}
-                    onBeforeRefresh={() => requestSelectedRefresh('original-status')}
+                    onBeforeRefresh={(event, _image, context) => requestSelectedRefresh(
+                        event?.type === 'error' || context?.reason === 'media-error' ? 'media-error' : 'original-status'
+                    )}
                     onMediaError={() => requestSelectedRefresh('media-error')}
                 />
             )}

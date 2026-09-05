@@ -457,6 +457,17 @@ export default function SharedAlbum() {
                             </svg>
                         </button>
 
+
+                        <div className="linen-lightbox-content flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <VideoPlayer
+                                videoInfo={images[lightboxIndex]}
+                                autoplay={true}
+                                controls={true}
+                                onMediaError={requestMediaRefresh}
+                            />
+                        </div>
+
+                    <div className="linen-lightbox-footer">
                         {images.length > 1 && (
                             <nav className="linen-lightbox-nav" aria-label="Video navigation">
                                 <button
@@ -477,15 +488,6 @@ export default function SharedAlbum() {
                                 </button>
                             </nav>
                         )}
-
-                        <div className="linen-lightbox-content flex-1 w-full max-w-6xl min-h-0 flex items-center justify-center relative shadow-2xl bg-black overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                            <VideoPlayer
-                                videoInfo={images[lightboxIndex]}
-                                autoplay={true}
-                                controls={true}
-                                onMediaError={requestMediaRefresh}
-                            />
-                        </div>
 
                         <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>
                             <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
@@ -509,10 +511,11 @@ export default function SharedAlbum() {
                                     <span>Download</span>
                                 </button>
                             </div>
-                            <span className="text-white/70 text-sm font-medium drop-shadow-md">
+                            <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">
                                 {lightboxIndex + 1} / {images.length}
                             </span>
                         </div>
+                    </div>
                 </AccessibleLightbox>
             )}
         </motion.div>

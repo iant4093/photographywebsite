@@ -63,6 +63,7 @@ describe('navigation and metadata', () => {
     vi.stubGlobal('requestAnimationFrame', (callback) => { callback(); return 1 })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 0 })
+    document.body.style.overflow = ''
   })
   afterEach(() => {
     document.documentElement.removeAttribute('data-lightbox-scroll-lock')
@@ -81,11 +82,65 @@ describe('navigation and metadata', () => {
     expect(menu).not.toHaveAttribute('inert')
     expect(within(menu).getByRole('link', { name: 'Sign In' })).toHaveAttribute('href', '/login')
     fireEvent.keyDown(window, { key: 'Escape' })
-    expect(document.body.style.overflow).toBe('unset')
+    expect(document.body.style.overflow).toBe('')
     expect(document.getElementById('site-menu')).toHaveAttribute('inert')
     expect(screen.getByRole('button', { name: 'Open menu' })).toHaveFocus()
     unmount()
-    expect(document.body.style.overflow).toBe('unset')
+    expect(document.body.style.overflow).toBe('')
+  })
+
+  it('restores existing page styles and scroll position after closing or unmounting the menu', () => {
+    document.body.style.overflow = 'clip'
+    document.body.style.position = 'relative'
+    document.body.style.width = '95%'
+    document.documentElement.style.overflow = 'auto'
+    document.documentElement.style.overscrollBehavior = 'contain'
+    window.scrollY = 320
+    const { unmount } = routed(<Navbar />)
+    const menu = document.getElementById('site-menu')
+    menu.scrollTop = 240
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(menu.scrollTop).toBe(0)
+    expect(document.body.style.position).toBe('fixed')
+    expect(document.body.style.top).toBe('-320px')
+    expect(document.documentElement.style.overflow).toBe('hidden')
+    expect(document.documentElement).toHaveAttribute('data-menu-scroll-lock')
+    menu.scrollTop = 480
+    fireEvent.click(screen.getByRole('button', { name: 'Close menu' }))
+    expect(document.body.style.overflow).toBe('clip')
+    expect(document.body.style.position).toBe('relative')
+    expect(document.body.style.width).toBe('95%')
+    expect(document.documentElement.style.overflow).toBe('auto')
+    expect(document.documentElement.style.overscrollBehavior).toBe('contain')
+    expect(document.documentElement).not.toHaveAttribute('data-menu-scroll-lock')
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 320, behavior: 'instant' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(menu.scrollTop).toBe(0)
+    unmount()
+    expect(document.body.style.overflow).toBe('clip')
+    expect(document.body.style.position).toBe('relative')
+    expect(document.documentElement).not.toHaveAttribute('data-menu-scroll-lock')
+    document.body.style.cssText = ''
+    document.documentElement.style.cssText = ''
+  })
+
+  it('keeps the close button on screen while scrolling an open menu', async () => {
+    window.requestAnimationFrame = callback => { queueMicrotask(callback); return 1 }
+    const { container } = routed(<Navbar />)
+    const nav = container.querySelector('nav')
+    window.scrollY = 200
+    fireEvent.scroll(window)
+    await waitFor(() => expect(nav).toHaveClass('-translate-y-full'))
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(nav).toHaveClass('translate-y-0')
+    window.scrollY = 0
+    fireEvent.scroll(window)
+    await act(async () => {})
+    expect(nav).toHaveClass('translate-y-0')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.getByRole('button', { name: 'Open menu' })).toHaveFocus()
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 200, behavior: 'instant' })
   })
 
   it('offers an accessible theme toggle beside the brand on public routes', () => {
@@ -118,7 +173,7 @@ describe('navigation and metadata', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
     expect(within(document.getElementById('site-menu')).queryByRole('link', { name: 'Search' })).toBeNull()
     fireEvent.click(search)
-    expect(document.body.style.overflow).toBe('unset')
+    expect(document.body.style.overflow).toBe('')
   })
 
   it.each([
@@ -137,7 +192,7 @@ describe('navigation and metadata', () => {
       : within(document.getElementById('site-menu')).getByRole('link', { name })
     expect(link).toHaveAttribute('href', destination)
     fireEvent.click(link)
-    expect(document.body.style.overflow).toBe('unset')
+    expect(document.body.style.overflow).toBe('')
     view.unmount()
   })
 
@@ -181,10 +236,10 @@ describe('navigation and metadata', () => {
     const menu = document.getElementById('site-menu')
     expect(within(menu).getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/dashboard')
     fireEvent.click(within(menu).getByRole('link', { name: 'Dashboard' }))
-    expect(document.body.style.overflow).toBe('unset')
+    expect(document.body.style.overflow).toBe('')
     fireEvent.click(screen.getByRole('button', { name: 'Open menu' }))
     fireEvent.click(within(menu).getByRole('link', { name: 'Videos' }))
-    expect(document.body.style.overflow).toBe('unset')
+    expect(document.body.style.overflow).toBe('')
   })
 
   it('sets and reuses a canonical URL for the current pathname', () => {
