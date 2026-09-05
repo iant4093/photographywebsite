@@ -4,14 +4,19 @@ Museum material textures
 Downloaded from Poly Haven on 2026-08-27 through the official Poly Haven API/CDN.
 All Poly Haven assets are dedicated to the public domain under CC0.
 
+Historical delivery files listed below with "legacy" are no longer packaged:
+the three 512px wood-floor maps, three White Plaster 02 maps, and two 512px
+wallpapers. The current material family supersedes them. Deployment does not
+delete existing CDN objects, so already-cached older clients retain those URLs.
+
 Wood Floor
 Source: https://polyhaven.com/a/wood_floor
 File: wood_floor_diff_1k.jpg (legacy delivery copy resized to 512px and JPEG-compressed)
 
 White Plaster 02
 Source: https://polyhaven.com/a/white_plaster_02
-File: white_plaster_02_diff_1k.jpg (delivery copy resized to 512px and JPEG-compressed)
-Files: white_plaster_02_nor_gl_1k.jpg and white_plaster_02_rough_1k.jpg (delivery copies resized to 512px and JPEG-compressed)
+File: white_plaster_02_diff_1k.jpg (legacy delivery copy resized to 512px and JPEG-compressed)
+Files: white_plaster_02_nor_gl_1k.jpg and white_plaster_02_rough_1k.jpg (legacy delivery copies resized to 512px and JPEG-compressed)
 
 Wood Floor PBR maps
 Files: wood_floor_nor_gl_1k.jpg and wood_floor_rough_1k.jpg (legacy delivery copies resized to 512px and JPEG-compressed)
@@ -35,7 +40,7 @@ furniture veneer rather than flooring, so the joinery has no plank seams.
 Normal maps use OpenGL (+Y) convention; normal/roughness are linear data.
 
 Authored Surface Response Maps
-Files: fine_plaster_normal_512.png, fine_plaster_roughness_512.png,
+Files: fine_plaster_normal_512.jpg, fine_plaster_roughness_512.png,
        brushed_brass_roughness_256.png, ceramic_roughness_256.png,
        fabric_weave_normal_256.png, fabric_weave_roughness_256.png
 Created for this project on 2026-09-04 by the deterministic offline generator
@@ -44,21 +49,26 @@ data, no photographs, generated artwork, or third-party source images used.
 Periodic shallow plaster pores, satin metal brushing, ceramic glaze variation,
 and soft woven textile response. No painted highlights or shadows. All these
 maps are linear data; grayscale roughness decodes to equal R/G/B values.
+Fine plaster retains the original 512px analytic normal field and is delivered
+as quality-92 JPEG with 4:4:4 chroma sampling. This replaces the lossless PNG
+delivery with a fresh URL and reduces transfer by 151,681 bytes. The generator
+checks decoded channel error and tile seams against the lossless analytic data.
+Other generated response maps remain lossless PNG files.
 
 Reproduction and budgets
 See scripts/materials/README.md and src/utils/museumMaterialAssets.js.
 The preparation script pins the six downloaded source files by SHA-256, keeps
 PBR maps aligned, and checks dimensions, color-space metadata, seams, transfer,
 and conservative RGBA+mipmap memory. Poly Haven source width: wood floor 1.7m,
-walnut veneer 1m. Generated files are delivered as lossless PNG data maps.
+walnut veneer 1m.
 
 Museum Wallpaper
 Generated specifically for Ian Truong Photography with OpenAI image generation on 2026-08-28.
-File: museum_wallpaper_albedo_512.jpg (delivery copy resized to 512px and JPEG-compressed)
+File: museum_wallpaper_albedo_512.jpg (legacy delivery copy resized to 512px and JPEG-compressed)
 
 Museum Wallpaper — Oxblood
 Generated specifically for Ian Truong Photography with OpenAI image generation on 2026-08-28.
-File: museum_wallpaper_oxblood_512.jpg (seamless, evenly lit dark damask delivery copy resized to 512px and JPEG-compressed)
+File: museum_wallpaper_oxblood_512.jpg (legacy seamless, evenly lit dark damask delivery copy resized to 512px and JPEG-compressed)
 
 Museum Wallpaper — Authored Oxblood Velvet
 Generated specifically for Ian Truong Photography with OpenAI image generation on 2026-08-29.

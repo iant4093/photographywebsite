@@ -9,7 +9,7 @@ export const MUSEUM_MATERIAL_TEXTURES = Object.freeze({
     joineryColor: `${TEXTURE_ROOT}/joinery_wood_albedo_512.jpg`,
     joineryNormal: `${TEXTURE_ROOT}/joinery_wood_normal_512.jpg`,
     joineryRoughness: `${TEXTURE_ROOT}/joinery_wood_roughness_512.jpg`,
-    plasterNormal: `${TEXTURE_ROOT}/fine_plaster_normal_512.png`,
+    plasterNormal: `${TEXTURE_ROOT}/fine_plaster_normal_512.jpg`,
     plasterRoughness: `${TEXTURE_ROOT}/fine_plaster_roughness_512.png`,
     brassRoughness: `${TEXTURE_ROOT}/brushed_brass_roughness_256.png`,
     ceramicRoughness: `${TEXTURE_ROOT}/ceramic_roughness_256.png`,

@@ -47,14 +47,25 @@ roughness only slightly. Use mipmaps and bounded anisotropy for distant detail.
 
 ## Cost and checks
 
-All twelve new-family delivery images total 1,038,333 bytes (0.99 MiB). This
+All twelve new-family delivery images total 886,652 bytes (0.85 MiB). This
 replaces the old ~100 KiB floor family and can replace the old ~150 KiB plaster
 family. The conservative full RGBA8+mipmap footprint is 24 MiB; replacing the old
 512² floor/plaster family gives about 16 MiB additional storage when texture
 uploads are shared across repeated materials. No geometry, extra draw calls,
-runtime lights, or shadow passes are required by these assets.
+runtime lights, or shadow passes are required by these assets. Superseded legacy
+maps are no longer packaged in the frontend artifact; upload-only deployment
+retains their existing CDN objects for older cached clients.
+
+The fine-plaster normal retains its full 512² analytic detail in a 67,352-byte,
+quality-92 JPEG with 4:4:4 sampling, saving 151,681 bytes against the former PNG.
+Its decoded channel RMS error is 2.37/1.66/1.07 out of 255 against the lossless
+normal field. At the recommended 0.2 normal strength this corresponds to about
+0.26 degrees RMS angular error. Compression does not change the field, physical
+scale, or material normal strength. Other generated maps remain lossless PNG.
 
 `--check` verifies exact image sizes, no embedded ICC transforms for data maps,
-normal-channel averages, exact generated seam samples, a 1 MiB family transfer
-ceiling, and a 26 MiB conservative texture-memory ceiling. All source channels
-undergo the same resize, and normal JPEG delivery disables chroma subsampling.
+normal-channel averages and unit lengths, exact lossless generated seam samples,
+bounded JPEG seam/channel error against the original analytic field, a 1 MiB
+family transfer ceiling, and a 26 MiB conservative texture-memory ceiling. All
+source channels undergo the same resize, and normal JPEG delivery disables
+chroma subsampling.
