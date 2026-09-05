@@ -25,6 +25,10 @@ import {
     start,
 } from './albumVideoHoverPreview'
 
+function setPaused(video, paused) {
+    Object.defineProperty(video, 'paused', { configurable: true, value: paused })
+}
+
 describe('video album hover previews', () => {
     beforeEach(() => {
         hlsInstances.length = 0
@@ -33,8 +37,14 @@ describe('video album hover previews', () => {
             matches: query.includes('(hover: hover)'),
         }))
         vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('maybe')
-        vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
-        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function () {
+            setPaused(this, false)
+            Object.defineProperty(this, 'readyState', { configurable: true, value: 3 })
+            return Promise.resolve()
+        })
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function () {
+            setPaused(this, true)
+        })
         vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
         vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
             callback(0)
@@ -175,9 +185,10 @@ describe('video album hover previews', () => {
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
         let resolvePlayback
-        HTMLMediaElement.prototype.play.mockImplementationOnce(() => new Promise((resolve) => {
-            resolvePlayback = resolve
-        }))
+        HTMLMediaElement.prototype.play.mockImplementationOnce(function () {
+            setPaused(this, false)
+            return new Promise((resolve) => { resolvePlayback = resolve })
+        })
         const controller = start({
             container,
             album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8', coverThumbnailTime: 5 },
@@ -212,7 +223,10 @@ describe('video album hover previews', () => {
     ])('ignores old %s play promises that %s after rapidly returning to a card', async (runtime, settlement) => {
         HTMLMediaElement.prototype.canPlayType.mockReturnValue(runtime === 'native' ? 'maybe' : '')
         const pending = []
-        const pendingPlayback = () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+        const pendingPlayback = function () {
+            setPaused(this, false)
+            return new Promise((resolve, reject) => pending.push({ resolve, reject }))
+        }
         HTMLMediaElement.prototype.play
             .mockImplementationOnce(pendingPlayback)
             .mockImplementationOnce(pendingPlayback)
@@ -325,9 +339,10 @@ describe('video album hover previews', () => {
             .mockRejectedValueOnce(new DOMException('Source interrupted', 'AbortError'))
             .mockRejectedValueOnce(new DOMException('Seek interrupted', 'AbortError'))
         let resolvePlayback
-        HTMLMediaElement.prototype.play.mockImplementationOnce(() => new Promise((resolve) => {
-            resolvePlayback = resolve
-        }))
+        HTMLMediaElement.prototype.play.mockImplementationOnce(function () {
+            setPaused(this, false)
+            return new Promise((resolve) => { resolvePlayback = resolve })
+        })
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
         const controller = start({
@@ -382,6 +397,204 @@ describe('video album hover previews', () => {
         expect(container.querySelector('video')).toBeNull()
         await vi.advanceTimersByTimeAsync(1000)
         expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(VIDEO_HOVER_MAX_PLAY_ATTEMPTS)
+    })
+
+    it.each(['resolve', 'AbortError', 'NotAllowedError'])('recovers a paused pending play and ignores its late %s', async (settlement) => {
+        const pending = []
+        const pendingPlayback = function () {
+            setPaused(this, false)
+            return new Promise((resolve, reject) => pending.push({ resolve, reject }))
+        }
+        HTMLMediaElement.prototype.play
+            .mockImplementationOnce(pendingPlayback)
+            .mockImplementationOnce(pendingPlayback)
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const onPlaybackEnd = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+            onPlaybackEnd,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        expect(video.paused).toBe(false)
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+
+        // The browser can interrupt an element before settling its play promise.
+        setPaused(video, true)
+        video.dispatchEvent(new Event('pause'))
+        await vi.advanceTimersByTimeAsync(150)
+        expect(video.play).toHaveBeenCalledTimes(2)
+        expect(video.paused).toBe(false)
+
+        if (settlement === 'resolve') pending[0].resolve()
+        else pending[0].reject(new DOMException('Previous playback failed', settlement))
+        await vi.advanceTimersByTimeAsync(500)
+        expect(video.play).toHaveBeenCalledTimes(2)
+        expect(container.querySelector('video')).toBe(video)
+        expect(video.style.opacity).toBe('0')
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+        expect(onPlaybackEnd).not.toHaveBeenCalled()
+
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 3 })
+        pending[1].resolve()
+        await Promise.resolve()
+        expect(video.style.opacity).toBe('1')
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it('reveals playback if the browser resumes the original request before the retry', async () => {
+        let resolvePlayback
+        HTMLMediaElement.prototype.play.mockImplementationOnce(function () {
+            setPaused(this, false)
+            return new Promise((resolve) => { resolvePlayback = resolve })
+        })
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        setPaused(video, true)
+        video.dispatchEvent(new Event('pause'))
+        await vi.advanceTimersByTimeAsync(75)
+
+        setPaused(video, false)
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 3 })
+        resolvePlayback()
+        await Promise.resolve()
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(video.style.opacity).toBe('1')
+        await vi.advanceTimersByTimeAsync(150)
+        expect(video.play).toHaveBeenCalledOnce()
+        expect(container.querySelector('video')).toBe(video)
+        controller.stop()
+    })
+
+    it.each(['canplay', 'seeked'])('retries paused pending playback when %s arrives', async (event) => {
+        HTMLMediaElement.prototype.play.mockImplementationOnce(function () {
+            setPaused(this, false)
+            return new Promise(() => {})
+        })
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        setPaused(video, true)
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 3 })
+        video.dispatchEvent(new Event(event))
+        await vi.advanceTimersByTimeAsync(150)
+
+        expect(video.play).toHaveBeenCalledTimes(2)
+        expect(video.paused).toBe(false)
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it('recovers a pause after playback starts without restarting its four-second lifetime', async () => {
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const onPlaybackEnd = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+            onPlaybackEnd,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        await vi.advanceTimersByTimeAsync(1000)
+        setPaused(video, true)
+        video.dispatchEvent(new Event('pause'))
+        await vi.advanceTimersByTimeAsync(150)
+
+        expect(video.play).toHaveBeenCalledTimes(2)
+        expect(video.paused).toBe(false)
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(onPlaybackEnd).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DURATION_MS - 1151)
+        expect(container.querySelector('video')).toBe(video)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(container.querySelector('video')).toBeNull()
+        expect(onPlaybackEnd).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it('caps repeated browser pauses without requiring a play rejection', async () => {
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const onPlaybackEnd = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+            onPlaybackEnd,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+
+        for (let attempt = 1; attempt < VIDEO_HOVER_MAX_PLAY_ATTEMPTS; attempt += 1) {
+            setPaused(video, true)
+            video.dispatchEvent(new Event('pause'))
+            await vi.advanceTimersByTimeAsync(150 * attempt)
+            expect(video.play).toHaveBeenCalledTimes(attempt + 1)
+            expect(video.paused).toBe(false)
+        }
+        setPaused(video, true)
+        video.dispatchEvent(new Event('pause'))
+        await vi.advanceTimersByTimeAsync(1000)
+        video.dispatchEvent(new Event('canplay'))
+        video.dispatchEvent(new Event('seeked'))
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(video.play).toHaveBeenCalledTimes(VIDEO_HOVER_MAX_PLAY_ATTEMPTS)
+        expect(container.querySelector('video')).toBeNull()
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(onPlaybackEnd).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it.each(['leave', 'ended'])('cancels paused playback recovery on %s', async (reason) => {
+        const container = document.createElement('div')
+        const onPlaybackEnd = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackEnd,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        setPaused(video, true)
+        video.dispatchEvent(new Event('pause'))
+        if (reason === 'leave') controller.stop()
+        else {
+            Object.defineProperty(video, 'ended', { configurable: true, value: true })
+            video.dispatchEvent(new Event('ended'))
+        }
+        video.dispatchEvent(new Event('canplay'))
+        video.dispatchEvent(new Event('seeked'))
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(video.play).toHaveBeenCalledOnce()
+        expect(container.querySelector('video')).toBeNull()
+        expect(onPlaybackEnd).toHaveBeenCalledOnce()
+        controller.stop()
     })
 
     it('does not retry a browser autoplay-policy denial', async () => {

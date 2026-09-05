@@ -93,6 +93,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     let mediaReady = false
     let started = false
     let playAttempts = 0
+    let playRequest = 0
     let retryTimer = null
     const timers = new Set()
     const listeners = []
@@ -128,9 +129,27 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         playing = false
     }
     const fail = () => cleanup(true)
+    const retryPlayback = () => {
+        if (!active || retryTimer !== null) return
+        if (playAttempts >= VIDEO_HOVER_MAX_PLAY_ATTEMPTS) {
+            fail()
+            return
+        }
+        retryTimer = later(() => {
+            retryTimer = null
+            void play()
+        }, 150 * playAttempts)
+    }
 
     const play = async () => {
-        if (!active || started || !mediaReady || !video) return
+        if (!active || !mediaReady || !video || video.ended) return
+        // A request can remain pending (or have resolved) after the browser
+        // pauses the element. Its actual state decides whether to resume.
+        if (started && !video.paused) return
+        if (playAttempts >= VIDEO_HOVER_MAX_PLAY_ATTEMPTS) {
+            fail()
+            return
+        }
         if (retryTimer !== null) {
             window.clearTimeout(retryTimer)
             timers.delete(retryTimer)
@@ -138,26 +157,30 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         }
         started = true
         playAttempts += 1
+        const request = ++playRequest
         try {
             await video.play()
-            if (!active) return
-            playing = true
-            onPlaybackStart?.()
+            if (!active || request !== playRequest) return
+            if (video.paused) {
+                retryPlayback()
+                return
+            }
+            if (!playing) {
+                playing = true
+                onPlaybackStart?.()
+                later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
+            }
             window.requestAnimationFrame(() => {
                 if (active && video) video.style.opacity = '1'
             })
-            later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
         } catch (error) {
-            if (!active) return
+            if (!active || request !== playRequest) return
             // Rapid hover changes can interrupt startup more than once. Retry
             // when media becomes ready, with a bounded backoff as a fallback.
             // Policy denials and real stream failures still stop the preview.
             if (error?.name === 'AbortError' && playAttempts < VIDEO_HOVER_MAX_PLAY_ATTEMPTS) {
                 started = false
-                retryTimer = later(() => {
-                    retryTimer = null
-                    void play()
-                }, 150 * playAttempts)
+                retryPlayback()
             } else {
                 fail()
             }
@@ -201,6 +224,11 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         }
         listen(video, 'ended', () => cleanup(true), { once: true })
         listen(video, 'error', fail, { once: true })
+        listen(video, 'pause', () => {
+            if (active && video?.paused && !video.ended) {
+                retryPlayback()
+            }
+        })
         listen(video, 'canplay', () => { void play() })
         listen(video, 'seeked', () => { void play() })
 
