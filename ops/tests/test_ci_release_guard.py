@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import datetime
 import json
@@ -703,6 +704,76 @@ class ReleaseDependencyTests(unittest.TestCase):
                 release_intent=intent,
                 release_dependencies=dependencies,
             )
+
+    def test_original_comparison_releases_allow_only_exact_dynamic_dependencies(self):
+        dependencies = release_guard.load_release_dependencies(json.loads(
+            (ROOT / "ops/ci/release_dependencies.json").read_text(encoding="utf-8")
+        ))
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        # Subsequent artifact releases conservatively cascade through these
+        # existing references. An initial Add rule must never become general
+        # permission to edit a role, schedule, or invocation permission.
+        reviewed = [
+            (
+                "OriginalComparisonWorkerFunctionRole", "AWS::IAM::Role",
+                "Policies", "ImagesBucket.Arn",
+            ),
+            (
+                "OriginalComparisonWorkerFunction", "AWS::Lambda::Function",
+                "Role", "OriginalComparisonWorkerFunctionRole.Arn",
+            ),
+            (
+                "OriginalIndexRefreshFunctionRefreshOriginalIndex", "AWS::Events::Rule",
+                "Targets", "OriginalIndexRefreshFunction.Arn",
+            ),
+            (
+                "OriginalIndexRefreshFunctionRefreshOriginalIndexPermission", "AWS::Lambda::Permission",
+                "SourceArn", "OriginalIndexRefreshFunctionRefreshOriginalIndex.Arn",
+            ),
+        ]
+        for logical_id, resource_type, property_name, cause in reviewed:
+            with self.subTest(logical_id=logical_id):
+                self.assertEqual(
+                    dependencies[(logical_id, resource_type, property_name)],
+                    frozenset({cause}),
+                )
+                item = change(
+                    logical_id=logical_id, resource_type=resource_type,
+                    property_name=property_name,
+                    replacement="Conditional" if resource_type == "AWS::Lambda::Permission" else "False",
+                    recreation="Always" if resource_type == "AWS::Lambda::Permission" else "Never",
+                )
+                item["ResourceChange"]["Details"][0].update({
+                    "Evaluation": "Dynamic",
+                    "ChangeSource": "ResourceAttribute",
+                    "CausingEntity": cause,
+                })
+                self.assertEqual(release_guard.gate_change_set(
+                    [{"Changes": [item]}],
+                    release_intent=intent, release_dependencies=dependencies,
+                ), {"Add": 0, "Modify": 1, "Total": 1})
+
+                rejected = [
+                    (("Details", 0, "Evaluation"), "Static"),
+                    (("Details", 0, "ChangeSource"), "DirectModification"),
+                    (("Details", 0, "CausingEntity"), "UnreviewedResource.Arn"),
+                    (("Details", 0, "Target", "Name"), "UnreviewedProperty"),
+                    (("Details", 0, "Target", "Attribute"), "Metadata"),
+                    (("Replacement",), "True"),
+                ]
+                for path, value in rejected:
+                    altered = copy.deepcopy(item)
+                    target = altered["ResourceChange"]
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = value
+                    with self.subTest(path=path, value=value), self.assertRaises(release_guard.GateError):
+                        release_guard.gate_change_set(
+                            [{"Changes": [altered]}],
+                            release_intent=intent, release_dependencies=dependencies,
+                        )
 
     def test_dependency_schema_is_exact_and_tracked_policy_is_valid(self):
         document = json.loads(

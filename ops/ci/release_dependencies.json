@@ -93,6 +93,10 @@
     {"logicalId": "RefreshGoogleDriveUsageFunctionDriveUsageDailyRefresh", "resourceType": "AWS::Events::Rule", "propertyPath": "Targets", "causingEntities": ["RefreshGoogleDriveUsageFunction.Arn"]},
     {"logicalId": "RefreshGoogleDriveUsageFunctionDriveUsageDailyRefreshPermission", "resourceType": "AWS::Lambda::Permission", "propertyPath": "SourceArn", "causingEntities": ["RefreshGoogleDriveUsageFunctionDriveUsageDailyRefresh.Arn"]},
     {"logicalId": "RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefresh", "resourceType": "AWS::Events::Rule", "propertyPath": "Targets", "causingEntities": ["RefreshGitHubAnalyticsFunction.Arn"]},
-    {"logicalId": "RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefreshPermission", "resourceType": "AWS::Lambda::Permission", "propertyPath": "SourceArn", "causingEntities": ["RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefresh.Arn"]}
+    {"logicalId": "RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefreshPermission", "resourceType": "AWS::Lambda::Permission", "propertyPath": "SourceArn", "causingEntities": ["RefreshGitHubAnalyticsFunctionGitHubAnalyticsHourlyRefresh.Arn"]},
+    {"logicalId": "OriginalComparisonWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn"]},
+    {"logicalId": "OriginalComparisonWorkerFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["OriginalComparisonWorkerFunctionRole.Arn"]},
+    {"logicalId": "OriginalIndexRefreshFunctionRefreshOriginalIndex", "resourceType": "AWS::Events::Rule", "propertyPath": "Targets", "causingEntities": ["OriginalIndexRefreshFunction.Arn"]},
+    {"logicalId": "OriginalIndexRefreshFunctionRefreshOriginalIndexPermission", "resourceType": "AWS::Lambda::Permission", "propertyPath": "SourceArn", "causingEntities": ["OriginalIndexRefreshFunctionRefreshOriginalIndex.Arn"]}
   ]
 }
