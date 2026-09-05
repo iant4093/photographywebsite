@@ -226,6 +226,10 @@ class GetAlbumsBranchTests(unittest.TestCase):
                 get_albums._fetch_page(visibility="public", album_type=None, limit=2, start_key=None)
 
     def test_handler_authenticated_public_private_and_error_outcomes(self):
+        # Public responses also hydrate hover metadata and gallery ordering.
+        # Keep those provider reads isolated alongside the paginated query.
+        self.enterContext(patch.object(get_albums.dynamodb, "batch_get_item", return_value={"Responses": {}}))
+        self.enterContext(patch.object(get_albums.settings_table, "get_item", return_value={}))
         with patch.object(get_albums, "get_verified_claims", return_value=claims()), patch.object(
             get_albums, "_fetch_page", return_value=([album()], None)
         ) as fetch:
@@ -576,8 +580,6 @@ class WorkerZipBranchTests(unittest.TestCase):
         zip_file.assert_called_once_with(
             stream,
             "w",
-            compression=worker_zip.zipfile.ZIP_DEFLATED,
-            compresslevel=6,
             allowZip64=True,
         )
 

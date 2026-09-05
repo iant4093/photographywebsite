@@ -71,6 +71,9 @@ class GalleryOrderHelperTests(unittest.TestCase):
 
 
 class UpdateGalleryOrderTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(update_gallery_order, "request_public_api_invalidation", return_value=True))
+
     def event(self, album_ids):
         return {"body": json.dumps({"albumIds": album_ids})}
 

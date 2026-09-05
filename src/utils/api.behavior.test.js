@@ -138,6 +138,19 @@ describe('public API client behavior', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('requests one original through the correct authenticated or shared scope', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ before: { status: 'ready' } })))
+    vi.stubGlobal('fetch', fetchMock)
+    const signal = new AbortController().signal
+    await api.requestAlbumOriginalComparison('a/b', 'photo', 'token', { signal })
+    await api.requestSharedOriginalComparison('share/code', 'photo', { signal })
+    expect(fetchMock.mock.calls[0][0]).toContain('/albums/a%2Fb/original-comparison')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ mediaId: 'photo' }), headers: { Authorization: 'Bearer token' } })
+    expect(fetchMock.mock.calls[1][0]).toContain('/shared/share%2Fcode/original-comparison')
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ mediaId: 'photo' }) })
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined()
+  })
+
   it('calls every mutation endpoint with encoded identifiers, authorization, JSON, and null 204 handling', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true })))
     vi.stubGlobal('fetch', fetchMock)

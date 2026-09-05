@@ -11,7 +11,7 @@ from audit_helpers import actor_context, emit_audit_event
 from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_previews, request_public_api_invalidation
+from cache_invalidation import invalidate_album_media, request_public_api_invalidation
 from explore_index import sync_album_index
 from hover_preview_refresh import request_hover_preview_refresh
 from album_qr import album_qr_key, write_album_qr
@@ -221,8 +221,8 @@ def handler(event, context):
             # Submit the edge purge before committing a restrictive transition.
             # A purge failure therefore leaves media unavailable, not silently
             # less private than the requested album state.
-            invalidate_public_previews(
-                album_id,
+            invalidate_album_media(
+                album,
                 reason="album-visibility-restricted",
                 strict=True,
             )
@@ -301,7 +301,7 @@ def handler(event, context):
                 )
         if visibility_changed and old_visibility != "public" and new_visibility == "public":
             # Clear any cached denial produced while the source was protected.
-            invalidate_public_previews(album_id, reason="album-visibility-public")
+            invalidate_album_media(committed, reason="album-visibility-public")
         if old_visibility == "public" or new_visibility == "public":
             request_public_api_invalidation(
                 album_id=album_id,

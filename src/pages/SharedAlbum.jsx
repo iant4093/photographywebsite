@@ -1,3 +1,4 @@
+import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router'
 import { fetchSharedAlbum, requestSharedAlbumZip, requestSharedMediaDownload, requestSharedPrintSession } from '../utils/api'
@@ -95,6 +96,7 @@ export default function SharedAlbum() {
         setLoading(false)
     }, [])
     const requestMediaRefresh = useMediaExpiryRefresh(images, requireFreshVerification)
+    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(images, { albumId: album?.albumId, shareCode: code })
 
     const handleManualSubmit = (e) => {
         e.preventDefault()
@@ -429,7 +431,7 @@ export default function SharedAlbum() {
 
             {lightboxIndex !== null && images[lightboxIndex] && album.type !== 'video' && (
                 <PhotoLightbox
-                    images={images}
+                    images={lightboxImages}
                     index={lightboxIndex}
                     ariaLabel={`Photo viewer for ${album.title}`}
                     onClose={closeLightbox}
@@ -439,6 +441,7 @@ export default function SharedAlbum() {
                     onPrint={printImage}
                     shareTitle={`${album.title} — Ian Truong Photography`}
                     shareUrl={image => shareUrlForPathPhoto(location.pathname, mediaId(image))}
+                    onBeforeRefresh={refreshOriginal}
                     onMediaError={() => requestMediaRefresh('media-error')}
                 />
             )}

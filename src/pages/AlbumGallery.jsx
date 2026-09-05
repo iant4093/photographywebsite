@@ -1,3 +1,4 @@
+import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useNavigationType } from 'react-router'
 import { fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
@@ -157,6 +158,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
         [loadAlbum],
     )
     const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)
+    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(images, { albumId, getIdToken })
 
     // Lightbox navigation — wraps around at ends
     const goNext = useCallback(() => {
@@ -382,7 +384,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                         {/* Lightbox Overlay */}
                         {lightboxIndex !== null && images[lightboxIndex] && (
                             <PhotoLightbox
-                                images={images}
+                                images={lightboxImages}
                                 index={lightboxIndex}
                                 ariaLabel={`Photo viewer for ${album.title}`}
                                 onClose={closeLightbox}
@@ -393,9 +395,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                 canShare={album.visibility === 'public'}
                                 shareTitle={`${album.title} — Ian Truong Photography`}
                                 shareUrl={image => shareUrlForAlbumPhoto(albumId, mediaId(image))}
-                                onBeforeRefresh={(event, _image, context) => requestMediaRefresh(
-                                    event?.type === 'error' || context?.reason === 'media-error' ? 'media-error' : 'original-status'
-                                )}
+                                onBeforeRefresh={refreshOriginal}
                                 onMediaError={() => requestMediaRefresh('media-error')}
                             />
                         )}

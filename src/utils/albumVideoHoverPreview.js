@@ -92,6 +92,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     let intentReady = false
     let mediaReady = false
     let started = false
+    let playAttempts = 0
     const timers = new Set()
     const listeners = []
     const later = (callback, delay) => {
@@ -123,11 +124,12 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         if (playing && notify) onPlaybackEnd?.()
         playing = false
     }
-    const fail = () => cleanup(false)
+    const fail = () => cleanup(true)
 
     const play = async () => {
         if (!active || started || !intentReady || !mediaReady || !video) return
         started = true
+        playAttempts += 1
         try {
             await video.play()
             if (!active) return
@@ -137,8 +139,17 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
                 if (active && video) video.style.opacity = '1'
             })
             later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
-        } catch {
-            fail()
+        } catch (error) {
+            if (!active) return
+            // A source/seek transition can interrupt the first play request.
+            // Retry it once while the pointer is still here, without requiring
+            // a leave/re-enter or retrying an autoplay-policy denial.
+            if (error?.name === 'AbortError' && playAttempts < 2) {
+                started = false
+                later(() => { void play() }, 100)
+            } else {
+                fail()
+            }
         }
     }
 
@@ -150,7 +161,6 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     video = prepareVideo()
     container.appendChild(video)
     const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
-    const hlsModule = nativeHls ? null : loadHlsModule()
 
     void (async () => {
         let selected = selectAlbumCoverVideo(null, album)
@@ -170,7 +180,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
             return
         }
 
-        const seekAndStart = () => {
+        const seekToCover = () => {
             if (!active || !video) return
             const duration = Number(video.duration)
             const latestStart = Number.isFinite(duration) ? Math.max(0, duration - 0.05) : selected.startTime
@@ -182,24 +192,23 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
                     // HLS.js already receives the same start position below.
                 }
             }
-            // Starting playback allows cold Safari HLS streams to fetch the
-            // segment needed to finish the cover-frame seek. Waiting for
-            // `seeked` here can otherwise deadlock until a second hover.
-            mediaReady = true
-            void play()
         }
         listen(video, 'ended', () => cleanup(true), { once: true })
         listen(video, 'error', fail, { once: true })
 
         if (nativeHls) {
-            listen(video, 'loadedmetadata', seekAndStart, { once: true })
+            listen(video, 'loadedmetadata', seekToCover, { once: true })
             video.src = selected.hlsUrl
             video.load()
+            // preload is only a hint. Request playback after hover intent even
+            // if a cold native HLS stream has not loaded its metadata yet.
+            mediaReady = true
+            void play()
             return
         }
 
         try {
-            const { default: Hls } = await hlsModule
+            const { default: Hls } = await loadHlsModule()
             if (!active || !video) return
             if (!Hls.isSupported()) {
                 fail()
@@ -213,7 +222,11 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
                 maxMaxBufferLength: 8,
                 backBufferLength: 0,
             })
-            listen(video, 'loadedmetadata', seekAndStart, { once: true })
+            listen(video, 'loadedmetadata', seekToCover, { once: true })
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                mediaReady = true
+                void play()
+            })
             hls.on(Hls.Events.ERROR, (_event, data) => {
                 if (data.fatal) fail()
             })

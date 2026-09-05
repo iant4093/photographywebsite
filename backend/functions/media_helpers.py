@@ -102,9 +102,51 @@ def extract_exif_data(bucket, key):
         logger.warning("exif_extraction_failed error_type=%s", type(error).__name__)
         return None
 
+def hls_master_playlist_key(raw_key):
+    """Match MediaConvert's input-based name for the HLS multivariant playlist."""
+    base_name = raw_key.rsplit(".", 1)[0]
+    filename = base_name.rsplit("/", 1)[-1]
+    return f"{base_name}_hls/{filename}.m3u8"
+
+
+def _hls_output(name_modifier, width, height, max_bitrate):
+    return {
+        "VideoDescription": {
+            "Width": width,
+            "Height": height,
+            # Preserve aspect ratio without padding or enlarging small sources.
+            "ScalingBehavior": "FIT_NO_UPSCALE",
+            "CodecSettings": {
+                "Codec": "H_264",
+                "H264Settings": {
+                    "RateControlMode": "QVBR",
+                    "QvbrSettings": {"QvbrQualityLevel": 7},
+                    "MaxBitrate": max_bitrate,
+                    "CodecProfile": "HIGH",
+                    "GopSizeUnits": "AUTO",
+                },
+            },
+        },
+        "AudioDescriptions": [
+            {
+                "CodecSettings": {
+                    "Codec": "AAC",
+                    "AacSettings": {
+                        "Bitrate": 96000,
+                        "CodingMode": "CODING_MODE_2_0",
+                        "SampleRate": 48000,
+                    },
+                },
+            },
+        ],
+        "NameModifier": name_modifier,
+        "ContainerSettings": {"Container": "M3U8", "M3u8Settings": {}},
+    }
+
+
 def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
     """
-    Submits an HLS transcoding job to AWS Elemental MediaConvert.
+    Submit two HLS renditions so the player can adapt to connection speed.
     """
     mc_client = get_mediaconvert_client()
     role_arn = os.environ['MEDIACONVERT_ROLE_ARN']
@@ -130,42 +172,13 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
                     "HlsGroupSettings": {
                         "SegmentLength": 10,
                         "MinSegmentLength": 0,
-                        "Destination": destination_s3_prefix
+                        "Destination": destination_s3_prefix,
+                        "OutputSelection": "MANIFESTS_AND_SEGMENTS",
                     }
                 },
                 "Outputs": [
-                    {
-                        "VideoDescription": {
-                            "CodecSettings": {
-                                "Codec": "H_264",
-                                "H264Settings": {
-                                    "RateControlMode": "QVBR",
-                                    "QvbrSettings": {
-                                        "QvbrQualityLevel": 7
-                                    },
-                                    "MaxBitrate": 5000000,
-                                    "CodecProfile": "HIGH"
-                                }
-                            }
-                        },
-                        "AudioDescriptions": [
-                            {
-                                "CodecSettings": {
-                                    "Codec": "AAC",
-                                    "AacSettings": {
-                                        "Bitrate": 96000,
-                                        "CodingMode": "CODING_MODE_2_0",
-                                        "SampleRate": 48000
-                                    }
-                                }
-                            }
-                        ],
-                        "NameModifier": "_1080p5m",
-                        "ContainerSettings": {
-                            "Container": "M3U8",
-                            "M3u8Settings": {}
-                        }
-                    }
+                    _hls_output("_1080p5m", 1920, 1080, 5000000),
+                    _hls_output("_540p1m2", 960, 540, 1200000),
                 ]
             }
         ],

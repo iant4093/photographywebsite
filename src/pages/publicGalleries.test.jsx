@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   fetchAlbum: vi.fn(),
+  requestAlbumOriginalComparison: vi.fn(),
   requestAlbumMediaDownload: vi.fn(),
   requestAlbumZip: vi.fn(),
 }))
@@ -147,7 +148,7 @@ describe('AlbumGallery', () => {
     expect(screen.getByRole('heading', { name: 'Wild Album' })).toBeInTheDocument()
   })
 
-  it('reuses verified original URLs on status refresh and replaces them after a media error', async () => {
+  it('refreshes failed originals separately from the gallery media refresh cooldown', async () => {
     const now = Date.now()
     const original = (issuedAt, signature) => {
       const date = new Date(issuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
@@ -156,6 +157,7 @@ describe('AlbumGallery', () => {
     }
     const previous = original(now - 60_000, 'old')
     const fresh = original(now, 'fresh')
+    api.requestAlbumOriginalComparison.mockRejectedValueOnce(new Error('Network unavailable')).mockResolvedValueOnce({ before: fresh })
     const data = before => ({ ...photoData, images: [{ ...photoData.images[0], before }] })
     api.fetchAlbum.mockResolvedValueOnce(data(previous)).mockResolvedValue(data(fresh))
     expiry.hook.mockImplementation((_items, refresh) => {
@@ -170,16 +172,17 @@ describe('AlbumGallery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
     const beforeImage = document.querySelector('.linen-lightbox-original')
     expect(beforeImage).toHaveAttribute('src', previous.url)
-    // The existing media refresh cooldown can suppress the automatic attempt.
-    // The subsequent retry click must still replace the URL that failed.
+    // A failed comparison request exposes retry without reloading the gallery.
     expiry.refresh.mockImplementationOnce(() => Promise.resolve(false))
     await act(async () => { fireEvent.error(beforeImage) })
     expect(api.fetchAlbum).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: 'Retry original' }))
-    await waitFor(() => expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh))
     await waitFor(() => expect(document.querySelector('.linen-lightbox-original')).toHaveAttribute('src', fresh.url))
-    expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh)
-    expect(expiry.refresh).toHaveBeenLastCalledWith('media-error')
+    expect(expiry.hook.mock.lastCall[0][0].before).toBe(previous)
+    expect(api.requestAlbumOriginalComparison).toHaveBeenCalledTimes(2)
+    expect(api.requestAlbumOriginalComparison).toHaveBeenLastCalledWith('a1', 'one', 'token', { signal: expect.any(AbortSignal) })
+    expect(expiry.refresh).not.toHaveBeenCalled()
+    expect(api.fetchAlbum).toHaveBeenCalledTimes(2)
     expect(api.fetchAlbum).toHaveBeenLastCalledWith('a1', 'token', expect.objectContaining({ force: true }))
   })
 

@@ -1,3 +1,4 @@
+import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useNavigationType } from 'react-router'
 import { useAuth } from '../context/auth'
@@ -168,6 +169,7 @@ function UserDashboard() {
         [loadSelectedImages, selectedAlbum],
     )
     const requestSelectedRefresh = useMediaExpiryRefresh(images, refreshSelectedMedia)
+    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(images, { albumId: selectedAlbum?.albumId, getIdToken })
 
     // Open photo album to view images inline
     async function openAlbum(album) {
@@ -482,7 +484,7 @@ function UserDashboard() {
 
             {lightboxIndex !== null && images[lightboxIndex] && (
                 <PhotoLightbox
-                    images={images}
+                    images={lightboxImages}
                     index={lightboxIndex}
                     ariaLabel={`Photo viewer for ${selectedAlbum?.title || 'private album'}`}
                     onClose={closeLightbox}
@@ -491,9 +493,7 @@ function UserDashboard() {
                     onDownload={downloadImage}
                     onPrint={printImage}
                     canShare={false}
-                    onBeforeRefresh={(event, _image, context) => requestSelectedRefresh(
-                        event?.type === 'error' || context?.reason === 'media-error' ? 'media-error' : 'original-status'
-                    )}
+                    onBeforeRefresh={refreshOriginal}
                     onMediaError={() => requestSelectedRefresh('media-error')}
                 />
             )}

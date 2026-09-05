@@ -105,6 +105,17 @@ def _dimension(value):
         return None
 
 
+def original_comparison_hint(album):
+    """Advertise the feature without reading metadata or signing unused URLs.
+
+    Availability is resolved for one photo through the authorized comparison
+    endpoint when the viewer asks to see its original.
+    """
+    if original_comparisons_enabled() and album.get("type", "photo") == "photo":
+        return {"status": "unresolved"}
+    return None
+
+
 def serialize_original_comparison(image, album, metadata=None):
     """Expose a minimal DTO only after checking the exact image and key contract."""
     from media_access import _raw_key, media_id_for_key, validate_album_media_key

@@ -71,6 +71,57 @@ class CacheInvalidationTests(unittest.TestCase):
             with self.assertRaises(ClientError):
                 cache_invalidation.invalidate_public_previews(ALBUM_ID, strict=True)
 
+    def test_album_media_invalidation_covers_canonical_legacy_and_preview_aliases(self):
+        album = {
+            "albumId": ALBUM_ID,
+            "legacyS3Prefix": "albums/summer-portraits-a1b2c3d4/",
+            "s3Prefix": "albums/someone-else/",
+        }
+        with patch.dict(os.environ, {"IMAGES_DISTRIBUTION_ID": "media"}), patch.object(
+            cache_invalidation, "_client", return_value=self.client
+        ):
+            self.assertTrue(cache_invalidation.invalidate_album_media(album, strict=True))
+        request = self.client.create_invalidation.call_args.kwargs
+        self.assertEqual(request["DistributionId"], "media")
+        self.assertEqual(request["InvalidationBatch"]["Paths"], {
+            "Quantity": 3,
+            "Items": [
+                f"/albums/{ALBUM_ID}/*",
+                "/albums/summer-portraits-a1b2c3d4/*",
+                f"/public-previews/{ALBUM_ID}/*",
+            ],
+        })
+
+    def test_album_media_invalidation_never_broadens_for_unsafe_legacy_prefix(self):
+        for legacy in ("albums/", "albums/*/", "albums/../", "/albums/legacy/", f"albums/{ALBUM_ID}/"):
+            with self.subTest(legacy=legacy), patch.dict(
+                os.environ, {"IMAGES_DISTRIBUTION_ID": "media"}
+            ), patch.object(cache_invalidation, "_client", return_value=self.client):
+                cache_invalidation.invalidate_album_media({
+                    "albumId": ALBUM_ID,
+                    "legacyS3Prefix": legacy,
+                    "s3Prefix": "albums/untrusted/",
+                })
+                paths = self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"]
+                self.assertEqual(paths, {
+                    "Quantity": 2,
+                    "Items": [f"/albums/{ALBUM_ID}/*", f"/public-previews/{ALBUM_ID}/*"],
+                })
+
+    def test_album_media_invalidation_rejects_invalid_album_and_propagates_strict_failure(self):
+        self.client.create_invalidation.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "CreateInvalidation"
+        )
+        with patch.dict(os.environ, {"IMAGES_DISTRIBUTION_ID": "media"}), patch.object(
+            cache_invalidation, "_client", return_value=self.client
+        ):
+            with self.assertRaises(validation_helpers.ValidationError):
+                cache_invalidation.invalidate_album_media({"albumId": "../other"})
+            self.client.create_invalidation.assert_not_called()
+            with self.assertRaises(ClientError):
+                cache_invalidation.invalidate_album_media({"albumId": ALBUM_ID}, strict=True)
+            self.assertFalse(cache_invalidation.invalidate_album_media({"albumId": ALBUM_ID}))
+
     def test_empty_invalidation_never_calls_provider(self):
         with patch.object(cache_invalidation, "_client", return_value=self.client):
             self.assertFalse(cache_invalidation._create_invalidation("", ["/safe"], "none", strict=False))

@@ -3236,6 +3236,8 @@ Resources:
       ReservedConcurrentExecutions: 10
       Environment:
         Variables:
+          ORIGINAL_COMPARISON_TABLE: !If [EnableOriginalComparisons, !Ref OriginalComparisonTable, '']
+          ORIGINAL_PREVIEW_BUCKET: !If [EnableOriginalComparisons, !Ref OriginalPreviewBucket, '']
           ALBUMS_TABLE: !Ref AlbumsTable
           IMAGES_BUCKET: !Ref ImagesBucket
           RATE_LIMIT_TABLE: !Ref RateLimitTable
@@ -3243,6 +3245,13 @@ Resources:
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:BatchGetItem
+              Resource: !GetAtt OriginalComparisonTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
@@ -3281,6 +3290,22 @@ Resources:
           Properties:
             ApiId: !Ref Api
             Path: /shared/{shareCode}/download-url
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        AlbumOriginalComparison:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /albums/{albumId}/original-comparison
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        SharedOriginalComparison:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /shared/{shareCode}/original-comparison
             Method: POST
             Auth:
               Authorizer: NONE

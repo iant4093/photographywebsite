@@ -134,13 +134,33 @@ function PhotoLightbox({
     }, [activeId])
 
     useEffect(() => {
+        const previous = originalRefreshRef.current
+        const needsResolution = previous.id === activeId && previous.requested && comparisonRequested
+            && before?.status === 'unresolved' && previous.image?.before?.status !== 'unresolved'
         if (originalRefreshRef.current.id !== activeId || !comparisonRequested) {
             const active = originalRequestRef.current
             active?.queued?.resolve()
             if (active) active.queued = null
         }
         originalRefreshRef.current = { callback: onBeforeRefresh, image: activeImage, id: activeId, requested: comparisonRequested }
-    }, [onBeforeRefresh, activeImage, activeId, comparisonRequested])
+        if (!needsResolution || !onBeforeRefresh) return
+
+        // A protected-media refresh replaces the photo with a fresh unresolved
+        // hint. Resume a comparison that is already open after any old request
+        // finishes; its response belongs to the photo object it started with.
+        const isCurrent = () => {
+            const current = originalRefreshRef.current
+            return current.id === activeId && current.image === activeImage && current.requested
+        }
+        const resolveOriginal = () => {
+            if (!isCurrent()) return
+            const { callback, image } = originalRefreshRef.current
+            void runOriginalRefresh(originalRequestRef, callback, undefined, image, isCurrent)
+        }
+        const pending = originalRequestRef.current?.promise
+        if (pending) void pending.then(resolveOriginal)
+        else resolveOriginal()
+    }, [onBeforeRefresh, activeImage, activeId, before?.status, comparisonRequested])
 
     useEffect(() => () => {
         originalRefreshRef.current.requested = false
@@ -188,7 +208,7 @@ function PhotoLightbox({
     if (!activeImage && !loading && !emptyMessage) return null
 
     const isLegacyOrDemo = typeof activeImage === 'string'
-    const hasOriginalComparison = Boolean(before && ['ready', 'pending', 'unavailable', 'failed'].includes(before.status))
+    const hasOriginalComparison = Boolean(before && ['unresolved', 'ready', 'pending', 'unavailable', 'failed'].includes(before.status))
     const hasPhotoMetadata = !isLegacyOrDemo && Boolean(activeImage?.exif)
     const hasOutgoingImage = settledImage && settledImage.id !== activeId
 
@@ -281,10 +301,10 @@ function PhotoLightbox({
     else if (comparisonRequested && !showingBefore) {
         if (before?.status === 'unavailable') beforeMessage = 'Unable to locate original'
         else if (beforeLoadFailed || before?.status === 'failed') beforeMessage = 'Original could not be loaded.'
-        else if (beforeIsReady) beforeMessage = 'Loading original…'
+        else if (beforeIsReady || before?.status === 'unresolved') beforeMessage = 'Loading original…'
         else beforeMessage = 'Preparing original…'
     }
-    const beforeBusy = waitingForEdited || (comparisonRequested && !showingBefore && !beforeLoadFailed && (before?.status === 'pending' || beforeIsReady))
+    const beforeBusy = waitingForEdited || (comparisonRequested && !showingBefore && !beforeLoadFailed && (['unresolved', 'pending'].includes(before?.status) || beforeIsReady))
     const beforeHasError = comparisonRequested && (beforeLoadFailed || before?.status === 'failed')
     const beforeNeedsRetry = beforeHasError && (beforeLoadFailed || hasBeforeRefresh)
     const beforeUnavailable = comparisonRequested && before?.status === 'unavailable'

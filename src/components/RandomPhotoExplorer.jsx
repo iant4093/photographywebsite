@@ -29,7 +29,7 @@ function warmStartingPhotos(images) {
     })
 }
 
-function RandomPhotoExplorer({ category = '', prefetch = false, variant = 'link' }) {
+function RandomPhotoExplorer({ category = '', variant = 'link' }) {
     const controllerRef = useRef(null)
     const requestRef = useRef(null)
     const photosRef = useRef([])
@@ -83,14 +83,6 @@ function RandomPhotoExplorer({ category = '', prefetch = false, variant = 'link'
         requestRef.current = request
         return request
     }, [normalizedCategory])
-
-    useEffect(() => {
-        if (!prefetch) return
-        // The whole-site pool begins warming after the initial page render.
-        // Category pools wait for pointer or keyboard intent so a large
-        // catalog does not fan out into one request per section.
-        void loadSession().catch(() => {})
-    }, [loadSession, prefetch])
 
     useEffect(() => () => controllerRef.current?.abort(), [])
 
@@ -182,6 +174,8 @@ function RandomPhotoExplorer({ category = '', prefetch = false, variant = 'link'
                 <button
                     type="button"
                     onClick={handleOpen}
+                    onPointerEnter={() => { void loadSession().catch(() => {}) }}
+                    onFocus={() => { void loadSession().catch(() => {}) }}
                     className="linen-text-link inline-flex cursor-pointer items-center gap-2 px-1 py-2 text-white font-medium transition-all duration-300"
                 >
                     {buttonLabel}

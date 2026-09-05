@@ -1,9 +1,9 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { fetchAlbum } from '../utils/api'
+import { requestAlbumOriginalComparison, requestSharedOriginalComparison } from '../utils/api'
 import usePhotoOriginalRefresh from './usePhotoOriginalRefresh'
 
-vi.mock('../utils/api', () => ({ fetchAlbum: vi.fn() }))
+vi.mock('../utils/api', () => ({ requestAlbumOriginalComparison: vi.fn(), requestSharedOriginalComparison: vi.fn() }))
 
 const first = { id: 'one', albumId: 'album-one', before: { status: 'pending' }, palette: ['#111111'] }
 const second = { id: 'two', albumId: 'album-one', before: { status: 'pending' } }
@@ -17,55 +17,76 @@ function deferred() {
 }
 
 describe('usePhotoOriginalRefresh', () => {
-    it('refreshes every matching deck photo after checking just one, without adding album-only photos', async () => {
-        vi.mocked(fetchAlbum).mockResolvedValueOnce({ images: [
-            { id: first.id, before: ready },
-            { id: second.id, before: { status: 'unavailable' } },
-            { id: 'not-in-deck', before: ready },
-        ] })
+    it('fetches only the requested photo without changing the deck or other originals', async () => {
+        vi.mocked(requestAlbumOriginalComparison).mockResolvedValueOnce({ before: ready })
         const unrelated = { ...first, albumId: 'another-album' }
         const { result } = renderHook(() => usePhotoOriginalRefresh([second, unrelated, first]))
         await act(async () => { await result.current.refreshOriginal(null, first) })
-        expect(fetchAlbum).toHaveBeenCalledOnce()
-        expect(result.current.images).toEqual([
-            { ...second, before: { status: 'unavailable' } }, unrelated, { ...first, before: ready },
-        ])
+        expect(requestAlbumOriginalComparison).toHaveBeenCalledOnce()
+        expect(requestAlbumOriginalComparison).toHaveBeenCalledWith('album-one', 'one', null, { signal: expect.any(AbortSignal) })
+        expect(result.current.images).toEqual([second, unrelated, { ...first, before: ready }])
     })
 
-    it('deduplicates album reads and updates only matching original descriptors without changing a deck', async () => {
+    it('deduplicates concurrent requests for the same photo', async () => {
         const request = deferred()
-        vi.mocked(fetchAlbum).mockReturnValueOnce(request.promise)
+        vi.mocked(requestAlbumOriginalComparison).mockReturnValueOnce(request.promise)
         const images = [second, first]
         const { result } = renderHook(() => usePhotoOriginalRefresh(images))
         let refreshFirst
         let refreshSecond
         act(() => {
             refreshFirst = result.current.refreshOriginal(null, first)
-            refreshSecond = result.current.refreshOriginal(null, second)
+            refreshSecond = result.current.refreshOriginal(null, first)
         })
-        expect(fetchAlbum).toHaveBeenCalledOnce()
-        expect(fetchAlbum).toHaveBeenCalledWith('album-one', null, { force: true, signal: expect.any(AbortSignal) })
+        expect(requestAlbumOriginalComparison).toHaveBeenCalledOnce()
         await act(async () => {
-            request.resolve({ images: [{ id: 'one', before: ready }, { id: 'two', before: { status: 'unavailable' } }] })
+            request.resolve({ before: ready })
             await Promise.all([refreshFirst, refreshSecond])
         })
-        expect(result.current.images.map(image => image.id)).toEqual(['two', 'one'])
-        expect(result.current.images[0].before).toEqual({ status: 'unavailable' })
-        expect(result.current.images[1]).toEqual({ ...first, before: ready })
+        expect(result.current.images).toEqual([second, { ...first, before: ready }])
         expect(first.before).toEqual({ status: 'pending' })
         expect(images).toEqual([second, first])
     })
 
+    it('uses the current token and owning album for a private photo', async () => {
+        vi.mocked(requestAlbumOriginalComparison).mockResolvedValueOnce({ before: ready })
+        const source = { id: 'one', before: { status: 'unresolved' } }
+        const getIdToken = vi.fn().mockResolvedValue('fresh-token')
+        const { result } = renderHook(() => usePhotoOriginalRefresh([source], { albumId: 'private-album', getIdToken }))
+        await act(async () => { await result.current.refreshOriginal(null, source) })
+        expect(requestAlbumOriginalComparison).toHaveBeenCalledWith('private-album', 'one', 'fresh-token', { signal: expect.any(AbortSignal) })
+        expect(result.current.images[0].before).toEqual(ready)
+    })
+
+    it('allows public comparisons when there is no logged-in session', async () => {
+        vi.mocked(requestAlbumOriginalComparison).mockResolvedValueOnce({ before: ready })
+        const getIdToken = vi.fn().mockRejectedValue(new Error('No active user session.'))
+        const { result } = renderHook(() => usePhotoOriginalRefresh([first], { getIdToken }))
+        await act(async () => { await result.current.refreshOriginal(null, first) })
+        expect(requestAlbumOriginalComparison).toHaveBeenCalledWith('album-one', 'one', null, { signal: expect.any(AbortSignal) })
+        expect(result.current.images[0].before).toEqual(ready)
+    })
+
+    it('uses the exact share grant for a shared photo', async () => {
+        vi.mocked(requestSharedOriginalComparison).mockResolvedValueOnce({ before: ready })
+        const source = { id: 'one', before: { status: 'unresolved' } }
+        const { result } = renderHook(() => usePhotoOriginalRefresh([source], { albumId: 'unlisted-album', shareCode: 'share-grant' }))
+        await act(async () => { await result.current.refreshOriginal(null, source) })
+        expect(requestSharedOriginalComparison).toHaveBeenCalledWith('share-grant', 'one', { signal: expect.any(AbortSignal) })
+        expect(requestAlbumOriginalComparison).not.toHaveBeenCalled()
+        expect(result.current.images[0].before).toEqual(ready)
+    })
+
     it('ignores a late descriptor after its owning view receives newer photo data', async () => {
         const request = deferred()
-        vi.mocked(fetchAlbum).mockReturnValueOnce(request.promise)
+        vi.mocked(requestAlbumOriginalComparison).mockReturnValueOnce(request.promise)
         const { result, rerender } = renderHook(({ images }) => usePhotoOriginalRefresh(images), { initialProps: { images: [first] } })
         let refresh
         act(() => { refresh = result.current.refreshOriginal(null, first) })
         const newer = { ...first, before: { status: 'unavailable' } }
         rerender({ images: [newer] })
         await act(async () => {
-            request.resolve({ images: [{ id: 'one', before: ready }] })
+            request.resolve({ before: ready })
             await refresh
         })
         expect(result.current.images).toEqual([newer])
@@ -73,14 +94,14 @@ describe('usePhotoOriginalRefresh', () => {
 
     it('does not attach an old response to removed or replaced photos even if their descriptor reference is unchanged', async () => {
         const request = deferred()
-        vi.mocked(fetchAlbum).mockReturnValueOnce(request.promise)
+        vi.mocked(requestAlbumOriginalComparison).mockReturnValueOnce(request.promise)
         const { result, rerender } = renderHook(({ images }) => usePhotoOriginalRefresh(images), { initialProps: { images: [first, second] } })
         let refresh
         act(() => { refresh = result.current.refreshOriginal(null, first) })
         const replaced = { ...second, palette: ['#ffffff'] }
         rerender({ images: [replaced] })
         await act(async () => {
-            request.resolve({ images: [{ id: first.id, before: ready }, { id: second.id, before: ready }] })
+            request.resolve({ before: ready })
             await refresh
         })
         expect(result.current.images).toEqual([replaced])
@@ -96,14 +117,14 @@ describe('usePhotoOriginalRefresh', () => {
         const oldBefore = descriptor(now - 60_000, 'old')
         const newBefore = descriptor(now, 'fresh')
         const source = { ...first, before: oldBefore }
-        vi.mocked(fetchAlbum).mockResolvedValue({ images: [{ id: first.id, before: newBefore }] })
+        vi.mocked(requestAlbumOriginalComparison).mockResolvedValue({ before: newBefore })
         const { result } = renderHook(() => usePhotoOriginalRefresh([source]))
         await act(async () => { await result.current.refreshOriginal(null, source) })
         expect(result.current.images[0].before).toBe(oldBefore)
         await act(async () => { await result.current.refreshOriginal({ type: 'error' }, result.current.images[0]) })
         expect(result.current.images[0].before).toBe(newBefore)
         const retried = descriptor(now + 1000, 'retry')
-        vi.mocked(fetchAlbum).mockResolvedValueOnce({ images: [{ id: first.id, before: retried }] })
+        vi.mocked(requestAlbumOriginalComparison).mockResolvedValueOnce({ before: retried })
         await act(async () => {
             await result.current.refreshOriginal({ type: 'click' }, result.current.images[0], { reason: 'media-error' })
         })
@@ -111,7 +132,7 @@ describe('usePhotoOriginalRefresh', () => {
     })
 
     it('reports missing photos and refresh failures while preserving the photo itself', async () => {
-        vi.mocked(fetchAlbum).mockResolvedValueOnce({ images: [] }).mockRejectedValueOnce(new Error('Network unavailable'))
+        vi.mocked(requestAlbumOriginalComparison).mockResolvedValueOnce({ before: { status: 'unavailable' } }).mockRejectedValueOnce(new Error('Network unavailable'))
         const { result } = renderHook(() => usePhotoOriginalRefresh([first]))
         await act(async () => { await result.current.refreshOriginal(null, first) })
         expect(result.current.images[0]).toEqual({ ...first, before: { status: 'unavailable' } })
@@ -121,21 +142,21 @@ describe('usePhotoOriginalRefresh', () => {
         expect(result.current.images[0]).toEqual({ ...first, before: { status: 'failed' } })
     })
 
-    it('aborts pending album reads when the discovery view unmounts', async () => {
+    it('aborts pending comparison reads when the discovery view unmounts', async () => {
         const request = deferred()
-        vi.mocked(fetchAlbum).mockReturnValueOnce(request.promise)
+        vi.mocked(requestAlbumOriginalComparison).mockReturnValueOnce(request.promise)
         const { result, unmount } = renderHook(() => usePhotoOriginalRefresh([first]))
         let refresh
         act(() => { refresh = result.current.refreshOriginal(null, first) })
-        const signal = vi.mocked(fetchAlbum).mock.lastCall[2].signal
+        const signal = vi.mocked(requestAlbumOriginalComparison).mock.lastCall[3].signal
         unmount()
         expect(signal.aborted).toBe(true)
-        request.resolve({ images: [{ id: 'one', before: ready }] })
+        request.resolve({ before: ready })
         await refresh
     })
 
     it('preserves an omitted descriptor when comparison has been disabled in the refreshed API', async () => {
-        vi.mocked(fetchAlbum).mockResolvedValueOnce({ images: [{ id: first.id }] })
+        vi.mocked(requestAlbumOriginalComparison).mockResolvedValueOnce({ before: null })
         const { result } = renderHook(() => usePhotoOriginalRefresh([first]))
         await act(async () => { await result.current.refreshOriginal(null, first) })
         expect(result.current.images[0].before).toBeUndefined()

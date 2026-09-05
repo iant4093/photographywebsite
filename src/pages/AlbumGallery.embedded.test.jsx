@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
     fetchAlbum: vi.fn(),
+    requestAlbumOriginalComparison: vi.fn(),
     requestAlbumMediaDownload: vi.fn(),
     requestAlbumPrintSession: vi.fn(),
     requestAlbumZip: vi.fn(),
@@ -60,6 +61,19 @@ beforeEach(() => {
 })
 
 describe('embedded album gallery', () => {
+    it('loads one original on demand without reloading the album', async () => {
+        api.fetchAlbum.mockResolvedValueOnce({ ...data, images: [{ ...data.images[0], before: { status: 'unresolved' } }] })
+        api.requestAlbumOriginalComparison.mockResolvedValueOnce({ before: data.images[0].before })
+        render(<AlbumGalleryContent albumId="a1" />)
+        const openPhoto = await screen.findByRole('button', { name: 'Open item 1 from Coastal Light' })
+        expect(api.requestAlbumOriginalComparison).not.toHaveBeenCalled()
+        fireEvent.click(openPhoto)
+        fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+        await waitFor(() => expect(screen.getByAltText('Before — Camera JPG')).toHaveAttribute('src', data.images[0].before.url))
+        expect(api.requestAlbumOriginalComparison).toHaveBeenCalledWith('a1', 'one', 'current-token', { signal: expect.any(AbortSignal) })
+        expect(api.fetchAlbum).toHaveBeenCalledOnce()
+    })
+
     it('loads explicit album content and its full photo viewer without router state or scroll restoration', async () => {
         const pending = deferred()
         api.fetchAlbum.mockReturnValueOnce(pending.promise)

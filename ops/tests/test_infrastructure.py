@@ -143,6 +143,8 @@ expected_routes = {
     ("POST", "/albums/{albumId}/zip"),
     ("POST", "/shared/{shareCode}/zip"),
     ("POST", "/albums/{albumId}/delete-images"),
+    ("POST", "/albums/{albumId}/original-comparison"),
+    ("POST", "/shared/{shareCode}/original-comparison"),
     ("POST", "/albums/{albumId}/download-url"),
     ("POST", "/shared/{shareCode}/download-url"),
     ("POST", "/albums/{albumId}/print"),

@@ -16,6 +16,10 @@ from zip_helpers import get_album_record, raw_image_keys, zip_keys
 
 logger = logging.getLogger("photography_api.zip_worker")
 s3 = boto3.client("s3")
+COMPRESSED_MEDIA_EXTENSIONS = frozenset({
+    ".jpg", ".jpeg", ".jpe", ".png", ".gif", ".webp", ".avif", ".heic", ".heif",
+    ".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".mpeg", ".mpg", ".mts", ".m2ts",
+})
 
 
 class StreamToS3(io.RawIOBase):
@@ -123,23 +127,29 @@ def handler(event, context):
 
         zip_key, lock_key = zip_keys(album)
         stream = StreamToS3(bucket, zip_key)
-        # Deflate preserves the original media bytes while avoiding store-only
-        # archives. JPEG and MP4 inputs are already compressed, so savings vary,
-        # but no image or video quality is discarded.
+        # Store media that is already compressed; keep ordinary deflate for
+        # other source formats. Both methods preserve the original bytes.
         with zipfile.ZipFile(
             stream,
             "w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=6,
             allowZip64=True,
         ) as archive:
             for index, key in enumerate(validated_keys, start=1):
                 filename = posixpath.basename(key).replace("\r", "_").replace("\n", "_") or "media"
                 archive_name = f"{index:04d}_{filename}"
+                entry = zipfile.ZipInfo(archive_name)
+                entry.compress_type = (
+                    zipfile.ZIP_STORED
+                    if posixpath.splitext(filename)[1].lower() in COMPRESSED_MEDIA_EXTENSIONS
+                    else zipfile.ZIP_DEFLATED
+                )
                 response = s3.get_object(Bucket=bucket, Key=key)
-                with archive.open(archive_name, "w") as destination:
-                    for chunk in iter(lambda: response["Body"].read(1024 * 1024), b""):
-                        destination.write(chunk)
+                try:
+                    with archive.open(entry, "w", force_zip64=True) as destination:
+                        for chunk in iter(lambda: response["Body"].read(1024 * 1024), b""):
+                            destination.write(chunk)
+                finally:
+                    response["Body"].close()
         stream.close()
         stream = None
         tag_keys_visibility([zip_key], album["visibility"])

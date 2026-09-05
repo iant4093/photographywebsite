@@ -22,7 +22,7 @@ from cache_invalidation import request_public_api_invalidation
 from dynamodb_helpers import ensure_album_item_budget
 from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
-from media_helpers import extract_exif_data, start_mediaconvert_job
+from media_helpers import extract_exif_data, hls_master_playlist_key, start_mediaconvert_job
 from preview_jobs import enqueue_preview_jobs
 from original_comparison_jobs import request_original_comparisons
 from random_pool_refresh import request_random_photo_pool_refresh
@@ -131,10 +131,7 @@ def _normalize_images(value, album_id, album_type, *, album=None):
         if image.get("blurhash"):
             item["blurhash"] = require_string(image["blurhash"], f"images[{index}].blurhash", maximum=200)
         if album_type == "video":
-            base_name = raw_key.rsplit(".", 1)[0]
-            filename = raw_key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-            # Matches MediaConvert's configured `_1080p5m` NameModifier.
-            item["hlsUrl"] = f"{base_name}_hls/{filename}_1080p5m.m3u8"
+            item["hlsUrl"] = hls_master_playlist_key(raw_key)
             if image.get("thumbnailTime") is not None:
                 try:
                     numeric_time = max(0, min(float(image["thumbnailTime"]), 86400))
@@ -171,6 +168,9 @@ def _start_video_jobs(images):
                 f"s3://{bucket}/{raw_key}",
                 f"s3://{bucket}/{output_prefix}",
             )
+            # A retried upload may have an old rendition URL or no URL after a
+            # failed submission. Only newly submitted jobs switch to the master.
+            image["hlsUrl"] = hls_master_playlist_key(raw_key)
         except Exception:
             # Keep the raw protected video usable if transcoding is unavailable.
             image.pop("hlsUrl", None)

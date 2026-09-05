@@ -8,7 +8,7 @@ import boto3
 from audit_helpers import actor_context, emit_audit_event
 from album_media_store import deactivate_album_media, delete_album_media
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_previews, request_public_api_invalidation
+from cache_invalidation import invalidate_album_media, request_public_api_invalidation
 from deletion_helpers import (
     DeletionTooLargeError,
     delete_keys_all_versions,
@@ -140,15 +140,13 @@ def handler(event, context):
         # Enumerate and bound every affected object version before the first
         # mutation. If S3 then fails, the manifest remains intact and retryable.
         preflight_deletion(keys=exact_keys, prefixes=hls_prefixes)
-        if album.get("visibility") == "public":
-            invalidate_public_previews(
-                album_id,
-                reason="album-media-deleted",
-                strict=True,
-            )
         deleted_versions = delete_keys_all_versions(exact_keys)
         for hls_prefix in hls_prefixes:
             deleted_versions += delete_prefix_all_versions(hls_prefix)
+        if album.get("visibility") == "public":
+            # Remove origin objects before purging to prevent a refill with
+            # deleted media; preserve the manifest until the purge succeeds.
+            invalidate_album_media(album, reason="album-media-deleted", strict=True)
 
         delete_preview_metadata(
             album_id,

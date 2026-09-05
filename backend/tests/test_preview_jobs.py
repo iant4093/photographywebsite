@@ -49,6 +49,9 @@ class PreviewJobTests(unittest.TestCase):
 
 
 class PreviewLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(update_album, "request_public_api_invalidation", return_value=True))
+
     def test_visibility_change_performs_post_write_preview_convergence_pass(self):
         album = {
             "albumId": ALBUM_ID,

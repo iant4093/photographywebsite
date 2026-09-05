@@ -23,7 +23,7 @@ import cloudfront_frontend  # noqa: E402
 
 API_READERS = {
     "GetPublicAlbumFunction", "GetAlbumFunction", "GetAdminAlbumMediaFunction", "GetSharedAlbumFunction",
-    "CreateAlbumFunction", "AddImagesFunction",
+    "CreateAlbumFunction", "AddImagesFunction", "GetDownloadUrlFunction",
 }
 UPLOAD_COMPLETERS = {"CreateAlbumFunction", "AddImagesFunction"}
 BACKGROUND_FUNCTIONS = {"OriginalIndexRefreshFunction", "OriginalComparisonWorkerFunction"}

@@ -34,7 +34,7 @@ def raw_image_keys(album):
 
 def zip_version(album):
     material = {
-        "archiveFormatVersion": 2,
+        "archiveFormatVersion": 3,
         "albumId": album.get("albumId"),
         "type": album.get("type", "photo"),
         "visibility": album.get("visibility"),

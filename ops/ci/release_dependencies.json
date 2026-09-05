@@ -54,7 +54,7 @@
     {"logicalId": "GetAdminAlbumMediaFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn", "OriginalComparisonTable.Arn", "OriginalPreviewBucket.Arn", "PreviewMetadataTable.Arn"]},
     {"logicalId": "GetAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ImagesBucket.Arn", "OriginalComparisonTable.Arn", "OriginalPreviewBucket.Arn", "PreviewMetadataTable.Arn"]},
     {"logicalId": "GetAlbumsFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["GallerySettingsTable.Arn", "ImagesBucket.Arn"]},
-    {"logicalId": "GetDownloadUrlFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "ImagesBucket.Arn", "RateLimitTable.Arn"]},
+    {"logicalId": "GetDownloadUrlFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "ImagesBucket.Arn", "OriginalComparisonTable.Arn", "OriginalPreviewBucket.Arn", "RateLimitTable.Arn"]},
     {"logicalId": "GetCostReportFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["CostReportCacheTable.Arn"]},
     {"logicalId": "AnalyticsIngestFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "AnalyticsTable.Arn", "RateLimitTable.Arn"]},
     {"logicalId": "GetAnalyticsReportFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "AnalyticsTable.Arn"]},

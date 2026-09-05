@@ -82,7 +82,7 @@ def original_descriptor(album_id=ALBUM_ONE, media_id="a" * 24):
 
 class OriginalComparisonPublicContractTests(unittest.TestCase):
     def test_only_photos_accept_exact_ready_or_state_only_comparisons(self):
-        for before in (original_descriptor(), {"status": "pending"}, {"status": "unavailable"}, {"status": "failed"}):
+        for before in (original_descriptor(), {"status": "unresolved"}, {"status": "pending"}, {"status": "unavailable"}, {"status": "failed"}):
             payload = detail()
             payload["images"][0].update(id="a" * 24, before=before)
             self.assertEqual(public_load.validate_detail(payload, ALBUM_ONE), 1)
@@ -95,6 +95,7 @@ class OriginalComparisonPublicContractTests(unittest.TestCase):
         bad_values = [
             {**original, "sourceFileId": "private-id"},
             {"status": "pending", "sourcePath": "private-path"},
+            {"status": "unresolved", "url": "https://originals-test.s3.amazonaws.com/private"},
             {**original, "width": True}, {**original, "expiresAt": 1},
             {**original, "srcSet": [{"width": 500, "url": original["url"]}] * 2},
         ]

@@ -112,23 +112,6 @@ function ExploreLanding() {
         prefetchExploreModule(mode).catch(() => {})
     }, [])
 
-    useEffect(() => {
-        const warm = () => Promise.allSettled([
-            prefetchExploreModule('color'),
-            prefetchExploreModule('lens'),
-            prefetchExploreModule('exposure'),
-            prefetchExploreModule('time'),
-            prefetchExploreModule('season'),
-            prefetchExploreModule('sample'),
-        ])
-        if (typeof window.requestIdleCallback === 'function') {
-            const idleId = window.requestIdleCallback(warm, { timeout: 1500 })
-            return () => window.cancelIdleCallback?.(idleId)
-        }
-        const timeoutId = window.setTimeout(warm, 350)
-        return () => window.clearTimeout(timeoutId)
-    }, [])
-
     return (
         <div className="explore-page animate-fade-in pt-[74px]">
             <ExploreHeader />
@@ -418,7 +401,7 @@ function ExploreModule({ mode }) {
     }, [loadingMore, mode, nextCursor, requestKey, value])
 
     const reshuffle = useCallback(async () => {
-        if (!value || reshuffling) return
+        if (!value || loading || reshuffling) return
         const targetKey = requestKey
         setReshuffling(true)
         setLightboxIndex(null)
@@ -441,7 +424,7 @@ function ExploreModule({ mode }) {
         } finally {
             setReshuffling(false)
         }
-    }, [mode, requestKey, reshuffling, value])
+    }, [loading, mode, requestKey, reshuffling, value])
 
     const handleDownload = useCallback(async (event, image) => {
         event.stopPropagation()
@@ -531,7 +514,7 @@ function ExploreModule({ mode }) {
                             <p><strong>{activeFacet.photos}</strong> {activeFacet.photos === 1 ? 'photograph' : 'photographs'}</p>
                             <span>{activeLabel}</span>
                         </div>
-                        <ExploreShuffleButton label={`${activeLabel} photographs`} loading={reshuffling} onClick={reshuffle} />
+                        <ExploreShuffleButton label={`${activeLabel} photographs`} loading={reshuffling} disabled={loading} onClick={reshuffle} />
                     </div>
                 )}
                 {loading && <div className="explore-loading" role="status">Finding photographs…</div>}

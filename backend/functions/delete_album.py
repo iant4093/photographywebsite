@@ -8,7 +8,7 @@ import boto3
 from audit_helpers import actor_context, emit_audit_event
 from album_media_store import delete_album_media
 from auth_helpers import require_admin
-from cache_invalidation import invalidate_public_previews, request_public_api_invalidation
+from cache_invalidation import invalidate_album_media, request_public_api_invalidation
 from deletion_helpers import DeletionTooLargeError, delete_prefix_all_versions, preflight_deletion
 from explore_index import index_entry_keys
 from media_access import album_media_prefixes, delete_preview_metadata, load_preview_metadata
@@ -55,12 +55,6 @@ def handler(event, context):
             return error_response(404, "Album not found", code="not_found")
 
         album["albumId"] = album_id
-        if album.get("visibility") == "public":
-            invalidate_public_previews(
-                album_id,
-                reason="album-deleted",
-                strict=True,
-            )
         # Strictly resolve external derivative state before the first mutation.
         # A metadata outage must not leave an anonymously readable derivative
         # behind while its album is deleted.
@@ -70,6 +64,11 @@ def handler(event, context):
         deleted_versions = 0
         for prefix in prefixes:
             deleted_versions += delete_prefix_all_versions(prefix)
+        if album.get("visibility") == "public":
+            # Purge after origin deletion so a cache miss cannot refill with
+            # the old media. Keep the album record until the purge is accepted
+            # so a provider failure can be retried with the same namespaces.
+            invalidate_album_media(album, reason="album-deleted", strict=True)
         delete_preview_metadata(
             album_id,
             preview_metadata.keys(),

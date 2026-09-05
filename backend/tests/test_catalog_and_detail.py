@@ -41,6 +41,9 @@ class CatalogTests(unittest.TestCase):
         self.gallery_order = patch.object(get_albums, "load_gallery_settings", return_value={})
         self.gallery_order.start()
         self.addCleanup(self.gallery_order.stop)
+        # Summary responses hydrate optional hover fields independently of the
+        # mocked query; these catalog unit tests must not call live DynamoDB.
+        self.enterContext(patch.object(get_albums.dynamodb, "batch_get_item", return_value={"Responses": {}}))
 
     def test_public_summary_query_uses_additive_include_index(self):
         projected = album()

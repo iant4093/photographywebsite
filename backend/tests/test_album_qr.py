@@ -141,7 +141,7 @@ class AlbumQrLifecycleTests(unittest.TestCase):
             update_album, "tag_keys_visibility", side_effect=ordering.restrict_qr
         ) as restrict, patch.object(
             update_album, "tag_album_visibility", side_effect=ordering.restrict_album
-        ), patch.object(update_album, "invalidate_public_previews"), patch.object(
+        ), patch.object(update_album, "invalidate_album_media"), patch.object(
             update_album, "tag_preview_visibility"
         ), patch.object(update_album, "request_public_api_invalidation"), patch.object(update_album, "_audit"):
             table.update_item.side_effect = ordering.commit

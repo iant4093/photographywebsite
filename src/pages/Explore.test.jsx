@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -13,7 +13,7 @@ const exploreApi = vi.hoisted(() => ({
   fetchExploreTimes: vi.fn(),
   prefetchExploreModule: vi.fn(() => Promise.resolve()),
 }))
-const api = vi.hoisted(() => ({ fetchAlbum: vi.fn(), requestAlbumMediaDownload: vi.fn() }))
+const api = vi.hoisted(() => ({ requestAlbumOriginalComparison: vi.fn(), requestAlbumMediaDownload: vi.fn() }))
 const scroll = vi.hoisted(() => ({ saveVerticalScroll: vi.fn(), useScrollRestoration: vi.fn() }))
 const exploreState = vi.hoisted(() => ({
   readExploreBrowseState: vi.fn(() => null),
@@ -73,6 +73,7 @@ const photo = {
   albumId: 'album-1', albumTitle: 'Blue Mountain', albumCategory: 'Hikes',
   mediaId: 'media-1', id: 'media-1', thumbnailUrl: 'https://media.test/photo.webp',
   blurhash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
+  before: { status: 'unresolved' },
   previewSrcSet: [{ width: 640, url: 'https://media.test/photo.webp' }],
   palette: ['#123456', '#567890'], width: 1920, height: 1280,
   exif: {
@@ -135,20 +136,38 @@ describe('Explore', () => {
       items: [{ id: 'dawn', photos: 2 }],
       initialPage: { value: 'dawn', items: [photo, secondPhoto], nextCursor: null, seed: '0123456789abcdef' },
     })
-    api.fetchAlbum.mockResolvedValue({ images: [{ id: 'media-2', before: { status: 'unavailable' } }] })
+    api.requestAlbumOriginalComparison.mockResolvedValue({ before: { status: 'unavailable' } })
     render(<MemoryRouter initialEntries={[path]}><Explore /></MemoryRouter>)
     fireEvent.click(await screen.findByRole('button', { name: 'View photo from Blue Mountain' }))
     fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('Green Valley')
+    expect(api.requestAlbumOriginalComparison).not.toHaveBeenCalled()
     const browseRequests = exploreApi.fetchExplorePhotos.mock.calls.length
     fireEvent.click(screen.getByRole('button', { name: 'Refresh original' }))
     await waitFor(() => expect(screen.getByTestId('original-status')).toHaveTextContent('unavailable'))
-    expect(api.fetchAlbum).toHaveBeenCalledWith('album-2', null, { force: true, signal: expect.any(AbortSignal) })
+    expect(api.requestAlbumOriginalComparison).toHaveBeenCalledWith('album-2', 'media-2', null, { signal: expect.any(AbortSignal) })
     expect(screen.getByRole('dialog')).toHaveTextContent('Green Valley')
     expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledTimes(browseRequests)
     fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('Blue Mountain')
-    expect(screen.getByTestId('original-status')).toHaveTextContent('pending')
+    expect(screen.getByTestId('original-status')).toHaveTextContent('unresolved')
+  })
+
+  it('waits for interest in a module before prefetching its index', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<MemoryRouter initialEntries={['/explore']}><Explore /></MemoryRouter>)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(exploreApi.prefetchExploreModule).not.toHaveBeenCalled()
+
+      fireEvent.pointerEnter(screen.getByRole('link', { name: /Color Explorer/ }))
+      expect(exploreApi.prefetchExploreModule).toHaveBeenCalledExactlyOnceWith('color')
+      fireEvent.focus(screen.getByRole('link', { name: /Lens Explorer/ }))
+      expect(exploreApi.prefetchExploreModule).toHaveBeenLastCalledWith('lens')
+      expect(exploreApi.prefetchExploreModule).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('presents Explore as a module landing page without loading an index', () => {
@@ -468,9 +487,31 @@ describe('Explore', () => {
       .mockResolvedValueOnce({ items: [secondPhoto], nextCursor: null })
     render(<MemoryRouter initialEntries={['/explore/colors']}><Explore /></MemoryRouter>)
 
+    await screen.findByText('Blue Mountain')
     fireEvent.click(await screen.findByRole('button', { name: 'Reshuffle Blue photographs' }))
     expect(await screen.findByText('Green Valley')).toBeInTheDocument()
     expect(screen.queryByText('Blue Mountain')).toBeNull()
+    expect(exploreApi.fetchExplorePhotos).toHaveBeenLastCalledWith({
+      mode: 'color', value: 'blue', limit: 24, seed: '0123456789abcdef',
+    })
+  })
+
+  it('waits for the initial color results before allowing a competing shuffle', async () => {
+    const initialRequest = deferred()
+    exploreApi.fetchExplorePhotos
+      .mockReturnValueOnce(initialRequest.promise)
+      .mockResolvedValueOnce({ items: [secondPhoto], nextCursor: null })
+    render(<MemoryRouter initialEntries={['/explore/colors']}><Explore /></MemoryRouter>)
+    const shuffle = await screen.findByRole('button', { name: 'Reshuffle Blue photographs' })
+    expect(shuffle).toBeDisabled()
+    fireEvent.click(shuffle)
+    expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledOnce()
+
+    await act(async () => { initialRequest.resolve({ items: [photo], nextCursor: null }) })
+    expect(shuffle).toBeEnabled()
+    fireEvent.click(shuffle)
+    expect(await screen.findByText('Green Valley')).toBeInTheDocument()
+    expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledTimes(2)
     expect(exploreApi.fetchExplorePhotos).toHaveBeenLastCalledWith({
       mode: 'color', value: 'blue', limit: 24, seed: '0123456789abcdef',
     })

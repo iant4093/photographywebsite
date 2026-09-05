@@ -46,9 +46,8 @@ from media_access import (
 )
 from random_photo_pools import load_pool_references, normalized_category
 from original_comparison_access import (
-    load_original_comparisons_for_albums,
+    original_comparison_hint,
     original_comparisons_enabled,
-    serialize_original_comparison,
 )
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, require_string, validate_uuid
@@ -314,11 +313,10 @@ def _active_public_photo_album(album):
 
 
 def _explore_json_response(status_code, body, **kwargs):
-    """Sign originals only for the selected page, after fresh public access checks.
+    """Add a lightweight comparison hint after checking current public access.
 
-    Explore can return cached edited DTOs or an initial page inside facet results.
-    Rechecking the source album prevents those caches granting access to originals
-    after an album changes visibility; no signed URLs enter the shared item cache.
+    The comparison endpoint resolves availability and signs a single photo only
+    when requested. Cached edited DTOs never contain original URLs.
     """
     if not original_comparisons_enabled():
         return json_response(status_code, body, **kwargs)
@@ -335,7 +333,6 @@ def _explore_json_response(status_code, body, **kwargs):
     try:
         albums = _batch_albums(item["albumId"] for item in candidates)
         verified = {}
-        grouped = {}
         for item in candidates:
             album = albums.get(item["albumId"])
             if not _active_public_photo_album(album):
@@ -345,15 +342,8 @@ def _explore_json_response(status_code, body, **kwargs):
                 continue
             identity = (item["albumId"], item["mediaId"])
             verified[identity] = (album, image)
-            group = grouped.setdefault(album["albumId"], {"album": album, "images": []})
-            group["images"].append(image)
-        metadata = load_original_comparisons_for_albums(
-            [(group["album"], group["images"]) for group in grouped.values()],
-        )
-        for identity, (album, image) in verified.items():
-            before_by_identity[identity] = serialize_original_comparison(
-                image, album, metadata.get(identity[0], {}).get(identity[1]),
-            )
+        for identity, (album, _image) in verified.items():
+            before_by_identity[identity] = original_comparison_hint(album)
     except Exception as error:
         logger.error("explore_original_read_failed error_type=%s", type(error).__name__)
         before_by_identity = {
@@ -1556,19 +1546,10 @@ def handler(event, context):
             "album": serialize_album_detail(album),
             "images": serialize_images(album),
         }
-        # Original generation can complete between lightbox status polls. A
-        # cached pending/failed descriptor would hide that completed work.
-        originals_changing = album.get("type", "photo") == "photo" and any(
-            image.get("before", {}).get("status") in {"pending", "failed"}
-            for image in body["images"]
-        )
         return json_response(
             200,
             body,
-            cache_control=(
-                "private, no-store" if originals_changing else
-                "public, max-age=60, s-maxage=300, stale-while-revalidate=60"
-            ),
+            cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=60",
         )
     except ValidationError as error:
         return error_response(400, str(error), code="invalid_request")

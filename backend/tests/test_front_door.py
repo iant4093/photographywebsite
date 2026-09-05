@@ -136,6 +136,7 @@ class FrontDoorVerifierTests(unittest.TestCase):
         self.assertNotIn("provider details", "\n".join(captured.output) + response["body"])
 
     def test_handler_denies_before_business_logic_only_when_enforced(self) -> None:
+        self.enterContext(patch.object(get_public_albums.settings_table, "get_item", return_value={}))
         with patch.dict(
             os.environ,
             {
@@ -161,7 +162,7 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
         self.assertEqual(len(handlers), 33)
         self.assertEqual(
             len(re.findall(r"(?m)^          Type: HttpApi$", TEMPLATE_TEXT)),
-            40,
+            42,
         )
         for logical_id, module_name in handlers.items():
             with self.subTest(function=logical_id, module=module_name):

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   fetchSharedAlbum: vi.fn(),
+  requestSharedOriginalComparison: vi.fn(),
   requestSharedAlbumZip: vi.fn(),
   requestSharedMediaDownload: vi.fn(),
 }))
@@ -31,14 +32,20 @@ vi.mock('@marsidev/react-turnstile', () => ({
     <button onClick={onError}>Fail security check</button>
   </div>,
 }))
-vi.mock('framer-motion', () => ({
-  AnimatePresence: ({ children }) => children,
-  motion: new Proxy({}, { get: (_target, tag) => ({ children, ...props }) => {
-    const Tag = tag
-    const { variants: _v, initial: _i, animate: _a, exit: _e, transition: _t, ...domProps } = props
-    return <Tag {...domProps}>{children}</Tag>
-  } }),
-}))
+vi.mock('framer-motion', () => {
+  const components = new Map()
+  return {
+    AnimatePresence: ({ children }) => children,
+    motion: new Proxy({}, { get: (_target, tag) => {
+      if (!components.has(tag)) components.set(tag, ({ children, ...props }) => {
+        const Tag = tag
+        const { variants: _v, initial: _i, animate: _a, exit: _e, transition: _t, ...domProps } = props
+        return <Tag {...domProps}>{children}</Tag>
+      })
+      return components.get(tag)
+    } }),
+  }
+})
 vi.mock('../components/ProgressiveImage', () => ({ default: ({ alt, src, srcSet, onError }) => <img alt={alt} src={src} srcSet={srcSet} onError={onError} /> }))
 vi.mock('../components/VideoPlayer', () => ({ default: ({ videoInfo, onMediaError }) => <button onClick={onMediaError}>Video {videoInfo.id}</button> }))
 
@@ -142,16 +149,19 @@ describe('SharedAlbum access and gallery', () => {
     expect(screen.getByRole('heading', { name: 'Verify Access' })).toBeInTheDocument()
   })
 
-  it('keeps a verified shared gallery and its selected photo open when an original is still pending', async () => {
+  it('checks one original with the share grant while retaining verification and selection', async () => {
+    api.requestSharedOriginalComparison.mockResolvedValueOnce({ before: { status: 'pending' } })
     api.fetchSharedAlbum.mockResolvedValueOnce({
       ...photoData,
-      images: photoData.images.map(image => ({ ...image, before: { status: 'pending' } })),
+      images: photoData.images.map(image => ({ ...image, before: { status: 'unresolved' } })),
     })
     renderShared('/sharedalbum/code-1?photo=p2')
     fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
     await screen.findByRole('dialog', { name: 'Photo viewer for Shared Photos' })
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
-    expect(screen.getByRole('status')).toHaveTextContent('Preparing original…')
+    await waitFor(() => expect(api.requestSharedOriginalComparison).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Preparing original…'))
+    expect(api.requestSharedOriginalComparison).toHaveBeenCalledWith('code-1', 'p2', { signal: expect.any(AbortSignal) })
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
     expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://x.test/p2-full')
     expect(screen.queryByText(/gallery session expired/i)).toBeNull()

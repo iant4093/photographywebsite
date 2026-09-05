@@ -466,6 +466,60 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Before — Camera JPG')
   })
 
+  it('resolves an open comparison again when a gallery refresh replaces it with an unresolved hint', async () => {
+    const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh }
+    const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    fireEvent.load(screen.getByAltText('Before — Camera JPG'))
+
+    const refreshedPhoto = { ...comparisonPhoto, before: { status: 'unresolved' } }
+    rerender(<PhotoLightbox {...props} images={[refreshedPhoto]} />)
+    expect(onBeforeRefresh).toHaveBeenCalledExactlyOnceWith(undefined, refreshedPhoto, { reason: 'original-status' })
+    expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
+    await act(async () => {})
+
+    rerender(<PhotoLightbox {...props} images={[{ ...refreshedPhoto }]} />)
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    rerender(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    fireEvent.load(screen.getByAltText('Before — Camera JPG'))
+    expect(screen.getByAltText('Before — Camera JPG')).toBeVisible()
+  })
+
+  it('does not duplicate the first unresolved request or repeatedly retry an unresolved response', async () => {
+    const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+    const photo = { ...landscape, before: { status: 'unresolved' } }
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh }
+    const { rerender } = render(<PhotoLightbox {...props} images={[photo]} />)
+    expect(onBeforeRefresh).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    await act(async () => {})
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    rerender(<PhotoLightbox {...props} images={[{ ...photo }]} />)
+    await act(async () => {})
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+  })
+
+  it.each([false, true])('waits for an obsolete status request before resolving refreshed gallery data (cancelled: %s)', async (cancelled) => {
+    let finish
+    const onBeforeRefresh = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValue(undefined)
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh }
+    const { rerender } = render(<PhotoLightbox {...props} images={[landscape]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const refreshedPhoto = { ...landscape, before: { status: 'unresolved' } }
+    rerender(<PhotoLightbox {...props} images={[refreshedPhoto]} />)
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    if (cancelled) fireEvent.click(screen.getByRole('button', { name: 'Cancel loading original' }))
+
+    await act(async () => { finish() })
+    expect(onBeforeRefresh).toHaveBeenCalledTimes(cancelled ? 1 : 2)
+    if (!cancelled) {
+      expect(onBeforeRefresh).toHaveBeenLastCalledWith(undefined, refreshedPhoto, { reason: 'original-status' })
+    }
+  })
+
   it('checks pending matches on request and shows the required message for a missing original', () => {
     const onMediaError = vi.fn()
     const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh: onMediaError }

@@ -126,12 +126,12 @@ class UserAuthenticationFlowTests(unittest.TestCase):
         )
         self.assertEqual(complete_challenge.handler(event, None)["statusCode"], 400)
 
-    def test_video_manifest_matches_mediaconvert_name_modifier(self):
+    def test_video_manifest_uses_mediaconvert_master_playlist(self):
         raw_key = f"albums/{ALBUM_ID}/original/movie.mp4"
         normalized = create_album._normalize_images([{"rawKey": raw_key}], ALBUM_ID, "video")
         self.assertEqual(
             normalized[0]["hlsUrl"],
-            f"albums/{ALBUM_ID}/original/movie_hls/movie_1080p5m.m3u8",
+            f"albums/{ALBUM_ID}/original/movie_hls/movie.m3u8",
         )
 
 

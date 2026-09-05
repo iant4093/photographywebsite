@@ -42,6 +42,7 @@ class PublicCatalogListTests(unittest.TestCase):
         )
         self.gallery_order.start()
         self.addCleanup(self.gallery_order.stop)
+        self.enterContext(patch.object(get_public_albums.dynamodb, "batch_get_item", return_value={"Responses": {}}))
 
     def test_valid_base64_json_nonobjects_are_rejected_as_invalid_cursors(self):
         for payload in ([], None, 1, "x"):
@@ -371,20 +372,16 @@ class PublicAlbumDetailTests(unittest.TestCase):
             {"album": {"albumId": ALBUM_ID}, "images": [{"url": "https://media.example.test/photo"}]},
         )
 
-    def test_public_detail_does_not_cache_changing_originals(self):
-        stable = {"id": "ready", "before": {"status": "ready"}}
-        for status in ("pending", "failed"):
-            with self.subTest(status=status), patch.object(
-                get_public_album.table, "get_item", return_value={"Item": public_album()}
-            ), patch.object(
-                get_public_album, "serialize_album_detail", return_value={"albumId": ALBUM_ID}
-            ), patch.object(
-                get_public_album, "serialize_images", return_value=[stable, {"id": "changing", "before": {"status": status}}]
-            ):
-                response = get_public_album.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
-            self.assertEqual(response["statusCode"], 200)
-            self.assertEqual(response["headers"]["Cache-Control"], "private, no-store")
-            self.assertEqual(response_body(response)["images"][1]["before"]["status"], status)
+    def test_public_detail_stays_cacheable_with_on_demand_originals(self):
+        with patch.dict(os.environ, {"ORIGINAL_COMPARISON_TABLE": "originals-test"}), patch.object(
+            get_public_album.table, "get_item", return_value={"Item": public_album()}
+        ), patch.object(
+            get_public_album, "serialize_album_detail", return_value={"albumId": ALBUM_ID}
+        ):
+            response = get_public_album.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=60, s-maxage=300, stale-while-revalidate=60")
+        self.assertEqual(response_body(response)["images"][0]["before"], {"status": "unresolved"})
 
     def test_public_detail_keeps_stable_and_video_cache_policy(self):
         cases = (

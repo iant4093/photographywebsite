@@ -506,6 +506,23 @@ export function requestSharedMediaDownload(shareCode, mediaId, options = {}) {
     })
 }
 
+export function requestAlbumOriginalComparison(albumId, mediaId, token = null, options = {}) {
+    return apiFetch(`/albums/${encodeURIComponent(albumId)}/original-comparison`, {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({ mediaId }),
+        signal: options.signal,
+    })
+}
+
+export function requestSharedOriginalComparison(shareCode, mediaId, options = {}) {
+    return apiFetch(`/shared/${encodeURIComponent(shareCode)}/original-comparison`, {
+        method: 'POST',
+        body: JSON.stringify({ mediaId }),
+        signal: options.signal,
+    })
+}
+
 export function requestAlbumPrintSession(albumId, mediaId, token = null, options = {}) {
     return apiFetch(`/albums/${encodeURIComponent(albumId)}/print`, {
         method: 'POST',

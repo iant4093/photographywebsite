@@ -1,4 +1,4 @@
-"""Authorize a media identifier and issue a short-lived attachment URL."""
+"""Authorize on-demand media downloads and camera-original comparisons."""
 
 import os
 import posixpath
@@ -13,6 +13,7 @@ from media_access import (
     url_expiry_metadata,
     validate_album_media_key,
 )
+from original_comparison_access import load_original_comparisons_for_albums, serialize_original_comparison
 from response_helpers import error_response, internal_error, json_response
 from security_helpers import check_rate_limit
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_uuid
@@ -27,13 +28,20 @@ def _not_found():
     return error_response(404, "Media not found", code="not_found")
 
 
+def _is_original_comparison(event):
+    request = event or {}
+    route_key = request.get("routeKey") or (request.get("requestContext") or {}).get("routeKey") or ""
+    return str(request.get("rawPath") or "").endswith("/original-comparison") or str(route_key).endswith("/original-comparison")
+
+
 def _audit(event, context, outcome, reason_code, *, actor_type=None, auth_method=None):
     classified_actor, classified_auth = actor_context(event)
+    comparison = _is_original_comparison(event)
     emit_audit_event(
-        event_name="media.download_authorized",
+        event_name="media.original_authorized" if comparison else "media.download_authorized",
         outcome=outcome,
-        action="media.download.authorize",
-        resource_type="download",
+        action="media.original.authorize" if comparison else "media.download.authorize",
+        resource_type="media" if comparison else "download",
         reason_code=reason_code,
         event=event,
         context=context,
@@ -50,6 +58,7 @@ def handler(event, context):
     if denied:
         return denied
     access_actor = access_auth = None
+    comparison = _is_original_comparison(event)
     try:
         path = (event or {}).get("pathParameters") or {}
         album_id = path.get("albumId")
@@ -63,15 +72,19 @@ def handler(event, context):
             authorize_album(album, claims=claims)
             access_actor = "admin" if is_admin(claims) else "user" if claims else "anonymous"
             access_auth = "jwt" if claims else "none"
-            action = "album_download"
+            action = "album_original_comparison" if comparison else "album_download"
             limit = 100
         elif isinstance(share_code, str) and SHARE_CODE_PATTERN.fullmatch(share_code):
             album = get_album_record(share_code=share_code)
             if not album:
                 return _not_found()
+            if comparison:
+                # The share index can lag revocation. Recheck the current album
+                # before issuing fresh access to private original previews.
+                album = get_album_record(album_id=album["albumId"])
             authorize_album(album, share_code=share_code)
             access_actor, access_auth = "anonymous", "share_grant"
-            action = "shared_download"
+            action = "shared_original_comparison" if comparison else "shared_download"
             limit = 40
         else:
             return _not_found()
@@ -89,7 +102,14 @@ def handler(event, context):
         ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
         if not check_rate_limit(f"{ip}:{album['albumId']}", action, limit, 300, fail_closed=True):
             _audit(event, context, "denied", "rate_limited", actor_type=access_actor, auth_method=access_auth)
-            return error_response(429, "Too many download requests. Please try again later.", code="rate_limited")
+            kind = "comparison" if comparison else "download"
+            return error_response(429, f"Too many {kind} requests. Please try again later.", code="rate_limited")
+
+        if comparison:
+            metadata = load_original_comparisons_for_albums([(album, [image])])
+            before = serialize_original_comparison(image, album, metadata.get(album["albumId"], {}).get(media_id))
+            _audit(event, context, "success", "original_authorized", actor_type=access_actor, auth_method=access_auth)
+            return json_response(200, {"before": before})
 
         filename = posixpath.basename(raw_key) or "download"
         expires_in = max(60, min(int(os.environ.get("MEDIA_URL_TTL_SECONDS", "600")), 3600))
@@ -112,4 +132,4 @@ def handler(event, context):
         return _not_found()
     except Exception as error:
         _audit(event, context, "failure", "unexpected_error", actor_type=access_actor, auth_method=access_auth)
-        return internal_error(context, error, "get_download_url")
+        return internal_error(context, error, "get_original_comparison" if comparison else "get_download_url")

@@ -10,6 +10,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
+from media_access import album_media_prefixes
 from validation_helpers import validate_uuid
 
 
@@ -143,6 +144,23 @@ def invalidate_public_previews(album_id, *, reason="preview-revocation", strict=
     return _create_invalidation(
         distribution_id,
         [f"/public-previews/{album_id}/*"],
+        reason,
+        strict=strict,
+    )
+
+
+def invalidate_album_media(album, *, reason="media-revocation", strict=False):
+    """Purge originals, derivatives, and their rewritten public-preview URLs.
+
+    Use the same trusted namespaces as media authorization and deletion;
+    mutable historical s3Prefix values must never broaden an invalidation.
+    """
+    album_id = validate_uuid((album or {}).get("albumId"))
+    paths = [f"/{prefix}*" for prefix in album_media_prefixes(album)]
+    paths.append(f"/public-previews/{album_id}/*")
+    return _create_invalidation(
+        os.environ.get("IMAGES_DISTRIBUTION_ID", "").strip(),
+        paths,
         reason,
         strict=strict,
     )

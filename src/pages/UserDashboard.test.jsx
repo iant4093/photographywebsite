@@ -3,7 +3,7 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  fetchAlbumsFiltered: vi.fn(), fetchAlbum: vi.fn(), requestAlbumMediaDownload: vi.fn(), requestAlbumZip: vi.fn(),
+  requestAlbumOriginalComparison: vi.fn(), fetchAlbumsFiltered: vi.fn(), fetchAlbum: vi.fn(), requestAlbumMediaDownload: vi.fn(), requestAlbumZip: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ userEmail: 'viewer@example.com', getIdToken: vi.fn() }))
 const urls = vi.hoisted(() => ({ startBrowserDownload: vi.fn(), resolveMediaDownloadUrl: vi.fn() }))
@@ -216,7 +216,7 @@ describe('UserDashboard', () => {
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
   })
 
-  it('preserves a verified original during authorized status refresh but replaces failed URLs', async () => {
+  it('refreshes a failed original with a single authorized comparison request', async () => {
     const now = Date.now()
     const original = (issuedAt, signature) => {
       const date = new Date(issuedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
@@ -225,6 +225,7 @@ describe('UserDashboard', () => {
     }
     const previous = original(now - 60_000, 'old')
     const fresh = original(now, 'fresh')
+    api.requestAlbumOriginalComparison.mockResolvedValueOnce({ before: fresh })
     api.fetchAlbum.mockResolvedValueOnce({ images: [{ ...images[0], before: previous }] })
       .mockResolvedValue({ images: [{ ...images[0], before: fresh }] })
     mounted()
@@ -237,9 +238,10 @@ describe('UserDashboard', () => {
     const beforeImage = document.querySelector('.linen-lightbox-original')
     expect(beforeImage).toHaveAttribute('src', previous.url)
     fireEvent.error(beforeImage)
-    await waitFor(() => expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh))
     await waitFor(() => expect(document.querySelector('.linen-lightbox-original')).toHaveAttribute('src', fresh.url))
-    expect(expiry.hook.mock.lastCall[0][0].before).toBe(fresh)
+    expect(expiry.hook.mock.lastCall[0][0].before).toBe(previous)
+    expect(api.requestAlbumOriginalComparison).toHaveBeenCalledWith('photo', 'one', 'token', { signal: expect.any(AbortSignal) })
+    expect(api.fetchAlbum).toHaveBeenCalledTimes(2)
     expect(api.fetchAlbum).toHaveBeenLastCalledWith('photo', 'token', expect.objectContaining({ force: true }))
   })
 

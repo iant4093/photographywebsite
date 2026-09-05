@@ -182,7 +182,7 @@ def _exact_fields(value: object, allowed: set[str], label: str) -> dict:
 
 def validate_before(value: object, album_id: str, media_id: str, *, expected_bucket: str = "", region: str = "") -> list[str]:
     """Permit signed S3 delivery only inside the exact original-preview DTO."""
-    if not isinstance(value, dict) or value.get("status") not in {"ready", "pending", "unavailable", "failed"}:
+    if not isinstance(value, dict) or value.get("status") not in {"unresolved", "ready", "pending", "unavailable", "failed"}:
         raise ProbeError("original comparison status is invalid")
     if value["status"] != "ready":
         if set(value) != {"status"}:

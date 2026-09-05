@@ -314,6 +314,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "CreateZipFunctionRole",
                 "GetAlbumsFunctionRole",
                 "GetAlbumFunctionRole",
+                "GetDownloadUrlFunctionRole",
                 "GetSharedAlbumFunctionRole",
                 "GetAdminAlbumMediaFunctionRole",
                 "GetPublicAlbumFunctionRole",
@@ -379,6 +380,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("GetPublicAlbumFunctionGetAlbumSocialPreviewPermission", "AWS::Lambda::Permission"),
                 ("GetPublicAlbumFunctionGetRandomPhotosPermission", "AWS::Lambda::Permission"),
                 ("GetPublicAlbumFunctionGetExplorePermission", "AWS::Lambda::Permission"),
+                ("GetDownloadUrlFunctionAlbumOriginalComparisonPermission", "AWS::Lambda::Permission"),
+                ("GetDownloadUrlFunctionSharedOriginalComparisonPermission", "AWS::Lambda::Permission"),
                 ("RandomPhotoPoolBuilderFunction", "AWS::Lambda::Function"),
                 ("RandomPhotoPoolBuilderFunctionRole", "AWS::IAM::Role"),
                 ("RandomPhotoPoolBuilderFunctionAlbumsChanged", "AWS::Lambda::EventSourceMapping"),
@@ -473,6 +476,57 @@ class ReleaseIntentTests(unittest.TestCase):
                 self.assertTrue(rule["allowNoDetails"])
 
         self.assertFalse(any(rule["action"] == "Remove" for rule in document["rules"]))
+
+    def test_original_comparison_routes_have_a_bounded_release_intent(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        additions = []
+        for event_name in ("AlbumOriginalComparison", "SharedOriginalComparison"):
+            item = change(
+                action="Add",
+                logical_id=f"GetDownloadUrlFunction{event_name}Permission",
+                resource_type="AWS::Lambda::Permission",
+                replacement=None,
+            )
+            item["ResourceChange"]["Details"] = []
+            additions.append(item)
+        role_change = change(
+            logical_id="GetDownloadUrlFunctionRole",
+            resource_type="AWS::IAM::Role",
+            property_name="Policies",
+        )
+        api_change = change(
+            logical_id="Api",
+            resource_type="AWS::ApiGatewayV2::Api",
+            property_name="Body",
+        )
+        self.assertEqual(release_guard.gate_change_set(
+            [{"Changes": additions + [role_change, api_change]}],
+            release_intent=intent,
+        ), {"Add": 2, "Modify": 2, "Total": 4})
+
+        # The new role exception is for inline comparison reads only; it does
+        # not approve other IAM properties, replacements, or unrelated routes.
+        rejected = []
+        for property_name in ("ManagedPolicyArns", "AssumeRolePolicyDocument", "RoleName"):
+            item = copy.deepcopy(role_change)
+            item["ResourceChange"]["Details"][0]["Target"]["Name"] = property_name
+            rejected.append(item)
+        replaced = copy.deepcopy(role_change)
+        replaced["ResourceChange"]["Replacement"] = "True"
+        rejected.append(replaced)
+        unknown_route = copy.deepcopy(additions[0])
+        unknown_route["ResourceChange"]["LogicalResourceId"] = "GetDownloadUrlFunctionUnreviewedPermission"
+        rejected.append(unknown_route)
+        modified_permission = copy.deepcopy(additions[0])
+        modified_permission["ResourceChange"]["Action"] = "Modify"
+        rejected.append(modified_permission)
+        for item in rejected:
+            with self.subTest(item=item), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set(
+                    [{"Changes": [item]}], release_intent=intent,
+                )
 
     def test_exact_add_intent_can_introduce_but_never_modify_a_protected_resource(self):
         document = {
@@ -783,6 +837,13 @@ class ReleaseDependencyTests(unittest.TestCase):
         )
         rules = release_guard.load_release_dependencies(document)
         self.assertEqual(len(rules), len(document["rules"]))
+        self.assertEqual(
+            rules[("GetDownloadUrlFunctionRole", "AWS::IAM::Role", "Policies")],
+            frozenset({
+                "AlbumsTable.Arn", "ImagesBucket.Arn", "OriginalComparisonTable.Arn",
+                "OriginalPreviewBucket.Arn", "RateLimitTable.Arn",
+            }),
+        )
         for logical_id in (
             "CompleteChallengeFunctionRole",
             "CreateUserFunctionRole",
@@ -1958,12 +2019,14 @@ class PublicPostureSmokeTests(unittest.TestCase):
         with self.assertRaises(public_posture_smoke.PostureError):
             public_posture_smoke._inspect_media_urls({"url": self.original_descriptor()["url"]}, "media.test", [], original_bucket="originals-test", region="us-west-2")
 
-    def test_original_pending_status_stays_valid_without_unsigned_url_exception(self):
-        payload = {"album": {"albumId": self.ALBUM_ID}, "images": [{"id": "a" * 24, "before": {"status": "pending"}}]}
-        public_posture_smoke._inspect_media_urls(payload, "media.test", [])
-        payload["images"][0]["before"] = {"status": "pending", "url": "https://originals-test.s3.amazonaws.com/private"}
-        with self.assertRaises(public_posture_smoke.catalog_probe.ProbeError):
-            public_posture_smoke._inspect_media_urls(payload, "media.test", [])
+    def test_original_state_hints_stay_valid_without_unsigned_url_exception(self):
+        for status in ("pending", "unresolved"):
+            with self.subTest(status=status):
+                payload = {"album": {"albumId": self.ALBUM_ID}, "images": [{"id": "a" * 24, "before": {"status": status}}]}
+                public_posture_smoke._inspect_media_urls(payload, "media.test", [])
+                payload["images"][0]["before"] = {"status": status, "url": "https://originals-test.s3.amazonaws.com/private"}
+                with self.assertRaises(public_posture_smoke.catalog_probe.ProbeError):
+                    public_posture_smoke._inspect_media_urls(payload, "media.test", [])
 
     def test_public_stats_allows_exact_initial_bootstrap_response(self):
         response = self.response(

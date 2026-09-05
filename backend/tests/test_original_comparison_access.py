@@ -137,13 +137,15 @@ class OriginalComparisonAccessTests(unittest.TestCase):
             self.assertEqual(result, {"status": "unavailable" if status == "ambiguous" else status})
         self.s3.generate_presigned_url.assert_not_called()
 
-    def test_comparisons_load_even_without_edited_preview_table(self):
+    def test_album_lists_only_advertise_comparison_without_metadata_reads_or_signing(self):
         resource = Mock()
         resource.batch_get_item.return_value = {"Responses": {"comparison-test": [ready_record()]}}
         with patch.dict(os.environ, {"PREVIEW_METADATA_TABLE": ""}), patch.object(media_access, "get_dynamodb_resource", return_value=resource):
             metadata = media_access.load_preview_metadata(ALBUM)
             result = media_access.serialize_images(ALBUM, preview_metadata_by_id=metadata)[0]
-        self.assertEqual(result["before"]["status"], "ready")
+        self.assertEqual(result["before"], {"status": "unresolved"})
+        resource.batch_get_item.assert_not_called()
+        self.s3.generate_presigned_url.assert_not_called()
         self.assertNotIn("originalFilename", result)
         self.assertNotIn("driveFileId", json.dumps(result))
         admin = media_access.serialize_images(ALBUM, include_internal=True, preview_metadata_by_id=metadata)[0]
@@ -157,7 +159,9 @@ class OriginalComparisonAccessTests(unittest.TestCase):
         resource.batch_get_item.return_value = {"Responses": {"comparison-test": [ready_record()]}}
         with patch.object(get_public_album, "_batch_albums", return_value={ALBUM_ID: ALBUM}), patch.object(media_access, "get_dynamodb_resource", return_value=resource):
             body = response_body(get_public_album._explore_json_response(200, {"items": [{"id": "wide", "photos": 1}], "initialPage": {"items": [item]}}))
-        self.assertEqual(body["initialPage"]["items"][0]["before"]["status"], "ready")
+        self.assertEqual(body["initialPage"]["items"][0]["before"], {"status": "unresolved"})
+        resource.batch_get_item.assert_not_called()
+        self.s3.generate_presigned_url.assert_not_called()
         self.assertEqual(body["items"], [{"id": "wide", "photos": 1}])
         self.assertEqual(item, cached)
         with patch.object(get_public_album, "_batch_albums", return_value={ALBUM_ID: {**ALBUM, "visibility": "private"}}):
