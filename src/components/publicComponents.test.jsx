@@ -441,4 +441,70 @@ describe('VideoPlayer', () => {
     expect(container.querySelector('video')).not.toHaveAttribute('src')
     expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled()
   })
+
+  it('keeps only the latest raw video during rapid navigation and releases it on close', () => {
+    const onMediaError = vi.fn()
+    const props = { onMediaError }
+    const { container, rerender, unmount } = render(
+      <VideoPlayer {...props} videoInfo={{ url: 'https://x.test/first.mp4', thumbnailUrl: 'first-poster' }} />,
+    )
+    const video = container.querySelector('video')
+
+    for (const name of ['second', 'third', 'fourth']) {
+      rerender(<VideoPlayer {...props} videoInfo={{ url: `https://x.test/${name}.mp4`, thumbnailUrl: `${name}-poster` }} />)
+      expect(container.querySelectorAll('video')).toHaveLength(1)
+      expect(video.src).toBe(`https://x.test/${name}.mp4`)
+      expect(video).toHaveAttribute('poster', `${name}-poster`)
+    }
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(3)
+    expect(onMediaError).not.toHaveBeenCalled()
+
+    unmount()
+    expect(video).not.toHaveAttribute('src')
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(4)
+    fireEvent.error(video)
+    expect(onMediaError).not.toHaveBeenCalled()
+  })
+
+  it('does not attach a delayed HLS import after rapidly moving to another video', async () => {
+    const { container, rerender } = render(
+      <VideoPlayer videoInfo={{ url: 'https://x.test/first.mp4', hlsUrl: 'https://x.test/first.m3u8' }} />,
+    )
+    rerender(<VideoPlayer videoInfo={{ url: 'https://x.test/second.mp4', hlsUrl: 'https://x.test/second.m3u8' }} />)
+    rerender(<VideoPlayer videoInfo={{ url: 'https://x.test/current.mp4' }} />)
+
+    await act(async () => {})
+    expect(hlsInstances).toHaveLength(0)
+    expect(container.querySelectorAll('video')).toHaveLength(1)
+    expect(container.querySelector('video').src).toBe('https://x.test/current.mp4')
+  })
+
+  it('ignores late manifest and fatal-error callbacks from retired HLS videos', async () => {
+    const onMediaError = vi.fn()
+    const info = name => ({ url: `https://x.test/${name}.mp4`, hlsUrl: `https://x.test/${name}.m3u8` })
+    const { container, rerender } = render(<VideoPlayer videoInfo={info('first')} onMediaError={onMediaError} />)
+    await waitFor(() => expect(hlsInstances).toHaveLength(1))
+    rerender(<VideoPlayer videoInfo={info('second')} onMediaError={onMediaError} />)
+    await waitFor(() => expect(hlsInstances).toHaveLength(2))
+    rerender(<VideoPlayer videoInfo={info('current')} onMediaError={onMediaError} />)
+    await waitFor(() => expect(hlsInstances).toHaveLength(3))
+
+    const current = hlsInstances[2]
+    act(() => {
+      for (const retired of hlsInstances.slice(0, 2)) {
+        expect(retired.destroy).toHaveBeenCalledOnce()
+        retired.handlers.manifest()
+        retired.handlers.error(null, { fatal: true })
+      }
+    })
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
+    expect(onMediaError).not.toHaveBeenCalled()
+    expect(hlsInstances).toHaveLength(3)
+    expect(current.destroy).not.toHaveBeenCalled()
+    expect(current.loadSource).toHaveBeenCalledWith('https://x.test/current.m3u8')
+    expect(current.attachMedia).toHaveBeenCalledWith(container.querySelector('video'))
+
+    act(() => current.handlers.manifest())
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce()
+  })
 })

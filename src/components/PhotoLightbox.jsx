@@ -96,13 +96,12 @@ function PhotoLightbox({
     emptyMessage = '',
 }) {
     const { containerRef, sizesFor } = useContainedImageSizes()
-    const [loadedImageId, setLoadedImageId] = useState(null)
-    const [settledImage, setSettledImage] = useState(null)
     const [printing, setPrinting] = useState(false)
-    const settledImageRef = useRef(null)
-    const transitionTimerRef = useRef(null)
     const activeImage = images[index]
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
+    const [preview, setPreview] = useState(() => ({ id: activeId, ready: null, outgoing: null }))
+    const loadedImageId = preview.ready?.id
+    const outgoingImage = preview.outgoing
     const thumbUrl = activeImage ? mediaThumbnailUrl(activeImage) : ''
     const activeRawUrl = activeImage ? mediaDisplayUrl(activeImage) : ''
     const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
@@ -123,13 +122,25 @@ function PhotoLightbox({
     const beforeLoadFailed = comparison.failedKey === beforeRequestKey
     const hasBeforeRefresh = Boolean(onBeforeRefresh)
 
-    // Reset during an identity change so returning to a previous photograph also
-    // starts with its edit, without resetting the existing navigation crossfade.
+    // Only carry the immediately preceding decoded photo into a navigation fade.
+    // Advancing again must never resurrect an older outgoing layer, even when
+    // the skipped photo has not loaded or its fade has not finished.
+    if (preview.id !== activeId) setPreview({ id: activeId, ready: null, outgoing: preview.ready })
+
+    // Returning to a previous photograph also starts with its edit.
     if (comparison.id !== activeId) setComparison(freshComparison(activeId))
 
+    useEffect(() => {
+        if (!outgoingImage) return
+        // The fade starts on navigation, not on the next photo's load event.
+        // Slow or failed loads cannot leave a stale photograph on screen.
+        const timer = window.setTimeout(() => {
+            setPreview(current => current.outgoing === outgoingImage ? { ...current, outgoing: null } : current)
+        }, PHOTO_CROSSFADE_MS)
+        return () => window.clearTimeout(timer)
+    }, [outgoingImage])
+
     useEffect(() => () => {
-        window.clearTimeout(transitionTimerRef.current)
-        transitionTimerRef.current = null
         refreshedOriginalsRef.current.clear()
     }, [activeId])
 
@@ -210,30 +221,15 @@ function PhotoLightbox({
     const isLegacyOrDemo = typeof activeImage === 'string'
     const hasOriginalComparison = Boolean(before && ['unresolved', 'ready', 'pending', 'unavailable', 'failed'].includes(before.status))
     const hasPhotoMetadata = !isLegacyOrDemo && Boolean(activeImage?.exif)
-    const hasOutgoingImage = settledImage && settledImage.id !== activeId
-
     const handleFullImageLoad = (event) => afterImageDecode(event.currentTarget, () => {
-        const nextSettledImage = {
+        const ready = {
             id: activeId,
             image: activeImage,
             rawUrl: activeRawUrl,
             previewSrcSet,
         }
 
-        setLoadedImageId(activeId)
-        window.clearTimeout(transitionTimerRef.current)
-
-        if (!settledImageRef.current || settledImageRef.current.id === activeId) {
-            settledImageRef.current = nextSettledImage
-            setSettledImage(nextSettledImage)
-            return
-        }
-
-        transitionTimerRef.current = window.setTimeout(() => {
-            settledImageRef.current = nextSettledImage
-            setSettledImage(nextSettledImage)
-            transitionTimerRef.current = null
-        }, PHOTO_CROSSFADE_MS)
+        setPreview(current => current.id === activeId ? { ...current, ready } : current)
     }, onMediaError)
 
     const handlePrint = async (event) => {
@@ -360,18 +356,19 @@ function PhotoLightbox({
                                 style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: showingBefore || loadedImageId === activeId ? 'hidden' : undefined }}
                                 className={`linen-lightbox-placeholder object-contain blur-sm opacity-50 z-10 pointer-events-none ${showingBefore || loadedImageId === activeId ? 'is-placeholder-hidden' : ''}`}
                             />
-                            {hasOutgoingImage && (
+                            {outgoingImage && (
                                 <img
-                                    src={settledImage.rawUrl}
-                                    srcSet={settledImage.previewSrcSet || undefined}
-                                    sizes={sizesFor(settledImage.image)}
+                                    key={`outgoing-${activeId}`}
+                                    src={outgoingImage.rawUrl}
+                                    srcSet={outgoingImage.previewSrcSet || undefined}
+                                    sizes={sizesFor(outgoingImage.image)}
                                     alt=""
                                     aria-hidden="true"
-                                    width={settledImage.image.width}
-                                    height={settledImage.image.height}
+                                    width={outgoingImage.image.width}
+                                    height={outgoingImage.image.height}
                                     decoding="async"
                                     style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: showingBefore ? 'hidden' : undefined }}
-                                    className={`linen-lightbox-photo linen-lightbox-photo-outgoing is-loaded object-contain relative z-20 ${loadedImageId === activeId ? 'is-exiting' : ''}`}
+                                    className="linen-lightbox-photo linen-lightbox-photo-outgoing object-contain relative z-20"
                                 />
                             )}
                             <img

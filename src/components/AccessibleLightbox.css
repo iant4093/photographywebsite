@@ -21,10 +21,12 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
 
 .linen-lightbox-photo-outgoing {
   pointer-events: none;
+  animation: lightbox-photo-exit 360ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
-.linen-lightbox-photo-outgoing.is-exiting {
-  opacity: 0;
+@keyframes lightbox-photo-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 .linen-lightbox-media {
@@ -46,6 +48,10 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
 .linen-lightbox-nav,
 .linen-lightbox-footer {
   display: contents;
+}
+
+.linen-lightbox-counter {
+  font-variant-numeric: tabular-nums;
 }
 
 .linen-photo-lightbox .linen-lightbox-action-buttons {
@@ -163,6 +169,10 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .linen-photo-lightbox .linen-lightbox-photo-outgoing {
+    animation: none;
+  }
+
   .linen-photo-lightbox .linen-lightbox-edited,
   .linen-photo-lightbox .linen-lightbox-original,
   .linen-photo-lightbox .linen-lightbox-placeholder {

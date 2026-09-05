@@ -72,11 +72,9 @@ describe('PhotoLightbox', () => {
     const outgoingImage = document.querySelector('.linen-lightbox-photo-outgoing')
     expect(outgoingImage).toBeInTheDocument()
     expect(outgoingImage).toHaveAttribute('src', landscape.url)
-    expect(outgoingImage).not.toHaveClass('is-exiting')
     expect(fullImage).not.toHaveClass('is-loaded')
     fireEvent.load(fullImage)
     expect(fullImage).toHaveClass('is-loaded')
-    expect(outgoingImage).toHaveClass('is-exiting')
     expect(fullImage).toHaveAttribute('width', '1280')
     expect(fullImage).toHaveAttribute('height', '1920')
     expect(fullImage).toHaveStyle({
@@ -118,6 +116,75 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('No photographs are available.')
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('retires the previous photo on schedule even while the next photo is still loading', () => {
+    vi.useFakeTimers()
+    const props = { images: [landscape, portrait], ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
+    try {
+      fireEvent.load(screen.getByAltText('Full size preview'))
+      rerender(<PhotoLightbox {...props} index={1} />)
+      expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(400))
+      expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
+      expect(document.querySelector('.linen-lightbox-placeholder')).not.toHaveClass('is-placeholder-hidden')
+      expect(screen.getByAltText('Full size preview')).not.toHaveClass('is-loaded')
+      fireEvent.load(screen.getByAltText('Full size preview'))
+      expect(screen.getByAltText('Full size preview')).toHaveClass('is-loaded')
+    } finally {
+      unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps up with rapid navigation instead of resurrecting the first photo behind each selection', () => {
+    vi.useFakeTimers()
+    const photos = Array.from({ length: 5 }, (_, index) => ({ ...landscape, id: `photo-${index}`, url: `https://media.test/${index}.jpg` }))
+    const props = { images: photos, ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
+    try {
+      fireEvent.load(screen.getByAltText('Full size preview'))
+      let previous = 0
+      for (const index of [1, 2, 3, 4, 0, 4, 3, 2, 1]) {
+        rerender(<PhotoLightbox {...props} index={index} />)
+        const outgoing = document.querySelectorAll('.linen-lightbox-photo-outgoing')
+        expect(outgoing).toHaveLength(1)
+        expect(outgoing[0]).toHaveAttribute('src', photos[previous].url)
+        fireEvent.load(screen.getByAltText('Full size preview'))
+        act(() => vi.advanceTimersByTime(40))
+        expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', photos[index].url)
+        expect(document.querySelector('.linen-lightbox-counter')).toHaveTextContent(`${index + 1} / 5`)
+        previous = index
+      }
+      act(() => vi.advanceTimersByTime(400))
+      expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
+    } finally {
+      unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops an interrupted outgoing frame and ignores late decodes when wrapping to a fresh instance', async () => {
+    const photos = [landscape, portrait, { ...landscape, id: 'third' }]
+    const props = { images: photos, ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender } = render(<PhotoLightbox {...props} index={0} />)
+    fireEvent.load(screen.getByAltText('Full size preview'))
+    rerender(<PhotoLightbox {...props} index={1} />)
+    const slowPhoto = screen.getByAltText('Full size preview')
+    let finishDecode
+    slowPhoto.decode = () => new Promise(resolve => { finishDecode = resolve })
+    fireEvent.load(slowPhoto)
+    rerender(<PhotoLightbox {...props} index={2} />)
+    expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
+    rerender(<PhotoLightbox {...props} index={1} />)
+    const returnedPhoto = screen.getByAltText('Full size preview')
+    expect(returnedPhoto).not.toBe(slowPhoto)
+    await act(async () => { finishDecode() })
+    expect(returnedPhoto).not.toHaveClass('is-loaded')
+    expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
+    fireEvent.load(returnedPhoto)
+    expect(returnedPhoto).toHaveClass('is-loaded')
   })
 
   it('supports a single metadata-free photo and reports media errors', () => {
