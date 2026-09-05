@@ -293,6 +293,109 @@ describe('PhotoLightbox', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
   })
 
+  it('keeps the edit visible until the original is decoded and reuses it on later toggles', async () => {
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} />)
+    const edited = screen.getByAltText('Full size preview')
+    fireEvent.load(edited)
+    const placeholder = document.querySelector('.linen-lightbox-placeholder')
+    expect(placeholder).toHaveClass('is-placeholder-hidden')
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    let finishDecode
+    original.decode = vi.fn(() => new Promise(resolve => { finishDecode = resolve }))
+    fireEvent.load(original)
+    expect(original.decode).toHaveBeenCalledOnce()
+    expect(edited).toBeVisible()
+    expect(original).not.toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
+    await act(async () => { finishDecode() })
+    expect(original).toBeVisible()
+    expect(edited).toHaveClass('is-comparison-hidden')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
+    expect(placeholder).toHaveClass('is-placeholder-hidden')
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(original.decode).toHaveBeenCalledOnce()
+    expect(screen.getByAltText('Before — Camera JPG')).toBe(original)
+  })
+
+  it('does not reveal a late decoded original after cancellation or a source replacement', async () => {
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    fireEvent.load(screen.getByAltText('Full size preview'))
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    let finishDecode
+    original.decode = () => new Promise(resolve => { finishDecode = resolve })
+    fireEvent.load(original)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel loading original' }))
+    await act(async () => { finishDecode() })
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Show original photo' })).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const oldSource = screen.getByAltText('Before — Camera JPG')
+    oldSource.decode = () => new Promise(resolve => { finishDecode = resolve })
+    fireEvent.load(oldSource)
+    rerender(<PhotoLightbox {...props} images={[{ ...comparisonPhoto, before: { ...comparisonPhoto.before, url: 'https://media.test/fresh-original.jpg' } }]} />)
+    const freshSource = screen.getByAltText('Before — Camera JPG')
+    await act(async () => { finishDecode() })
+    expect(freshSource).not.toBeVisible()
+    expect(screen.getByAltText('Full size preview')).toBeVisible()
+  })
+
+  it.each(['reject', 'throw'])('keeps the edit available when original decoding fails with %s', async (failure) => {
+    const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onBeforeRefresh={onBeforeRefresh} />)
+    fireEvent.load(screen.getByAltText('Full size preview'))
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    original.decode = () => {
+      if (failure === 'throw') throw new Error('Decode failed')
+      return Promise.reject(new Error('Decode failed'))
+    }
+    await act(async () => { fireEvent.load(original) })
+    expect(screen.getByAltText('Full size preview')).toBeVisible()
+    expect(screen.queryByAltText('Before — Camera JPG')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry original' })).toBeInTheDocument()
+    expect(onBeforeRefresh).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }), comparisonPhoto, { reason: 'media-error' })
+  })
+
+  it('holds the original on screen when returning to an edit that is still decoding', async () => {
+    render(<PhotoLightbox images={[comparisonPhoto]} index={0} ariaLabel="Viewer" onClose={vi.fn()} />)
+    const edited = screen.getByAltText('Full size preview')
+    let finishDecode
+    edited.decode = () => new Promise(resolve => { finishDecode = resolve })
+    fireEvent.load(edited)
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    fireEvent.load(original)
+    fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
+    expect(original).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading edited photo…')
+    expect(screen.getByRole('button', { name: 'Cancel loading edited photo' })).toHaveAttribute('aria-pressed', 'true')
+    await act(async () => { finishDecode() })
+    expect(edited).toBeVisible()
+    expect(original).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Show original photo' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('ignores a stale edit decode when a refreshed URL reuses the current image element', async () => {
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn() }
+    const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    const edited = screen.getByAltText('Full size preview')
+    let finishDecode
+    edited.decode = () => new Promise(resolve => { finishDecode = resolve })
+    fireEvent.load(edited)
+    rerender(<PhotoLightbox {...props} images={[{ ...comparisonPhoto, url: 'https://media.test/fresh-edit.jpg' }]} />)
+    expect(screen.getByAltText('Full size preview')).toBe(edited)
+    await act(async () => { finishDecode() })
+    expect(edited).not.toHaveClass('is-loaded')
+    fireEvent.load(edited)
+    await act(async () => { finishDecode() })
+    expect(edited).toHaveClass('is-loaded')
+  })
+
   it('resets comparison on navigation, return, and reopen and ignores detached original events', () => {
     const onMediaError = vi.fn()
     const props = { images: [comparisonPhoto, portrait], ariaLabel: 'Viewer', onClose: vi.fn(), onMediaError }

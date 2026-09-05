@@ -16,7 +16,31 @@ const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
 const ORIGINAL_REFRESH_SLOW_INTERVAL_MS = 60_000
 
 function freshComparison(id) {
-    return { id, requested: false, attempt: 0, loadedKey: null, failedKey: null }
+    return { id, requested: false, returningToEdit: false, attempt: 0, loadedKey: null, failedKey: null }
+}
+
+function afterImageDecode(image, onReady, onError) {
+    if (!image?.isConnected) return
+    const src = image.getAttribute('src')
+    const srcSet = image.getAttribute('srcset')
+    const candidate = image.currentSrc
+    const isCurrent = () => image.isConnected && image.getAttribute('src') === src
+        && image.getAttribute('srcset') === srcSet && image.currentSrc === candidate
+    const ready = () => {
+        if (!isCurrent()) return
+        // Establish the hidden layer's initial style even when a cached image
+        // decodes before the browser's first paint, so its fade still runs.
+        image.getBoundingClientRect()
+        onReady()
+    }
+    const failed = () => {
+        if (isCurrent()) onError?.({ type: 'error', currentTarget: image })
+    }
+    if (typeof image.decode !== 'function') {
+        ready()
+        return
+    }
+    try { image.decode().then(ready, failed) } catch { failed() }
 }
 
 function runOriginalRefresh(requestRef, callback, event, image, isCurrent, context = { reason: 'original-status' }) {
@@ -93,7 +117,9 @@ function PhotoLightbox({
     const beforeRequestKey = `${beforeSourceKey}:${comparison.attempt}`
     const beforeIsReady = before?.status === 'ready' && Boolean(beforeUrl)
     const comparisonRequested = comparison.id === activeId && comparison.requested
-    const showingBefore = comparisonRequested && beforeIsReady && comparison.loadedKey === beforeRequestKey
+    const originalLoaded = beforeIsReady && comparison.loadedKey === beforeRequestKey
+    const waitingForEdited = originalLoaded && comparison.returningToEdit && loadedImageId !== activeId
+    const showingBefore = originalLoaded && (comparisonRequested || waitingForEdited)
     const beforeLoadFailed = comparison.failedKey === beforeRequestKey
     const hasBeforeRefresh = Boolean(onBeforeRefresh)
 
@@ -166,7 +192,7 @@ function PhotoLightbox({
     const hasPhotoMetadata = !isLegacyOrDemo && Boolean(activeImage?.exif)
     const hasOutgoingImage = settledImage && settledImage.id !== activeId
 
-    const handleFullImageLoad = () => {
+    const handleFullImageLoad = (event) => afterImageDecode(event.currentTarget, () => {
         const nextSettledImage = {
             id: activeId,
             image: activeImage,
@@ -188,7 +214,7 @@ function PhotoLightbox({
             setSettledImage(nextSettledImage)
             transitionTimerRef.current = null
         }, PHOTO_CROSSFADE_MS)
-    }
+    }, onMediaError)
 
     const handlePrint = async (event) => {
         event.stopPropagation()
@@ -221,21 +247,24 @@ function PhotoLightbox({
             refreshOriginal(event, beforeLoadFailed, true)
             return
         }
-        setComparison((current) => ({ ...current, requested: !current.requested }))
+        setComparison((current) => ({
+            ...current,
+            requested: !current.requested,
+            returningToEdit: showingBefore && current.requested && loadedImageId !== activeId,
+        }))
         if (!comparisonRequested && !beforeIsReady && before?.status !== 'unavailable') {
             refreshedOriginalsRef.current.delete(beforeSourceKey)
             refreshOriginal(event)
         }
     }
 
-    const handleBeforeLoad = (event) => {
-        if (!event.currentTarget.isConnected) return
+    const handleBeforeLoad = (event) => afterImageDecode(event.currentTarget, () => {
         setComparison((current) => (
             current.id === activeId && current.attempt === comparison.attempt
                 ? { ...current, loadedKey: beforeRequestKey, failedKey: null }
                 : current
         ))
-    }
+    }, handleBeforeError)
 
     const handleBeforeError = (event) => {
         if (!event.currentTarget.isConnected) return
@@ -248,17 +277,19 @@ function PhotoLightbox({
     }
 
     let beforeMessage = ''
-    if (comparisonRequested && !showingBefore) {
+    if (waitingForEdited) beforeMessage = 'Loading edited photo…'
+    else if (comparisonRequested && !showingBefore) {
         if (before?.status === 'unavailable') beforeMessage = 'Unable to locate original'
         else if (beforeLoadFailed || before?.status === 'failed') beforeMessage = 'Original could not be loaded.'
         else if (beforeIsReady) beforeMessage = 'Loading original…'
         else beforeMessage = 'Preparing original…'
     }
-    const beforeBusy = comparisonRequested && !showingBefore && !beforeLoadFailed && (before?.status === 'pending' || beforeIsReady)
+    const beforeBusy = waitingForEdited || (comparisonRequested && !showingBefore && !beforeLoadFailed && (before?.status === 'pending' || beforeIsReady))
     const beforeHasError = comparisonRequested && (beforeLoadFailed || before?.status === 'failed')
     const beforeNeedsRetry = beforeHasError && (beforeLoadFailed || hasBeforeRefresh)
     const beforeUnavailable = comparisonRequested && before?.status === 'unavailable'
-    const beforeButtonLabel = beforeNeedsRetry ? 'Retry original'
+    const beforeButtonLabel = waitingForEdited ? 'Cancel loading edited photo'
+        : beforeNeedsRetry ? 'Retry original'
         : beforeUnavailable ? 'Unable to locate original'
             : beforeBusy ? 'Cancel loading original'
                 : comparisonRequested ? 'Show edited photo' : 'Show original photo'
@@ -306,8 +337,8 @@ function PhotoLightbox({
                                 alt=""
                                 width={activeImage.width}
                                 height={activeImage.height}
-                                style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: showingBefore ? 'hidden' : undefined }}
-                                className="linen-lightbox-placeholder object-contain blur-sm opacity-50 z-10 pointer-events-none"
+                                style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: showingBefore || loadedImageId === activeId ? 'hidden' : undefined }}
+                                className={`linen-lightbox-placeholder object-contain blur-sm opacity-50 z-10 pointer-events-none ${showingBefore || loadedImageId === activeId ? 'is-placeholder-hidden' : ''}`}
                             />
                             {hasOutgoingImage && (
                                 <img
@@ -336,7 +367,7 @@ function PhotoLightbox({
                                 height={activeImage.height}
                                 decoding="async"
                                 style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%', visibility: showingBefore ? 'hidden' : undefined }}
-                                className={`linen-lightbox-photo object-contain relative z-30 ${loadedImageId === activeId ? 'is-loaded' : ''}`}
+                                className={`linen-lightbox-photo linen-lightbox-edited object-contain relative z-30 ${loadedImageId === activeId ? 'is-loaded' : ''} ${showingBefore ? 'is-comparison-hidden' : ''}`}
                             />
                             {(comparisonRequested || comparison.loadedKey === beforeRequestKey) && beforeIsReady && !beforeLoadFailed && (
                                 <img
