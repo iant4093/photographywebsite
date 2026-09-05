@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { MUSEUM_DIMENSIONS } from '../../utils/museumLayout'
+import { museumRoomCofferPanels } from '../../utils/museumSkylights'
 
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1)
 const UNIT_PLANE = new THREE.PlaneGeometry(1, 1)
@@ -73,24 +74,8 @@ function PictureLightWash({ paintings }) {
     )
 }
 
-export function MuseumCofferedCeiling({ room, shellCenterX, shellDepth }) {
-    const panels = useMemo(() => {
-        const count = Math.max(2, Math.min(16, Math.round(shellDepth / 6.4)))
-        const length = (shellDepth - 0.8) / count
-        const centers = Array.from({ length: count }, (_, index) => (
-            shellCenterX - shellDepth / 2 + 0.4 + length * (index + 0.5)
-        ))
-        return {
-            surround: centers.map(x => ({
-                position: [x, 6.035, room.centerZ],
-                size: [length - 0.22, 0.09, room.width - 0.7],
-            })),
-            inset: centers.map(x => ({
-                position: [x, 5.98, room.centerZ],
-                size: [length - 0.44, 0.025, room.width - 1.02],
-            })),
-        }
-    }, [room, shellCenterX, shellDepth])
+export function MuseumCofferedCeiling({ room }) {
+    const panels = useMemo(() => museumRoomCofferPanels(room), [room])
     return (
         <group>
             <ArchitectureBatch items={panels.surround} color="#82705b" />

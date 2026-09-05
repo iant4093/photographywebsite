@@ -5,7 +5,7 @@ import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { museumGalleryDisplayParts, museumGalleryDisplays, museumReadingProps } from '../../utils/museumDecor'
-import { createMuseumDisplayPartGeometry } from '../../utils/museumDisplayGeometry'
+import { createMuseumDisplayPartGeometry, createMuseumReadingPartGeometry } from '../../utils/museumDisplayGeometry'
 import { applyMuseumDisplayResponse } from '../../utils/museumMaterialResponse'
 import { MUSEUM_MATERIAL_TILE_METERS } from '../../utils/museumMaterialAssets'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
@@ -348,19 +348,7 @@ function SalonRugs({ benches }) {
 
 function ReadingRoomDetails({ layout }) {
     const geometry = useMemo(() => {
-        const parts = museumReadingProps(layout).map(part => {
-            const next = part.shape === 'cylinder'
-                ? new THREE.CylinderGeometry(1, 1, 1, 12)
-                : new THREE.BoxGeometry(1, 1, 1)
-            next.scale(...part.size)
-            next.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(...part.rotation)))
-            next.translate(...part.position)
-            const color = new THREE.Color(part.color)
-            const values = new Float32Array(next.getAttribute('position').count * 3)
-            for (let index = 0; index < values.length; index += 3) color.toArray(values, index)
-            next.setAttribute('color', new THREE.BufferAttribute(values, 3))
-            return next
-        })
+        const parts = museumReadingProps(layout).map(createMuseumReadingPartGeometry)
         const merged = mergeGeometries(parts)
         parts.forEach(part => part.dispose())
         return merged
@@ -368,7 +356,7 @@ function ReadingRoomDetails({ layout }) {
     useEffect(() => () => geometry.dispose(), [geometry])
     return (
         <mesh geometry={geometry}>
-            <meshStandardMaterial vertexColors roughness={0.67} metalness={0.12} />
+            <meshStandardMaterial vertexColors roughness={1} metalness={1} onBeforeCompile={applyMuseumDisplayResponse} />
         </mesh>
     )
 }

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import './AccessibleLightbox.css'
+import { registerLightboxLayer } from '../utils/lightboxLayers'
 
 const FOCUSABLE_SELECTOR = [
     'a[href]',
@@ -25,7 +26,6 @@ export default function AccessibleLightbox({
     onPrevious,
 }) {
     const dialogRef = useRef(null)
-    const restoreFocusRef = useRef(null)
     const callbacksRef = useRef({ onClose, onNext, onPrevious })
     const portalTarget = typeof document === 'undefined' ? null : document.body
 
@@ -35,62 +35,10 @@ export default function AccessibleLightbox({
 
     useLayoutEffect(() => {
         const dialog = dialogRef.current
-        const scrollPosition = {
-            x: window.scrollX,
-            y: window.scrollY,
-        }
-        const previousBodyStyles = {
-            overflow: document.body.style.overflow,
-            overscrollBehavior: document.body.style.overscrollBehavior,
-            position: document.body.style.position,
-            top: document.body.style.top,
-            left: document.body.style.left,
-            right: document.body.style.right,
-            width: document.body.style.width,
-        }
-        const previousDocumentStyles = {
-            overflow: document.documentElement.style.overflow,
-            overscrollBehavior: document.documentElement.style.overscrollBehavior,
-        }
         const useViewportScrollLock = window.matchMedia?.(
             '(orientation: landscape) and (max-height: 600px) and (max-width: 1024px) and (pointer: coarse)',
         ).matches === true
-        const backgroundState = Array.from(dialog?.parentElement?.children || [])
-            .filter((element) => element !== dialog)
-            .map((element) => ({
-                element,
-                ariaHidden: element.getAttribute('aria-hidden'),
-                inert: element.hasAttribute('inert'),
-            }))
-
-        restoreFocusRef.current = document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : null
-
-        document.documentElement.setAttribute('data-lightbox-scroll-lock', '')
-        backgroundState.forEach(({ element }) => {
-            element.setAttribute('inert', '')
-            element.setAttribute('aria-hidden', 'true')
-        })
-        if (useViewportScrollLock) {
-            Object.assign(document.documentElement.style, {
-                overflow: 'hidden',
-                overscrollBehavior: 'none',
-            })
-            Object.assign(document.body.style, {
-                overflow: 'hidden',
-                overscrollBehavior: 'none',
-            })
-        } else {
-            Object.assign(document.body.style, {
-                overflow: 'hidden',
-                position: 'fixed',
-                top: `-${scrollPosition.y}px`,
-                left: `-${scrollPosition.x}px`,
-                right: '0',
-                width: '100%',
-            })
-        }
+        const releaseLayer = registerLightboxLayer(dialog, useViewportScrollLock)
 
         const initialFocus = useViewportScrollLock
             ? dialog
@@ -98,6 +46,9 @@ export default function AccessibleLightbox({
         initialFocus?.focus({ preventScroll: true })
 
         const handleKeyDown = (event) => {
+            // A photograph can open above an album dialog. Its portal makes
+            // this dialog inert; only the visible top layer owns keyboard input.
+            if (event.defaultPrevented || dialog?.hasAttribute('inert')) return
             if (event.key === 'Escape') {
                 event.preventDefault()
                 callbacksRef.current.onClose()
@@ -136,18 +87,7 @@ export default function AccessibleLightbox({
         window.addEventListener('keydown', handleKeyDown)
         return () => {
             window.removeEventListener('keydown', handleKeyDown)
-            Object.assign(document.body.style, previousBodyStyles)
-            Object.assign(document.documentElement.style, previousDocumentStyles)
-            backgroundState.forEach(({ element, ariaHidden, inert }) => {
-                if (!inert) element.removeAttribute('inert')
-                if (ariaHidden === null) element.removeAttribute('aria-hidden')
-                else element.setAttribute('aria-hidden', ariaHidden)
-            })
-            restoreFocusRef.current?.focus({ preventScroll: true })
-            if (!useViewportScrollLock) {
-                window.scrollTo(scrollPosition.x, scrollPosition.y)
-            }
-            document.documentElement.removeAttribute('data-lightbox-scroll-lock')
+            releaseLayer()
         }
     }, [])
 

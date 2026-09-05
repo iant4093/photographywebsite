@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { buildMuseumLayout } from './museumLayout'
 import { museumGalleryDisplayParts, museumGalleryDisplays, museumReadingProps } from './museumDecor'
-import { createMuseumDisplayPartGeometry } from './museumDisplayGeometry'
+import { createMuseumDisplayPartGeometry, createMuseumReadingPartGeometry } from './museumDisplayGeometry'
 
 function layoutFor(counts) {
     return buildMuseumLayout(counts.map((count, index) => ({
@@ -16,12 +16,7 @@ describe('museum reading details', () => {
     it('keeps every prop on its existing furniture footprint, above its support', () => {
         const layout = layoutFor([1, 6, 26, 70])
         for (const part of museumReadingProps(layout)) {
-            const geometry = part.shape === 'cylinder'
-                ? new THREE.CylinderGeometry(1, 1, 1, 12)
-                : new THREE.BoxGeometry(1, 1, 1)
-            geometry.scale(...part.size)
-            geometry.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(...part.rotation)))
-            geometry.translate(...part.position)
+            const geometry = createMuseumReadingPartGeometry(part)
             const vertices = geometry.getAttribute('position')
             const point = new THREE.Vector3()
             const { support } = part
@@ -41,17 +36,70 @@ describe('museum reading details', () => {
         }
     })
 
-    it('funds the entire prop set from the geometry removed by flat rugs', () => {
+    it('bounds the reception detail budget and funds repeated props from the geometry removed by flat rugs', () => {
         const originalRugLayer = new RoundedBoxGeometry(1, 1, 1, 2, 0.07)
         const oldTrianglesPerBench = originalRugLayer.getAttribute('position').count / 3 * 4
         for (const counts of [[1], [26, 10, 6, 9, 7, 4, 2, 4, 6], [70, 70, 70]]) {
             const layout = layoutFor(counts)
             const benchCount = layout.rooms.reduce((total, room) => total + room.benches.length, 0)
-            const propTriangles = museumReadingProps(layout).reduce((total, part) => total + (part.shape === 'cylinder' ? 48 : 12), 0)
-            const newTriangles = propTriangles + benchCount * 2
+            let receptionTriangles = 0
+            const propTriangles = museumReadingProps(layout).reduce((total, part) => {
+                const geometry = createMuseumReadingPartGeometry(part)
+                const triangles = geometry.getAttribute('position').count / 3
+                geometry.dispose()
+                if (part.support.id === 'reception') receptionTriangles += triangles
+                return total + triangles
+            }, 0)
+            expect(receptionTriangles).toBeLessThan(2_600)
+            const newTriangles = propTriangles - receptionTriangles + benchCount * 2
             expect(newTriangles).toBeLessThan(oldTrianglesPerBench * benchCount)
         }
         originalRugLayer.dispose()
+    })
+
+    it('keeps the camera strap grounded, connected and clear of the printed contact sheet', () => {
+        const parts = museumReadingProps(layoutFor([6]))
+        const strap = parts.filter(part => part.detail === 'camera-strap')
+        expect(strap).toHaveLength(7)
+        const endpoints = strap.map(part => {
+            const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(...part.rotation))
+            return [-1, 1].map(direction => new THREE.Vector3(0, 0, direction * part.size[2] / 2).applyQuaternion(rotation).add(new THREE.Vector3(...part.position)))
+        })
+        for (let index = 1; index < endpoints.length; index += 1) {
+            expect(Math.min(...endpoints[index].flatMap(a => endpoints[index - 1].map(b => a.distanceTo(b))))).toBeLessThan(0.006)
+        }
+        const deskTop = strap[0].support.position[1]
+        expect(endpoints.flat().filter(point => point.y < deskTop + 0.012).length).toBeGreaterThanOrEqual(6)
+        const lowStrapBounds = strap.map(part => {
+            const geometry = createMuseumReadingPartGeometry(part)
+            geometry.computeBoundingBox()
+            const bounds = geometry.boundingBox.clone()
+            geometry.dispose()
+            return bounds
+        }).filter(bounds => bounds.min.y < deskTop + 0.008)
+        for (const sheet of parts.filter(part => part.detail === 'contact-sheet')) {
+            const geometry = createMuseumReadingPartGeometry(sheet)
+            geometry.computeBoundingBox()
+            expect(lowStrapBounds.some(bounds => bounds.intersectsBox(geometry.boundingBox))).toBe(false)
+            geometry.dispose()
+        }
+    })
+
+    it('retains different camera glass, metal and paper responses within a single mergeable geometry layout', () => {
+        const details = museumReadingProps(layoutFor([6])).filter(part => part.detail)
+        const attributeSets = new Set()
+        const responses = new Set()
+        for (const part of details) {
+            const geometry = createMuseumReadingPartGeometry(part)
+            attributeSets.add(Object.keys(geometry.attributes).sort().join(','))
+            responses.add(`${geometry.getAttribute('museumRoughness').getX(0).toFixed(2)}/${geometry.getAttribute('museumMetalness').getX(0).toFixed(2)}`)
+            expect(geometry.index).toBeNull()
+            geometry.dispose()
+        }
+        expect(attributeSets.size).toBe(1)
+        expect(responses.has('0.12/0.00')).toBe(true)
+        expect(responses.has('0.32/0.78')).toBe(true)
+        expect(responses.has('0.93/0.00')).toBe(true)
     })
 })
 
@@ -311,6 +359,75 @@ describe('distributed gallery displays', () => {
             expect(upward[0].point.y).toBeCloseTo(0, 6)
             geometry.dispose()
             material.dispose()
+        }
+    })
+
+    it('bakes cavity and page-cover occlusion into colors without shading exposed surfaces uniformly', () => {
+        const common = { position: [0, 0, 0], size: [1, 1, 1], rotation: [0, 0, 0], color: '#ffffff' }
+        for (const shape of ['vase', 'bud-vase']) {
+            const geometry = createMuseumDisplayPartGeometry({ ...common, shape, surface: 'ceramic' })
+            const positions = geometry.getAttribute('position')
+            const colors = geometry.getAttribute('color')
+            const uv = geometry.getAttribute('uv')
+            const cavityFloor = []
+            const exposedRim = []
+            for (let index = 0; index < positions.count; index += 1) {
+                if (uv.getY(index) > 0.54 && positions.getY(index) < 0.15) cavityFloor.push(colors.getX(index))
+                if (Math.abs(positions.getY(index) - 1) < 1e-5) exposedRim.push(colors.getX(index))
+            }
+            expect(cavityFloor.length).toBeGreaterThan(0)
+            expect(Math.max(...cavityFloor)).toBeLessThan(0.5)
+            expect(Math.min(...exposedRim)).toBeGreaterThan(0.9)
+            geometry.dispose()
+        }
+        const pages = createMuseumDisplayPartGeometry({ ...common, shape: 'page-block', fineShade: 'paper-edge' })
+        const positions = pages.getAttribute('position')
+        const normals = pages.getAttribute('normal')
+        const colors = pages.getAttribute('color')
+        const edge = []
+        const center = []
+        for (let index = 0; index < positions.count; index += 1) {
+            if (Math.abs(normals.getY(index)) > 0.5) continue
+            const target = Math.abs(positions.getY(index)) < 0.01 ? center : edge
+            target.push(colors.getX(index))
+        }
+        expect(Math.min(...center)).toBe(1)
+        expect(Math.max(...edge)).toBe(0.75)
+        expect(positions.count / 3).toBe(20)
+        pages.dispose()
+    })
+
+    it('seats contact shadows above flat wood supports with matching grain and invisible outside edges', () => {
+        for (const display of museumGalleryDisplays(layoutFor([6, 26])).filter(part => part.kind === 'console')) {
+            const parts = museumGalleryDisplayParts(display)
+            for (const patch of parts.filter(part => part.detail === 'display-contact')) {
+                const geometry = createMuseumDisplayPartGeometry(patch)
+                const vertices = geometry.getAttribute('position')
+                const uv = geometry.getAttribute('uv')
+                const colors = geometry.getAttribute('color')
+                const original = new THREE.Color(patch.color)
+                const support = parts.find(part => part.shape === 'chamfer' && part.surface === 'wood'
+                    && Math.abs(part.position[1] + part.size[1] / 2 + 0.001 - patch.position[1]) < 1e-6)
+                expect(support).toBeDefined()
+                const levels = []
+                for (let index = 0; index < vertices.count; index += 1) {
+                    const x = vertices.getX(index) - display.position[0]
+                    const z = vertices.getZ(index) - display.position[2]
+                    const u = x * Math.cos(display.rotationY) - z * Math.sin(display.rotationY)
+                    const v = x * Math.sin(display.rotationY) + z * Math.cos(display.rotationY)
+                    expect(uv.getX(index)).toBeCloseTo(u, 5)
+                    expect(uv.getY(index)).toBeCloseTo(v, 5)
+                    // Stay on the flat top face, before its bevel turns down.
+                    expect(Math.abs(u)).toBeLessThan(support.size[0] * 0.45)
+                    expect(Math.abs(v)).toBeLessThan(support.size[2] * 0.45)
+                    expect(vertices.getY(index) - support.position[1] - support.size[1] / 2).toBeCloseTo(0.001, 5)
+                    levels.push(colors.getX(index) / original.r)
+                }
+                expect(Math.min(...levels)).toBeCloseTo(0.6, 5)
+                expect(Math.max(...levels)).toBeCloseTo(1, 5)
+                expect(geometry.getAttribute('normal').array.every((value, index) => Math.abs(value - (index % 3 === 1 ? 1 : 0)) < 1e-6)).toBe(true)
+                geometry.dispose()
+            }
         }
     })
 })

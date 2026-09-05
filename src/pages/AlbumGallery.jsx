@@ -27,16 +27,39 @@ import { shareUrlForAlbumPhoto } from '../utils/share'
 
 
 
-// Album gallery page — displays all images in a masonry-like grid
+// The route owns navigation and document scroll memory. The same album content
+// can also live inside the museum without reading or changing its URL.
 function AlbumGallery() {
     const { albumId } = useParams()
     const navigate = useNavigate()
     const navType = useNavigationType()
     const location = useLocation()
-    const initialSharedPhotoIdRef = useRef(new URLSearchParams(location.search).get('photo'))
-
-    // Manage scroll memory for this page (saves position for when user returns from a photo or deep link)
     useScrollRestoration(location.pathname, navType === 'POP')
+
+    const clearSharedPhoto = useCallback(() => {
+        const params = new URLSearchParams(location.search)
+        if (!params.has('photo')) return
+        params.delete('photo')
+        navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, {
+            replace: true,
+            preventScrollReset: true,
+        })
+    }, [location.pathname, location.search, navigate])
+    const handleBack = useCallback(
+        () => navigateBackOr(navigate, '/#photo-albums'),
+        [navigate],
+    )
+
+    return <AlbumGalleryContent
+        albumId={albumId}
+        initialPhotoId={new URLSearchParams(location.search).get('photo') || ''}
+        onSharedPhotoClose={clearSharedPhoto}
+        onBack={handleBack}
+    />
+}
+
+export function AlbumGalleryContent({ albumId, embedded = false, onBack, initialPhotoId = '', onSharedPhotoClose }) {
+    const initialSharedPhotoIdRef = useRef(embedded ? '' : initialPhotoId)
 
     const [album, setAlbum] = useState(null)
     const [images, setImages] = useState([])
@@ -52,7 +75,6 @@ function AlbumGallery() {
     const { getIdToken } = useAuth()
     // Lightbox state — store index for prev/next navigation
     const [lightboxIndex, setLightboxIndex] = useState(null)
-    const sharedPhotoId = new URLSearchParams(location.search).get('photo')
 
     const loadAlbum = useCallback(async ({ signal, background = false, openPhotoId = '', reuseOriginals = true } = {}) => {
         const scope = albumRequestScopeRef.current
@@ -110,6 +132,9 @@ function AlbumGallery() {
             setLightboxIndex(null)
             setLoadError('')
             setMediaError('')
+            setDownloading(false)
+            setZipError('')
+            setZipStatus('')
             return loadAlbum({ signal: controller.signal, openPhotoId: initialSharedPhotoIdRef.current })
         }).catch(() => {})
         return () => {
@@ -118,7 +143,7 @@ function AlbumGallery() {
         }
     }, [albumId, loadAlbum])
 
-    useEffect(() => () => zipControllerRef.current?.abort(), [])
+    useEffect(() => () => zipControllerRef.current?.abort(), [albumId])
 
     useEffect(() => {
         if (album?.visibility === 'public' && trackedAlbumRef.current !== albumId) {
@@ -144,18 +169,8 @@ function AlbumGallery() {
 
     const closeLightbox = useCallback(() => {
         setLightboxIndex(null)
-        if (!sharedPhotoId) return
-        const params = new URLSearchParams(location.search)
-        params.delete('photo')
-        navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, {
-            replace: true,
-            preventScrollReset: true,
-        })
-    }, [location.pathname, location.search, navigate, sharedPhotoId])
-    const handleBack = useCallback(
-        () => navigateBackOr(navigate, '/#photo-albums'),
-        [navigate],
-    )
+        if (!embedded) onSharedPhotoClose?.()
+    }, [embedded, onSharedPhotoClose])
 
     // Download current lightbox image
     const downloadImage = async (e) => {
@@ -215,6 +230,7 @@ function AlbumGallery() {
                 signal: controller.signal,
                 onStatus: setZipStatus,
             })
+            if (controller.signal.aborted) return
             startBrowserDownload(url, `${album.title || 'album'}.zip`)
         } catch (err) {
             if (err?.name !== 'AbortError') {
@@ -233,22 +249,22 @@ function AlbumGallery() {
 
 
     return (
-        <div className="linen-gallery-page flex-1 animate-fade-in pb-16 pt-[88px] md:pt-[104px]">
+        <div className={`linen-gallery-page flex-1 animate-fade-in ${embedded ? 'linen-gallery-page--embedded pb-8' : 'pb-16 pt-[88px] md:pt-[104px]'}`}>
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}
-                <button
-                    onClick={handleBack}
+                {onBack && <button
+                    onClick={onBack}
                     className="linen-gallery-back inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8 cursor-pointer"
                 >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                     </svg>
-                    Back to Albums
-                </button>
+                    {embedded ? 'Back to Gallery' : 'Back to Albums'}
+                </button>}
 
                 {/* Loading state */}
                 {loading && (
-                    <div className="flex justify-center py-32">
+                    <div className="flex justify-center py-32" role="status" aria-label="Loading album">
                         <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
                     </div>
                 )}
@@ -256,7 +272,7 @@ function AlbumGallery() {
                 {!loading && !album && (
                     <div className="py-24 text-center">
                         <p className="text-warm-gray">{loadError || 'This album could not be loaded.'}</p>
-                        <button onClick={handleBack} className="mt-4 text-amber hover:underline">Go Back</button>
+                        {onBack && <button onClick={onBack} className="mt-4 text-amber hover:underline">Go Back</button>}
                     </div>
                 )}
 
@@ -284,7 +300,7 @@ function AlbumGallery() {
                             </div>
 
                             <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
-                                    {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} />}
+                                    {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} url={embedded ? shareUrlForAlbumPhoto(albumId) : undefined} />}
                                     <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
                                     {images.length > 0 && (
                                         <button

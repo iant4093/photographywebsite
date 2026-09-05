@@ -27,8 +27,58 @@ function Harness() {
     )
 }
 
+function NestedHarness() {
+    const [album, setAlbum] = useState(true)
+    const [photo, setPhoto] = useState(false)
+    return <>
+        <button type="button">Gallery control</button>
+        {album && <AccessibleLightbox ariaLabel="Album" onClose={() => setAlbum(false)}>
+            <button type="button" onClick={() => setPhoto(true)}>Open photograph</button>
+            <button type="button">Album action</button>
+            {photo && <AccessibleLightbox ariaLabel="Photograph" onClose={() => setPhoto(false)}>
+                <button type="button" onClick={() => setPhoto(false)}>Close photograph</button>
+                <button type="button">Photo action</button>
+            </AccessibleLightbox>}
+        </AccessibleLightbox>}
+    </>
+}
+
 describe('AccessibleLightbox', () => {
     afterEach(() => document.getElementById('root')?.remove())
+
+    it('closes only the top dialog and restores album focus without unlocking the page', () => {
+        const { container } = render(<NestedHarness />)
+        const opener = screen.getByRole('button', { name: 'Open photograph' })
+        opener.focus()
+        fireEvent.click(opener)
+        const album = document.querySelector('[role="dialog"][aria-label="Album"]')
+        expect(album).toHaveAttribute('inert')
+        expect(screen.getByRole('button', { name: 'Close photograph' })).toHaveFocus()
+        fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
+        expect(screen.getByRole('button', { name: 'Photo action' })).toHaveFocus()
+        fireEvent.keyDown(window, { key: 'Escape' })
+        expect(screen.queryByRole('dialog', { name: 'Photograph' })).toBeNull()
+        expect(screen.getByRole('dialog', { name: 'Album' })).not.toHaveAttribute('inert')
+        expect(opener).toHaveFocus()
+        expect(container).toHaveAttribute('inert')
+        expect(document.body.style.position).toBe('fixed')
+        expect(document.documentElement).toHaveAttribute('data-lightbox-scroll-lock')
+        fireEvent.keyDown(window, { key: 'Escape' })
+        expect(screen.queryByRole('dialog')).toBeNull()
+        expect(container).not.toHaveAttribute('inert')
+        expect(document.body.style.position).toBe('')
+    })
+
+    it('releases nested locks when the route unmounts both dialogs together', () => {
+        const { container, unmount } = render(<NestedHarness />)
+        fireEvent.click(screen.getByRole('button', { name: 'Open photograph' }))
+        unmount()
+        expect(container).not.toHaveAttribute('inert')
+        expect(container).not.toHaveAttribute('aria-hidden')
+        expect(document.body.style.position).toBe('')
+        expect(document.body.style.overflow).toBe('')
+        expect(document.documentElement).not.toHaveAttribute('data-lightbox-scroll-lock')
+    })
 
     it('isolates the page, traps focus, closes by keyboard, and restores focus', () => {
         const appRoot = document.createElement('div')

@@ -2,7 +2,8 @@
 import { addAfterEffect, Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { decode as decodeBlurhash } from 'blurhash'
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link } from 'react-router'
+import { flushSync } from 'react-dom'
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
@@ -57,6 +58,10 @@ import {
 } from '../utils/museumStreaming'
 import { MuseumRoomArchitecture, MuseumCofferedCeiling, MuseumAtmosphere } from '../components/museum/MuseumAtmosphere'
 import MuseumChandeliers from '../components/museum/MuseumChandeliers'
+import MuseumAlbumOverlay from '../components/museum/MuseumAlbumOverlay'
+import MuseumSkylights from '../components/museum/MuseumSkylights'
+import { museumRoomSkylights, sampleMuseumSkylightIrradiance } from '../utils/museumSkylights'
+import { applyMuseumFrameContactShadow } from '../utils/museumDisplayGeometry'
 import { createMuseumFrameDriver } from '../utils/museumFrameDriver'
 import { createMuseumArchBand } from '../utils/museumArchitecture'
 import { MUSEUM_MATERIAL_TEXTURES, MUSEUM_MATERIAL_TILE_METERS } from '../utils/museumMaterialAssets'
@@ -1039,7 +1044,10 @@ function BakedWallpaperSurface({
     reverseU = false,
     mode = 'room',
     fixtures = EMPTY_FIXTURES,
+    skylights = EMPTY_FIXTURES,
 }) {
+    const [worldX, worldY, worldZ] = position
+    const wallRotationY = rotation?.[1] || 0
     const geometry = useMemo(() => {
         const horizontalSegments = Math.max(12, Math.min(46, Math.ceil(width / (mode === 'hall' ? 1.15 : 0.9))))
         const verticalSegments = 12
@@ -1057,13 +1065,19 @@ function BakedWallpaperSurface({
                 phase,
                 fixtures,
             })
-            colors[(index * 3)] = irradiance[0]
-            colors[(index * 3) + 1] = irradiance[1]
-            colors[(index * 3) + 2] = irradiance[2]
+            const daylight = sampleMuseumSkylightIrradiance({
+                skylights,
+                x: worldX + vertex.x * Math.cos(wallRotationY),
+                y: worldY + vertex.y,
+                z: worldZ - vertex.x * Math.sin(wallRotationY),
+            })
+            colors[(index * 3)] = irradiance[0] + daylight[0]
+            colors[(index * 3) + 1] = irradiance[1] + daylight[1]
+            colors[(index * 3) + 2] = irradiance[2] + daylight[2]
         }
         wall.setAttribute('color', new THREE.BufferAttribute(colors, 3))
         return wall
-    }, [fixtures, height, mode, phase, width])
+    }, [fixtures, height, mode, phase, skylights, wallRotationY, width, worldX, worldY, worldZ])
 
     useEffect(() => () => geometry.dispose(), [geometry])
 
@@ -1178,8 +1192,10 @@ function BakedIrradianceFloor({
     mode = 'room',
     fixtures = EMPTY_FIXTURES,
     occluders = EMPTY_FIXTURES,
+    skylights = EMPTY_FIXTURES,
 }) {
     const [width, depth] = size
+    const [worldX, worldY, worldZ] = position
     const geometry = useMemo(() => {
         const { positions, normals, uvs, colors, indices } = buildBakedFloorGrid({
             width,
@@ -1188,6 +1204,14 @@ function BakedIrradianceFloor({
             fixtures,
             occluders,
         })
+        for (let index = 0; skylights.length && index < positions.length; index += 3) {
+            const daylight = sampleMuseumSkylightIrradiance({
+                skylights, x: worldX + positions[index], y: worldY + positions[index + 1], z: worldZ + positions[index + 2],
+            })
+            colors[index] += daylight[0]
+            colors[index + 1] += daylight[1]
+            colors[index + 2] += daylight[2]
+        }
         const floor = new THREE.BufferGeometry()
         floor.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
         floor.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
@@ -1197,7 +1221,7 @@ function BakedIrradianceFloor({
         floor.computeBoundingBox()
         floor.computeBoundingSphere()
         return floor
-    }, [depth, fixtures, mode, occluders, width])
+    }, [depth, fixtures, mode, occluders, skylights, width, worldX, worldY, worldZ])
 
     useEffect(() => () => geometry.dispose(), [geometry])
 
@@ -2322,7 +2346,7 @@ function GalleryFrameShells({ paintings, materials, compact = false }) {
             // Keep the assembly physically coherent from the side. The former
             // 4.15 x 4.45 backing projected far beyond a 3.24 x 2.34 frame and
             // read as a second square slab behind every landscape photograph.
-            [shadow.current, [0.09, -0.09, -0.116], [0, 0, 0], [3.46, 2.44, 1]],
+            [shadow.current, [0.025, -0.025, -0.116], [0, 0, 0], [3.54, 2.64, 1]],
             [plaqueBacking.current, [0, MUSEUM_ARTWORK_SURFACES.plaqueY, MUSEUM_ARTWORK_SURFACES.plaqueBacking], [0, 0, 0], [1.72, 0.38, MUSEUM_ARTWORK_SURFACES.plaqueBackingDepth]],
             [backing.current, [0, -0.025, MUSEUM_ARTWORK_SURFACES.backing], [0, 0, 0], [3.42, 2.52, MUSEUM_ARTWORK_SURFACES.backingDepth]],
             [frame.current, [0, 0, 0], [0, 0, 0], [3.24, 2.34, 0.14]],
@@ -2362,8 +2386,9 @@ function GalleryFrameShells({ paintings, materials, compact = false }) {
                 <meshBasicMaterial
                     color="#120d09"
                     transparent
-                    opacity={0.24}
+                    opacity={0.42}
                     depthWrite={false}
+                    onBeforeCompile={applyMuseumFrameContactShadow}
                 />
             </instancedMesh>}
             {!compact && <instancedMesh ref={plaqueBacking} args={[undefined, undefined, count]}>
@@ -2899,7 +2924,7 @@ function CameraAwareRoomPaintings({ room, paintings = room.paintings, active, fo
     )
 }
 
-function RoomWallpaperSurfaces({ room, paintings = room.paintings, shellCenterX, shellDepth, ceilingY, materials, wallThickness, color = '#d8cab8' }) {
+function RoomWallpaperSurfaces({ room, paintings = room.paintings, shellCenterX, shellDepth, ceilingY, materials, wallThickness, skylights, color = '#d8cab8' }) {
     const outerRotationY = room.side < 0 ? Math.PI / 2 : -Math.PI / 2
     const roomPhase = useMemo(() => (
         [...room.id].reduce((total, character) => total + character.charCodeAt(0), 0) % 17
@@ -2913,6 +2938,7 @@ function RoomWallpaperSurfaces({ room, paintings = room.paintings, shellCenterX,
         <>
             <BakedWallpaperSurface
                 materials={materials}
+                skylights={skylights}
                 position={[
                     room.outerX - (room.side * ((wallThickness / 2) + WALL_SURFACE_GAP)),
                     ceilingY / 2,
@@ -2929,6 +2955,7 @@ function RoomWallpaperSurfaces({ room, paintings = room.paintings, shellCenterX,
             {[-1, 1].map(direction => (
                 <BakedWallpaperSurface
                     materials={materials}
+                    skylights={skylights}
                     key={direction}
                     position={[
                         shellCenterX,
@@ -3635,6 +3662,7 @@ function RoomFocalLandmark({ room, materials }) {
 
 function CategoryRoom({ room, active, gateRequested, detailed, materials, inspectionWidth, onGatePassabilityChange }) {
     const roomWidth = room.width
+    const skylights = useMemo(() => museumRoomSkylights(room), [room])
     const outerWallX = room.outerX
     const wallThickness = MUSEUM_DIMENSIONS.roomWallThickness
     const ceilingY = MUSEUM_DIMENSIONS.roomCeilingY
@@ -3797,6 +3825,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
                     color="#a18a73"
                     fixtures={roomFloorFixtures}
                     occluders={roomFloorOccluders}
+                    skylights={skylights}
                 />
             <mesh position={[shellCenterX, 0.012, room.centerZ]} scale={[Math.max(1, shellDepth - 0.48), 0.028, 2.5]} receiveShadow>
                 <primitive object={ARCHITECTURAL_ROUNDED_BOX} attach="geometry" />
@@ -3817,7 +3846,8 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
                 <PlasterMaterial materials={materials} color="#e9e2d8" textured={false} />
             </mesh>
             <MuseumRoomArchitecture room={room} shellCenterX={shellCenterX} shellDepth={shellDepth} ribXs={ribXs} />
-            <MuseumCofferedCeiling room={room} shellCenterX={shellCenterX} shellDepth={shellDepth} />
+            <MuseumCofferedCeiling room={room} />
+            <MuseumSkylights room={room} />
             <mesh position={[outerWallX, ceilingY / 2, room.centerZ]}>
                 <boxGeometry args={[wallThickness, ceilingY, roomWidth]} />
                 <PlasterMaterial materials={materials} color={ROOM_PAINT} />
@@ -3825,6 +3855,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
             <RoomWallpaperSurfaces
                 room={room}
                 paintings={presentationPaintings}
+                skylights={skylights}
                 shellCenterX={shellCenterX}
                 shellDepth={shellDepth}
                 ceilingY={ceilingY}
@@ -4766,7 +4797,13 @@ function PreviewCamera({ mode, roomIndex, layout }) {
     const { camera } = useThree()
     useEffect(() => {
         const room = layout.rooms[roomIndex] || layout.rooms[0]
-        if (mode === 'inspect' && room?.paintings.length) {
+        if (mode === 'skylight' && room) {
+            const skylight = museumRoomSkylights(room)[0]
+            if (skylight) {
+                camera.position.set(skylight.position[0] - room.side * 3.6, 2.1, room.centerZ - 1.4)
+                camera.lookAt(skylight.position[0], 4.6, skylight.position[2])
+            }
+        } else if (mode === 'inspect' && room?.paintings.length) {
             const painting = room.paintings[0]
             const [normalX = 0, , normalZ = 1] = painting.normal || []
             camera.position.set(
@@ -5103,6 +5140,9 @@ function DevelopmentPerformanceProbe() {
             0,
         )
         document.documentElement.dataset.museumPerf = JSON.stringify({
+            rendererFrame: gl.info.render.frame,
+            cameraPosition: state.camera.position.toArray(),
+            cameraQuaternion: state.camera.quaternion.toArray(),
             medianMs: Number(pick(0.5).toFixed(2)),
             p95Ms: Number(pick(0.95).toFixed(2)),
             p99Ms: Number(pick(0.99).toFixed(2)),
@@ -5434,7 +5474,7 @@ function RendererHealth({ input, onPause, onStatus }) {
     return null
 }
 
-const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, albumOpen, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
     const cinematicShadows = !touchMode && !isFirefoxBrowser()
     const inspectionWidth = useMemo(
@@ -5449,7 +5489,7 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
     return (
         <>
             <MuseumFrameDriver
-                continuous={controlsEnabled.locked || visualPreview || developmentTour || developmentJump || !sceneReady}
+                continuous={!albumOpen && (controlsEnabled.locked || visualPreview || developmentTour || developmentJump || !sceneReady)}
             />
             <color attach="background" args={[INK]} />
             <fog attach="fog" args={['#151310', 30, 120]} />
@@ -5494,7 +5534,7 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                 layout={layout}
                 activeRoomId={controlsEnabled.activeRoomId}
                 activeRoomIds={controlsEnabled.activeRoomIds}
-                enabled={sceneReady}
+                enabled={sceneReady && !albumOpen}
             />
             {developmentPerf && <DevelopmentPerformanceProbe />}
             {visualPreview && <PreviewCamera mode={previewMode} roomIndex={previewRoomIndex} layout={layout} />}
@@ -5509,7 +5549,7 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                 <>
                     <PlayerController
                         layout={layout}
-                        enabled={controlsEnabled.locked || (developmentJump && sceneReady)}
+                        enabled={!albumOpen && (controlsEnabled.locked || (developmentJump && sceneReady))}
                         passableRoomIds={passableRoomIds}
                         touchMode={touchMode}
                         touchInput={touchInput}
@@ -5541,7 +5581,6 @@ function CatalogStatus({ error, onRetry }) {
 }
 
 export default function ImmersiveGalleryDesktop() {
-    const navigate = useNavigate()
     const previewParams = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null
     const forceTouchPreview = previewParams?.get('museum-touch') === '1'
     const useDevelopmentFixture = import.meta.env.DEV && previewParams?.get('museum-fixture') === '1'
@@ -5551,6 +5590,8 @@ export default function ImmersiveGalleryDesktop() {
     const [error, setError] = useState('')
     const [loadVersion, setLoadVersion] = useState(0)
     const [locked, setLocked] = useState(false)
+    const [openGalleryAlbum, setOpenGalleryAlbum] = useState(null)
+    const albumOpenRef = useRef(false)
     const [activeRoomId, setActiveRoomId] = useState(null)
     const [activeRoomIds, setActiveRoomIds] = useState(null)
     const [focused, setFocused] = useState(null)
@@ -5586,7 +5627,10 @@ export default function ImmersiveGalleryDesktop() {
         setLocked(false)
         setFocused(null)
     }, [setFocused, setLocked])
-    const handleLock = useCallback(() => setLocked(true), [setLocked])
+    const handleLock = useCallback(() => {
+        if (albumOpenRef.current) pauseGallery()
+        else setLocked(true)
+    }, [pauseGallery, setLocked])
     const handleUnlock = useCallback(() => setLocked(false), [setLocked])
 
     useEffect(() => {
@@ -5666,7 +5710,7 @@ export default function ImmersiveGalleryDesktop() {
     const developmentTour = import.meta.env.DEV && previewParams?.get('museum-tour') === '1'
     const developmentJump = import.meta.env.DEV && previewParams?.get('museum-jump') === '1'
     const developmentPerf = import.meta.env.DEV && previewParams?.get('museum-perf') === '1'
-    const roomPreviewModes = useMemo(() => ['room', 'inspect', 'portal', 'end', 'join', 'plaques', 'arch', 'sign', 'plant'], [])
+    const roomPreviewModes = useMemo(() => ['skylight', 'room', 'inspect', 'portal', 'end', 'join', 'plaques', 'arch', 'sign', 'plant'], [])
     const visualPreview = import.meta.env.DEV && ['lobby', 'hall', 'entrance', 'reception', 'display', 'sculpture', ...roomPreviewModes].includes(previewMode)
     const initialActiveRoomIds = useMemo(
         () => initialMuseumRoomIds(
@@ -5688,9 +5732,18 @@ export default function ImmersiveGalleryDesktop() {
         ? layout.rooms[previewRoomIndex]?.id
         : activeRoomId
     const openAlbum = useCallback((album) => {
-        sessionStorage.setItem(RETURN_KEY, 'true')
-        navigate(`/album/${encodeURIComponent(album.albumId)}`, { state: { fromImmersiveGallery: true } })
-    }, [navigate])
+        if (!album?.albumId) return
+        albumOpenRef.current = true
+        pauseGallery()
+        setOpenGalleryAlbum(album)
+    }, [pauseGallery, setOpenGalleryAlbum])
+    const closeAlbum = useCallback(() => {
+        albumOpenRef.current = false
+        setOpenGalleryAlbum(null)
+        // Escape never reacquires pointer lock. The visitor can review the
+        // paused scene and resume with an explicit click on Continue exploring.
+        requestAnimationFrame(() => document.getElementById('museum-enter')?.focus({ preventScroll: true }))
+    }, [setOpenGalleryAlbum])
     const handleSceneReady = useCallback(() => setSceneReady(true), [setSceneReady])
     const updatePreference = useCallback((key, value) => {
         if (key === 'bobStrength') {
@@ -5720,7 +5773,7 @@ export default function ImmersiveGalleryDesktop() {
             const request = canvas.requestPointerLock()
             if (request && typeof request.then === 'function') {
                 request.then(() => {
-                    if (document.pointerLockElement === canvas) setLocked(true)
+                    if (document.pointerLockElement === canvas && !albumOpenRef.current) setLocked(true)
                     else pauseGallery()
                 }).catch(pauseGallery)
             }
@@ -5728,11 +5781,18 @@ export default function ImmersiveGalleryDesktop() {
             pauseGallery()
         }
     }, [pauseGallery, setLocked, touchMode])
+    const returnFromAlbum = useCallback(() => {
+        albumOpenRef.current = false
+        flushSync(() => setOpenGalleryAlbum(null))
+        // This button supplies the user gesture browsers require for pointer
+        // lock. If it is denied, beginWalkThrough leaves the normal pause UI.
+        beginWalkThrough()
+    }, [beginWalkThrough, setOpenGalleryAlbum])
     const controlsEnabled = useMemo(() => ({
-        locked,
+        locked: locked && !openGalleryAlbum,
         activeRoomId: renderedActiveRoomId,
         activeRoomIds: renderedActiveRoomIds,
-    }), [locked, renderedActiveRoomId, renderedActiveRoomIds])
+    }), [locked, openGalleryAlbum, renderedActiveRoomId, renderedActiveRoomIds])
     const motionSuppressed = reducedMotion && !motionOverride
     const canvasCamera = useMemo(() => ({
         fov: touchMode ? Math.max(68, preferences.fov) : preferences.fov,
@@ -5787,6 +5847,7 @@ export default function ImmersiveGalleryDesktop() {
                         layout={layout}
                         controlsEnabled={controlsEnabled}
                         sceneReady={sceneReady}
+                        albumOpen={Boolean(openGalleryAlbum)}
                         touchMode={touchMode}
                         touchInput={touchInput}
                         preferences={preferences}
@@ -5861,7 +5922,7 @@ export default function ImmersiveGalleryDesktop() {
             {sceneReady && touchMode && locked && !visualPreview && !developmentJump && (
                 <MuseumTouchControls input={touchInput} onPause={() => setLocked(false)} />
             )}
-            {sceneReady && !locked && !visualPreview && !developmentTour && !developmentJump && (
+            {sceneReady && !locked && !openGalleryAlbum && !visualPreview && !developmentTour && !developmentJump && (
                 <div className="museum-entry-panel">
                     <span className="museum-entry-number">The virtual archive</span>
                     <h1>{activeRoomId ? 'Gallery paused' : 'Enter the gallery'}</h1>
@@ -5902,6 +5963,10 @@ export default function ImmersiveGalleryDesktop() {
                         </div>
                     </details>
                 </div>
+            )}
+            {openGalleryAlbum && <MuseumAlbumOverlay album={openGalleryAlbum} onClose={closeAlbum} onReturn={returnFromAlbum} />}
+            {import.meta.env.DEV && visualPreview && sceneReady && (
+                <button className="museum-preview-album" type="button" onClick={() => openAlbum(layout.rooms[previewRoomIndex]?.albums[0])}>Preview album overlay</button>
             )}
         </div>
     )

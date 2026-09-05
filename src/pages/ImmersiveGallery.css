@@ -111,6 +111,17 @@
   inset: 0;
 }
 
+.museum-preview-album {
+  position: fixed;
+  z-index: 15;
+  right: 1rem;
+  bottom: 1rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid #bba687;
+  background: #171411;
+  color: #eee8dc;
+}
+
 .museum-renderer-recovery {
   position: fixed;
   z-index: 29;

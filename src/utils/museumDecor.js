@@ -47,9 +47,9 @@ export function museumGalleryDisplayParts(display) {
         const part = (dx, dy, dz, size, tone, properties = cloth, surface = 'ceramic') => {
             place([x + dx * Math.cos(angle) + dz * Math.sin(angle), y + dy, z - dx * Math.sin(angle) + dz * Math.cos(angle)], size, tone, surface, 'box', [0, angle, 0], { objectId, ...properties })
         }
-        part(0, 0.009, 0, [width, 0.018, depth], color, { ...cloth, detail: 'book-cover' })
-        part(0, height / 2, 0, [width - 0.036, height - 0.036, depth - 0.026], '#d8cab3', { ...paper, detail: 'book-paper' })
-        part(0, height - 0.009, 0, [width, 0.018, depth], color, { ...cloth, detail: 'book-cover' })
+        part(0, 0.009, 0, [width, 0.018, depth], color, { ...cloth, detail: 'book-cover', fineShade: 'underface' })
+        part(0, height / 2, 0, [width - 0.036, height - 0.036, depth - 0.026], '#d8cab3', { ...paper, detail: 'book-paper', shape: 'page-block', fineShade: 'paper-edge' })
+        part(0, height - 0.009, 0, [width, 0.018, depth], color, { ...cloth, detail: 'book-cover', fineShade: 'underface' })
         part(-width / 2 + 0.009, height / 2, 0, [0.018, height - 0.036, depth], color)
         // Thin page signatures and spine bands break up the solid blocks. They
         // stay below the upper cover, so the next book rests on a flat surface.
@@ -64,21 +64,30 @@ export function museumGalleryDisplayParts(display) {
     }
 
     if (display.kind === 'console') {
+        const supportShadow = (position, size, color, angle = 0, round = false) => {
+            place(position, [size[0], 1, size[1]], color, 'wood', round ? 'contact-circle' : 'contact-rectangle', [0, angle, 0], {
+                detail: 'display-contact', uvFrame: { origin: display.position, yaw },
+            })
+        }
         // Slim, chamfered walnut casework and a low shelf form a repeatable
         // gallery console without a cabinet-sized obstacle in the room.
-        place([0, 1.065, 0], [1.82, 0.10, 0.60], '#a18a72', 'wood', 'chamfer')
-        place([0, 0.265, 0], [1.58, 0.06, 0.47], '#b4967b', 'wood', 'chamfer')
+        place([0, 1.065, 0], [1.82, 0.10, 0.60], '#a18a72', 'wood', 'chamfer', [0, 0, 0], { fineShade: 'underface' })
+        place([0, 0.265, 0], [1.58, 0.06, 0.47], '#b4967b', 'wood', 'chamfer', [0, 0, 0], { fineShade: 'underface' })
         for (const x of [-0.76, 0.76]) {
             for (const z of [-0.20, 0.20]) {
-                place([x, 0.52, z], [0.075, 0.96, 0.075], '#b4967b', 'wood', 'chamfer')
+                place([x, 0.52, z], [0.075, 0.96, 0.075], '#b4967b', 'wood', 'chamfer', [0, 0, 0], { fineShade: 'joint' })
                 place([x, 0.045, z], [0.085, 0.09, 0.085], '#a48754', 'brass', 'chamfer')
             }
         }
         for (const z of [-0.24, 0.24]) {
-            place([0, 0.925, z], [1.52, 0.20, 0.05], '#a48970')
+            place([0, 0.925, z], [1.52, 0.20, 0.05], '#a48970', 'wood', 'box', [0, 0, 0], { fineShade: 'joint' })
             place([0, 1.028, z], [1.54, 0.012, 0.015], '#af9058', 'brass')
         }
         for (const x of [-0.37, 0.37]) place([x, 0.936, 0.276], [0.09, 0.015, 0.02], '#b59a65', 'brass', 'chamfer')
+        supportShadow([-0.47, 1.116, 0.015], [0.61, 0.46], '#a18a72', -0.065)
+        supportShadow([0.17, 0.296, 0], [0.655, 0.379], '#b4967b', 0.055)
+        supportShadow([0.51, 1.116, -0.035], [0.328, 0.328], '#a18a72', 0, true)
+        supportShadow([0.16, 1.116, 0.04], [0.19, 0.19], '#a18a72', 0, true)
         book(-0.47, 1.115, 0.015, '#39545a', 0.55, 0.09, 0.42, -0.065)
         book(-0.455, 1.205, 0.015, display.variant % 2 ? '#82554a' : '#9a8059', 0.49, 0.078, 0.36, 0.045)
         book(0.17, 0.295, 0, '#6a4446', 0.62, 0.095, 0.36, 0.055)
@@ -148,18 +157,18 @@ export function museumGalleryDisplayParts(display) {
 export function museumReadingProps(layout) {
     const parts = []
     let support
-    const place = (position, size, color, rotation = [0, 0, 0], shape = 'box') => {
-        parts.push({ position, size, color, rotation, shape, support })
+    const place = (position, size, color, rotation = [0, 0, 0], shape = 'box', properties = {}) => {
+        parts.push({ position, size, color, rotation, shape, support, ...properties })
     }
     const book = (x, y, z, width, depth, height, color, angle = 0) => {
         const rotate = (dx, dz) => [x + dx * Math.cos(angle) + dz * Math.sin(angle), z - dx * Math.sin(angle) + dz * Math.cos(angle)]
-        const part = (dx, dy, dz, size, tone) => {
+        const part = (dx, dy, dz, size, tone, properties = {}) => {
             const [px, pz] = rotate(dx, dz)
-            place([px, y + dy, pz], size, tone, [0, angle, 0])
+            place([px, y + dy, pz], size, tone, [0, angle, 0], 'box', properties)
         }
-        part(0, 0.009, 0, [width, 0.018, depth], color)
-        part(0, height / 2, 0, [width - 0.045, height - 0.036, depth - 0.035], '#d9cdb5')
-        part(0, height - 0.009, 0, [width, 0.018, depth], color)
+        part(0, 0.009, 0, [width, 0.018, depth], color, { fineShade: 'underface' })
+        part(0, height / 2, 0, [width - 0.045, height - 0.036, depth - 0.035], '#d9cdb5', { shape: 'page-block', fineShade: 'paper-edge', roughness: 0.9 })
+        part(0, height - 0.009, 0, [width, 0.018, depth], color, { fineShade: 'underface' })
         part(-width / 2 + 0.012, height / 2, 0, [0.024, height - 0.036, depth], color)
         part(0, height + 0.002, -depth * 0.12, [width * 0.52, 0.004, 0.022], '#b89b61')
         part(0, height + 0.002, depth * 0.24, [width * 0.26, 0.004, 0.013], '#b89b61')
@@ -183,14 +192,67 @@ export function museumReadingProps(layout) {
     place([deskX + 0.77, deskTop + 0.014, deskZ + 0.04], [0.025, 0.025, 0.36], '#3b3833', [0, -0.24, 0])
     place([deskX + 0.73, deskTop + 0.014, deskZ + 0.2], [0.025, 0.025, 0.047], '#b49b61', [0, -0.24, 0])
 
-    // A compact vintage camera faces arriving visitors; all three lens rings
-    // share the same merged geometry/material as the books and guestbook.
-    place([deskX + 1.42, deskTop + 0.15, deskZ - 0.01], [0.55, 0.30, 0.22], '#302f2b')
-    place([deskX + 1.42, deskTop + 0.315, deskZ - 0.01], [0.56, 0.03, 0.23], '#a29881')
-    place([deskX + 1.42, deskTop + 0.357, deskZ - 0.045], [0.17, 0.055, 0.11], '#464640')
-    place([deskX + 1.60, deskTop + 0.346, deskZ - 0.01], [0.055, 0.031, 0.055], '#baa883')
-    for (const [z, radius, depth, color] of [[0.15, 0.122, 0.15, '#524c3e'], [0.24, 0.111, 0.03, '#a69a7d'], [0.258, 0.092, 0.008, '#263e42']]) {
-        place([deskX + 1.42, deskTop + 0.15, deskZ + z], [radius, depth, radius], color, [Math.PI / 2, 0, 0], 'cylinder')
+    // A worn metal-and-leather camera, with its strap resting on the desk,
+    // makes reception feel inhabited. It still shares the reading-detail draw.
+    const metal = { roughness: 0.32, metalness: 0.78 }
+    const leather = { roughness: 0.84, metalness: 0, fineShade: 'underface' }
+    const camera = (position, size, color, shape = 'box', rotation = [0, 0, 0], properties = leather) => {
+        place([deskX + 1.42 + position[0], deskTop + position[1], deskZ + position[2]], size, color, rotation, shape, { detail: 'reception-camera', ...properties })
+    }
+    camera([0, 0.012, -0.01], [0.565, 0.024, 0.23], '#a99e89', 'chamfer', [0, 0, 0], metal)
+    camera([0, 0.16, -0.01], [0.55, 0.27, 0.22], '#38352f', 'chamfer')
+    camera([0, 0.305, -0.01], [0.565, 0.02, 0.23], '#c0b49c', 'chamfer', [0, 0, 0], metal)
+    for (const direction of [-1, 1]) {
+        camera([direction * 0.205, 0.16, 0.109], [0.108, 0.205, 0.018], '#272925', 'chamfer')
+        camera([direction * 0.26, 0.16, 0.12], [0.003, 0.19, 0.002], '#726956')
+        camera([direction * 0.29, 0.235, -0.042], [0.020, 0.020, 0.05], '#aba18b', 'lens-ring', [0, 0, 0], metal)
+    }
+    camera([-0.045, 0.34, -0.005], [0.17, 0.05, 0.14], '#9c9482', 'chamfer', [0, 0, 0], metal)
+    camera([-0.045, 0.341, 0.067], [0.097, 0.027, 0.006], '#253637', 'box', [0, 0, 0], { roughness: 0.15, metalness: 0 })
+    camera([0.18, 0.327, -0.025], [0.043, 0.023, 0.043], '#baae94', 'cylinder', [0, 0, 0], metal)
+    camera([0.18, 0.341, -0.025], [0.014, 0.007, 0.014], '#645e50', 'cylinder', [0, 0, 0], metal)
+    for (const x of [-0.076, -0.014]) camera([x, 0.368, -0.006], [0.011, 0.006, 0.075], '#c3b9a4', 'box', [0, 0, 0], metal)
+    for (const [z, radius, depth, color] of [
+        [0.145, 0.122, 0.11, '#57564c'], [0.205, 0.118, 0.04, '#282e2a'],
+        [0.195, 0.119, 0.006, '#9f9988'], [0.215, 0.119, 0.006, '#9f9988'],
+        [0.24, 0.115, 0.04, '#282d2a'],
+    ]) camera([0, 0.16, z], [radius, depth, radius], color, 'cylinder', [Math.PI / 2, 0, 0], metal)
+    camera([0, 0.16, 0.263], [0.096, 0.006, 0.096], '#253e40', 'cylinder', [Math.PI / 2, 0, 0], { roughness: 0.12, metalness: 0 })
+    camera([0, 0.16, 0.265], [0.105, 0.105, 0.1], '#b6ad96', 'lens-ring', [0, 0, 0], { ...metal, fineShade: 'lens' })
+    for (let index = -3; index <= 3; index += 1) {
+        const angle = index * 0.22
+        camera([Math.sin(angle) * 0.104, 0.16 + Math.cos(angle) * 0.104, 0.272], [0.003, index === 0 ? 0.008 : 0.005, 0.0015], '#eee2c8', 'box', [0, 0, -angle], { roughness: 0.75, metalness: 0 })
+    }
+    const strapPath = [
+        [-0.29, 0.235, -0.042], [-0.35, 0.035, -0.165], [-0.32, 0.006, -0.28],
+        [-0.12, 0.006, -0.395], [0.26, 0.006, -0.4], [0.41, 0.006, -0.285],
+        [0.36, 0.035, -0.16], [0.29, 0.235, -0.042],
+    ]
+    for (let index = 1; index < strapPath.length; index += 1) {
+        const a = strapPath[index - 1]
+        const b = strapPath[index]
+        const dx = b[0] - a[0]
+        const dy = b[1] - a[1]
+        const dz = b[2] - a[2]
+        camera(a.map((value, axis) => (value + b[axis]) / 2), [0.032, 0.006, Math.hypot(dx, dy, dz) + 0.005], '#684b37', 'box', [-Math.atan2(dy, Math.hypot(dx, dz)), Math.atan2(dx, dz), 0, 'YXZ'], { ...leather, detail: 'camera-strap' })
+    }
+    // A small contact sheet uses opaque printed blocks, so its nine studies
+    // need no photo requests, alpha layers or dedicated material.
+    const sheetAngle = -0.09
+    const sheet = (x, y, z, size, color) => {
+        place([deskX + 1.905 + x * Math.cos(sheetAngle) + z * Math.sin(sheetAngle), deskTop + y, deskZ + 0.245 - x * Math.sin(sheetAngle) + z * Math.cos(sheetAngle)], size, color, [0, sheetAngle, 0], 'box', { detail: 'contact-sheet', roughness: 0.93, metalness: 0, fineShade: 'underface' })
+    }
+    sheet(0, 0.002, 0, [0.39, 0.003, 0.51], '#d8cfba')
+    sheet(-0.063, 0.004, -0.222, [0.207, 0.001, 0.009], '#565d56')
+    sheet(0.112, 0.004, -0.222, [0.063, 0.001, 0.006], '#927754')
+    const printColors = ['#7f9290', '#869895', '#9c9987', '#898879', '#87929a', '#9b9486', '#75887f', '#8c9c9d', '#8c8980']
+    for (let row = 0; row < 3; row += 1) for (let column = 0; column < 3; column += 1) {
+        const x = (column - 1) * 0.111
+        const z = -0.134 + row * 0.124
+        sheet(x, 0.004, z, [0.101, 0.001, 0.111], '#343c38')
+        sheet(x, 0.005, z - 0.004, [0.092, 0.001, 0.095], printColors[row * 3 + column])
+        sheet(x, 0.006, z + 0.022, [0.092, 0.001, 0.043], row % 2 ? '#4f645d' : '#536462')
+        sheet(x - 0.013, 0.007, z + 0.034, [0.066, 0.001, 0.019], column % 2 ? '#7e7665' : '#657568')
     }
 
     for (const room of layout.rooms) {

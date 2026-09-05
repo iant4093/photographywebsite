@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { sharePage } from '../utils/share'
 
-export default function AlbumShareButton({ albumTitle, className = '' }) {
+export default function AlbumShareButton({ albumTitle, className = '', url }) {
     const [label, setLabel] = useState('Share Album')
     const resetRef = useRef(null)
 
@@ -13,6 +13,7 @@ export default function AlbumShareButton({ albumTitle, className = '' }) {
             const result = await sharePage({
                 title: albumTitle ? `${albumTitle} — Ian Truong Photography` : 'Ian Truong Photography',
                 text: albumTitle ? `View ${albumTitle} on Ian Truong Photography.` : '',
+                ...(url ? { url } : {}),
             })
             if (result === 'copied') {
                 setLabel('Link Copied')
