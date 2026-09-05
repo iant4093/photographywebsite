@@ -174,8 +174,8 @@ export function museumReadingProps(layout) {
         part(0, height + 0.002, depth * 0.24, [width * 0.26, 0.004, 0.013], '#b89b61')
     }
 
-    const [deskX, deskY, deskZ] = layout.desk.position
-    support = { id: 'reception', position: [deskX, deskY + 0.82, deskZ], rotationY: 0, size: [layout.desk.size[0] + 0.18, layout.desk.size[2] + 0.12] }
+    const [deskX, , deskZ] = layout.desk.position
+    support = { id: 'reception', position: [deskX, layout.desk.surfaceY, deskZ], rotationY: 0, size: [layout.desk.countertop.size[0], layout.desk.countertop.size[2]] }
     const deskTop = support.position[1]
     book(deskX - 1.36, deskTop, deskZ - 0.01, 0.62, 0.83, 0.095, '#32474e', -0.08)
     book(deskX - 1.34, deskTop + 0.099, deskZ, 0.57, 0.76, 0.09, '#75484a', 0.06)

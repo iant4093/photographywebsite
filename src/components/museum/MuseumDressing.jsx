@@ -6,6 +6,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { museumGalleryDisplayParts, museumGalleryDisplays, museumReadingProps } from '../../utils/museumDecor'
 import { createMuseumDisplayPartGeometry, createMuseumReadingPartGeometry } from '../../utils/museumDisplayGeometry'
+import { createMuseumReceptionFacadeGeometry } from '../../utils/museumReceptionDeskGeometry'
 import { applyMuseumDisplayResponse } from '../../utils/museumMaterialResponse'
 import { MUSEUM_MATERIAL_TILE_METERS } from '../../utils/museumMaterialAssets'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
@@ -501,69 +502,43 @@ function InstancedRoomBenches({ rooms, materials, castDynamicShadows = false }) 
 }
 
 function ReceptionDesk({ layout, materials, LabelPlane, WoodMaterial }) {
-    const [x, y, z] = layout.desk.position
-    const facadeGeometry = useMemo(() => {
-        // A bespoke tapered reception silhouette reads as joinery rather than
-        // a scaled primitive. The shallow bow and inset lower corners preserve
-        // the original collision footprint while opening negative space around
-        // the base and keeping the desk human-scaled from the spawn camera.
-        const shape = new THREE.Shape()
-        shape.moveTo(-1.72, -0.67)
-        shape.quadraticCurveTo(-1.86, -0.65, -1.9, -0.48)
-        shape.lineTo(-2.12, 0.47)
-        shape.quadraticCurveTo(-2.16, 0.66, -1.94, 0.69)
-        shape.lineTo(1.94, 0.69)
-        shape.quadraticCurveTo(2.16, 0.66, 2.12, 0.47)
-        shape.lineTo(1.9, -0.48)
-        shape.quadraticCurveTo(1.86, -0.65, 1.72, -0.67)
-        shape.closePath()
-        const geometry = new THREE.ExtrudeGeometry(shape, {
-            depth: 1.08,
-            bevelEnabled: true,
-            bevelSegments: 3,
-            bevelSize: 0.055,
-            bevelThickness: 0.055,
-            curveSegments: 16,
-        })
-        geometry.translate(0, 0, -0.54)
-        geometry.computeVertexNormals()
-        return geometry
-    }, [])
+    const desk = layout.desk
+    const facadeGeometry = useMemo(() => createMuseumReceptionFacadeGeometry(desk), [desk])
 
     useEffect(() => () => facadeGeometry.dispose(), [facadeGeometry])
 
     return (
-        <group position={[x, y, z]}>
-            <mesh castShadow receiveShadow position={[0, -0.61, -0.02]}>
-                <RoundedBoxShape size={[layout.desk.size[0] - 0.78, 0.18, layout.desk.size[2] - 0.38]} radius={0.055} segments={4} />
+        <group position={desk.position}>
+            <mesh castShadow receiveShadow position={desk.base.position}>
+                <RoundedBoxShape size={desk.base.size} radius={desk.base.radius} segments={4} />
                 <meshPhysicalMaterial color="#281a14" roughness={0.62} clearcoat={0.12} />
             </mesh>
             <mesh geometry={facadeGeometry} castShadow receiveShadow>
                 <WoodMaterial materials={materials} color="#bba18b" roughness={0.95} />
             </mesh>
-            <mesh position={[0, 0.76, 0]} castShadow receiveShadow>
-                <RoundedBoxShape size={[layout.desk.size[0] + 0.18, 0.12, layout.desk.size[2] + 0.12]} radius={0.06} segments={4} />
+            <mesh position={desk.countertop.position} castShadow receiveShadow>
+                <RoundedBoxShape size={desk.countertop.size} radius={desk.countertop.radius} segments={4} />
                 <meshPhysicalMaterial {...materials.ceramic} color="#d1c7b8" roughness={0.48} clearcoat={0.16} clearcoatRoughness={0.52} />
             </mesh>
-            <mesh position={[0, 0.04, 0.592]} castShadow>
-                <RoundedBoxShape size={[3.16, 0.82, 0.055]} radius={0.045} segments={4} />
+            <mesh position={desk.panel.position} castShadow>
+                <RoundedBoxShape size={desk.panel.size} radius={desk.panel.radius} segments={4} />
                 <meshPhysicalMaterial color="#201917" roughness={0.66} clearcoat={0.14} clearcoatRoughness={0.66} />
             </mesh>
-            <mesh position={[0, 0.04, 0.626]}>
-                <RoundedBoxShape size={[3.0, 0.69, 0.018]} radius={0.035} segments={3} />
+            <mesh position={desk.insert.position}>
+                <RoundedBoxShape size={desk.insert.size} radius={desk.insert.radius} segments={3} />
                 <meshStandardMaterial {...materials.joinery} normalScale={[0.2, 0.2]} color="#90725e" roughness={0.95} />
             </mesh>
-            {[-1.86, -1.56, -1.26, 1.26, 1.56, 1.86].map(fluteX => (
-                <mesh key={fluteX} position={[fluteX, -0.02, 0.565]} castShadow>
-                    <cylinderGeometry args={[0.028, 0.028, 1.14, 8]} />
+            {desk.flutes.xs.map(fluteX => (
+                <mesh key={fluteX} position={[fluteX, desk.flutes.y, desk.flutes.z]} castShadow>
+                    <cylinderGeometry args={[desk.flutes.radius, desk.flutes.radius, desk.flutes.height, 8]} />
                     <meshPhysicalMaterial color="#9a7441" metalness={0.68} roughness={0.3} clearcoat={0.2} />
                 </mesh>
             ))}
             <LabelPlane
                 title="Ian Truong Photography"
                 subtitle="Welcome · Explore every room"
-                position={[0, 0.08, 0.642]}
-                size={[2.76, 0.58]}
+                position={desk.label.position}
+                size={desk.label.size}
             />
         </group>
     )

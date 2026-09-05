@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildMuseumLayout, MUSEUM_DIMENSIONS, museumRoomRibXs } from './museumLayout'
+import { buildMuseumLayout, MUSEUM_DIMENSIONS, museumRoomRibXs, museumRoomShell } from './museumLayout'
 import {
     MUSEUM_SKYLIGHT,
     museumRoomCofferBays,
     museumRoomCofferPanels,
     museumRoomSkylights,
+    museumSkylightCeilingFixtureXs,
     sampleMuseumSkylightIrradiance,
 } from './museumSkylights'
 import { createMuseumSkylightGeometry } from './museumSkylightGeometry'
@@ -31,14 +32,19 @@ describe('gallery skylights', () => {
                 const skylights = museumRoomSkylights(room)
                 expect(skylights.length).toBeLessThanOrEqual(MUSEUM_SKYLIGHT.maximumPerRoom)
                 expect(new Set(skylights.map(skylight => skylight.cofferIndex)).size).toBe(skylights.length)
+                const shell = museumRoomShell(room)
                 for (const skylight of skylights) {
                     const halfX = skylight.size[0] / 2 + MUSEUM_SKYLIGHT.frameWidth
                     const halfZ = skylight.size[1] / 2 + MUSEUM_SKYLIGHT.frameWidth
                     expect(skylight.position[0] - halfX).toBeGreaterThan(room.bounds.minX + 0.4)
                     expect(skylight.position[0] + halfX).toBeLessThan(room.bounds.maxX - 0.4)
                     expect(Math.abs(skylight.position[2] - room.centerZ) + halfZ).toBeLessThan(room.width / 2 - 0.4)
-                    expect(Math.abs(skylight.position[2] - room.centerZ) - halfZ).toBeGreaterThan(0.7)
+                    expect(skylight.position[2]).toBe(room.centerZ)
+                    expect(skylights.some(other => Math.abs(other.position[0] + skylight.position[0] - shell.centerX * 2) < 0.00001)).toBe(true)
                     for (const x of museumRoomRibXs(room)) expect(Math.abs(x - skylight.position[0]) - halfX).toBeGreaterThan(0.18)
+                    for (const x of museumSkylightCeilingFixtureXs(room)) {
+                        expect(Math.abs(x - skylight.position[0]) - halfX).toBeGreaterThan(0.425)
+                    }
                 }
             }
         }

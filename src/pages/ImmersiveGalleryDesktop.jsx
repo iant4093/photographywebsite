@@ -60,7 +60,7 @@ import { MuseumRoomArchitecture, MuseumCofferedCeiling, MuseumAtmosphere } from 
 import MuseumChandeliers from '../components/museum/MuseumChandeliers'
 import MuseumAlbumOverlay from '../components/museum/MuseumAlbumOverlay'
 import MuseumSkylights from '../components/museum/MuseumSkylights'
-import { museumRoomSkylights, sampleMuseumSkylightIrradiance } from '../utils/museumSkylights'
+import { museumRoomSkylights, museumSkylightCeilingFixtureXs, sampleMuseumSkylightIrradiance } from '../utils/museumSkylights'
 import { applyMuseumFrameContactShadow } from '../utils/museumDisplayGeometry'
 import { createMuseumFrameDriver } from '../utils/museumFrameDriver'
 import { createMuseumArchBand } from '../utils/museumArchitecture'
@@ -3668,6 +3668,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
     const ceilingY = MUSEUM_DIMENSIONS.roomCeilingY
     const ceilingFixtureY = MUSEUM_DIMENSIONS.roomFixtureY
     const lightXs = useMemo(() => museumRoomCeilingFixtureXs(room, 4), [room])
+    const visibleLightXs = useMemo(() => museumSkylightCeilingFixtureXs(room, 4), [room])
     const endPlacardPose = useMemo(() => museumEndWallPlacardPose(room), [room])
     const { depth: shellDepth, centerX: shellCenterX } = museumRoomShell(room)
     const runnerMaps = useMemo(() => Object.fromEntries(
@@ -3935,7 +3936,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
                 readinessVersion={readinessVersion}
             />
             <InstancedCeilingFixtures
-                positions={lightXs.map(x => [x, room.centerZ])}
+                positions={visibleLightXs.map(x => [x, room.centerZ])}
                 ceilingY={ceilingFixtureY}
             />
             </group>
@@ -4504,7 +4505,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         if (returningFromAlbum) {
             camera.lookAt(restored.x, layout.spawn[1], restored.z - 1)
         } else {
-            camera.lookAt(layout.desk.position[0], 1.55, layout.desk.position[2])
+            camera.lookAt(layout.desk.position[0], layout.desk.surfaceY + 0.24, layout.desk.position[2])
         }
         // Publish the restored residency before controls are enabled. A return
         // from an album can place the camera deep inside a large room, where
@@ -4861,13 +4862,13 @@ function PreviewCamera({ mode, roomIndex, layout }) {
             camera.lookAt(0, 4.8, MUSEUM_DIMENSIONS.lobbyFrontZ)
         } else if (mode === 'reception') {
             camera.position.set(3.05, 2.5, 8.5)
-            camera.lookAt(0, 1.5, layout.desk.position[2])
+            camera.lookAt(0, layout.desk.surfaceY + 0.16, layout.desk.position[2])
         } else if (mode === 'hall') {
             camera.position.set(0, 1.95, 1.5)
             camera.lookAt(0, 2.3, MUSEUM_DIMENSIONS.firstBayZ - 14)
         } else {
             camera.position.set(...layout.spawn)
-            camera.lookAt(layout.desk.position[0], 1.55, layout.desk.position[2])
+            camera.lookAt(layout.desk.position[0], layout.desk.surfaceY + 0.24, layout.desk.position[2])
         }
         camera.updateProjectionMatrix()
     }, [camera, layout, mode, roomIndex])

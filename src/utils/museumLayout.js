@@ -1,6 +1,7 @@
 import { sortGalleryAlbums, sortGalleryCategories } from './galleryOrder'
 import { MUSEUM_PLANT_FORM, museumPlantFoliageRadius } from './museumPlants'
 import { museumGalleryDisplays } from './museumDecor'
+import { createMuseumReceptionDesk } from './museumReceptionDesk'
 
 export const MUSEUM_DIMENSIONS = Object.freeze({
     hallHalfWidth: 4.8,
@@ -339,11 +340,9 @@ export function buildMuseumLayout(categories = []) {
             }])
         })
     }).flat()
+    const desk = createMuseumReceptionDesk()
     const obstacles = [
-        {
-            position: [0, 0.69, 6.4],
-            size: [4.3, 1.38, 1.3],
-        },
+        desk,
         ...dressing.lobbyPlants,
         ...dressing.hallPlants,
         ...dressing.displays,
@@ -370,10 +369,7 @@ export function buildMuseumLayout(categories = []) {
         hallBackZ,
         hallLength: MUSEUM_DIMENSIONS.lobbyFrontZ - hallBackZ,
         spawn: [0, 1.7, 11.25],
-        desk: {
-            position: [0, 0.69, 6.4],
-            size: [4.3, 1.38, 1.3],
-        },
+        desk,
         dressing,
         obstacles,
     }

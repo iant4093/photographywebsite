@@ -1,4 +1,4 @@
-import { MUSEUM_DIMENSIONS, museumRoomRibXs, museumRoomShell } from './museumLayout'
+import { MUSEUM_DIMENSIONS, museumRoomCeilingFixtureXs, museumRoomRibXs, museumRoomShell } from './museumLayout'
 
 export const MUSEUM_SKYLIGHT = Object.freeze({
     paneY: 6.04,
@@ -27,27 +27,46 @@ export function museumRoomCofferBays(room) {
 export function museumRoomSkylights(room) {
     if ((room.bay + (room.side > 0 ? 1 : 0)) % 2 !== 0) return []
     const ribs = museumRoomRibXs(room)
-    const candidates = museumRoomCofferBays(room).filter(bay => (
+    const bays = museumRoomCofferBays(room)
+    const clear = bay => (
         ribs.every(x => Math.abs(x - bay.x) > MUSEUM_SKYLIGHT.openingWidth / 2 + 0.3)
-    ))
-    const count = Math.min(candidates.length, MUSEUM_SKYLIGHT.maximumPerRoom, Math.max(1, Math.ceil(room.depth / 48)))
-    const selected = Array.from({ length: count }, (_, index) => (
-        candidates[Math.min(candidates.length - 1, Math.floor((index + 0.5) * candidates.length / count))]
-    ))
-    return selected.map((bay, index) => {
-        const direction = (room.bay + index) % 2 === 0 ? 1 : -1
+    )
+    const shell = museumRoomShell(room)
+    const desiredCount = Math.min(MUSEUM_SKYLIGHT.maximumPerRoom, Math.max(1, Math.ceil(room.depth / 48)))
+    const center = bays.length % 2 === 1 ? bays[Math.floor(bays.length / 2)] : null
+    // Choose the center coffer or a mirrored pair. Filtering each side
+    // independently made long rooms look accidentally staggered.
+    const pairs = bays.slice(0, Math.floor(bays.length / 2))
+        .map(bay => [bay, bays[bays.length - 1 - bay.index]])
+        .filter(pair => pair.every(clear))
+    const targetOffset = desiredCount === 1 ? 0 : shell.depth * 0.25
+    pairs.sort((a, b) => Math.abs(Math.abs(a[0].x - shell.centerX) - targetOffset)
+        - Math.abs(Math.abs(b[0].x - shell.centerX) - targetOffset))
+    const selected = center && clear(center) && desiredCount === 1
+        ? [center]
+        : [...(pairs[0] || []), ...(center && clear(center) && (desiredCount === 3 || !pairs.length) ? [center] : [])]
+    return selected.sort((a, b) => a.x - b.x).map(bay => {
         return {
             id: `${room.id}-skylight-${bay.index}`,
             cofferIndex: bay.index,
-            position: [bay.x, MUSEUM_SKYLIGHT.paneY, room.centerZ + direction * room.width * 0.245],
+            position: [bay.x, MUSEUM_SKYLIGHT.paneY, room.centerZ],
             size: [MUSEUM_SKYLIGHT.openingWidth, MUSEUM_SKYLIGHT.openingDepth],
             // An evening ray travels diagonally toward the outer side of the
             // room. Projecting the actual opening gives one continuous pool
             // across the floor and any wall it meets, without free-floating
             // transparent quads passing through paintings or furniture.
-            slope: [room.side * 0.16, direction * 0.30],
+            slope: [room.side * 0.16, 0.68],
         }
     })
+}
+
+export function museumSkylightCeilingFixtureXs(room, requestedFixtures = 4) {
+    const skylights = museumRoomSkylights(room)
+    // A centered skylight replaces any small ceiling fitting beneath it.
+    // Keep its housing clear of the full cream surround, not only the glass.
+    return museumRoomCeilingFixtureXs(room, requestedFixtures).filter(x => skylights.every(skylight => (
+        Math.abs(x - skylight.position[0]) > skylight.size[0] / 2 + MUSEUM_SKYLIGHT.frameWidth + 0.425
+    )))
 }
 
 function splitPanel(panel, opening) {
