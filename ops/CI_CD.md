@@ -428,6 +428,36 @@ Keep automatic production deployment enabled only while all of these are true:
 
 ## Local parity
 
+### Release archive retention
+
+The `release-storage-cleanup` job runs after each successful production
+deployment, inside its existing concurrency lock with manual rollbacks. It uses a
+separate main-only OIDC role with permission to list and delete exact versions
+only in the release bucket's `releases/` prefix. It cannot read application data,
+decrypt secrets, upload artifacts, or change the application stack.
+
+`ops/ci/release_storage_cleanup.py` retains every artifact referenced by the live
+processed stack template, the current release SHA, and the five latest distinct
+successful production release SHAs. All other recognized backend release
+attempts remain for at least `ReleaseArtifactNoncurrentRetentionDays` (180 days
+by default). An attempt with any recent or unknown object is retained. Both
+current and noncurrent versions are considered, fixing indefinite accumulation
+under unique release paths. Unrecognized paths, website media, audit evidence,
+and the frontend serving bucket are outside this cleanup.
+
+Cleanup requires stable protected stacks, enabled bucket versioning, verified
+successful GitHub runs, and no pending application change set. It rechecks the
+stack before each deletion batch, deletes explicit version IDs, and stops on
+partial failures. Each run is limited to 1,000 versions and 5 GiB. Larger work
+is left for later releases. If deployments stop, storage stops growing and
+cleanup resumes on the next release. Keep releases and rollbacks inside the production lock;
+out-of-band manual stack deployments must not overlap cleanup.
+
+The bucket's old blanket noncurrent-version expiration is removed because it
+could delete a version still referenced by a retained release. Multipart-upload
+cleanup remains enabled. The Python command defaults to dry-run; the workflow
+supplies `--apply`. Its logs contain aggregate counts and bytes only.
+
 Run these before pushing to `main`:
 
 ```bash

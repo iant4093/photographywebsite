@@ -45,8 +45,9 @@ Parameters:
   ReleaseArtifactNoncurrentRetentionDays:
     Type: Number
     Default: 180
-    MinValue: 90
+    MinValue: 180
     MaxValue: 3650
+    Description: Minimum age for guarded cleanup of unprotected release attempts, including current versions.
   CentralAccessLogBucketName:
     Type: String
     Default: ''
@@ -149,11 +150,8 @@ Resources:
             Status: Enabled
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
-          - Id: RetireNoncurrentReleaseVersions
-            Status: Enabled
-            NoncurrentVersionExpiration:
-              NoncurrentDays: !Ref ReleaseArtifactNoncurrentRetentionDays
-            ExpiredObjectDeleteMarker: false
+          # Version expiration is owned by release_storage_cleanup.py, which
+          # preserves live template references and known-good rollback releases.
       LoggingConfiguration: !If
         - EnableCentralAccessLogging
         - DestinationBucketName: !Ref CentralAccessLogBucketName
@@ -206,6 +204,61 @@ Resources:
                 s3:x-amz-server-side-encryption-aws-kms-key-id: 'false'
               StringNotEquals:
                 s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt ReleaseArtifactKey.Arn
+
+  ReleaseStorageCleanupRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: ian-website-release-storage-cleanup
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateGitHubOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingGitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:iant4093/photographywebsite:ref:refs/heads/${DefaultBranch}'
+      Policies:
+        - PolicyName: RetireOnlyReleaseArtifactVersions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadExactReleaseStacks
+                Effect: Allow
+                Action: [cloudformation:DescribeStacks, cloudformation:GetTemplate, cloudformation:ListChangeSets]
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${ApplicationStackName}/*'
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:us-west-2:${AWS::AccountId}:stack/${AWS::StackName}/*'
+              - Sid: ReadReleaseVersioning
+                Effect: Allow
+                Action: s3:GetBucketVersioning
+                Resource: !GetAtt ReleaseArtifactBucket.Arn
+              - Sid: ListReleaseVersionsOnly
+                Effect: Allow
+                Action: s3:ListBucketVersions
+                Resource: !GetAtt ReleaseArtifactBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: releases/*
+              - Sid: DeleteExactReleaseVersionsOnly
+                Effect: Allow
+                Action: s3:DeleteObjectVersion
+                Resource: !Sub '${ReleaseArtifactBucket.Arn}/releases/*'
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: CiBoundary
+          Value: ReleaseStorageCleanup
+        - Key: RetentionDays
+          Value: !Sub '${ReleaseArtifactNoncurrentRetentionDays}'
 
   PlanRole:
     Type: AWS::IAM::Role
@@ -847,6 +900,18 @@ Resources:
             Resource:
               - !GetAtt ReleaseArtifactBucket.Arn
               - !Sub '${ReleaseArtifactBucket.Arn}/releases/*'
+          - Sid: ManageExactReleaseStorageLifecycle
+            Effect: Allow
+            Action:
+              - s3:GetBucketLogging
+              - s3:GetBucketOwnershipControls
+              - s3:GetBucketPublicAccessBlock
+              - s3:GetBucketTagging
+              - s3:GetBucketVersioning
+              - s3:GetEncryptionConfiguration
+              - s3:GetLifecycleConfiguration
+              - s3:PutLifecycleConfiguration
+            Resource: !GetAtt ReleaseArtifactBucket.Arn
           - Sid: DecryptReleasePackagesThroughS3
             Effect: Allow
             Action:

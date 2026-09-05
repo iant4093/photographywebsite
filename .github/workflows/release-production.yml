@@ -229,9 +229,39 @@ jobs:
           EXPECTED_RELEASE_SHA: ${{ github.sha }}
         run: ./ops/ci/public_smoke.sh
 
+  release-storage-cleanup:
+    name: Retire obsolete release storage
+    needs: frontend-deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Require trusted main controls
+        run: test "$GITHUB_REF" = refs/heads/main
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify cleanup safety contracts
+        run: python3 -m unittest ops.tests.test_release_storage_cleanup -q
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/ian-website-release-storage-cleanup
+          role-session-name: cleanup-${{ github.run_id }}
+          aws-region: us-west-2
+          mask-aws-account-id: true
+      - name: Remove only expired unprotected artifact versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: python3 ops/ci/release_storage_cleanup.py --expected-account-id "$EXPECTED_ACCOUNT_ID" --apply
+
   release-record:
     name: Publish sanitized release record
-    needs: [quality, attest, backend-plan, backend-deploy, backend-smoke, frontend-deploy]
+    needs: [quality, attest, backend-plan, backend-deploy, backend-smoke, frontend-deploy, release-storage-cleanup]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

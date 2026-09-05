@@ -502,7 +502,8 @@ fi
         for setting in ("BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"):
             self.assertIn(f"{setting}: true", bucket)
         self.assertIn("AbortIncompleteMultipartUpload", bucket)
-        self.assertIn("NoncurrentVersionExpiration", bucket)
+        self.assertNotIn("NoncurrentVersionExpiration", bucket)
+        self.assertIn("release_storage_cleanup.py", bucket)
         self.assertIn("aws:SecureTransport: 'false'", policy)
         self.assertIn("s3:x-amz-server-side-encryption", policy)
 
