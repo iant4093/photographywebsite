@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from test_support import claims, gateway_event, response_body
 
@@ -52,6 +52,39 @@ class SiteHealthTests(unittest.TestCase):
     def test_alarm_names_drop_stack_and_generated_suffixes(self):
         with patch.dict(get_site_health.os.environ, {"STACK_NAME": "ian-website-test"}):
             self.assertEqual(get_site_health._label_alarm("ian-website-test-PreviewQueueDepthAlarm-AbCd123456"), "Preview Queue Depth")
+
+
+    def test_alarm_inventory_includes_exact_edge_backup_names_and_paginates(self):
+        home, edge = Mock(), Mock()
+        def read(**args):
+            if 'AlarmNames' in args:
+                names = args['AlarmNames']
+                return {'MetricAlarms': [{'AlarmName': n, 'StateValue': 'OK'} for n in names]}
+            if args.get('NextToken'):
+                return {'MetricAlarms': [{'AlarmName': 'ian-website-test-QueueAlarm-AbCd123456', 'StateValue': 'OK'}]}
+            return {'MetricAlarms': [{'AlarmName': 'ian-website-test-ApiAlarm-AbCd123456', 'StateValue': 'OK'}, {'AlarmName': 'unrelated-account-alarm', 'StateValue': 'ALARM'}], 'NextToken': 'page-two'}
+        home.describe_alarms.side_effect = read
+        edge.describe_alarms.side_effect = read
+        with patch.object(get_site_health, 'cloudwatch', home), patch.object(get_site_health, 'edge_cloudwatch', edge), patch.dict(get_site_health.os.environ, {'STACK_NAME': 'ian-website-test', 'APPLICATION_STAGE': 'test'}):
+            alarms, error = get_site_health._alarms()
+        self.assertIsNone(error)
+        self.assertEqual(len(alarms), 7)
+        self.assertIn('Backup Freshness', {a['name'] for a in alarms})
+        self.assertIn('Website Edge Server Errors', {a['name'] for a in alarms})
+        self.assertNotIn('unrelated-account-alarm', str(alarms))
+        self.assertEqual(home.describe_alarms.call_count, 3)
+        self.assertEqual(edge.describe_alarms.call_args.kwargs['AlarmNames'], ['ian-photography-frontend-5xx-test', 'ian-photography-media-5xx-test', 'ian-photography-waf-blocked-test'])
+
+    def test_partial_failure_or_missing_expected_alarm_degrades_health(self):
+        home, edge = Mock(), Mock()
+        home.describe_alarms.return_value = {'MetricAlarms': []}
+        edge.describe_alarms.side_effect = PermissionError('private-provider-detail')
+        with patch.object(get_site_health, 'cloudwatch', home), patch.object(get_site_health, 'edge_cloudwatch', edge), patch.dict(get_site_health.os.environ, {'STACK_NAME': 'ian-website-test', 'APPLICATION_STAGE': 'test'}):
+            alarms, error = get_site_health._alarms()
+        self.assertEqual(len(alarms), 5)
+        self.assertTrue(all(a['state'] == 'INSUFFICIENT_DATA' for a in alarms))
+        self.assertEqual(get_site_health._overall([{'status': 'healthy'}], alarms, error), 'degraded')
+        self.assertNotIn('private-provider-detail', str((alarms, error)))
 
 
 class AuditLogTests(unittest.TestCase):

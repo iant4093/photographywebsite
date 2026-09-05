@@ -2,7 +2,7 @@
 """Read-only ownership preflight for paid CloudFront monitoring subscriptions.
 
 Create mode requires both distributions to have no monitoring subscription.
-Update mode requires both enabled subscriptions to be owned by the exact
+Update mode requires both existing subscriptions to be owned by the exact
 CloudFormation stack and logical resources in ``observability_template.yaml``.
 The helper calls only STS, CloudFront GET, and CloudFormation describe APIs.
 """
@@ -169,8 +169,8 @@ def validate_preflight(
                 ["RealtimeMetricsSubscriptionConfig"]
                 ["RealtimeMetricsSubscriptionStatus"]
             )
-            if status != "Enabled":
-                raise SystemExit("Refusing update: an owned paid monitoring subscription is disabled.")
+            if status not in {"Enabled", "Disabled"}:
+                raise SystemExit("Refusing update: unknown monitoring subscription status.")
             owned_id = _stack_owned_distribution(stack_name, logical_id, profile, region)
             if owned_id != distribution_ids[label]:
                 raise SystemExit(
@@ -184,7 +184,7 @@ def validate_preflight(
         "distributionCount": 2,
         "existingSubscriptionCount": len(existing),
         "monitoringSubscriptionOwnership": ownership,
-        "paidMetricsAcknowledgementRequired": True,
+        "paidMetricsAcknowledgementRequired": False,
         "region": region,
         "stackName": stack_name,
     }

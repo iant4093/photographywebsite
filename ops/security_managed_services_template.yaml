@@ -812,7 +812,6 @@ Resources:
           - AWS::CloudTrail::Trail
           - AWS::DynamoDB::Table
           - AWS::KMS::Key
-          - AWS::Lambda::Function
           - AWS::S3::Bucket
 
   ConfigDeliveryChannel:
@@ -838,7 +837,6 @@ Resources:
         - AWS::CloudTrail::Trail
         - AWS::DynamoDB::Table
         - AWS::KMS::Key
-        - AWS::Lambda::Function
         - AWS::S3::Bucket
       OwnershipParameterName: !Sub '/ian-photography/config-delivery/ian-photography-${Stage}/owner'
 
@@ -914,17 +912,194 @@ Resources:
         Owner: AWS
         SourceIdentifier: DYNAMODB_PITR_ENABLED
 
-  ConfigLambdaPublicAccessProhibited:
+  LambdaPermissionsAuditLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateConfig
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/ian-photography-lambda-permissions-${Stage}'
+      RetentionInDays: 30
+
+  LambdaPermissionsAuditRole:
+    Type: AWS::IAM::Role
+    Condition: CreateConfig
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadLiveLambdaPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:ListFunctions
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - lambda:GetPolicy
+                  - lambda:ListAliases
+                  - lambda:ListVersionsByFunction
+                Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*'
+              - Effect: Allow
+                Action: config:PutEvaluations
+                Resource: '*'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt LambdaPermissionsAuditLogGroup.Arn
+
+  LambdaPermissionsAuditFunction:
+    Type: AWS::Lambda::Function
+    Condition: CreateConfig
+    DependsOn: LambdaPermissionsAuditLogGroup
+    Properties:
+      FunctionName: !Sub 'ian-photography-lambda-permissions-${Stage}'
+      Description: Daily live permissions audit without Lambda configuration recording.
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt LambdaPermissionsAuditRole.Arn
+      Timeout: 300
+      MemorySize: 128
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ACCOUNT_ID: !Ref AWS::AccountId
+      Code:
+        ZipFile: |
+          import datetime as dt
+          import json
+          import os
+          import re
+
+          import boto3
+
+
+          def fixed(value):
+              return isinstance(value, str) and bool(value) and not any(c in value for c in ('*', '?', '${'))
+
+
+          def policy_safe(policy):
+              statements = policy.get('Statement')
+              if isinstance(statements, dict):
+                  statements = [statements]
+              if not isinstance(statements, list):
+                  return False
+              for statement in statements:
+                  if not isinstance(statement, dict) or statement.get('Effect') not in ('Allow', 'Deny'):
+                      return False
+                  if statement['Effect'] == 'Deny':
+                      continue
+                  principal = statement.get('Principal')
+                  if isinstance(principal, str):
+                      principal = {'AWS': principal}
+                  if not isinstance(principal, dict) or not principal or 'NotPrincipal' in statement:
+                      return False
+                  for kind, values in principal.items():
+                      if kind not in ('AWS', 'Service', 'Federated', 'CanonicalUser'):
+                          return False
+                      values = values if isinstance(values, list) else [values]
+                      if not values or not all(fixed(value) for value in values):
+                          return False
+                      if kind == 'Service' and 's3.amazonaws.com' in values:
+                          conditions = statement.get('Condition', {})
+                          bounded = False
+                          for operator in ('StringEquals', 'ArnEquals', 'ArnLike'):
+                              for key, value in conditions.get(operator, {}).items():
+                                  entries = value if isinstance(value, list) else [value]
+                                  if not entries:
+                                      continue
+                                  if key.lower() == 'aws:sourceaccount':
+                                      bounded |= operator == 'StringEquals' and all(isinstance(v, str) and re.fullmatch(r'[0-9]{12}', v) for v in entries)
+                                  if key.lower() == 'aws:sourcearn':
+                                      bounded |= all(fixed(v) and re.fullmatch(r'arn:[a-z0-9-]+:s3:::[a-z0-9.-]+', v) for v in entries)
+                          if not bounded:
+                              return False
+              return True
+
+
+          def inventory(client):
+              result = {'functions': 0, 'policies': 0, 'unsafe': 0, 'errors': 0}
+              try:
+                  for page in client.get_paginator('list_functions').paginate():
+                      for function in page['Functions']:
+                          result['functions'] += 1
+                          if result['functions'] > 500:
+                              raise RuntimeError('function inventory limit')
+                          name = function['FunctionName']
+                          qualifiers = {None}
+                          for operation, field, key in (
+                              ('list_versions_by_function', 'Versions', 'Version'),
+                              ('list_aliases', 'Aliases', 'Name'),
+                          ):
+                              for group in client.get_paginator(operation).paginate(FunctionName=name):
+                                  qualifiers.update(item[key] for item in group[field] if item[key] != '$LATEST')
+                                  if len(qualifiers) > 200:
+                                      raise RuntimeError('qualifier inventory limit')
+                          for qualifier in sorted(qualifiers, key=lambda value: value or ''):
+                              arguments = {'FunctionName': name}
+                              if qualifier:
+                                  arguments['Qualifier'] = qualifier
+                              try:
+                                  response = client.get_policy(**arguments)
+                              except client.exceptions.ResourceNotFoundException:
+                                  # No resource policy grants no public access. Enumeration
+                                  # runs afresh daily, so deleted functions are not retained.
+                                  continue
+                              result['policies'] += 1
+                              if not policy_safe(json.loads(response['Policy'])):
+                                  result['unsafe'] += 1
+              except Exception:
+                  # Incomplete inventory must never produce a compliant result. Do not log
+                  # provider responses, function environments, policy bodies, or names.
+                  result['errors'] += 1
+              return result
+
+
+          def handler(event, context):
+              result = inventory(boto3.client('lambda'))
+              result['compliance'] = 'NON_COMPLIANT' if result['unsafe'] or result['errors'] else 'COMPLIANT'
+              if not event.get('dryRun', False):
+                  response = boto3.client('config').put_evaluations(
+                      ResultToken=event['resultToken'],
+                      Evaluations=[{
+                          'ComplianceResourceType': 'AWS::::Account',
+                          'ComplianceResourceId': os.environ['ACCOUNT_ID'],
+                          'ComplianceType': result['compliance'],
+                          'OrderingTimestamp': dt.datetime.now(dt.timezone.utc),
+                          'Annotation': 'Daily live Lambda policy audit: functions={functions}, policies={policies}, unsafe={unsafe}, inventory_errors={errors}.'.format(**result),
+                      }],
+                  )
+                  if response.get('FailedEvaluations'):
+                      raise RuntimeError('Config rejected the evaluation')
+              print(json.dumps(result, sort_keys=True))
+              return result
+
+  LambdaPermissionsAuditPermission:
+    Type: AWS::Lambda::Permission
+    Condition: CreateConfig
+    Properties:
+      FunctionName: !Ref LambdaPermissionsAuditFunction
+      Action: lambda:InvokeFunction
+      Principal: config.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  ConfigLambdaPermissionsDaily:
     Type: AWS::Config::ConfigRule
     Condition: CreateConfig
-    DependsOn:
-      - ConfigRecorder
-      - ConfigDeliveryChannel
+    DependsOn: LambdaPermissionsAuditPermission
     Properties:
-      ConfigRuleName: !Sub 'ian-photography-lambda-public-access-prohibited-${Stage}'
+      ConfigRuleName: !Sub 'ian-photography-lambda-permissions-daily-${Stage}'
+      Description: Daily live function, alias, and version policy audit; one account-level compliance result.
       Source:
-        Owner: AWS
-        SourceIdentifier: LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED
+        Owner: CUSTOM_LAMBDA
+        SourceIdentifier: !GetAtt LambdaPermissionsAuditFunction.Arn
+        SourceDetails:
+          - EventSource: aws.config
+            MessageType: ScheduledNotification
+            MaximumExecutionFrequency: TwentyFour_Hours
 
   ConfigCmkBackingKeyRotationEnabled:
     Type: AWS::Config::ConfigRule

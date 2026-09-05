@@ -99,6 +99,7 @@ Resources:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-edge-alarm-${Stage}'
 
   SecurityEventDlq:
     Type: AWS::SQS::Queue
@@ -133,6 +134,7 @@ Resources:
                 aws:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-backup-job-failed-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-waf-alarm-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/ian-photography-edge-alarm-${Stage}'
 
   SecuritySignalProcessorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -222,6 +224,7 @@ Resources:
           CONTRACTS = {
               "backup.job.failed": ("high", "backup-job-failure"),
               "waf.alarm": ("high", "waf-observation"),
+              "edge.alarm": ("high", "edge-health"),
           }
           KEYS = {"schemaVersion", "eventName", "severity", "stage", "runbook"}
 
@@ -298,6 +301,37 @@ Resources:
           Arn: !GetAtt SecuritySignalQueue.Arn
           Input: !Sub >-
             {"schemaVersion":1,"eventName":"waf.alarm","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#waf-observation"}
+          DeadLetterConfig:
+            Arn: !GetAtt SecurityEventDlq.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  EdgeAlarmForwardRule:
+    Type: AWS::Events::Rule
+    DependsOn:
+      - SecuritySignalQueuePolicy
+      - SecurityEventDlqPolicy
+    Properties:
+      Name: !Sub 'ian-photography-edge-alarm-${Stage}'
+      Description: Converts exact us-east-1 CloudFront alarm transitions into one privacy-safe security signal.
+      EventPattern:
+        source: [aws.cloudwatch]
+        detail-type: [CloudWatch Alarm State Change]
+        account: [!Ref AWS::AccountId]
+        region: [us-east-1]
+        detail:
+          alarmName:
+            - !Sub 'ian-photography-frontend-5xx-${Stage}'
+            - !Sub 'ian-photography-media-5xx-${Stage}'
+          state:
+            value: [ALARM]
+      State: ENABLED
+      Targets:
+        - Id: SecuritySignalQueue
+          Arn: !GetAtt SecuritySignalQueue.Arn
+          Input: !Sub >-
+            {"schemaVersion":1,"eventName":"edge.alarm","severity":"high","stage":"${Stage}","runbook":"ops/ALARM_REGISTRY.md#edge-health"}
           DeadLetterConfig:
             Arn: !GetAtt SecurityEventDlq.Arn
           RetryPolicy:

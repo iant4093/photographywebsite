@@ -181,10 +181,11 @@ generic provider's `kms:Decrypt` is still denied. The backup freshness
 these exceptions to the exact source properties and continue to forbid direct
 Lambda invocation, queue message reads, and KMS decryption.
 
-The observability stack contains only CloudFront monitoring subscriptions,
-CloudWatch alarms, and a dashboard, so the scheduled audit can use ordinary
-whole-stack drift detection without a service-specific exclusion or posture
-bypass. Browser telemetry and synthetic probes are not part of the release.
+The observability stack contains only disabled CloudFront subscriptions and a
+free-metric dashboard, so the scheduled audit can use ordinary whole-stack drift
+detection without a service-specific exclusion or posture
+bypass. The edge alarms belong to the us-east-1 WAF stack. Browser telemetry and
+synthetic probes are not part of the release.
 
 The GuardDuty CloudFormation provider reports the six service-managed detector
 features as additions even though CloudFormation can configure only the other

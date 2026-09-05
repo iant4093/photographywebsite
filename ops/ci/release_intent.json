@@ -1,7 +1,8 @@
 {
   "version": 1,
   "rules": [
-    {"logicalId": "ApiServerErrorAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
+    {"logicalId": "ApiStage", "resourceType": "AWS::ApiGatewayV2::Stage", "action": "Modify", "propertyPaths": ["DefaultRouteSettings"], "allowNoDetails": false},
+    {"logicalId": "ApiServerErrorAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions", "MetricName"], "allowNoDetails": false},
     {"logicalId": "ApiLatencyAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
     {"logicalId": "FrontDoorDeniedAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions", "AlarmDescription", "Threshold"], "allowNoDetails": false},
     {"logicalId": "AsyncFailureQueueAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},

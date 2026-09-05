@@ -137,8 +137,10 @@ completed recovery point inside the approved age window in the source vault.
 
 ## Edge health
 
-Compare frontend and media 5xx rates, request volume, origin latency, and cache
-behavior by release. The observability stack intentionally collects no browser
+Compare frontend and media 5xx rates and request volume by release. Both alarms
+are owned by the us-east-1 WAF stack and forwarded through the exact edge event
+rule to the existing home-region notification pipeline. Paid origin-latency and
+cache-hit metrics are disabled. The observability stack intentionally collects no browser
 telemetry and runs no synthetic browser probe; use the credential-free public
 posture smoke test for release verification.
 

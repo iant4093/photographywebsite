@@ -22,6 +22,7 @@ logger = logging.getLogger("photography_api.site_health")
 logger.setLevel(logging.INFO)
 cloudformation = boto3.client("cloudformation")
 cloudwatch = boto3.client("cloudwatch")
+edge_cloudwatch = boto3.client("cloudwatch", region_name="us-east-1")
 
 _HEALTHY_STACK_STATUSES = {"CREATE_COMPLETE", "UPDATE_COMPLETE", "UPDATE_ROLLBACK_COMPLETE"}
 _ALARM_SUFFIX = re.compile(r"-[A-Za-z0-9]{8,}$")
@@ -82,21 +83,64 @@ def _stack_check():
 
 
 def _alarms():
-    try:
-        response = cloudwatch.describe_alarms(AlarmNamePrefix=f"{os.environ['STACK_NAME']}-", MaxRecords=100)
-        alarms = []
-        for alarm in response.get("MetricAlarms", []):
+    stage = os.environ["APPLICATION_STAGE"]
+    home_names = {
+        f"ian-photography-backup-freshness-{stage}": "Backup Freshness",
+        f"ian-photography-security-events-dlq-{stage}": "Alert Delivery Failures",
+    }
+    edge_names = {
+        f"ian-photography-frontend-5xx-{stage}": "Website Edge Server Errors",
+        f"ian-photography-media-5xx-{stage}": "Media Edge Server Errors",
+        f"ian-photography-waf-blocked-{stage}": "Firewall Blocked Requests",
+    }
+    groups = (
+        (cloudwatch, {"AlarmNamePrefix": f"{os.environ['STACK_NAME']}-"}, {}),
+        (cloudwatch, {"AlarmNames": list(home_names)}, home_names),
+        (edge_cloudwatch, {"AlarmNames": list(edge_names)}, edge_names),
+    )
+    alarms = []
+    unavailable = False
+    for client, query, labels in groups:
+        found = set()
+        try:
+            response = {}
+            for _ in range(5):
+                arguments = {**query, "MaxRecords": 100}
+                if response.get("NextToken"):
+                    arguments["NextToken"] = response["NextToken"]
+                response = client.describe_alarms(**arguments)
+                for alarm in response.get("MetricAlarms", []):
+                    name = alarm.get("AlarmName", "")
+                    if labels and name not in labels:
+                        continue
+                    if not labels and not name.startswith(query["AlarmNamePrefix"]):
+                        continue
+                    found.add(name)
+                    alarms.append({
+                        "name": labels.get(name) or _label_alarm(name),
+                        "description": str(alarm.get("AlarmDescription") or "Website operational alarm"),
+                        "state": str(alarm.get("StateValue") or "INSUFFICIENT_DATA"),
+                        "updatedAt": alarm.get("StateUpdatedTimestamp").isoformat().replace("+00:00", "Z") if alarm.get("StateUpdatedTimestamp") else None,
+                    })
+                if not response.get("NextToken"):
+                    break
+            else:
+                raise RuntimeError("alarm pagination limit exceeded")
+            if not found:
+                unavailable = True
+        except Exception as error:
+            logger.warning("site_health_alarms_failed error_type=%s", type(error).__name__)
+            unavailable = True
+        for name in labels.keys() - found:
+            unavailable = True
             alarms.append({
-                "name": _label_alarm(alarm.get("AlarmName", "")),
-                "description": str(alarm.get("AlarmDescription") or "Website operational alarm"),
-                "state": str(alarm.get("StateValue") or "INSUFFICIENT_DATA"),
-                "updatedAt": alarm.get("StateUpdatedTimestamp").isoformat().replace("+00:00", "Z") if alarm.get("StateUpdatedTimestamp") else None,
+                "name": labels[name],
+                "description": "Expected website alarm is unavailable",
+                "state": "INSUFFICIENT_DATA",
+                "updatedAt": None,
             })
-        alarms.sort(key=lambda item: ({"ALARM": 0, "INSUFFICIENT_DATA": 1, "OK": 2}.get(item["state"], 1), item["name"]))
-        return alarms, None
-    except Exception as error:
-        logger.warning("site_health_alarms_failed error_type=%s", type(error).__name__)
-        return [], "Alarm status unavailable"
+    alarms.sort(key=lambda item: ({"ALARM": 0, "INSUFFICIENT_DATA": 1, "OK": 2}.get(item["state"], 1), item["name"]))
+    return alarms, "Some alarm statuses are unavailable" if unavailable else None
 
 
 def _overall(checks, alarms, alarm_error):

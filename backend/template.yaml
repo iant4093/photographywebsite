@@ -1652,7 +1652,7 @@ Resources:
         Format: >-
           {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}
       DefaultRouteSettings:
-        DetailedMetricsEnabled: true
+        DetailedMetricsEnabled: false
         ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
         ThrottlingRateLimit: !Ref ApiThrottleRateLimit
       Tags:
@@ -3780,8 +3780,8 @@ Resources:
               Action: cloudformation:DescribeStacks
               Resource: !Ref AWS::StackId
             # DescribeAlarms does not support resource-level IAM permissions.
-            # The handler uses the exact stack-name prefix and returns only this
-            # website's alarm states and descriptions.
+            # The handler uses the exact stack-name prefix plus fixed website
+            # edge, backup, and alert-delivery names in the home/edge Regions.
             - Effect: Allow
               Action: cloudwatch:DescribeAlarms
               Resource: '*'
@@ -4042,7 +4042,7 @@ Resources:
     Properties:
       AlarmDescription: API Gateway has at least five server errors in five minutes.
       Namespace: AWS/ApiGateway
-      MetricName: 5XXError
+      MetricName: 5xx
       Dimensions:
         - Name: ApiId
           Value: !Ref Api

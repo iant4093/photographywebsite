@@ -1,8 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Retained CloudFront edge observability for Ian Truong Photography. The stack
-  owns only each distribution's paid real-time metrics subscription, two 5xx
-  alarms, and a dashboard; it does not collect browser telemetry or run
+  keeps additional metrics disabled and owns a dashboard of free metrics; it does not collect browser telemetry or run
   synthetic browser probes.
 
 Parameters:
@@ -21,11 +20,6 @@ Parameters:
   MediaDistributionId:
     Type: String
     AllowedPattern: '^[A-Z0-9]{12,20}$'
-  AlarmTopicArn:
-    Type: String
-    Default: ''
-    AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256})$'
-    Description: Optional exact, pre-existing SNS topic ARN for alarm and OK actions.
 
 Rules:
   MustDeployInApplicationRegion:
@@ -37,9 +31,6 @@ Rules:
       - Assert: !Not [!Equals [!Ref FrontendDistributionId, !Ref MediaDistributionId]]
         AssertDescription: Frontend and media distributions must have distinct IDs.
 
-Conditions:
-  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
-
 Resources:
   FrontendMonitoringSubscription:
     Type: AWS::CloudFront::MonitoringSubscription
@@ -49,7 +40,7 @@ Resources:
       DistributionId: !Ref FrontendDistributionId
       MonitoringSubscription:
         RealtimeMetricsSubscriptionConfig:
-          RealtimeMetricsSubscriptionStatus: Enabled
+          RealtimeMetricsSubscriptionStatus: Disabled
 
   MediaMonitoringSubscription:
     Type: AWS::CloudFront::MonitoringSubscription
@@ -59,63 +50,7 @@ Resources:
       DistributionId: !Ref MediaDistributionId
       MonitoringSubscription:
         RealtimeMetricsSubscriptionConfig:
-          RealtimeMetricsSubscriptionStatus: Enabled
-
-  FrontendFiveXxAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-frontend-5xx-${Stage}'
-      AlarmDescription: Frontend CloudFront five-percent server error threshold breached.
-      Namespace: AWS/CloudFront
-      MetricName: 5xxErrorRate
-      Dimensions:
-        - Name: DistributionId
-          Value: !Ref FrontendDistributionId
-        - Name: Region
-          Value: Global
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      DatapointsToAlarm: 2
-      Threshold: 5
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-      OKActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-
-  MediaFiveXxAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-media-5xx-${Stage}'
-      AlarmDescription: Media CloudFront five-percent server error threshold breached.
-      Namespace: AWS/CloudFront
-      MetricName: 5xxErrorRate
-      Dimensions:
-        - Name: DistributionId
-          Value: !Ref MediaDistributionId
-        - Name: Region
-          Value: Global
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      DatapointsToAlarm: 2
-      Threshold: 5
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
-      OKActions: !If
-        - HasAlarmTopic
-        - [!Ref AlarmTopicArn]
-        - !Ref AWS::NoValue
+          RealtimeMetricsSubscriptionStatus: Disabled
 
   ObservabilityDashboard:
     Type: AWS::CloudWatch::Dashboard
@@ -148,11 +83,11 @@ Resources:
                 "stat": "Average",
                 "metrics": [
                   ["AWS/CloudFront", "5xxErrorRate", "DistributionId", "${FrontendDistributionId}", "Region", "Global", {"label": "Frontend 5xx"}],
-                  [".", "CacheHitRate", ".", ".", ".", ".", {"label": "Frontend cache hit"}],
-                  [".", "OriginLatency", ".", ".", ".", ".", {"label": "Frontend origin latency"}],
+                  [".", "Requests", ".", ".", ".", ".", {"label": "Frontend requests"}],
+                  [".", "4xxErrorRate", ".", ".", ".", ".", {"label": "Frontend 4xx"}],
                   ["AWS/CloudFront", "5xxErrorRate", "DistributionId", "${MediaDistributionId}", "Region", "Global", {"label": "Media 5xx"}],
-                  [".", "CacheHitRate", ".", ".", ".", ".", {"label": "Media cache hit"}],
-                  [".", "OriginLatency", ".", ".", ".", ".", {"label": "Media origin latency"}]
+                  [".", "Requests", ".", ".", ".", ".", {"label": "Media requests"}],
+                  [".", "4xxErrorRate", ".", ".", ".", ".", {"label": "Media 4xx"}]
                 ]
               }
             }

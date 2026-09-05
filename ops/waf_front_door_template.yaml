@@ -9,6 +9,14 @@ Parameters:
     Type: String
     Default: prod
     AllowedPattern: '^[a-z0-9-]+$'
+  FrontendDistributionId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Z0-9]{12,20}$'
+  MediaDistributionId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[A-Z0-9]{12,20}$'
   WafLogRetentionDays:
     Type: Number
     Default: 30
@@ -52,7 +60,14 @@ Parameters:
       Distributed cost-protection circuit breaker for the scan-backed Explore API during
       each five-minute window.
 
+Rules:
+  MustDeployInEdgeRegion:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, us-east-1]
+        AssertDescription: CloudFront and WAF metrics exist in us-east-1.
 Conditions:
+  HasFrontendDistribution: !Not [!Equals [!Ref FrontendDistributionId, '']]
+  HasMediaDistribution: !Not [!Equals [!Ref MediaDistributionId, '']]
   HasSecurityEventBus: !Not [!Equals [!Ref SecurityEventBusArn, '']]
   HasLogsKmsKey: !Not [!Equals [!Ref LogsKmsKeyArn, '']]
 
@@ -253,6 +268,48 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
+  FrontendFiveXxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasFrontendDistribution
+    Properties:
+      AlarmName: !Sub 'ian-photography-frontend-5xx-${Stage}'
+      AlarmDescription: Frontend CloudFront five-percent server error threshold breached.
+      Namespace: AWS/CloudFront
+      MetricName: 5xxErrorRate
+      Dimensions:
+        - Name: DistributionId
+          Value: !Ref FrontendDistributionId
+        - Name: Region
+          Value: Global
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  MediaFiveXxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasMediaDistribution
+    Properties:
+      AlarmName: !Sub 'ian-photography-media-5xx-${Stage}'
+      AlarmDescription: Media CloudFront five-percent server error threshold breached.
+      Namespace: AWS/CloudFront
+      MetricName: 5xxErrorRate
+      Dimensions:
+        - Name: DistributionId
+          Value: !Ref MediaDistributionId
+        - Name: Region
+          Value: Global
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
   WafAlarmForwardRole:
     Type: AWS::IAM::Role
     Condition: HasSecurityEventBus
@@ -278,15 +335,19 @@ Resources:
     Condition: HasSecurityEventBus
     Properties:
       Name: !Sub 'ian-photography-waf-cross-region-${Stage}'
-      Description: Forwards exact WAF alarm state changes to the home-region security event bus.
+      Description: Forwards exact website edge and WAF alarm states to the home-region security event bus.
       EventPattern:
         source: [aws.cloudwatch]
         detail-type: [CloudWatch Alarm State Change]
         resources:
-          - prefix: !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-waf-'
+          - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-waf-blocked-${Stage}'
+          - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-frontend-5xx-${Stage}'
+          - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-media-5xx-${Stage}'
         detail:
           alarmName:
             - !Sub 'ian-photography-waf-blocked-${Stage}'
+            - !Sub 'ian-photography-frontend-5xx-${Stage}'
+            - !Sub 'ian-photography-media-5xx-${Stage}'
       State: ENABLED
       Targets:
         - Id: HomeRegionSecurityBus

@@ -287,10 +287,14 @@ role on ordinary stack deletion, matching the rest of the account-security
 retention posture.
 
 The recorder is deliberately scoped to CloudTrail trails, DynamoDB tables,
-customer-managed KMS keys, Lambda functions, and S3 buckets. It does not record
-every supported AWS resource or global IAM inventory. The periodic root-MFA and
-password-policy rules continue to evaluate without broad configuration-item
-recording.
+KMS keys and S3 buckets. Lambda deployments are excluded from recording. The
+periodic root-access-key and key-rotation rules continue to evaluate without
+broad configuration-item recording. `ConfigLambdaPermissionsDaily` invokes a
+restricted Lambda once every 24 hours to read live function, alias, and version
+policies. It reports one account-level compliance result containing counts only;
+public grants or incomplete inventory are NON_COMPLIANT. No function environment,
+policy body, or identifier is logged. Detection can take up to a day. Deploy and
+verify the daily rule before retiring the change-triggered Lambda rule.
 
 Before an enabled deployment, inventory must show no recorder and no delivery
 channel. Also require the fixed SSM ownership parameter to be absent; check its
@@ -384,7 +388,8 @@ separately reviewed cost and control-coverage decision that updates this
 contract and its tests.
 The Config layer also checks public S3 writes, default S3 encryption, public
 Lambda function access, and customer-managed KMS key rotation. These rules use
-only resource types already recorded by the exact home-region recorder. The
+the scoped recorder, except the daily Lambda policy audit, which reads current
+Lambda APIs directly and does not require Lambda configuration items. The
 rollout deliberately omits the us-east-1-only CloudFront HTTPS managed rule and
 noisy blanket versioning/deletion-protection rules that would flag intentional
 ephemeral or log resources.

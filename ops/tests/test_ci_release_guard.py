@@ -291,6 +291,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 if rule["logicalId"] == "FrontDoorDeniedAlarm"
                 else ["AlarmActions"]
             )
+            if rule["logicalId"] == "ApiServerErrorAlarm":
+                expected_paths.append("MetricName")
             self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertFalse(rule["allowNoDetails"])
 

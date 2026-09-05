@@ -1,107 +1,53 @@
-# CloudFront edge observability operations
+# Website monitoring and cost controls
 
-`ops/observability_template.yaml` is the separately deployed, retained source
-of truth for edge monitoring. It does not own either CloudFront distribution.
-It owns only each distribution's real-time metrics subscription, a 5xx alarm
-for each distribution, and one CloudWatch dashboard.
+The home-region `ian-photography-observability` stack retains ownership of both
+CloudFront monitoring subscriptions with `RealtimeMetricsSubscriptionStatus:
+Disabled`. Its dashboard contains only free request/error metrics. Keeping the
+subscriptions explicitly disabled prevents a later deployment from re-enabling
+paid metrics or leaving unmanaged resources behind.
 
-Browser RUM and synthetic canaries are not part of this stack. Adding either
-requires a new privacy, security, cost, dependency, and operational review; it
-is not an observability-stack toggle.
+The existing `ian-photography-front-door-waf` stack owns the frontend and media
+5xx alarms in **us-east-1**, where CloudFront publishes its metrics. Pass the
+exact `FrontendDistributionId` and `MediaDistributionId` when updating that stack.
+The alarms use the free `5xxErrorRate` metric. Exact edge and WAF state events
+cross to the home EventBridge bus; the notification stack converts ALARM states
+to fixed `edge.alarm`/`waf.alarm` signals through the existing encrypted queue,
+retry/DLQ, validation Lambda, and owner notification route.
 
-## Cost and data boundary
+API Gateway detailed route metrics are disabled. Stage-level latency and `5xx`
+metrics remain available; the HTTP API error alarm must use `5xx`, not the REST
+API metric name `5XXError`. Application custom metrics, operational alarms, and
+audit logs remain enabled. Quiet windows remain non-breaching for traffic/error
+alarms; backup freshness explicitly treats missing data as a failure.
 
-The retained paid boundary is deliberately small:
+## Admin dependencies
 
-- additional one-minute CloudFront metrics for exactly the frontend and media
-  distributions;
-- two CloudWatch metric alarms; and
-- one aggregate dashboard.
+Site Health reads the application-stack alarm prefix in the home region plus
+five exact website alarms: backup freshness, alert-delivery DLQ, frontend 5xx,
+media 5xx, and WAF blocks. It paginates application alarms and returns degraded
+health if an expected alarm is missing or a regional lookup fails. It does not
+include account-wide identity/security-change alarms or expose AWS identifiers.
+The live website/API latency checks are direct HTTP probes. Audit Log queries
+CloudWatch Logs; Website Analytics reads DynamoDB aggregates. Neither relies on
+paid CloudFront or API route metrics.
 
-These resources process CloudFront metrics only. They do not collect request or
-response bodies, cookies, browser events, album identifiers, media object keys,
-credentials, or screenshots. Before changing metric subscriptions or alarm
-periods, review current CloudFront and CloudWatch pricing and the account budget.
+## Validation and rollout
 
-## Validate and inventory
+Run `cfn-lint` on the affected templates, the operations suite, backend health
+and audit tests, and frontend checks. The read-only `observability_preflight.py`
+update mode accepts enabled or disabled subscriptions only when both exact
+resources are owned by the existing stack. Create mode still requires confirmed
+absence. It never mutates AWS resources.
 
-Run the repository checks before AWS inventory:
+Deploy notification forwarding before the new us-east-1 alarms. Confirm the
+new alarms read real CloudFront data and have their exact EventBridge route,
+then update the home observability stack to remove the two obsolete alarms and
+disable the additional metrics. Deploy the application metric/health changes
+and UI copy. Review each CloudFormation change set, preserve live secret
+parameters and unrelated resources, and verify final drift and public health.
 
-```bash
-cfn-lint ops/observability_template.yaml
-python3 -m unittest ops.tests.test_observability -v
-```
-
-CloudFront monitoring subscriptions are paid singleton resources. First-time
-creation must prove both are absent. This preflight is read-only and fails
-closed on an unknown AWS response:
-
-```bash
-python3 ops/observability_preflight.py \
-  --deployment-mode create \
-  --frontend-distribution-id FRONTEND_DISTRIBUTION_ID \
-  --media-distribution-id MEDIA_DISTRIBUTION_ID \
-  --expected-account-id AWS_ACCOUNT_ID
-```
-
-For an update, the helper requires two enabled subscriptions and verifies that
-the exact observability stack owns both logical resources:
-
-```bash
-python3 ops/observability_preflight.py \
-  --deployment-mode update \
-  --frontend-distribution-id FRONTEND_DISTRIBUTION_ID \
-  --media-distribution-id MEDIA_DISTRIBUTION_ID \
-  --expected-account-id AWS_ACCOUNT_ID \
-  --stack-name ian-photography-observability
-```
-
-If create mode finds a subscription, stop. Determine whether another stack,
-Terraform state, or a manual operator owns it. Do not delete or adopt it merely
-to make deployment pass. If ownership is intentionally transferred, use a
-reviewed CloudFormation import plan and update the runbook evidence first.
-
-An authenticated operator can also run CloudFormation's read-only parser:
-
-```bash
-aws cloudformation validate-template \
-  --region us-west-2 \
-  --template-body file://ops/observability_template.yaml
-```
-
-## Update procedure
-
-1. Run update-mode preflight and save only its aggregate result.
-2. Create a CloudFormation change set with the exact two distribution IDs,
-   optional exact SNS topic ARN, and tested `ReleaseSha`.
-3. Confirm the change set preserves both monitoring subscriptions, both 5xx
-   alarms, and the dashboard, and changes no other resource.
-4. Execute the reviewed change set and retain termination protection.
-5. Run the public edge-posture smoke and scheduled drift audit. Confirm the
-   canonical site remains healthy and the full observability stack is in
-   sync without exclusions or service-specific posture bypasses.
-
-## Alarm ownership and triage
-
-`AlarmTopicArn` must remain set in production to the exact encrypted central
-security topic ARN. This stack never creates an email endpoint or subscription.
-An empty value is useful only for an intentionally non-alerting initial stack
-creation and is not an acceptable production state. Test and document
-notification delivery separately.
-
-For a frontend or media 5xx alarm, compare the two distributions, origin
-latency, request volume, and cache-hit metrics before changing cache behavior.
-Missing data is not breaching because a low-traffic photography site can have
-quiet windows.
-
-`ops/alarm_registry.json` and `ops/ALARM_REGISTRY.md` remain the versioned
-signal inventory and runbook map.
-
-## Rollback and cost stop
-
-If real-time metrics cost must stop, use the explicit CloudFront
-`delete-monitoring-subscription` operation only after recording that it creates
-CloudFormation drift. Remove or update the corresponding retained resource in
-a reviewed change set before any later stack update. Disabling monitoring never
-authorizes deleting either distribution or weakening application, logging,
-backup, WAF, or security controls.
+The August 2026 bill attributed $2.26 to API route metrics and $1.83 to additional
+CloudFront metrics. These are historical savings estimates, not fixed quotes.
+No browser telemetry, synthetic browser probes, or new notification destination
+is introduced. Rollback should restore a prior reviewed template; keeping paid
+metrics disabled does not affect basic error metrics or application logging.

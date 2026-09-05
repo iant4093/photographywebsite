@@ -86,7 +86,7 @@ function SiteHealth() {
                     </section>
 
                     <section className="observability-panel">
-                        <div className="observability-panel-heading"><span>Safeguards</span><h2>Operational alarms</h2><p>Only alarms managed by this website stack are included.</p></div>
+                        <div className="observability-panel-heading"><span>Safeguards</span><h2>Operational alarms</h2><p>Website processing, edge delivery, firewall, backup freshness, and alert delivery.</p></div>
                         {report.alarmError && <div className="observability-warning">{report.alarmError}</div>}
                         <div className="alarm-list">
                             {(report.alarms || []).map((alarm) => (

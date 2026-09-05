@@ -142,8 +142,8 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("KmsMasterKeyId", NOTIFICATIONS)
         self.assertIn("events.amazonaws.com", NOTIFICATIONS)
         self.assertIn("cloudwatch.amazonaws.com", NOTIFICATIONS)
-        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 1)
-        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 1)
+        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 2)
+        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 2)
         self.assertIn("SqsManagedSseEnabled: true", NOTIFICATIONS)
         self.assertIn("MetricName: ApproximateNumberOfMessagesVisible", NOTIFICATIONS)
         self.assertIn("AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'", NOTIFICATIONS)
@@ -254,7 +254,6 @@ class SecurityTemplateTests(unittest.TestCase):
         expected = {
             "ConfigS3PublicWriteProhibited": "S3_BUCKET_PUBLIC_WRITE_PROHIBITED",
             "ConfigS3EncryptionEnabled": "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
-            "ConfigLambdaPublicAccessProhibited": "LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED",
             "ConfigCmkBackingKeyRotationEnabled": "CMK_BACKING_KEY_ROTATION_ENABLED",
         }
         for logical_id, source_identifier in expected.items():
@@ -336,7 +335,6 @@ class SecurityTemplateTests(unittest.TestCase):
             "AWS::CloudTrail::Trail",
             "AWS::DynamoDB::Table",
             "AWS::KMS::Key",
-            "AWS::Lambda::Function",
             "AWS::S3::Bucket",
         ):
             self.assertIn(resource_type, recorder)

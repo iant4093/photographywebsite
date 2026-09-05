@@ -64,10 +64,9 @@ class ObservabilityTemplateTests(unittest.TestCase):
             self.assertIn("DeletionPolicy: Retain", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
             self.assertIn(f"DistributionId: !Ref {parameter}", block)
-            self.assertIn("RealtimeMetricsSubscriptionStatus: Enabled", block)
+            self.assertIn("RealtimeMetricsSubscriptionStatus: Disabled", block)
         self.assertIn("DistributionIdsMustBeDistinct", TEMPLATE)
         self.assertIn("observability_preflight.py", RUNBOOK)
-        self.assertIn("paid singleton", RUNBOOK)
 
     def test_unused_browser_and_synthetic_components_are_removed(self):
         for removed in (
@@ -89,16 +88,13 @@ class ObservabilityTemplateTests(unittest.TestCase):
         self.assertNotIn("initializeRum", (ROOT / "src" / "main.jsx").read_text())
 
     def test_dashboard_and_two_alarms_are_the_complete_edge_contract(self):
-        self.assertIn("AllowedPattern: '^(|arn:(aws|aws-us-gov):sns:", TEMPLATE)
-        self.assertEqual(TEMPLATE.count("AlarmActions: !If"), 2)
+        self.assertEqual(TEMPLATE.count("AlarmActions: !If"), 0)
         resources = TEMPLATE.split("\nResources:\n", 1)[1].split("\nOutputs:\n", 1)[0]
         self.assertEqual(
             set(re.findall(r"(?m)^  ([A-Za-z][A-Za-z0-9]+):$", resources)),
             {
                 "FrontendMonitoringSubscription",
                 "MediaMonitoringSubscription",
-                "FrontendFiveXxAlarm",
-                "MediaFiveXxAlarm",
                 "ObservabilityDashboard",
             },
         )
@@ -108,6 +104,23 @@ class ObservabilityTemplateTests(unittest.TestCase):
         self.assertNotIn("CloudWatchSynthetics", dashboard)
         self.assertIn("  DashboardName:", TEMPLATE)
         self.assertIn("ReleaseSha", TEMPLATE)
+
+    def test_edge_alarms_and_notifications_use_correct_region_and_free_metrics(self):
+        waf = (OPS / "waf_front_door_template.yaml").read_text()
+        notifications = (OPS / "security_notifications_template.yaml").read_text()
+        backend = (ROOT / "backend" / "template.yaml").read_text()
+        self.assertIn("!Equals [!Ref AWS::Region, us-east-1]", waf)
+        self.assertEqual(waf.count("MetricName: 5xxErrorRate"), 2)
+        self.assertNotIn("CacheHitRate", TEMPLATE)
+        self.assertNotIn("OriginLatency", TEMPLATE)
+        self.assertIn("DetailedMetricsEnabled: false", backend)
+        self.assertIn("MetricName: 5xx\n", backend)
+        self.assertNotIn("MetricName: 5XXError", backend)
+        for edge in ("frontend", "media"):
+            self.assertIn("ian-photography-" + edge + "-5xx-${Stage}", waf)
+            self.assertIn("ian-photography-" + edge + "-5xx-${Stage}", notifications)
+        self.assertIn('"edge.alarm": ("high", "edge-health")', notifications)
+        self.assertIn('"eventName":"edge.alarm"', notifications)
 
     def test_validation_lists_and_release_identity_remain_complete(self):
         self.assertIn("VITE_RELEASE_SHA: ${{ github.sha }}", WORKFLOW)
@@ -236,9 +249,10 @@ class MonitoringSubscriptionTests(unittest.TestCase):
         disabled["MonitoringSubscription"]["RealtimeMetricsSubscriptionConfig"][
             "RealtimeMetricsSubscriptionStatus"
         ] = "Disabled"
+        with patch.object(observability_preflight, "aws_json", side_effect=self.aws_for()), patch.object(observability_preflight, "monitoring_subscription", return_value=disabled):
+            self.assertEqual(observability_preflight.validate_preflight(**self.base(deployment_mode="update"))["monitoringSubscriptionOwnership"], "exact-stack-owned")
         failure_cases = (
             ([enabled, None], self.aws_for(), "both exact"),
-            ([disabled, enabled], self.aws_for(), "disabled"),
             ([enabled, enabled], self.aws_for(owned=False), "does not own"),
             ([enabled, enabled], self.aws_for(wrong_type=True), "unexpected resource type"),
         )
