@@ -3,6 +3,7 @@ import { mediaHlsUrl } from './mediaUrls'
 export const VIDEO_HOVER_DELAY_MS = 350
 export const VIDEO_HOVER_DURATION_MS = 4000
 export const VIDEO_HOVER_FADE_MS = 260
+export const VIDEO_HOVER_MAX_PLAY_ATTEMPTS = 4
 
 let hlsModulePromise = null
 
@@ -89,10 +90,10 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     let playing = false
     let video = null
     let hls = null
-    let intentReady = false
     let mediaReady = false
     let started = false
     let playAttempts = 0
+    let retryTimer = null
     const timers = new Set()
     const listeners = []
     const later = (callback, delay) => {
@@ -101,6 +102,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
             if (active) callback()
         }, delay)
         timers.add(timer)
+        return timer
     }
     const listen = (target, event, callback, options) => {
         target.addEventListener(event, callback, options)
@@ -111,6 +113,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         active = false
         timers.forEach((timer) => window.clearTimeout(timer))
         timers.clear()
+        retryTimer = null
         listeners.splice(0).forEach((remove) => remove())
         hls?.destroy()
         hls = null
@@ -127,7 +130,12 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     const fail = () => cleanup(true)
 
     const play = async () => {
-        if (!active || started || !intentReady || !mediaReady || !video) return
+        if (!active || started || !mediaReady || !video) return
+        if (retryTimer !== null) {
+            window.clearTimeout(retryTimer)
+            timers.delete(retryTimer)
+            retryTimer = null
+        }
         started = true
         playAttempts += 1
         try {
@@ -141,28 +149,22 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
             later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
         } catch (error) {
             if (!active) return
-            // A source/seek transition can interrupt the first play request.
-            // Retry it once while the pointer is still here, without requiring
-            // a leave/re-enter or retrying an autoplay-policy denial.
-            if (error?.name === 'AbortError' && playAttempts < 2) {
+            // Rapid hover changes can interrupt startup more than once. Retry
+            // when media becomes ready, with a bounded backoff as a fallback.
+            // Policy denials and real stream failures still stop the preview.
+            if (error?.name === 'AbortError' && playAttempts < VIDEO_HOVER_MAX_PLAY_ATTEMPTS) {
                 started = false
-                later(() => { void play() }, 100)
+                retryTimer = later(() => {
+                    retryTimer = null
+                    void play()
+                }, 150 * playAttempts)
             } else {
                 fail()
             }
         }
     }
 
-    later(() => {
-        intentReady = true
-        void play()
-    }, VIDEO_HOVER_DELAY_MS)
-
-    video = prepareVideo()
-    container.appendChild(video)
-    const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
-
-    void (async () => {
+    const loadPreview = async () => {
         let selected = selectAlbumCoverVideo(null, album)
         if (!selected) {
             let detail
@@ -180,12 +182,16 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
             return
         }
 
+        video = prepareVideo()
+        container.appendChild(video)
+        const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
+
         const seekToCover = () => {
             if (!active || !video) return
             const duration = Number(video.duration)
             const latestStart = Number.isFinite(duration) ? Math.max(0, duration - 0.05) : selected.startTime
             const startTime = Math.min(selected.startTime, latestStart)
-            if (startTime > 0.01) {
+            if (startTime > 0.01 && Math.abs(video.currentTime - startTime) > 0.05) {
                 try {
                     video.currentTime = startTime
                 } catch {
@@ -195,6 +201,8 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         }
         listen(video, 'ended', () => cleanup(true), { once: true })
         listen(video, 'error', fail, { once: true })
+        listen(video, 'canplay', () => { void play() })
+        listen(video, 'seeked', () => { void play() })
 
         if (nativeHls) {
             listen(video, 'loadedmetadata', seekToCover, { once: true })
@@ -235,7 +243,11 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         } catch {
             fail()
         }
-    })()
+    }
+
+    // Merely passing over a card must not create/load a stream that the next
+    // card then has to compete with while the browser tears it down.
+    later(() => { void loadPreview() }, VIDEO_HOVER_DELAY_MS)
 
     return { stop: () => cleanup(true) }
 }

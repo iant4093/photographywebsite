@@ -20,6 +20,7 @@ vi.mock('hls.js', () => ({
 import {
     VIDEO_HOVER_DELAY_MS,
     VIDEO_HOVER_DURATION_MS,
+    VIDEO_HOVER_MAX_PLAY_ATTEMPTS,
     selectAlbumCoverVideo,
     start,
 } from './albumVideoHoverPreview'
@@ -66,6 +67,52 @@ describe('video album hover previews', () => {
         })).toEqual({ hlsUrl: 'https://media.test/hls/summary.m3u8', startTime: 7 })
     })
 
+    it.each(['native', 'HLS.js'])('does not allocate streams while rapidly crossing cards with %s', async (runtime) => {
+        HTMLMediaElement.prototype.canPlayType.mockReturnValue(runtime === 'native' ? 'maybe' : '')
+        const firstContainer = document.createElement('div')
+        const secondContainer = document.createElement('div')
+        const createElement = vi.spyOn(document, 'createElement')
+        const loadDetail = vi.fn().mockResolvedValue({
+            images: [{ hlsUrl: 'https://media.test/hls/cover.m3u8' }],
+        })
+        const begin = (container) => start({ container, album: {}, loadDetail })
+
+        const firstPass = begin(firstContainer)
+        await vi.advanceTimersByTimeAsync(100)
+        firstPass.stop()
+        const secondPass = begin(secondContainer)
+        await vi.advanceTimersByTimeAsync(100)
+        secondPass.stop()
+        const finalHover = begin(firstContainer)
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS - 1)
+        await vi.dynamicImportSettled()
+
+        expect(createElement.mock.calls.filter(([tag]) => tag === 'video')).toHaveLength(0)
+        expect(loadDetail).not.toHaveBeenCalled()
+        expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled()
+        expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
+        expect(hlsInstances).toHaveLength(0)
+
+        await vi.advanceTimersByTimeAsync(1)
+        await vi.dynamicImportSettled()
+        expect(createElement.mock.calls.filter(([tag]) => tag === 'video')).toHaveLength(1)
+        expect(loadDetail).toHaveBeenCalledOnce()
+        expect(secondContainer.querySelector('video')).toBeNull()
+        const video = firstContainer.querySelector('video')
+        if (runtime === 'HLS.js') {
+            expect(hlsInstances).toHaveLength(1)
+            expect(hlsInstances[0].loadSource).toHaveBeenCalledWith('https://media.test/hls/cover.m3u8')
+            expect(hlsInstances[0].attachMedia).toHaveBeenCalledWith(video)
+            hlsInstances[0].handlers.manifestParsed()
+            await Promise.resolve()
+        } else {
+            expect(video.src).toBe('https://media.test/hls/cover.m3u8')
+        }
+        expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce()
+        expect(video.style.opacity).toBe('1')
+        finalHover.stop()
+    })
+
     it('starts a cold stream without waiting for seeked, then resets', async () => {
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
@@ -85,8 +132,9 @@ describe('video album hover previews', () => {
             onPlaybackEnd,
         })
 
-        await Promise.resolve()
-        await Promise.resolve()
+        expect(container.querySelector('video')).toBeNull()
+        expect(loadDetail).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
         expect(loadDetail).toHaveBeenCalledOnce()
         const video = container.querySelector('video')
         expect(video).toBeTruthy()
@@ -95,10 +143,6 @@ describe('video album hover previews', () => {
         Object.defineProperty(video, 'duration', { configurable: true, value: 30 })
         video.dispatchEvent(new Event('loadedmetadata'))
         expect(video.currentTime).toBe(5)
-        expect(onPlaybackStart).not.toHaveBeenCalled()
-        expect(video.play).not.toHaveBeenCalled()
-        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
-        await Promise.resolve()
         expect(video.play).toHaveBeenCalledOnce()
         expect(onPlaybackStart).toHaveBeenCalledOnce()
         expect(video.style.opacity).toBe('1')
@@ -122,7 +166,7 @@ describe('video album hover previews', () => {
             loadDetail,
         })
 
-        await Promise.resolve()
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
         expect(loadDetail).not.toHaveBeenCalled()
         expect(container.querySelector('video')?.src).toBe('https://media.test/hls/summary.m3u8')
     })
@@ -140,12 +184,16 @@ describe('video album hover previews', () => {
             loadDetail: vi.fn(),
             onPlaybackStart,
         })
-        const video = container.querySelector('video')
-
         await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
         expect(video.play).toHaveBeenCalledOnce()
         expect(onPlaybackStart).not.toHaveBeenCalled()
         expect(video.style.opacity).toBe('0')
+
+        video.dispatchEvent(new Event('canplay'))
+        video.dispatchEvent(new Event('seeked'))
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(video.play).toHaveBeenCalledOnce()
 
         Object.defineProperty(video, 'duration', { configurable: true, value: 30 })
         video.dispatchEvent(new Event('loadedmetadata'))
@@ -154,6 +202,79 @@ describe('video album hover previews', () => {
         await Promise.resolve()
         expect(onPlaybackStart).toHaveBeenCalledOnce()
         controller.stop()
+    })
+
+    it.each([
+        ['native', 'resolve'],
+        ['native', 'reject'],
+        ['HLS.js', 'resolve'],
+        ['HLS.js', 'reject'],
+    ])('ignores old %s play promises that %s after rapidly returning to a card', async (runtime, settlement) => {
+        HTMLMediaElement.prototype.canPlayType.mockReturnValue(runtime === 'native' ? 'maybe' : '')
+        const pending = []
+        const pendingPlayback = () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+        HTMLMediaElement.prototype.play
+            .mockImplementationOnce(pendingPlayback)
+            .mockImplementationOnce(pendingPlayback)
+        const firstContainer = document.createElement('div')
+        const secondContainer = document.createElement('div')
+        const oldStarted = vi.fn()
+        const oldEnded = vi.fn()
+        const finalStarted = vi.fn()
+        const finalEnded = vi.fn()
+        const begin = (container, onPlaybackStart, onPlaybackEnd) => start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+            onPlaybackEnd,
+        })
+        const reachPlayback = async () => {
+            await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+            if (runtime === 'HLS.js') {
+                await vi.dynamicImportSettled()
+                hlsInstances.at(-1).handlers.manifestParsed()
+                await Promise.resolve()
+            }
+        }
+
+        const firstHover = begin(firstContainer, oldStarted, oldEnded)
+        await reachPlayback()
+        const firstVideo = firstContainer.querySelector('video')
+        firstHover.stop()
+        const secondHover = begin(secondContainer, oldStarted, oldEnded)
+        await reachPlayback()
+        const secondVideo = secondContainer.querySelector('video')
+        secondHover.stop()
+        const finalHover = begin(firstContainer, finalStarted, finalEnded)
+        await reachPlayback()
+        const finalVideo = firstContainer.querySelector('video')
+        expect(finalStarted).toHaveBeenCalledOnce()
+        expect(finalVideo.style.opacity).toBe('1')
+
+        for (const playback of pending.reverse()) {
+            if (settlement === 'resolve') playback.resolve()
+            else playback.reject(new DOMException('Old playback interrupted', 'AbortError'))
+        }
+        firstVideo.dispatchEvent(new Event('canplay'))
+        secondVideo.dispatchEvent(new Event('seeked'))
+        await vi.advanceTimersByTimeAsync(1000)
+
+        expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(3)
+        expect(firstContainer.querySelector('video')).toBe(finalVideo)
+        expect(secondContainer.querySelector('video')).toBeNull()
+        expect(finalVideo.style.opacity).toBe('1')
+        expect(oldStarted).not.toHaveBeenCalled()
+        expect(oldEnded).not.toHaveBeenCalled()
+        expect(finalStarted).toHaveBeenCalledOnce()
+        expect(finalEnded).not.toHaveBeenCalled()
+        if (runtime === 'HLS.js') {
+            expect(hlsInstances).toHaveLength(3)
+            expect(hlsInstances[0].destroy).toHaveBeenCalledOnce()
+            expect(hlsInstances[1].destroy).toHaveBeenCalledOnce()
+            expect(hlsInstances[2].destroy).not.toHaveBeenCalled()
+        }
+        finalHover.stop()
     })
 
     it('starts HLS.js playback when its manifest arrives after the hover delay', async () => {
@@ -166,13 +287,13 @@ describe('video album hover previews', () => {
             loadDetail: vi.fn(),
             onPlaybackStart,
         })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
         await vi.dynamicImportSettled()
         const instance = hlsInstances[0]
         const video = container.querySelector('video')
         expect(instance.config.startPosition).toBe(5)
         expect(instance.attachMedia).toHaveBeenCalledWith(video)
 
-        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
         expect(video.play).not.toHaveBeenCalled()
         instance.handlers.manifestParsed()
         await Promise.resolve()
@@ -182,7 +303,7 @@ describe('video album hover previews', () => {
         expect(instance.destroy).toHaveBeenCalledOnce()
     })
 
-    it('retries an interrupted play once without requiring another hover', async () => {
+    it('retries an interrupted play without requiring another hover', async () => {
         HTMLMediaElement.prototype.play.mockRejectedValueOnce(new DOMException('Playback interrupted', 'AbortError'))
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
@@ -192,14 +313,59 @@ describe('video album hover previews', () => {
             loadDetail: vi.fn(),
             onPlaybackStart,
         })
-        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS + 100)
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS + 150)
         expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2)
         expect(onPlaybackStart).toHaveBeenCalledOnce()
         expect(container.querySelector('video')?.style.opacity).toBe('1')
         controller.stop()
     })
 
-    it('stops retrying an interrupted play after one retry', async () => {
+    it('uses media readiness to recover from two startup interruptions without another hover', async () => {
+        HTMLMediaElement.prototype.play
+            .mockRejectedValueOnce(new DOMException('Source interrupted', 'AbortError'))
+            .mockRejectedValueOnce(new DOMException('Seek interrupted', 'AbortError'))
+        let resolvePlayback
+        HTMLMediaElement.prototype.play.mockImplementationOnce(() => new Promise((resolve) => {
+            resolvePlayback = resolve
+        }))
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        expect(video.play).toHaveBeenCalledOnce()
+
+        video.dispatchEvent(new Event('canplay'))
+        await Promise.resolve()
+        expect(video.play).toHaveBeenCalledTimes(2)
+        video.dispatchEvent(new Event('seeked'))
+        await Promise.resolve()
+        expect(video.play).toHaveBeenCalledTimes(3)
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+
+        video.dispatchEvent(new Event('canplay'))
+        video.dispatchEvent(new Event('seeked'))
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(video.play).toHaveBeenCalledTimes(3)
+        resolvePlayback()
+        await Promise.resolve()
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(video.style.opacity).toBe('1')
+
+        video.dispatchEvent(new Event('canplay'))
+        video.dispatchEvent(new Event('seeked'))
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(video.play).toHaveBeenCalledTimes(3)
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it('caps interrupted playback retries while the pointer stays hovered', async () => {
         HTMLMediaElement.prototype.play.mockRejectedValue(new DOMException('Playback interrupted', 'AbortError'))
         const container = document.createElement('div')
         start({
@@ -207,9 +373,15 @@ describe('video album hover previews', () => {
             album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
             loadDetail: vi.fn(),
         })
-        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS + 500)
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS + 150)
         expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(300)
+        expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(3)
+        await vi.advanceTimersByTimeAsync(450)
+        expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(VIDEO_HOVER_MAX_PLAY_ATTEMPTS)
         expect(container.querySelector('video')).toBeNull()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(VIDEO_HOVER_MAX_PLAY_ATTEMPTS)
     })
 
     it('does not retry a browser autoplay-policy denial', async () => {
@@ -234,7 +406,10 @@ describe('video album hover previews', () => {
             loadDetail: vi.fn(),
         })
         await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
         controller.stop()
+        video.dispatchEvent(new Event('canplay'))
+        video.dispatchEvent(new Event('seeked'))
         await vi.advanceTimersByTimeAsync(500)
         expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce()
         expect(container.querySelector('video')).toBeNull()
