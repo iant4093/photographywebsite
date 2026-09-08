@@ -27,6 +27,10 @@ def assert_root(service, folder):
         if current.get('id') == root:
             return
         parents = current.get('parents', [])
+        # Drive's file scope can expose a child's parent ID without granting
+        # metadata reads on that parent. Reaching our configured root is enough.
+        if parents == [root]:
+            return
         if len(parents) != 1 or parents[0] in seen:
             break
         seen.add(parents[0])

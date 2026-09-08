@@ -200,6 +200,13 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(read.call_count, 1)
 
 class AdditionalBackupBehaviorTests(unittest.TestCase):
+    def test_root_parent_identity_does_not_require_broader_root_metadata_access(self):
+        service = Mock()
+        service.files().get.side_effect = RuntimeError('root metadata is outside the granted Drive file scope')
+        with patch.dict(os.environ, {'GOOGLE_DRIVE_FOLDER_ID': 'configured-root'}):
+            worker.assert_root(service, {'id': 'type-folder', 'parents': ['configured-root']})
+        service.files().get.assert_not_called()
+
     def test_lambda_failure_redacts_provider_details_and_still_fails_for_retry(self):
         with patch.dict(os.environ, {'DRIVE_BACKUP_STATE_TABLE': 'state'}), patch.object(worker, 'handler', side_effect=ValueError('private-drive-id private-filename.jpg')):
             with self.assertRaises(RuntimeError) as caught:
