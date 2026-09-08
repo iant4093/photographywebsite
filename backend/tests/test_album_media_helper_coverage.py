@@ -193,9 +193,9 @@ class ZipAndPreviewHelperBranchTests(unittest.TestCase):
         album = {"albumId": ALBUM_ID, "visibility": "public", "images": [None, {}, {"key": RAW_KEY}, RAW_KEY]}
         self.assertEqual(zip_helpers.raw_image_keys(album), [RAW_KEY])
         zip_key, lock_key = zip_helpers.zip_keys(album)
-        self.assertTrue(zip_key.startswith(f"temp-zips/{ALBUM_ID}/"))
+        self.assertTrue(zip_key.startswith(f"album-zips/{ALBUM_ID}/"))
         self.assertTrue(zip_key.endswith(".zip"))
-        self.assertEqual(lock_key, zip_key.removesuffix(".zip") + ".lock")
+        self.assertEqual(lock_key, zip_key.replace("album-zips/", "temp-zips/").removesuffix(".zip") + ".failed.json")
 
     def test_preview_client_is_lazy_and_dispatch_skips_non_objects(self):
         client = Mock()

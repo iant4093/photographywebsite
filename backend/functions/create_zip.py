@@ -5,6 +5,7 @@ import re
 import json
 
 import boto3
+from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
 from album_access import authorize_album
@@ -14,29 +15,22 @@ from response_helpers import error_response, internal_error, json_response
 from security_helpers import check_rate_limit
 from validation_helpers import ValidationError, validate_uuid
 from zip_helpers import get_album_record, raw_image_keys, zip_keys
+from zip_jobs import enqueue_zip, object_metadata
 
 
 s3 = boto3.client("s3")
-lambda_client = boto3.client("lambda")
 SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
 
 def _object_metadata(bucket, key):
-    """Check an exact temporary key with prefix-scoped ListBucket access.
+    """Check an exact archive/status key with prefix-scoped ListBucket access.
 
     S3 intentionally returns 403, rather than 404, when HeadObject checks a
     missing key and the caller's ListBucket permission is prefix-constrained.
     Listing the exact server-generated key avoids that ambiguity without
     granting this request handler permission to enumerate album object names.
     """
-    response = s3.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1)
-    contents = response.get("Contents", [])
-    if not isinstance(contents, list):
-        raise RuntimeError("Malformed temporary object lookup")
-    return next(
-        (item for item in contents if isinstance(item, dict) and item.get("Key") == key),
-        None,
-    )
+    return object_metadata(s3, bucket, key)
 
 
 def _not_found():
@@ -101,11 +95,11 @@ def handler(event, context):
 
         ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
         rate_identifier = f"{ip}:{album['albumId']}"
-        if not check_rate_limit(rate_identifier, "zip_status", 30, 300, fail_closed=True):
+        if not check_rate_limit(rate_identifier, "zip_status", 120, 300, fail_closed=True):
             _audit(event, context, "denied", "rate_limited", actor_type=access_actor, auth_method=access_auth)
             return error_response(429, "Too many ZIP requests. Please try again later.", code="rate_limited")
 
-        zip_key, lock_key = zip_keys(album)
+        zip_key, failure_key = zip_keys(album)
         bucket = bucket_name()
         if _object_metadata(bucket, zip_key):
             _audit(
@@ -120,35 +114,32 @@ def handler(event, context):
                 },
             )
 
-        worker_running = False
-        lock = _object_metadata(bucket, lock_key)
-        if lock:
-            import datetime
-
-            age = (datetime.datetime.now(datetime.timezone.utc) - lock["LastModified"]).total_seconds()
-            worker_running = age < 900
-
-        if not worker_running:
-            s3.put_object(
-                Bucket=bucket,
-                Key=lock_key,
-                Body=b"locked",
-                Tagging="visibility=pending",
-                ContentType="application/octet-stream",
-            )
-            lambda_client.invoke(
-                FunctionName=os.environ["WORKER_FUNCTION_NAME"],
-                InvocationType="Event",
-                Payload=json.dumps({"albumId": album_id, "shareCode": share_code}),
-            )
+        if _object_metadata(bucket, failure_key):
+            try:
+                response = s3.get_object(Bucket=bucket, Key=failure_key)
+            except ClientError as error:
+                # A retry may clear the error between the lookup and the read.
+                if error.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
+                    raise
+            else:
+                try:
+                    failure = json.loads(response["Body"].read())
+                finally:
+                    response["Body"].close()
+                _audit(
+                    event, context, "failure", "archive_failed", zip_state="failed",
+                    actor_type=access_actor, auth_method=access_auth,
+                )
+                return json_response(200, failure)
+        enqueue_zip(album["albumId"], album)
         _audit(
             event, context, "success", "archive_processing", zip_state="processing",
             actor_type=access_actor, auth_method=access_auth,
         )
         return json_response(
             202,
-            {"status": "processing", "retryAfterSeconds": 3},
-            headers={"Retry-After": "3"},
+            {"status": "processing", "retryAfterSeconds": 2},
+            headers={"Retry-After": "2"},
         )
     except AuthError as error:
         _audit(event, context, "denied", "access_denied", actor_type=access_actor, auth_method=access_auth)

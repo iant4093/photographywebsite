@@ -87,7 +87,7 @@ class DeleteAlbumTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(
             delete_prefix.call_args_list,
-            [call(f"albums/{ALBUM_ID}/"), call(f"temp-zips/{ALBUM_ID}/")],
+            [call(f"albums/{ALBUM_ID}/"), call(f"temp-zips/{ALBUM_ID}/"), call(f"album-zips/{ALBUM_ID}/")],
         )
 
     def test_handler_deletes_only_canonical_and_separately_approved_legacy_prefix(self):
@@ -102,7 +102,7 @@ class DeleteAlbumTests(unittest.TestCase):
         ) as delete_prefix:
             response = delete_album.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
         self.assertEqual(response["statusCode"], 200)
-        expected = (f"albums/{ALBUM_ID}/", legacy, f"temp-zips/{ALBUM_ID}/")
+        expected = (f"albums/{ALBUM_ID}/", legacy, f"temp-zips/{ALBUM_ID}/", f"album-zips/{ALBUM_ID}/")
         self.assertEqual(preflight.call_args.kwargs["prefixes"], expected)
         self.assertEqual(delete_prefix.call_args_list, [call(prefix) for prefix in expected])
 

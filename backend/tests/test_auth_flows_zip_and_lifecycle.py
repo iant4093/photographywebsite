@@ -258,8 +258,7 @@ class ZipTests(unittest.TestCase):
         with patch.object(
             worker_zip, "get_album_record", return_value={"albumId": ALBUM_ID, "status": "pending", "visibility": "public"}
         ):
-            with self.assertRaises(Exception):
-                worker_zip._validated_album({"albumId": ALBUM_ID})
+            self.assertIsNone(worker_zip._validated_album({"albumId": ALBUM_ID}))
 
     def test_processing_response_advertises_retry_after(self):
         album = {
@@ -273,11 +272,11 @@ class ZipTests(unittest.TestCase):
             create_zip, "get_verified_claims", return_value=None
         ), patch.object(create_zip, "check_rate_limit", return_value=True), patch.object(
             create_zip.s3, "list_objects_v2", side_effect=[{"Contents": []}, {"Contents": []}]
-        ), patch.object(create_zip.s3, "put_object"), patch.object(create_zip.lambda_client, "invoke"):
+        ), patch.object(create_zip, "enqueue_zip"):
             response = create_zip.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
         self.assertEqual(response["statusCode"], 202)
-        self.assertEqual(response["headers"]["Retry-After"], "3")
-        self.assertEqual(response_body(response)["retryAfterSeconds"], 3)
+        self.assertEqual(response["headers"]["Retry-After"], "2")
+        self.assertEqual(response_body(response)["retryAfterSeconds"], 2)
 
 
 if __name__ == "__main__":

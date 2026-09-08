@@ -259,9 +259,11 @@ class DataProtectionTests(unittest.TestCase):
 
         create_zip = resource_block("CreateZipFunction")
         self.assertIn("Action: s3:ListBucket", create_zip)
-        self.assertIn("s3:prefix: temp-zips/*", create_zip)
+        self.assertIn("- temp-zips/*", create_zip)
+        self.assertIn("- album-zips/*", create_zip)
         self.assertIn("${ImagesBucket.Arn}/temp-zips/*", create_zip)
-        self.assertIn("s3:PutObjectTagging", create_zip)
+        self.assertIn("sqs:SendMessage", create_zip)
+        self.assertNotIn("s3:PutObject", create_zip)
 
     def test_new_fixed_name_log_resources_do_not_orphan_on_initial_rollback(self) -> None:
         for logical_id in ("MediaAccessLogsBucket", "ApiAccessLogGroup", "ApplicationLogGroup"):

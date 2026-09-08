@@ -897,6 +897,14 @@ Resources:
               NoncurrentDays: 1
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
+          - Id: RetainCurrentAlbumArchives
+            Status: Enabled
+            Prefix: album-zips/
+            ExpiredObjectDeleteMarker: true
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
           - Id: ExpireNoncurrentMediaVersions
             Status: Enabled
             NoncurrentVersionExpiration:
@@ -987,7 +995,9 @@ Resources:
             Principal:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
-            Resource: !Sub '${ImagesBucket.Arn}/temp-zips/*'
+            Resource:
+              - !Sub '${ImagesBucket.Arn}/temp-zips/*'
+              - !Sub '${ImagesBucket.Arn}/album-zips/*'
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
@@ -2801,6 +2811,7 @@ Resources:
                   s3:prefix:
                     - albums/*
                     - temp-zips/*
+                    - album-zips/*
             - Effect: Allow
               Action:
                 - s3:DeleteObject
@@ -2808,6 +2819,7 @@ Resources:
               Resource:
                 - !Sub '${ImagesBucket.Arn}/albums/*'
                 - !Sub '${ImagesBucket.Arn}/temp-zips/*'
+                - !Sub '${ImagesBucket.Arn}/album-zips/*'
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
@@ -3014,6 +3026,113 @@ Resources:
             ScalingConfig:
               MaximumConcurrency: 2
 
+  ZipPreparationDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-zip-preparation-dlq-${Stage}.fifo'
+      FifoQueue: true
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+
+  ZipPreparationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'ian-photography-zip-preparation-${Stage}.fifo'
+      FifoQueue: true
+      SqsManagedSseEnabled: true
+      DelaySeconds: 5
+      VisibilityTimeout: 5400
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ZipPreparationDeadLetterQueue.Arn
+        maxReceiveCount: 5
+
+  ZipPreparationFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Album ZIP preparation exhausted retries.
+      AlarmActions:
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ZipPreparationDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ZipArchiveRefreshFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: zip_archive_refresh.handler
+      Timeout: 120
+      MemorySize: 256
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          ZIP_QUEUE_URL: !Ref ZipPreparationQueue
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:DescribeStream
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:ListStreams
+              Resource: !GetAtt AlbumsTable.StreamArn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - album-zips/*
+                    - temp-zips/zip-reconciliation.json
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:PutObjectTagging
+              Resource: !Sub '${ImagesBucket.Arn}/temp-zips/zip-reconciliation.json'
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource:
+                - !GetAtt ZipPreparationQueue.Arn
+                - !GetAtt AsyncFailureQueue.Arn
+      Events:
+        AlbumsChanged:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt AlbumsTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 100
+            MaximumBatchingWindowInSeconds: 10
+            MaximumRetryAttempts: 3
+            BisectBatchOnFunctionError: true
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            DestinationConfig:
+              OnFailure:
+                Type: SQS
+                Destination: !GetAtt AsyncFailureQueue.Arn
+        ReconcileArchives:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Enabled: true
+
   CreateZipFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -3031,7 +3150,7 @@ Resources:
           COGNITO_CLIENT_ID: !Ref UserPoolClient
           RATE_LIMIT_TABLE: !Ref RateLimitTable
           RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'
-          WORKER_FUNCTION_NAME: !Ref WorkerZipFunction
+          ZIP_QUEUE_URL: !Ref ZipPreparationQueue
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
@@ -3052,16 +3171,18 @@ Resources:
               Resource: !GetAtt ImagesBucket.Arn
               Condition:
                 StringLike:
-                  s3:prefix: temp-zips/*
+                  s3:prefix:
+                    - temp-zips/*
+                    - album-zips/*
             - Effect: Allow
               Action:
                 - s3:GetObject
-                - s3:PutObject
-                - s3:PutObjectTagging
-              Resource: !Sub '${ImagesBucket.Arn}/temp-zips/*'
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/temp-zips/*'
+                - !Sub '${ImagesBucket.Arn}/album-zips/*'
             - Effect: Allow
-              Action: lambda:InvokeFunction
-              Resource: !GetAtt WorkerZipFunction.Arn
+              Action: sqs:SendMessage
+              Resource: !GetAtt ZipPreparationQueue.Arn
         - !If
           - HasApplicationSecretsKmsKey
           - Statement:
@@ -3105,6 +3226,7 @@ Resources:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
           IMAGES_BUCKET: !Ref ImagesBucket
+          ZIP_QUEUE_URL: !Ref ZipPreparationQueue
       Policies:
         - Statement:
             - Effect: Allow
@@ -3114,7 +3236,9 @@ Resources:
               Action: dynamodb:Query
               Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
             - Effect: Allow
-              Action: s3:GetObject
+              Action:
+                - s3:GetObject
+                - s3:GetObjectVersion
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action:
@@ -3125,10 +3249,38 @@ Resources:
                 - s3:PutObjectTagging
                 - s3:AbortMultipartUpload
                 - s3:ListMultipartUploadParts
-              Resource: !Sub '${ImagesBucket.Arn}/temp-zips/*'
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/temp-zips/*'
+                - !Sub '${ImagesBucket.Arn}/album-zips/*'
             - Effect: Allow
               Action: sqs:SendMessage
               Resource: !GetAtt AsyncFailureQueue.Arn
+
+        - Statement:
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - album-zips/*
+                    - temp-zips/*
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:ChangeMessageVisibility
+              Resource: !GetAtt ZipPreparationQueue.Arn
+      Events:
+        ArchiveJobs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ZipPreparationQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            ScalingConfig:
+              MaximumConcurrency: 2
 
   DeleteImagesFunction:
     Type: AWS::Serverless::Function
@@ -3919,6 +4071,7 @@ Resources:
                   s3:prefix:
                     - albums/*
                     - temp-zips/*
+                    - album-zips/*
             - Effect: Allow
               Action:
                 - s3:DeleteObject
@@ -3926,6 +4079,7 @@ Resources:
               Resource:
                 - !Sub '${ImagesBucket.Arn}/albums/*'
                 - !Sub '${ImagesBucket.Arn}/temp-zips/*'
+                - !Sub '${ImagesBucket.Arn}/album-zips/*'
             - Effect: Allow
               Action:
                 - cognito-idp:AdminDeleteUser

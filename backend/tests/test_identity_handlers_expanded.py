@@ -433,9 +433,9 @@ class DeleteUserExpandedTests(unittest.TestCase):
             response = delete_user.handler(self.event(), CONTEXT)
         body = response_body(response)
         self.assertEqual(body["albumsDeleted"], 2)
-        self.assertEqual(body["deletedObjectVersions"], 8)
-        self.assertEqual(len(preflight.call_args.kwargs["prefixes"]), 4)
-        self.assertEqual(delete_prefix.call_count, 4)
+        self.assertEqual(body["deletedObjectVersions"], 12)
+        self.assertEqual(len(preflight.call_args.kwargs["prefixes"]), 6)
+        self.assertEqual(delete_prefix.call_count, 6)
         self.assertEqual(table.delete_item.call_count, 2)
         delete_identity.assert_called_once_with(UserPoolId=delete_user.USER_POOL_ID, Username="username")
 

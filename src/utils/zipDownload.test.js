@@ -28,9 +28,26 @@ describe('pollZipJob', () => {
             sleep,
         })).resolves.toBe('https://example.com/album.zip')
 
-        expect(sleep).toHaveBeenNthCalledWith(1, 5_000, undefined)
+        expect(sleep).toHaveBeenNthCalledWith(1, 1_000, undefined)
         expect(sleep).toHaveBeenNthCalledWith(2, 20_000, undefined)
         expect(storage.values.size).toBe(0)
+    })
+
+    it('detects a three-minute build without exhausting the backend status budget', async () => {
+        let clock = 0
+        let requests = 0
+        const sleep = vi.fn(async (delay) => { clock += delay })
+        const request = vi.fn(async () => {
+            requests += 1
+            if (requests > 120) throw Object.assign(new Error('limited'), { status: 429 })
+            return clock >= 180_000
+                ? { status: 'ready', url: 'ready' }
+                : { status: 'processing', retryAfterSeconds: 2 }
+        })
+        await pollZipJob({ jobKey: 'long-build', request, storage: memoryStorage(), now: () => clock, sleep })
+        expect(clock).toBeLessThan(195_000)
+        expect(requests).toBeLessThan(30)
+        expect(sleep.mock.calls.some(([delay]) => delay === 15_000)).toBe(true)
     })
 
     it('uses sessionStorage when no explicit storage adapter is supplied', async () => {
@@ -117,7 +134,7 @@ describe('pollZipJob', () => {
             .mockResolvedValueOnce({ status: 'ready', url: 'ready' })
         const sleep = vi.fn().mockResolvedValue()
         await pollZipJob({ jobKey: 'bounds', request, storage: memoryStorage(), sleep, intervals: [7, 9] })
-        expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([5_000, 60_000, 9, 9])
+        expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([1_000, 60_000, 9, 9])
     })
 
     it('uses the default abortable browser sleep and tolerates broken storage', async () => {

@@ -123,8 +123,8 @@ class MediaRevocationTests(unittest.TestCase):
     def test_album_deletion_removes_origin_objects_then_purges_before_record_removal(self):
         response = self.delete(delete_album)
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(response_body(response)["deletedObjectVersions"], 3)
-        self.assertEqual(self.order, ["delete", "delete", "delete", "purge", "commit"])
+        self.assertEqual(response_body(response)["deletedObjectVersions"], 4)
+        self.assertEqual(self.order, ["delete", "delete", "delete", "delete", "purge", "commit"])
         self.assert_purge_paths()
 
     def test_media_deletion_purges_originals_thumbnails_and_hls_after_origin_removal(self):

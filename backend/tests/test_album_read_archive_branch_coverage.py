@@ -423,7 +423,7 @@ class CreateZipBranchTests(unittest.TestCase):
             create_zip, "get_verified_claims", return_value=claims_value
         ), patch.object(create_zip, "authorize_album", side_effect=authorize_error), patch.object(
             create_zip, "check_rate_limit", return_value=rate
-        ), patch.object(create_zip, "s3", s3), patch.object(create_zip, "lambda_client", worker), patch.object(
+        ), patch.object(create_zip, "s3", s3), patch.object(create_zip, "enqueue_zip", worker), patch.object(
             create_zip, "presigned_get_url", return_value="signed"
         ), patch.object(create_zip, "_audit"):
             response = create_zip.handler(request(path=path), None)
@@ -445,69 +445,25 @@ class CreateZipBranchTests(unittest.TestCase):
         response, _, _ = self._call({"albumId": ALBUM_ID}, record=album())
         self.assertEqual(response_body(response)["status"], "ready")
 
-    def test_share_processing_stale_and_active_locks_and_provider_errors(self):
+    def test_share_processing_queue_and_provider_errors(self):
         shared = album(visibility="unlisted", isShared=True, shareCode=SHARE_CODE)
-        stale = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=901)
-        _, shared_lock = create_zip.zip_keys(shared)
-        response, s3, worker = self._call(
-            {"shareCode": SHARE_CODE},
-            record=shared,
-            list_effect=[
-                {"Contents": []},
-                {"Contents": [{"Key": shared_lock, "LastModified": stale}]},
-            ],
+        response, s3, queue = self._call(
+            {"shareCode": SHARE_CODE}, record=shared,
+            list_effect=[{"Contents": []}, {"Contents": []}],
         )
         self.assertEqual(response["statusCode"], 202)
-        s3.put_object.assert_called_once()
-        worker.invoke.assert_called_once()
-
-        recent = datetime.datetime.now(datetime.timezone.utc)
-        active = album()
-        _, active_lock = create_zip.zip_keys(active)
-        response, s3, worker = self._call(
-            {"albumId": ALBUM_ID},
-            record=active,
-            list_effect=[
-                {"Contents": []},
-                {"Contents": [{"Key": active_lock, "LastModified": recent}]},
-            ],
-        )
-        self.assertEqual(response["statusCode"], 202)
+        queue.assert_called_once_with(ALBUM_ID, shared)
         s3.put_object.assert_not_called()
-        worker.invoke.assert_not_called()
-
         self.assertEqual(
-            self._call({"albumId": ALBUM_ID}, record=album(visibility="private"), authorize_error=create_zip.AuthError("no", 403))[0]["statusCode"],
-            403,
+            self._call({"albumId": ALBUM_ID}, record=album(visibility="private"), authorize_error=create_zip.AuthError("no", 403))[0]["statusCode"], 403,
         )
-        self.assertEqual(
-            self._call({"albumId": "bad"}, record=album())[0]["statusCode"],
-            400,
-        )
-        self.assertEqual(
-            self._call(
-                {"albumId": ALBUM_ID},
-                record=album(),
-                list_effect=client_error("AccessDenied", "ListObjectsV2"),
-            )[0]["statusCode"],
-            500,
-        )
-        self.assertEqual(
-            self._call(
-                {"albumId": ALBUM_ID},
-                record=album(),
-                list_effect=[{"Contents": []}, client_error("AccessDenied", "ListObjectsV2")],
-            )[0]["statusCode"],
-            500,
-        )
-        self.assertEqual(
-            self._call(
-                {"albumId": ALBUM_ID},
-                record=album(),
-                list_effect=[{"Contents": "malformed"}],
-            )[0]["statusCode"],
-            500,
-        )
+        self.assertEqual(self._call({"albumId": "bad"}, record=album())[0]["statusCode"], 400)
+        for effect in (
+            client_error("AccessDenied", "ListObjectsV2"),
+            [{"Contents": []}, client_error("AccessDenied", "ListObjectsV2")],
+            [{"Contents": "malformed"}],
+        ):
+            self.assertEqual(self._call({"albumId": ALBUM_ID}, record=album(), list_effect=effect)[0]["statusCode"], 500)
 
 
 class WorkerZipBranchTests(unittest.TestCase):
@@ -541,12 +497,10 @@ class WorkerZipBranchTests(unittest.TestCase):
 
     def test_validated_album_id_share_missing_and_unavailable(self):
         with patch.object(worker_zip, "get_album_record", return_value=None):
-            with self.assertRaises(worker_zip.ValidationError):
-                worker_zip._validated_album({"albumId": ALBUM_ID})
+            self.assertIsNone(worker_zip._validated_album({"albumId": ALBUM_ID}))
         for record in (album(status="pending"), album(visibility="unknown")):
             with patch.object(worker_zip, "get_album_record", return_value=record):
-                with self.assertRaises(worker_zip.ValidationError):
-                    worker_zip._validated_album({"albumId": ALBUM_ID})
+                self.assertIsNone(worker_zip._validated_album({"albumId": ALBUM_ID}))
         active = album()
         with patch.object(worker_zip, "get_album_record", return_value=active):
             self.assertIs(worker_zip._validated_album({"albumId": ALBUM_ID}), active)
@@ -558,62 +512,6 @@ class WorkerZipBranchTests(unittest.TestCase):
         with self.assertRaises(worker_zip.ValidationError):
             worker_zip._validated_album({})
 
-    def test_handler_success_byte_object_and_type_quota_failures(self):
-        s3 = Mock()
-        s3.head_object.return_value = {"ContentLength": 4}
-        body = io.BytesIO(b"data")
-        s3.get_object.return_value = {"Body": body}
-        stream = MagicMock()
-        archive = MagicMock()
-        destination = MagicMock()
-        archive.__enter__.return_value.open.return_value = destination
-        destination.__enter__.return_value = destination
-        with patch.object(worker_zip, "s3", s3), patch.object(worker_zip, "_validated_album", return_value=album()), patch.object(
-            worker_zip, "StreamToS3", return_value=stream
-        ), patch.object(worker_zip.zipfile, "ZipFile", return_value=archive) as zip_file, patch.object(
-            worker_zip, "tag_keys_visibility"
-        ):
-            result = worker_zip.handler({"albumId": ALBUM_ID}, None)
-        self.assertEqual(result, {"status": "complete", "objectCount": 1, "totalBytes": 4})
-        stream.close.assert_called_once()
-        destination.write.assert_called_once_with(b"data")
-        zip_file.assert_called_once_with(
-            stream,
-            "w",
-            allowZip64=True,
-        )
-
-        for record, env in (
-            (album(type="audio"), {}),
-            (album(images=[]), {}),
-            (album(images=[{"rawKey": RAW_KEY}, {"rawKey": RAW_KEY_2}]), {"ZIP_MAX_OBJECTS": "1"}),
-        ):
-            with self.subTest(record=record), patch.object(worker_zip, "_validated_album", return_value=record), patch.dict(
-                os.environ, env, clear=False
-            ):
-                with self.assertRaises(worker_zip.ValidationError):
-                    worker_zip.handler({}, None)
-        with patch.object(worker_zip, "_validated_album", return_value=album()), patch.object(
-            worker_zip, "s3", s3
-        ), patch.dict(os.environ, {"ZIP_MAX_TOTAL_BYTES": "3"}):
-            with self.assertRaisesRegex(worker_zip.ValidationError, "byte quota"):
-                worker_zip.handler({}, None)
-
-    def test_handler_failure_cancels_stream_and_lock_cleanup_failures_do_not_mask(self):
-        s3 = Mock()
-        s3.head_object.return_value = {"ContentLength": 1}
-        s3.delete_object.side_effect = RuntimeError("cleanup")
-        stream = Mock()
-        stream.cancel.side_effect = RuntimeError("cancel")
-        with patch.object(worker_zip, "s3", s3), patch.object(worker_zip, "_validated_album", return_value=album()), patch.object(
-            worker_zip, "zip_keys", return_value=("zip", "lock")
-        ), patch.object(worker_zip, "StreamToS3", return_value=stream), patch.object(
-            worker_zip.zipfile, "ZipFile", side_effect=RuntimeError("archive")
-        ):
-            with self.assertRaisesRegex(RuntimeError, "archive"):
-                worker_zip.handler({}, None)
-        stream.cancel.assert_called_once()
-        s3.delete_object.assert_called_once()
 
 
 class TagMediaObjectBranchTests(unittest.TestCase):

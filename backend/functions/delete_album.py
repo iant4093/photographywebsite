@@ -59,7 +59,7 @@ def handler(event, context):
         # A metadata outage must not leave an anonymously readable derivative
         # behind while its album is deleted.
         preview_metadata = load_preview_metadata(album, strict=True)
-        prefixes = (*album_media_prefixes(album), f"temp-zips/{album_id}/")
+        prefixes = (*album_media_prefixes(album), f"temp-zips/{album_id}/", f"album-zips/{album_id}/")
         preflight_deletion(prefixes=prefixes)
         deleted_versions = 0
         for prefix in prefixes:

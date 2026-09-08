@@ -45,7 +45,9 @@ class ZipMediaCompressionTests(unittest.TestCase):
         s3.upload_part.side_effect = lambda **request: {"ETag": str(request["PartNumber"])}
         with patch.object(worker_zip, "s3", s3), patch.object(
             worker_zip, "_validated_album", return_value=record
-        ), patch.object(worker_zip, "tag_keys_visibility") as tag:
+        ), patch.object(worker_zip, "object_metadata", return_value=None), patch.object(
+            worker_zip, "_still_current", return_value=True
+        ), patch.object(worker_zip, "_prune_archives"):
             result = worker_zip.handler({"albumId": ALBUM_ID}, None)
 
         self.assertEqual(result, {
@@ -54,11 +56,11 @@ class ZipMediaCompressionTests(unittest.TestCase):
             "totalBytes": sum(len(value) for value in contents.values()),
         })
         self.assertGreater(s3.upload_part.call_count, 1)
-        parts = [call.kwargs["Body"] for call in s3.upload_part.call_args_list]
+        parts = [call.kwargs["Body"] for call in sorted(s3.upload_part.call_args_list, key=lambda call: call.kwargs["PartNumber"])]
         self.assertTrue(all(len(part) <= 8 * 1024 * 1024 for part in parts))
         s3.complete_multipart_upload.assert_called_once()
         s3.abort_multipart_upload.assert_not_called()
-        tag.assert_called_once()
+        self.assertEqual(s3.create_multipart_upload.call_args.kwargs["Tagging"], "visibility=private")
         self.assertTrue(all(body.closed for body in bodies.values()))
         self.assertTrue(all(size == 1024 * 1024 for body in bodies.values() for size in body.read_sizes))
 

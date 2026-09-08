@@ -1,5 +1,5 @@
 const ZIP_JOB_LIFETIME_MS = 15 * 60_000
-const DEFAULT_INTERVALS_MS = [5_000, 8_000, 12_000, 15_000, 20_000, 30_000]
+const DEFAULT_INTERVALS_MS = [1_000, 2_000, 3_000, 5_000, 10_000, 15_000]
 
 export class ZipJobError extends Error {
     constructor(message, { code = 'ZIP_FAILED', terminal = false } = {}) {
@@ -59,11 +59,12 @@ function defaultSleep(delayMs, signal) {
 }
 
 function responseDelay(response, attempt, intervals) {
+    const backoff = intervals[Math.min(attempt, intervals.length - 1)]
     const suggestedSeconds = Number(response?.retryAfterSeconds)
     if (Number.isFinite(suggestedSeconds) && suggestedSeconds > 0) {
-        return Math.min(Math.max(suggestedSeconds * 1000, 5_000), 60_000)
+        return Math.min(Math.max(suggestedSeconds * 1000, 1_000, backoff), 60_000)
     }
-    return intervals[Math.min(attempt, intervals.length - 1)]
+    return backoff
 }
 
 export async function pollZipJob({

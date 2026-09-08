@@ -691,7 +691,7 @@ class DeleteHandlerBranchTests(unittest.TestCase):
             self.assertIs(delete_album.handler({}, None), denied)
         self.assertEqual(self._delete_album(None)[0]["statusCode"], 404)
         response, table = self._delete_album(album())
-        self.assertEqual(response_body(response)["deletedObjectVersions"], 4)
+        self.assertEqual(response_body(response)["deletedObjectVersions"], 6)
         table.delete_item.assert_called_once()
         self.assertEqual(
             self._delete_album(album(), too_large=patch.object(delete_album, "preflight_deletion", side_effect=delete_album.DeletionTooLargeError()))[0]["statusCode"],

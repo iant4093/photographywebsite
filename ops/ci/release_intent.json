@@ -208,6 +208,19 @@
     {"logicalId": "OriginalComparisonWorkerFunctionOriginalComparisonJobs", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GetAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "GetSharedAlbumFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
-    {"logicalId": "GetAdminAlbumMediaFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true}
+    {"logicalId": "GetAdminAlbumMediaFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "ZipPreparationQueue", "resourceType": "AWS::SQS::Queue", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipPreparationDeadLetterQueue", "resourceType": "AWS::SQS::Queue", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipPreparationFailureAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipArchiveRefreshFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipArchiveRefreshFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipArchiveRefreshFunctionAlbumsChanged", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipArchiveRefreshFunctionReconcileArchives", "resourceType": "AWS::Events::Rule", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "ZipArchiveRefreshFunctionReconcileArchivesPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "WorkerZipFunctionArchiveJobs", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "WorkerZipFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "ZipArchiveRefreshFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
+    {"logicalId": "ZipPreparationFailureAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
+    {"logicalId": "DeleteUserFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true}
   ]
 }

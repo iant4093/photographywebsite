@@ -61,7 +61,7 @@ def handler(event, context):
             album_id = validate_uuid(album.get("albumId", ""))
             record = dict(album)
             record["albumId"] = album_id
-            prefixes = (*album_media_prefixes(record), f"temp-zips/{album_id}/")
+            prefixes = (*album_media_prefixes(record), f"temp-zips/{album_id}/", f"album-zips/{album_id}/")
             deletion_targets.extend(prefixes)
             validated_albums.append((record, prefixes))
         # Bound the entire cascade before deleting the first byte. This avoids
