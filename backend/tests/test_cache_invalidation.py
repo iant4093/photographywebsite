@@ -1,6 +1,7 @@
 """Unit coverage for narrow public CloudFront invalidations."""
 
 import os
+import json
 import unittest
 from unittest.mock import Mock, patch
 
@@ -157,9 +158,44 @@ class CacheInvalidationTests(unittest.TestCase):
         invalidate.assert_called_once_with(
             album_ids={ALBUM_ID},
             catalog=True,
+            random_photos=False,
             reason="batched-public-mutation",
             strict=True,
         )
+
+    def test_random_photo_queue_message_purges_only_random_photo_paths(self):
+        queue = Mock()
+        with patch.dict(os.environ, {
+            "CACHE_INVALIDATION_QUEUE_URL": "https://sqs.test/cache",
+            "FRONTEND_DISTRIBUTION_ID": "frontend",
+        }), patch.object(cache_invalidation, "_queue_client", return_value=queue), patch.object(
+            cache_invalidation, "_client", return_value=self.client
+        ):
+            cache_invalidation.request_public_api_invalidation(random_photos=True)
+            body = queue.send_message.call_args.kwargs["MessageBody"]
+            self.assertIs(json.loads(body)["catalog"], False)
+            result = cache_invalidation_worker.handler({"Records": [{"body": body}]}, None)
+        self.assertTrue(result["invalidated"])
+        self.assertEqual(self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"], {
+            "Quantity": 2,
+            "Items": ["/api/public/random-photos", "/api/public/random-photos?*"],
+        })
+
+    def test_random_photo_synchronous_fallback_and_mixed_batch_preserve_scope(self):
+        with patch.dict(os.environ, {
+            "CACHE_INVALIDATION_QUEUE_URL": "", "FRONTEND_DISTRIBUTION_ID": "frontend",
+        }), patch.object(cache_invalidation, "_client", return_value=self.client):
+            cache_invalidation.request_public_api_invalidation(random_photos=True)
+            self.assertEqual(self.client.create_invalidation.call_args.kwargs[
+                "InvalidationBatch"]["Paths"]["Quantity"], 2)
+            cache_invalidation_worker.handler({"Records": [
+                {"body": json.dumps({"version": 1, "randomPhotos": True})},
+                {"body": json.dumps({"version": 1, "catalog": True, "albumId": ALBUM_ID})},
+            ]}, None)
+        paths = self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"]
+        self.assertEqual(paths["Quantity"], 7)
+        self.assertIn(f"/api/public/albums/{ALBUM_ID}", paths["Items"])
+        self.assertIn("/api/public/explore?*", paths["Items"])
 
 
 if __name__ == "__main__":

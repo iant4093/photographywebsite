@@ -73,7 +73,7 @@ def _create_invalidation(distribution_id, paths, reason, *, strict):
         return False
 
 
-def invalidate_public_api_batch(*, album_ids=None, catalog=False, reason="public-album", strict=False):
+def invalidate_public_api_batch(*, album_ids=None, catalog=False, random_photos=False, reason="public-album", strict=False):
     """Invalidate anonymous representations in one bounded provider request."""
     paths = []
     if catalog:
@@ -82,6 +82,9 @@ def invalidate_public_api_batch(*, album_ids=None, catalog=False, reason="public
             "/api/public/albums?*",
             "/api/public/explore",
             "/api/public/explore?*",
+        ))
+    if catalog or random_photos:
+        paths.extend((
             "/api/public/random-photos",
             "/api/public/random-photos?*",
         ))
@@ -94,17 +97,18 @@ def invalidate_public_api_batch(*, album_ids=None, catalog=False, reason="public
     return _create_invalidation(distribution_id, paths, reason, strict=strict)
 
 
-def invalidate_public_api(*, album_id=None, catalog=False, reason="public-album", strict=False):
+def invalidate_public_api(*, album_id=None, catalog=False, random_photos=False, reason="public-album", strict=False):
     """Synchronously invalidate only anonymous API representations."""
     return invalidate_public_api_batch(
         album_ids=[album_id] if album_id else [],
         catalog=catalog,
+        random_photos=random_photos,
         reason=reason,
         strict=strict,
     )
 
 
-def request_public_api_invalidation(*, album_id=None, catalog=False, reason="public-album"):
+def request_public_api_invalidation(*, album_id=None, catalog=False, random_photos=False, reason="public-album"):
     """Queue non-security cache work so an admin write returns immediately.
 
     Deployments without the queue retain the former synchronous behavior,
@@ -116,6 +120,7 @@ def request_public_api_invalidation(*, album_id=None, catalog=False, reason="pub
         return invalidate_public_api(
             album_id=validated_album_id,
             catalog=catalog,
+            random_photos=random_photos,
             reason=reason,
         )
     try:
@@ -125,6 +130,7 @@ def request_public_api_invalidation(*, album_id=None, catalog=False, reason="pub
                 "version": 1,
                 "albumId": validated_album_id,
                 "catalog": bool(catalog),
+                "randomPhotos": bool(random_photos),
                 "reason": str(reason)[:64],
             }, separators=(",", ":")),
         )

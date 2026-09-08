@@ -41,6 +41,29 @@ Review actual costs daily during the first week after enabling a new paid
 service and monthly afterward. Cost pressure never authorizes disabling
 logging, detection, backup, WAF, rollback access, or evidence retention.
 
+## Random-photo cache costs
+
+The hourly random-photo reconciliation compares a stable digest of public photo
+membership, categories, and validated preview data. Shuffle order is excluded.
+It reuses a complete unchanged generation without DynamoDB writes or CloudFront
+invalidations; the reader still rotates its sample every five minutes. Missing
+metadata or shards, legacy generations without digests, and incomplete prior
+publications trigger a rebuild. Inventory reads are strongly consistent, and
+obsolete generations are removed only after new shards and metadata publish.
+
+Changed decks enqueue only the two random-photo API paths, including query-string
+variants. The existing worker coalesces these with any pending album/catalog
+changes. Privacy and visibility-revocation invalidations retain their synchronous
+media and public API paths. The optional `randomPhotos` field extends the existing
+queue message format; during a mixed-version rollout or rollback, old consumers
+can omit that refresh, with staleness bounded by the existing public API cache TTL.
+
+The first deployment rebuilds legacy decks once to establish digests. Verify a
+subsequent unchanged invocation reports `changed=false` and creates no invalidation.
+Before this change, the hourly job submitted six paths per run: 4,320 paths in a
+30-day month, or $16.60 after the shared 1,000-path free allowance, excluding other
+invalidation activity. This is an avoided-usage estimate, not a guaranteed bill.
+
 ## Admin cost report
 
 The protected `/admin/costs` page provides an account-wide Cost Explorer

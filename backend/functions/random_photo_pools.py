@@ -153,8 +153,84 @@ def _shard_previews(references, previews):
     return selected
 
 
+def _content_digest(pools, previews):
+    """Ignore shuffle/order while tracking membership, categories and derivatives."""
+    content = [
+        [pool_id(category), [
+            [reference, previews.get(reference)] for reference in sorted(references)
+        ]]
+        for category, references in sorted(pools.items(), key=lambda entry: pool_id(entry[0]))
+    ]
+    return hashlib.sha256(json.dumps(
+        [POOL_SCHEMA_VERSION, PREVIEW_VERSION, content],
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
+
+
+def _pool_inventory(table):
+    fields = ("mediaId", "recordType", "schemaVersion", "poolId", "generation",
+              "category", "totalPhotos", "shardSize", "shardCount", "contentDigest",
+              "shardIndex")
+    items = {}
+    cursor = None
+    while True:
+        query = {
+            "KeyConditionExpression": "albumId = :partition",
+            "ExpressionAttributeValues": {":partition": POOL_PARTITION},
+            "ProjectionExpression": ", ".join(f"#f{i}" for i in range(len(fields))),
+            "ExpressionAttributeNames": {f"#f{i}": field for i, field in enumerate(fields)},
+            "ConsistentRead": True,
+        }
+        if cursor:
+            query["ExclusiveStartKey"] = cursor
+        response = table.query(**query)
+        for item in response.get("Items", []):
+            if isinstance(item, dict) and isinstance(item.get("mediaId"), str):
+                items[item["mediaId"]] = item
+        cursor = response.get("LastEvaluatedKey")
+        if not cursor:
+            return items
+
+
+def _unchanged_generation(existing, pools, digest):
+    expected_keys = set()
+    generations = set()
+    for category, references in pools.items():
+        meta_key = metadata_sort_key(category)
+        item = existing.get(meta_key)
+        valid = _valid_metadata(item, category)
+        if (valid is None or item.get("contentDigest") != digest
+                or valid["totalPhotos"] != len(references)):
+            return None
+        generations.add(valid["generation"])
+        expected_keys.add(meta_key)
+        for index in range(valid["shardCount"]):
+            key = shard_sort_key(valid["poolId"], valid["generation"], index)
+            shard = existing.get(key, {})
+            if (shard.get("recordType") != POOL_SHARD_RECORD_TYPE
+                    or shard.get("schemaVersion") != POOL_SCHEMA_VERSION
+                    or shard.get("poolId") != valid["poolId"]
+                    or shard.get("generation") != valid["generation"]
+                    or shard.get("shardIndex") != index):
+                return None
+            expected_keys.add(key)
+    if len(generations) == 1 and expected_keys == set(existing):
+        return generations.pop()
+    return None
+
+
 def replace_materialized_pools(table, pools, *, generation=None, generated_at=None, previews=None):
-    """Publish new immutable shards, switch metadata, then delete old shards."""
+    """Reuse complete unchanged decks; otherwise publish, switch, then clean up."""
+    existing = _pool_inventory(table)
+    digest = _content_digest(pools, previews or {})
+    unchanged_generation = _unchanged_generation(existing, pools, digest)
+    if unchanged_generation:
+        return {
+            "generation": unchanged_generation,
+            "poolCount": len(pools),
+            "totalPhotos": len(pools.get(None, [])),
+            "changed": False,
+        }
     generation = generation or secrets.token_hex(8)
     if not GENERATION_PATTERN.fullmatch(generation):
         raise ValueError("generation must be 16 lowercase hexadecimal characters")
@@ -197,33 +273,14 @@ def replace_materialized_pools(table, pools, *, generation=None, generated_at=No
                 "shardSize": POOL_SHARD_SIZE,
                 "shardCount": shard_count,
                 "generatedAt": generated_at,
+                "contentDigest": digest,
             })
 
     # Each metadata write is the atomic pointer switch for one complete deck.
     for item in metadata_items:
         table.put_item(Item=item)
 
-    existing_keys = set()
-    cursor = None
-    while True:
-        query = {
-            "KeyConditionExpression": "albumId = :partition",
-            "ExpressionAttributeValues": {":partition": POOL_PARTITION},
-            "ProjectionExpression": "mediaId",
-        }
-        if cursor:
-            query["ExclusiveStartKey"] = cursor
-        response = table.query(**query)
-        existing_keys.update(
-            item.get("mediaId")
-            for item in response.get("Items", [])
-            if isinstance(item, dict) and isinstance(item.get("mediaId"), str)
-        )
-        cursor = response.get("LastEvaluatedKey")
-        if not cursor:
-            break
-
-    stale_keys = sorted(existing_keys - desired_keys)
+    stale_keys = sorted(set(existing) - desired_keys)
     if stale_keys:
         with table.batch_writer() as batch:
             for sort_key in stale_keys:
@@ -232,6 +289,7 @@ def replace_materialized_pools(table, pools, *, generation=None, generated_at=No
         "generation": generation,
         "poolCount": len(metadata_items),
         "totalPhotos": len(pools.get(None, [])),
+        "changed": True,
     }
 
 

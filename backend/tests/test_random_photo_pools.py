@@ -1,4 +1,5 @@
 import datetime as dt
+from copy import deepcopy
 import unittest
 from unittest.mock import MagicMock
 
@@ -159,7 +160,7 @@ class RandomPhotoPoolTests(unittest.TestCase):
 
         self.assertEqual(
             result,
-            {"generation": generation, "poolCount": 1, "totalPhotos": 300},
+            {"generation": generation, "poolCount": 1, "totalPhotos": 300, "changed": True},
         )
         self.assertEqual(batch.put_item.call_count, 2)
         metadata = table.put_item.call_args.kwargs["Item"]
@@ -252,6 +253,111 @@ class RandomPhotoPoolTests(unittest.TestCase):
         from random_photo_pools import _shard_previews
         preview = {"previewKeys": {"640": "x" * MAX_SHARD_PREVIEW_BYTES}}
         self.assertEqual(_shard_previews(["ref"], {"ref": preview}), {})
+
+    def _stored_decks(self):
+        table = MagicMock()
+        table.name = "previews"
+        stored = {}
+        batch = table.batch_writer.return_value.__enter__.return_value
+        batch.put_item.side_effect = lambda *, Item: stored.update({Item["mediaId"]: deepcopy(Item)})
+        table.put_item.side_effect = batch.put_item.side_effect
+        batch.delete_item.side_effect = lambda *, Key: stored.pop(Key["mediaId"], None)
+        table.query.side_effect = lambda **kwargs: {"Items": deepcopy(list(stored.values()))}
+        refs = [f"{ALBUM_ID}:{index:024x}" for index in range(300)]
+        pools = {None: refs, "Birding": refs[:]}
+        return table, batch, stored, pools
+
+    def test_unchanged_content_ignores_shuffle_and_avoids_all_writes(self):
+        table, batch, stored, pools = self._stored_decks()
+        first = replace_materialized_pools(table, pools, generation="0123456789abcdef")
+        snapshot = deepcopy(stored)
+        table.reset_mock()
+        batch.reset_mock()
+        reordered = {key: list(reversed(value)) for key, value in reversed(list(pools.items()))}
+        second = replace_materialized_pools(table, reordered)
+        self.assertEqual(second, {**first, "changed": False})
+        self.assertEqual(stored, snapshot)
+        table.put_item.assert_not_called()
+        table.batch_writer.assert_not_called()
+        self.assertTrue(table.query.call_args.kwargs["ConsistentRead"])
+
+        table.get_item.side_effect = lambda *, Key, **kwargs: {"Item": stored.get(Key["mediaId"])}
+        resource = MagicMock()
+        resource.batch_get_item.side_effect = lambda *, RequestItems: {"Responses": {
+            table.name: [stored[key["mediaId"]] for key in RequestItems[table.name]["Keys"]]
+        }}
+        samples = [load_pool_references(table, resource, now=300 * window)["references"]
+                   for window in range(3)]
+        self.assertTrue(any(sample != samples[0] for sample in samples[1:]))
+
+    def test_membership_category_and_preview_changes_republish(self):
+        for change in ("membership", "category", "preview", "removed-preview", "empty"):
+            with self.subTest(change=change):
+                table, batch, stored, pools = self._stored_decks()
+                reference = pools[None][0]
+                previews = {reference: {"previewVersion": PREVIEW_VERSION, "previewKeys": {"640": "old"}}}
+                first = replace_materialized_pools(table, pools, previews=previews)
+                if change == "membership":
+                    pools = {key: values[1:] for key, values in pools.items()}
+                elif change == "category":
+                    pools["Hikes"] = pools.pop("Birding")
+                elif change == "preview":
+                    previews[reference]["previewKeys"]["640"] = "new"
+                elif change == "removed-preview":
+                    previews = {}
+                else:
+                    pools = {None: []}
+                second = replace_materialized_pools(table, pools, previews=previews)
+                self.assertTrue(second["changed"])
+                self.assertNotEqual(first["generation"], second["generation"])
+                self.assertFalse(replace_materialized_pools(table, pools, previews=previews)["changed"])
+                self.assertTrue(all(item["generation"] == second["generation"] for item in stored.values()))
+
+    def test_incomplete_legacy_and_stale_decks_are_repaired(self):
+        for damage in ("missing-shard", "missing-meta", "legacy", "invalid-shard", "stale"):
+            with self.subTest(damage=damage):
+                table, batch, stored, pools = self._stored_decks()
+                first = replace_materialized_pools(table, pools)
+                shard_key = shard_sort_key(pool_id(None), first["generation"], 0)
+                if damage == "missing-shard":
+                    stored.pop(shard_key)
+                elif damage == "missing-meta":
+                    stored.pop(metadata_sort_key("Birding"))
+                elif damage == "legacy":
+                    stored[metadata_sort_key(None)].pop("contentDigest")
+                elif damage == "invalid-shard":
+                    stored[shard_key]["schemaVersion"] = 0
+                else:
+                    stored["orphan"] = {"mediaId": "orphan"}
+                self.assertTrue(replace_materialized_pools(table, pools)["changed"])
+                self.assertFalse(replace_materialized_pools(table, pools)["changed"])
+
+    def test_inventory_pagination_and_partial_publication_retry(self):
+        table, batch, stored, pools = self._stored_decks()
+        replace_materialized_pools(table, pools)
+        items = deepcopy(list(stored.values()))
+        table.query.side_effect = [
+            {"Items": items[:2], "LastEvaluatedKey": {"mediaId": "cursor"}},
+            {"Items": items[2:]},
+        ]
+        self.assertFalse(replace_materialized_pools(table, pools)["changed"])
+        self.assertEqual(table.query.call_args.kwargs["ExclusiveStartKey"], {"mediaId": "cursor"})
+        table.query.side_effect = lambda **kwargs: {"Items": deepcopy(list(stored.values()))}
+        pools[None] = pools[None][1:]
+        save = batch.put_item.side_effect
+        writes = 0
+        def fail_second_metadata(*, Item):
+            nonlocal writes
+            writes += 1
+            if writes == 2:
+                raise RuntimeError("interrupted publication")
+            save(Item=Item)
+        table.put_item.side_effect = fail_second_metadata
+        with self.assertRaises(RuntimeError):
+            replace_materialized_pools(table, pools)
+        table.put_item.side_effect = save
+        self.assertTrue(replace_materialized_pools(table, pools)["changed"])
+        self.assertFalse(replace_materialized_pools(table, pools)["changed"])
 
 
 if __name__ == "__main__":

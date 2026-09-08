@@ -74,10 +74,11 @@ def handler(event, context):
     previews = build_pool_previews(albums, metadata)
     result = replace_materialized_pools(preview_table, pools, previews=previews)
     logger.info(
-        "random_photo_pools_refreshed pool_count=%d total_photos=%d",
+        "random_photo_pools_refreshed pool_count=%d total_photos=%d changed=%s",
         result["poolCount"],
         result["totalPhotos"],
+        result["changed"],
     )
-    if os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip():
-        request_public_api_invalidation(catalog=True, reason="random-photo-pool-refreshed")
+    if result["changed"] and os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip():
+        request_public_api_invalidation(random_photos=True, reason="random-photo-pool-refreshed")
     return result
