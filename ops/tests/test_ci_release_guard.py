@@ -335,7 +335,7 @@ class ReleaseIntentTests(unittest.TestCase):
             self.assertEqual(rule["action"], "Modify")
             expected_paths = (
                 ["ManagedPolicyArns", "Policies"]
-                if rule["logicalId"] == "RandomPhotoPoolBuilderFunctionRole"
+                if rule["logicalId"] in {"RandomPhotoPoolBuilderFunctionRole", "WorkerZipFunctionRole"}
                 else ["Policies"]
             )
             self.assertEqual(rule["propertyPaths"], expected_paths)
