@@ -141,6 +141,16 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         }, 150 * playAttempts)
     }
 
+    const confirmPlayback = () => {
+        if (!active || !video || video.paused || video.ended || playing) return
+        playing = true
+        onPlaybackStart?.()
+        later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
+        window.requestAnimationFrame(() => {
+            if (active && video) video.style.opacity = '1'
+        })
+    }
+
     const play = async () => {
         if (!active || !mediaReady || !video || video.ended) return
         // A request can remain pending (or have resolved) after the browser
@@ -165,16 +175,10 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
                 retryPlayback()
                 return
             }
-            if (!playing) {
-                playing = true
-                onPlaybackStart?.()
-                later(() => cleanup(true), VIDEO_HOVER_DURATION_MS)
-            }
-            window.requestAnimationFrame(() => {
-                if (active && video) video.style.opacity = '1'
-            })
+            confirmPlayback()
         } catch (error) {
             if (!active || request !== playRequest) return
+            if (playing && !video?.paused) return
             // Rapid hover changes can interrupt startup more than once. Retry
             // when media becomes ready, with a bounded backoff as a fallback.
             // Policy denials and real stream failures still stop the preview.
@@ -231,8 +235,33 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         })
         listen(video, 'canplay', () => { void play() })
         listen(video, 'seeked', () => { void play() })
+        // Actual playback can start before the browser settles play(). Do not
+        // leave a running preview hidden while waiting for that promise.
+        listen(video, 'playing', confirmPlayback)
+        let lastTime = selected.startTime
+        listen(video, 'timeupdate', () => {
+            const currentTime = video.currentTime
+            if (!video.seeking && video.readyState >= 2 && currentTime > Math.max(lastTime, selected.startTime) + 0.01) {
+                confirmPlayback()
+            }
+            lastTime = currentTime
+        })
 
-        if (nativeHls) {
+        // Prefer the managed HLS path, including on Safari. Native capability
+        // detection alone does not guarantee reliable cold/rapid-hover startup.
+        let Hls
+        try {
+            Hls = (await loadHlsModule()).default
+        } catch {
+            // Native HLS remains available if the optional runtime cannot load.
+        }
+        if (!active || !video) return
+
+        if (!Hls?.isSupported()) {
+            if (!nativeHls) {
+                fail()
+                return
+            }
             // Let Safari apply the cover position when its native HLS player
             // is ready; seeking from loadedmetadata can interrupt startup.
             const source = selected.hlsUrl.split('#', 1)[0]
@@ -246,12 +275,6 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         }
 
         try {
-            const { default: Hls } = await loadHlsModule()
-            if (!active || !video) return
-            if (!Hls.isSupported()) {
-                fail()
-                return
-            }
             hls = new Hls({
                 debug: false,
                 capLevelToPlayerSize: true,

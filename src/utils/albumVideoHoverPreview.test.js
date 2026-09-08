@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const hlsInstances = vi.hoisted(() => [])
+const hlsSupported = vi.hoisted(() => vi.fn(() => true))
 vi.mock('hls.js', () => ({
     default: class Hls {
         static Events = { ERROR: 'error', MANIFEST_PARSED: 'manifestParsed' }
-        static isSupported = () => true
+        static isSupported = hlsSupported
         constructor(config) {
             this.config = config
             this.handlers = {}
@@ -32,6 +33,7 @@ function setPaused(video, paused) {
 describe('video album hover previews', () => {
     beforeEach(() => {
         hlsInstances.length = 0
+        hlsSupported.mockReturnValue(false)
         vi.useFakeTimers()
         window.matchMedia = vi.fn((query) => ({
             matches: query.includes('(hover: hover)'),
@@ -78,6 +80,7 @@ describe('video album hover previews', () => {
     })
 
     it.each(['native', 'HLS.js'])('does not allocate streams while rapidly crossing cards with %s', async (runtime) => {
+        hlsSupported.mockReturnValue(runtime === 'HLS.js')
         HTMLMediaElement.prototype.canPlayType.mockReturnValue(runtime === 'native' ? 'maybe' : '')
         const firstContainer = document.createElement('div')
         const secondContainer = document.createElement('div')
@@ -182,6 +185,25 @@ describe('video album hover previews', () => {
         expect(container.querySelector('video')?.src).toBe('https://media.test/hls/summary.m3u8#t=3')
     })
 
+    it('cleans up when neither HLS.js nor native HLS is supported', async () => {
+        HTMLMediaElement.prototype.canPlayType.mockReturnValue('')
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        await vi.dynamicImportSettled()
+        expect(container.querySelector('video')).toBeNull()
+        expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
+        expect(hlsInstances).toHaveLength(0)
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+        controller.stop()
+    })
+
     it('requests native playback before cold-stream metadata arrives', async () => {
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
@@ -280,6 +302,7 @@ describe('video album hover previews', () => {
         ['HLS.js', 'resolve'],
         ['HLS.js', 'reject'],
     ])('ignores old %s play promises that %s after rapidly returning to a card', async (runtime, settlement) => {
+        hlsSupported.mockReturnValue(runtime === 'HLS.js')
         HTMLMediaElement.prototype.canPlayType.mockReturnValue(runtime === 'native' ? 'maybe' : '')
         const pending = []
         const pendingPlayback = function () {
@@ -350,8 +373,96 @@ describe('video album hover previews', () => {
         finalHover.stop()
     })
 
-    it('starts HLS.js playback when its manifest arrives after the hover delay', async () => {
-        HTMLMediaElement.prototype.canPlayType.mockReturnValue('')
+    it.each(['resolve', 'AbortError', 'NotAllowedError'])('reveals native playing events and ignores late play promise %s', async (settlement) => {
+        let resolvePlayback
+        let rejectPlayback
+        HTMLMediaElement.prototype.play.mockImplementationOnce(function () {
+            setPaused(this, false)
+            return new Promise((resolve, reject) => {
+                resolvePlayback = resolve
+                rejectPlayback = reject
+            })
+        })
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const onPlaybackEnd = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8', coverThumbnailTime: 5 },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+            onPlaybackEnd,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS + 1000)
+        const video = container.querySelector('video')
+        expect(video.style.opacity).toBe('0')
+
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 3 })
+        video.dispatchEvent(new Event('playing'))
+        await Promise.resolve()
+        expect(video.style.opacity).toBe('1')
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+
+        await vi.advanceTimersByTimeAsync(1000)
+        if (settlement === 'resolve') resolvePlayback()
+        else rejectPlayback(new DOMException('Playback promise settled after playing', settlement))
+        await Promise.resolve()
+        expect(container.querySelector('video')).toBe(video)
+        expect(video.style.opacity).toBe('1')
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(onPlaybackEnd).not.toHaveBeenCalled()
+
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DURATION_MS - 1001)
+        expect(container.querySelector('video')).toBe(video)
+        expect(hlsInstances).toHaveLength(0)
+        video.dispatchEvent(new Event('playing'))
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        await vi.advanceTimersByTimeAsync(1)
+        expect(container.querySelector('video')).toBeNull()
+        expect(onPlaybackEnd).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it.each([true, false])('ignores a cover-position time update with seeking=%s before recognizing playback', async (seeking) => {
+        HTMLMediaElement.prototype.play.mockImplementationOnce(function () {
+            setPaused(this, false)
+            return new Promise(() => {})
+        })
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8', coverThumbnailTime: 5 },
+            loadDetail: vi.fn(),
+            onPlaybackStart,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 3 })
+        video.dispatchEvent(new Event('timeupdate'))
+        expect(video.currentTime).toBe(0)
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+        Object.defineProperty(video, 'seeking', { configurable: true, value: seeking })
+        video.currentTime = 5
+        video.dispatchEvent(new Event('timeupdate'))
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+        expect(video.style.opacity).toBe('0')
+
+        Object.defineProperty(video, 'seeking', { configurable: true, value: false })
+        video.currentTime = 5.25
+        video.dispatchEvent(new Event('timeupdate'))
+        await Promise.resolve()
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        expect(video.style.opacity).toBe('1')
+        await vi.advanceTimersByTimeAsync(3000)
+        expect(hlsInstances).toHaveLength(0)
+        expect(container.querySelector('video')).toBe(video)
+        controller.stop()
+    })
+
+    it.each(['maybe', ''])('prefers supported HLS.js when native canPlayType returns %s', async (nativeSupport) => {
+        hlsSupported.mockReturnValue(true)
+        HTMLMediaElement.prototype.canPlayType.mockReturnValue(nativeSupport)
         const container = document.createElement('div')
         const onPlaybackStart = vi.fn()
         const controller = start({
