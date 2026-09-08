@@ -5,6 +5,7 @@ import logging
 import os
 
 import boto3
+import drive_backup_jobs
 
 from audit_helpers import actor_context, emit_audit_event
 from album_media_store import append_album_media, deactivate_album_media
@@ -81,16 +82,18 @@ def handler(event, context):
             else:
                 _start_video_jobs(fresh_images)
 
-            table.update_item(
+            drive_backup_jobs.update_album(
+                table, album,
                 Key={"albumId": album_id},
                 UpdateExpression=(
                     "SET images = list_append(if_not_exists(images, :empty), :images), "
                     "imageCount = if_not_exists(imageCount, :existing_count) + :added"
                 ),
-                ConditionExpression="attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active)",
+                ConditionExpression="attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) AND (attribute_not_exists(images) OR images = :previous_images)",
                 ExpressionAttributeNames={"#status": "status"},
                 ExpressionAttributeValues={
                     ":empty": [],
+                    ":previous_images": existing_images,
                     ":images": fresh_images,
                     ":existing_count": len(existing_images),
                     ":added": len(fresh_images),
@@ -123,7 +126,7 @@ def handler(event, context):
         # The durable album setting is authoritative. A per-request value must
         # neither disable required backup nor opt an album into backup.
         backup_to_drive = album.get("backupToGoogleDrive") is True
-        if backup_to_drive and fresh_images and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
+        if backup_to_drive and fresh_images and not drive_backup_jobs.state_table() and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
             try:
                 boto3.client("lambda").invoke(
                     FunctionName=os.environ["GOOGLE_DRIVE_SYNC_FUNCTION_NAME"],
@@ -163,6 +166,8 @@ def handler(event, context):
                 include_internal=True,
             ),
         })
+    except drive_backup_jobs.DriveBackupBusy as error:
+        return error_response(409, str(error), code="backup_busy")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_media")
         return error_response(400, str(error), code="invalid_images")

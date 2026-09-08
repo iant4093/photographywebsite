@@ -851,3 +851,18 @@ export function fetchPhotographyStats(options = {}) {
         signal: options.signal,
     }, { timeoutMs: 15_000, retries: 1 })
 }
+
+// Backup metadata stays on a separate admin-only endpoint.
+export function fetchDriveBackupStatus(token, albumIds, options = {}) {
+    return apiFetch('/admin/drive-backups', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ albumIds }), signal: options.signal,
+    })
+}
+
+export function retryDriveBackup(token, albumId) {
+    return apiFetch('/admin/drive-backups', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ albumIds: [albumId], action: 'retry' }),
+    })
+}

@@ -4,6 +4,7 @@ import os
 import logging
 
 import boto3
+import drive_backup_jobs
 
 from audit_helpers import actor_context, emit_audit_event
 from album_media_store import delete_album_media
@@ -47,6 +48,9 @@ def handler(event, context):
     denied = require_admin(event)
     if denied:
         return denied
+    retaining = False
+    deleted = False
+    album_id = None
     try:
         album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
         album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
@@ -61,6 +65,7 @@ def handler(event, context):
         preview_metadata = load_preview_metadata(album, strict=True)
         prefixes = (*album_media_prefixes(album), f"temp-zips/{album_id}/", f"album-zips/{album_id}/")
         preflight_deletion(prefixes=prefixes)
+        retaining = drive_backup_jobs.begin_retention(album)
         deleted_versions = 0
         for prefix in prefixes:
             deleted_versions += delete_prefix_all_versions(prefix)
@@ -78,6 +83,7 @@ def handler(event, context):
             Key={"albumId": album_id},
             ConditionExpression="attribute_exists(albumId)",
         )
+        deleted = True
         try:
             delete_album_media(album_id)
         except Exception as error:
@@ -104,6 +110,8 @@ def handler(event, context):
             "Album is too large for synchronous deletion; use the maintenance deletion workflow",
             code="deletion_too_large",
         )
+    except drive_backup_jobs.DriveBackupBusy as error:
+        return error_response(409, str(error), code="backup_busy")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_request")
         return error_response(400, str(error), code="invalid_request")
@@ -113,3 +121,7 @@ def handler(event, context):
     except Exception as error:
         _audit(event, context, "failure", "unexpected_error")
         return internal_error(context, error, "delete_album")
+
+    finally:
+        if retaining:
+            drive_backup_jobs.end_retention(album_id, deleted)
