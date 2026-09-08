@@ -1032,6 +1032,7 @@ export default function Editor() {
                     <div
                         ref={stageRef}
                         className={`editor-stage${isDragging ? ' is-dragging' : ''}${zoom !== 'fit' ? ' is-zoomed' : ''}${isPanning ? ' is-panning' : ''}`}
+                        data-camera-cursor={isPanning ? 'native' : undefined}
                         onDragEnter={(event) => { event.preventDefault(); setIsDragging(true) }}
                         onDragOver={(event) => event.preventDefault()}
                         onDragLeave={(event) => { if (event.currentTarget === event.target) setIsDragging(false) }}
@@ -1084,6 +1085,7 @@ export default function Editor() {
                         ) : (
                             <div
                                 className="editor-canvas-transform"
+                                data-camera-cursor="native"
                                 style={{
                                     width: `${displaySize.width}px`,
                                     height: `${displaySize.height}px`,

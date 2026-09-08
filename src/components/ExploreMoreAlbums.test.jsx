@@ -77,12 +77,12 @@ describe('ExploreMoreAlbums', () => {
         expect(api.fetchAlbumsPage).toHaveBeenNthCalledWith(2, {
             visibility: 'public', type: 'photo', limit: 100, cursor: 'next-page',
         }, { signal: expect.any(AbortSignal) })
-        expect(screen.queryByRole('heading', { name: 'Explore more' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('heading', { name: 'Explore More' })).not.toBeInTheDocument()
         expect(Math.random).not.toHaveBeenCalled()
 
         await act(async () => laterPage.resolve({ items: [album('last-page')], nextCursor: null }))
 
-        expect(screen.getByRole('region', { name: 'Explore more' })).toBeInTheDocument()
+        expect(screen.getByRole('region', { name: 'Explore More' })).toBeInTheDocument()
         expect(cardRoutes()).toHaveLength(3)
         expect(cardRoutes()).toContain('/album/last-page')
         expect(cardRoutes()).not.toContain('/album/current')
@@ -108,7 +108,7 @@ describe('ExploreMoreAlbums', () => {
 
         expect(cardRoutes()).toHaveLength(Math.min(3, count))
         for (const route of cardRoutes()) expect(route).toMatch(/^\/album\/peer-/)
-        expect(Boolean(screen.queryByRole('region', { name: 'Explore more' }))).toBe(count > 0)
+        expect(Boolean(screen.queryByRole('region', { name: 'Explore More' }))).toBe(count > 0)
         expect(api.fetchAlbumsPage).not.toHaveBeenCalled()
     })
 
@@ -168,7 +168,7 @@ describe('ExploreMoreAlbums', () => {
         const items = [album('current'), ...['one', 'two', 'three', 'four'].map((id) => album(id))]
         setCatalogSnapshot('public-photos', { items, nextCursor: null })
         const { rerender } = render(view(album('current')))
-        await screen.findByRole('region', { name: 'Explore more' })
+        await screen.findByRole('region', { name: 'Explore More' })
         const originalRoutes = cardRoutes()
         const randomCalls = Math.random.mock.calls.length
 
@@ -186,12 +186,12 @@ describe('ExploreMoreAlbums', () => {
             nextCursor: null,
         })
         const firstVisit = render(view(album('current')))
-        await screen.findByRole('region', { name: 'Explore more' })
+        await screen.findByRole('region', { name: 'Explore More' })
         const firstRoutes = cardRoutes().sort()
         firstVisit.unmount()
 
         render(view(album('current')))
-        await screen.findByRole('region', { name: 'Explore more' })
+        await screen.findByRole('region', { name: 'Explore More' })
 
         expect(cardRoutes()).toHaveLength(3)
         expect(cardRoutes().sort()).not.toEqual(firstRoutes)
@@ -212,7 +212,7 @@ describe('ExploreMoreAlbums', () => {
 
         expect(oldSignal.aborted).toBe(true)
         expect(cardRoutes()).toEqual([])
-        expect(screen.queryByRole('region', { name: 'Explore more' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('region', { name: 'Explore More' })).not.toBeInTheDocument()
         await act(async () => nextPage.resolve({
             items: [album('new-peer', { category: 'Portraits' })], nextCursor: null,
         }))
@@ -248,7 +248,7 @@ describe('ExploreMoreAlbums', () => {
         await act(async () => { render(view(album('current'))) })
 
         expect(api.fetchAlbumsPage).toHaveBeenCalledOnce()
-        expect(screen.queryByRole('region', { name: 'Explore more' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('region', { name: 'Explore More' })).not.toBeInTheDocument()
         expect(cardRoutes()).toEqual([])
     })
 

@@ -95,6 +95,7 @@ export function ToneCurve({ points, onChange, onEditStart, onEditEnd, onReset })
             <svg
                 ref={surfaceRef}
                 className="editor-curve-editor"
+                data-camera-cursor="native"
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
                 role="application"

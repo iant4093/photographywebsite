@@ -89,7 +89,7 @@ function App() {
         <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} ${isImmersiveRoute ? 'linen-immersive' : ''} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
             <AnalyticsTracker />
-            <CameraCursor enabled={!isAdminRoute && !isImmersiveRoute && location.pathname !== '/editor'} routeKey={location.pathname} />
+            <CameraCursor enabled={!isImmersiveRoute} routeKey={location.pathname} />
             {!isImmersiveRoute && <a className="linen-skip-link" href="#main-content">Skip to main content</a>}
             {!isImmersiveRoute && (
                 <Navbar

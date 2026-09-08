@@ -83,6 +83,7 @@ describe('App routing shell', () => {
     expect(screen.queryByTestId('mock-navbar')).toBeNull()
     expect(screen.queryByText('Footer')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Top' })).toBeNull()
+    expect(document.querySelector('.camera-cursor')).toBeNull()
   })
 
   it('scrolls a canonical fallback hash target into view', async () => {
@@ -152,5 +153,6 @@ describe('App routing shell', () => {
   ])('routes %s to its page', async (path, label) => {
     render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole('heading', { name: label })).toBeInTheDocument())
+    expect(document.querySelectorAll('.camera-cursor')).toHaveLength(1)
   })
 })

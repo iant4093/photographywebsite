@@ -55,9 +55,8 @@ export default function ExploreMoreAlbums({ album, mediaType = album.type === 'v
 
     return (
         <section aria-labelledby={headingId} className="mt-16 border-t border-warm-border pt-10">
-            <div className="mb-8 flex flex-wrap items-baseline justify-center gap-x-4 gap-y-2 text-center">
-                <h2 id={headingId} className="font-serif text-3xl font-normal text-charcoal">Explore more</h2>
-                <p className="text-sm text-warm-gray">{category}</p>
+            <div className="mb-8 text-center">
+                <h2 id={headingId} className="font-serif text-3xl font-normal text-charcoal">Explore More</h2>
             </div>
             <div className="flex flex-wrap justify-center gap-6 pt-6 pb-10">
                 {result.albums.map((relatedAlbum) => (
