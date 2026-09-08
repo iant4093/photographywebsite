@@ -319,6 +319,16 @@ describe('random public photos', () => {
             /\/public\/random-photos\?mode=category&value=Birding\+%26\+Wildlife$/,
         )
     })
+
+    it('requests separately cacheable starter and background batches', async () => {
+        const request = vi.fn().mockImplementation(async () => jsonResponse({ images: [], totalPhotos: 0 }))
+        vi.stubGlobal('fetch', request)
+        await fetchRandomPhotos({ limit: 6 })
+        await fetchRandomPhotos({ category: 'Hikes', limit: 80, priority: 'low' })
+        expect(request.mock.calls[0][0]).toMatch(/\/public\/random-photos\?limit=6$/)
+        expect(request.mock.calls[1][0]).toMatch(/\?mode=category&value=Hikes&limit=80$/)
+        expect(request.mock.calls[1][1].priority).toBe('low')
+    })
 })
 
 describe('public Explore API', () => {

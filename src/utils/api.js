@@ -340,10 +340,13 @@ export function fetchAlbums(options = {}) {
 
 export function fetchRandomPhotos(options = {}) {
     const category = typeof options.category === 'string' ? options.category.trim() : ''
-    const query = category
-        ? `?${new URLSearchParams({ mode: 'category', value: category })}`
-        : ''
-    return apiFetch(`/public/random-photos${query}`, { signal: options.signal }, { timeoutMs: 30_000 })
+    const params = new URLSearchParams(category ? { mode: 'category', value: category } : {})
+    if (options.limit != null) params.set('limit', String(options.limit))
+    const query = params.size ? `?${params}` : ''
+    return apiFetch(`/public/random-photos${query}`, {
+        signal: options.signal,
+        ...(options.priority ? { priority: options.priority } : {}),
+    }, { timeoutMs: 30_000 })
         .then((payload) => ({
             ...payload,
             images: Array.isArray(payload?.images)

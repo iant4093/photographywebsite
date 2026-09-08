@@ -37,6 +37,7 @@ from media_access import (
     album_media_prefixes,
     bucket_name,
     find_image_by_media_id,
+    media_id_for_key,
     load_preview_metadata_for_albums,
     public_preview_key,
     public_url,
@@ -44,7 +45,7 @@ from media_access import (
     serialize_images,
     validated_preview_keys,
 )
-from random_photo_pools import load_pool_references, normalized_category
+from random_photo_pools import compact_reference, load_pool_references, normalized_category
 from original_comparison_access import (
     original_comparison_hint,
     original_comparisons_enabled,
@@ -1213,14 +1214,16 @@ def _random_photo_category(event):
     params = (event or {}).get("queryStringParameters")
     if not params:
         return None
-    if not isinstance(params, dict) or set(params) != {"mode", "value"}:
+    if not isinstance(params, dict) or set(params) - {"mode", "value", "limit"}:
         raise ValidationError("Invalid random photo parameters")
+    if not (set(params) & {"mode", "value"}):
+        return None
     if params.get("mode") != "category":
         raise ValidationError("Unsupported random photo mode")
     return require_string(params.get("value"), "category", maximum=100)
 
 
-def _scan_random_photo_sample(category):
+def _scan_random_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
     sample = []
     total_photos = 0
     for album in _random_photo_albums(category):
@@ -1230,19 +1233,19 @@ def _scan_random_photo_sample(category):
                 continue
             total_photos += 1
             candidate = (album, image)
-            if len(sample) < RANDOM_PHOTO_LIMIT:
+            if len(sample) < limit:
                 sample.append(candidate)
                 continue
             replacement = secrets.randbelow(total_photos)
-            if replacement < RANDOM_PHOTO_LIMIT:
+            if replacement < limit:
                 sample[replacement] = candidate
 
     return sample, total_photos
 
 
-def _materialized_random_photo_sample(category):
+def _materialized_random_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
     try:
-        pool = load_pool_references(_preview_table(), dynamodb, category)
+        pool = load_pool_references(_preview_table(), dynamodb, category, limit=limit)
     except Exception as error:
         logger.warning(
             "random_photo_pool_read_failed error_type=%s",
@@ -1268,13 +1271,21 @@ def _materialized_random_photo_sample(category):
         if image is None:
             return None
         sample.append((album, image))
-    return sample, pool["totalPhotos"]
+    return sample, pool["totalPhotos"], pool.get("previews", {})
 
 
 def _random_photos_response(event):
+    started = time.monotonic()
     category = _random_photo_category(event)
-    materialized = _materialized_random_photo_sample(category)
-    sample, total_photos = materialized or _scan_random_photo_sample(category)
+    params = (event or {}).get("queryStringParameters") or {}
+    limit = _positive_limit(params.get("limit"), RANDOM_PHOTO_LIMIT, RANDOM_PHOTO_LIMIT)
+    materialized = _materialized_random_photo_sample(category, limit)
+    if materialized is None:
+        sample, total_photos = _scan_random_photo_sample(category, limit)
+        previews = {}
+    else:
+        sample, total_photos, previews = materialized
+    sampled_at = time.monotonic()
 
     grouped = {}
     for album, image in sample:
@@ -1282,9 +1293,30 @@ def _random_photos_response(event):
         group["images"].append(image)
 
     images = []
-    metadata_by_album = load_preview_metadata_for_albums(
-        [(group["album"], group["images"]) for group in grouped.values()]
-    )
+    metadata_by_album = {}
+    missing = []
+    precomputed_count = 0
+    for group in grouped.values():
+        album = group["album"]
+        album_id = album["albumId"]
+        metadata_by_album[album_id] = {}
+        missing_images = []
+        for image in group["images"]:
+            media_id = media_id_for_key(image["rawKey"])
+            cached = previews.get(compact_reference(album_id, media_id))
+            metadata = {
+                **cached, "albumId": album_id, "mediaId": media_id, "status": "ready",
+            } if isinstance(cached, dict) else None
+            if validated_preview_keys(image, album, metadata):
+                metadata_by_album[album_id][media_id] = metadata
+                precomputed_count += 1
+            else:
+                missing_images.append(image)
+        if missing_images:
+            missing.append((album, missing_images))
+    if missing:
+        for album_id, metadata in load_preview_metadata_for_albums(missing).items():
+            metadata_by_album.setdefault(album_id, {}).update(metadata)
     for group in grouped.values():
         album = group["album"]
         serialized = serialize_images(
@@ -1305,6 +1337,12 @@ def _random_photos_response(event):
     body = {"images": images, "totalPhotos": total_photos}
     if category:
         body["category"] = category
+    logger.info(
+        "random_photos_served source=%s photos=%d precomputed=%d sample_ms=%.1f total_ms=%.1f",
+        "pool" if materialized is not None else "fallback",
+        len(images), precomputed_count, (sampled_at - started) * 1000,
+        (time.monotonic() - started) * 1000,
+    )
     return json_response(
         200,
         body,

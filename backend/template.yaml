@@ -1814,6 +1814,9 @@ Resources:
     Properties:
       CodeUri: ./
       Handler: get_public_album.handler
+      # Six-photo startup benchmark: 0.92 s cold / 76 ms warm at 1024 MB.
+      # See ops/performance/random-photo-startup-2026-09-08.json.
+      MemorySize: 1024
       ReservedConcurrentExecutions: 20
       Environment:
         Variables:
@@ -2029,6 +2032,7 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
                 - dynamodb:Query
+                - dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow
               Action:

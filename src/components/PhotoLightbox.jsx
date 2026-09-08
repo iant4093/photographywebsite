@@ -363,6 +363,7 @@ function PhotoLightbox({
                             <img
                                 key={`preview-${activeId}`}
                                 src={activeRawUrl}
+                                fetchPriority="high"
                                 srcSet={previewSrcSet || undefined}
                                 sizes={sizesFor(activeImage)}
                                 alt="Full size preview"

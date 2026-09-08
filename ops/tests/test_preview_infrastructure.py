@@ -181,11 +181,18 @@ class PreviewWorkerTests(unittest.TestCase):
             "BisectBatchOnFunctionError: true",
             "Destination: !GetAtt AsyncFailureQueue.Arn",
             "dynamodb:BatchWriteItem",
+            "dynamodb:BatchGetItem",
             "dynamodb:GetRecords",
             "s3:ListBucket",
         ):
             self.assertIn(expected, builder)
         self.assertIn("SOURCES_RandomPhotoPoolBuilderFunction", MAKEFILE)
+
+    def test_random_photo_memory_setting_is_allowed_by_the_release_contract(self) -> None:
+        self.assertIn("MemorySize: 1024", resource_block("GetPublicAlbumFunction"))
+        rules = json.loads((ROOT / "ops/ci/release_intent.json").read_text())["rules"]
+        rule = next(rule for rule in rules if rule["logicalId"] == "GetPublicAlbumFunction" and rule["action"] == "Modify")
+        self.assertIn("MemorySize", rule["propertyPaths"])
 
     def test_hover_previews_use_bounded_immutable_materialization(self) -> None:
         metadata = resource_block("PreviewMetadataTable")

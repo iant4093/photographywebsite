@@ -233,6 +233,7 @@ describe('Home complete public catalog', () => {
     expect(screen.queryByAltText('Full size preview')).toBeNull()
     expect(api.fetchRandomPhotos).toHaveBeenCalledWith({
       category: 'Birding',
+      limit: 6,
       signal: expect.any(AbortSignal),
     })
 

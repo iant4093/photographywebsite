@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
 import re
 import secrets
 
-from media_access import media_id_for_key
+from media_access import PREVIEW_VERSION, media_id_for_key, validated_preview_keys
 from validation_helpers import ValidationError
 
 
@@ -18,6 +19,8 @@ POOL_SHARD_RECORD_TYPE = "randomPhotoPoolShard"
 POOL_SHARD_SIZE = 256
 POOL_WINDOW_SECONDS = 300
 DEFAULT_SAMPLE_LIMIT = 80
+# Leave ample room below DynamoDB's 400 KiB item limit, including attributes.
+MAX_SHARD_PREVIEW_BYTES = 280 * 1024
 GENERATION_PATTERN = re.compile(r"^[a-f0-9]{16}$")
 REFERENCE_PATTERN = re.compile(
     r"^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):([a-f0-9]{24})$"
@@ -113,7 +116,44 @@ def _generated_at(value=None):
     return value.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def replace_materialized_pools(table, pools, *, generation=None, generated_at=None):
+def build_pool_previews(albums, metadata_by_album):
+    """Keep only validated edited-preview fields; never cache access or originals."""
+    previews = {}
+    for album in albums:
+        if not _active_public_photo_album(album):
+            continue
+        images = album.get("images")
+        for image in images if isinstance(images, list) else []:
+            raw_key = image.get("rawKey") if isinstance(image, dict) else None
+            if not isinstance(raw_key, str) or not raw_key:
+                continue
+            media_id = media_id_for_key(raw_key)
+            metadata = metadata_by_album.get(album["albumId"], {}).get(media_id)
+            keys = validated_preview_keys(image, album, metadata)
+            if keys:
+                previews[compact_reference(album["albumId"], media_id)] = {
+                    "previewVersion": PREVIEW_VERSION,
+                    "previewKeys": keys,
+                }
+    return previews
+
+
+def _shard_previews(references, previews):
+    selected = {}
+    size = 0
+    for index, reference in enumerate(references):
+        preview = previews.get(reference)
+        if preview is None:
+            continue
+        entry_size = len(json.dumps({reference: preview}, ensure_ascii=True).encode("utf-8"))
+        if size + entry_size > MAX_SHARD_PREVIEW_BYTES:
+            continue  # Oversize/missing entries use the normal request-time read.
+        selected[str(index)] = preview
+        size += entry_size
+    return selected
+
+
+def replace_materialized_pools(table, pools, *, generation=None, generated_at=None, previews=None):
     """Publish new immutable shards, switch metadata, then delete old shards."""
     generation = generation or secrets.token_hex(8)
     if not GENERATION_PATTERN.fullmatch(generation):
@@ -129,6 +169,9 @@ def replace_materialized_pools(table, pools, *, generation=None, generated_at=No
             for index in range(shard_count):
                 sort_key = shard_sort_key(identifier, generation, index)
                 desired_keys.add(sort_key)
+                references_in_shard = references[
+                    index * POOL_SHARD_SIZE:(index + 1) * POOL_SHARD_SIZE
+                ]
                 batch.put_item(Item={
                     "albumId": POOL_PARTITION,
                     "mediaId": sort_key,
@@ -137,9 +180,8 @@ def replace_materialized_pools(table, pools, *, generation=None, generated_at=No
                     "poolId": identifier,
                     "generation": generation,
                     "shardIndex": index,
-                    "references": references[
-                        index * POOL_SHARD_SIZE:(index + 1) * POOL_SHARD_SIZE
-                    ],
+                    "references": references_in_shard,
+                    "previews": _shard_previews(references_in_shard, previews or {}),
                 })
             meta_key = metadata_sort_key(category)
             desired_keys.add(meta_key)
@@ -227,11 +269,19 @@ def _valid_metadata(item, category):
     }
 
 
-def _batch_get_shards(resource, table, keys):
+def _batch_get_shards(resource, table, keys, preview_offsets):
+    # Offset keys let a six-photo request project just six preview records,
+    # without transferring all 256 records in each shard.
+    offset_names = {f"#p{offset}": str(offset) for offset in sorted(set(preview_offsets))}
     request = {
         table.name: {
             "Keys": [{"albumId": POOL_PARTITION, "mediaId": key} for key in keys],
             "ConsistentRead": False,
+            "ProjectionExpression": (
+                "mediaId,recordType,schemaVersion,poolId,generation,shardIndex,#refs,"
+                + ",".join(f"#previews.{alias}" for alias in offset_names)
+            ),
+            "ExpressionAttributeNames": {"#refs": "references", "#previews": "previews", **offset_names},
         }
     }
     items = {}
@@ -286,9 +336,12 @@ def load_pool_references(table, resource, category=None, *, now=None, limit=DEFA
         shard_sort_key(valid["poolId"], valid["generation"], index)
         for index in shard_indexes
     ]
-    shards = _batch_get_shards(resource, table, shard_keys)
+    shards = _batch_get_shards(
+        resource, table, shard_keys, [position % POOL_SHARD_SIZE for position in positions]
+    )
 
     references_by_position = {}
+    previews = {}
     for index, key in zip(shard_indexes, shard_keys):
         item = shards.get(key)
         values = item.get("references") if isinstance(item, dict) else None
@@ -308,8 +361,11 @@ def load_pool_references(table, resource, category=None, *, now=None, limit=DEFA
             or len(values) > POOL_SHARD_SIZE
         ):
             return None
+        stored_previews = item.get("previews")
         for offset, value in enumerate(values):
             references_by_position[(index * POOL_SHARD_SIZE) + offset] = value
+            if isinstance(value, str) and isinstance(stored_previews, dict) and str(offset) in stored_previews:
+                previews[value] = stored_previews[str(offset)]
 
     try:
         references = [parse_reference(references_by_position[position]) for position in positions]
@@ -319,4 +375,9 @@ def load_pool_references(table, resource, category=None, *, now=None, limit=DEFA
         "references": references,
         "totalPhotos": total,
         "generatedAt": valid["generatedAt"],
+        "previews": {
+            reference: previews[reference]
+            for position in positions
+            if (reference := references_by_position[position]) in previews
+        },
     }

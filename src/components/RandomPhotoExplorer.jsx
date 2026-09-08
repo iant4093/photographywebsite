@@ -3,9 +3,9 @@ import PhotoLightbox from './PhotoLightbox'
 import { fetchRandomPhotos, requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
     mediaFileName,
+    mediaDisplayUrl,
     mediaId,
     mediaPreviewSrcSet,
-    mediaThumbnailUrl,
     resolveMediaDownloadUrl,
     startBrowserDownload,
 } from '../utils/mediaUrls'
@@ -16,23 +16,27 @@ import { shareUrlForAlbumPhoto } from '../utils/share'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 
 const LIGHTBOX_SIZES = '(min-width: 768px) calc(100vw - 12rem), calc(100vw - 2rem)'
+const STARTER_PHOTO_LIMIT = 6
+const SESSION_PHOTO_LIMIT = 80
 
 function warmStartingPhotos(images) {
     if (typeof Image === 'undefined') return
-    images.slice(0, 2).forEach((image) => {
+    images.slice(0, 2).forEach((image, index) => {
         const preload = new Image()
         preload.decoding = 'async'
+        preload.fetchPriority = index === 0 ? 'high' : 'low'
         preload.sizes = LIGHTBOX_SIZES
         preload.srcset = mediaPreviewSrcSet(image)
-        preload.src = mediaThumbnailUrl(image)
+        preload.src = mediaDisplayUrl(image)
         preload.onload = () => { void preload.decode?.().catch(() => {}) }
     })
 }
 
-function RandomPhotoExplorer({ category = '', variant = 'link' }) {
+function RandomPhotoSession({ category = '', variant = 'link' }) {
     const controllerRef = useRef(null)
     const requestRef = useRef(null)
     const photosRef = useRef([])
+    const completeRef = useRef(false)
     const openRef = useRef(false)
     const [photos, setPhotos] = useState([])
     const [index, setIndex] = useState(0)
@@ -54,6 +58,8 @@ function RandomPhotoExplorer({ category = '', variant = 'link' }) {
         const cached = readRandomPhotoSession(normalizedCategory)
         if (cached?.length) {
             photosRef.current = cached
+            completeRef.current = true
+            warmStartingPhotos(cached)
             return Promise.resolve(cached)
         }
 
@@ -61,9 +67,11 @@ function RandomPhotoExplorer({ category = '', variant = 'link' }) {
         controllerRef.current = controller
         const request = fetchRandomPhotos({
             category: normalizedCategory || undefined,
+            limit: STARTER_PHOTO_LIMIT,
             signal: controller.signal,
         })
             .then((payload) => {
+                if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
                 const images = payload.images || []
                 if (!images.length) {
                     throw new Error(normalizedCategory
@@ -71,7 +79,10 @@ function RandomPhotoExplorer({ category = '', variant = 'link' }) {
                         : 'No public photos are available yet.')
                 }
                 photosRef.current = images
-                cacheRandomPhotoSession(normalizedCategory, images)
+                completeRef.current = images.length >= SESSION_PHOTO_LIMIT
+                    || images.length >= payload.totalPhotos
+                    || (!Number.isFinite(payload.totalPhotos) && images.length < STARTER_PHOTO_LIMIT)
+                if (completeRef.current) cacheRandomPhotoSession(normalizedCategory, images)
                 warmStartingPhotos(images)
                 return images
             })
@@ -85,6 +96,39 @@ function RandomPhotoExplorer({ category = '', variant = 'link' }) {
     }, [normalizedCategory])
 
     useEffect(() => () => controllerRef.current?.abort(), [])
+
+    // Only expand an opened viewer. Hover/focus warms just the small starter.
+    useEffect(() => {
+        if (!open || !photos.length || completeRef.current) return undefined
+        const controller = new AbortController()
+        const request = fetchRandomPhotos({
+            category: normalizedCategory || undefined,
+            limit: SESSION_PHOTO_LIMIT,
+            priority: 'low',
+            signal: controller.signal,
+        }).then((payload) => {
+            if (controller.signal.aborted || !payload.images?.length) return
+            // Keep the starter order and current index, even if the pool rotated
+            // while the full deck was loading. Identity includes the album.
+            const merged = [...photosRef.current]
+            const seen = new Set(merged.map((photo) => `${photo.albumId}:${mediaId(photo)}`))
+            for (const photo of payload.images) {
+                const key = `${photo.albumId}:${mediaId(photo)}`
+                if (!seen.has(key)) {
+                    seen.add(key)
+                    merged.push(photo)
+                }
+                if (merged.length >= SESSION_PHOTO_LIMIT) break
+            }
+            completeRef.current = true
+            photosRef.current = merged
+            cacheRandomPhotoSession(normalizedCategory, merged)
+            setPhotos(merged)
+        })
+        // Background failures leave the starter usable; reopening retries.
+        request.catch(() => {})
+        return () => controller.abort()
+    }, [open, photos.length, normalizedCategory])
 
     const finishOpening = useCallback(async () => {
         setError('')
@@ -119,6 +163,7 @@ function RandomPhotoExplorer({ category = '', variant = 'link' }) {
 
     const handleRetry = useCallback(() => {
         photosRef.current = []
+        completeRef.current = false
         void finishOpening()
     }, [finishOpening])
 
@@ -205,4 +250,7 @@ function RandomPhotoExplorer({ category = '', variant = 'link' }) {
     )
 }
 
-export default RandomPhotoExplorer
+export default function RandomPhotoExplorer(props) {
+    const category = (props.category || '').trim()
+    return <RandomPhotoSession key={category} {...props} category={category} />
+}

@@ -12,7 +12,7 @@ from test_support import response_body
 import get_public_album
 import get_public_albums
 import cursor_helpers
-from media_access import media_id_for_key
+from media_access import PREVIEW_VERSION, expected_preview_keys, media_id_for_key
 
 
 ALBUM_ID = "11111111-1111-4111-8111-111111111111"
@@ -481,6 +481,11 @@ class PublicAlbumDetailTests(unittest.TestCase):
     def test_random_photos_reject_query_parameters(self):
         invalid = (
             {"limit": "500"},
+            {"limit": "0"},
+            {"limit": "-1"},
+            {"limit": "6.5"},
+            {"limit": "many"},
+            {"value": "Birding"},
             {"mode": "album", "value": "Birding"},
             {"mode": "category", "value": ""},
             {"mode": "category", "value": "Birding", "extra": "no"},
@@ -496,6 +501,69 @@ class PublicAlbumDetailTests(unittest.TestCase):
                     None,
                 )
                 self.assertEqual(response["statusCode"], 400)
+
+    def test_starter_uses_precomputed_previews_without_a_metadata_read(self):
+        album = public_album()
+        raw_key = album["images"][0]["rawKey"]
+        media_id = media_id_for_key(raw_key)
+        pool = {"references": [{"albumId": ALBUM_ID, "mediaId": media_id}], "totalPhotos": 80,
+                "previews": {f"{ALBUM_ID}:{media_id}": {
+                    "previewVersion": PREVIEW_VERSION,
+                    "previewKeys": expected_preview_keys(ALBUM_ID, raw_key),
+                }}}
+        with patch.object(get_public_album, "load_pool_references", return_value=pool) as loader, patch.object(
+            get_public_album, "_preview_table", return_value=MagicMock()
+        ), patch.object(get_public_album, "_batch_albums", return_value={ALBUM_ID: album}), patch.object(
+            get_public_album, "load_preview_metadata_for_albums"
+        ) as metadata, patch.object(get_public_album, "_random_photo_albums") as scan:
+            response = get_public_album._random_photos_response({"queryStringParameters": {"limit": "6"}})
+        self.assertEqual(loader.call_args.kwargs["limit"], 6)
+        metadata.assert_not_called()
+        scan.assert_not_called()
+        image = response_body(response)["images"][0]
+        self.assertEqual(len(image["previewSrcSet"]), 4)
+        self.assertEqual(image["albumId"], ALBUM_ID)
+
+    def test_invalid_precomputed_preview_reads_only_missing_metadata(self):
+        album = public_album(images=[{"rawKey": f"albums/{ALBUM_ID}/original/{index}.jpg"} for index in range(2)])
+        ids = [media_id_for_key(image["rawKey"]) for image in album["images"]]
+        pool = {"references": [{"albumId": ALBUM_ID, "mediaId": media_id} for media_id in ids], "totalPhotos": 2,
+                "previews": {f"{ALBUM_ID}:{media_id}": {
+                    "previewVersion": PREVIEW_VERSION,
+                    "previewKeys": expected_preview_keys(ALBUM_ID, album["images"][0]["rawKey"]),
+                } for media_id in ids}}
+        with patch.object(get_public_album, "load_pool_references", return_value=pool), patch.object(
+            get_public_album, "_preview_table", return_value=MagicMock()
+        ), patch.object(get_public_album, "_batch_albums", return_value={ALBUM_ID: album}), patch.object(
+            get_public_album, "load_preview_metadata_for_albums", return_value={}
+        ) as metadata:
+            response = get_public_album._random_photos_response({})
+        metadata.assert_called_once_with([(album, [album["images"][1]])])
+        images = {image["id"]: image for image in response_body(response)["images"]}
+        self.assertIn("previewSrcSet", images[ids[0]])
+        self.assertNotIn("previewSrcSet", images[ids[1]])
+
+    def test_precomputed_pool_still_rejects_private_deleted_and_moved_photos(self):
+        album = public_album()
+        media_id = media_id_for_key(album["images"][0]["rawKey"])
+        pool = {"references": [{"albumId": ALBUM_ID, "mediaId": media_id}], "totalPhotos": 1, "previews": {}}
+        for overrides in ({"visibility": "private"}, {"status": "deleted"}, {"images": []}, {"category": "Birding"}):
+            with self.subTest(overrides=overrides), patch.object(get_public_album, "load_pool_references", return_value=pool), patch.object(
+                get_public_album, "_preview_table", return_value=MagicMock()
+            ), patch.object(get_public_album, "_batch_albums", return_value={ALBUM_ID: {**album, **overrides}}), patch.object(
+                get_public_album, "_legacy_images", return_value=[]
+            ):
+                self.assertIsNone(get_public_album._materialized_random_photo_sample("Portraits", 6))
+
+    def test_legacy_fallback_honors_starter_limit_and_total(self):
+        album = public_album(images=[{"rawKey": f"albums/{ALBUM_ID}/original/{index}.jpg"} for index in range(100)])
+        with patch.object(get_public_album, "_materialized_random_photo_sample", return_value=None), patch.object(
+            get_public_album, "_random_photo_albums", return_value=[album]
+        ), patch.object(get_public_album, "load_preview_metadata_for_albums", return_value={}):
+            response = get_public_album._random_photos_response({"queryStringParameters": {"limit": "6"}})
+        body = response_body(response)
+        self.assertEqual(len(body["images"]), 6)
+        self.assertEqual(body["totalPhotos"], 100)
 
     def test_random_photos_can_be_scoped_to_one_category(self):
         album = public_album(category="Birding")

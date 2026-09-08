@@ -3,18 +3,21 @@ import unittest
 from unittest.mock import MagicMock
 
 from random_photo_pools import (
+    MAX_SHARD_PREVIEW_BYTES,
     POOL_PARTITION,
     POOL_RECORD_TYPE,
     POOL_SCHEMA_VERSION,
     POOL_SHARD_RECORD_TYPE,
     POOL_SHARD_SIZE,
     build_reference_pools,
+    build_pool_previews,
     load_pool_references,
     metadata_sort_key,
     pool_id,
     replace_materialized_pools,
     shard_sort_key,
 )
+from media_access import PREVIEW_VERSION, expected_preview_keys, media_id_for_key
 
 
 ALBUM_ID = "11111111-1111-4111-8111-111111111111"
@@ -185,6 +188,70 @@ class RandomPhotoPoolTests(unittest.TestCase):
 
         self.assertEqual(result["references"], [])
         self.assertEqual(result["totalPhotos"], 0)
+
+    def test_precomputed_previews_round_trip_with_a_small_sample_and_remain_optional(self):
+        from copy import deepcopy
+        album = {
+            "albumId": ALBUM_ID, "visibility": "public", "images": [
+                {"rawKey": f"albums/{ALBUM_ID}/original/{index}.jpg"} for index in range(300)
+            ],
+        }
+        metadata = {ALBUM_ID: {
+            media_id_for_key(image["rawKey"]): {
+                "albumId": ALBUM_ID, "mediaId": media_id_for_key(image["rawKey"]),
+                "previewVersion": PREVIEW_VERSION, "status": "ready",
+                "previewKeys": expected_preview_keys(ALBUM_ID, image["rawKey"]),
+                "before": {"url": "must-not-be-cached"}, "exif": {"private": "not-needed"},
+            } for image in album["images"]
+        }}
+        pools = build_reference_pools([album], randomizer=NoShuffle())
+        previews = build_pool_previews([album], metadata)
+        self.assertEqual(len(previews), 300)
+        self.assertEqual(set(next(iter(previews.values()))), {"previewKeys", "previewVersion"})
+        table = MagicMock()
+        table.name = "previews"
+        table.query.return_value = {"Items": []}
+        stored = {}
+        batch = table.batch_writer.return_value.__enter__.return_value
+        batch.put_item.side_effect = lambda *, Item: stored.update({Item["mediaId"]: deepcopy(Item)})
+        table.put_item.side_effect = batch.put_item.side_effect
+        replace_materialized_pools(table, pools, previews=previews)
+        table.get_item.side_effect = lambda *, Key, **kwargs: {"Item": stored.get(Key["mediaId"])}
+        resource = MagicMock()
+        resource.batch_get_item.side_effect = lambda *, RequestItems: {"Responses": {
+            table.name: [stored[key["mediaId"]] for key in RequestItems[table.name]["Keys"]]
+        }}
+        small = load_pool_references(table, resource, now=12345, limit=6)
+        request = resource.batch_get_item.call_args.kwargs["RequestItems"][table.name]
+        aliases = request["ExpressionAttributeNames"]
+        self.assertEqual(len([alias for alias in aliases if alias.startswith("#p") and alias != "#previews"]), 6)
+        self.assertIn("#previews.#p", request["ProjectionExpression"])
+        full = load_pool_references(table, resource, now=12345)
+        self.assertEqual(len(small["references"]), 6)
+        self.assertEqual(small["references"], full["references"][:6])
+        self.assertEqual(len(small["previews"]), 6)
+        self.assertEqual(small["totalPhotos"], 300)
+        for item in stored.values():
+            item.pop("previews", None)
+        legacy = load_pool_references(table, resource, now=12345, limit=6)
+        self.assertEqual(legacy["references"], small["references"])
+        self.assertEqual(legacy["previews"], {})
+
+    def test_only_ready_current_public_previews_are_precomputed(self):
+        image = {"rawKey": f"albums/{ALBUM_ID}/original/photo.jpg"}
+        album = {"albumId": ALBUM_ID, "visibility": "public", "images": [image]}
+        media_id = media_id_for_key(image["rawKey"])
+        valid = {"albumId": ALBUM_ID, "mediaId": media_id, "previewVersion": PREVIEW_VERSION,
+                 "status": "ready", "previewKeys": expected_preview_keys(ALBUM_ID, image["rawKey"])}
+        for override in ({"status": "pending"}, {"previewVersion": 0}, {"previewKeys": {}}, {"mediaId": "bad"}):
+            with self.subTest(override=override):
+                self.assertEqual(build_pool_previews([album], {ALBUM_ID: {media_id: {**valid, **override}}}), {})
+        self.assertEqual(build_pool_previews([{**album, "visibility": "private"}], {ALBUM_ID: {media_id: valid}}), {})
+
+    def test_optional_preview_payload_cannot_overflow_a_shard(self):
+        from random_photo_pools import _shard_previews
+        preview = {"previewKeys": {"640": "x" * MAX_SHARD_PREVIEW_BYTES}}
+        self.assertEqual(_shard_previews(["ref"], {"ref": preview}), {})
 
 
 if __name__ == "__main__":

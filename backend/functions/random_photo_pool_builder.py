@@ -6,9 +6,9 @@ import os
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
-from media_access import album_media_prefixes, bucket_name
+from media_access import album_media_prefixes, bucket_name, load_preview_metadata_for_albums
 from cache_invalidation import request_public_api_invalidation
-from random_photo_pools import build_reference_pools, replace_materialized_pools
+from random_photo_pools import build_pool_previews, build_reference_pools, replace_materialized_pools
 
 
 logger = logging.getLogger("photography_api.random_photo_pool_builder")
@@ -65,8 +65,14 @@ def _legacy_images(album):
 
 
 def handler(event, context):
-    pools = build_reference_pools(_public_photo_albums(), legacy_loader=_legacy_images)
-    result = replace_materialized_pools(preview_table, pools)
+    albums = _public_photo_albums()
+    for album in albums:
+        if not album.get("images"):
+            album["images"] = _legacy_images(album)
+    pools = build_reference_pools(albums)
+    metadata = load_preview_metadata_for_albums([(album, None) for album in albums])
+    previews = build_pool_previews(albums, metadata)
+    result = replace_materialized_pools(preview_table, pools, previews=previews)
     logger.info(
         "random_photo_pools_refreshed pool_count=%d total_photos=%d",
         result["poolCount"],

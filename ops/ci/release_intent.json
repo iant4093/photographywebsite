@@ -49,7 +49,7 @@
     {"logicalId": "HoverPreviewManifestFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["FilterPattern"], "allowNoDetails": false},
     {"logicalId": "PublicPreviewRewriteFunction", "resourceType": "AWS::CloudFront::Function", "action": "Modify", "propertyPaths": ["FunctionCode"], "allowNoDetails": false},
     {"logicalId": "GetPublicAlbumsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
-    {"logicalId": "GetPublicAlbumFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
+    {"logicalId": "GetPublicAlbumFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "MemorySize"], "allowNoDetails": false},
     {"logicalId": "RandomPhotoPoolBuilderFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "RandomPhotoPoolBuilderFunctionAlbumsChanged", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Modify", "propertyPaths": ["Enabled"], "allowNoDetails": false},
     {"logicalId": "RandomPhotoPoolBuilderFunctionRefreshRequests", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
