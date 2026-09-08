@@ -1,7 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import AlbumCard from './AlbumCard'
 import VideoAlbumCard from './VideoAlbumCard'
-import ScrollRow from './ScrollRow'
 import { fetchAlbumsPage } from '../utils/api'
 import {
     getCatalogSnapshot,
@@ -56,13 +55,13 @@ export default function ExploreMoreAlbums({ album, mediaType = album.type === 'v
 
     return (
         <section aria-labelledby={headingId} className="mt-16 border-t border-warm-border pt-10">
-            <div className="mb-8 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+            <div className="mb-8 flex flex-wrap items-baseline justify-center gap-x-4 gap-y-2 text-center">
                 <h2 id={headingId} className="font-serif text-3xl font-normal text-charcoal">Explore more</h2>
                 <p className="text-sm text-warm-gray">{category}</p>
             </div>
-            <ScrollRow>
+            <div className="flex flex-wrap justify-center gap-6 pt-6 pb-10">
                 {result.albums.map((relatedAlbum) => (
-                    <div key={relatedAlbum.albumId} className="shrink-0 w-[280px] sm:w-[320px] lg:w-[360px] snap-start">
+                    <div key={relatedAlbum.albumId} className="w-full min-w-0 sm:w-[320px] lg:w-[360px]">
                         {mediaType === 'video' ? (
                             <VideoAlbumCard album={relatedAlbum} />
                         ) : (
@@ -70,7 +69,7 @@ export default function ExploreMoreAlbums({ album, mediaType = album.type === 'v
                         )}
                     </div>
                 ))}
-            </ScrollRow>
+            </div>
         </section>
     )
 }
