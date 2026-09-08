@@ -200,6 +200,13 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(read.call_count, 1)
 
 class AdditionalBackupBehaviorTests(unittest.TestCase):
+    def test_lambda_failure_redacts_provider_details_and_still_fails_for_retry(self):
+        with patch.dict(os.environ, {'DRIVE_BACKUP_STATE_TABLE': 'state'}), patch.object(worker, 'handler', side_effect=ValueError('private-drive-id private-filename.jpg')):
+            with self.assertRaises(RuntimeError) as caught:
+                worker.provider.handler({'Records': []}, None)
+        self.assertEqual(str(caught.exception), 'Drive backup failed: ValueError')
+        self.assertTrue(caught.exception.__suppress_context__)
+
     def test_root_ancestry_requires_configured_destination(self):
         service = Mock()
         with patch.dict(os.environ, {'GOOGLE_DRIVE_FOLDER_ID': 'root'}):

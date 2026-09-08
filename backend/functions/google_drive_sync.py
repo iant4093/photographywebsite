@@ -283,7 +283,9 @@ def legacy_handler(event, context):
 
 
 def handler(event, context):
-    if os.environ.get('DRIVE_BACKUP_STATE_TABLE'):
+    if not os.environ.get('DRIVE_BACKUP_STATE_TABLE'):
+        return legacy_handler(event, context)
+    try:
         import drive_backup_reconcile
         if 'Records' in (event or {}):
             return drive_backup_reconcile.handler(event, context)
@@ -294,4 +296,7 @@ def handler(event, context):
         if album and album.get('status', 'active') == 'active':
             drive_backup_jobs.enqueue_retry(album)
         return {'status': 'queued'}
-    return legacy_handler(event, context)
+    except Exception as error:
+        # SDK exceptions can contain private Drive IDs and original filenames.
+        # Fail the invocation for retry without writing those values to logs.
+        raise RuntimeError("Drive backup failed: " + type(error).__name__) from None
