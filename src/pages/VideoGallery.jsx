@@ -292,6 +292,7 @@ export default function VideoGallery() {
                     const thumbUrl = mediaThumbnailUrl(img)
                     return (
                         <button
+                            data-camera-cursor="photo"
                             data-page-scroll-media
                             type="button"
                             key={mediaId(img) || index}

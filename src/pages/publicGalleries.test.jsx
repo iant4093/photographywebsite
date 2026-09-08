@@ -130,6 +130,7 @@ describe('AlbumGallery', () => {
     const firstPhoto = screen.getByRole('img', { name: 'Item 1 from Wild Album' })
     expect(firstPhoto).toHaveAttribute('srcset')
     const firstPhotoButton = screen.getByRole('button', { name: 'Open item 1 from Wild Album' })
+    expect(firstPhotoButton).toHaveAttribute('data-camera-cursor', 'photo')
     expect(firstPhotoButton).toHaveClass('linen-photo-frame')
     expect(firstPhotoButton.closest('.linen-gallery-page')).not.toHaveClass('bg-cream')
     expect(firstPhotoButton.querySelector('.linen-photo-viewport')).toContainElement(firstPhoto)
@@ -471,6 +472,7 @@ describe('VideoGallery', () => {
   it('opens from a thumbnail, refreshes media, downloads, closes, and goes back', async () => {
     gallery(<VideoGallery />, '/video/v-album')
     await screen.findByRole('heading', { name: 'Video Album' })
+    expect(screen.getByRole('img', { name: 'Video 1' }).closest('button')).toHaveAttribute('data-camera-cursor', 'photo')
     fireEvent.error(screen.getByRole('img', { name: 'Video 1' }))
     expect(expiry.refresh).toHaveBeenCalledWith('media-error')
     fireEvent.click(screen.getByRole('img', { name: 'Video 1' }))

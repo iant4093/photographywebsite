@@ -17,7 +17,7 @@ const NATIVE_SELECTOR = [
     '[data-camera-cursor="native"]', '[inert]', ':disabled', '[aria-disabled="true"]',
     'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])',
     'textarea', 'select', '[contenteditable]:not([contenteditable="false"])',
-    'video', 'audio', 'iframe', 'canvas', 'dialog[open]',
+    'audio', 'iframe', 'dialog[open]',
     '[role="slider"]', '[role="spinbutton"]',
 ].join(',')
 const ACTION_SELECTOR = 'a[href], button, summary, label, [role="button"], [role="link"], input[type="checkbox"], input[type="radio"], input[type="button"], input[type="submit"], input[type="reset"]'
@@ -84,6 +84,17 @@ export function installCameraCursor() {
         }
         const annotated = pointed.closest('[data-camera-cursor]')
         const requested = annotated?.getAttribute('data-camera-cursor')
+        const media = pointed.closest('video, canvas')
+        // Blurhash canvases and autoplay previews are decorative parts of the
+        // album link, including when their opacity is zero. Only these passive
+        // layers inherit its flash; actual players and canvas tools stay native.
+        const decorativeAlbumMedia = requested === 'photo'
+            && media?.closest('[aria-hidden="true"]')
+            && !media.hasAttribute('controls')
+        if (media && !decorativeAlbumMedia) {
+            hide()
+            return
+        }
         let nextState = Object.hasOwn(SYMBOLS, requested) ? requested : null
         if (!nextState && pointed.closest('[aria-busy="true"]')) nextState = 'loading'
         if (!nextState && pointed.closest(ACTION_SELECTOR)) nextState = 'link'
@@ -159,7 +170,7 @@ export function installCameraCursor() {
     })
     observer.observe(document.body, {
         childList: true, subtree: true, attributes: true,
-        attributeFilter: ['data-camera-cursor', 'disabled', 'aria-disabled', 'aria-busy', 'inert'],
+        attributeFilter: ['data-camera-cursor', 'disabled', 'aria-disabled', 'aria-busy', 'aria-hidden', 'controls', 'inert'],
     })
 
     return () => {

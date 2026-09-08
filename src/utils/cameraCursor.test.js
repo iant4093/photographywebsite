@@ -107,6 +107,61 @@ describe('camera cursor interaction and lifecycle', () => {
         expect(cursor()).not.toHaveClass('is-visible')
     })
 
+    it.each(['canvas', 'video'])('keeps the album flash over a decorative %s and its image', tag => {
+        const album = element('a', { href: '/album/example', 'data-camera-cursor': 'photo' })
+        const image = document.createElement('img')
+        const preview = document.createElement(tag)
+        const layer = document.createElement('div')
+        layer.setAttribute('aria-hidden', 'true')
+        layer.append(preview)
+        album.append(image, layer)
+
+        pointer(image)
+        const flash = cursor().querySelector('svg')
+        pointer(preview)
+        expect(active()).toBe(true)
+        expect(cursor()).toHaveAttribute('data-state', 'photo')
+        expect(cursor().querySelector('svg')).toBe(flash)
+        layer.style.opacity = '0'
+        pointer(preview)
+        expect(active()).toBe(true)
+        expect(cursor().querySelector('svg')).toBe(flash)
+        layer.remove()
+        pointer(image)
+        expect(cursor().querySelector('svg')).toBe(flash)
+    })
+
+    it.each(['canvas', 'video'])('preserves native %s interaction inside a marked album', tag => {
+        const album = element('button', { 'data-camera-cursor': 'photo' })
+        const media = document.createElement(tag)
+        album.append(media)
+        pointer(media)
+        expect(active()).toBe(false)
+        media.setAttribute('aria-hidden', 'true')
+        pointer(media)
+        expect(active()).toBe(true)
+        album.disabled = true
+        pointer(media)
+        expect(active()).toBe(false)
+    })
+
+    it('restores video controls under a stationary pointer even on decorative album media', async () => {
+        const album = element('a', { href: '/video/example', 'data-camera-cursor': 'photo' })
+        const video = document.createElement('video')
+        video.setAttribute('aria-hidden', 'true')
+        album.append(video)
+        pointer(video)
+        expect(active()).toBe(true)
+        video.controls = true
+        await Promise.resolve()
+        flush()
+        expect(active()).toBe(false)
+        video.controls = false
+        await Promise.resolve()
+        flush()
+        expect(active()).toBe(true)
+    })
+
     it.each(['touch', 'pen'])('does not replace a %s pointer on a hybrid device', type => {
         pointer(fixture)
         pointer(fixture, 'pointerdown', { pointerType: type })
