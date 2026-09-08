@@ -269,6 +269,8 @@ class ReleaseIntentTests(unittest.TestCase):
             expected_paths = ["Code", "Environment"]
             if rule["logicalId"] == "GetPhotographyStatsFunction":
                 expected_paths.append("ReservedConcurrentExecutions")
+            if rule["logicalId"] == "GetPublicAlbumFunction":
+                expected_paths.append("MemorySize")
             self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertFalse(rule["allowNoDetails"])
 
