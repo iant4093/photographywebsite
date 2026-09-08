@@ -23,6 +23,25 @@ const NATIVE_SELECTOR = [
 const ACTION_SELECTOR = 'a[href], button, summary, label, [role="button"], [role="link"], input[type="checkbox"], input[type="radio"], input[type="button"], input[type="submit"], input[type="reset"]'
 const TEXT_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, pre, code, dt, dd'
 
+function isOverText(element, x, y) {
+    if (!element.closest(TEXT_SELECTOR)) return false
+    const range = document.createRange()
+    if (typeof range.getClientRects !== 'function') return false
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+    let text
+    while ((text = walker.nextNode())) {
+        if (!text.textContent.trim()) continue
+        range.selectNodeContents(text)
+        // A text range gives one rectangle per rendered line, excluding the
+        // empty remainder of the block and the space after its last line.
+        for (const rect of range.getClientRects()) {
+            if (rect.width > 0 && rect.height > 0
+                && x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) return true
+        }
+    }
+    return false
+}
+
 function symbolMarkup(state) {
     // Only these static, source-controlled paths ever reach innerHTML.
     const geometry = SYMBOLS[state]
@@ -98,7 +117,7 @@ export function installCameraCursor() {
         let nextState = Object.hasOwn(SYMBOLS, requested) ? requested : null
         if (!nextState && pointed.closest('[aria-busy="true"]')) nextState = 'loading'
         if (!nextState && pointed.closest(ACTION_SELECTOR)) nextState = 'link'
-        if (!nextState && pointed.closest(TEXT_SELECTOR)) {
+        if (!nextState && isOverText(pointed, x, y)) {
             hide()
             return
         }
@@ -169,7 +188,7 @@ export function installCameraCursor() {
         if (records.some(record => !cursor.contains(record.target))) schedule()
     })
     observer.observe(document.body, {
-        childList: true, subtree: true, attributes: true,
+        childList: true, subtree: true, characterData: true, attributes: true,
         attributeFilter: ['data-camera-cursor', 'disabled', 'aria-disabled', 'aria-busy', 'aria-hidden', 'controls', 'inert'],
     })
 

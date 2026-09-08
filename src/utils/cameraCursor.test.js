@@ -8,6 +8,7 @@ describe('camera cursor interaction and lifecycle', () => {
     let frames
     let queries
     let nextFrame
+    let textRects
 
     const cursor = () => document.querySelector('.camera-cursor')
     const active = () => document.documentElement.hasAttribute('data-camera-cursor-active')
@@ -16,6 +17,12 @@ describe('camera cursor interaction and lifecycle', () => {
         Object.entries(attributes).forEach(([name, value]) => node.setAttribute(name, value))
         fixture.append(node)
         return node
+    }
+    function text(node, value, rects = [{ left: 100, right: 200, top: 80, bottom: 100, width: 100, height: 20 }]) {
+        const content = document.createTextNode(value)
+        node.append(content)
+        textRects.set(content, rects)
+        return content
     }
     function flush() {
         const queued = [...frames.values()]
@@ -38,6 +45,13 @@ describe('camera cursor interaction and lifecycle', () => {
         frames = new Map()
         nextFrame = 0
         queries = new Map()
+        textRects = new WeakMap()
+        const createRange = document.createRange.bind(document)
+        vi.spyOn(document, 'createRange').mockImplementation(() => {
+            const range = createRange()
+            range.getClientRects = () => textRects.get(range.startContainer) || []
+            return range
+        })
         vi.spyOn(window, 'matchMedia').mockImplementation(query => {
             const result = new EventTarget()
             result.matches = query === '(any-pointer: fine)'
@@ -88,7 +102,9 @@ describe('camera cursor interaction and lifecycle', () => {
         pointer(second)
         expect(cursor().querySelector('svg')).not.toBe(original)
         const secondIcon = cursor().querySelector('svg')
-        pointer(element('p'))
+        const paragraph = element('p')
+        text(paragraph, 'Select this text')
+        pointer(paragraph)
         expect(active()).toBe(false)
         pointer(second)
         expect(cursor().querySelector('svg')).not.toBe(secondIcon)
@@ -96,7 +112,7 @@ describe('camera cursor interaction and lifecycle', () => {
 
     it.each([
         ['input', { type: 'text' }], ['input', { type: 'range' }], ['input', { type: 'password' }],
-        ['textarea', {}], ['select', {}], ['p', {}], ['div', { contenteditable: 'true' }],
+        ['textarea', {}], ['select', {}], ['div', { contenteditable: 'true' }],
         ['button', { disabled: '' }], ['button', { 'aria-disabled': 'true' }],
         ['div', { inert: '' }], ['div', { 'data-camera-cursor': 'native' }],
         ['video', { controls: '' }], ['canvas', {}], ['iframe', {}], ['dialog', { open: '' }],
@@ -105,6 +121,93 @@ describe('camera cursor interaction and lifecycle', () => {
         pointer(element(tag, attributes))
         expect(active()).toBe(false)
         expect(cursor()).not.toHaveClass('is-visible')
+    })
+
+    it('keeps the camera beside a heading while preserving text selection over its letters', () => {
+        const heading = element('h2')
+        text(heading, 'Photo Albums')
+        pointer(heading, 'pointermove', { clientX: 250 })
+        expect(active()).toBe(true)
+        expect(cursor()).toHaveAttribute('data-state', 'camera')
+        pointer(heading)
+        expect(active()).toBe(false)
+        pointer(heading, 'pointermove', { clientX: 200 })
+        expect(active()).toBe(true)
+    })
+
+    it('keeps the camera after a short final line and between lines in a paragraph', () => {
+        const paragraph = element('p')
+        text(paragraph, "Hi, I'm Ian — welcome to my photography portfolio. Take a look around!", [
+            { left: 100, right: 450, top: 80, bottom: 100, width: 350, height: 20 },
+            { left: 100, right: 180, top: 120, bottom: 140, width: 80, height: 20 },
+        ])
+        pointer(paragraph, 'pointermove', { clientX: 250, clientY: 130 })
+        expect(active()).toBe(true)
+        pointer(paragraph, 'pointermove', { clientX: 120, clientY: 130 })
+        expect(active()).toBe(false)
+        pointer(paragraph, 'pointermove', { clientY: 110 })
+        expect(active()).toBe(true)
+        pointer(paragraph, 'pointermove', { clientY: 150 })
+        expect(active()).toBe(true)
+    })
+
+    it('keeps empty blocks, whitespace-only nodes, and hidden text on the camera', () => {
+        const paragraph = element('p')
+        pointer(paragraph)
+        expect(active()).toBe(true)
+        text(paragraph, '   \n  ')
+        text(paragraph, 'Hidden text', [])
+        text(paragraph, 'Collapsed text', [{ left: 120, right: 120, top: 90, bottom: 90, width: 0, height: 0 }])
+        pointer(paragraph)
+        expect(active()).toBe(true)
+    })
+
+    it('checks nested text fragments without overriding links or album flash targets', () => {
+        const paragraph = element('p')
+        const emphasis = document.createElement('strong')
+        paragraph.append(emphasis)
+        text(emphasis, 'Photography')
+        pointer(emphasis)
+        expect(active()).toBe(false)
+        pointer(emphasis, 'pointermove', { clientX: 250 })
+        expect(active()).toBe(true)
+        const link = document.createElement('a')
+        link.href = '/videos'
+        paragraph.append(link)
+        text(link, 'View videos')
+        pointer(link)
+        expect(cursor()).toHaveAttribute('data-state', 'link')
+        paragraph.dataset.cameraCursor = 'photo'
+        pointer(emphasis)
+        expect(cursor()).toHaveAttribute('data-state', 'photo')
+    })
+
+    it('rechecks text geometry after wrapping and scrolling under a stationary pointer', () => {
+        const paragraph = element('p')
+        const content = text(paragraph, 'Responsive introduction')
+        pointer(paragraph)
+        expect(active()).toBe(false)
+        textRects.set(content, [{ left: 100, right: 110, top: 80, bottom: 100, width: 10, height: 20 }])
+        window.dispatchEvent(new Event('resize'))
+        flush()
+        expect(active()).toBe(true)
+        textRects.set(content, [{ left: 100, right: 200, top: 80, bottom: 100, width: 100, height: 20 }])
+        document.dispatchEvent(new Event('scroll'))
+        flush()
+        expect(active()).toBe(false)
+    })
+
+    it('rechecks edited text under a stationary pointer', async () => {
+        const paragraph = element('p')
+        const content = text(paragraph, 'Introduction')
+        pointer(paragraph)
+        expect(active()).toBe(false)
+        await Promise.resolve()
+        flush()
+        content.data = ''
+        await Promise.resolve()
+        flush()
+        expect(active()).toBe(true)
     })
 
     it.each(['canvas', 'video'])('keeps the album flash over a decorative %s and its image', tag => {
