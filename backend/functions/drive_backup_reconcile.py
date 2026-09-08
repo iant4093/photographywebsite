@@ -80,8 +80,8 @@ def current_keys(album):
 
 def upload(service, album, key, folder_id, context):
     head = provider.s3.head_object(Bucket=os.environ['IMAGES_BUCKET'], Key=key)
-    # Fail visibly before filling the worker's temporary disk.
-    if int(head.get('ContentLength', 0)) > 1800 * 1024 * 1024:
+    # Match the gallery's 5 GiB video upload limit, with 1 GiB disk headroom.
+    if int(head.get('ContentLength', 0)) > 5 * 1024 * 1024 * 1024:
         raise RuntimeError('Original exceeds Drive worker temporary storage')
     path = None
     try:

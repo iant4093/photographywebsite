@@ -2573,7 +2573,7 @@ Resources:
       Timeout: 900
       MemorySize: 512
       EphemeralStorage:
-        Size: 2048
+        Size: 6144
       ReservedConcurrentExecutions: 1
       DeadLetterQueue:
         Type: SQS

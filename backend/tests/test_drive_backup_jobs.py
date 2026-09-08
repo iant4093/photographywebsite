@@ -233,7 +233,7 @@ class AdditionalBackupBehaviorTests(unittest.TestCase):
     def test_actual_upload_sets_stable_identity_and_cleans_temporary_file(self):
         album = {**ALBUM, 'images': [{'rawKey': RAW}]}
         service = Mock(); service.files().create.return_value.next_chunk.return_value = (None, {'id': 'new-file'})
-        s3 = Mock(); s3.head_object.return_value = {'ContentLength': 3, 'ContentType': 'image/jpeg'}
+        s3 = Mock(); s3.head_object.return_value = {'ContentLength': 5 * 1024 * 1024 * 1024, 'ContentType': 'video/mp4'}
         with patch.object(worker.provider, 's3', s3), patch.object(worker, 'live_album', return_value=album), patch.object(worker, 'MediaFileUpload', return_value='media'), patch.object(worker.os, 'remove') as remove:
             self.assertEqual(worker.upload(service, album, RAW, 'folder', None), 'new-file')
         self.assertEqual(service.files().create.call_args.kwargs['body']['appProperties'][worker.MEDIA_ID], worker.media_id_for_key(RAW))
@@ -248,7 +248,7 @@ class AdditionalBackupBehaviorTests(unittest.TestCase):
         service.files().create.assert_not_called()
 
     def test_upload_refuses_oversized_original_and_near_timeout(self):
-        service = Mock(); s3 = Mock(); s3.head_object.return_value = {'ContentLength': 2000 * 1024 * 1024}
+        service = Mock(); s3 = Mock(); s3.head_object.return_value = {'ContentLength': 5 * 1024 * 1024 * 1024 + 1}
         with patch.object(worker.provider, 's3', s3):
             with self.assertRaises(RuntimeError): worker.upload(service, ALBUM, RAW, 'folder', None)
         s3.download_file.assert_not_called()

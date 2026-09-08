@@ -271,6 +271,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 expected_paths.append("ReservedConcurrentExecutions")
             if rule["logicalId"] == "GetPublicAlbumFunction":
                 expected_paths.append("MemorySize")
+            if rule["logicalId"] == "GoogleDriveBackupFunction":
+                expected_paths.append("EphemeralStorage")
             self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertFalse(rule["allowNoDetails"])
 

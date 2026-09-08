@@ -39,6 +39,8 @@ mutation environment; review the exact additive CloudFormation change set;
 verify admin authorization and a photo/video canary before completing release.
 Rollback pauses the stream mapping and preserves the state table for retry.
 Do not restore the old upload dispatcher while the new worker is still running.
+The worker stages one original at a time with 6 GiB temporary storage to cover
+the gallery’s existing 5 GiB video upload limit.
 Use per-album Retry backup to repair missed historical additions; do not bulk
 trash unmatched files. Provider errors are logged by type only.
 
