@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const canvasState = vi.hoisted(() => ({ scene: null, camera: null, mounts: 0, unmounts: 0 }))
+const canvasState = vi.hoisted(() => ({ scene: null, camera: null, dpr: null, mounts: 0, unmounts: 0 }))
 const api = vi.hoisted(() => ({
     fetchAlbumForViewing: vi.fn(), fetchAllAlbums: vi.fn(), requestAlbumMediaDownload: vi.fn(),
     requestAlbumPrintSession: vi.fn(), requestAlbumZip: vi.fn(),
@@ -12,9 +12,10 @@ const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 vi.mock('@react-three/fiber', async () => {
     const { useEffect } = await import('react')
     return {
-        Canvas: ({ children, className, camera }) => {
+        Canvas: ({ children, className, camera, dpr }) => {
             canvasState.scene = children.props.children.props
             canvasState.camera = camera
+            canvasState.dpr = dpr
             useEffect(() => {
                 canvasState.mounts += 1
                 return () => { canvasState.unmounts += 1 }
@@ -52,6 +53,7 @@ beforeEach(() => {
     vi.clearAllMocks()
     canvasState.scene = null
     canvasState.camera = null
+    canvasState.dpr = null
     canvasState.mounts = 0
     canvasState.unmounts = 0
     auth.getIdToken.mockResolvedValue(null)
@@ -105,6 +107,33 @@ describe('museum album overlay integration', () => {
         expect(screen.getByTestId('retained-museum-canvas')).toBe(canvas)
         expect(canvasState.camera).toBe(camera)
         expect(canvasState.mounts).toBe(1)
+    })
+
+    it('preserves adaptive mobile resolution through album, pause, and resume renders', async () => {
+        const { canvas, camera } = await gallery({ touch: true })
+        fireEvent.click(screen.getByRole('button', { name: 'Begin walk-through' }))
+        act(() => { canvasState.scene.onResolutionChange(1.1) })
+        // Fiber reapplies this prop when Canvas rerenders, so it must follow
+        // the live renderer instead of reverting to the initial device tier.
+        expect(canvasState.dpr).toBe(1.1)
+
+        act(() => { canvasState.scene.onOpenAlbum(album) })
+        await screen.findByRole('heading', { name: 'Coastal Light' })
+        expect(canvasState.dpr).toBe(1.1)
+        fireEvent.click(screen.getByRole('button', { name: '← Return to gallery' }))
+        expect(canvasState.scene.controlsEnabled.locked).toBe(true)
+        expect(canvasState.dpr).toBe(1.1)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Pause', exact: true }))
+        expect(canvasState.scene.controlsEnabled.locked).toBe(false)
+        expect(canvasState.dpr).toBe(1.1)
+        fireEvent.click(screen.getByRole('button', { name: 'Begin walk-through' }))
+        expect(canvasState.scene.controlsEnabled.locked).toBe(true)
+        expect(canvasState.dpr).toBe(1.1)
+        expect(screen.getByTestId('retained-museum-canvas')).toBe(canvas)
+        expect(canvasState.camera).toBe(camera)
+        expect(canvasState.mounts).toBe(1)
+        expect(canvasState.unmounts).toBe(0)
     })
 
     it('requests desktop pointer lock only after the modal has released the canvas, and handles denial', async () => {

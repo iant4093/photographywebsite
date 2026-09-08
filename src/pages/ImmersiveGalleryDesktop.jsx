@@ -59,10 +59,12 @@ import {
 import { MuseumRoomArchitecture, MuseumCofferedCeiling, MuseumAtmosphere } from '../components/museum/MuseumAtmosphere'
 import MuseumChandeliers from '../components/museum/MuseumChandeliers'
 import MuseumAlbumOverlay from '../components/museum/MuseumAlbumOverlay'
+import MuseumAdaptiveResolution from '../components/museum/MuseumAdaptiveResolution'
 import MuseumSkylights from '../components/museum/MuseumSkylights'
 import { museumRoomSkylights, museumSkylightCeilingFixtureXs, sampleMuseumSkylightIrradiance } from '../utils/museumSkylights'
 import { applyMuseumFrameContactShadow } from '../utils/museumDisplayGeometry'
 import { createMuseumFrameDriver } from '../utils/museumFrameDriver'
+import { museumResolutionProfile } from '../utils/museumResolution'
 import { createMuseumArchBand } from '../utils/museumArchitecture'
 import { MUSEUM_MATERIAL_TEXTURES, MUSEUM_MATERIAL_TILE_METERS } from '../utils/museumMaterialAssets'
 import { createMuseumThresholdFloorGeometry, museumFloorTextureTransform, museumSurfaceTextureTransform } from '../utils/museumMaterialMapping'
@@ -5119,13 +5121,30 @@ function AnticipatoryRoomPreloader({ layout, activeRoomId, activeRoomIds, enable
     return null
 }
 
-function DevelopmentPerformanceProbe() {
+function DevelopmentPerformanceProbe({ enabled }) {
     const { gl } = useThree()
     const samples = useRef([])
     const lifetime = useRef({ maxMs: 0, over25: 0, over50: 0, total: 0 })
     const lastPublishedAt = useRef(0)
-    useFrame((state, delta) => {
-        const elapsedMs = delta * 1000
+    const previousFrameAt = useRef(null)
+    useEffect(() => {
+        const reset = () => { previousFrameAt.current = null; samples.current = [] }
+        reset()
+        window.addEventListener('blur', reset)
+        window.addEventListener('focus', reset)
+        document.addEventListener('visibilitychange', reset)
+        return () => {
+            window.removeEventListener('blur', reset)
+            window.removeEventListener('focus', reset)
+            document.removeEventListener('visibilitychange', reset)
+        }
+    }, [enabled])
+    useFrame((state) => {
+        const now = performance.now()
+        const previous = previousFrameAt.current
+        previousFrameAt.current = enabled ? now : null
+        if (!enabled || previous === null) return
+        const elapsedMs = now - previous
         samples.current.push(elapsedMs)
         if (samples.current.length > 180) samples.current.shift()
         lifetime.current.maxMs = Math.max(lifetime.current.maxMs, elapsedMs)
@@ -5142,6 +5161,9 @@ function DevelopmentPerformanceProbe() {
         )
         document.documentElement.dataset.museumPerf = JSON.stringify({
             rendererFrame: gl.info.render.frame,
+            dpr: gl.getPixelRatio(),
+            drawingBuffer: [gl.domElement.width, gl.domElement.height],
+            antialias: gl.getContext().getContextAttributes()?.antialias,
             cameraPosition: state.camera.position.toArray(),
             cameraQuaternion: state.camera.quaternion.toArray(),
             medianMs: Number(pick(0.5).toFixed(2)),
@@ -5475,7 +5497,7 @@ function RendererHealth({ input, onPause, onStatus }) {
     return null
 }
 
-const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, albumOpen, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, albumOpen, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onResolutionChange, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
     const cinematicShadows = !touchMode && !isFirefoxBrowser()
     const inspectionWidth = useMemo(
@@ -5492,6 +5514,12 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
             <MuseumFrameDriver
                 continuous={!albumOpen && (controlsEnabled.locked || visualPreview || developmentTour || developmentJump || !sceneReady)}
             />
+            {touchMode && <MuseumAdaptiveResolution
+                enabled={sceneReady && !albumOpen && Boolean(controlsEnabled.locked || visualPreview || developmentTour || developmentJump)}
+                firefox={isFirefoxBrowser()}
+                requestFrames={requestMuseumFrames}
+                onDprChange={onResolutionChange}
+            />}
             <color attach="background" args={[INK]} />
             <fog attach="fog" args={['#151310', 30, 120]} />
             {/* Keep enough indirect exposure for accessibility, but let the
@@ -5537,7 +5565,9 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                 activeRoomIds={controlsEnabled.activeRoomIds}
                 enabled={sceneReady && !albumOpen}
             />
-            {developmentPerf && <DevelopmentPerformanceProbe />}
+            {developmentPerf && <DevelopmentPerformanceProbe
+                enabled={sceneReady && !albumOpen && Boolean(controlsEnabled.locked || visualPreview || developmentTour || developmentJump)}
+            />}
             {visualPreview && <PreviewCamera mode={previewMode} roomIndex={previewRoomIndex} layout={layout} />}
             {import.meta.env.DEV && developmentTour && sceneReady && (
                 <DevelopmentMuseumTour
@@ -5602,6 +5632,13 @@ export default function ImmersiveGalleryDesktop() {
     const [rendererStatus, setRendererStatus] = useState('ok')
     const [rendererVersion, setRendererVersion] = useState(0)
     const [touchMode, setTouchMode] = useState(() => forceTouchPreview || usesTouchControls())
+    const [mobileDpr, setMobileDpr] = useState(() => museumResolutionProfile({
+        touchMode: true,
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+        deviceMemory: navigator.deviceMemory,
+    }).initialDpr)
     const [preferences, setPreferences] = useState(() => readMuseumPreferences(localStorage, PREFERENCES_KEY))
     const reducedMotion = useReducedMotionPreference()
     const [motionOverride, setMotionOverride] = useState(() => {
@@ -5802,15 +5839,24 @@ export default function ImmersiveGalleryDesktop() {
         position: layout.spawn,
     }), [layout.spawn, preferences.fov, touchMode])
     const canvasPerformance = useMemo(() => ({ min: 0.45, max: 1, debounce: 240 }), [])
+    const resolutionProfile = useMemo(() => museumResolutionProfile({
+        touchMode,
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+        deviceMemory: navigator.deviceMemory,
+        firefox: isFirefoxBrowser(),
+        windowsFirefox: isWindowsFirefoxBrowser(),
+    }), [touchMode])
     const canvasGl = useMemo(() => ({
         // Firefox frequently compiles MSAA variants only after the first camera
         // movement. Browser compositing at a stable DPR is preferable to that
         // severe cold-start hitch.
-        antialias: !touchMode && !isFirefoxBrowser(),
+        antialias: resolutionProfile.antialias,
         powerPreference: 'high-performance',
         alpha: false,
         stencil: false,
-    }), [touchMode])
+    }), [resolutionProfile.antialias])
     const handleCanvasCreated = useCallback(({ gl }) => {
         gl.outputColorSpace = THREE.SRGBColorSpace
         gl.toneMapping = THREE.ACESFilmicToneMapping
@@ -5832,7 +5878,10 @@ export default function ImmersiveGalleryDesktop() {
                 key={rendererVersion}
                 className="museum-canvas"
                 camera={canvasCamera}
-                dpr={touchMode ? 0.68 : (isWindowsFirefoxBrowser() ? 0.68 : 0.8)}
+                // Fiber reapplies this prop when the parent renders. Keep it
+                // in sync with the governor so controls/album state updates
+                // cannot reset the drawing buffer to its starting resolution.
+                dpr={touchMode ? mobileDpr : resolutionProfile.initialDpr}
                 // The gallery owns its RAF lifecycle so a browser-discarded
                 // hidden-tab callback can never strand Fiber's module-global
                 // loop. MuseumFrameDriver advances continuously only during
@@ -5862,6 +5911,7 @@ export default function ImmersiveGalleryDesktop() {
                         onSceneReady={handleSceneReady}
                         onSceneProgress={setSceneProgress}
                         onRendererStatus={setRendererStatus}
+                        onResolutionChange={setMobileDpr}
                         onPause={pauseGallery}
                         onLock={handleLock}
                         onUnlock={handleUnlock}
