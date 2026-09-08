@@ -159,6 +159,7 @@ expected_routes = {
     ("POST", "/analytics/events"),
     ("GET", "/admin/analytics"),
     ("GET", "/admin/drive-usage"),
+    ("POST", "/admin/drive-backups"),
     ("GET", "/admin/github-analytics"),
     ("GET", "/admin/site-health"),
     ("GET", "/admin/audit-log"),
@@ -247,7 +248,11 @@ class DataProtectionTests(unittest.TestCase):
 
         update_album = resource_block("UpdateAlbumFunction")
         self.assertIn("dynamodb:GetItem", update_album)
-        self.assertNotIn("dynamodb:PutItem", update_album)
+        # Album replacement remains forbidden; PutItem is scoped to durable
+        # backup intents in the separate state table.
+        album_policy = re.search(r"- Effect: Allow\n(?:(?!- Effect: Allow).)*Resource: !GetAtt AlbumsTable.Arn", update_album, re.S).group(0)
+        self.assertNotIn("dynamodb:PutItem", album_policy)
+        self.assertIn("Resource: !GetAtt DriveBackupStateTable.Arn", update_album)
         self.assertIn("dynamodb:UpdateItem", update_album)
         self.assertIn("GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction", update_album)
         self.assertIn("Action: lambda:InvokeFunction", update_album)

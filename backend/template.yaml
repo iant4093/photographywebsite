@@ -448,6 +448,39 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
+  DriveBackupStateTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'GoldenHour-DriveBackupState-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: albumId
+          AttributeType: S
+        - AttributeName: entry
+          AttributeType: S
+      KeySchema:
+        - AttributeName: albumId
+          KeyType: HASH
+        - AttributeName: entry
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: PrivateCustomerData
+
   AlbumsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -2502,6 +2535,35 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  AdminDriveBackupsFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: admin_drive_backups.handler
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:BatchGetItem, dynamodb:ConditionCheckItem]
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:BatchGetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query]
+              Resource: !GetAtt DriveBackupStateTable.Arn
+      Events:
+        ManageBackups:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/drive-backups
+            Method: POST
+
   GoogleDriveBackupFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -2519,13 +2581,41 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           IMAGES_BUCKET: !Ref ImagesBucket
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
           GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
+      Events:
+        BackupIntents:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt DriveBackupStateTable.StreamArn
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 1
+            MaximumRetryAttempts: 8
+            MaximumRecordAgeInSeconds: 86400
+            FilterCriteria:
+              Filters:
+                - Pattern: '{"eventName":["INSERT"],"dynamodb":{"NewImage":{"recordType":{"S":["job","delivery"]}}}}'
+            DestinationConfig:
+              OnFailure:
+                Type: SQS
+                Destination: !GetAtt AsyncFailureQueue.Arn
       Policies:
+        - DynamoDBStreamReadPolicy:
+            TableName: !Ref DriveBackupStateTable
+            StreamName: !Select [3, !Split ['/', !GetAtt DriveBackupStateTable.StreamArn]]
         - Statement:
             - Effect: Allow
-              Action: dynamodb:GetItem
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource: !GetAtt DriveBackupStateTable.Arn
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem, dynamodb:ConditionCheckItem]
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action: s3:GetObject
@@ -2562,6 +2652,7 @@ Resources:
           ORIGINAL_COMPARISON_TABLE: !If [EnableOriginalComparisons, !Ref OriginalComparisonTable, '']
           ORIGINAL_PREVIEW_BUCKET: !If [EnableOriginalComparisons, !Ref OriginalPreviewBucket, '']
           ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
@@ -2578,6 +2669,14 @@ Resources:
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource: !GetAtt DriveBackupStateTable.Arn
         - Statement:
             - Effect: Allow
               Action: sqs:SendMessage
@@ -2676,6 +2775,7 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           HOVER_PREVIEW_REFRESH_QUEUE_URL: !Ref HoverPreviewRefreshQueue
@@ -2686,6 +2786,14 @@ Resources:
           FRONTEND_URL: !Ref FrontendUrl
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource: !GetAtt DriveBackupStateTable.Arn
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
@@ -2772,6 +2880,7 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
@@ -2779,6 +2888,14 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource: !GetAtt DriveBackupStateTable.Arn
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
@@ -2845,6 +2962,7 @@ Resources:
           ORIGINAL_COMPARISON_TABLE: !If [EnableOriginalComparisons, !Ref OriginalComparisonTable, '']
           ORIGINAL_PREVIEW_BUCKET: !If [EnableOriginalComparisons, !Ref OriginalPreviewBucket, '']
           ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
@@ -2854,6 +2972,14 @@ Resources:
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource: !GetAtt DriveBackupStateTable.Arn
         - Statement:
             - Effect: Allow
               Action: sqs:SendMessage
@@ -3291,6 +3417,7 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
@@ -3298,6 +3425,14 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource: !GetAtt DriveBackupStateTable.Arn
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow

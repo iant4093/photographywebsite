@@ -4,6 +4,7 @@ import os
 import logging
 
 import boto3
+import drive_backup_jobs
 
 from audit_helpers import actor_context, emit_audit_event
 from album_media_store import deactivate_album_media, delete_album_media
@@ -156,15 +157,17 @@ def handler(event, context):
                 for media_id in removed_media_ids
             },
         )
-        table.update_item(
+        drive_backup_jobs.update_album(
+            table, album, removed_keys=removed_raw_keys,
             Key={"albumId": album_id},
             UpdateExpression=(
                 "SET images = :images, imageCount = :count, coverImageUrl = :cover, "
                 "coverThumbKey = :coverThumb, coverBlurhash = :coverBlurhash"
             ),
-            ConditionExpression="attribute_exists(albumId)",
+            ConditionExpression="attribute_exists(albumId) AND images = :previous_images",
             ExpressionAttributeValues={
                 ":images": retained,
+                ":previous_images": album.get("images", []),
                 ":count": len(retained),
                 ":cover": cover_raw,
                 ":coverThumb": cover_thumb,
@@ -226,6 +229,8 @@ def handler(event, context):
             "Media deletion is too large for synchronous processing; use the maintenance deletion workflow",
             code="deletion_too_large",
         )
+    except drive_backup_jobs.DriveBackupBusy as error:
+        return error_response(409, str(error), code="backup_busy")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_request")
         return error_response(400, str(error), code="invalid_request")

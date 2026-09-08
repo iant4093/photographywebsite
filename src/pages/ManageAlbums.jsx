@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router'
 import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
+import AdminToasts from '../components/AdminToasts'
+import { useAdminToasts } from '../hooks/useAdminToasts'
+import useAdminAlbumCatalog from '../hooks/useAdminAlbumCatalog'
+import useDriveBackupStatus from '../hooks/useDriveBackupStatus'
 import { processImage, processVideo, extractFrameFromVideoElement } from '../utils/mediaUtils'
 import {
-    fetchAlbumsFilteredPage,
-    fetchAllAlbums,
-    readCachedAlbumsPage,
     listUsersPage,
     updateAlbum,
     updateGalleryOrder,
@@ -47,7 +48,7 @@ function managementMediaKey(image) {
     return typeof value === 'string' && value.trim() ? value : ''
 }
 
-const ADMIN_ALBUM_PAGE_SIZE = 40
+const ADMIN_ALBUM_PAGE_SIZE = 100
 const ADMIN_MEDIA_PAGE_SIZE = 48
 
 function albumCatalogParams(scope, typeFilter, users) {
@@ -59,17 +60,6 @@ function albumCatalogParams(scope, typeFilter, users) {
     return selectedUser?.sub
         ? { ...params, visibility: 'private', ownerSub: selectedUser.sub }
         : { ...params, visibility: 'private', ownerEmail: scope }
-}
-
-function albumsForScope(items, scope, typeFilter) {
-    const typeMatched = items.filter((album) => (
-        typeFilter === 'video' ? album.type === 'video' : album.type !== 'video'
-    ))
-    return scope !== 'public' && scope !== 'unlisted'
-        ? typeMatched.filter((album) => (
-            String(album.ownerEmail || '').trim().toLowerCase() === scope.trim().toLowerCase()
-        ))
-        : typeMatched
 }
 
 // Helper component for picking a thumbnail time for a video
@@ -200,11 +190,6 @@ function ManageAlbums() {
     // Scope: 'public' for main gallery, or a user email for private albums
     const [scope, setScope] = useState('public')
     const [users, setUsers] = useState([])
-    const [albums, setAlbums] = useState([])
-    const [loading, setLoading] = useState(true)
-    const [refreshing, setRefreshing] = useState(false)
-    const [loadingMore, setLoadingMore] = useState(false)
-    const [nextCursor, setNextCursor] = useState(null)
     const [userSearch, setUserSearch] = useState('')
     const [viewMode, setViewMode] = useState('manage')
 
@@ -232,8 +217,12 @@ function ManageAlbums() {
     const [updatingThumb, setUpdatingThumb] = useState(false)
     const scrubberVideoRef = useRef(null)  // ref to the scrubber's <video> element
 
-    const [actionError, setActionError] = useState('')
-    const [actionSuccess, setActionSuccess] = useState('')
+    const { toasts, notify, dismiss } = useAdminToasts()
+    const setActionSuccess = useCallback((message) => notify(message), [notify])
+    const setActionError = useCallback((message) => notify(message, 'error'), [notify])
+    const [categoryFilter, setCategoryFilter] = useState('')
+    const [collapsedCategories, setCollapsedCategories] = useState(() => new Set())
+    const mediaRequest = useRef(0)
     const [savingOrder, setSavingOrder] = useState(false)
     const [savingAlbumIds, setSavingAlbumIds] = useState(() => new Set())
     const albumCardRefs = useRef(new Map())
@@ -266,6 +255,10 @@ function ManageAlbums() {
         ),
         [scope, typeFilter, selectedOwnerSub],
     )
+
+    const { albums, setAlbums, patch: patchCatalogAlbum, remove: removeCatalogAlbum, loading, loadingMore, catalogError, retry: retryCatalog } = useAdminAlbumCatalog(catalogParams, getIdToken, scope === 'public' || scope === 'unlisted' ? '' : scope)
+
+    const { statuses: backupStatuses, refresh: refreshBackupStatus, retry: retryBackup } = useDriveBackupStatus(albums.map((album) => album.albumId), getIdToken, notify)
 
     useEffect(() => {
         const term = userSearch.trim()
@@ -307,18 +300,16 @@ function ManageAlbums() {
 
     const patchAlbum = useCallback((albumId, patch) => {
         const oldTop = albumCardRefs.current.get(albumId)?.getBoundingClientRect().top
-        setAlbums((current) => current.map((album) => (
-            album.albumId === albumId ? { ...album, ...patch, albumId } : album
-        )))
-        if (Number.isFinite(oldTop)) {
+        patchCatalogAlbum(albumId, { ...patch, albumId })
+        if (Number.isFinite(oldTop) && !Object.hasOwn(patch, 'category')) {
             window.requestAnimationFrame(() => {
                 const newTop = albumCardRefs.current.get(albumId)?.getBoundingClientRect().top
                 if (Number.isFinite(newTop) && newTop !== oldTop) window.scrollBy(0, newTop - oldTop)
             })
         }
-    }, [])
+    }, [patchCatalogAlbum])
 
-    const canReorderGallery = scope === 'public' && viewMode === 'arrange'
+    const canReorderGallery = scope === 'public' && viewMode === 'arrange' && !loadingMore && !catalogError
 
     async function moveAlbum(album, direction) {
         if (!canReorderGallery || savingOrder) return
@@ -350,7 +341,7 @@ function ManageAlbums() {
             const token = await getIdToken()
             await updateGalleryOrder(token, { albumType: typeFilter, albumIds: orderedIds })
             setActionSuccess('Album order updated!')
-            window.setTimeout(() => setActionSuccess(''), 3000)
+
         } catch (error) {
             setAlbums(previousAlbums)
             setActionError(error.message)
@@ -385,7 +376,7 @@ function ManageAlbums() {
                 categoryNames: reorderedCategories,
             })
             setActionSuccess('Category order updated!')
-            window.setTimeout(() => setActionSuccess(''), 3000)
+
         } catch (error) {
             setAlbums(previousAlbums)
             setActionError(error.message)
@@ -394,103 +385,32 @@ function ManageAlbums() {
         }
     }
 
-    // Scope changes reset album-specific UI, but cached summaries render
-    // immediately and are revalidated without replacing the page with a spinner.
     useEffect(() => {
-        const controller = new AbortController()
-        const cached = readCachedAlbumsPage(catalogParams, { authenticated: true })
-        const initialize = window.setTimeout(() => {
+        mediaRequest.current += 1
+        const timer = window.setTimeout(() => {
             setExpandedAlbumId(null)
             setAlbumImages([])
             setMediaNextCursor(null)
             setEditingAlbum(null)
             setViewMode('manage')
-            if (cached) {
-                setAlbums(albumsForScope(cached.items, scope, typeFilter))
-                setNextCursor(cached.nextCursor)
-                setLoading(false)
-                setRefreshing(true)
-            } else {
-                setAlbums([])
-                setNextCursor(null)
-                setLoading(true)
-            }
-            loadFirstPage()
+            setCategoryFilter('')
+            setCollapsedCategories(new Set())
         }, 0)
+        return () => { window.clearTimeout(timer); mediaRequest.current += 1 }
+    }, [scope, typeFilter])
 
-        async function loadFirstPage() {
-            try {
-                const token = await getIdToken()
-                const page = await fetchAlbumsFilteredPage(
-                    catalogParams,
-                    token,
-                    { signal: controller.signal, force: Boolean(cached) },
-                )
-                setAlbums(albumsForScope(page.items, scope, typeFilter))
-                setNextCursor(page.nextCursor)
-            } catch (err) {
-                if (err?.name !== 'AbortError') {
-                    console.error('Failed to load albums:', err)
-                    if (!cached) setAlbums([])
-                }
-            } finally {
-                if (!controller.signal.aborted) {
-                    setLoading(false)
-                    setRefreshing(false)
-                }
-            }
-        }
-        return () => {
-            window.clearTimeout(initialize)
-            controller.abort()
-        }
-    }, [catalogParams, getIdToken, scope, typeFilter])
-
-    async function loadMoreAlbums() {
-        if (!nextCursor || loadingMore) return
-        setLoadingMore(true)
-        setActionError('')
-        try {
-            const token = await getIdToken()
-            const page = await fetchAlbumsFilteredPage(
-                { ...catalogParams, cursor: nextCursor },
-                token,
-            )
-            const incoming = albumsForScope(page.items, scope, typeFilter)
-            setAlbums((current) => {
-                const existing = new Set(current.map((album) => album.albumId))
-                return [...current, ...incoming.filter((album) => !existing.has(album.albumId))]
-            })
-            setNextCursor(page.nextCursor)
-        } catch (err) {
-            setActionError(err.message)
-        } finally {
-            setLoadingMore(false)
-        }
-    }
-
-    async function enterArrangeMode() {
+    function enterArrangeMode() {
+        if (loadingMore || catalogError) return
         setExpandedAlbumId(null)
         setAlbumImages([])
         setMediaNextCursor(null)
+        setCategoryFilter('')
+        setCollapsedCategories(new Set())
         setViewMode('arrange')
-        if (!nextCursor) return
-        setLoadingMore(true)
-        setActionError('')
-        try {
-            const token = await getIdToken()
-            const all = await fetchAllAlbums(catalogParams, { token })
-            setAlbums(albumsForScope(all, scope, typeFilter))
-            setNextCursor(null)
-        } catch (err) {
-            setViewMode('manage')
-            setActionError(err.message)
-        } finally {
-            setLoadingMore(false)
-        }
     }
 
     async function toggleAlbumImages(album) {
+        const request = ++mediaRequest.current
         if (expandedAlbumId === album.albumId) {
             // Collapse
             setExpandedAlbumId(null)
@@ -512,19 +432,22 @@ function ManageAlbums() {
                 album.albumId,
                 { limit: ADMIN_MEDIA_PAGE_SIZE },
             )
+            if (request !== mediaRequest.current) return
             setAlbumImages(page.items)
             setMediaNextCursor(page.nextCursor)
             if (page.album) patchAlbum(album.albumId, page.album)
         } catch (err) {
+            if (request !== mediaRequest.current) return
             console.error('Failed to load album images:', err)
             setActionError(err.message)
         } finally {
-            setLoadingImages(false)
+            if (request === mediaRequest.current) setLoadingImages(false)
         }
     }
 
     async function loadMoreMedia() {
         if (!expandedAlbumId || !mediaNextCursor || loadingMoreMedia) return
+        const request = mediaRequest.current
         setLoadingMoreMedia(true)
         setActionError('')
         try {
@@ -534,6 +457,7 @@ function ManageAlbums() {
                 expandedAlbumId,
                 { limit: ADMIN_MEDIA_PAGE_SIZE, cursor: mediaNextCursor },
             )
+            if (request !== mediaRequest.current) return
             setAlbumImages((current) => {
                 const keys = new Set(current.map(managementMediaKey).filter(Boolean))
                 return [...current, ...page.items.filter((item) => !keys.has(managementMediaKey(item)))]
@@ -543,7 +467,7 @@ function ManageAlbums() {
         } catch (err) {
             setActionError(err.message)
         } finally {
-            setLoadingMoreMedia(false)
+            if (request === mediaRequest.current) setLoadingMoreMedia(false)
         }
     }
 
@@ -582,7 +506,8 @@ function ManageAlbums() {
             patchAlbum(albumId, { ...updates, ...(updated || {}) })
             setEditingAlbum(null)
             setActionSuccess('Album updated!')
-            window.setTimeout(() => setActionSuccess(''), 3000)
+            refreshBackupStatus()
+
         } catch (err) {
             setActionError(err.message)
         } finally {
@@ -598,14 +523,14 @@ function ManageAlbums() {
         try {
             const token = await getIdToken()
             await deleteAlbum(token, albumId)
-            setAlbums((current) => current.filter((album) => album.albumId !== albumId))
+            removeCatalogAlbum(albumId)
             setActionSuccess('Album deleted!')
             if (expandedAlbumId === albumId) {
                 setExpandedAlbumId(null)
                 setAlbumImages([])
                 setMediaNextCursor(null)
             }
-            window.setTimeout(() => setActionSuccess(''), 3000)
+
         } catch (err) {
             setActionError(err.message)
         } finally {
@@ -636,8 +561,9 @@ function ManageAlbums() {
             patchAlbum(expandedAlbumId, result.album || {
                 imageCount: Math.max(0, Number(expandedAlbum?.imageCount || albumImages.length) - 1),
             })
+            refreshBackupStatus()
             setActionSuccess(deletingCover ? 'Item removed and album cover refreshed!' : 'Item removed!')
-            setTimeout(() => setActionSuccess(''), 3000)
+
         } catch (err) {
             setActionError(err.message)
         }
@@ -663,7 +589,7 @@ function ManageAlbums() {
             const updated = await updateAlbum(token, expandedAlbumId, updates)
             patchAlbum(expandedAlbumId, { ...updates, ...(updated || {}) })
             setActionSuccess('Cover image updated!')
-            window.setTimeout(() => setActionSuccess(''), 3000)
+
         } catch (err) {
             setActionError(err.message)
         } finally {
@@ -729,7 +655,7 @@ function ManageAlbums() {
 
             setEditingThumbKey(null)
             setActionSuccess('Thumbnail updated!')
-            setTimeout(() => setActionSuccess(''), 3000)
+
         } catch (err) {
             setActionError(err.message)
         } finally {
@@ -823,6 +749,7 @@ function ManageAlbums() {
             setAddingVideoFiles([])
             if (addFilesRef.current) addFilesRef.current.value = ''
             setActionSuccess(`Added ${isVideo ? addingVideoFiles.length : addingFiles.length} ${isVideo ? 'video(s)' : 'image(s)'}!`)
+            refreshBackupStatus()
             // If every prior media page is loaded, append the freshly signed
             // records. Otherwise keep the current page stable and update count.
             if (!mediaNextCursor && Array.isArray(result.items)) {
@@ -831,7 +758,7 @@ function ManageAlbums() {
             patchAlbum(expandedAlbumId, result.album || {
                 imageCount: Number(expandedAlbum?.imageCount || albumImages.length) + finalItems.length,
             })
-            setTimeout(() => setActionSuccess(''), 3000)
+
         } catch (err) {
             setActionError(err.message)
         } finally {
@@ -887,13 +814,7 @@ function ManageAlbums() {
                     <p className="mt-2 text-warm-gray">Edit, add photos, remove photos, delete albums, or arrange the main gallery.</p>
                 </div>
 
-                {/* Alerts */}
-                {actionSuccess && (
-                    <div className="mb-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm animate-fade-in">{actionSuccess}</div>
-                )}
-                {actionError && (
-                    <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm animate-fade-in">{actionError}</div>
-                )}
+                <AdminToasts toasts={toasts} dismiss={dismiss} />
 
                 {/* Scope selector */}
                 <div className="bg-white rounded-2xl p-6 shadow-warm border border-warm-border mb-8">
@@ -962,14 +883,14 @@ function ManageAlbums() {
                             <button
                                 type="button"
                                 onClick={enterArrangeMode}
-                                disabled={loadingMore}
+                                disabled={loadingMore || loading || Boolean(catalogError)}
                                 className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors cursor-pointer disabled:cursor-wait disabled:opacity-60 ${viewMode === 'arrange' ? 'bg-amber text-white' : 'text-warm-gray hover:bg-cream'}`}
                             >
                                 {loadingMore && viewMode === 'arrange' ? 'Loading all albums…' : 'Arrange Gallery'}
                             </button>
                         </div>
                         <span className="px-3 text-xs text-warm-gray" aria-live="polite">
-                            {refreshing ? 'Refreshing…' : `${albums.length} album${albums.length === 1 ? '' : 's'} loaded`}
+                            {loadingMore ? 'Loading all albums…' : `${albums.length} album${albums.length === 1 ? '' : 's'} loaded`}
                         </span>
                     </div>
                 )}
@@ -979,6 +900,17 @@ function ManageAlbums() {
                         Use the category arrows to arrange sections and the album arrows to arrange cards within a section. Albums default to newest first until you customize their order.
                     </div>
                 )}
+
+                <div className="mb-6 flex flex-wrap items-center gap-3" aria-live="polite">
+                    {viewMode === 'manage' && <label className="text-sm text-warm-gray">Category
+                        <select aria-label="Filter categories" value={sortedCategories.includes(categoryFilter) ? categoryFilter : ''} onChange={(event) => setCategoryFilter(event.target.value)} className="ml-3 rounded-lg border border-warm-border bg-white px-3 py-2">
+                            <option value="">All categories</option>
+                            {sortedCategories.map((name) => <option key={name} value={name}>{name} ({groupedAlbums[name].length}{loadingMore || catalogError ? '+' : ''})</option>)}
+                        </select>
+                    </label>}
+                    {loadingMore && <span className="text-sm text-warm-gray">Loading remaining albums…</span>}
+                    {catalogError && <div role="alert" className="text-sm text-red-700">{catalogError} <button onClick={retryCatalog} className="underline">Retry album loading</button></div>}
+                </div>
 
                 {/* Albums list */}
                 {loading && albums.length === 0 ? (
@@ -991,16 +923,18 @@ function ManageAlbums() {
                     </div>
                 ) : (
                     <div className="space-y-12">
-                        {sortedCategories.map((cat, categoryIndex) => (
+                        {sortedCategories.filter((cat) => !sortedCategories.includes(categoryFilter) || cat === categoryFilter).map((cat) => (
                             <div key={cat} className="animate-fade-in">
                                 <div className="flex items-center gap-4 mb-6">
                                     <h2 className="font-serif text-2xl font-medium text-charcoal">{cat}</h2>
+                                    <span className="text-sm text-warm-gray">{groupedAlbums[cat].length}{loadingMore || catalogError ? '+' : ''}</span>
+                                    {viewMode === 'manage' && <button type="button" aria-label={`${collapsedCategories.has(cat) ? 'Expand' : 'Collapse'} ${cat}`} aria-expanded={!collapsedCategories.has(cat)} onClick={() => setCollapsedCategories((current) => { const next = new Set(current); if (next.has(cat)) next.delete(cat); else next.add(cat); return next })} className="text-sm text-amber-dark underline">{collapsedCategories.has(cat) ? 'Show' : 'Hide'}</button>}
                                     {canReorderGallery && (
                                         <div className="flex gap-2 shrink-0">
                                             <button
                                                 type="button"
                                                 onClick={() => moveCategory(cat, -1)}
-                                                disabled={categoryIndex === 0 || savingOrder}
+                                                disabled={sortedCategories.indexOf(cat) === 0 || savingOrder}
                                                 aria-label={`Move ${cat} category earlier`}
                                                 title="Move category earlier"
                                                 className="h-8 w-8 rounded-lg bg-amber/10 text-amber-dark text-sm font-medium cursor-pointer hover:bg-amber/20 disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
@@ -1010,7 +944,7 @@ function ManageAlbums() {
                                             <button
                                                 type="button"
                                                 onClick={() => moveCategory(cat, 1)}
-                                                disabled={categoryIndex === sortedCategories.length - 1 || savingOrder}
+                                                disabled={sortedCategories.indexOf(cat) === sortedCategories.length - 1 || savingOrder}
                                                 aria-label={`Move ${cat} category later`}
                                                 title="Move category later"
                                                 className="h-8 w-8 rounded-lg bg-amber/10 text-amber-dark text-sm font-medium cursor-pointer hover:bg-amber/20 disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
@@ -1022,7 +956,7 @@ function ManageAlbums() {
                                     <div className="h-px bg-warm-border flex-1"></div>
                                 </div>
                                 <div className="space-y-4">
-                                    {groupedAlbums[cat].map((album, albumIndex) => (
+                                    {(collapsedCategories.has(cat) ? [] : groupedAlbums[cat]).map((album, albumIndex) => (
                                         <div
                                             key={album.albumId}
                                             data-album-id={album.albumId}
@@ -1031,6 +965,10 @@ function ManageAlbums() {
                                                 else albumCardRefs.current.delete(album.albumId)
                                             }}
                                         >
+                                            <div className="mb-2 flex items-center gap-3 px-2 text-xs text-warm-gray" aria-live="polite">
+                                                <span>{({ gallery_only: 'Gallery only', not_synced: 'Drive backup awaiting sync', queued: 'Drive update queued', syncing: 'Syncing to Drive…', synced: 'Drive backup up to date', failed: 'Drive backup needs attention', unavailable: 'Drive status unavailable' })[backupStatuses[album.albumId]?.status] || 'Checking Drive backup…'}</span>
+                                                {backupStatuses[album.albumId]?.canRetry && ['failed', 'not_synced', 'queued'].includes(backupStatuses[album.albumId]?.status) && <button type="button" onClick={() => retryBackup(album.albumId)} className="text-amber-dark underline">Retry backup</button>}
+                                            </div>
                                             {/* Album card */}
                                             <div className="bg-white rounded-2xl p-5 shadow-warm-sm border border-warm-border hover:shadow-warm transition-all">
                                                 {editingAlbum === album.albumId ? (
@@ -1147,7 +1085,7 @@ function ManageAlbums() {
                                                                         onClick={() => {
                                                                             navigator.clipboard.writeText(`${window.location.origin}/sharedalbum/${album.shareCode}`)
                                                                             setActionSuccess('Link copied to clipboard!')
-                                                                            setTimeout(() => setActionSuccess(''), 3000)
+
                                                                         }}
                                                                         className="text-xs text-amber hover:text-amber-dark font-medium transition-colors cursor-pointer"
                                                                     >
@@ -1348,18 +1286,7 @@ function ManageAlbums() {
                                 </div>
                             </div>
                         ))}
-                        {viewMode === 'manage' && nextCursor && (
-                            <div className="flex justify-center pt-2">
-                                <button
-                                    type="button"
-                                    onClick={loadMoreAlbums}
-                                    disabled={loadingMore}
-                                    className="rounded-xl border border-warm-border bg-white px-6 py-3 text-sm font-medium text-charcoal shadow-warm-sm transition-colors hover:border-amber hover:text-amber disabled:cursor-wait disabled:opacity-60 cursor-pointer"
-                                >
-                                    {loadingMore ? 'Loading more…' : 'Load more albums'}
-                                </button>
-                            </div>
-                        )}
+
                     </div>
                 )}
             </div>

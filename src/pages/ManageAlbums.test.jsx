@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  fetchAlbumsFilteredPage: vi.fn(), fetchAllAlbums: vi.fn(), readCachedAlbumsPage: vi.fn(), listUsersPage: vi.fn(), updateAlbum: vi.fn(), updateGalleryOrder: vi.fn(), deleteAlbum: vi.fn(), deleteImages: vi.fn(),
+  fetchDriveBackupStatus: vi.fn(), retryDriveBackup: vi.fn(), fetchAlbumsFilteredPage: vi.fn(), fetchAllAlbums: vi.fn(), readCachedAlbumsPage: vi.fn(), listUsersPage: vi.fn(), updateAlbum: vi.fn(), updateGalleryOrder: vi.fn(), deleteAlbum: vi.fn(), deleteImages: vi.fn(),
   requestUploadUrl: vi.fn(), uploadFileToS3: vi.fn(), fetchAlbumMediaPage: vi.fn(), addImagesToAlbum: vi.fn(), updateImageThumbnail: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
@@ -32,6 +32,7 @@ describe('ManageAlbums', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     auth.getIdToken.mockResolvedValue('admin-token')
+    api.fetchDriveBackupStatus.mockResolvedValue({ items: [] })
     api.listUsersPage.mockResolvedValue({ users: [{ email: 'client@example.com', sub: '11111111-1111-4111-8111-111111111111' }, { email: 'other@example.com', sub: '22222222-2222-4222-8222-222222222222' }], nextCursor: null })
     api.fetchAlbumsFilteredPage.mockResolvedValue({ items: albums, nextCursor: null })
     api.fetchAllAlbums.mockResolvedValue(albums)
@@ -52,14 +53,14 @@ describe('ManageAlbums', () => {
     expect(screen.getByText('Travel')).toBeInTheDocument()
     expect(screen.getByText('Uncategorized')).toBeInTheDocument()
     expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
-      { type: 'photo', limit: 40, visibility: 'public' },
+      { type: 'photo', limit: 100, visibility: 'public' },
       'admin-token',
       expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
     await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
-      { type: 'photo', limit: 40, visibility: 'unlisted' },
+      { type: 'photo', limit: 100, visibility: 'unlisted' },
       'admin-token',
       expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
     ))
@@ -68,7 +69,7 @@ describe('ManageAlbums', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'client@example.com' }))
     expect(await screen.findByText('Viewing albums for: client@example.com')).toBeInTheDocument()
     await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
-      { type: 'photo', limit: 40, visibility: 'private', ownerSub: '11111111-1111-4111-8111-111111111111' },
+      { type: 'photo', limit: 100, visibility: 'private', ownerSub: '11111111-1111-4111-8111-111111111111' },
       'admin-token',
       expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
     ))
@@ -78,7 +79,7 @@ describe('ManageAlbums', () => {
     expect(screen.getByText('No users found')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
     await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenLastCalledWith(
-      { type: 'photo', limit: 40, visibility: 'public' },
+      { type: 'photo', limit: 100, visibility: 'public' },
       'admin-token',
       expect.objectContaining({ signal: expect.any(AbortSignal), force: false }),
     ))
@@ -104,7 +105,7 @@ describe('ManageAlbums', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
     await waitFor(() => expect(api.fetchAlbumsFilteredPage).toHaveBeenLastCalledWith(
-      { type: 'photo', limit: 40, visibility: 'unlisted' }, 'admin-token', expect.any(Object),
+      { type: 'photo', limit: 100, visibility: 'unlisted' }, 'admin-token', expect.any(Object),
     ))
     expect(screen.queryByRole('button', { name: /Move .* earlier/ })).toBeNull()
   })
@@ -150,7 +151,7 @@ describe('ManageAlbums', () => {
       { albumType: 'video', categoryNames: ['Sports', 'Films'] },
     ))
     expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledWith(
-      { type: 'video', limit: 40, visibility: 'public' },
+      { type: 'video', limit: 100, visibility: 'public' },
       'admin-token',
       expect.any(Object),
     )

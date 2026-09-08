@@ -11,6 +11,7 @@ import re
 import secrets
 
 import boto3
+import drive_backup_jobs
 from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
@@ -284,7 +285,8 @@ def handler(event, context):
             )
             item["status"] = "active"
         tag_album_visibility(item, visibility, include_derivatives=False)
-        table.update_item(
+        drive_backup_jobs.update_album(
+            table, item,
             Key={"albumId": album_id},
             UpdateExpression="SET #status = :active REMOVE createdBySub",
             ConditionExpression="createdBySub = :creator AND (#status = :pending OR #status = :active)",
@@ -337,7 +339,7 @@ def handler(event, context):
                     context=context, actor_type="service", auth_method="service",
                 )
 
-        if backup_to_drive and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
+        if backup_to_drive and not drive_backup_jobs.state_table() and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
             payload = {
                 "albumId": album_id,
                 "albumType": album_type,
@@ -365,6 +367,8 @@ def handler(event, context):
                 request_random_photo_pool_refresh()
         _audit(event, context, "success", "album_created", media_count=len(images), visibility=visibility)
         return json_response(201, serialize_album_summary(item, include_admin=True))
+    except drive_backup_jobs.DriveBackupBusy as error:
+        return error_response(409, str(error), code="backup_busy")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_album")
         return error_response(400, str(error), code="invalid_album")

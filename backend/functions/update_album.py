@@ -5,6 +5,7 @@ import os
 import secrets
 
 import boto3
+import drive_backup_jobs
 from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
@@ -274,7 +275,10 @@ def handler(event, context):
         if removals:
             update_parts.append("REMOVE " + ", ".join(removals))
 
-        response = table.update_item(
+        backup_change = bool({"title", "category"}.intersection(changed_fields))
+        commit = drive_backup_jobs.update_album if backup_change else lambda _table, _album, **kwargs: _table.update_item(**kwargs)
+        response = commit(
+            table, album,
             Key={"albumId": album_id},
             UpdateExpression=" ".join(update_parts),
             ConditionExpression=condition,
@@ -320,7 +324,7 @@ def handler(event, context):
             and (old_visibility == "public" or new_visibility == "public")
         ):
             request_hover_preview_refresh(album_id)
-        if album.get("title") != committed.get("title") or album.get("category") != committed.get("category"):
+        if not drive_backup_jobs.state_table() and (album.get("title") != committed.get("title") or album.get("category") != committed.get("category")):
             try:
                 _sync_drive_folder(committed)
             except Exception:
@@ -346,6 +350,8 @@ def handler(event, context):
             visibility=new_visibility,
         )
         return json_response(200, serialize_album_summary(committed, include_admin=True))
+    except drive_backup_jobs.DriveBackupBusy as error:
+        return error_response(409, str(error), code="backup_busy")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_album")
         return error_response(400, str(error), code="invalid_album")

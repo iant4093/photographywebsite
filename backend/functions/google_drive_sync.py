@@ -195,7 +195,7 @@ def _existing_file_id(service, filename, parent_id):
     return files[0]["id"] if files else None
 
 
-def handler(event, context):
+def legacy_handler(event, context):
     root_folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
     if not root_folder_id:
         raise RuntimeError("Google Drive destination is not configured")
@@ -280,3 +280,18 @@ def handler(event, context):
             if temporary_path and os.path.exists(temporary_path):
                 os.remove(temporary_path)
     return {"status": "success", "uploadedCount": uploaded}
+
+
+def handler(event, context):
+    if os.environ.get('DRIVE_BACKUP_STATE_TABLE'):
+        import drive_backup_reconcile
+        if 'Records' in (event or {}):
+            return drive_backup_reconcile.handler(event, context)
+        # Old async invocations drain into the durable path during rollout.
+        import drive_backup_jobs
+        album_id = validate_uuid((event or {}).get('albumId'))
+        album = table.get_item(Key={'albumId': album_id}, ConsistentRead=True).get('Item')
+        if album and album.get('status', 'active') == 'active':
+            drive_backup_jobs.enqueue_retry(album)
+        return {'status': 'queued'}
+    return legacy_handler(event, context)
