@@ -228,6 +228,6 @@
     {"logicalId": "DriveBackupStateTable", "resourceType": "AWS::DynamoDB::Table", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GoogleDriveBackupFunctionBackupIntents", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "AdminDriveBackupsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
-    {"logicalId": "GoogleDriveBackupFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true}
+    {"logicalId": "GoogleDriveBackupFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["ManagedPolicyArns", "Policies"], "allowNoDetails": false, "allowProtectedModify": true}
   ]
 }
