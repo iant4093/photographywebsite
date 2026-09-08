@@ -7,6 +7,7 @@ import BackToTop from './components/BackToTop'
 import DocumentMetadata from './components/DocumentMetadata'
 import MotionExperience from './components/MotionExperience'
 import AnalyticsTracker from './components/AnalyticsTracker'
+import CameraCursor from './components/CameraCursor'
 import Home from './pages/Home'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
@@ -88,6 +89,7 @@ function App() {
         <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} ${isImmersiveRoute ? 'linen-immersive' : ''} min-h-screen flex flex-col bg-cream`}>
             <DocumentMetadata />
             <AnalyticsTracker />
+            <CameraCursor enabled={!isAdminRoute && !isImmersiveRoute && location.pathname !== '/editor'} routeKey={location.pathname} />
             {!isImmersiveRoute && <a className="linen-skip-link" href="#main-content">Skip to main content</a>}
             {!isImmersiveRoute && (
                 <Navbar

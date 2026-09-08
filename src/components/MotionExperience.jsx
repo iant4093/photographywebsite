@@ -278,6 +278,7 @@ export default function MotionExperience() {
         <div
             ref={progressRef}
             className="editorial-progress"
+            data-camera-cursor="drag-y"
             role="scrollbar"
             aria-label="Page scroll position"
             aria-controls="root"

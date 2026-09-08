@@ -269,6 +269,7 @@ function ExploreCard({ item, index, mode, onOpen }) {
         <button
             type="button"
             className="explore-photo-card editorial-motion-media"
+            data-camera-cursor="photo"
             onClick={() => onOpen(index)}
             aria-label={`View photo from ${item.albumTitle}`}
         >

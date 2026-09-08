@@ -175,7 +175,7 @@ function AlbumCard({
 
     if (onOpen) {
         return (
-            <button type="button" onClick={onOpen} onMouseEnter={onMouseEnter} className={className} aria-label={`Open ${album.title}`}>
+            <button type="button" data-camera-cursor="photo" onClick={onOpen} onMouseEnter={onMouseEnter} className={className} aria-label={`Open ${album.title}`}>
                 {content}
             </button>
         )
@@ -183,6 +183,7 @@ function AlbumCard({
 
     return (
         <Link
+            data-camera-cursor="photo"
             to={targetRoute}
             onMouseEnter={() => {
                 onMouseEnter?.()

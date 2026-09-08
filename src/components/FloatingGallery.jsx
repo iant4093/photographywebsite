@@ -65,6 +65,7 @@ function buildGalleryLanes(albums, seed = PAGE_RANDOM_SEED) {
 function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = '' }) {
     return (
         <Link
+            data-camera-cursor="photo"
             to={`/album/${album.albumId}`}
             className="floating-print-card"
             aria-label={`View ${album.title}`}

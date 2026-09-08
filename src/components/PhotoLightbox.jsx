@@ -326,6 +326,7 @@ function PhotoLightbox({
                     right: 'max(1rem, calc(env(safe-area-inset-right) + 0.5rem))',
                 }}
                 aria-label="Close photo viewer"
+                data-camera-cursor="close"
                 title="Close Photo Viewer"
                 data-lightbox-initial-focus
             >
@@ -426,6 +427,7 @@ function PhotoLightbox({
                                 onClick={(event) => { event.stopPropagation(); onPrevious() }}
                                 className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                 aria-label="Previous photo"
+                                data-camera-cursor="previous"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -458,6 +460,7 @@ function PhotoLightbox({
                                 onClick={(event) => { event.stopPropagation(); onNext() }}
                                 className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                 aria-label="Next photo"
+                                data-camera-cursor="next"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

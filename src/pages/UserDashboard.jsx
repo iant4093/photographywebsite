@@ -402,6 +402,7 @@ function UserDashboard() {
 
                                     return (
                                         <button
+                                            data-camera-cursor="photo"
                                             data-page-scroll-media
                                             type="button"
                                             key={mediaId(img) || index}

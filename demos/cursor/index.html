@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#f3efe6" />
+    <meta name="description" content="A local, interactive cursor study for Ian Truong Photography." />
+    <title>Cursor study · Ian Truong</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23231f1a'/%3E%3Ctext x='7' y='22' fill='%23f3efe6' font-size='18' font-family='serif'%3EIT%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="brand" href="#playground"><span class="monogram">IT</span> Ian Truong</a>
+      <div class="masthead-right"><span class="eyebrow">Cursor study / 03</span><span class="local-badge">Local preview</span></div>
+    </header>
+
+    <main>
+      <div class="intro"><div><p class="eyebrow">An experiment in the details</p><h1>A little camera. A lighter touch.</h1></div><p>Move through the gallery. Open a photograph.<br />Adjust the cursor until it feels like you.</p></div>
+
+      <div class="workspace">
+        <section class="playground" id="playground" aria-label="Try the cursor">
+          <nav class="preview-nav" aria-label="Demo navigation"><span class="eyebrow">The gallery</span><div><a href="#photographs">Photographs <span aria-hidden="true">↗</span></a><a href="#details">Details <span aria-hidden="true">↗</span></a><button id="theme-toggle" aria-pressed="false">Dark background</button></div></nav>
+          <div class="gallery" id="photographs">
+            <button class="photo landscape" data-photo="0" data-cursor="view" aria-label="Open snowy trail photograph"><img src="./assets/landscape.webp" alt="A hiker on a snowy mountain trail beside an evergreen tree" width="1280" height="853" /><span class="photo-shade"></span><span class="photo-caption"><span>Out in the quiet.</span><span class="eyebrow">01 / Open photograph ↗</span></span></button>
+            <div class="portrait-column"><button class="photo portrait" data-photo="1" data-cursor="view" aria-label="Open golden light portrait"><img src="./assets/portrait.webp" alt="A portrait in warm afternoon light, with golden leaves in the background" width="1280" height="853" /></button><div class="portrait-caption"><span class="eyebrow">02 / A familiar face</span><p>Stay curious.<br />Look a little closer.</p><button class="text-link" data-open="1">View portrait <span aria-hidden="true">↗</span></button></div></div>
+          </div>
+          <div class="strip-header"><span class="eyebrow">The contact sheet</span><span>Drag to explore <span aria-hidden="true">↔</span></span></div>
+          <div class="filmstrip" tabindex="0" role="region" aria-label="Contact sheet. Drag, swipe, or use left and right arrow keys to scroll." data-cursor="drag">
+            <figure><img src="./assets/landscape.webp" alt="Snowy trail, full frame" draggable="false" /><figcaption>01 — Trail</figcaption></figure><figure><img src="./assets/portrait.webp" alt="Golden light portrait, full frame" draggable="false" /><figcaption>02 — Portrait</figcaption></figure><figure><img class="crop-tree" src="./assets/landscape.webp" alt="Detail of the tree on the snowy trail" draggable="false" /><figcaption>03 — Tree / crop</figcaption></figure><figure><img class="crop-light" src="./assets/portrait.webp" alt="Detail of golden leaves behind the portrait" draggable="false" /><figcaption>04 — Light / crop</figcaption></figure>
+          </div>
+          <div class="details" id="details"><div><span class="eyebrow">Keep the familiar parts</span><p class="selectable" data-native="text">Some moments ask you to slow down.<br />You can select this text as usual.</p></div><label class="note-label" for="demo-note">Try typing a note<input id="demo-note" type="text" placeholder="What feels right?" maxlength="200" autocomplete="off" /><span class="small-note">Just a scratchpad. Nothing is sent.</span></label></div>
+        </section>
+
+        <aside class="controls" aria-label="Cursor settings">
+          <div class="controls-heading"><span class="eyebrow">Make it yours</span><button id="reset" class="text-link">Reset</button></div>
+          <fieldset><legend>Cursor shape</legend><div class="mode-options"><label><input type="radio" name="mode" value="camera" checked /><span><span data-sample="camera"></span>Camera</span></label><label><input type="radio" name="mode" value="system" /><span><span data-sample="system"></span>System</span></label></div></fieldset>
+          <div class="size-control"><label for="cursor-size">Cursor size <output id="size-value" for="cursor-size">20 px</output></label><input id="cursor-size" type="range" min="20" max="36" step="1" value="20" /><div class="range-labels"><span>Quiet</span><span>Expressive</span></div></div>
+          <label class="toggle"><span>Action labels<small>“View”, “Next”, “Drag”</small></span><input id="labels" type="checkbox" role="switch" /></label>
+          <label class="toggle"><span>Shutter feedback<small>A small squeeze on click</small></span><input id="feedback" type="checkbox" role="switch" checked /></label>
+          <div class="live-state"><div class="state-visual" id="state-icon" aria-hidden="true"></div><div><span class="eyebrow">Under your pointer</span><p id="state-name">Camera / resting</p></div></div>
+          <p class="state-description" id="state-description">A small camera, with the lens at your exact click position.</p>
+          <div class="extra-tries"><button id="loading-demo">Try loading state <span aria-hidden="true">↻</span></button><button disabled>Unavailable action</button></div>
+          <p id="device-note" class="small-note">Text fields keep the normal cursor. Touch devices keep their usual behavior.</p>
+          <button id="copy-settings" class="copy-button">Copy these settings <span aria-hidden="true">↗</span></button>
+          <p id="notice" class="notice" role="status" aria-live="polite"></p>
+        </aside>
+      </div>
+
+      <footer class="state-guide" aria-label="Cursor state guide"><div><span data-sample="camera"></span><span>Rest<small>Small camera</small></span></div><div><span data-sample="view"></span><span>Photo<small>Camera flash</small></span></div><div><span data-sample="arrow"></span><span>Link<small>Directional arrow</small></span></div><div><span data-sample="zoom"></span><span>Zoom<small>Magnifier</small></span></div><div><span data-sample="drag"></span><span>Drag<small>Horizontal arrows</small></span></div><div><span data-sample="text"></span><span>Text<small>Native I-beam</small></span></div></footer>
+    </main>
+
+    <dialog id="viewer" aria-label="Photograph viewer"><div class="viewer-top"><span class="eyebrow" id="viewer-count">01 / 02</span><span>Click photograph to zoom</span><button id="close-viewer" data-cursor="close" aria-label="Close photograph">Close <span aria-hidden="true">×</span></button></div><div class="viewer-image-area" id="viewer-image-area"><button id="zoom-photo" data-cursor="zoom" aria-label="Zoom in on photograph"><img id="viewer-image" src="./assets/landscape.webp" alt="" /></button></div><div class="viewer-bottom"><button id="previous-photo" data-cursor="previous">← Previous</button><p id="viewer-title">Out in the quiet.</p><button id="next-photo" data-cursor="next">Next →</button></div></dialog>
+    <div id="custom-cursor" aria-hidden="true"><div class="cursor-shape"></div><span class="cursor-label"></span></div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -344,6 +344,7 @@ export default function VideoGallery() {
                         }}
                         title="Close Player"
                         aria-label="Close video player"
+                        data-camera-cursor="close"
                         data-lightbox-initial-focus
                     >
                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -368,6 +369,7 @@ export default function VideoGallery() {
                                     onClick={goPrev}
                                     className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                     aria-label="Previous video"
+                                    data-camera-cursor="previous"
                                 >
                                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -377,6 +379,7 @@ export default function VideoGallery() {
                                     onClick={goNext}
                                     className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                     aria-label="Next video"
+                                    data-camera-cursor="next"
                                 >
                                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
