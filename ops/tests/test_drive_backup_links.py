@@ -78,7 +78,7 @@ class DriveLinkInventoryTests(unittest.TestCase):
         links, summary = self.inventory(tree=tree, s3=s3)
         self.assertEqual(summary['filesMatched'], 2)
         self.assertEqual([item['fileId'] for item in links[0]['media']], ['a', 'b'])
-        s3.head_object.return_value = {'ETag': '"no-match"', 'ContentLength': 3}
+        s3.head_object.return_value = {'ETag': '"nomatch"', 'ContentLength': 3}
         with self.assertRaises(RuntimeError): self.inventory(tree=tree, s3=s3)
 
     def test_duplicate_manifest_entries_do_not_create_ambiguous_mapping(self):
