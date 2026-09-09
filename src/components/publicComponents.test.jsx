@@ -18,7 +18,7 @@ vi.mock('hls.js', () => {
   }
   return { default: Hls }
 })
-vi.mock('react-blurhash', () => ({ Blurhash: () => <div data-testid="blurhash" /> }))
+vi.mock('../utils/imagePlaceholder', () => ({ imagePlaceholder: () => 'data:image/png;base64,placeholder' }))
 
 import { AuthContext } from '../context/auth'
 import Hls from 'hls.js'
@@ -352,7 +352,7 @@ describe('scroll controls and progressive loading', () => {
     expect(screen.queryByRole('button', { name: /Scroll/ })).toBeNull()
   })
 
-  it('loads lazily and releases the blur placeholder after loading', () => {
+  it('loads only after observer admission and keeps a tiny fallback background', () => {
     let observerCallback
     const disconnect = vi.fn()
     vi.stubGlobal('IntersectionObserver', class {
@@ -362,19 +362,19 @@ describe('scroll controls and progressive loading', () => {
     })
     const { container } = render(<ProgressiveImage src="https://x.test/a.jpg" blurhash="LEHV6nWB2yk8pyo0adR*.7kCMdnj" alt="Lazy" />)
     expect(screen.queryByRole('img', { name: 'Lazy' })).toBeNull()
-    act(() => observerCallback([{ isIntersecting: false }]))
+    act(() => observerCallback([{ target: container.firstElementChild, isIntersecting: false }]))
     expect(screen.queryByRole('img', { name: 'Lazy' })).toBeNull()
-    act(() => observerCallback([{ isIntersecting: true }]))
+    act(() => observerCallback([{ target: container.firstElementChild, isIntersecting: true }]))
     const image = screen.getByRole('img', { name: 'Lazy' })
     fireEvent.load(image)
-    expect(container.querySelector('[aria-hidden="true"]')).toBeNull()
+    expect(container.querySelector('.progressive-image-placeholder')).toBeInTheDocument()
     expect(image).toHaveClass('opacity-100')
   })
 
   it('loads immediately when IntersectionObserver is unavailable or eager', () => {
     vi.stubGlobal('IntersectionObserver', undefined)
     const first = render(<ProgressiveImage src="https://x.test/fallback.jpg" alt="Fallback" />)
-    expect(screen.getByRole('img', { name: 'Fallback' })).toHaveAttribute('loading', 'lazy')
+    expect(screen.getByRole('img', { name: 'Fallback' })).toHaveAttribute('loading', 'eager')
     first.unmount()
     render(<ProgressiveImage eager src="https://x.test/eager.jpg" alt="Eager" />)
     expect(screen.getByRole('img', { name: 'Eager' })).toHaveAttribute('fetchpriority', 'high')

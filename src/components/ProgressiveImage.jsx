@@ -1,29 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { Blurhash } from 'react-blurhash'
-
-const lazyCallbacks = new Map()
-let sharedLazyObserver = null
-let sharedObserverConstructor = null
-
-function getLazyObserver() {
-    if (typeof IntersectionObserver === 'undefined') return null
-    if (!sharedLazyObserver || sharedObserverConstructor !== IntersectionObserver) {
-        sharedLazyObserver?.disconnect()
-        sharedObserverConstructor = IntersectionObserver
-        sharedLazyObserver = new IntersectionObserver((entries) => {
-            entries.forEach((entry) => {
-                if (entry.target) {
-                    lazyCallbacks.get(entry.target)?.(entry.isIntersecting)
-                    return
-                }
-                lazyCallbacks.forEach((load) => load(entry.isIntersecting))
-            })
-        // Retain a generous buffer in both directions, but release distant
-        // decoded images as well as their DOM nodes on long gallery visits.
-        }, { rootMargin: '800px', threshold: 0 })
-    }
-    return sharedLazyObserver
-}
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { observeRetainedImage } from '../utils/imageRetention'
+import { imagePlaceholder } from '../utils/imagePlaceholder'
 
 export default function ProgressiveImage({
     src,
@@ -42,6 +19,9 @@ export default function ProgressiveImage({
     const [loadedIdentity, setLoadedIdentity] = useState(null)
     const [failedResponsiveIdentity, setFailedResponsiveIdentity] = useState(null)
     const containerRef = useRef(null)
+    const retentionRef = useRef(null)
+    const [placeholder, setPlaceholder] = useState({ hash: '', url: '' })
+    const eagerPlaceholder = useMemo(() => eager ? imagePlaceholder(blurhash) : '', [blurhash, eager])
     const shouldLoad = eager || visibleSrc === src
     const responsiveIdentity = srcSet ? `${src}\n${srcSet}` : ''
     const effectiveSrcSet = responsiveIdentity && failedResponsiveIdentity !== responsiveIdentity
@@ -53,30 +33,28 @@ export default function ProgressiveImage({
     useEffect(() => {
         if (!src || eager) return undefined
         const element = containerRef.current
-        const observer = getLazyObserver()
-        if (!element || !observer) {
-            setVisibleSrc(src)
-            return undefined
-        }
-
-        lazyCallbacks.set(element, (visible) => {
+        if (!element) return undefined
+        const retained = observeRetainedImage(element, (visible) => {
             setVisibleSrc(visible ? src : null)
-            if (!visible) setLoadedIdentity(null)
+            if (visible && blurhash) {
+                setPlaceholder(previous => previous.hash === blurhash ? previous
+                    : { hash: blurhash, url: imagePlaceholder(blurhash) })
+            }
         })
-        observer.observe(element)
+        retentionRef.current = retained
         return () => {
-            lazyCallbacks.delete(element)
-            if (observer.unobserve) observer.unobserve(element)
-            else observer.disconnect?.()
+            retained.dispose()
+            if (retentionRef.current === retained) retentionRef.current = null
         }
-    }, [eager, src])
+    }, [blurhash, eager, src])
+
+    const placeholderUrl = eager ? eagerPlaceholder : placeholder.hash === blurhash ? placeholder.url : ''
 
     return (
         <div ref={containerRef} className={`relative overflow-hidden ${className}`} style={style}>
-            {shouldLoad && blurhash && !isLoaded && (
-                <div className="absolute inset-0 z-0 pointer-events-none" aria-hidden="true">
-                    <Blurhash hash={blurhash} width="100%" height="100%" resolutionX={24} resolutionY={24} punch={1} />
-                </div>
+            {placeholderUrl && (
+                <div className="progressive-image-placeholder absolute inset-0 z-0 pointer-events-none"
+                    aria-hidden="true" style={{ backgroundImage: `url("${placeholderUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
             )}
             {shouldLoad && (
                 <img
@@ -87,10 +65,15 @@ export default function ProgressiveImage({
                     alt={alt}
                     width={width}
                     height={height}
-                    loading={eager ? 'eager' : 'lazy'}
-                    fetchPriority={eager ? 'high' : 'low'}
+                    // The observer already controls loading distance, including
+                    // nested rows. A second native lazy gate can delay swipes.
+                    loading="eager"
+                    fetchPriority={eager ? 'high' : 'auto'}
                     decoding="async"
-                    onLoad={() => setLoadedIdentity(imageIdentity)}
+                    onLoad={(event) => {
+                        retentionRef.current?.loaded(event.currentTarget)
+                        setLoadedIdentity(imageIdentity)
+                    }}
                     onError={(event) => {
                         if (effectiveSrcSet) {
                             setFailedResponsiveIdentity(responsiveIdentity)
@@ -99,7 +82,7 @@ export default function ProgressiveImage({
                         setLoadedIdentity(imageIdentity)
                         onError?.(event)
                     }}
-                    className={`absolute inset-0 z-0 h-full w-full object-cover transition-opacity duration-300 ease-out ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+                    className={`absolute inset-0 z-0 h-full w-full object-cover transition-opacity duration-150 ease-out ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
                 />
             )}
         </div>

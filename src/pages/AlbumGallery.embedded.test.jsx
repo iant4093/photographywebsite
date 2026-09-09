@@ -93,12 +93,12 @@ describe('embedded album gallery', () => {
             }
         }
 
-        // Later rows still wait until they approach the viewport, at low priority.
+        // Later rows wait for observer admission, then load without a second lazy gate.
         const nextRow = observer.observe.mock.calls[0][0]
         act(() => notifyIntersection([{ target: nextRow, isIntersecting: true }], observer))
         const laterImage = screen.getByRole('img', { name: `Item ${firstRowCount + 1} from Coastal Light` })
-        expect(laterImage).toHaveAttribute('loading', 'lazy')
-        expect(laterImage).toHaveAttribute('fetchpriority', 'low')
+        expect(laterImage).toHaveAttribute('loading', 'eager')
+        expect(laterImage).toHaveAttribute('fetchpriority', 'auto')
     })
 
     it('loads one original on demand without reloading the album', async () => {

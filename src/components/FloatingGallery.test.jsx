@@ -144,22 +144,22 @@ describe('FloatingGallery', () => {
     })
 
     it('starts observing when asynchronously loaded albums create the wall', () => {
-        let intersectionCallback
         const observe = vi.fn()
         const unobserve = vi.fn()
-        const disconnect = vi.fn()
+        const observers = []
         vi.stubGlobal('IntersectionObserver', class {
             constructor(callback) {
-                intersectionCallback = callback
+                this.callback = callback
+                this.targets = []
+                this.disconnect = vi.fn()
+                observers.push(this)
             }
             observe(element) {
+                this.targets.push(element)
                 observe(element)
             }
             unobserve(element) {
                 unobserve(element)
-            }
-            disconnect() {
-                disconnect()
             }
         })
         const view = render(
@@ -178,6 +178,7 @@ describe('FloatingGallery', () => {
         )
         const wall = view.container.querySelector('.floating-print-wall')
         expect(observe).toHaveBeenCalledWith(wall)
+        const intersectionCallback = observers.find(observer => observer.targets.includes(wall)).callback
 
         act(() => intersectionCallback([{ isIntersecting: true }]))
         expect(wall).toHaveClass('is-floating-visible')
@@ -185,6 +186,7 @@ describe('FloatingGallery', () => {
         expect(wall).not.toHaveClass('is-floating-visible')
 
         view.unmount()
-        expect(disconnect).toHaveBeenCalledOnce()
+        // Both the wall animation and the shared image observer release work.
+        observers.forEach(observer => expect(observer.disconnect).toHaveBeenCalledOnce())
     })
 })

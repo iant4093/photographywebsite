@@ -2,12 +2,47 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import ProgressiveImage from './ProgressiveImage'
-vi.mock('react-blurhash', () => ({ Blurhash: () => <canvas data-testid="blur-placeholder" /> }))
+vi.mock('../utils/imagePlaceholder', () => ({ imagePlaceholder: () => 'data:image/png;base64,placeholder' }))
+import { RECENT_IMAGE_LIFETIME_MS } from '../utils/imageRetention'
 
 describe('ProgressiveImage responsive fallback', () => {
-    afterEach(() => vi.unstubAllGlobals())
+    afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
-    it('releases distant images and canvases, then restores them on reverse scrolling', () => {
+    it('keeps the same decoded image node during quick scroll reversals', () => {
+        vi.useFakeTimers()
+        let notify
+        vi.stubGlobal('IntersectionObserver', class {
+            constructor(callback) { notify = callback }
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        })
+        const view = render(<ProgressiveImage src="/photo.jpg" alt="Photo" />)
+        const target = view.container.firstElementChild
+        act(() => notify([{ target, isIntersecting: true }]))
+        const original = screen.getByRole('img')
+        fireEvent.load(original)
+        for (let pass = 0; pass < 5; pass++) {
+            act(() => {
+                notify([{ target, isIntersecting: false }])
+                vi.advanceTimersByTime(500)
+                notify([{ target, isIntersecting: true }])
+            })
+            expect(screen.getByRole('img')).toBe(original)
+            expect(original).toHaveClass('opacity-100')
+        }
+    })
+
+    it('does not reuse loaded state for a different photograph', () => {
+        const view = render(<ProgressiveImage eager src="/one.jpg" alt="Photo" />)
+        fireEvent.load(screen.getByRole('img'))
+        view.rerender(<ProgressiveImage eager src="/two.jpg" alt="Photo" />)
+        expect(screen.getByRole('img')).toHaveAttribute('src', '/two.jpg')
+        expect(screen.getByRole('img')).toHaveClass('opacity-0')
+    })
+
+    it('retains a stable placeholder and skips repeated fades after distant images are released', () => {
+        vi.useFakeTimers()
         let notify
         const unobserve = vi.fn()
         vi.stubGlobal('IntersectionObserver', class {
@@ -20,12 +55,16 @@ describe('ProgressiveImage responsive fallback', () => {
         const target = view.container.firstElementChild
         for (let visit = 0; visit < 3; visit += 1) {
             act(() => notify([{ target, isIntersecting: true }]))
-            expect(screen.getByTestId('blur-placeholder')).toBeInTheDocument()
+            expect(target.querySelector('.progressive-image-placeholder')).toBeInTheDocument()
+            if (visit > 0) expect(screen.getByRole('img')).toHaveClass('opacity-100')
             fireEvent.load(screen.getByRole('img'))
-            expect(screen.queryByTestId('blur-placeholder')).toBeNull()
+            expect(target.querySelector('.progressive-image-placeholder')).toBeInTheDocument()
             expect(screen.getByRole('img')).toHaveClass('opacity-100')
             act(() => notify([{ target, isIntersecting: false }]))
+            expect(screen.getByRole('img')).toBeInTheDocument()
+            act(() => vi.advanceTimersByTime(RECENT_IMAGE_LIFETIME_MS))
             expect(screen.queryByRole('img')).toBeNull()
+            expect(target.querySelector('.progressive-image-placeholder')).toBeInTheDocument()
             expect(target).toBeInTheDocument()
         }
         view.unmount()
@@ -47,7 +86,7 @@ describe('ProgressiveImage responsive fallback', () => {
         expect(screen.getByRole('img', { name: 'One' })).toBeInTheDocument()
         expect(screen.queryByRole('img', { name: 'Two' })).toBeNull()
         act(() => notify([{ target: first, isIntersecting: false }, { target: second, isIntersecting: true }]))
-        expect(screen.queryByRole('img', { name: 'One' })).toBeNull()
+        expect(screen.getByRole('img', { name: 'One' })).toBeInTheDocument()
         expect(screen.getByRole('img', { name: 'Two' })).toBeInTheDocument()
         expect(create).toHaveBeenCalledOnce()
     })

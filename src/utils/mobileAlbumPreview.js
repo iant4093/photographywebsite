@@ -1,6 +1,6 @@
 import { canRunAlbumPreview, MOBILE_PREVIEW_QUERY, REDUCED_MOTION_QUERY } from './albumPreviewPolicy'
 
-export const MOBILE_PREVIEW_DWELL_MS = 750
+export const MOBILE_PREVIEW_DWELL_MS = 550
 const MIN_VISIBLE = 0.6
 let coordinator = null
 
