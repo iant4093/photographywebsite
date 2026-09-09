@@ -14,7 +14,7 @@ function AlbumCard({
     onMouseEnter,
     showNewFlag = false,
     preview = false,
-    imageSizes = '(min-width: 768px) 360px, (min-width: 640px) 320px, 280px',
+    imageSizes = '(min-width: 1024px) 360px, (min-width: 640px) 320px, 280px',
 }) {
     const intentTimer = useRef(null)
     const hoverController = useRef(null)
@@ -171,7 +171,7 @@ function AlbumCard({
         </>
     )
 
-    const className = 'album-card group flex w-full flex-col h-full overflow-hidden transition-all duration-500 text-left cursor-pointer'
+    const className = 'album-card group flex w-full flex-col h-full overflow-hidden transition-shadow duration-300 text-left cursor-pointer'
 
     if (onOpen) {
         return (
@@ -197,7 +197,6 @@ function AlbumCard({
             onFocus={canPrefetch ? prefetchNavigation : undefined}
             onBlur={cancelPrefetch}
             onMouseDown={canPrefetch ? prefetchNavigation : undefined}
-            onTouchStart={canPrefetch ? prefetchNavigation : undefined}
             className={className}
         >
             {content}

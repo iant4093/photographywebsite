@@ -10,21 +10,17 @@ function getLazyObserver() {
     if (!sharedLazyObserver || sharedObserverConstructor !== IntersectionObserver) {
         sharedLazyObserver?.disconnect()
         sharedObserverConstructor = IntersectionObserver
-        sharedLazyObserver = new IntersectionObserver((entries, observer) => {
+        sharedLazyObserver = new IntersectionObserver((entries) => {
             entries.forEach((entry) => {
-                if (!entry.isIntersecting) return
                 if (entry.target) {
-                    lazyCallbacks.get(entry.target)?.()
-                    lazyCallbacks.delete(entry.target)
-                    if (observer?.unobserve) observer.unobserve(entry.target)
-                    else observer?.disconnect?.()
+                    lazyCallbacks.get(entry.target)?.(entry.isIntersecting)
                     return
                 }
-                lazyCallbacks.forEach((load) => load())
-                lazyCallbacks.clear()
-                observer?.disconnect?.()
+                lazyCallbacks.forEach((load) => load(entry.isIntersecting))
             })
-        }, { rootMargin: '280px', threshold: 0.01 })
+        // Retain a generous buffer in both directions, but release distant
+        // decoded images as well as their DOM nodes on long gallery visits.
+        }, { rootMargin: '800px', threshold: 0 })
     }
     return sharedLazyObserver
 }
@@ -55,7 +51,7 @@ export default function ProgressiveImage({
     const isLoaded = loadedIdentity === imageIdentity
 
     useEffect(() => {
-        if (!src || eager || visibleSrc === src) return undefined
+        if (!src || eager) return undefined
         const element = containerRef.current
         const observer = getLazyObserver()
         if (!element || !observer) {
@@ -63,19 +59,22 @@ export default function ProgressiveImage({
             return undefined
         }
 
-        lazyCallbacks.set(element, () => setVisibleSrc(src))
+        lazyCallbacks.set(element, (visible) => {
+            setVisibleSrc(visible ? src : null)
+            if (!visible) setLoadedIdentity(null)
+        })
         observer.observe(element)
         return () => {
             lazyCallbacks.delete(element)
             if (observer.unobserve) observer.unobserve(element)
             else observer.disconnect?.()
         }
-    }, [eager, src, visibleSrc])
+    }, [eager, src])
 
     return (
         <div ref={containerRef} className={`relative overflow-hidden ${className}`} style={style}>
-            {shouldLoad && blurhash && (
-                <div className={`absolute inset-0 z-10 pointer-events-none transition-opacity duration-500 ${isLoaded ? 'opacity-0' : 'opacity-100'}`} aria-hidden="true">
+            {shouldLoad && blurhash && !isLoaded && (
+                <div className="absolute inset-0 z-0 pointer-events-none" aria-hidden="true">
                     <Blurhash hash={blurhash} width="100%" height="100%" resolutionX={24} resolutionY={24} punch={1} />
                 </div>
             )}
@@ -100,7 +99,7 @@ export default function ProgressiveImage({
                         setLoadedIdentity(imageIdentity)
                         onError?.(event)
                     }}
-                    className={`absolute inset-0 z-0 h-full w-full object-cover transition-all duration-500 ease-out ${isLoaded ? 'scale-100 opacity-100' : 'scale-[1.02] opacity-0'}`}
+                    className={`absolute inset-0 z-0 h-full w-full object-cover transition-opacity duration-300 ease-out ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
                 />
             )}
         </div>

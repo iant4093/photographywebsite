@@ -1,3 +1,4 @@
+import useHeroParallax from '../hooks/useHeroParallax'
 import SiteSelect from '../components/SiteSelect'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigationType } from 'react-router'
@@ -110,24 +111,8 @@ function Home() {
         return () => controller.abort()
     }, [loadAttempt, savePage])
 
-    useEffect(() => {
-        const hero = heroRef.current
-        if (!hero || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
-        let frame = null
-        const update = () => {
-            frame = null
-            const shift = Math.min(Math.max(0, window.scrollY) * 0.08, 24)
-            hero.style.transform = `translateY(-${shift}px)`
-        }
-        const onScroll = () => {
-            if (frame === null) frame = window.requestAnimationFrame(update)
-        }
-        window.addEventListener('scroll', onScroll, { passive: true })
-        return () => {
-            window.removeEventListener('scroll', onScroll)
-            if (frame !== null) window.cancelAnimationFrame(frame)
-        }
-    }, [responsiveHeroFailed, managedHomeFailed])
+    useHeroParallax(heroRef, -0.08, 24)
+
 
     useEffect(() => {
         const elements = pageRef.current?.querySelectorAll('[data-reveal-id]') || []

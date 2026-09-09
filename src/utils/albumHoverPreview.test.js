@@ -3,6 +3,7 @@ import {
     ALBUM_HOVER_PREVIEW_LIMIT,
     canRunAlbumHoverPreview,
     selectAlbumHoverPreviews,
+    start,
 } from './albumHoverPreview'
 
 const previews = (name) => [640, 960, 1440, 1920]
@@ -10,6 +11,24 @@ const previews = (name) => [640, 960, 1440, 1920]
 
 describe('album hover preview selection', () => {
     afterEach(() => vi.unstubAllGlobals())
+
+    it('cancels a photo preview before loading when its row scrolls', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('hover: hover') }))
+        const container = document.createElement('div')
+        document.body.append(container)
+        const loadManifest = vi.fn()
+        const controller = start({ container, loadManifest })
+        try {
+            container.dispatchEvent(new Event('scroll'))
+            await vi.advanceTimersByTimeAsync(1000)
+            expect(loadManifest).not.toHaveBeenCalled()
+        } finally {
+            controller.stop()
+            container.remove()
+            vi.useRealTimers()
+        }
+    })
 
     it('uses only landscape images with complete 640px previews, excludes the cover, removes duplicates, and caps the sequence', () => {
         const cover = 'https://media.example.test/full/cover.jpg?version=1'

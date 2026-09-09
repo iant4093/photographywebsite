@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router'
+import useMediaQuery from '../hooks/useMediaQuery'
 
 const TARGET_SELECTOR = [
-    'main .home-hero',
-    'main .linen-video-hero',
     'main .linen-section-heading',
-    'main .catalog-section',
     'main .photo-stats-hero',
     'main .photo-stats-motion-section',
     'main .album-card',
     'main .linen-gallery-page [data-page-scroll-media]',
 ].join(', ')
 // Detached removed subtrees no longer match the `main ...` selectors above.
-const CANDIDATE_SELECTOR = '.home-hero, .linen-video-hero, .linen-section-heading, .catalog-section, .photo-stats-hero, .photo-stats-motion-section, .album-card, [data-page-scroll-media], .editorial-motion-frame'
+const CANDIDATE_SELECTOR = '.linen-section-heading, .photo-stats-hero, .photo-stats-motion-section, .album-card, [data-page-scroll-media], .editorial-motion-frame'
 
 function changesMotionTargets(records) {
     return records.some(record => [...record.addedNodes, ...record.removedNodes].some(node => (
@@ -34,6 +32,7 @@ function isMediaTarget(element) {
 function clearMotionStyles(target) {
     target.classList.remove(
         'editorial-motion-frame',
+        'is-motion-visible',
         'editorial-motion-media',
         'editorial-index-0',
         'editorial-index-1',
@@ -48,6 +47,8 @@ export default function MotionExperience() {
     const { pathname } = useLocation()
     const isAdmin = pathname.startsWith('/admin')
     const usesCatalogMotion = ['/', '/search', '/videos', '/stats'].includes(pathname)
+    const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+    const compactMotion = useMediaQuery('(pointer: coarse), (max-width: 720px)')
     const progressRef = useRef(null)
     const dragRef = useRef(null)
 
@@ -124,7 +125,7 @@ export default function MotionExperience() {
     }, [])
 
     useEffect(() => {
-        if (isAdmin || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
+        if (isAdmin || reducedMotion) return undefined
 
         const root = document.documentElement
         const main = document.querySelector('main')
@@ -135,14 +136,13 @@ export default function MotionExperience() {
         let collectFrame = null
         let targets = []
         const metadata = new Map()
-        let previousScrollY = window.scrollY
-        let velocity = 0
+        let layoutDirty = true
         const activeTargets = new Set()
 
         root.classList.add('editorial-motion-active', 'editorial-scrollbar-active')
 
         const requestUpdate = () => {
-            if (updateFrame === null) updateFrame = window.requestAnimationFrame(update)
+            if (!document.hidden && updateFrame === null) updateFrame = window.requestAnimationFrame(update)
         }
 
         const visibilityObserver = typeof IntersectionObserver === 'undefined'
@@ -152,13 +152,14 @@ export default function MotionExperience() {
                     if (!metadata.has(entry.target)) return
                     if (entry.isIntersecting) activeTargets.add(entry.target)
                     else activeTargets.delete(entry.target)
+                    entry.target.classList.toggle('is-motion-visible', entry.isIntersecting)
                 })
                 requestUpdate()
-            }, { rootMargin: '38% 0px 38% 0px', threshold: 0 })
+            }, { rootMargin: '160px 0px', threshold: 0 })
 
         const collectTargets = () => {
             collectFrame = null
-            const nextTargets = Array.from(new Set(main.querySelectorAll(TARGET_SELECTOR)))
+            const nextTargets = compactMotion ? [] : Array.from(new Set(main.querySelectorAll(TARGET_SELECTOR)))
                 .filter((element) => !element.closest('[role="dialog"]') && !element.classList.contains('fixed'))
             const nextSet = new Set(nextTargets)
 
@@ -182,7 +183,7 @@ export default function MotionExperience() {
                     target.classList.add('editorial-motion-frame', `editorial-index-${position}`)
                 }
                 if (!previous || previous.isMedia !== isMedia) target.classList.toggle('editorial-motion-media', isMedia)
-                metadata.set(target, { position, isMedia })
+                metadata.set(target, { ...previous, position, isMedia })
                 if (usesCatalogMotion) {
                     setMotionStyle(target, '--editorial-x', '0px')
                     setMotionStyle(target, '--editorial-card-rotation', '0deg')
@@ -191,11 +192,15 @@ export default function MotionExperience() {
 
                 if (!previous) {
                     if (visibilityObserver) visibilityObserver.observe(target)
-                    else activeTargets.add(target)
+                    else {
+                        activeTargets.add(target)
+                        target.classList.add('is-motion-visible')
+                    }
                 }
             })
 
             targets = nextTargets
+            layoutDirty = true
             requestUpdate()
         }
 
@@ -207,9 +212,23 @@ export default function MotionExperience() {
             updateFrame = null
             const viewportHeight = Math.max(window.innerHeight, 1)
             const scrollY = window.scrollY
-            velocity += ((scrollY - previousScrollY) - velocity) * 0.24
-            previousScrollY = scrollY
-            const motionKick = clamp(velocity, -24, 24)
+            // Measure untransformed layout only when it changes. Measuring the
+            // animated bounds feeds last frame's transform back into this frame,
+            // producing jumps on slow direction changes. Never read card layout
+            // during ordinary scrolling, and finish all reads before writes.
+            if (layoutDirty) {
+                targets.forEach(target => {
+                    let top = 0
+                    let element = target
+                    while (element) {
+                        top += element.offsetTop
+                        element = element.offsetParent
+                        if (element) top += element.clientTop
+                    }
+                    Object.assign(metadata.get(target), { top, height: target.offsetHeight })
+                })
+                layoutDirty = false
+            }
             const pageTravel = Math.max(document.documentElement.scrollHeight - viewportHeight, 0)
             const pageProgress = clamp(scrollY / Math.max(pageTravel, 1), 0, 1)
             let progressThumb = null
@@ -225,12 +244,11 @@ export default function MotionExperience() {
 
             const measurements = []
             activeTargets.forEach((target) => {
-                const bounds = target.getBoundingClientRect()
-                const measuredHeight = Math.min(Math.max(bounds.height, 1), viewportHeight)
-                const progress = clamp((viewportHeight - bounds.top) / (viewportHeight + measuredHeight), 0, 1)
+                const info = metadata.get(target)
+                const measuredHeight = Math.min(Math.max(info.height, 1), viewportHeight)
+                const progress = clamp((viewportHeight - (info.top - scrollY)) / (viewportHeight + measuredHeight), 0, 1)
                 const phase = (progress - 0.5) * 2
                 const presence = clamp(1 - Math.abs(phase) * 0.28, 0.72, 1)
-                const info = metadata.get(target)
                 const position = info.position - 1
                 const isMedia = info.isMedia
                 const amplitude = isMedia ? 1 : 0.76
@@ -249,27 +267,23 @@ export default function MotionExperience() {
                     )
                 }
             }
-            setMotionStyle(root, '--editorial-progress', pageProgress.toFixed(5))
-            setMotionStyle(root, '--editorial-speed', clamp(Math.abs(velocity) / 42, 0, 1).toFixed(4))
 
             measurements.forEach(({ target, position, presence, phase, amplitude }) => {
                 if (usesCatalogMotion) {
-                    setMotionStyle(target, '--editorial-y', `${(phase * -44 - motionKick * 0.085).toFixed(2)}px`)
-                    setMotionStyle(target, '--editorial-card-y', `${(phase * -32 - motionKick * 0.075).toFixed(2)}px`)
+                    setMotionStyle(target, '--editorial-y', `${(phase * -44).toFixed(2)}px`)
+                    setMotionStyle(target, '--editorial-card-y', `${(phase * -32).toFixed(2)}px`)
                     setMotionStyle(target, '--editorial-card-scale', (0.87 + presence * 0.13).toFixed(5))
                     setMotionStyle(target, '--editorial-scale', (0.93 + presence * 0.07).toFixed(5))
-                    setMotionStyle(target, '--editorial-saturation', (0.88 + presence * 0.12).toFixed(4))
                     return
                 }
 
                 setMotionStyle(target, '--editorial-x', `${(position * (1 - presence) * 36 * amplitude).toFixed(2)}px`)
-                setMotionStyle(target, '--editorial-y', `${(phase * -52 * amplitude - motionKick * 0.1).toFixed(2)}px`)
-                setMotionStyle(target, '--editorial-card-y', `${(phase * -16 - motionKick * 0.08).toFixed(2)}px`)
-                setMotionStyle(target, '--editorial-card-rotation', `${(position * phase * 0.62 + position * motionKick * 0.004).toFixed(3)}deg`)
+                setMotionStyle(target, '--editorial-y', `${(phase * -52 * amplitude).toFixed(2)}px`)
+                setMotionStyle(target, '--editorial-card-y', `${(phase * -16).toFixed(2)}px`)
+                setMotionStyle(target, '--editorial-card-rotation', `${(position * phase * 0.62).toFixed(3)}deg`)
                 setMotionStyle(target, '--editorial-card-scale', (0.978 + presence * 0.022).toFixed(5))
                 setMotionStyle(target, '--editorial-scale', (0.95 + presence * 0.05).toFixed(5))
                 setMotionStyle(target, '--editorial-rotation', `${(position * phase * 0.72 * amplitude).toFixed(3)}deg`)
-                setMotionStyle(target, '--editorial-saturation', (0.92 + presence * 0.08).toFixed(4))
             })
         }
 
@@ -279,27 +293,37 @@ export default function MotionExperience() {
         mutationObserver.observe(main, { childList: true, subtree: true })
         // Image swaps inside fixed media frames do not alter the motion target
         // set. Observe actual page-size changes without recollecting every card.
-        const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(requestUpdate)
+        const refreshLayout = () => {
+            layoutDirty = true
+            requestUpdate()
+        }
+        const onVisibilityChange = () => {
+            if (document.hidden && updateFrame !== null) {
+                window.cancelAnimationFrame(updateFrame)
+                updateFrame = null
+            } else refreshLayout()
+        }
+        const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(refreshLayout)
         layoutObserver?.observe(main)
         collectTargets()
         window.addEventListener('scroll', requestUpdate, { passive: true })
-        window.addEventListener('resize', requestUpdate)
+        window.addEventListener('resize', refreshLayout)
+        document.addEventListener('visibilitychange', onVisibilityChange)
 
         return () => {
             mutationObserver.disconnect()
             visibilityObserver?.disconnect()
             layoutObserver?.disconnect()
             window.removeEventListener('scroll', requestUpdate)
-            window.removeEventListener('resize', requestUpdate)
+            window.removeEventListener('resize', refreshLayout)
+            document.removeEventListener('visibilitychange', onVisibilityChange)
             if (updateFrame !== null) window.cancelAnimationFrame(updateFrame)
             if (collectFrame !== null) window.cancelAnimationFrame(collectFrame)
             targets.forEach(clearMotionStyles)
             root.classList.remove('editorial-motion-active', 'editorial-scrollbar-active')
-            root.style.removeProperty('--editorial-progress')
-            root.style.removeProperty('--editorial-speed')
             progressRail?.style.removeProperty('--editorial-progress-offset')
         }
-    }, [isAdmin, pathname, usesCatalogMotion])
+    }, [compactMotion, isAdmin, pathname, reducedMotion, usesCatalogMotion])
 
     if (isAdmin) return null
 

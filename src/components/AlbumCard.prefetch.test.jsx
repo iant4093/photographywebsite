@@ -58,7 +58,7 @@ describe('AlbumCard intent prefetch', () => {
         expect(prefetchPublicAlbum).not.toHaveBeenCalled()
     })
 
-    it.each(['focus', 'mouseDown', 'touchStart'])('starts immediately on %s and clears pending hover work', (event) => {
+    it.each(['focus', 'mouseDown'])('starts immediately on %s and clears pending hover work', (event) => {
         renderCard()
         const link = screen.getByRole('link', { name: /Public album/ })
         fireEvent.mouseEnter(link)
@@ -67,6 +67,17 @@ describe('AlbumCard intent prefetch', () => {
         expect(prefetchPublicAlbum).toHaveBeenCalledExactlyOnceWith(album.albumId)
         act(() => vi.advanceTimersByTime(300))
         expect(prefetchPublicAlbum).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not download album details for a touch scroll gesture', () => {
+        renderCard()
+        const link = screen.getByRole('link', { name: /Public album/ })
+        fireEvent.touchStart(link)
+        fireEvent.touchMove(link)
+        fireEvent.touchEnd(link)
+        act(() => vi.advanceTimersByTime(1000))
+        expect(preloadAlbumRoute).not.toHaveBeenCalled()
+        expect(prefetchPublicAlbum).not.toHaveBeenCalled()
     })
 
     it('prefetches only the hovered album in a catalog', () => {

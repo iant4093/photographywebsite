@@ -219,4 +219,87 @@ describe('MotionExperience film-strip scrollbar', () => {
     flushFrames()
     expect(write).not.toHaveBeenCalled()
   })
+
+  it('animates only nearby cards and leaves their catalog sections stable', () => {
+    let notify
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback) { notify = callback }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    const view = render(<MemoryRouter><main><section className="catalog-section">
+      {Array.from({ length: 100 }, (_, index) => <a key={index} className="album-card" />)}
+    </section></main><MotionExperience /></MemoryRouter>)
+    flushFrames()
+    const cards = view.container.querySelectorAll('.album-card')
+    expect(view.container.querySelector('.catalog-section')).not.toHaveClass('editorial-motion-frame')
+    expect(view.container.querySelectorAll('.is-motion-visible')).toHaveLength(0)
+    act(() => notify([{ target: cards[0], isIntersecting: true }]))
+    flushFrames()
+    expect(view.container.querySelectorAll('.is-motion-visible')).toHaveLength(1)
+    const farWrite = vi.spyOn(cards[99].style, 'setProperty')
+    window.scrollY = 500
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(farWrite).not.toHaveBeenCalled()
+    act(() => notify([{ target: cards[0], isIntersecting: false }, { target: cards[1], isIntersecting: true }]))
+    flushFrames()
+    expect(cards[0]).not.toHaveClass('is-motion-visible')
+    expect(cards[1]).toHaveClass('is-motion-visible')
+    view.unmount()
+    expect(cards[1]).not.toHaveClass('is-motion-visible')
+  })
+
+  it('does not measure transformed card geometry or invalidate root styles during scrolling', () => {
+    const view = renderExperience()
+    const card = view.container.querySelector('.album-card')
+    const readTop = vi.fn(() => 600)
+    Object.defineProperty(card, 'offsetTop', { configurable: true, get: readTop })
+    Object.defineProperty(card, 'offsetHeight', { configurable: true, value: 300 })
+    const bounds = vi.spyOn(card, 'getBoundingClientRect')
+    const rootWrite = vi.spyOn(document.documentElement.style, 'setProperty')
+    flushFrames()
+    readTop.mockClear()
+    window.scrollY = 300
+    fireEvent.scroll(window)
+    flushFrames()
+    const transform = card.style.cssText
+    window.scrollY = 700
+    fireEvent.scroll(window)
+    flushFrames()
+    window.scrollY = 300
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(card.style.cssText).toBe(transform)
+    expect(readTop).not.toHaveBeenCalled()
+    expect(bounds).not.toHaveBeenCalled()
+    expect(rootWrite).not.toHaveBeenCalled()
+    fireEvent.resize(window)
+    flushFrames()
+    expect(readTop).toHaveBeenCalledOnce()
+  })
+
+  it('responds to mobile and reduced-motion changes without leaving stale layers', () => {
+    const queries = new Map()
+    window.matchMedia = vi.fn(query => {
+      if (!queries.has(query)) queries.set(query, {
+        matches: false,
+        addEventListener: (_event, notify) => { queries.get(query).notify = notify },
+        removeEventListener: vi.fn(),
+      })
+      return queries.get(query)
+    })
+    const view = renderExperience()
+    flushFrames()
+    expect(view.container.querySelectorAll('.is-motion-visible').length).toBeGreaterThan(0)
+    const compact = queries.get('(pointer: coarse), (max-width: 720px)')
+    act(() => { compact.matches = true; compact.notify() })
+    flushFrames()
+    expect(view.container.querySelectorAll('.editorial-motion-frame')).toHaveLength(0)
+    expect(screen.getByRole('scrollbar')).toBeInTheDocument()
+    const reduced = queries.get('(prefers-reduced-motion: reduce)')
+    act(() => { reduced.matches = true; reduced.notify() })
+    expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
+  })
 })

@@ -352,7 +352,7 @@ describe('scroll controls and progressive loading', () => {
     expect(screen.queryByRole('button', { name: /Scroll/ })).toBeNull()
   })
 
-  it('loads lazily at intersection and fades out the blur placeholder on load', () => {
+  it('loads lazily and releases the blur placeholder after loading', () => {
     let observerCallback
     const disconnect = vi.fn()
     vi.stubGlobal('IntersectionObserver', class {
@@ -367,8 +367,8 @@ describe('scroll controls and progressive loading', () => {
     act(() => observerCallback([{ isIntersecting: true }]))
     const image = screen.getByRole('img', { name: 'Lazy' })
     fireEvent.load(image)
-    expect(container.querySelector('[aria-hidden="true"]')).toHaveClass('opacity-0')
-    expect(disconnect).toHaveBeenCalled()
+    expect(container.querySelector('[aria-hidden="true"]')).toBeNull()
+    expect(image).toHaveClass('opacity-100')
   })
 
   it('loads immediately when IntersectionObserver is unavailable or eager', () => {

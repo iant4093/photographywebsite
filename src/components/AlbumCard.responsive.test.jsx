@@ -47,7 +47,7 @@ describe('AlbumCard responsive covers', () => {
         await waitFor(() => expect(screen.getByRole('img', { name: photoAlbum.title }))
             .toHaveAttribute('srcset', expect.stringContaining('preview-1920.webp 1920w')))
         expect(screen.getByRole('img', { name: photoAlbum.title }))
-            .toHaveAttribute('sizes', '(min-width: 768px) 360px, (min-width: 640px) 320px, 280px')
+            .toHaveAttribute('sizes', '(min-width: 1024px) 360px, (min-width: 640px) 320px, 280px')
         expect(media.albumCoverPreviewSrcSet).toHaveBeenCalledWith({
             albumId: photoAlbum.albumId,
             coverImageUrl: photoAlbum.coverImageUrl,

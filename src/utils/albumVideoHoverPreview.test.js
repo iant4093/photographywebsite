@@ -59,6 +59,34 @@ describe('video album hover previews', () => {
         vi.restoreAllMocks()
     })
 
+    it('cancels pending hover work when scrolling starts', async () => {
+        const loadDetail = vi.fn()
+        const container = document.createElement('div')
+        document.body.append(container)
+        const controller = start({ container, album: {}, loadDetail })
+        container.dispatchEvent(new Event('scroll'))
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS + 1)
+        expect(loadDetail).not.toHaveBeenCalled()
+        expect(container.querySelector('video')).toBeNull()
+        controller.stop()
+        container.remove()
+    })
+
+    it('destroys an active decoder when the page is hidden', async () => {
+        hlsSupported.mockReturnValue(true)
+        const container = document.createElement('div')
+        const controller = start({ container, album: { coverHlsUrl: 'https://media.test/cover.m3u8' } })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        expect(hlsInstances).toHaveLength(1)
+        expect(container.querySelector('video')).not.toBeNull()
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+        document.dispatchEvent(new Event('visibilitychange'))
+        expect(hlsInstances[0].destroy).toHaveBeenCalledOnce()
+        expect(container.querySelector('video')).toBeNull()
+        controller.stop()
+        expect(hlsInstances[0].destroy).toHaveBeenCalledOnce()
+    })
+
     it('selects the exact cover video and requires its lighter HLS rendition', () => {
         const detail = {
             images: [

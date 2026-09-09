@@ -1,4 +1,5 @@
 import { mediaPreviewCandidates } from './mediaUrls'
+import { stopPreviewOnLeave } from './previewLifecycle'
 
 export const ALBUM_HOVER_DELAY_MS = 650
 export const ALBUM_HOVER_FRAME_MS = 2200
@@ -101,6 +102,16 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
     let currentImage = null
     const timers = new Set()
     const previewImages = new Set()
+    const stop = () => {
+        active = false
+        removeLifecycle()
+        timers.forEach((timer) => window.clearTimeout(timer))
+        timers.clear()
+        previewImages.forEach((image) => image.remove())
+        previewImages.clear()
+        currentImage = null
+    }
+    const removeLifecycle = stopPreviewOnLeave(stop)
     const later = (callback, delay) => {
         const timer = window.setTimeout(() => {
             timers.delete(timer)
@@ -173,14 +184,5 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
         await showNextFrame()
     }, ALBUM_HOVER_DELAY_MS)
 
-    return {
-        stop() {
-            active = false
-            timers.forEach((timer) => window.clearTimeout(timer))
-            timers.clear()
-            previewImages.forEach((image) => image.remove())
-            previewImages.clear()
-            currentImage = null
-        },
-    }
+    return { stop }
 }

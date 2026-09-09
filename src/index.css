@@ -251,7 +251,8 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
 }
 
 .parallax-hero {
-  transition: transform 0.1s linear;
+  /* JavaScript supplies the current frame; a transition would trail scrolling. */
+  transition: none;
 }
 
 @media (min-width: 768px) {
@@ -265,9 +266,10 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
   }
 }
 
+/* Keep catalog layout stable on scroll re-entry. Media is windowed by the
+   image observer instead of skipping entire transformed/scrollable sections. */
 .catalog-section {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 520px;
+  content-visibility: visible;
 }
 
 .skeleton-shimmer {

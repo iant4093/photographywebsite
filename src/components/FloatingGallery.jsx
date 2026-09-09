@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import ProgressiveImage from './ProgressiveImage'
 import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
+import useMediaQuery from '../hooks/useMediaQuery'
 
 const TILT_PATTERN = [-0.3, 0.14, 0.28, -0.12]
 const LANE_COUNT = 3
@@ -33,7 +34,7 @@ function galleryAlbumKey(album, index) {
     )
 }
 
-function buildGalleryLanes(albums, seed = PAGE_RANDOM_SEED) {
+function buildGalleryLanes(albums, maximum = MAX_ALBUMS_PER_LANE, seed = PAGE_RANDOM_SEED) {
     const seen = new Set()
     const randomizedAlbums = albums
         .map((album, index) => ({
@@ -50,7 +51,7 @@ function buildGalleryLanes(albums, seed = PAGE_RANDOM_SEED) {
         .sort((left, right) => left.rank - right.rank || left.index - right.index)
         .map(({ album }) => album)
 
-    const laneLength = Math.min(MAX_ALBUMS_PER_LANE, randomizedAlbums.length)
+    const laneLength = Math.min(maximum, randomizedAlbums.length)
     if (!laneLength) return []
 
     return Array.from({ length: LANE_COUNT }, (_, laneIndex) => {
@@ -123,15 +124,16 @@ function Lane({ albums, lane, previewSets }) {
 
 export default function FloatingGallery({ albums }) {
     const stageRef = useRef(null)
+    const compact = useMediaQuery('(pointer: coarse), (max-width: 720px)')
     const [previewSets, setPreviewSets] = useState(() => new Map())
     const albumLanes = useMemo(
-        () => buildGalleryLanes(albums),
-        [albums],
+        () => buildGalleryLanes(albums, compact ? 4 : MAX_ALBUMS_PER_LANE),
+        [albums, compact],
     )
     useEffect(() => {
         let active = true
         const unique = new Map()
-        for (const album of albums) unique.set(galleryAlbumKey(album, unique.size), album)
+        for (const album of albumLanes.flat()) unique.set(galleryAlbumKey(album, unique.size), album)
         Promise.all([...unique].map(async ([key, album]) => [
             key,
             await albumCoverPreviewSrcSet(album).catch(() => ''),
@@ -139,7 +141,7 @@ export default function FloatingGallery({ albums }) {
             if (active) setPreviewSets(new Map(entries.filter(([, value]) => value)))
         })
         return () => { active = false }
-    }, [albums])
+    }, [albumLanes])
     const setPlaybackRate = useCallback((rate) => {
         const stage = stageRef.current
         if (!stage) return
@@ -169,15 +171,19 @@ export default function FloatingGallery({ albums }) {
         if (!albumLanes.length) return undefined
         const stage = stageRef.current
         if (!stage) return undefined
-        if (typeof IntersectionObserver === 'undefined') {
-            stage.classList.add('is-floating-visible')
-            return undefined
+        let visible = typeof IntersectionObserver === 'undefined'
+        const update = () => stage.classList.toggle('is-floating-visible', visible && !document.hidden)
+        const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([entry]) => {
+            visible = entry.isIntersecting
+            update()
+        }, { rootMargin: '160px 0px', threshold: 0 })
+        observer?.observe(stage)
+        document.addEventListener('visibilitychange', update)
+        update()
+        return () => {
+            observer?.disconnect()
+            document.removeEventListener('visibilitychange', update)
         }
-        const observer = new IntersectionObserver(([entry]) => {
-            stage.classList.toggle('is-floating-visible', entry.isIntersecting)
-        }, { rootMargin: '25% 0px', threshold: 0 })
-        observer.observe(stage)
-        return () => observer.disconnect()
     }, [albumLanes.length])
 
     if (!albumLanes.length) return null

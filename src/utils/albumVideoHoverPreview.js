@@ -1,4 +1,5 @@
 import { mediaHlsUrl } from './mediaUrls'
+import { stopPreviewOnLeave } from './previewLifecycle'
 
 export const VIDEO_HOVER_DELAY_MS = 350
 export const VIDEO_HOVER_DURATION_MS = 4000
@@ -112,6 +113,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     const cleanup = (notify = true) => {
         if (!active && !video && !hls) return
         active = false
+        removeLifecycle()
         timers.forEach((timer) => window.clearTimeout(timer))
         timers.clear()
         retryTimer = null
@@ -128,6 +130,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
         if (playing && notify) onPlaybackEnd?.()
         playing = false
     }
+    const removeLifecycle = stopPreviewOnLeave(() => cleanup(true))
     const fail = () => cleanup(true)
     const retryPlayback = () => {
         if (!active || retryTimer !== null) return

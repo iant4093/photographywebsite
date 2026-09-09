@@ -312,7 +312,7 @@ export default function VideoGallery() {
                             />
                             {/* Play Button Overlay */}
                             <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                                <div className="w-16 h-16 rounded-full bg-white/30 backdrop-blur-sm flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                                <div className="w-16 h-16 rounded-full bg-black/40 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
                                     <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
                                         <path d="M8 5v14l11-7z" />
                                     </svg>

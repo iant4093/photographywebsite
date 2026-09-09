@@ -401,8 +401,10 @@ describe('Home complete public catalog', () => {
     const unobserve = vi.fn()
     const disconnect = vi.fn()
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(next) { callback = next }
-      observe = vi.fn()
+      constructor(next) { callback = next; this.callback = next }
+      observe = vi.fn((element) => {
+        if (element.querySelector('img.parallax-hero')) this.callback([{ isIntersecting: true, target: element }])
+      })
       unobserve = unobserve
       disconnect = disconnect
     })
@@ -590,8 +592,10 @@ describe('Videos paginated catalog', () => {
     let callback
     const unobserve = vi.fn()
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(next) { callback = next }
-      observe() {}
+      constructor(next) { callback = next; this.callback = next }
+      observe(element) {
+        if (element.querySelector('img')) this.callback([{ isIntersecting: true, target: element }])
+      }
       unobserve = unobserve
       disconnect() {}
     })

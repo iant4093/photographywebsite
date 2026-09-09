@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import FloatingGallery from './FloatingGallery'
 
@@ -14,7 +14,29 @@ function makeAlbums(count) {
 }
 
 describe('FloatingGallery', () => {
+    beforeEach(() => { window.matchMedia = vi.fn(() => ({ matches: false })) })
     afterEach(() => vi.unstubAllGlobals())
+
+    it('bounds the width of animated tracks on mobile', () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('pointer: coarse') }))
+        const { container } = render(<MemoryRouter><FloatingGallery albums={makeAlbums(75)} /></MemoryRouter>)
+        expect(container.querySelectorAll('.floating-lane')).toHaveLength(3)
+        expect(container.querySelectorAll('.floating-print-card')).toHaveLength(24)
+        expect(screen.getAllByRole('link')).toHaveLength(12)
+    })
+
+    it('pauses a visible wall while the document is hidden', () => {
+        vi.stubGlobal('IntersectionObserver', undefined)
+        const { container } = render(<MemoryRouter><FloatingGallery albums={makeAlbums(12)} /></MemoryRouter>)
+        const wall = container.querySelector('.floating-print-wall')
+        expect(wall).toHaveClass('is-floating-visible')
+        const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+        fireEvent(document, new Event('visibilitychange'))
+        expect(wall).not.toHaveClass('is-floating-visible')
+        hidden.mockReturnValue(false)
+        fireEvent(document, new Event('visibilitychange'))
+        expect(wall).toHaveClass('is-floating-visible')
+    })
 
     it('selects stable randomized lanes from the full available catalog', () => {
         const albums = makeAlbums(36)

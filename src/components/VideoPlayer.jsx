@@ -56,7 +56,13 @@ export default function VideoPlayer({ videoInfo, autoplay = true, controls = tru
                     fallbackToRaw()
                     return
                 }
-                hls = new Hls({ debug: false })
+                hls = new Hls({
+                    debug: false,
+                    capLevelToPlayerSize: true,
+                    maxBufferLength: 20,
+                    maxMaxBufferLength: 30,
+                    backBufferLength: 10,
+                })
                 hls.loadSource(hlsUrl)
                 hls.attachMedia(video)
                 hls.on(Hls.Events.MANIFEST_PARSED, tryPlay)

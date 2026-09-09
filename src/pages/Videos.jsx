@@ -1,3 +1,4 @@
+import useHeroParallax from '../hooks/useHeroParallax'
 import SiteSelect from '../components/SiteSelect'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigationType } from 'react-router'
@@ -82,23 +83,8 @@ export default function Videos() {
         return () => window.clearTimeout(timer)
     }, [])
 
-    useEffect(() => {
-        const hero = heroRef.current
-        if (!hero || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
-        let frame = null
-        const update = () => {
-            frame = null
-            hero.style.transform = `translateY(${Math.min(Math.max(0, window.scrollY) * 0.15, 60)}px)`
-        }
-        const onScroll = () => {
-            if (frame === null) frame = window.requestAnimationFrame(update)
-        }
-        window.addEventListener('scroll', onScroll, { passive: true })
-        return () => {
-            window.removeEventListener('scroll', onScroll)
-            if (frame !== null) window.cancelAnimationFrame(frame)
-        }
-    }, [])
+    useHeroParallax(heroRef, 0.15, 60)
+
 
     useEffect(() => {
         const elements = pageRef.current?.querySelectorAll('[data-reveal-id]') || []
