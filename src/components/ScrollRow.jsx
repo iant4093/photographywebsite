@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
 import { saveHorizontalScroll, getHorizontalScroll } from '../utils/scroll'
+import { createRowScrollController } from '../utils/rowScroll'
 
 const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)'
 const SCROLL_VIEWPORT_STYLE = {
@@ -11,6 +12,7 @@ const SCROLL_VIEWPORT_STYLE = {
 // Horizontal scroll row with left/right arrow buttons on desktop
 export default function ScrollRow({ children, className = '', scrollKey }) {
     const scrollRef = useRef(null)
+    const controllerRef = useRef(null)
     const [canScrollLeft, setCanScrollLeft] = useState(false)
     const [canScrollRight, setCanScrollRight] = useState(false)
 
@@ -40,6 +42,8 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
         if (!el) return
 
         checkScroll()
+        const controller = createRowScrollController(el)
+        controllerRef.current = controller
 
         let frame = null
         const handleScroll = () => {
@@ -53,36 +57,37 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
         }
 
         el.addEventListener('scroll', handleScroll, { passive: true })
-        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(checkScroll)
+        const handleResize = () => { controller.cancel(); checkScroll() }
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(handleResize)
         resizeObserver?.observe(el)
-        if (!resizeObserver) window.addEventListener('resize', checkScroll)
+        if (!resizeObserver) window.addEventListener('resize', handleResize)
 
         // Re-check after images/content may have loaded
         const timer = setTimeout(checkScroll, 500)
 
         return () => {
+            controller.destroy()
+            if (controllerRef.current === controller) controllerRef.current = null
             el.removeEventListener('scroll', handleScroll)
             resizeObserver?.disconnect()
-            if (!resizeObserver) window.removeEventListener('resize', checkScroll)
+            if (!resizeObserver) window.removeEventListener('resize', handleResize)
             if (frame !== null) window.cancelAnimationFrame(frame)
             clearTimeout(timer)
         }
     }, [checkScroll, scrollKey])
 
     const scroll = (direction) => {
-        const el = scrollRef.current
-        if (!el) return
-        const scrollAmount = el.clientWidth * 0.8
-        el.scrollBy({ left: direction === 'left' ? -scrollAmount : scrollAmount, behavior: 'smooth' })
+        controllerRef.current?.scroll(direction)
     }
 
     return (
         <div className="relative group/scroll">
-            {/* Scroll container */}
+            {/* Touch rows keep native snapping. Desktop arrows own the complete
+                motion so browser snapping cannot add a second correction. */}
             <div
                 ref={scrollRef}
                 style={SCROLL_VIEWPORT_STYLE}
-                className={`flex overflow-x-auto gap-6 px-8 -mx-6 pt-6 pb-10 snap-x snap-mandatory scrollbar-hide ${className}`}
+                className={`flex overflow-x-auto gap-6 px-8 -mx-6 pt-6 pb-10 snap-x snap-mandatory md:snap-none scrollbar-hide ${className}`}
             >
                 {children}
             </div>

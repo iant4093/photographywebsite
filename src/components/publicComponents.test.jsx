@@ -309,8 +309,10 @@ describe('scroll controls and progressive loading', () => {
   })
 
   it('restores, persists, and operates both ScrollRow arrows', () => {
+    vi.stubGlobal('requestAnimationFrame', callback => setTimeout(() => callback(Date.now()), 16))
+    vi.stubGlobal('cancelAnimationFrame', id => clearTimeout(id))
     sessionStorage.clear()
-    const { container, unmount } = render(<ScrollRow scrollKey="test"><div>item</div></ScrollRow>)
+    const { container, unmount } = render(<ScrollRow scrollKey="test"><div>one</div><div>two</div><div>three</div></ScrollRow>)
     const scroller = container.querySelector('.overflow-x-auto')
     expect(scroller).toHaveClass('px-8', '-mx-6')
     expect(scroller).toHaveStyle({ scrollPaddingInline: '2rem' })
@@ -321,7 +323,9 @@ describe('scroll controls and progressive loading', () => {
       scrollWidth: { configurable: true, value: 1000 },
       clientWidth: { configurable: true, value: 300 },
     })
-    scroller.scrollBy = vi.fn()
+    Array.from(scroller.children).forEach((child, index) => {
+      Object.defineProperty(child, 'offsetLeft', { value: 32 + index * 240 })
+    })
     fireEvent.scroll(scroller)
     act(() => vi.advanceTimersByTime(500))
     const leftButton = screen.getByRole('button', { name: 'Scroll left' })
@@ -331,14 +335,17 @@ describe('scroll controls and progressive loading', () => {
     expect(rightButton).toHaveClass('right-3')
     expect(rightButton).not.toHaveClass('translate-x-1/2')
     fireEvent.click(leftButton)
+    act(() => vi.advanceTimersByTime(650))
+    expect(scroller.scrollLeft).toBe(0)
     fireEvent.click(rightButton)
-    expect(scroller.scrollBy).toHaveBeenNthCalledWith(1, { left: -240, behavior: 'smooth' })
-    expect(scroller.scrollBy).toHaveBeenNthCalledWith(2, { left: 240, behavior: 'smooth' })
+    act(() => vi.advanceTimersByTime(650))
+    expect(scroller.scrollLeft).toBe(240)
+    fireEvent.scroll(scroller)
     unmount()
 
     vi.stubGlobal('ResizeObserver', undefined)
     const restored = render(<ScrollRow scrollKey="test"><div>again</div></ScrollRow>)
-    expect(restored.container.querySelector('.overflow-x-auto').scrollLeft).toBe(10)
+    expect(restored.container.querySelector('.overflow-x-auto').scrollLeft).toBe(240)
     fireEvent.resize(window)
     restored.unmount()
   })

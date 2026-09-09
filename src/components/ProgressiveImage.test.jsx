@@ -41,7 +41,7 @@ describe('ProgressiveImage responsive fallback', () => {
         expect(screen.getByRole('img')).toHaveClass('opacity-0')
     })
 
-    it('retains a stable placeholder and skips repeated fades after distant images are released', () => {
+    it('keeps the placeholder visible until an evicted full image loads again', () => {
         vi.useFakeTimers()
         let notify
         const unobserve = vi.fn()
@@ -56,7 +56,7 @@ describe('ProgressiveImage responsive fallback', () => {
         for (let visit = 0; visit < 3; visit += 1) {
             act(() => notify([{ target, isIntersecting: true }]))
             expect(target.querySelector('.progressive-image-placeholder')).toBeInTheDocument()
-            if (visit > 0) expect(screen.getByRole('img')).toHaveClass('opacity-100')
+            expect(screen.getByRole('img')).toHaveClass('opacity-0')
             fireEvent.load(screen.getByRole('img'))
             expect(target.querySelector('.progressive-image-placeholder')).toBeInTheDocument()
             expect(screen.getByRole('img')).toHaveClass('opacity-100')

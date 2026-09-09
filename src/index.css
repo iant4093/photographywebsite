@@ -299,6 +299,17 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
   }
 }
 
+/* A load-triggered animation also fades cached images whose load event arrives
+   before their initial paint. Retained image nodes do not restart this reveal. */
+.progressive-image-ready {
+  animation: progressive-image-reveal 500ms ease-in-out both;
+}
+
+@keyframes progressive-image-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* Grid item scroll-triggered animation */
 .grid-item {
   opacity: 0;

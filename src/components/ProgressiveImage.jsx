@@ -36,6 +36,7 @@ export default function ProgressiveImage({
         if (!element) return undefined
         const retained = observeRetainedImage(element, (visible) => {
             setVisibleSrc(visible ? src : null)
+            if (!visible) setLoadedIdentity(null)
             if (visible && blurhash) {
                 setPlaceholder(previous => previous.hash === blurhash ? previous
                     : { hash: blurhash, url: imagePlaceholder(blurhash) })
@@ -82,7 +83,7 @@ export default function ProgressiveImage({
                         setLoadedIdentity(imageIdentity)
                         onError?.(event)
                     }}
-                    className={`absolute inset-0 z-0 h-full w-full object-cover transition-opacity duration-150 ease-out ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+                    className={`absolute inset-0 z-0 h-full w-full object-cover ${isLoaded ? 'opacity-100 progressive-image-ready' : 'opacity-0'}`}
                 />
             )}
         </div>
