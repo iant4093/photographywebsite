@@ -1,5 +1,5 @@
 import { selectChoice } from '../test/selectChoice'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -41,6 +41,110 @@ import { clearRandomPhotoSessionCache } from '../utils/randomPhotoSession'
 function routed(ui) {
   return render(<MemoryRouter>{ui}</MemoryRouter>)
 }
+
+describe.each([
+  { label: 'photo', Page: Home, prefix: 'home-photo', filterLabel: 'albums', sortLabel: 'Sort sections' },
+  { label: 'video', Page: Videos, prefix: 'videos', filterLabel: 'video albums', sortLabel: 'Sort video sections' },
+])('$label category year filters', ({ label, Page, prefix, filterLabel, sortLabel }) => {
+  let items
+  beforeEach(() => {
+    vi.clearAllMocks()
+    clearRandomPhotoSessionCache()
+    items = [
+      { albumId: 'h26a', title: 'Recent hike', type: label, category: 'Hikes', createdAt: '2026-08-03T12:00:00Z', galleryCategoryOrder: 0 },
+      { albumId: 'h24', title: 'Older hike', type: label, category: 'Hikes', createdAt: '2024-04-01T12:00:00Z', uploadedAt: '2025-06-01T12:00:00Z', galleryCategoryOrder: 0 },
+      { albumId: 'h26b', title: 'Spring hike', type: label, category: 'Hikes', createdAt: '2026-03-01T12:00:00Z', galleryCategoryOrder: 0 },
+      { albumId: 'b25', title: 'Birds last year', type: label, category: 'Birding', createdAt: '2025-04-01T12:00:00Z', galleryCategoryOrder: 1 },
+      { albumId: 'b26', title: 'Birds this year', type: label, category: 'Birding', createdAt: '2026-05-01T12:00:00Z', galleryCategoryOrder: 1 },
+      { albumId: 'no-date', title: 'Undated album', type: label },
+      { albumId: 'bad-date', title: 'Unknown date', type: label, createdAt: 'invalid' },
+    ]
+    catalog.getCatalogSnapshot.mockReturnValue({ items, nextCursor: null })
+    catalog.loadCompleteCatalog.mockResolvedValue({ items, nextCursor: null })
+    scroll.isRevealed.mockReturnValue(true)
+    api.fetchRandomPhotos.mockResolvedValue({ images: [] })
+    window.matchMedia = vi.fn(() => ({ matches: true }))
+  })
+
+  it('defaults to All and filters categories independently using only their available years', async () => {
+    const view = routed(<Page />)
+    const hikes = await screen.findByRole('combobox', { name: `Filter Hikes ${filterLabel} by year` })
+    const birds = screen.getByRole('combobox', { name: `Filter Birding ${filterLabel} by year` })
+    expect(hikes).toHaveValue('all')
+    expect(hikes).toHaveTextContent('All')
+    expect(screen.getByTestId(`${prefix}-Hikes`)).toHaveTextContent('Recent hikeSpring hikeOlder hike')
+    fireEvent.click(hikes)
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['All', '2026', '2024'])
+    selectChoice(hikes, '2024')
+    expect(screen.getByTestId(`${prefix}-Hikes-year-2024`)).toHaveTextContent('Older hike')
+    expect(screen.queryByRole('link', { name: 'Recent hike' })).toBeNull()
+    expect(birds).toHaveValue('all')
+    expect(within(screen.getByTestId(`${prefix}-Birding`)).getAllByRole('link')).toHaveLength(2)
+
+    selectChoice(birds, '2025')
+    expect(screen.getByTestId(`${prefix}-Birding-year-2025`)).toHaveTextContent('Birds last year')
+    expect(hikes).toHaveValue('2024')
+    selectChoice(screen.getByRole('combobox', { name: sortLabel }), '1')
+    expect(hikes).toHaveValue('2024')
+    expect(birds).toHaveValue('2025')
+
+    selectChoice(hikes, 'all')
+    expect(screen.getByTestId(`${prefix}-Hikes`)).toHaveTextContent('Recent hikeSpring hikeOlder hike')
+    expect(birds).toHaveValue('2025')
+    view.unmount()
+    routed(<Page />)
+    expect(screen.getByRole('combobox', { name: `Filter Birding ${filterLabel} by year` })).toHaveValue('all')
+  })
+
+  it('keeps undated albums in All without inventing year options and preserves curated order', async () => {
+    items[1].galleryOrder = 0
+    items.push({ albumId: 'undated-hike', title: 'Undated hike', type: label, category: 'Hikes' })
+    routed(<Page />)
+    const hikes = await screen.findByRole('combobox', { name: `Filter Hikes ${filterLabel} by year` })
+    expect(screen.getByTestId(`${prefix}-Hikes`)).toHaveTextContent('Older hikeRecent hikeSpring hikeUndated hike')
+    selectChoice(hikes, '2026')
+    expect(screen.getByTestId(`${prefix}-Hikes-year-2026`)).toHaveTextContent('Recent hikeSpring hike')
+    expect(screen.queryByRole('link', { name: 'Undated hike' })).toBeNull()
+    selectChoice(hikes, 'all')
+    expect(screen.getByTestId(`${prefix}-Hikes`)).toHaveTextContent('Older hikeRecent hikeSpring hikeUndated hike')
+
+    fireEvent.click(screen.getByRole('combobox', { name: `Filter Uncategorized ${filterLabel} by year` }))
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['All'])
+    expect(screen.getByRole('link', { name: 'Undated album' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Unknown date' })).toBeInTheDocument()
+  })
+
+  it('adds years from later catalog pages without clearing the selected filter', async () => {
+    catalog.getCatalogSnapshot.mockReturnValue({ items, nextCursor: 'next' })
+    let deliverPage
+    if (label === 'photo') {
+      catalog.loadCompleteCatalog.mockImplementation(({ onPage }) => new Promise(resolve => {
+        deliverPage = nextItems => {
+          const page = { items: nextItems, nextCursor: null }
+          onPage(page)
+          resolve(page)
+        }
+      }))
+    } else {
+      api.fetchAlbumsPage.mockImplementation(() => new Promise(resolve => {
+        deliverPage = nextItems => resolve({ items: nextItems, nextCursor: null })
+      }))
+    }
+    routed(<Page />)
+    const hikes = await screen.findByRole('combobox', { name: `Filter Hikes ${filterLabel} by year` })
+    selectChoice(hikes, '2024')
+    if (label === 'video') fireEvent.click(screen.getByRole('button', { name: 'Load more videos' }))
+    await act(async () => deliverPage([
+      ...items,
+      { albumId: 'h23', title: 'Archive hike', type: label, category: 'Hikes', createdAt: '2023-07-01T12:00:00Z' },
+    ]))
+    expect(hikes).toHaveValue('2024')
+    fireEvent.click(hikes)
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['All', '2026', '2024', '2023'])
+    selectChoice(hikes, '2023')
+    expect(screen.getByTestId(`${prefix}-Hikes-year-2023`)).toHaveTextContent('Archive hike')
+  })
+})
 
 describe('Home complete public catalog', () => {
   beforeEach(() => {

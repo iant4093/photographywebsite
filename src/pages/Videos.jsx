@@ -12,6 +12,7 @@ import { sortVideoSections, VIDEO_SECTION_SORT_OPTIONS } from '../utils/videoSec
 import { cdnUrl, HERO_CURRENT_WIDTHS } from '../utils/mediaUrls'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 import { warmVideoHoverRuntime } from '../utils/albumVideoHoverPreview'
+import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 
 const CATALOG_KEY = 'public-videos'
 // The API enforces 100 as its maximum, which keeps today's video catalog to a
@@ -133,6 +134,7 @@ export default function Videos() {
     const videoCategories = useMemo(() => (
         sortVideoSections(curatedVideoCategories, groupedVideoAlbums, sectionSort)
     ), [curatedVideoCategories, groupedVideoAlbums, sectionSort])
+    const { sections: videoSections, setCategoryYear } = useAlbumYearFilters(groupedVideoAlbums)
     const managedHeroUrl = cdnUrl('site/hero/video/home')
     const responsiveHeroUrl = currentVideoHeroUrl()
     const useResponsiveHero = Boolean(responsiveHeroUrl) && !responsiveHeroFailed
@@ -227,15 +229,26 @@ export default function Videos() {
 
                     {!loading && videoCategories.map((category, categoryIndex) => {
                         const sectionId = `video-cat-${category.toLowerCase().replace(/\s+/g, '-')}`
+                        const { albums: visibleAlbums, year, options } = videoSections[category]
+                        const scrollKey = `videos-${category}${year === 'all' ? '' : `-year-${year}`}`
                         return (
                             <div key={category} data-reveal-id={sectionId} className="mb-16 scroll-animate catalog-section" style={{ transitionDelay: `${Math.min(categoryIndex, 4) * 80}ms` }}>
-                                <div className="flex items-center gap-4 mb-8">
-                                    <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
-                                    <h3 className="font-serif text-2xl font-normal text-charcoal">{category}</h3>
-                                    <div className="h-px bg-warm-border flex-1" />
+                                <div className="flex items-center gap-3 sm:gap-4 mb-8">
+                                    <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+                                        <span className="linen-category-number shrink-0">{String(categoryIndex + 1).padStart(2, '0')}</span>
+                                        <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
+                                    </div>
+                                    <div className="hidden sm:block h-px bg-warm-border flex-1" />
+                                    <SiteSelect
+                                        aria-label={`Filter ${category} video albums by year`}
+                                        value={year}
+                                        onChange={value => setCategoryYear(category, value)}
+                                        options={options}
+                                        className="ml-auto w-28 sm:w-32 shrink-0 text-sm"
+                                    />
                                 </div>
-                                <ScrollRow scrollKey={`videos-${category}`}>
-                                    {groupedVideoAlbums[category].map((album) => (
+                                <ScrollRow key={year} scrollKey={scrollKey}>
+                                    {visibleAlbums.map((album) => (
                                         <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] lg:w-[360px] snap-start stagger-child">
                                             <VideoAlbumCard album={album} />
                                         </div>

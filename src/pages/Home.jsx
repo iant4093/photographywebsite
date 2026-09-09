@@ -25,6 +25,7 @@ import {
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { HOME_SECTION_SORT_OPTIONS, sortHomePhotoSections } from '../utils/homeSectionSort'
 import { trackHeroExplore } from '../utils/analytics'
+import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 
 const CATALOG_KEY = 'public-photos'
 const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer'))
@@ -176,6 +177,7 @@ function Home() {
     const photoCategories = useMemo(() => (
         sortHomePhotoSections(curatedPhotoCategories, groupedPhotoAlbums, sectionSort)
     ), [curatedPhotoCategories, groupedPhotoAlbums, sectionSort])
+    const { sections: photoSections, setCategoryYear } = useAlbumYearFilters(groupedPhotoAlbums)
 
     return (
         <div ref={pageRef}>
@@ -294,6 +296,8 @@ function Home() {
 
                 {!loading && photoCategories.map((category, categoryIndex) => {
                     const sectionId = `photo-cat-${category.toLowerCase().replace(/\s+/g, '-')}`
+                    const { albums: visibleAlbums, year, options } = photoSections[category]
+                    const scrollKey = `home-photo-${category}${year === 'all' ? '' : `-year-${year}`}`
                     return (
                         <div
                             key={category}
@@ -301,14 +305,23 @@ function Home() {
                             className="mb-16 scroll-animate catalog-section"
                             style={{ transitionDelay: `${Math.min(categoryIndex, 4) * 80}ms` }}
                         >
-                            <div className="flex items-center gap-4 mb-8">
-                                <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
-                                <h3 className="font-serif text-2xl font-normal text-charcoal w-fit">{category}</h3>
-                                <RandomPhotoExplorer category={category} variant="icon" />
-                                <div className="h-px bg-warm-border flex-1" />
+                            <div className="flex items-center gap-3 sm:gap-4 mb-8">
+                                <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+                                    <span className="linen-category-number shrink-0">{String(categoryIndex + 1).padStart(2, '0')}</span>
+                                    <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
+                                    <RandomPhotoExplorer category={category} variant="icon" />
+                                </div>
+                                <div className="hidden sm:block h-px bg-warm-border flex-1" />
+                                <SiteSelect
+                                    aria-label={`Filter ${category} albums by year`}
+                                    value={year}
+                                    onChange={value => setCategoryYear(category, value)}
+                                    options={options}
+                                    className="ml-auto w-28 sm:w-32 shrink-0 text-sm"
+                                />
                             </div>
-                            <ScrollRow scrollKey={`home-photo-${category}`}>
-                                {groupedPhotoAlbums[category].map((album) => (
+                            <ScrollRow key={year} scrollKey={scrollKey}>
+                                {visibleAlbums.map((album) => (
                                     <div key={album.albumId} className="shrink-0 w-[280px] sm:w-[320px] lg:w-[360px] snap-start stagger-child">
                                         <AlbumCard album={album} showNewFlag preview />
                                     </div>
