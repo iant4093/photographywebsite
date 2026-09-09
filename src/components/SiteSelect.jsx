@@ -73,7 +73,9 @@ export default function SiteSelect({
         if (!expanded) return undefined
         const control = controlRef.current
         const menu = menuRef.current
+        let frame = null
         const update = () => {
+            frame = null
             const rect = control.getBoundingClientRect()
             const viewport = window.visualViewport
             const leftEdge = viewport?.offsetLeft || 0
@@ -86,34 +88,47 @@ export default function SiteSelect({
             const maxHeight = Math.max(40, Math.min(320, flip ? above : below))
             const menuWidth = Math.min(Math.max(rect.width, 160), width - 16)
             const colors = getComputedStyle(control)
-            setPlacement({
+            const nextPlacement = {
                 left: Math.max(leftEdge + 8, Math.min(rect.left, leftEdge + width - menuWidth - 8)),
                 top: flip ? Math.max(topEdge + 8, rect.top - Math.min(menu?.scrollHeight || maxHeight, maxHeight) - 6) : rect.bottom + 6,
                 width: menuWidth, maxHeight,
                 ...Object.fromEntries(PALETTE.map(color => [`--color-${color}`, colors.getPropertyValue(`--color-${color}`)])),
-            })
+            }
+            setPlacement(previous => previous && Object.keys(nextPlacement).every(key => previous[key] === nextPlacement[key])
+                ? previous : nextPlacement)
+        }
+        const schedule = () => {
+            if (frame === null) frame = window.requestAnimationFrame(update)
         }
         const outside = event => {
             if (!control.contains(event.target) && !menu?.contains(event.target)) setOpen(false)
         }
-        const scroll = event => { if (!menu?.contains(event.target)) update() }
+        const scroll = event => { if (!menu?.contains(event.target)) schedule() }
         update()
-        const resize = new ResizeObserver(update)
+        const resize = new ResizeObserver(schedule)
         resize.observe(control)
+        // Scroll motion transforms ancestors after the scroll event. Track only
+        // this open control's ancestor chain so its portal stays attached.
+        const motion = new MutationObserver(schedule)
+        for (let ancestor = control; ancestor; ancestor = ancestor.parentElement) {
+            motion.observe(ancestor, { attributes: true, attributeFilter: ['style', 'class'] })
+        }
         document.addEventListener('pointerdown', outside, true)
         document.addEventListener('focusin', outside)
         document.addEventListener('scroll', scroll, true)
-        window.addEventListener('resize', update)
-        window.visualViewport?.addEventListener('resize', update)
-        window.visualViewport?.addEventListener('scroll', update)
+        window.addEventListener('resize', schedule)
+        window.visualViewport?.addEventListener('resize', schedule)
+        window.visualViewport?.addEventListener('scroll', schedule)
         return () => {
             resize.disconnect()
+            motion.disconnect()
+            if (frame !== null) window.cancelAnimationFrame(frame)
             document.removeEventListener('pointerdown', outside, true)
             document.removeEventListener('focusin', outside)
             document.removeEventListener('scroll', scroll, true)
-            window.removeEventListener('resize', update)
-            window.visualViewport?.removeEventListener('resize', update)
-            window.visualViewport?.removeEventListener('scroll', update)
+            window.removeEventListener('resize', schedule)
+            window.visualViewport?.removeEventListener('resize', schedule)
+            window.visualViewport?.removeEventListener('scroll', schedule)
         }
     }, [expanded, visibleItems.length])
 

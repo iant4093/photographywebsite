@@ -167,4 +167,56 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(card.style.getPropertyValue('--editorial-x')).not.toBe('0px')
     expect(card.style.getPropertyValue('--editorial-card-rotation')).not.toBe('0deg')
   })
+
+  it('ignores preview image/video swaps but discovers and removes real motion targets', () => {
+    let notify
+    vi.stubGlobal('MutationObserver', class {
+      constructor(callback) { notify = callback }
+      observe() {}
+      disconnect() {}
+    })
+    const view = renderExperience()
+    flushFrames()
+    const main = view.container.querySelector('main')
+    const collect = vi.spyOn(main, 'querySelectorAll')
+    const card = main.querySelector('.album-card')
+    const preview = document.createElement('img')
+    card.append(preview)
+    notify([{ addedNodes: [preview], removedNodes: [] }])
+    preview.remove()
+    const video = document.createElement('video')
+    card.append(video)
+    notify([{ addedNodes: [video], removedNodes: [preview] }])
+    expect(frames).toHaveLength(0)
+    expect(collect).not.toHaveBeenCalled()
+
+    const wrapper = document.createElement('div')
+    const newCard = document.createElement('a')
+    newCard.className = 'album-card'
+    wrapper.append(newCard)
+    main.prepend(wrapper)
+    notify([{ addedNodes: [wrapper], removedNodes: [] }])
+    flushFrames()
+    expect(collect).toHaveBeenCalledOnce()
+    expect(newCard).toHaveClass('editorial-motion-frame', 'editorial-index-0')
+    expect(card).toHaveClass('editorial-index-1')
+    expect(card).not.toHaveClass('editorial-index-0')
+
+    wrapper.remove()
+    notify([{ addedNodes: [], removedNodes: [wrapper] }])
+    flushFrames()
+    expect(newCard).not.toHaveClass('editorial-motion-frame')
+    expect(card).toHaveClass('editorial-index-0')
+    expect(card).not.toHaveClass('editorial-index-1')
+  })
+
+  it('does not rewrite unchanged animation values when the viewport is refreshed', () => {
+    const view = renderExperience()
+    flushFrames()
+    const card = view.container.querySelector('.album-card')
+    const write = vi.spyOn(card.style, 'setProperty')
+    fireEvent.resize(window)
+    flushFrames()
+    expect(write).not.toHaveBeenCalled()
+  })
 })

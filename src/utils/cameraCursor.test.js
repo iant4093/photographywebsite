@@ -88,6 +88,56 @@ describe('camera cursor interaction and lifecycle', () => {
         expect(frames.size).toBe(0)
     })
 
+    it('moves repeatedly over one album without repeating hit tests, ancestor searches, or root writes', () => {
+        const album = element('a', { href: '/album/example', 'data-camera-cursor': 'photo' })
+        pointer(album)
+        const search = vi.spyOn(album, 'closest')
+        const rootWrite = vi.spyOn(document.documentElement, 'setAttribute')
+        document.elementFromPoint.mockClear()
+        for (let index = 0; index < 100; index += 1) pointer(album, 'pointermove', { clientX: 130 + index })
+        expect(document.elementFromPoint).not.toHaveBeenCalled()
+        expect(search).not.toHaveBeenCalled()
+        expect(rootWrite).not.toHaveBeenCalled()
+        expect(cursor().style.transform).toBe('translate3d(229px, 90px, 0)')
+        expect(frames.size).toBe(0)
+    })
+
+    it('reuses text rectangles across movement and invalidates them when layout or text changes', async () => {
+        const paragraph = element('p')
+        const content = text(paragraph, 'Photo Albums')
+        pointer(paragraph, 'pointermove', { clientX: 250 })
+        document.createRange.mockClear()
+        for (let index = 0; index < 100; index += 1) pointer(paragraph, 'pointermove', { clientX: 250 + index })
+        pointer(paragraph)
+        expect(active()).toBe(false)
+        expect(document.createRange).not.toHaveBeenCalled()
+
+        document.dispatchEvent(new Event('scroll'))
+        flush()
+        expect(document.createRange).toHaveBeenCalledOnce()
+        document.createRange.mockClear()
+        content.data = ''
+        await Promise.resolve()
+        flush()
+        expect(document.createRange).toHaveBeenCalledOnce()
+        expect(active()).toBe(true)
+    })
+
+    it('reclassifies changed native and disabled states without waiting for another mouse move', async () => {
+        const button = element('button')
+        pointer(button)
+        expect(active()).toBe(true)
+        button.disabled = true
+        await Promise.resolve()
+        flush()
+        expect(active()).toBe(false)
+        button.disabled = false
+        button.dataset.cameraCursor = 'photo'
+        await Promise.resolve()
+        flush()
+        expect(cursor()).toHaveAttribute('data-state', 'photo')
+    })
+
     it('flashes once per entered photo, including re-entry after native text', () => {
         const first = element('button', { 'data-camera-cursor': 'photo' })
         const child = document.createElement('span')

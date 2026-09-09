@@ -742,7 +742,10 @@
   transform:
     translate3d(var(--editorial-x), var(--editorial-card-y), 0)
     rotate(var(--editorial-card-rotation))
-    scale(calc(var(--editorial-card-scale) + var(--editorial-hover-scale, 0))) !important;
+    scale(var(--editorial-card-scale)) !important;
+  /* Scroll transforms follow the current frame. Hover has its own animation. */
+  scale: calc(1 + var(--editorial-hover-scale, 0));
+  transition: scale 320ms ease, box-shadow 320ms ease;
   transform-origin: center;
 }
 
@@ -787,7 +790,7 @@
     linear-gradient(90deg, #312b26 0 3px, var(--color-amber) 3px 9px, #312b26 9px 12px);
   box-shadow: 0 3px 9px rgba(41, 36, 31, 0.18);
   transform: translateY(var(--editorial-progress-offset));
-  transition: transform 80ms linear;
+  transition: none;
   cursor: grab;
 }
 

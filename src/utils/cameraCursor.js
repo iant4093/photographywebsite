@@ -23,10 +23,10 @@ const NATIVE_SELECTOR = [
 const ACTION_SELECTOR = 'a[href], button, summary, label, [role="button"], [role="link"], input[type="checkbox"], input[type="radio"], input[type="button"], input[type="submit"], input[type="reset"]'
 const TEXT_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, pre, code, dt, dd'
 
-function isOverText(element, x, y) {
-    if (!element.closest(TEXT_SELECTOR)) return false
+function measureText(element) {
+    const rectangles = []
     const range = document.createRange()
-    if (typeof range.getClientRects !== 'function') return false
+    if (typeof range.getClientRects !== 'function') return rectangles
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
     let text
     while ((text = walker.nextNode())) {
@@ -35,11 +35,27 @@ function isOverText(element, x, y) {
         // A text range gives one rectangle per rendered line, excluding the
         // empty remainder of the block and the space after its last line.
         for (const rect of range.getClientRects()) {
-            if (rect.width > 0 && rect.height > 0
-                && x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) return true
+            if (rect.width > 0 && rect.height > 0) rectangles.push(rect)
         }
     }
-    return false
+    return rectangles
+}
+
+function classifyTarget(pointed) {
+    if (pointed.closest(NATIVE_SELECTOR)) return { native: true }
+    const annotated = pointed.closest('[data-camera-cursor]')
+    const requested = annotated?.getAttribute('data-camera-cursor')
+    const media = pointed.closest('video, canvas')
+    const decorativeAlbumMedia = requested === 'photo'
+        && media?.closest('[aria-hidden="true"]') && !media.hasAttribute('controls')
+    if (media && !decorativeAlbumMedia) return { native: true }
+    let state = Object.hasOwn(SYMBOLS, requested) ? requested : null
+    if (!state && pointed.closest('[aria-busy="true"]')) state = 'loading'
+    if (!state && pointed.closest(ACTION_SELECTOR)) state = 'link'
+    return {
+        state: state || 'camera', photo: state === 'photo' ? annotated : null,
+        text: !state && Boolean(pointed.closest(TEXT_SELECTOR)),
+    }
 }
 
 function symbolMarkup(state) {
@@ -71,6 +87,14 @@ export function installCameraCursor() {
     let dragTarget = null
     let photoTarget = null
     let state = null
+    let visible = false
+    let positionedX = null
+    let positionedY = null
+    let classifiedTarget = null
+    let classification = null
+    let textRectangles = null
+    let observedText = null
+    let needsHitTest = false
     const removers = []
     const listen = (target, name, callback, options) => {
         target.addEventListener(name, callback, options)
@@ -78,6 +102,8 @@ export function installCameraCursor() {
     }
     const hide = () => {
         photoTarget = null
+        if (!visible) return
+        visible = false
         root.removeAttribute('data-camera-cursor-active')
         cursor.classList.remove('is-visible')
     }
@@ -91,53 +117,76 @@ export function installCameraCursor() {
 
     function update() {
         frame = null
+        // Consume changes that arrived between the pointer event and this frame.
+        // Ordinary movement otherwise uses the browser's event target directly.
+        readMutations(observer.takeRecords())
         if (!inside || pointerType !== 'mouse' || !finePointer.matches || forcedColors.matches
             || document.hidden || document.fullscreenElement || document.pointerLockElement) {
             hide()
             return
         }
-        const pointed = dragTarget?.isConnected ? dragTarget : document.elementFromPoint?.(x, y) || lastTarget
-        if (!(pointed instanceof Element) || !pointed.isConnected || pointed.closest(NATIVE_SELECTOR)) {
+        const pointed = dragTarget?.isConnected ? dragTarget
+            : needsHitTest || !(lastTarget instanceof Element) || !lastTarget.isConnected
+                ? document.elementFromPoint?.(x, y) || lastTarget : lastTarget
+        needsHitTest = false
+        lastTarget = pointed
+        if (!(pointed instanceof Element) || !pointed.isConnected) {
             hide()
             return
         }
-        const annotated = pointed.closest('[data-camera-cursor]')
-        const requested = annotated?.getAttribute('data-camera-cursor')
-        const media = pointed.closest('video, canvas')
-        // Blurhash canvases and autoplay previews are decorative parts of the
-        // album link, including when their opacity is zero. Only these passive
-        // layers inherit its flash; actual players and canvas tools stay native.
-        const decorativeAlbumMedia = requested === 'photo'
-            && media?.closest('[aria-hidden="true"]')
-            && !media.hasAttribute('controls')
-        if (media && !decorativeAlbumMedia) {
+        if (classifiedTarget !== pointed || !classification) {
+            classifiedTarget = pointed
+            classification = classifyTarget(pointed)
+            textRectangles = null
+            const nextText = classification.text ? pointed : null
+            if (nextText !== observedText) {
+                textResizeObserver?.disconnect()
+                observedText = nextText
+                if (observedText) textResizeObserver?.observe(observedText)
+            }
+        }
+        if (classification.native) {
             hide()
             return
         }
-        let nextState = Object.hasOwn(SYMBOLS, requested) ? requested : null
-        if (!nextState && pointed.closest('[aria-busy="true"]')) nextState = 'loading'
-        if (!nextState && pointed.closest(ACTION_SELECTOR)) nextState = 'link'
-        if (!nextState && isOverText(pointed, x, y)) {
-            hide()
-            return
+        if (classification.text) {
+            textRectangles ??= measureText(pointed)
+            if (textRectangles.some(rect => x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom)) {
+                hide()
+                return
+            }
         }
-        nextState ||= 'camera'
+        let nextState = classification.state
         if (nextState === 'drag-y' && pressed) nextState = 'drag-y-held'
-        const nextPhoto = nextState === 'photo' ? annotated : null
+        const nextPhoto = classification.photo
         if (state !== nextState || photoTarget !== nextPhoto) {
             state = nextState
             photoTarget = nextPhoto
             cursor.dataset.state = state
             shape.innerHTML = symbolMarkup(state)
         }
-        cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`
-        cursor.classList.add('is-visible')
-        root.setAttribute('data-camera-cursor-active', '')
+        if (positionedX !== x || positionedY !== y) {
+            cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`
+            positionedX = x
+            positionedY = y
+        }
+        if (!visible) {
+            visible = true
+            cursor.classList.add('is-visible')
+            root.setAttribute('data-camera-cursor-active', '')
+        }
     }
 
     const schedule = () => {
         if (inside && frame === null) frame = window.requestAnimationFrame(update)
     }
+    const layoutChanged = event => {
+        if (event?.target instanceof Node && cursor.contains(event.target)) return
+        textRectangles = null
+        needsHitTest = true
+        schedule()
+    }
+    const textResizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(layoutChanged)
     const move = (event) => {
         pointerType = event.pointerType
         x = event.clientX
@@ -150,6 +199,7 @@ export function installCameraCursor() {
     const release = () => {
         pressed = false
         dragTarget = null
+        needsHitTest = true
         window.clearTimeout(pressTimer)
         pressTimer = window.setTimeout(() => cursor.classList.remove('is-pressed'), 100)
         schedule()
@@ -177,24 +227,37 @@ export function installCameraCursor() {
     listen(document, 'pointerlockchange', suspend)
     listen(document, 'dragstart', suspend)
     listen(document, 'keydown', (event) => { if (event.key === 'Tab') suspend() })
-    listen(document, 'scroll', schedule, { capture: true, passive: true })
-    listen(window, 'resize', schedule, { passive: true })
+    listen(document, 'scroll', layoutChanged, { capture: true, passive: true })
+    listen(window, 'resize', layoutChanged, { passive: true })
+    listen(document, 'load', layoutChanged, { capture: true, passive: true })
+    if (document.fonts?.addEventListener) listen(document.fonts, 'loadingdone', layoutChanged)
+    listen(document, 'transitionend', layoutChanged, { passive: true })
+    listen(document, 'animationend', layoutChanged, { passive: true })
     listen(finePointer, 'change', suspend)
     listen(forcedColors, 'change', suspend)
 
     // Refresh a stationary pointer when a route, lazy image, or portal changes.
     // Ignore our own SVG writes so the observer cannot become an animation loop.
-    const observer = new MutationObserver((records) => {
-        if (records.some(record => !cursor.contains(record.target))) schedule()
-    })
+    function readMutations(records) {
+        const changed = records.some(record => !cursor.contains(record.target)
+            && (record.type !== 'characterData' || classifiedTarget?.contains(record.target)))
+        if (changed) {
+            classification = null
+            textRectangles = null
+            needsHitTest = true
+        }
+        return changed
+    }
+    const observer = new MutationObserver(records => { if (readMutations(records)) schedule() })
     observer.observe(document.body, {
         childList: true, subtree: true, characterData: true, attributes: true,
-        attributeFilter: ['data-camera-cursor', 'disabled', 'aria-disabled', 'aria-busy', 'aria-hidden', 'controls', 'inert'],
+        attributeFilter: ['data-camera-cursor', 'disabled', 'aria-disabled', 'aria-busy', 'aria-hidden', 'controls', 'inert', 'contenteditable', 'open', 'href', 'type', 'role'],
     })
 
     return () => {
         removers.forEach(remove => remove())
         observer.disconnect()
+        textResizeObserver?.disconnect()
         if (frame !== null) window.cancelAnimationFrame(frame)
         window.clearTimeout(pressTimer)
         hide()

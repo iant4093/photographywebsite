@@ -11,6 +11,18 @@ const TARGET_SELECTOR = [
     'main .album-card',
     'main .linen-gallery-page [data-page-scroll-media]',
 ].join(', ')
+// Detached removed subtrees no longer match the `main ...` selectors above.
+const CANDIDATE_SELECTOR = '.home-hero, .linen-video-hero, .linen-section-heading, .catalog-section, .photo-stats-hero, .photo-stats-motion-section, .album-card, [data-page-scroll-media], .editorial-motion-frame'
+
+function changesMotionTargets(records) {
+    return records.some(record => [...record.addedNodes, ...record.removedNodes].some(node => (
+        node instanceof Element && (node.matches(CANDIDATE_SELECTOR) || node.querySelector(CANDIDATE_SELECTOR))
+    )))
+}
+
+function setMotionStyle(target, property, value) {
+    if (target.style.getPropertyValue(property) !== value) target.style.setProperty(property, value)
+}
 
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value))
 
@@ -122,6 +134,7 @@ export default function MotionExperience() {
         let updateFrame = null
         let collectFrame = null
         let targets = []
+        const metadata = new Map()
         let previousScrollY = window.scrollY
         let velocity = 0
         const activeTargets = new Set()
@@ -136,6 +149,7 @@ export default function MotionExperience() {
             ? null
             : new IntersectionObserver((entries) => {
                 entries.forEach((entry) => {
+                    if (!metadata.has(entry.target)) return
                     if (entry.isIntersecting) activeTargets.add(entry.target)
                     else activeTargets.delete(entry.target)
                 })
@@ -152,6 +166,7 @@ export default function MotionExperience() {
                 if (nextSet.has(target)) return
                 visibilityObserver?.unobserve?.(target)
                 activeTargets.delete(target)
+                metadata.delete(target)
                 clearMotionStyles(target)
             })
 
@@ -161,10 +176,20 @@ export default function MotionExperience() {
                 const position = isMedia ? mediaIndex % 3 : index % 3
                 if (isMedia) mediaIndex += 1
 
-                target.classList.add('editorial-motion-frame', `editorial-index-${position}`)
-                target.classList.toggle('editorial-motion-media', isMedia)
+                const previous = metadata.get(target)
+                if (!previous || previous.position !== position) {
+                    if (previous) target.classList.remove(`editorial-index-${previous.position}`)
+                    target.classList.add('editorial-motion-frame', `editorial-index-${position}`)
+                }
+                if (!previous || previous.isMedia !== isMedia) target.classList.toggle('editorial-motion-media', isMedia)
+                metadata.set(target, { position, isMedia })
+                if (usesCatalogMotion) {
+                    setMotionStyle(target, '--editorial-x', '0px')
+                    setMotionStyle(target, '--editorial-card-rotation', '0deg')
+                    setMotionStyle(target, '--editorial-rotation', '0deg')
+                }
 
-                if (!targets.includes(target)) {
+                if (!previous) {
                     if (visibilityObserver) visibilityObserver.observe(target)
                     else activeTargets.add(target)
                 }
@@ -205,54 +230,57 @@ export default function MotionExperience() {
                 const progress = clamp((viewportHeight - bounds.top) / (viewportHeight + measuredHeight), 0, 1)
                 const phase = (progress - 0.5) * 2
                 const presence = clamp(1 - Math.abs(phase) * 0.28, 0.72, 1)
-                const position = target.classList.contains('editorial-index-0')
-                    ? -1
-                    : target.classList.contains('editorial-index-2') ? 1 : 0
-                const isMedia = target.classList.contains('editorial-motion-media')
+                const info = metadata.get(target)
+                const position = info.position - 1
+                const isMedia = info.isMedia
                 const amplitude = isMedia ? 1 : 0.76
 
                 measurements.push({ target, position, presence, phase, amplitude })
             })
 
             if (progressRail) {
-                progressRail.hidden = !isScrollable
-                progressRail.setAttribute('aria-valuenow', String(Math.round(pageProgress * 100)))
+                if (progressRail.hidden === isScrollable) progressRail.hidden = !isScrollable
+                const progressValue = String(Math.round(pageProgress * 100))
+                if (progressRail.getAttribute('aria-valuenow') !== progressValue) progressRail.setAttribute('aria-valuenow', progressValue)
                 if (isScrollable && progressThumb) {
-                    progressRail.style.setProperty(
+                    setMotionStyle(progressRail,
                         '--editorial-progress-offset',
                         `${(pageProgress * thumbTravel).toFixed(2)}px`,
                     )
                 }
             }
-            root.style.setProperty('--editorial-progress', pageProgress.toFixed(5))
-            root.style.setProperty('--editorial-speed', clamp(Math.abs(velocity) / 42, 0, 1).toFixed(4))
+            setMotionStyle(root, '--editorial-progress', pageProgress.toFixed(5))
+            setMotionStyle(root, '--editorial-speed', clamp(Math.abs(velocity) / 42, 0, 1).toFixed(4))
 
             measurements.forEach(({ target, position, presence, phase, amplitude }) => {
                 if (usesCatalogMotion) {
-                    target.style.setProperty('--editorial-x', '0px')
-                    target.style.setProperty('--editorial-y', `${(phase * -44 - motionKick * 0.085).toFixed(2)}px`)
-                    target.style.setProperty('--editorial-card-y', `${(phase * -32 - motionKick * 0.075).toFixed(2)}px`)
-                    target.style.setProperty('--editorial-card-rotation', '0deg')
-                    target.style.setProperty('--editorial-card-scale', (0.87 + presence * 0.13).toFixed(5))
-                    target.style.setProperty('--editorial-scale', (0.93 + presence * 0.07).toFixed(5))
-                    target.style.setProperty('--editorial-rotation', '0deg')
-                    target.style.setProperty('--editorial-saturation', (0.88 + presence * 0.12).toFixed(4))
+                    setMotionStyle(target, '--editorial-y', `${(phase * -44 - motionKick * 0.085).toFixed(2)}px`)
+                    setMotionStyle(target, '--editorial-card-y', `${(phase * -32 - motionKick * 0.075).toFixed(2)}px`)
+                    setMotionStyle(target, '--editorial-card-scale', (0.87 + presence * 0.13).toFixed(5))
+                    setMotionStyle(target, '--editorial-scale', (0.93 + presence * 0.07).toFixed(5))
+                    setMotionStyle(target, '--editorial-saturation', (0.88 + presence * 0.12).toFixed(4))
                     return
                 }
 
-                target.style.setProperty('--editorial-x', `${(position * (1 - presence) * 36 * amplitude).toFixed(2)}px`)
-                target.style.setProperty('--editorial-y', `${(phase * -52 * amplitude - motionKick * 0.1).toFixed(2)}px`)
-                target.style.setProperty('--editorial-card-y', `${(phase * -16 - motionKick * 0.08).toFixed(2)}px`)
-                target.style.setProperty('--editorial-card-rotation', `${(position * phase * 0.62 + position * motionKick * 0.004).toFixed(3)}deg`)
-                target.style.setProperty('--editorial-card-scale', (0.978 + presence * 0.022).toFixed(5))
-                target.style.setProperty('--editorial-scale', (0.95 + presence * 0.05).toFixed(5))
-                target.style.setProperty('--editorial-rotation', `${(position * phase * 0.72 * amplitude).toFixed(3)}deg`)
-                target.style.setProperty('--editorial-saturation', (0.92 + presence * 0.08).toFixed(4))
+                setMotionStyle(target, '--editorial-x', `${(position * (1 - presence) * 36 * amplitude).toFixed(2)}px`)
+                setMotionStyle(target, '--editorial-y', `${(phase * -52 * amplitude - motionKick * 0.1).toFixed(2)}px`)
+                setMotionStyle(target, '--editorial-card-y', `${(phase * -16 - motionKick * 0.08).toFixed(2)}px`)
+                setMotionStyle(target, '--editorial-card-rotation', `${(position * phase * 0.62 + position * motionKick * 0.004).toFixed(3)}deg`)
+                setMotionStyle(target, '--editorial-card-scale', (0.978 + presence * 0.022).toFixed(5))
+                setMotionStyle(target, '--editorial-scale', (0.95 + presence * 0.05).toFixed(5))
+                setMotionStyle(target, '--editorial-rotation', `${(position * phase * 0.72 * amplitude).toFixed(3)}deg`)
+                setMotionStyle(target, '--editorial-saturation', (0.92 + presence * 0.08).toFixed(4))
             })
         }
 
-        const mutationObserver = new MutationObserver(requestCollection)
+        const mutationObserver = new MutationObserver(records => {
+            if (changesMotionTargets(records)) requestCollection()
+        })
         mutationObserver.observe(main, { childList: true, subtree: true })
+        // Image swaps inside fixed media frames do not alter the motion target
+        // set. Observe actual page-size changes without recollecting every card.
+        const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(requestUpdate)
+        layoutObserver?.observe(main)
         collectTargets()
         window.addEventListener('scroll', requestUpdate, { passive: true })
         window.addEventListener('resize', requestUpdate)
@@ -260,6 +288,7 @@ export default function MotionExperience() {
         return () => {
             mutationObserver.disconnect()
             visibilityObserver?.disconnect()
+            layoutObserver?.disconnect()
             window.removeEventListener('scroll', requestUpdate)
             window.removeEventListener('resize', requestUpdate)
             if (updateFrame !== null) window.cancelAnimationFrame(updateFrame)

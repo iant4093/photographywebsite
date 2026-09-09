@@ -158,6 +158,47 @@ describe('SiteSelect', () => {
         expect(screen.queryByRole('listbox')).toBeNull()
     })
 
+    it('coalesces scroll and resize positioning into one frame and cancels pending work on close', () => {
+        let frame
+        const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frame = callback; return 42 })
+        const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+        render(<Controlled />)
+        const control = screen.getByRole('combobox')
+        fireEvent.click(control)
+        const measure = vi.spyOn(control, 'getBoundingClientRect')
+        for (let index = 0; index < 20; index += 1) fireEvent.scroll(document)
+        fireEvent.resize(window)
+        expect(request).toHaveBeenCalledOnce()
+        expect(measure).not.toHaveBeenCalled()
+        act(() => frame())
+        expect(measure).toHaveBeenCalledOnce()
+        fireEvent.scroll(document)
+        fireEvent.keyDown(control, { key: 'Escape' })
+        expect(cancel).toHaveBeenCalledWith(42)
+        expect(screen.queryByRole('listbox')).toBeNull()
+    })
+
+    it('tracks an animated ancestor while open without reacting to unrelated styles', async () => {
+        let frame
+        const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frame = callback; return 42 })
+        render(<><section data-testid="moving-section"><Controlled /></section><aside data-testid="unrelated" /></>)
+        const control = screen.getByRole('combobox')
+        const measure = vi.spyOn(control, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 140, left: 20, width: 200 })
+        fireEvent.click(control)
+        expect(screen.getByRole('listbox').style.top).toBe('146px')
+        await act(async () => { screen.getByTestId('unrelated').style.transform = 'translateY(10px)' })
+        expect(request).not.toHaveBeenCalled()
+        measure.mockReturnValue({ top: 80, bottom: 120, left: 20, width: 200 })
+        await act(async () => { screen.getByTestId('moving-section').style.transform = 'translateY(-20px)' })
+        expect(request).toHaveBeenCalledOnce()
+        act(() => frame())
+        expect(screen.getByRole('listbox').style.top).toBe('126px')
+        fireEvent.keyDown(control, { key: 'Escape' })
+        request.mockClear()
+        await act(async () => { screen.getByTestId('moving-section').style.transform = 'translateY(-40px)' })
+        expect(request).not.toHaveBeenCalled()
+    })
+
     it('keeps all application dropdowns and playback menus out of native pickers', () => {
         const sources = import.meta.glob('../**/*.{jsx,js}', { query: '?raw', import: 'default', eager: true })
         for (const [path, source] of Object.entries(sources)) {
