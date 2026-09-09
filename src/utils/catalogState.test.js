@@ -53,9 +53,9 @@ describe('loadCompleteCatalog', () => {
             nextCursor: null,
         })
 
-        const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v4:public-photos'))
+        const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v5:public-photos'))
         expect(stored).toMatchObject({
-            version: 4,
+            version: 5,
             items: [{
                 albumId: 'album-one',
                 title: 'Visible',
@@ -72,14 +72,14 @@ describe('loadCompleteCatalog', () => {
         // Clearing only memory is intentionally unavailable: deletion removes
         // the persisted copy too, preventing stale data from being resurrected.
         deleteCatalogSnapshot('public-photos')
-        expect(sessionStorage.getItem('ian:public-catalog:v4:public-photos')).toBeNull()
+        expect(sessionStorage.getItem('ian:public-catalog:v5:public-photos')).toBeNull()
     })
 
     it('hydrates a valid tab snapshot and rejects malformed persisted state', () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
-        sessionStorage.setItem('ian:public-catalog:v4:public-videos', JSON.stringify({
-            version: 4,
+        sessionStorage.setItem('ian:public-catalog:v5:public-videos', JSON.stringify({
+            version: 5,
             savedAt: Date.now(),
             nextCursor: null,
             items: [{ albumId: 'video-one', title: 'Film', ownerEmail: 'discard@example.test' }],
@@ -90,9 +90,34 @@ describe('loadCompleteCatalog', () => {
         })
         expect(getCatalogSnapshot('public-videos').items[0]).not.toHaveProperty('ownerEmail')
 
-        sessionStorage.setItem('ian:public-catalog:v4:public-photos', '{bad-json')
+        sessionStorage.setItem('ian:public-catalog:v5:public-photos', '{bad-json')
         expect(getCatalogSnapshot('public-photos')).toBeNull()
-        expect(sessionStorage.getItem('ian:public-catalog:v4:public-photos')).toBeNull()
+        expect(sessionStorage.getItem('ian:public-catalog:v5:public-photos')).toBeNull()
+    })
+
+    it('preserves lightweight photo preview metadata through a tab reload', () => {
+        const album = {
+            albumId: 'album-one', visibility: 'public', title: 'Photos',
+            hoverPreviewStatus: 'ready', hoverPreviewVersion: 'a'.repeat(24),
+            hoverPreviewManifestUrl: 'https://media.test/public-previews/album-one/hover.json',
+        }
+        setCatalogSnapshot('public-photos', { items: [album], nextCursor: null })
+        const persisted = sessionStorage.getItem('ian:public-catalog:v5:public-photos')
+        deleteCatalogSnapshot('public-photos')
+        sessionStorage.setItem('ian:public-catalog:v5:public-photos', persisted)
+        expect(getCatalogSnapshot('public-photos').items).toEqual([album])
+    })
+
+    it('ignores older snapshots without preview metadata so the page refetches the catalog', () => {
+        sessionStorage.setItem('ian:public-catalog:v4:public-photos', JSON.stringify({
+            version: 4, savedAt: Date.now(), nextCursor: null,
+            items: [{ albumId: 'old', visibility: 'public' }],
+        }))
+        try {
+            expect(getCatalogSnapshot('public-photos')).toBeNull()
+        } finally {
+            sessionStorage.removeItem('ian:public-catalog:v4:public-photos')
+        }
     })
 
     it('reconciles recent public mutations over a stale edge catalog', () => {
