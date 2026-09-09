@@ -1,5 +1,6 @@
 import { mediaPreviewCandidates } from './mediaUrls'
 import { stopPreviewOnLeave } from './previewLifecycle'
+import { canRunAlbumPreview } from './albumPreviewPolicy'
 
 export const ALBUM_HOVER_DELAY_MS = 650
 export const ALBUM_HOVER_FRAME_MS = 2200
@@ -17,9 +18,7 @@ function comparablePath(value) {
 }
 
 export function canRunAlbumHoverPreview() {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
-    return window.matchMedia('(hover: hover) and (pointer: fine)').matches
-        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    return canRunAlbumPreview()
 }
 
 export function selectAlbumHoverPreviews(detail, coverImageUrl, random = Math.random) {
@@ -87,7 +86,7 @@ function stylePreviewImage(image) {
     image.alt = ''
     image.setAttribute('aria-hidden', 'true')
     image.setAttribute('draggable', 'false')
-    image.className = 'absolute inset-0 h-full w-full object-cover pointer-events-none'
+    image.className = 'album-card-photo-preview absolute inset-0 h-full w-full object-cover pointer-events-none'
     Object.assign(image.style, {
         zIndex: '10',
         opacity: '0',
@@ -95,8 +94,9 @@ function stylePreviewImage(image) {
     })
 }
 
-export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
-    if (!canRunAlbumHoverPreview()) return { stop() {} }
+export function start({ container, coverImageUrl, loadManifest, loadDetail, trigger = 'hover' }) {
+    if (!canRunAlbumPreview(trigger)) return { stop() {} }
+    const mobile = trigger === 'focus'
 
     let active = true
     let currentImage = null
@@ -132,7 +132,10 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
                 // album-detail path during rollout and transient CDN failures.
             }
         }
-        if (!manifestResolved && loadDetail) {
+        if (!active) return
+        // Automatic mobile previews use the small public manifest only; they
+        // must not download full album details merely because scrolling pauses.
+        if (!manifestResolved && loadDetail && !mobile) {
             try {
                 detail = await loadDetail()
             } catch {
@@ -140,7 +143,7 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
             }
         }
         if (!active) return
-        const frames = selectAlbumHoverPreviews(detail, coverImageUrl)
+        const frames = selectAlbumHoverPreviews(detail, coverImageUrl).slice(0, mobile ? 3 : ALBUM_HOVER_PREVIEW_LIMIT)
         if (frames.length < 2) return
 
         let frameIndex = 0
@@ -148,7 +151,7 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
         const showNextFrame = async () => {
             if (!active) return
             let nextFrame = null
-            while (!nextFrame && failed.size < frames.length) {
+            while (active && !nextFrame && failed.size < frames.length) {
                 const candidate = frames[frameIndex % frames.length]
                 frameIndex += 1
                 if (failed.has(candidate.url)) continue
@@ -177,12 +180,20 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail }) {
                         previewImages.delete(previousImage)
                     }, ALBUM_HOVER_FADE_MS)
                 }
-                later(showNextFrame, ALBUM_HOVER_FRAME_MS)
+                later(() => {
+                    if (mobile && frameIndex >= frames.length) {
+                        nextImage.style.opacity = '0'
+                        later(stop, ALBUM_HOVER_FADE_MS)
+                    } else void showNextFrame()
+                }, ALBUM_HOVER_FRAME_MS)
             }, 16)
         }
 
         await showNextFrame()
-    }, ALBUM_HOVER_DELAY_MS)
+    }, mobile ? 0 : ALBUM_HOVER_DELAY_MS)
+
+    // Also bound stalled downloads/decodes that never resolve.
+    if (mobile) later(stop, 12000)
 
     return { stop }
 }

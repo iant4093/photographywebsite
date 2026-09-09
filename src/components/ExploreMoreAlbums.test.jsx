@@ -253,6 +253,7 @@ describe('ExploreMoreAlbums', () => {
     })
 
     it('uses the actual photo card with its new flag, album route, and hover preview lifecycle', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('(hover: hover)') }))
         const peer = album('photo-peer', { uploadedAt: new Date().toISOString() })
         setCatalogSnapshot('public-photos', { items: [peer], nextCursor: null })
         render(view(album('current')))
@@ -278,6 +279,7 @@ describe('ExploreMoreAlbums', () => {
     })
 
     it('uses actual video cards with direct playback routes and desktop video previews', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('(hover: hover)') }))
         const single = album('single', { type: 'video', imageCount: 1 })
         const multiple = album('multiple', { type: 'video', imageCount: 2 })
         setCatalogSnapshot('public-videos', { items: [single, multiple], nextCursor: null })

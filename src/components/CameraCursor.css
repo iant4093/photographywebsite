@@ -1,49 +1,9 @@
-.camera-cursor {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  z-index: 2147483647;
-  pointer-events: none;
-  visibility: hidden;
-}
-
-.camera-cursor.is-visible { visibility: visible; }
-.camera-cursor-shape {
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  top: -10px;
-  left: -10px;
-  transition: scale 130ms ease;
-}
-.camera-cursor-shape svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.camera-cursor.is-pressed .camera-cursor-shape { scale: .8; }
-.camera-cursor-flash { transform-box: view-box; transform-origin: 18px 8px; }
-.camera-cursor[data-state='photo'] .camera-cursor-flash { animation: camera-cursor-flash 420ms ease-out both; }
-.camera-cursor[data-state='loading'] svg { animation: camera-cursor-aperture 1.6s linear infinite; }
-
-/* Activate only once a mouse is present and the decorative overlay is visible.
-   Native controls and text remove the attribute before their next paint. */
+/* The browser draws and positions these icons in its native cursor layer.
+   No hidden system pointer, moving DOM overlay, or perpetual animation loop. */
 @media (any-pointer: fine) and (forced-colors: none) {
   html[data-camera-cursor-active],
   html[data-camera-cursor-active] body,
-  html[data-camera-cursor-active] body * { cursor: none !important; }
+  html[data-camera-cursor-active] body * {
+    cursor: var(--camera-cursor-image, auto) !important;
+  }
 }
-@keyframes camera-cursor-flash {
-  0% { opacity: 0; transform: scale(.45); }
-  30% { opacity: 1; transform: scale(1.15); }
-  100% { opacity: 1; transform: scale(1); }
-}
-@keyframes camera-cursor-aperture { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .camera-cursor-shape { transition: none; }
-  .camera-cursor.is-pressed .camera-cursor-shape { scale: 1; }
-  .camera-cursor[data-state='photo'] .camera-cursor-flash,
-  .camera-cursor[data-state='loading'] svg { animation: none; }
-}
-@media (forced-colors: active), (any-pointer: none) {
-  .camera-cursor { display: none; }
-}
-@media print { .camera-cursor { display: none; } }

@@ -11,8 +11,7 @@ const SYMBOLS = {
     loading: '<circle cx="12" cy="12" r="9"/><path d="m12 3 5 9m3-6-6 9m4 4H8m4 2-5-9m-3 6 6-9M6 5h10"/>',
 }
 
-// Native controls retain their own pointer; no computed cursor lookup is used,
-// because the active overlay temporarily hides CSS cursors on the document.
+// Native controls retain their own pointer without computed-style reads.
 const NATIVE_SELECTOR = [
     '[data-camera-cursor="native"]', '[inert]', ':disabled', '[aria-disabled="true"]',
     'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])',
@@ -53,31 +52,26 @@ function classifyTarget(pointed) {
     if (!state && pointed.closest('[aria-busy="true"]')) state = 'loading'
     if (!state && pointed.closest(ACTION_SELECTOR)) state = 'link'
     return {
-        state: state || 'camera', photo: state === 'photo' ? annotated : null,
+        state: state || 'camera',
         text: !state && Boolean(pointed.closest(TEXT_SELECTOR)),
     }
 }
 
-function symbolMarkup(state) {
-    // Only these static, source-controlled paths ever reach innerHTML.
-    const geometry = SYMBOLS[state]
-    return `<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g stroke="#fffdf8" stroke-width="4.2">${geometry}</g><g stroke="#231f1a" stroke-width="1.55">${geometry}</g></svg>`
-}
+// Small static SVGs are rendered by the browser's native cursor layer. Mouse
+// position never waits for JavaScript, layout, React, or an animation frame.
+const CURSORS = Object.fromEntries(Object.entries(SYMBOLS).map(([state, geometry]) => {
+    const variant = scale => {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="-7 -7 38 38" fill="none" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(12 12) scale(${scale}) translate(-12 -12)"><g stroke="#fffdf8" stroke-width="4.2">${geometry}</g><g stroke="#231f1a" stroke-width="1.55">${geometry}</g></g></svg>`
+        return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 16 16, auto`
+    }
+    return [state, { normal: variant(1), pressed: variant(0.8) }]
+}))
 
 export function installCameraCursor() {
     const finePointer = window.matchMedia('(any-pointer: fine)')
     const forcedColors = window.matchMedia('(forced-colors: active)')
     const root = document.documentElement
-    const cursor = document.createElement('div')
-    cursor.className = 'camera-cursor'
-    cursor.setAttribute('aria-hidden', 'true')
-    const shape = document.createElement('div')
-    shape.className = 'camera-cursor-shape'
-    cursor.append(shape)
-    document.body.append(cursor)
-
     let frame = null
-    let pressTimer = null
     let inside = false
     let pointerType = 'mouse'
     let x = 0
@@ -85,11 +79,9 @@ export function installCameraCursor() {
     let pressed = false
     let lastTarget = null
     let dragTarget = null
-    let photoTarget = null
     let state = null
     let visible = false
-    let positionedX = null
-    let positionedY = null
+    let appliedIcon = null
     let classifiedTarget = null
     let classification = null
     let textRectangles = null
@@ -101,17 +93,14 @@ export function installCameraCursor() {
         removers.push(() => target.removeEventListener(name, callback, options))
     }
     const hide = () => {
-        photoTarget = null
         if (!visible) return
         visible = false
         root.removeAttribute('data-camera-cursor-active')
-        cursor.classList.remove('is-visible')
     }
     const suspend = () => {
         inside = false
         pressed = false
         dragTarget = null
-        cursor.classList.remove('is-pressed')
         hide()
     }
 
@@ -158,21 +147,17 @@ export function installCameraCursor() {
         }
         let nextState = classification.state
         if (nextState === 'drag-y' && pressed) nextState = 'drag-y-held'
-        const nextPhoto = classification.photo
-        if (state !== nextState || photoTarget !== nextPhoto) {
-            state = nextState
-            photoTarget = nextPhoto
-            cursor.dataset.state = state
-            shape.innerHTML = symbolMarkup(state)
+        const icon = CURSORS[nextState][pressed ? 'pressed' : 'normal']
+        if (appliedIcon !== icon) {
+            appliedIcon = icon
+            root.style.setProperty('--camera-cursor-image', icon)
         }
-        if (positionedX !== x || positionedY !== y) {
-            cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`
-            positionedX = x
-            positionedY = y
+        if (state !== nextState) {
+            state = nextState
+            root.dataset.cameraCursorState = state
         }
         if (!visible) {
             visible = true
-            cursor.classList.add('is-visible')
             root.setAttribute('data-camera-cursor-active', '')
         }
     }
@@ -181,27 +166,27 @@ export function installCameraCursor() {
         if (inside && frame === null) frame = window.requestAnimationFrame(update)
     }
     const layoutChanged = event => {
-        if (event?.target instanceof Node && cursor.contains(event.target)) return
+        if (event?.target === root && event.type !== 'scroll') return
         textRectangles = null
         needsHitTest = true
         schedule()
     }
     const textResizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(layoutChanged)
     const move = (event) => {
+        readMutations(observer.takeRecords())
         pointerType = event.pointerType
         x = event.clientX
         y = event.clientY
+        const changed = lastTarget !== event.target || !inside
         lastTarget = event.target
         inside = true
         if (pointerType !== 'mouse') suspend()
-        else schedule()
+        else if (changed || !classification || classification.text || needsHitTest) schedule()
     }
     const release = () => {
         pressed = false
         dragTarget = null
         needsHitTest = true
-        window.clearTimeout(pressTimer)
-        pressTimer = window.setTimeout(() => cursor.classList.remove('is-pressed'), 100)
         schedule()
     }
 
@@ -213,8 +198,7 @@ export function installCameraCursor() {
         move(event)
         pressed = true
         dragTarget = event.target instanceof Element ? event.target.closest('[data-camera-cursor="drag-y"]') : null
-        window.clearTimeout(pressTimer)
-        cursor.classList.add('is-pressed')
+        schedule()
     }, { passive: true })
     listen(document, 'pointerup', release, { passive: true })
     listen(document, 'pointercancel', suspend, { passive: true })
@@ -237,10 +221,9 @@ export function installCameraCursor() {
     listen(forcedColors, 'change', suspend)
 
     // Refresh a stationary pointer when a route, lazy image, or portal changes.
-    // Ignore our own SVG writes so the observer cannot become an animation loop.
+    // Cursor styles live on html, outside this body observer.
     function readMutations(records) {
-        const changed = records.some(record => !cursor.contains(record.target)
-            && (record.type !== 'characterData' || classifiedTarget?.contains(record.target)))
+        const changed = records.some(record => record.type !== 'characterData' || classifiedTarget?.contains(record.target))
         if (changed) {
             classification = null
             textRectangles = null
@@ -259,8 +242,8 @@ export function installCameraCursor() {
         observer.disconnect()
         textResizeObserver?.disconnect()
         if (frame !== null) window.cancelAnimationFrame(frame)
-        window.clearTimeout(pressTimer)
         hide()
-        cursor.remove()
+        root.removeAttribute('data-camera-cursor-state')
+        root.style.removeProperty('--camera-cursor-image')
     }
 }

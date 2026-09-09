@@ -20,6 +20,7 @@ import VideoAlbumCard from './VideoAlbumCard'
 
 describe('VideoAlbumCard', () => {
     it('hides the play control only while the lightweight preview is playing', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('(hover: hover)') }))
         const stop = vi.fn()
         hover.start.mockReturnValue({ stop })
         const { container } = render(<VideoAlbumCard album={{ albumId: 'video-one' }} />)

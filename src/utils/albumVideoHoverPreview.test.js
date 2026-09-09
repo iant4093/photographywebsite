@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MOBILE_PREVIEW_QUERY } from './albumPreviewPolicy'
 
 const hlsInstances = vi.hoisted(() => [])
 const hlsSupported = vi.hoisted(() => vi.fn(() => true))
@@ -70,6 +71,61 @@ describe('video album hover previews', () => {
         expect(container.querySelector('video')).toBeNull()
         controller.stop()
         container.remove()
+    })
+
+    it('plays a muted inline mobile preview once and releases its bounded HLS decoder after four seconds', async () => {
+        window.matchMedia.mockImplementation(query => ({ matches: query === MOBILE_PREVIEW_QUERY }))
+        hlsSupported.mockReturnValue(true)
+        const container = document.createElement('div')
+        const loadDetail = vi.fn()
+        const controller = start({ container, album: { coverHlsUrl: 'https://media.test/cover.m3u8' }, loadDetail, trigger: 'focus' })
+        await vi.advanceTimersByTimeAsync(1)
+        const video = container.querySelector('video')
+        expect(video.muted).toBe(true)
+        expect(video.playsInline).toBe(true)
+        expect(video).not.toHaveAttribute('controls')
+        expect(hlsInstances[0].config).toMatchObject({ maxBufferLength: 6, maxMaxBufferLength: 8, backBufferLength: 0 })
+        hlsInstances[0].handlers.manifestParsed()
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DURATION_MS)
+        expect(loadDetail).not.toHaveBeenCalled()
+        expect(hlsInstances[0].destroy).toHaveBeenCalledOnce()
+        expect(container.querySelector('video')).toBeNull()
+        expect(vi.getTimerCount()).toBe(0)
+        controller.stop()
+    })
+
+    it('leaves the mobile cover intact if autoplay is denied, with no repeated playback requests', async () => {
+        window.matchMedia.mockImplementation(query => ({ matches: query === MOBILE_PREVIEW_QUERY }))
+        HTMLMediaElement.prototype.play.mockRejectedValue(new DOMException('Blocked', 'NotAllowedError'))
+        const container = document.createElement('div')
+        const controller = start({ container, album: { coverHlsUrl: 'https://media.test/cover.m3u8' }, trigger: 'focus' })
+        await vi.advanceTimersByTimeAsync(20000)
+        expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce()
+        expect(container.querySelector('video')).toBeNull()
+        expect(vi.getTimerCount()).toBe(0)
+        controller.stop()
+    })
+
+    it('resolves legacy mobile cover streams once after focus when catalog metadata is missing', async () => {
+        window.matchMedia.mockImplementation(query => ({ matches: query === MOBILE_PREVIEW_QUERY }))
+        const loadDetail = vi.fn().mockResolvedValue({ images: [] })
+        const controller = start({ container: document.createElement('div'), album: {}, loadDetail, trigger: 'focus' })
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(loadDetail).toHaveBeenCalledOnce()
+        expect(vi.getTimerCount()).toBe(0)
+        controller.stop()
+    })
+
+    it('cleans up a mobile stream that never becomes ready', async () => {
+        window.matchMedia.mockImplementation(query => ({ matches: query === MOBILE_PREVIEW_QUERY }))
+        hlsSupported.mockReturnValue(true)
+        const container = document.createElement('div')
+        const controller = start({ container, album: { coverHlsUrl: 'https://media.test/cover.m3u8' }, trigger: 'focus' })
+        await vi.advanceTimersByTimeAsync(12000)
+        expect(hlsInstances[0].destroy).toHaveBeenCalledOnce()
+        expect(container.querySelector('video')).toBeNull()
+        expect(vi.getTimerCount()).toBe(0)
+        controller.stop()
     })
 
     it('destroys an active decoder when the page is hidden', async () => {

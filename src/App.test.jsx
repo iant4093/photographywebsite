@@ -153,6 +153,6 @@ describe('App routing shell', () => {
   ])('routes %s to its page', async (path, label) => {
     render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole('heading', { name: label })).toBeInTheDocument())
-    expect(document.querySelectorAll('.camera-cursor')).toHaveLength(1)
+    expect(document.querySelector('.camera-cursor')).toBeNull()
   })
 })

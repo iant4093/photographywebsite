@@ -10,7 +10,8 @@ describe('camera cursor interaction and lifecycle', () => {
     let nextFrame
     let textRects
 
-    const cursor = () => document.querySelector('.camera-cursor')
+    const cursor = () => document.documentElement
+    const icon = () => cursor().style.getPropertyValue('--camera-cursor-image')
     const active = () => document.documentElement.hasAttribute('data-camera-cursor-active')
     function element(tag = 'div', attributes = {}) {
         const node = document.createElement(tag)
@@ -81,10 +82,10 @@ describe('camera cursor interaction and lifecycle', () => {
         expect(frames.size).toBe(0)
         pointer(fixture)
         expect(active()).toBe(true)
-        expect(cursor()).toHaveAttribute('data-state', 'camera')
-        expect(cursor().style.transform).toBe('translate3d(120px, 90px, 0)')
-        expect(cursor()).toHaveAttribute('aria-hidden', 'true')
-        expect(cursor().textContent).toBe('')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'camera')
+        expect(icon()).toContain('data:image/svg+xml,')
+        expect(icon()).toContain('16 16, auto')
+        expect(document.querySelector('.camera-cursor')).toBeNull()
         expect(frames.size).toBe(0)
     })
 
@@ -94,11 +95,14 @@ describe('camera cursor interaction and lifecycle', () => {
         const search = vi.spyOn(album, 'closest')
         const rootWrite = vi.spyOn(document.documentElement, 'setAttribute')
         document.elementFromPoint.mockClear()
+        window.requestAnimationFrame.mockClear()
+        const originalIcon = icon()
         for (let index = 0; index < 100; index += 1) pointer(album, 'pointermove', { clientX: 130 + index })
         expect(document.elementFromPoint).not.toHaveBeenCalled()
         expect(search).not.toHaveBeenCalled()
         expect(rootWrite).not.toHaveBeenCalled()
-        expect(cursor().style.transform).toBe('translate3d(229px, 90px, 0)')
+        expect(icon()).toBe(originalIcon)
+        expect(window.requestAnimationFrame).not.toHaveBeenCalled()
         expect(frames.size).toBe(0)
     })
 
@@ -135,29 +139,29 @@ describe('camera cursor interaction and lifecycle', () => {
         button.dataset.cameraCursor = 'photo'
         await Promise.resolve()
         flush()
-        expect(cursor()).toHaveAttribute('data-state', 'photo')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'photo')
     })
 
-    it('flashes once per entered photo, including re-entry after native text', () => {
+    it('reuses the native photo icon across albums and restores it after native text', () => {
         const first = element('button', { 'data-camera-cursor': 'photo' })
         const child = document.createElement('span')
         first.append(child)
         pointer(first)
-        expect(cursor()).toHaveAttribute('data-state', 'photo')
-        const original = cursor().querySelector('svg')
-        expect(original.querySelector('.camera-cursor-flash')).not.toBeNull()
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'photo')
+        const original = icon()
+        expect(decodeURIComponent(original)).toContain('camera-cursor-flash')
         pointer(child)
-        expect(cursor().querySelector('svg')).toBe(original)
+        expect(icon()).toBe(original)
         const second = element('button', { 'data-camera-cursor': 'photo' })
         pointer(second)
-        expect(cursor().querySelector('svg')).not.toBe(original)
-        const secondIcon = cursor().querySelector('svg')
+        expect(icon()).toBe(original)
+        const secondIcon = icon()
         const paragraph = element('p')
         text(paragraph, 'Select this text')
         pointer(paragraph)
         expect(active()).toBe(false)
         pointer(second)
-        expect(cursor().querySelector('svg')).not.toBe(secondIcon)
+        expect(icon()).toBe(secondIcon)
     })
 
     it.each([
@@ -170,7 +174,6 @@ describe('camera cursor interaction and lifecycle', () => {
         pointer(fixture)
         pointer(element(tag, attributes))
         expect(active()).toBe(false)
-        expect(cursor()).not.toHaveClass('is-visible')
     })
 
     it('keeps the camera beside a heading while preserving text selection over its letters', () => {
@@ -178,7 +181,7 @@ describe('camera cursor interaction and lifecycle', () => {
         text(heading, 'Photo Albums')
         pointer(heading, 'pointermove', { clientX: 250 })
         expect(active()).toBe(true)
-        expect(cursor()).toHaveAttribute('data-state', 'camera')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'camera')
         pointer(heading)
         expect(active()).toBe(false)
         pointer(heading, 'pointermove', { clientX: 200 })
@@ -226,10 +229,10 @@ describe('camera cursor interaction and lifecycle', () => {
         paragraph.append(link)
         text(link, 'View videos')
         pointer(link)
-        expect(cursor()).toHaveAttribute('data-state', 'link')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'link')
         paragraph.dataset.cameraCursor = 'photo'
         pointer(emphasis)
-        expect(cursor()).toHaveAttribute('data-state', 'photo')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'photo')
     })
 
     it('rechecks text geometry after wrapping and scrolling under a stationary pointer', () => {
@@ -270,18 +273,18 @@ describe('camera cursor interaction and lifecycle', () => {
         album.append(image, layer)
 
         pointer(image)
-        const flash = cursor().querySelector('svg')
+        const flash = icon()
         pointer(preview)
         expect(active()).toBe(true)
-        expect(cursor()).toHaveAttribute('data-state', 'photo')
-        expect(cursor().querySelector('svg')).toBe(flash)
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'photo')
+        expect(icon()).toBe(flash)
         layer.style.opacity = '0'
         pointer(preview)
         expect(active()).toBe(true)
-        expect(cursor().querySelector('svg')).toBe(flash)
+        expect(icon()).toBe(flash)
         layer.remove()
         pointer(image)
-        expect(cursor().querySelector('svg')).toBe(flash)
+        expect(icon()).toBe(flash)
     })
 
     it.each(['canvas', 'video'])('preserves native %s interaction inside a marked album', tag => {
@@ -350,32 +353,32 @@ describe('camera cursor interaction and lifecycle', () => {
             portal.append(button)
             pointer(child)
             expect(active()).toBe(true)
-            expect(cursor()).toHaveAttribute('data-state', state)
+            expect(cursor()).toHaveAttribute('data-camera-cursor-state', state)
         }
         const link = element('a', { href: '/contact' })
         const title = document.createElement('h2')
         link.append(title)
         pointer(title)
-        expect(cursor()).toHaveAttribute('data-state', 'link')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'link')
         pointer(element('input', { type: 'checkbox' }))
-        expect(cursor()).toHaveAttribute('data-state', 'link')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'link')
         pointer(element('button', { 'aria-busy': 'true' }))
-        expect(cursor()).toHaveAttribute('data-state', 'loading')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'loading')
     })
 
     it('keeps vertical dragging meaningful through pointer capture and releases click feedback', () => {
         const rail = element('div', { 'data-camera-cursor': 'drag-y' })
         pointer(rail)
-        expect(cursor()).toHaveAttribute('data-state', 'drag-y')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'drag-y')
         pointer(rail, 'pointerdown')
-        expect(cursor()).toHaveAttribute('data-state', 'drag-y-held')
-        expect(cursor()).toHaveClass('is-pressed')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'drag-y-held')
+        expect(decodeURIComponent(icon())).toContain('scale(0.8)')
         pointer(fixture)
-        expect(cursor()).toHaveAttribute('data-state', 'drag-y-held')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'drag-y-held')
         pointer(rail, 'pointerup')
-        expect(cursor()).toHaveAttribute('data-state', 'drag-y')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'drag-y')
         vi.advanceTimersByTime(100)
-        expect(cursor()).not.toHaveClass('is-pressed')
+        expect(decodeURIComponent(icon())).toContain('scale(1)')
     })
 
     it('restores the native pointer when tabbing, leaving the page, or losing focus', () => {
@@ -399,12 +402,12 @@ describe('camera cursor interaction and lifecycle', () => {
         expect(active()).toBe(false)
     })
 
-    it('refreshes a stationary pointer after DOM changes without observing its own SVG forever', async () => {
+    it('refreshes a stationary pointer after DOM changes without observing its own cursor styles', async () => {
         pointer(fixture)
         hit = element('button', { 'data-camera-cursor': 'photo' })
         await Promise.resolve()
         flush()
-        expect(cursor()).toHaveAttribute('data-state', 'photo')
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'photo')
         await Promise.resolve()
         expect(frames.size).toBe(0)
         hit.remove()
@@ -413,13 +416,14 @@ describe('camera cursor interaction and lifecycle', () => {
         expect(active()).toBe(false)
     })
 
-    it('removes pending work, listeners, overlay, and the cursor override on unmount', async () => {
+    it('removes pending work, listeners, and the native cursor override on unmount', async () => {
         pointer(fixture, 'pointerdown')
         pointer(fixture, 'pointerup')
         document.dispatchEvent(new Event('scroll'))
         dispose()
         expect(active()).toBe(false)
-        expect(cursor()).toBeNull()
+        expect(icon()).toBe('')
+        expect(cursor()).not.toHaveAttribute('data-camera-cursor-state')
         expect(frames.size).toBe(0)
         pointer(fixture)
         element('button')

@@ -5,6 +5,7 @@ import {
     selectAlbumHoverPreviews,
     start,
 } from './albumHoverPreview'
+import { MOBILE_PREVIEW_QUERY } from './albumPreviewPolicy'
 
 const previews = (name) => [640, 960, 1440, 1920]
     .map((width) => ({ width, url: `https://media.example.test/${name}-${width}.webp` }))
@@ -83,5 +84,54 @@ describe('album hover preview selection', () => {
             { url: 'https://media.example.test/two-w640.webp' },
             { url: 'https://media.example.test/one-w640.webp' },
         ])
+    })
+
+    it('plays a finite mobile photo sequence without fetching full album details and releases every frame', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query === MOBILE_PREVIEW_QUERY }))
+        vi.stubGlobal('Image', class {
+            constructor() {
+                const image = document.createElement('img')
+                image.decode = () => Promise.resolve()
+                return image
+            }
+        })
+        const container = document.createElement('div')
+        const loadDetail = vi.fn()
+        const loadManifest = vi.fn().mockResolvedValue({
+            schemaVersion: 1, version: 'a'.repeat(24),
+            images: [1, 2, 3, 4, 5].map(id => ({ url: `https://media.test/${id}.webp`, width: 640, height: 427 })),
+        })
+        const controller = start({ container, loadManifest, loadDetail, trigger: 'focus' })
+        try {
+            await vi.advanceTimersByTimeAsync(16)
+            expect(container.querySelectorAll('.album-card-photo-preview')).toHaveLength(1)
+            for (let step = 0; step < 90; step++) {
+                await vi.advanceTimersByTimeAsync(100)
+                expect(container.querySelectorAll('img').length).toBeLessThanOrEqual(2)
+            }
+            expect(container.querySelector('img')).toBeNull()
+            expect(loadManifest).toHaveBeenCalledOnce()
+            expect(loadDetail).not.toHaveBeenCalled()
+            expect(vi.getTimerCount()).toBe(0)
+        } finally { controller.stop(); vi.useRealTimers() }
+    })
+
+    it.each(['mobile', 'cancelled'])('does not fall back to a full album after a %s manifest miss', async reason => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: reason === 'mobile'
+            ? query === MOBILE_PREVIEW_QUERY : query.includes('hover: hover') }))
+        let resolve
+        const loadManifest = () => new Promise(done => { resolve = done })
+        const loadDetail = vi.fn()
+        const controller = start({ container: document.createElement('div'), loadManifest, loadDetail,
+            trigger: reason === 'mobile' ? 'focus' : 'hover' })
+        try {
+            await vi.advanceTimersByTimeAsync(650)
+            if (reason === 'cancelled') controller.stop()
+            resolve(null)
+            await vi.advanceTimersByTimeAsync(100)
+            expect(loadDetail).not.toHaveBeenCalled()
+        } finally { controller.stop(); vi.useRealTimers() }
     })
 })

@@ -1,5 +1,6 @@
 import { mediaHlsUrl } from './mediaUrls'
 import { stopPreviewOnLeave } from './previewLifecycle'
+import { canRunAlbumPreview } from './albumPreviewPolicy'
 
 export const VIDEO_HOVER_DELAY_MS = 350
 export const VIDEO_HOVER_DURATION_MS = 4000
@@ -28,9 +29,7 @@ function comparablePath(value) {
 }
 
 export function canRunVideoHoverPreview() {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
-    return window.matchMedia('(hover: hover) and (pointer: fine)').matches
-        && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    return canRunAlbumPreview()
 }
 
 export function warmVideoHoverRuntime() {
@@ -84,8 +83,9 @@ function prepareVideo() {
     return video
 }
 
-export function start({ container, album, loadDetail, onPlaybackStart, onPlaybackEnd }) {
-    if (!container || !canRunVideoHoverPreview()) return { stop() {} }
+export function start({ container, album, loadDetail, onPlaybackStart, onPlaybackEnd, trigger = 'hover' }) {
+    if (!container || !canRunAlbumPreview(trigger)) return { stop() {} }
+    const mobile = trigger === 'focus'
 
     let active = true
     let playing = false
@@ -303,7 +303,8 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
 
     // Merely passing over a card must not create/load a stream that the next
     // card then has to compete with while the browser tears it down.
-    later(() => { void loadPreview() }, VIDEO_HOVER_DELAY_MS)
+    later(() => { void loadPreview() }, mobile ? 0 : VIDEO_HOVER_DELAY_MS)
+    if (mobile) later(() => cleanup(true), 12000)
 
     return { stop: () => cleanup(true) }
 }

@@ -5,6 +5,8 @@ import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
 import { prefetchPublicAlbum } from '../utils/api'
 import { preloadAlbumRoute } from '../utils/routePreload'
 import { isWithinRecentDays } from '../utils/date'
+import { registerMobileAlbumPreview } from '../utils/mobileAlbumPreview'
+import { canRunAlbumPreview, MOBILE_PREVIEW_QUERY } from '../utils/albumPreviewPolicy'
 
 // Shared album card used by public, video, and signed-in catalogs.
 function AlbumCard({
@@ -53,8 +55,8 @@ function AlbumCard({
         hoverController.current = null
     }, [])
 
-    const scheduleHoverPreview = useCallback(() => {
-        if (!preview || !canPrefetch) return
+    const scheduleHoverPreview = useCallback((trigger = 'hover') => {
+        if (!preview || !canPrefetch || !canRunAlbumPreview(trigger)) return
         stopHoverPreview()
         const pending = {}
         hoverController.current = pending
@@ -68,11 +70,20 @@ function AlbumCard({
                 coverImageUrl,
                 loadManifest: () => fetchAlbumHoverManifest(album),
                 loadDetail: prefetchDetail,
+                trigger,
             })
         }).catch(() => {
             if (hoverController.current === pending) hoverController.current = null
         })
     }, [album, canPrefetch, coverImageUrl, prefetchDetail, preview, stopHoverPreview])
+
+    useEffect(() => {
+        if (!preview || !canPrefetch) return undefined
+        return registerMobileAlbumPreview(imageContainer.current, {
+            start: () => scheduleHoverPreview('focus'),
+            stop: stopHoverPreview,
+        })
+    }, [preview, canPrefetch, scheduleHoverPreview, stopHoverPreview])
 
     useEffect(() => () => {
         cancelPrefetch()
@@ -186,11 +197,13 @@ function AlbumCard({
             data-camera-cursor="photo"
             to={targetRoute}
             onMouseEnter={() => {
+                if (window.matchMedia(MOBILE_PREVIEW_QUERY).matches) return
                 onMouseEnter?.()
                 scheduleNavigationPrefetch()
                 scheduleHoverPreview()
             }}
             onMouseLeave={() => {
+                if (window.matchMedia(MOBILE_PREVIEW_QUERY).matches) return
                 cancelPrefetch()
                 stopHoverPreview()
             }}
