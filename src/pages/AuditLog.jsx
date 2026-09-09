@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useEffect, useMemo, useState } from 'react'
 import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
@@ -35,10 +36,10 @@ function AuditLog() {
         return () => controller.abort()
     }, [days, getIdToken, requestVersion])
 
-    const changeDays = (event) => {
+    const changeDays = (value) => {
         setLoading(true)
         setError('')
-        setDays(Number(event.target.value))
+        setDays(Number(value))
     }
 
     const refresh = () => {
@@ -68,9 +69,9 @@ function AuditLog() {
             </header>
 
             <section className="audit-controls" aria-label="Audit log filters">
-                <label>Time range<select value={days} onChange={changeDays}><option value={1}>Last 24 hours</option><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option></select></label>
-                <label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="all">All outcomes</option><option value="success">Success</option><option value="denied">Denied</option><option value="failure">Failure</option></select></label>
-                <label>Resource<select value={resource} onChange={(event) => setResource(event.target.value)}><option value="all">All resources</option>{resources.map((value) => <option value={value} key={value}>{titleCase(value)}</option>)}</select></label>
+                <label>Time range<SiteSelect value={days} onChange={changeDays} aria-label="Time range" options={[{ value: 1, label: 'Last 24 hours' }, { value: 7, label: 'Last 7 days' }, { value: 30, label: 'Last 30 days' }]} /></label>
+                <label>Outcome<SiteSelect value={outcome} onChange={(value) => setOutcome(value)} aria-label="Outcome" options={[{ value: 'all', label: 'All outcomes' }, { value: 'success', label: 'Success' }, { value: 'denied', label: 'Denied' }, { value: 'failure', label: 'Failure' }]} /></label>
+                <label>Resource<SiteSelect value={resource} onChange={(value) => setResource(value)} aria-label="Resource" options={[{ value: 'all', label: 'All resources' }, ...resources.map(value => ({ value, label: titleCase(value) }))]} /></label>
                 <label className="audit-search">Search<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Action, event, or reason" /></label>
                 <button type="button" className="observability-refresh" onClick={refresh} disabled={loading}>Refresh</button>
             </section>

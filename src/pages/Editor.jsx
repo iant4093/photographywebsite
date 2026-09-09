@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { COLOR_CHANNELS, freshAdjustments, freshGeometry, sanitizeAdjustments, sanitizeGeometry } from '../editor/adjustments'
 import { BUILT_IN_PRESETS, applyPreset, parseSettings, serializeSettings } from '../editor/presets'
@@ -1020,9 +1021,7 @@ export default function Editor() {
                         <button type="button" className={showClipping ? 'is-active' : ''} onClick={() => setShowClipping((value) => !value)} disabled={!source}>Clipping</button>
                         <label className="editor-toolbar-select">
                             <span>Preview quality</span>
-                            <select aria-label="Preview quality" value={previewQuality} onChange={(event) => changePreviewQuality(event.target.value)}>
-                                {Object.entries(PREVIEW_QUALITIES).map(([value, profile]) => <option key={value} value={value}>{profile.label} · {profile.fullEdge}px</option>)}
-                            </select>
+                            <SiteSelect aria-label="Preview quality" value={previewQuality} onChange={(value) => changePreviewQuality(value)} options={Object.entries(PREVIEW_QUALITIES).map(([value, profile]) => ({ value, label: profile.label + ' · ' + profile.fullEdge + 'px' }))} />
                         </label>
                         <button type="button" className={isFullscreen ? 'is-active' : ''} onClick={() => void toggleFullscreen()} disabled={!source}>{isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}</button>
                     </div>
@@ -1205,7 +1204,7 @@ export default function Editor() {
                         </ControlSection>
 
                         <ControlSection title="Crop & geometry">
-                            <label className="editor-select">Aspect ratio<select value={geometry.aspect} onChange={(event) => setAspect(event.target.value)}><option value="free">Free</option><option value="original">Original</option><option value="1:1">1 : 1</option><option value="4:3">4 : 3</option><option value="3:2">3 : 2</option><option value="16:9">16 : 9</option><option value="5:4">5 : 4</option></select></label>
+                            <label className="editor-select">Aspect ratio<SiteSelect value={geometry.aspect} onChange={(value) => setAspect(value)} aria-label="Aspect ratio" options={[{ value: 'free', label: 'Free' }, { value: 'original', label: 'Original' }, ...['1:1', '4:3', '3:2', '16:9', '5:4'].map(value => ({ value, label: value.replace(':', ' : ') }))]} /></label>
                             {Object.entries(geometry.crop).map(([key, value]) => <RangeControl key={key} label={`Crop ${key}`} value={Math.round(value * 100)} min={key === 'x' || key === 'y' ? 0 : 1} max={100} step={1} onChange={(nextValue) => commit(adjustments, { ...geometry, crop: { ...geometry.crop, [key]: nextValue / 100 }, aspect: 'free' })} onLiveChange={(nextValue) => updateGeometryLive({ ...geometry, crop: { ...geometry.crop, [key]: nextValue / 100 }, aspect: 'free' })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />)}
                             <RangeControl label="Straighten" value={geometry.rotation} min={-45} max={45} step={0.1} onChange={(value) => commit(adjustments, { ...geometry, rotation: value })} onLiveChange={(value) => updateGeometryLive({ ...geometry, rotation: value })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => commit(adjustments, { ...geometry, rotation: 0 })} />
                             <RangeControl label="Vertical perspective" value={geometry.vertical} min={-30} max={30} step={0.5} onChange={(value) => commit(adjustments, { ...geometry, vertical: value })} onLiveChange={(value) => updateGeometryLive({ ...geometry, vertical: value })} onEditStart={beginLiveEdit} onEditEnd={finishLiveEdit} onReset={() => {}} />
@@ -1227,8 +1226,8 @@ export default function Editor() {
 
                         <ControlSection title="Export" defaultOpen>
                             <div className="editor-export-options">
-                                <label className="editor-select">Format<select value={exportOptions.format} onChange={(event) => setExportOptions({ ...exportOptions, format: event.target.value })}><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
-                                <label className="editor-select">Dimensions<select value={exportOptions.resizeMode} onChange={(event) => setExportOptions({ ...exportOptions, resizeMode: event.target.value })}><option value="original">Original size</option><option value="longEdge">Long edge</option><option value="width">Width</option><option value="height">Height</option></select></label>
+                                <label className="editor-select">Format<SiteSelect value={exportOptions.format} onChange={(value) => setExportOptions({ ...exportOptions, format: value })} aria-label="Format" options={[{ value: 'jpeg', label: 'JPEG' }, { value: 'png', label: 'PNG' }, { value: 'webp', label: 'WebP' }]} /></label>
+                                <label className="editor-select">Dimensions<SiteSelect value={exportOptions.resizeMode} onChange={(value) => setExportOptions({ ...exportOptions, resizeMode: value })} aria-label="Dimensions" options={[{ value: 'original', label: 'Original size' }, { value: 'longEdge', label: 'Long edge' }, { value: 'width', label: 'Width' }, { value: 'height', label: 'Height' }]} /></label>
                             </div>
                             <RangeControl label="Quality" value={exportOptions.quality} min={1} max={100} step={1} onChange={(quality) => setExportOptions({ ...exportOptions, quality })} onReset={() => setExportOptions({ ...exportOptions, quality: 92 })} />
                             {exportOptions.resizeMode !== 'original' && <label className="editor-text-field">Pixels<input type="number" min="1" max="20000" value={exportOptions.size} onChange={(event) => setExportOptions({ ...exportOptions, size: Number(event.target.value) })} /></label>}

@@ -38,7 +38,7 @@ html[data-theme="dark"] body {
     repeating-linear-gradient(0deg, transparent 0 5px, rgba(238, 231, 218, 0.035) 5px 6px);
 }
 
-.linen-site[data-theme="dark"] :is(input, textarea, select) {
+.linen-site[data-theme="dark"] :is(input, textarea, .site-select-control) {
   color: var(--color-charcoal);
   background: rgba(39, 36, 31, 0.8);
 }

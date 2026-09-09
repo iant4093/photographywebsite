@@ -68,7 +68,7 @@
 
 .linen-site input,
 .linen-site textarea,
-.linen-site select {
+.linen-site .site-select-control {
   border-radius: 0 !important;
   border-color: var(--color-warm-border);
   background: rgba(255, 253, 248, 0.56);
@@ -77,7 +77,7 @@
 
 .linen-site input:focus,
 .linen-site textarea:focus,
-.linen-site select:focus {
+.linen-site .site-select-control:focus {
   border-color: var(--color-charcoal);
   --tw-ring-color: transparent;
 }

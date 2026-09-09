@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useEffect, useMemo, useState } from 'react'
 import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
@@ -195,15 +196,12 @@ export default function AwsCosts() {
                         </div>
                         <label className="aws-cost-month-label">
                             Report month
-                            <select
+                            <SiteSelect
                                 className="aws-cost-month-select"
                                 value={selected.month}
-                                onChange={(event) => setSelectedMonth(event.target.value)}
-                            >
-                                {[...months].reverse().map((month) => (
-                                    <option key={month.month} value={month.month}>{monthLabel(month.month)}</option>
-                                ))}
-                            </select>
+                                onChange={(value) => setSelectedMonth(value)}
+                                aria-label="Report month" options={[...months].reverse().map(month => ({ value: month.month, label: monthLabel(month.month) }))}
+                            />
                         </label>
                     </div>
 

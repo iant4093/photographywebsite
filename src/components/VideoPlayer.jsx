@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { mediaDisplayUrl, mediaHlsUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
+import VideoControls from './VideoControls'
 
 export default function VideoPlayer({ videoInfo, autoplay = true, controls = true, onMediaError }) {
     const videoRef = useRef(null)
+    const playerRef = useRef(null)
     const [failedHlsUrl, setFailedHlsUrl] = useState('')
     const rawUrl = mediaDisplayUrl(videoInfo)
     const posterUrl = mediaThumbnailUrl(videoInfo)
@@ -76,13 +78,15 @@ export default function VideoPlayer({ videoInfo, autoplay = true, controls = tru
     }, [autoplay, hlsUrl, onMediaError, rawUrl, useHls])
 
     return (
-        <video
-            ref={videoRef}
-            controls={controls}
-            playsInline
-            preload="metadata"
-            poster={posterUrl}
-            className="w-full h-full outline-none"
-        />
+        <div ref={playerRef} className="site-video-player">
+            <video
+                ref={videoRef}
+                playsInline
+                preload="metadata"
+                poster={posterUrl}
+                className="w-full h-full outline-none"
+            />
+            {controls && <VideoControls videoRef={videoRef} playerRef={playerRef} />}
+        </div>
     )
 }

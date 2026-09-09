@@ -1,3 +1,4 @@
+import { selectChoice, expectSuggestion } from '../test/selectChoice'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -67,12 +68,14 @@ describe('UploadVideo', () => {
   it('loads categories and private users, adjusts thumbnail times, and creates a private video album', async () => {
     const { container, unmount } = mounted()
     await waitFor(() => expect(api.fetchAlbums).toHaveBeenCalled())
-    expect(container.querySelector('datalist option[value="Weddings"]')).toBeTruthy()
+    expect(expectSuggestion(screen.getByLabelText('Category'), 'Weddings')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'User Email *' }))
     expect(await screen.findByRole('option', { name: 'client@example.com' })).toBeInTheDocument()
-    const select = container.querySelector('select')
+    const select = screen.getByRole('combobox', { name: 'User Email *' })
     expect(screen.queryByRole('option', { name: 'iant4093@gmail.com' })).toBeNull()
-    fireEvent.change(select, { target: { value: 'client@example.com' } })
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'User Email *' }), { key: 'Escape' })
+    selectChoice(select, 'client@example.com')
 
     const files = [
       new File(['one'], 'first.mov', { type: 'video/quicktime' }),
@@ -132,11 +135,12 @@ describe('UploadVideo', () => {
   it('uses the default scrubber range before metadata and can return to public visibility', async () => {
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'User Email *' }))
     await screen.findByRole('option', { name: 'client@example.com' })
     populate(container, [new File(['film'], 'clip.mp4', { type: 'video/mp4' })])
     expect(container.querySelector('input[type="range"]')).toHaveAttribute('max', '100')
     fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
-    expect(container.querySelector('select')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'User Email *' })).toBeNull()
   })
 
   it('reports discovery and upload errors without leaving the form disabled', async () => {
@@ -147,6 +151,7 @@ describe('UploadVideo', () => {
     await waitFor(() => expect(console.error).toHaveBeenCalled())
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
     await waitFor(() => expect(api.listUsers).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
     populate(container, [new File(['film'], 'bad.mp4', { type: 'video/mp4' })])
     media.processVideo.mockRejectedValueOnce({})
     fireEvent.submit(container.querySelector('form'))

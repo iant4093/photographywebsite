@@ -1,3 +1,4 @@
+import { selectChoice } from '../test/selectChoice'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -57,7 +58,7 @@ describe('AWS costs admin page', () => {
         api.fetchCostReport.mockResolvedValue({ ...REPORT, cacheStatus: 'stale' })
         renderPage()
         expect(await screen.findByText(/last successful daily snapshot/i)).toBeInTheDocument()
-        fireEvent.change(screen.getByLabelText('Report month'), { target: { value: '2026-07' } })
+        selectChoice(screen.getByLabelText('Report month'), '2026-07')
         expect(screen.getByText('CloudFront')).toBeInTheDocument()
         expect(screen.getAllByText('$10.00').length).toBeGreaterThan(0)
         expect(screen.getByText('Forecast shown only for the current month')).toBeInTheDocument()

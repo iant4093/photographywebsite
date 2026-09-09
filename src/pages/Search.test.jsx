@@ -1,3 +1,4 @@
+import { selectChoice } from '../test/selectChoice'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -107,15 +108,15 @@ describe('Search', () => {
             .toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
-        fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'video' } })
+        selectChoice(screen.getByLabelText('Format'), 'video')
         expect(screen.getByRole('link', { name: 'Bird in Flight' })).toBeInTheDocument()
         expect(screen.queryByRole('link', { name: 'Finley Birds' })).toBeNull()
         expect(screen.getByLabelText('Current query')).toHaveTextContent('?type=video')
 
-        fireEvent.change(screen.getByLabelText('Format'), { target: { value: 'all' } })
-        fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Wildlife' } })
+        selectChoice(screen.getByLabelText('Format'), 'all')
+        selectChoice(screen.getByLabelText('Category'), 'Wildlife')
         expect(screen.getAllByTestId('search-result')).toHaveLength(2)
-        fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2026' } })
+        selectChoice(screen.getByLabelText('Year'), '2026')
         expect(screen.getByRole('link', { name: 'Finley Birds' })).toBeInTheDocument()
         expect(screen.queryByRole('link', { name: 'Bird in Flight' })).toBeNull()
 
@@ -129,7 +130,7 @@ describe('Search', () => {
         expect(screen.getAllByTestId('search-result').map((node) => node.textContent))
             .toEqual(['Bird in Flight', 'Finley Birds', 'Streets of Madrid'])
 
-        fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'oldest' } })
+        selectChoice(screen.getByLabelText('Order'), 'oldest')
         expect(screen.getAllByTestId('search-result').map((node) => node.textContent))
             .toEqual(['Bird in Flight', 'Streets of Madrid', 'Finley Birds'])
 

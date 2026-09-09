@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router'
 import DashboardBackLink from '../components/DashboardBackLink'
@@ -903,10 +904,7 @@ function ManageAlbums() {
 
                 <div className="mb-6 flex flex-wrap items-center gap-3" aria-live="polite">
                     {viewMode === 'manage' && <label className="text-sm text-warm-gray">Category
-                        <select aria-label="Filter categories" value={sortedCategories.includes(categoryFilter) ? categoryFilter : ''} onChange={(event) => setCategoryFilter(event.target.value)} className="ml-3 rounded-lg border border-warm-border bg-white px-3 py-2">
-                            <option value="">All categories</option>
-                            {sortedCategories.map((name) => <option key={name} value={name}>{name} ({groupedAlbums[name].length}{loadingMore || catalogError ? '+' : ''})</option>)}
-                        </select>
+                        <SiteSelect aria-label="Filter categories" value={sortedCategories.includes(categoryFilter) ? categoryFilter : ''} onChange={(value) => setCategoryFilter(value)} className="ml-3 rounded-lg border border-warm-border bg-white px-3 py-2" options={[{ value: '', label: 'All categories' }, ...sortedCategories.map(name => ({ value: name, label: name + ' (' + groupedAlbums[name].length + (loadingMore || catalogError ? '+' : '') + ')' }))]} />
                     </label>}
                     {loadingMore && <span className="text-sm text-warm-gray">Loading remaining albums…</span>}
                     {catalogError && <div role="alert" className="text-sm text-red-700">{catalogError} <button onClick={retryCatalog} className="underline">Retry album loading</button></div>}
@@ -985,19 +983,13 @@ function ManageAlbums() {
                                                             rows={2}
                                                             className="w-full px-3 py-2 rounded-lg border border-warm-border text-sm focus:outline-none focus:ring-2 focus:ring-amber/40 resize-none"
                                                         />
-                                                        <input
-                                                            type="text"
-                                                            list={`categories-${album.albumId}`}
+                                                        <SiteSelect editable aria-label="Category"
                                                             value={editCategory}
-                                                            onChange={(e) => setEditCategory(e.target.value)}
+                                                            onChange={(value) => setEditCategory(value)}
                                                             placeholder="Category (e.g. Wildlife, Sports)"
                                                             className="w-full px-3 py-2 rounded-lg border border-warm-border text-sm focus:outline-none focus:ring-2 focus:ring-amber/40"
+                                                            options={existingCategories}
                                                         />
-                                                        <datalist id={`categories-${album.albumId}`}>
-                                                            {existingCategories.map(cat => (
-                                                                <option key={cat} value={cat} />
-                                                            ))}
-                                                        </datalist>
                                                         <input
                                                             type="date"
                                                             value={editDate}

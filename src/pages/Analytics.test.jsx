@@ -1,3 +1,4 @@
+import { selectChoice } from '../test/selectChoice'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -55,7 +56,7 @@ describe('Website Analytics admin page', () => {
     it('changes range and interval, then safely retries an error', async () => {
         const page = render(<MemoryRouter><Analytics /></MemoryRouter>)
         await screen.findByText('Mountain Day')
-        fireEvent.change(screen.getByLabelText('Report range'), { target: { value: '90' } })
+        selectChoice(screen.getByLabelText('Report range'), '90')
         await waitFor(() => expect(api.fetchAnalyticsReport).toHaveBeenLastCalledWith('admin-token', 90, { signal: expect.any(AbortSignal) }))
         expect(screen.getByRole('button', { name: 'Week' })).toHaveClass('active')
         page.unmount()

@@ -1,3 +1,4 @@
+import { selectChoice } from '../test/selectChoice'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -218,7 +219,7 @@ describe('Photo Editor page', () => {
         await user.click(screen.getByRole('button', { name: 'Kodak Portra 400' }))
         expect(screen.getByRole('spinbutton', { name: 'Temperature value' })).toHaveValue(7)
 
-        await user.selectOptions(screen.getByRole('combobox', { name: 'Dimensions' }), 'longEdge')
+        await selectChoice(screen.getByRole('combobox', { name: 'Dimensions' }), 'longEdge')
         fireEvent.change(screen.getByRole('spinbutton', { name: 'Pixels' }), { target: { value: '1200' } })
         await user.click(screen.getByRole('button', { name: 'Export photo' }))
         expect((await screen.findAllByText(/Exported 2 × 1 JPG/)).length).toBeGreaterThan(0)
@@ -236,7 +237,7 @@ describe('Photo Editor page', () => {
 
         const geometrySummary = screen.getByText('Crop & geometry')
         await user.click(geometrySummary)
-        await user.selectOptions(screen.getByRole('combobox', { name: 'Aspect ratio' }), '1:1')
+        await selectChoice(screen.getByRole('combobox', { name: 'Aspect ratio' }), '1:1')
         await user.click(screen.getByRole('button', { name: 'Rotate right' }))
         await user.click(screen.getByRole('button', { name: 'Flip H' }))
         fireEvent.change(screen.getByRole('spinbutton', { name: 'Straighten value' }), { target: { value: '4' } })
@@ -316,7 +317,7 @@ describe('Photo Editor page', () => {
         await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 1200)).toBe(true))
 
         mocks.workerMessages.length = 0
-        await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Preview quality' }), 'high')
+        await selectChoice(screen.getByRole('combobox', { name: 'Preview quality' }), 'high')
         await waitFor(() => expect(mocks.workerMessages.some((message) => message.width === 1800)).toBe(true))
         expect(localStorage.getItem('ian-photo-editor-preview-quality-v1')).toBe('high')
     })

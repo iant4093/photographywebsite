@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { v4 as uuidv4 } from 'uuid'
@@ -49,7 +50,7 @@ function Upload() {
         }
 
         try {
-            // Also fetch public albums to extract categories for the datalist
+            // Also fetch public albums to populate category suggestions
             const albums = await fetchAlbums()
             const uniqueCategories = [...new Set(albums.map(a => a.category).filter(Boolean))]
             setExistingCategories(uniqueCategories)
@@ -255,18 +256,14 @@ function Upload() {
                             <label htmlFor="ownerEmail" className="block text-sm font-medium text-charcoal mb-2">
                                 User Email *
                             </label>
-                            <select
+                            <SiteSelect
                                 id="ownerEmail"
                                 value={ownerEmail}
-                                onChange={(e) => setOwnerEmail(e.target.value)}
+                                onChange={(value) => setOwnerEmail(value)}
                                 required
                                 className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
-                            >
-                                <option value="">Select a user...</option>
-                                {users.map((u) => (
-                                    <option key={u.email} value={u.email}>{u.email}</option>
-                                ))}
-                            </select>
+                                aria-label="User Email *" options={[{ value: '', label: 'Select a user...' }, ...users.map(user => ({ value: user.email, label: user.email }))]}
+                            />
                         </div>
                     )}
 
@@ -289,20 +286,14 @@ function Upload() {
                     {/* Category input */}
                     <div className="mb-6">
                         <label htmlFor="category" className="block text-sm font-medium text-charcoal mb-2">Category</label>
-                        <input
+                        <SiteSelect editable aria-label="Category"
                             id="category"
-                            type="text"
-                            list="categoriesList"
                             value={category}
-                            onChange={(e) => setCategory(e.target.value)}
+                            onChange={(value) => setCategory(value)}
                             className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all duration-200"
                             placeholder="e.g. Wildlife, Sports, or type a new one..."
+                            options={existingCategories}
                         />
-                        <datalist id="categoriesList">
-                            {existingCategories.map(cat => (
-                                <option key={cat} value={cat} />
-                            ))}
-                        </datalist>
                     </div>
 
                     {/* Album date */}

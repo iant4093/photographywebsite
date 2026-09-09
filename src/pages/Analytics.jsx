@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
@@ -139,8 +140,8 @@ export default function Analytics() {
         return () => controller.abort()
     }, [attempt, getIdToken, range])
 
-    const changeRange = useCallback((event) => {
-        const next = Number(event.target.value)
+    const changeRange = useCallback((value) => {
+        const next = Number(value)
         setLoading(true)
         setError('')
         setRange(next)
@@ -160,9 +161,7 @@ export default function Analytics() {
                     <p>Visits, portfolio engagement, audience shape, and frontend health in one view.</p>
                 </div>
                 <label>Report range
-                    <select value={range} onChange={changeRange}>
-                        {RANGE_OPTIONS.map((days) => <option key={days} value={days}>Last {days} days</option>)}
-                    </select>
+                    <SiteSelect value={range} onChange={changeRange} aria-label="Report range" options={RANGE_OPTIONS.map(value => ({ value, label: 'Last ' + value + ' days' }))} />
                 </label>
             </header>
 

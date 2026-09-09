@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigationType } from 'react-router'
 import VideoAlbumCard from '../components/VideoAlbumCard'
@@ -209,19 +210,14 @@ export default function Videos() {
                         <label className="w-full" htmlFor="video-section-sort">
                             <span className="linen-category-number block mb-1">Sort sections</span>
                             <span className="relative block">
-                                <select
+                                <SiteSelect
                                     id="video-section-sort"
                                     aria-label="Sort video sections"
                                     value={sectionSort}
-                                    onChange={(event) => setSectionSort(Number(event.target.value))}
+                                    onChange={(value) => setSectionSort(Number(value))}
                                     className="w-full py-2 px-4 border-0 border-b border-charcoal rounded-none text-charcoal bg-transparent text-xs font-medium tracking-wider uppercase cursor-pointer focus:outline-none"
-                                    style={{ WebkitAppearance: 'none', appearance: 'none', background: 'transparent' }}
-                                >
-                                    {VIDEO_SECTION_SORT_OPTIONS.map((option, index) => (
-                                        <option key={option} value={index}>{option}</option>
-                                    ))}
-                                </select>
-                                <span aria-hidden="true" className="absolute right-0 top-1/2 -translate-y-1/2 text-amber-dark pointer-events-none text-base">⌄</span>
+                                    options={VIDEO_SECTION_SORT_OPTIONS.map((label, value) => ({ value, label }))}
+                                />
                             </span>
                         </label>
                     </div>

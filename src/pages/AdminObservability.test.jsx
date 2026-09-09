@@ -1,3 +1,4 @@
+import { selectChoice } from '../test/selectChoice'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -69,12 +70,12 @@ describe('admin observability modules', () => {
     expect(await screen.findByRole('heading', { name: 'Audit Log' })).toBeInTheDocument()
     expect(screen.getByText('Album Create')).toBeInTheDocument()
     expect(screen.getByText('Auth Login')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'denied' } })
+    selectChoice(screen.getByLabelText('Outcome'), 'denied')
     expect(screen.queryByText('Album Create')).toBeNull()
     expect(screen.getByText('Auth Login')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'album' } })
     expect(screen.getByText('No events match these filters.')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Time range'), { target: { value: '30' } })
+    selectChoice(screen.getByLabelText('Time range'), '30')
     await waitFor(() => expect(api.fetchAuditLog).toHaveBeenLastCalledWith('admin-token', 30, { signal: expect.any(AbortSignal) }))
   })
 
@@ -93,9 +94,9 @@ describe('admin observability modules', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText(/Showing the newest 200 events/)).toBeInTheDocument()
     expect(screen.getAllByText('Unknown')).toHaveLength(4)
-    fireEvent.change(screen.getByLabelText('Resource'), { target: { value: 'provider' } })
+    selectChoice(screen.getByLabelText('Resource'), 'provider')
     expect(screen.getByLabelText('Resource')).toHaveValue('provider')
-    fireEvent.change(screen.getByLabelText('Resource'), { target: { value: 'all' } })
+    selectChoice(screen.getByLabelText('Resource'), 'all')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(api.fetchAuditLog).toHaveBeenCalledTimes(3))
   })

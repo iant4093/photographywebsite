@@ -5,7 +5,7 @@
 .analytics-header h1 { margin: .3rem 0; font-family: var(--font-serif); font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 500; line-height: 1; }
 .analytics-header p { color: var(--color-warm-gray, #7a7067); }
 .analytics-header label { display: grid; gap: .5rem; min-width: 10rem; color: var(--color-warm-gray, #7a7067); font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; }
-.analytics-header select { border: 1px solid color-mix(in srgb, currentColor 30%, transparent); background: var(--color-cream, #f6f0e6); color: inherit; padding: .7rem .8rem; }
+.analytics-header .site-select-control { border: 1px solid color-mix(in srgb, currentColor 30%, transparent); background: var(--color-cream, #f6f0e6); color: inherit; padding: .7rem .8rem; }
 .analytics-stats { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-width: 0 0 1px 1px; margin: 2rem 0; }
 .analytics-stat { min-width: 0; padding: 1.35rem; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-width: 1px 1px 0 0; }
 .analytics-stat span,.analytics-stat small { display: block; color: var(--color-warm-gray, #7a7067); font-size: .75rem; }

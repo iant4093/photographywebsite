@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigationType } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
@@ -261,24 +262,14 @@ function Home() {
                     <label className="w-full" htmlFor="home-section-sort">
                         <span className="linen-category-number block mb-1">Sort sections</span>
                         <span className="relative block">
-                            <select
+                            <SiteSelect
                                 id="home-section-sort"
                                 aria-label="Sort sections"
                                 value={sectionSort}
-                                onChange={(event) => setSectionSort(Number(event.target.value))}
+                                onChange={(value) => setSectionSort(Number(value))}
                                 className="w-full py-2 px-4 border-0 border-b border-charcoal rounded-none text-charcoal bg-transparent text-xs font-medium tracking-wider uppercase cursor-pointer focus:outline-none"
-                                style={{ WebkitAppearance: 'none', appearance: 'none', background: 'transparent' }}
-                            >
-                                {HOME_SECTION_SORT_OPTIONS.map((option, index) => (
-                                    <option key={option} value={index}>{option}</option>
-                                ))}
-                            </select>
-                            <span
-                                aria-hidden="true"
-                                className="absolute right-0 top-1/2 -translate-y-1/2 text-amber-dark pointer-events-none text-base"
-                            >
-                                ⌄
-                            </span>
+                                options={HOME_SECTION_SORT_OPTIONS.map((label, value) => ({ value, label }))}
+                            />
                         </span>
                     </label>
                 </div>

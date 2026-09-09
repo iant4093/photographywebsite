@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
@@ -211,33 +212,19 @@ export default function Search() {
                     <div className="archive-search-filter-grid">
                         <label>
                             <span>Format</span>
-                            <select value={type} onChange={(event) => updateParam('type', event.target.value)}>
-                                <option value="all">Photos & videos</option>
-                                <option value="photo">Photos</option>
-                                <option value="video">Videos</option>
-                            </select>
+                            <SiteSelect value={type} onChange={(value) => updateParam('type', value)} aria-label="Format" options={[{ value: 'all', label: 'Photos & videos' }, { value: 'photo', label: 'Photos' }, { value: 'video', label: 'Videos' }]} />
                         </label>
                         <label>
                             <span>Category</span>
-                            <select value={category} onChange={(event) => updateParam('category', event.target.value)}>
-                                <option value="all">All categories</option>
-                                {categories.map((option) => <option key={option} value={option}>{option}</option>)}
-                            </select>
+                            <SiteSelect value={category} onChange={(value) => updateParam('category', value)} aria-label="Category" options={[{ value: 'all', label: 'All categories' }, ...categories.map(value => ({ value, label: value }))]} />
                         </label>
                         <label>
                             <span>Year</span>
-                            <select value={year} onChange={(event) => updateParam('year', event.target.value)}>
-                                <option value="all">All years</option>
-                                {years.map((option) => <option key={option} value={option}>{option}</option>)}
-                            </select>
+                            <SiteSelect value={year} onChange={(value) => updateParam('year', value)} aria-label="Year" options={[{ value: 'all', label: 'All years' }, ...years.map(value => ({ value, label: value }))]} />
                         </label>
                         <label>
                             <span>Order</span>
-                            <select value={sort} onChange={(event) => updateParam('sort', event.target.value, 'newest')}>
-                                <option value="newest">Newest first</option>
-                                <option value="oldest">Oldest first</option>
-                                <option value="title">Title A–Z</option>
-                            </select>
+                            <SiteSelect value={sort} onChange={(value) => updateParam('sort', value, 'newest')} aria-label="Order" options={[{ value: 'newest', label: 'Newest first' }, { value: 'oldest', label: 'Oldest first' }, { value: 'title', label: 'Title A–Z' }]} />
                         </label>
                     </div>
                 </div>

@@ -1,3 +1,4 @@
+import { selectChoice } from '../test/selectChoice'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -114,7 +115,7 @@ describe('Home complete public catalog', () => {
       .toEqual(['Birding', 'Hikes'])
     expect(screen.getByTestId('home-photo-Birding')).toHaveTextContent('Bird OneBird Two')
 
-    fireEvent.change(sectionSort, { target: { value: '1' } })
+    selectChoice(sectionSort, '1')
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
       .toEqual(['Hikes', 'Birding'])
     expect(screen.getByTestId('home-photo-Birding')).toHaveTextContent('Bird OneBird Two')
@@ -421,7 +422,7 @@ describe('Videos paginated catalog', () => {
       .toEqual(['Films', 'Sports'])
     expect(screen.getByTestId('videos-Films')).toHaveTextContent('Film OldFilm New')
 
-    fireEvent.change(sectionSort, { target: { value: '1' } })
+    selectChoice(sectionSort, '1')
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
       .toEqual(['Sports', 'Films'])
     expect(screen.getByTestId('videos-Films')).toHaveTextContent('Film OldFilm New')

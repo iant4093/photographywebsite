@@ -1,3 +1,4 @@
+import SiteSelect from '../components/SiteSelect'
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import DashboardBackLink from '../components/DashboardBackLink'
@@ -285,15 +286,13 @@ export default function UploadVideo() {
                     {visibility === 'private' && (
                         <div className="mb-6">
                             <label className="block text-sm font-medium text-charcoal mb-2">User Email *</label>
-                            <select
+                            <SiteSelect
                                 value={ownerEmail}
-                                onChange={(e) => setOwnerEmail(e.target.value)}
+                                onChange={(value) => setOwnerEmail(value)}
                                 required
                                 className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 text-charcoal focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all"
-                            >
-                                <option value="">Select a user...</option>
-                                {users.map((u) => <option key={u.email} value={u.email}>{u.email}</option>)}
-                            </select>
+                                aria-label="User Email *" options={[{ value: '', label: 'Select a user...' }, ...users.map(user => ({ value: user.email, label: user.email }))]}
+                            />
                         </div>
                     )}
 
@@ -312,17 +311,13 @@ export default function UploadVideo() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <div>
                             <label className="block text-sm font-medium text-charcoal mb-2">Category</label>
-                            <input
-                                type="text"
-                                list="categoriesList"
+                            <SiteSelect editable aria-label="Category"
                                 value={category}
-                                onChange={(e) => setCategory(e.target.value)}
+                                onChange={(value) => setCategory(value)}
                                 className="w-full px-4 py-3 rounded-xl border border-warm-border bg-cream/50 focus:ring-2 focus:ring-amber/40 focus:border-amber transition-all"
                                 placeholder="e.g. Weddings, Commercial..."
+                                options={existingCategories}
                             />
-                            <datalist id="categoriesList">
-                                {existingCategories.map(cat => <option key={cat} value={cat} />)}
-                            </datalist>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-charcoal mb-2">Date</label>

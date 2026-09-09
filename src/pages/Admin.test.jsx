@@ -1,3 +1,4 @@
+import { selectChoice, expectSuggestion } from '../test/selectChoice'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,11 +19,11 @@ vi.mock('../utils/concurrency', () => ({
 }))
 vi.mock('uuid', () => ({ v4: () => '12345678-abcd-4567-8901-123456789012' }))
 vi.mock('framer-motion', () => ({
-  motion: new Proxy({}, { get: (_target, tag) => ({ children, ...props }) => {
+  motion: new Proxy({}, { get: (target, tag) => target[tag] ||= (({ children, ...props }) => {
     const Tag = tag
     const { variants: _variants, initial: _initial, animate: _animate, exit: _exit, transition: _transition, ...domProps } = props
     return <Tag {...domProps}>{children}</Tag>
-  } }),
+  }) }),
 }))
 
 import Admin from './Admin'
@@ -69,10 +70,12 @@ describe('Admin photo upload', () => {
   it('loads users/categories and creates a private album with processed image metadata', async () => {
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'User Email *' }))
     expect(await screen.findByRole('option', { name: 'client@example.com' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'iant4093@gmail.com' })).toBeNull()
-    expect(container.querySelector('datalist option[value="Travel"]')).toBeTruthy()
-    fireEvent.change(screen.getByLabelText('User Email *'), { target: { value: 'client@example.com' } })
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'User Email *' }), { key: 'Escape' })
+    expect(expectSuggestion(screen.getByLabelText('Category'), 'Travel')).toBeInTheDocument()
+    selectChoice(screen.getByLabelText('User Email *'), 'client@example.com')
 
     const files = [
       new File(['one'], 'One.JPG', { type: 'image/jpeg' }),
@@ -124,7 +127,9 @@ describe('Admin photo upload', () => {
     mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
     const select = await screen.findByLabelText('User Email *')
-    fireEvent.change(select, { target: { value: 'client@example.com' } })
+    fireEvent.click(select)
+    await screen.findByRole('option', { name: 'client@example.com' })
+    selectChoice(select, 'client@example.com')
     fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
     expect(screen.queryByLabelText('User Email *')).toBeNull()
     expect(api.listUsers).toHaveBeenCalledTimes(1)
@@ -138,6 +143,7 @@ describe('Admin photo upload', () => {
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
     await waitFor(() => expect(console.error).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
 
     populate(container, [new File(['one'], 'bad.jpg', { type: 'image/jpeg' })])
     media.processImage.mockRejectedValueOnce({})
