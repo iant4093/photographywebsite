@@ -1,3 +1,4 @@
+import { normalizeHeroManifest } from './heroManifestValidation'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     albumCoverPreviewSrcSet,
@@ -9,6 +10,7 @@ import {
     fetchHeroManifest,
     heroCoverUrl,
     heroManifestSrcSet,
+    heroManifestImageUrl,
     mediaDisplayUrl,
     mediaBeforeCandidates,
     mediaBeforeDisplayUrl,
@@ -20,7 +22,6 @@ import {
     mediaPreviewCandidates,
     mediaPreviewSrcSet,
     mediaThumbnailUrl,
-    normalizeHeroManifest,
     resolveMediaDownloadUrl,
     signedUrlExpiresAt,
     uploadOriginalFilename,
@@ -105,6 +106,9 @@ describe('media URL compatibility', () => {
         const normalized = normalizeHeroManifest(heroManifest)
         expect(normalized.version).toBe(HERO_VERSION)
         expect(heroManifestSrcSet(normalized, 'webp')).toContain('hero-1280.webp 1280w')
+        expect(heroManifestImageUrl(normalized)).toContain('hero-1280.jpg')
+        expect(heroManifestImageUrl(null)).toBe('')
+        expect(heroManifestImageUrl({ variants: { jpeg: [{ width: 500, url: 'small.jpg' }] } })).toBe('small.jpg')
         expect(normalizeHeroManifest({ ...heroManifest, version: '../unsafe' })).toBeNull()
         expect(normalizeHeroManifest({
             ...heroManifest,
@@ -121,6 +125,18 @@ describe('media URL compatibility', () => {
             credentials: 'omit',
             cache: 'no-cache',
         }))
+    })
+
+    it('keeps video and photo manifest versions in their own namespaces', async () => {
+        const videoManifest = JSON.parse(JSON.stringify(heroManifest).replaceAll('versions/v1/', 'versions/video/v1/'))
+        expect(normalizeHeroManifest(videoManifest)).toBeNull()
+        expect(normalizeHeroManifest(heroManifest, 'video')).toBeNull()
+        expect(normalizeHeroManifest(videoManifest, 'video').version).toBe(HERO_VERSION)
+        expect(normalizeHeroManifest(heroManifest, 'unknown')).toBeNull()
+        const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(videoManifest)))
+        vi.stubGlobal('fetch', fetch)
+        await expect(fetchHeroManifest({ heroType: 'video' })).resolves.toMatchObject({ version: HERO_VERSION })
+        expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/site/hero/video/manifest.json'), expect.objectContaining({ credentials: 'omit' }))
     })
 
     it('derives deterministic responsive album-cover previews only inside the album namespace', async () => {

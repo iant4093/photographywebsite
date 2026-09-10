@@ -14,7 +14,7 @@ export const HERO_COVER_KEY = 'site/hero/home'
 export const HERO_MANIFEST_KEY = 'site/hero/manifest.json'
 export const HERO_CURRENT_PREFIX = 'site/hero/current'
 export const HERO_CURRENT_WIDTHS = Object.freeze([640, 960, 1280, 1920, 2560])
-const HERO_VERSION_PATTERN = /^[a-f0-9]{32}$/
+export const HERO_PUBLISHED_EVENT = 'gallery-hero-published'
 const ALBUM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 function safePreviewUrl(value) {
@@ -170,69 +170,26 @@ export function currentHeroSrcSet(format = 'jpeg') {
         .join(', ')
 }
 
-export function heroManifestUrl() {
-    return cdnUrl(HERO_MANIFEST_KEY)
+export function heroManifestUrl(heroType = 'photo') {
+    return heroType === 'video' ? cdnUrl('site/hero/video/manifest.json') : cdnUrl(HERO_MANIFEST_KEY)
 }
 
-export function normalizeHeroManifest(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-    const version = typeof value.version === 'string' ? value.version.toLowerCase() : ''
-    if (value.schemaVersion !== 1 || !HERO_VERSION_PATTERN.test(version)) return null
-    const sourceWidth = Number(value.source?.width)
-    const sourceHeight = Number(value.source?.height)
-    if (!Number.isSafeInteger(sourceWidth) || sourceWidth < 1 || !Number.isSafeInteger(sourceHeight) || sourceHeight < 1) return null
-
-    const formats = { avif: '.avif', webp: '.webp', jpeg: '.jpg' }
-    const variants = {}
-    try {
-        for (const [format, extension] of Object.entries(formats)) {
-            const candidates = value.variants?.[format]
-            if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > 5) return null
-            let previousWidth = 0
-            variants[format] = candidates.map((candidate) => {
-                const width = Number(candidate?.width)
-                const height = Number(candidate?.height)
-                const key = candidate?.key
-                const expectedPrefix = `site/hero/versions/v1/${version}/hero-`
-                if (
-                    !Number.isSafeInteger(width)
-                    || width <= previousWidth
-                    || width > 2560
-                    || !Number.isSafeInteger(height)
-                    || height < 1
-                    || typeof key !== 'string'
-                    || !key.startsWith(expectedPrefix)
-                    || !key.endsWith(extension)
-                    || key !== `${expectedPrefix}${width}${extension}`
-                ) throw new TypeError('Invalid hero manifest')
-                previousWidth = width
-                return { width, height, url: cdnUrl(key) }
-            })
-            if (variants[format].some(({ url }) => !url)) return null
-        }
-    } catch {
-        return null
-    }
-    return {
-        version,
-        source: { width: sourceWidth, height: sourceHeight },
-        variants,
-    }
-}
-
-export async function fetchHeroManifest({ signal } = {}) {
-    const url = heroManifestUrl()
+export async function fetchHeroManifest({ signal, heroType = 'photo' } = {}) {
+    const url = heroManifestUrl(heroType)
     if (!url) return null
-    const response = await fetch(url, {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'omit',
-        cache: 'no-cache',
-        signal,
-    })
+    const [response, { normalizeHeroManifest }] = await Promise.all([
+        fetch(url, {
+            method: 'GET',
+            mode: 'cors',
+            credentials: 'omit',
+            cache: 'no-cache',
+            signal,
+        }),
+        import('./heroManifestValidation'),
+    ])
     if (!response.ok) return null
     try {
-        return normalizeHeroManifest(await response.json())
+        return normalizeHeroManifest(await response.json(), heroType)
     } catch {
         return null
     }
@@ -243,6 +200,11 @@ export function heroManifestSrcSet(manifest, format) {
     return Array.isArray(candidates)
         ? candidates.map(({ width, url }) => `${url} ${width}w`).join(', ')
         : ''
+}
+
+export function heroManifestImageUrl(manifest) {
+    const candidates = manifest?.variants?.jpeg
+    return (candidates?.find(({ width }) => width >= 1280) || candidates?.at(-1))?.url || ''
 }
 
 export async function albumCoverPreviewSrcSet(album) {

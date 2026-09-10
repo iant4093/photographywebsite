@@ -10,10 +10,11 @@ import { mergeUniqueById } from '../utils/apiResponse'
 import { getCatalogSnapshot, reconcilePublicCatalogItems, setCatalogSnapshot } from '../utils/catalogState'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { sortVideoSections, VIDEO_SECTION_SORT_OPTIONS } from '../utils/videoSectionSort'
-import { cdnUrl, HERO_CURRENT_WIDTHS } from '../utils/mediaUrls'
+import { cdnUrl, HERO_CURRENT_WIDTHS, heroManifestSrcSet, heroManifestImageUrl } from '../utils/mediaUrls'
 import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
 import { warmVideoHoverRuntime } from '../utils/albumVideoHoverPreview'
 import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
+import usePublishedHero from '../hooks/usePublishedHero'
 
 const CATALOG_KEY = 'public-videos'
 // The API enforces 100 as its maximum, which keeps today's video catalog to a
@@ -41,6 +42,8 @@ export default function Videos() {
     const [initialSnapshot] = useState(() => getCatalogSnapshot(CATALOG_KEY))
     const pageRef = useRef(null)
     const heroRef = useRef(null)
+    const publishedHero = usePublishedHero('video')
+    const [failedHeroVersion, setFailedHeroVersion] = useState(null)
     useScrollRestoration(location.pathname, navigationType === 'POP')
 
     const [albums, setAlbums] = useState(initialSnapshot?.items || [])
@@ -123,13 +126,14 @@ export default function Videos() {
     const { sections: videoSections, setCategoryYear } = useAlbumYearFilters(groupedVideoAlbums)
     const managedHeroUrl = cdnUrl('site/hero/video/home')
     const responsiveHeroUrl = currentVideoHeroUrl()
-    const useResponsiveHero = Boolean(responsiveHeroUrl) && !responsiveHeroFailed
+    const usePublishedVersion = publishedHero && failedHeroVersion !== publishedHero.version
+    const useResponsiveHero = usePublishedVersion || (Boolean(responsiveHeroUrl) && !responsiveHeroFailed)
     const useBundledHero = !useResponsiveHero && (!managedHeroUrl || managedHeroFailed)
     const heroSrc = useResponsiveHero
-        ? responsiveHeroUrl
+        ? (usePublishedVersion ? heroManifestImageUrl(publishedHero) : responsiveHeroUrl)
         : (useBundledHero ? '/images/heroes/video-1280.jpg' : managedHeroUrl)
     const heroSrcSet = useResponsiveHero
-        ? currentVideoHeroSrcSet()
+        ? (usePublishedVersion ? heroManifestSrcSet(publishedHero, 'jpeg') : currentVideoHeroSrcSet())
         : (useBundledHero ? heroSet('jpg') : undefined)
 
     const loadMore = async () => {
@@ -153,8 +157,8 @@ export default function Videos() {
                     <picture>
                         {useResponsiveHero ? (
                             <>
-                                <source type="image/avif" srcSet={currentVideoHeroSrcSet('avif')} sizes="100vw" />
-                                <source type="image/webp" srcSet={currentVideoHeroSrcSet('webp')} sizes="100vw" />
+                                <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentVideoHeroSrcSet('avif')} sizes="100vw" />
+                                <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentVideoHeroSrcSet('webp')} sizes="100vw" />
                             </>
                         ) : useBundledHero ? (
                             <>
@@ -174,7 +178,8 @@ export default function Videos() {
                             loading="eager"
                             decoding="async"
                             onError={() => {
-                                if (useResponsiveHero) setResponsiveHeroFailed(true)
+                                if (usePublishedVersion) setFailedHeroVersion(publishedHero.version)
+                                else if (useResponsiveHero) setResponsiveHeroFailed(true)
                                 else if (!useBundledHero) setManagedHeroFailed(true)
                             }}
                             className="w-full h-[110%] object-cover object-center parallax-hero"

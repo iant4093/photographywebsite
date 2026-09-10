@@ -457,7 +457,28 @@ describe('Home complete public catalog', () => {
     const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
     expect(hero).toHaveAttribute('fetchpriority', 'high')
-    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/site/hero/manifest.json'), expect.objectContaining({ cache: 'no-cache' }))
+  })
+
+  it('replaces a cached photo hero with the published version and updates an already open page', async () => {
+    const manifest = (version) => ({
+      schemaVersion: 1, version, source: { width: 800, height: 600 },
+      variants: Object.fromEntries(['avif', 'webp', 'jpeg'].map((format) => [format, [{
+        width: 800, height: 600, key: `site/hero/versions/v1/${version}/hero-800.${format === 'jpeg' ? 'jpg' : format}`,
+      }]])),
+    })
+    const first = 'a'.repeat(32)
+    const second = 'b'.repeat(32)
+    globalThis.fetch.mockImplementation(async () => new Response(JSON.stringify(manifest(first))))
+    catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
+    const { container } = routed(<Home />)
+    const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
+    await waitFor(() => expect(hero).toHaveAttribute('src', expect.stringContaining(`/versions/v1/${first}/`)))
+    expect(hero.getAttribute('srcset')).not.toContain('2560')
+    globalThis.fetch.mockImplementation(async () => new Response(JSON.stringify(manifest(second))))
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(hero).toHaveAttribute('src', expect.stringContaining(`/versions/v1/${second}/`)))
+    expect(container.querySelector('source[type="image/avif"]')).toHaveAttribute('srcset', expect.stringContaining(`${second}/hero-800.avif 800w`))
   })
 })
 
@@ -467,6 +488,21 @@ describe('Videos paginated catalog', () => {
     catalog.getCatalogSnapshot.mockReturnValue(null)
     scroll.isRevealed.mockReturnValue(false)
     window.matchMedia = vi.fn(() => ({ matches: true }))
+  })
+
+  it('uses the published video cover without borrowing the photo namespace', async () => {
+    const version = 'c'.repeat(32)
+    const manifest = {
+      schemaVersion: 1, version, source: { width: 1280, height: 853 },
+      variants: Object.fromEntries(['avif', 'webp', 'jpeg'].map((format) => [format, [{
+        width: 1280, height: 853, key: `site/hero/versions/video/v1/${version}/hero-1280.${format === 'jpeg' ? 'jpg' : format}`,
+      }]])),
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(manifest))))
+    api.fetchAlbumsPage.mockResolvedValue({ items: [], nextCursor: null })
+    routed(<Videos />)
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Cinematography' })).toHaveAttribute('src', expect.stringContaining(`/versions/video/v1/${version}/`)))
+    vi.unstubAllGlobals()
   })
 
   it('loads, groups, deduplicates, and loads another page', async () => {

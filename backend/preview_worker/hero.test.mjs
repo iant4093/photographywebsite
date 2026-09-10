@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import sharp from 'sharp'
 
 import {
     HERO_DERIVATIVE_VERSION,
@@ -11,9 +12,60 @@ import {
     heroOutputFormatMatches,
     heroWidthsFor,
     parseHeroJob,
+    prepareHeroSource,
+    generateHeroOutput,
+    mapHeroTasks,
 } from './hero.mjs'
 
 const version = '0123456789abcdef0123456789abcdef'
+
+test('decodes and orients once, then renders all formats without enlarging the source', async () => {
+    const bytes = await sharp({ create: { width: 60, height: 90, channels: 3, background: 'red' } })
+        .withMetadata({ orientation: 6 }).jpeg().toBuffer()
+    const source = await prepareHeroSource(bytes, 'image/jpeg')
+    assert.equal(source.raw.width, 90)
+    assert.equal(source.raw.height, 60)
+    for (const format of HERO_FORMATS) {
+        const output = await generateHeroOutput(source, 45, format, 1024 * 1024)
+        assert.equal(output.width, 45)
+        assert.equal(output.height, 30)
+        assert.equal(heroOutputFormatMatches(format, (await sharp(output.bytes).metadata()).format), true)
+    }
+    await assert.rejects(generateHeroOutput(source, 100, 'jpeg', 1024 * 1024), /failed validation/)
+    await assert.rejects(generateHeroOutput(source, 45, 'jpeg', 1), /size is invalid/)
+    await assert.rejects(generateHeroOutput(source, 45, 'gif', 1024 * 1024), /format/)
+})
+
+test('accepts real AVIF inputs as well as JPEG, PNG and WebP, while rejecting other formats', async () => {
+    for (const format of [...HERO_FORMATS, 'png']) {
+        const image = sharp({ create: { width: 12, height: 8, channels: 3, background: 'blue' } })
+        const bytes = await image.toFormat(format).toBuffer()
+        assert.equal((await prepareHeroSource(bytes, `image/${format}`)).raw.width, 12)
+        await assert.rejects(prepareHeroSource(bytes, 'text/html'), /Unsupported/)
+    }
+    const gif = await sharp({ create: { width: 12, height: 8, channels: 3, background: 'blue' } }).gif().toBuffer()
+    await assert.rejects(prepareHeroSource(gif), /Unsupported/)
+})
+
+test('bounds concurrent hero tasks and drains running work before returning a failure', async () => {
+    let running = 0
+    let maximum = 0
+    const result = await mapHeroTasks([1, 2, 3, 4, 5], async (value) => {
+        maximum = Math.max(maximum, ++running)
+        await new Promise((resolve) => setImmediate(resolve))
+        running--
+        return value * 2
+    })
+    assert.deepEqual(result, [2, 4, 6, 8, 10])
+    assert.equal(maximum, 2)
+    let drained = false
+    await assert.rejects(mapHeroTasks([1, 2, 3], async (value) => {
+        if (value === 1) throw new Error('failed')
+        await new Promise((resolve) => setImmediate(resolve))
+        drained = true
+    }), /failed/)
+    assert.equal(drained, true)
+})
 
 test('accepts only fixed hero sources and opaque version identifiers', () => {
     assert.deepEqual(parseHeroJob({ kind: 'hero', sourceKey: 'temp-zips/hero-pending', version }), {

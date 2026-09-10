@@ -1,3 +1,5 @@
+import sharp from 'sharp'
+
 const VERSION_PATTERN = /^[a-f0-9]{32}$/
 
 export const HERO_TYPES = Object.freeze(['photo', 'video'])
@@ -88,6 +90,49 @@ export function heroCurrentFallbackKey(format = 'jpeg', heroType = 'photo') {
 export function heroOutputFormatMatches(requestedFormat, detectedFormat) {
     if (!HERO_FORMATS.includes(requestedFormat) || typeof detectedFormat !== 'string') return false
     return detectedFormat === (requestedFormat === 'avif' ? 'heif' : requestedFormat)
+}
+
+export async function prepareHeroSource(bytes, contentType) {
+    const source = sharp(bytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
+    const metadata = await source.metadata()
+    // Sharp identifies AVIF containers as HEIF; require AV1 to exclude HEIC.
+    const supported = ['jpeg', 'png', 'webp'].includes(metadata.format)
+        || (metadata.format === 'heif' && metadata.compression === 'av1')
+    if (!supported || (contentType && !Object.values(HERO_CONTENT_TYPES).includes(contentType.toLowerCase()) && contentType.toLowerCase() !== 'image/png')) {
+        throw new Error('Unsupported hero source image')
+    }
+    // Decode, orient and convert the master once, instead of repeating this
+    // expensive work for all fifteen encodes. Keep the original pixels intact.
+    const { data, info } = await source.rotate().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true })
+    return { data, raw: { width: info.width, height: info.height, channels: info.channels } }
+}
+
+export async function generateHeroOutput(source, width, format, maximumBytes) {
+    if (!HERO_FORMATS.includes(format)) throw new Error('Invalid hero derivative format')
+    const image = sharp(source.data, { raw: source.raw }).resize({ width, withoutEnlargement: true })
+    if (format === 'avif') image.avif({ quality: 74, effort: 4 })
+    else if (format === 'webp') image.webp({ quality: 86, effort: 4 })
+    else image.jpeg({ quality: 90, progressive: true, mozjpeg: true })
+    const bytes = await image.toBuffer()
+    if (bytes.length < 1 || bytes.length > maximumBytes) throw new Error('Generated hero size is invalid')
+    const metadata = await sharp(bytes, { failOn: 'error' }).metadata()
+    if (!heroOutputFormatMatches(format, metadata.format) || metadata.width !== width || !metadata.height) {
+        throw new Error('Generated hero failed validation')
+    }
+    return { bytes, width, height: metadata.height, format }
+}
+
+export async function mapHeroTasks(items, process, concurrency = 2) {
+    const results = []
+    // Wait for the entire bounded batch even on failure; no uploads can keep
+    // running after a failed job is handed back to SQS for retry.
+    for (let index = 0; index < items.length; index += concurrency) {
+        const batch = await Promise.allSettled(items.slice(index, index + concurrency).map(process))
+        const failure = batch.find(({ status }) => status === 'rejected')
+        if (failure) throw failure.reason
+        results.push(...batch.map(({ value }) => value))
+    }
+    return results
 }
 
 export function buildHeroManifest({ version, sourceWidth, sourceHeight, outputs, heroType = 'photo' }) {

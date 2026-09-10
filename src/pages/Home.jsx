@@ -22,11 +22,14 @@ import {
     currentHeroSrcSet,
     currentHeroUrl,
     heroCoverUrl,
+    heroManifestSrcSet,
+    heroManifestImageUrl,
 } from '../utils/mediaUrls'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { HOME_SECTION_SORT_OPTIONS, sortHomePhotoSections } from '../utils/homeSectionSort'
 import { trackHeroExplore } from '../utils/analytics'
 import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
+import usePublishedHero from '../hooks/usePublishedHero'
 
 const CATALOG_KEY = 'public-photos'
 const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer'))
@@ -46,6 +49,8 @@ function Home() {
     const catalogSnapshotRef = useRef(initialSnapshot)
     const pageRef = useRef(null)
     const heroRef = useRef(null)
+    const publishedHero = usePublishedHero('photo')
+    const [failedHeroVersion, setFailedHeroVersion] = useState(null)
 
     useScrollRestoration(location.pathname, navigationType === 'POP')
 
@@ -138,13 +143,14 @@ function Home() {
     const photoAlbums = useMemo(() => albums.filter((album) => album.type !== 'video'), [albums])
     const managedHomeUrl = heroCoverUrl()
     const responsiveHomeUrl = currentHeroUrl()
-    const useResponsiveHero = Boolean(responsiveHomeUrl) && !responsiveHeroFailed
+    const usePublishedVersion = publishedHero && failedHeroVersion !== publishedHero.version
+    const useResponsiveHero = usePublishedVersion || (Boolean(responsiveHomeUrl) && !responsiveHeroFailed)
     const useBundledHero = !useResponsiveHero && (!managedHomeUrl || managedHomeFailed)
     const heroSrc = useResponsiveHero
-        ? responsiveHomeUrl
+        ? (usePublishedVersion ? heroManifestImageUrl(publishedHero) : responsiveHomeUrl)
         : (useBundledHero ? '/images/heroes/photo-1280.jpg' : managedHomeUrl)
     const heroSrcSet = useResponsiveHero
-        ? currentHeroSrcSet('jpeg')
+        ? (usePublishedVersion ? heroManifestSrcSet(publishedHero, 'jpeg') : currentHeroSrcSet('jpeg'))
         : (useBundledHero ? heroSet('jpg') : undefined)
     const { groupedPhotoAlbums, curatedPhotoCategories } = useMemo(() => {
         const grouped = photoAlbums.reduce((result, album) => {
@@ -171,8 +177,8 @@ function Home() {
                     <picture>
                         {useResponsiveHero ? (
                             <>
-                                <source type="image/avif" srcSet={currentHeroSrcSet('avif')} sizes={HERO_SIZES} />
-                                <source type="image/webp" srcSet={currentHeroSrcSet('webp')} sizes={HERO_SIZES} />
+                                <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentHeroSrcSet('avif')} sizes={HERO_SIZES} />
+                                <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentHeroSrcSet('webp')} sizes={HERO_SIZES} />
                             </>
                         ) : useBundledHero ? (
                             <>
@@ -191,7 +197,8 @@ function Home() {
                             fetchPriority="high"
                             decoding="async"
                             onError={() => {
-                                if (useResponsiveHero) setResponsiveHeroFailed(true)
+                                if (usePublishedVersion) setFailedHeroVersion(publishedHero.version)
+                                else if (useResponsiveHero) setResponsiveHeroFailed(true)
                                 else if (!useBundledHero) setManagedHomeFailed(true)
                             }}
                             className="home-hero-media parallax-hero"

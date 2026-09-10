@@ -1,0 +1,33 @@
+{
+  "benchmark": {
+    "sourceBytes": 17982294,
+    "width": 6867,
+    "height": 4578,
+    "outputs": 15,
+    "beforeMs": 9308,
+    "afterMs": 5085,
+    "fasterPercent": 45,
+    "beforeBytes": 3206330,
+    "afterBytes": 3245428
+  },
+  "benchmarkScope": "Local rendering of all 15 variants from the current photo original; excludes queue, upload, CDN and network latency. Quality settings retained.",
+  "checks": {
+    "frontendTests": 1071,
+    "frontendCoverage": {
+      "statements": 90.96,
+      "branches": 83.57,
+      "functions": 89.52,
+      "lines": 93.64
+    },
+    "workerCoverage": {
+      "lines": 98.66,
+      "branches": 90.5,
+      "functions": 98.97
+    },
+    "previewInfrastructureTests": 15,
+    "npmAuditVulnerabilities": 0,
+    "workerSamBuild": "passed",
+    "frontendArtifactBudget": "passed"
+  },
+  "productionDiagnosis": "Both requested photo and video versions completed publication; the confirmed new photo was visible in a fresh browser. Fixed hero URLs and lack of mounted-page revalidation allowed old images to persist."
+}

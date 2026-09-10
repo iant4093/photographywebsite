@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { completeHeroUpload, requestHeroUploadUrl, uploadFileToS3 } from '../utils/api'
-import { cdnUrl, heroCoverUrl } from '../utils/mediaUrls'
+import { cdnUrl, heroCoverUrl, heroManifestImageUrl } from '../utils/mediaUrls'
 import { completeVideoHeroUpload, requestVideoHeroUploadUrl } from '../utils/videoHeroApi'
+import { waitForHeroPublication } from '../utils/heroPublication'
+import usePublishedHero from '../hooks/usePublishedHero'
 
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
 const MAX_BYTES = 50 * 1024 * 1024
@@ -36,10 +38,15 @@ export default function ManageHero() {
     const [error, setError] = useState('')
     const [success, setSuccess] = useState(false)
     const [currentFailed, setCurrentFailed] = useState(false)
+    const publishedHero = usePublishedHero(heroType)
+    const [confirmedHero, setConfirmedHero] = useState(null)
     const fileInputRef = useRef(null)
     const requestRef = useRef(null)
     const activeTab = HERO_TABS.find(({ id }) => id === heroType) || HERO_TABS[0]
-    const currentHero = heroType === 'video' ? cdnUrl('site/hero/video/home') : heroCoverUrl()
+    const manifest = confirmedHero || publishedHero
+    const currentHero = manifest
+        ? heroManifestImageUrl(manifest)
+        : (heroType === 'video' ? cdnUrl('site/hero/video/home') : heroCoverUrl())
     const previewUrl = useMemo(() => file ? URL.createObjectURL(file) : '', [file])
 
     useEffect(() => () => {
@@ -51,6 +58,7 @@ export default function ManageHero() {
     function selectHeroType(nextType) {
         if (uploading || nextType === heroType) return
         setHeroType(nextType)
+        setConfirmedHero(null)
         setFile(null)
         setDimensions(null)
         setStatus('')
@@ -111,6 +119,9 @@ export default function ManageHero() {
             } else {
                 await completeHeroUpload(token, etag, { signal: controller.signal })
             }
+            setStatus('Publishing your new cover… This page will confirm when it is live.')
+            const published = await waitForHeroPublication(heroType, etag, { signal: controller.signal })
+            setConfirmedHero(published)
             setSuccess(true)
             setStatus('')
             setFile(null)
@@ -168,8 +179,8 @@ export default function ManageHero() {
 
                 {success && (
                     <div className="mb-8 p-5 rounded-2xl bg-green-50 border border-green-200 text-green-800" role="status">
-                        <p className="font-medium">{activeTab.label} hero processing started successfully.</p>
-                        <p className="mt-1 text-sm">The original is preserved exactly while optimized display sizes are created. The new cover will appear automatically in about a minute.</p>
+                        <p className="font-medium">{activeTab.label} cover is live.</p>
+                        <p className="mt-1 text-sm">Your new cover is published. The original is preserved exactly, and both new visits and open gallery pages will pick up the updated image automatically.</p>
                     </div>
                 )}
                 {error && (

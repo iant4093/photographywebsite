@@ -12,10 +12,13 @@ const videoApi = vi.hoisted(() => ({
   completeVideoHeroUpload: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
+const publication = vi.hoisted(() => ({ waitForHeroPublication: vi.fn() }))
 
 vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/videoHeroApi', () => videoApi)
+vi.mock('../utils/heroPublication', () => publication)
+vi.mock('../hooks/usePublishedHero', () => ({ default: () => null }))
 
 import ManageHero from './ManageHero'
 
@@ -37,6 +40,10 @@ describe('admin hero cover upload', () => {
       revokeObjectURL: { configurable: true, value: vi.fn() },
     })
     auth.getIdToken.mockResolvedValue('admin-token')
+    publication.waitForHeroPublication.mockImplementation(async (heroType) => ({
+      version: ETAG,
+      variants: { jpeg: [{ width: 1280, url: `https://media.example/site/hero/versions/${heroType}/${ETAG}/hero-1280.jpg` }] },
+    }))
     api.requestHeroUploadUrl.mockResolvedValue({
       uploadUrl: 'https://upload.example',
       requiredHeaders: {
@@ -72,7 +79,9 @@ describe('admin hero cover upload', () => {
     expect(screen.getByText(/under the recommended 2560-pixel width/)).toBeInTheDocument()
 
     fireEvent.submit(container.querySelector('form'))
-    expect(await screen.findByText('Photo Gallery hero processing started successfully.')).toBeInTheDocument()
+    expect(await screen.findByText('Photo Gallery cover is live.')).toBeInTheDocument()
+    expect(publication.waitForHeroPublication).toHaveBeenCalledWith('photo', `"${ETAG}"`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(screen.getByRole('img', { name: 'Current photography homepage hero cover' })).toHaveAttribute('src', expect.stringContaining(ETAG))
     expect(api.requestHeroUploadUrl).toHaveBeenCalledWith('admin-token', file, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(api.uploadFileToS3).toHaveBeenCalledWith(
       'https://upload.example',
@@ -128,7 +137,8 @@ describe('admin hero cover upload', () => {
     const file = heroFile('video-hero.jpg')
     fireEvent.change(screen.getByLabelText('New hero image'), { target: { files: [file] } })
     fireEvent.submit(container.querySelector('form'))
-    expect(await screen.findByText('Video Page hero processing started successfully.')).toBeInTheDocument()
+    expect(await screen.findByText('Video Page cover is live.')).toBeInTheDocument()
+    expect(publication.waitForHeroPublication).toHaveBeenCalledWith('video', `"${ETAG}"`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(videoApi.requestVideoHeroUploadUrl).toHaveBeenCalledWith(
       'admin-token',
       file,
@@ -139,5 +149,30 @@ describe('admin hero cover upload', () => {
       `"${ETAG}"`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
+  })
+
+  it('retains the selected preview and waits for publication before announcing success', async () => {
+    let finish
+    publication.waitForHeroPublication.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const { container } = mounted()
+    fireEvent.change(screen.getByLabelText('New hero image'), { target: { files: [heroFile()] } })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText(/Publishing your new cover/)).toBeInTheDocument()
+    expect(screen.queryByText(/cover is live/)).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Selected hero cover preview' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Video Page' })).toBeDisabled()
+    finish({ variants: { jpeg: [{ width: 1280, url: 'https://media.example/published.jpg' }] } })
+    expect(await screen.findByText('Photo Gallery cover is live.')).toBeInTheDocument()
+  })
+
+  it('surfaces a publication timeout without losing the selected file or claiming success', async () => {
+    publication.waitForHeroPublication.mockRejectedValue(new Error('Publication has not been confirmed yet.'))
+    const { container } = mounted()
+    fireEvent.change(screen.getByLabelText('New hero image'), { target: { files: [heroFile()] } })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Publication has not been confirmed yet.')
+    expect(screen.queryByText(/cover is live/)).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Selected hero cover preview' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Upload and Change Cover' })).toBeEnabled()
   })
 })

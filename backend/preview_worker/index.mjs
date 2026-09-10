@@ -62,7 +62,9 @@ import {
     heroCurrentFallbackKey,
     heroCurrentKey,
     heroDerivativeKey,
-    heroOutputFormatMatches,
+    generateHeroOutput,
+    mapHeroTasks,
+    prepareHeroSource,
     heroPaths,
     heroWidthsFor,
     parseHeroJob,
@@ -188,63 +190,35 @@ async function extractExploreMetadata(imageBytes, image) {
     }
 }
 
-async function generateHeroOutput(sourceBytes, width, format) {
-    const image = sharp(sourceBytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
-        .rotate()
-        .toColourspace('srgb')
-        .resize({ width, withoutEnlargement: true })
-    if (format === 'avif') image.avif({ quality: 74, effort: 4 })
-    else if (format === 'webp') image.webp({ quality: 86, effort: 4 })
-    else image.jpeg({ quality: 90, progressive: true, mozjpeg: true })
-    const bytes = await image.toBuffer()
-    if (bytes.length < 1 || bytes.length > MAX_OUTPUT_BYTES) throw new Error('Generated hero size is invalid')
-    const metadata = await sharp(bytes, { failOn: 'error' }).metadata()
-    if (!heroOutputFormatMatches(format, metadata.format) || metadata.width !== width || !metadata.height) {
-        throw new Error('Generated hero failed validation')
-    }
-    return { bytes, width, height: metadata.height, format }
-}
-
 async function processHeroJob(jobValue) {
     const job = parseHeroJob(jobValue)
     const { bytes: sourceBytes, head } = await readObjectBounded(job.sourceKey, MAX_SOURCE_BYTES)
     const sourceEtag = String(head.ETag || '').replaceAll('"', '').toLowerCase()
     if (sourceEtag !== job.version) return { status: 'superseded', manifest: null }
-    const metadata = await sharp(sourceBytes, { failOn: 'warning', limitInputPixels: 100_000_000 })
-        .rotate()
-        .metadata()
-    if (!metadata.width || !metadata.height || !['jpeg', 'png', 'webp', 'avif'].includes(metadata.format)) {
-        throw new Error('Unsupported hero source image')
-    }
-    const sourceWidth = metadata.autoOrient?.width || metadata.width
-    const sourceHeight = metadata.autoOrient?.height || metadata.height
-    if (head.ContentType && !['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(head.ContentType.toLowerCase())) {
-        throw new Error('Hero source content type is invalid')
-    }
-
-    const outputs = []
-    for (const width of heroWidthsFor(sourceWidth)) {
-        for (const format of HERO_FORMATS) {
-            const output = await generateHeroOutput(sourceBytes, width, format)
-            const key = heroDerivativeKey(job.version, width, format, job.heroType)
-            await s3.send(new PutObjectCommand({
-                Bucket: requiredEnvironment('IMAGES_BUCKET'),
-                Key: key,
-                Body: output.bytes,
-                ContentType: HERO_CONTENT_TYPES[format],
-                CacheControl: 'public, max-age=31536000, immutable',
-                ServerSideEncryption: 'AES256',
-                Tagging: 'visibility=public',
-                Metadata: {
-                    'hero-version': job.version,
-                    'hero-type': job.heroType,
-                    'hero-width': String(width),
-                    generator: 'responsive-hero-v1',
-                },
-            }))
-            outputs.push({ ...output, key })
-        }
-    }
+    const source = await prepareHeroSource(sourceBytes, head.ContentType)
+    const sourceWidth = source.raw.width
+    const sourceHeight = source.raw.height
+    const tasks = heroWidthsFor(sourceWidth).flatMap((width) => HERO_FORMATS.map((format) => ({ width, format })))
+    const outputs = await mapHeroTasks(tasks, async ({ width, format }) => {
+        const output = await generateHeroOutput(source, width, format, MAX_OUTPUT_BYTES)
+        const key = heroDerivativeKey(job.version, width, format, job.heroType)
+        await s3.send(new PutObjectCommand({
+            Bucket: requiredEnvironment('IMAGES_BUCKET'),
+            Key: key,
+            Body: output.bytes,
+            ContentType: HERO_CONTENT_TYPES[format],
+            CacheControl: 'public, max-age=31536000, immutable',
+            ServerSideEncryption: 'AES256',
+            Tagging: 'visibility=public',
+            Metadata: {
+                'hero-version': job.version,
+                'hero-type': job.heroType,
+                'hero-width': String(width),
+                generator: 'responsive-hero-v1',
+            },
+        }))
+        return { width: output.width, height: output.height, format, key }
+    })
     const manifest = buildHeroManifest({
         version: job.version,
         sourceWidth,
@@ -260,7 +234,7 @@ async function processHeroJob(jobValue) {
         await deleteHeroVersion(job.version, job.heroType)
         return { status: 'superseded', manifest: null }
     }
-    await publishHero(job, manifest, head.ContentType || `image/${metadata.format}`)
+    await publishHero(job, manifest, head.ContentType || 'application/octet-stream')
     return { status: 'completed', manifest }
 }
 
