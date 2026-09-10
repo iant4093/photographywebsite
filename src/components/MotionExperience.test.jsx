@@ -140,26 +140,69 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
   })
 
-  it('never applies visibility-driven vertical transforms to horizontal row cards', () => {
+  it('keeps row cards moving vertically before and after horizontal entry without extra layout reads', () => {
+    let notify
     const observe = vi.fn()
     vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback) { notify = callback }
       observe = observe
       disconnect() {}
     })
     const view = render(<MemoryRouter><main>
-      <div data-scroll-row=""><div className="album-card" data-testid="row-card" /></div>
-      <div className="album-card" data-testid="ordinary-card" />
+      <div data-scroll-row="" data-testid="row">
+        <div className="album-card" data-testid="visible-card" />
+        <div className="album-card" data-testid="clipped-card" />
+      </div>
+      <div data-scroll-row=""><div className="album-card" data-testid="distant-card" /></div>
     </main><MotionExperience /></MemoryRouter>)
+    const visible = screen.getByTestId('visible-card')
+    const clipped = screen.getByTestId('clipped-card')
+    const distant = screen.getByTestId('distant-card')
+    const readTop = vi.fn(() => 800)
+    for (const card of [visible, clipped]) {
+      Object.defineProperty(card, 'offsetTop', { configurable: true, get: readTop })
+      Object.defineProperty(card, 'offsetHeight', { configurable: true, value: 300 })
+    }
+    Object.defineProperty(distant, 'offsetTop', { configurable: true, value: 5000 })
     flushFrames()
-    const card = screen.getByTestId('row-card')
-    expect(observe).not.toHaveBeenCalledWith(card)
-    expect(card).not.toHaveClass('editorial-motion-frame')
-    expect(observe).toHaveBeenCalledWith(screen.getByTestId('ordinary-card'))
-    window.scrollY = 900
+    expect(observe).toHaveBeenCalledWith(visible)
+    expect(observe).toHaveBeenCalledWith(clipped)
+    expect(clipped).toHaveClass('editorial-motion-frame', 'editorial-motion-media')
+    expect(clipped).not.toHaveClass('is-motion-visible')
+    const initialPose = clipped.style.cssText
+    expect(initialPose).toBe(visible.style.cssText)
+    expect(Number.parseFloat(clipped.style.getPropertyValue('--editorial-card-y'))).toBeGreaterThan(20)
+    readTop.mockClear()
+    const distantWrite = vi.spyOn(distant.style, 'setProperty')
+
+    act(() => notify([{ target: visible, isIntersecting: true }, { target: clipped, isIntersecting: false }]))
+    window.scrollY = 450
     fireEvent.scroll(window)
     flushFrames()
-    expect(card.style.getPropertyValue('--editorial-card-y')).toBe('')
+    expect(clipped.style.cssText).not.toBe(initialPose)
+    expect(clipped.style.cssText).toBe(visible.style.cssText)
+    expect(clipped.style.getPropertyValue('--editorial-card-y')).toBe('0.00px')
+    expect(readTop).not.toHaveBeenCalled()
+    expect(distantWrite).not.toHaveBeenCalled()
+
+    const write = vi.spyOn(clipped.style, 'setProperty')
+    act(() => notify([{ target: visible, isIntersecting: false }, { target: clipped, isIntersecting: true }]))
+    fireEvent.scroll(screen.getByTestId('row'))
+    flushFrames()
+    expect(clipped).toHaveClass('is-motion-visible')
+    expect(visible).not.toHaveClass('is-motion-visible')
+    expect(write).not.toHaveBeenCalled()
+    expect(clipped.style.cssText).toBe(visible.style.cssText)
+
+    window.scrollY = 0
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(clipped.style.cssText).toBe(initialPose)
+    expect(visible.style.cssText).toBe(initialPose)
+    expect(readTop).not.toHaveBeenCalled()
     view.unmount()
+    expect(clipped).not.toHaveClass('editorial-motion-frame', 'editorial-motion-media', 'is-motion-visible')
+    expect(clipped.style.getPropertyValue('--editorial-card-y')).toBe('')
   })
 
   it('uses stronger consistent catalog motion on home, search, videos, and stats', () => {

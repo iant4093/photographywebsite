@@ -399,14 +399,6 @@
   cursor: pointer;
 }
 
-/* Stationary pointer hover and horizontal intersection changes must not lift
-   cards as they pass through a scrolling row. Keep the color/shadow feedback. */
-.linen-site [data-scroll-row] .album-card {
-  transform: none !important;
-  scale: none;
-  transition: box-shadow 320ms ease;
-}
-
 .linen-site .album-card-image {
   margin-top: 0;
   border: 1px solid rgba(54, 45, 37, 0.58);
@@ -741,7 +733,9 @@
 }
 
 .linen-site .album-card.editorial-motion-media.is-motion-visible,
-.linen-site .linen-media-frame.editorial-motion-media.is-motion-visible {
+.linen-site .linen-media-frame.editorial-motion-media.is-motion-visible,
+.linen-site [data-scroll-row] .album-card.editorial-motion-media {
+  /* Row cards retain their vertical pose through horizontal clipping. */
   transform:
     translate(var(--editorial-x), var(--editorial-card-y))
     rotate(var(--editorial-card-rotation))

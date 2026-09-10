@@ -161,8 +161,6 @@ export default function MotionExperience() {
             collectFrame = null
             const nextTargets = compactMotion ? [] : Array.from(new Set(main.querySelectorAll(TARGET_SELECTOR)))
                 .filter((element) => !element.closest('[role="dialog"]') && !element.classList.contains('fixed'))
-                // Horizontal clipping must never toggle a card's vertical transform.
-                .filter((element) => !element.closest('[data-scroll-row]'))
             const nextSet = new Set(nextTargets)
 
             targets.forEach((target) => {
@@ -185,7 +183,7 @@ export default function MotionExperience() {
                     target.classList.add('editorial-motion-frame', `editorial-index-${position}`)
                 }
                 if (!previous || previous.isMedia !== isMedia) target.classList.toggle('editorial-motion-media', isMedia)
-                metadata.set(target, { ...previous, position, isMedia })
+                metadata.set(target, { ...previous, position, isMedia, inScrollRow: Boolean(target.closest('[data-scroll-row]')) })
                 if (usesCatalogMotion) {
                     setMotionStyle(target, '--editorial-x', '0px')
                     setMotionStyle(target, '--editorial-card-rotation', '0deg')
@@ -245,8 +243,15 @@ export default function MotionExperience() {
             }
 
             const measurements = []
-            activeTargets.forEach((target) => {
+            targets.forEach((target) => {
                 const info = metadata.get(target)
+                // Keep horizontally clipped cards in step with their visible
+                // neighbors before they slide into view. IntersectionObserver
+                // still limits compositor hints to individual nearby cards;
+                // cached vertical bounds limit work to nearby rows.
+                if (info.inScrollRow) {
+                    if (info.top - scrollY > viewportHeight + 160 || info.top + info.height - scrollY < -160) return
+                } else if (!activeTargets.has(target)) return
                 const measuredHeight = Math.min(Math.max(info.height, 1), viewportHeight)
                 const progress = clamp((viewportHeight - (info.top - scrollY)) / (viewportHeight + measuredHeight), 0, 1)
                 const phase = (progress - 0.5) * 2
