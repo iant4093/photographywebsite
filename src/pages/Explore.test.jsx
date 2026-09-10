@@ -111,7 +111,7 @@ describe('Explore', () => {
       ],
       initialPage: { value: 'aperture:wide', items: [photo], total: 120, nextCursor: null },
     })
-    exploreApi.fetchExplorePhotos.mockResolvedValue({ items: [photo], nextCursor: null })
+    exploreApi.fetchExplorePhotos.mockReset().mockResolvedValue({ items: [photo], nextCursor: null })
     exploreApi.fetchExploreSample.mockResolvedValue({ images: [photo, secondPhoto] })
     exploreApi.fetchExploreTimes.mockResolvedValue({
       items: [
@@ -503,6 +503,7 @@ describe('Explore', () => {
       .mockResolvedValueOnce({ items: [secondPhoto], nextCursor: null })
     render(<MemoryRouter initialEntries={['/explore/colors']}><Explore /></MemoryRouter>)
     const shuffle = await screen.findByRole('button', { name: 'Reshuffle Blue photographs' })
+    await waitFor(() => expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledOnce())
     expect(shuffle).toBeDisabled()
     fireEvent.click(shuffle)
     expect(exploreApi.fetchExplorePhotos).toHaveBeenCalledOnce()
