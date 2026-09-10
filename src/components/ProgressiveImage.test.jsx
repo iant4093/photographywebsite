@@ -8,6 +8,42 @@ import { RECENT_IMAGE_LIFETIME_MS } from '../utils/imageRetention'
 describe('ProgressiveImage responsive fallback', () => {
     afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
+    it('keeps recognizable pixels after full-image expiry without bypassing the initial fade', () => {
+        vi.useFakeTimers()
+        let notify
+        vi.stubGlobal('IntersectionObserver', class {
+            constructor(callback) { notify = callback }
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        })
+        const draw = vi.fn()
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: draw })
+        const view = render(<ProgressiveImage src="/photo.jpg" alt="Photo" />)
+        const target = view.container.firstElementChild
+        act(() => notify([{ target, isIntersecting: true }]))
+        const fullImage = screen.getByRole('img')
+        Object.defineProperties(fullImage, { naturalWidth: { value: 1920 }, naturalHeight: { value: 1280 } })
+        fireEvent.load(fullImage)
+        expect(target.querySelector('canvas')).toBeNull()
+        fireEvent.animationEnd(fullImage)
+        const snapshot = target.querySelector('canvas')
+        expect(snapshot.width).toBe(192)
+        act(() => {
+            notify([{ target, isIntersecting: false }])
+            vi.advanceTimersByTime(RECENT_IMAGE_LIFETIME_MS)
+        })
+        expect(screen.queryByRole('img')).toBeNull()
+        expect(target.querySelector('canvas')).toBe(snapshot)
+        act(() => notify([{ target, isIntersecting: true }]))
+        expect(screen.getByRole('img')).toHaveClass('opacity-0')
+        expect(target.querySelector('canvas')).toBe(snapshot)
+        view.rerender(<ProgressiveImage src="/different.jpg" alt="Photo" />)
+        expect(target.querySelector('canvas')).toBeNull()
+        expect(snapshot.width * snapshot.height).toBe(0)
+        expect(draw).toHaveBeenCalledOnce()
+    })
+
     it('keeps the same decoded image node during quick scroll reversals', () => {
         vi.useFakeTimers()
         let notify

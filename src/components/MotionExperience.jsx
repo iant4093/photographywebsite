@@ -161,6 +161,8 @@ export default function MotionExperience() {
             collectFrame = null
             const nextTargets = compactMotion ? [] : Array.from(new Set(main.querySelectorAll(TARGET_SELECTOR)))
                 .filter((element) => !element.closest('[role="dialog"]') && !element.classList.contains('fixed'))
+                // Horizontal clipping must never toggle a card's vertical transform.
+                .filter((element) => !element.closest('[data-scroll-row]'))
             const nextSet = new Set(nextTargets)
 
             targets.forEach((target) => {

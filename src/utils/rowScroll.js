@@ -1,4 +1,3 @@
-export const ROW_SCROLL_DURATION_MS = 600
 const clamp = (value, maximum) => Math.max(0, Math.min(maximum, value))
 const SCROLL_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', ' '])
 
@@ -18,18 +17,35 @@ export function rowScrollTarget(element, direction, from = element.scrollLeft) {
     return forward ? (withinPage.at(-1) ?? candidates[0]) : (withinPage[0] ?? candidates.at(-1))
 }
 
-// One animation owns desktop arrow scrolling. It exists only while an arrow
-// move is active; wheel/touch/keyboard input takes over immediately.
+// Let the browser animate scrolling independently of image/React work. Keep
+// only the intended destination; never drive scrollLeft with a frame loop.
 export function createRowScrollController(element) {
-    let frame = null
+    let settleTimer = null
     let destination = null
     let lastDirection = null
     const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)')
-    const cancel = () => {
-        if (frame !== null) window.cancelAnimationFrame(frame)
-        frame = null
+    const finish = () => {
+        window.clearTimeout(settleTimer)
+        settleTimer = null
         destination = null
         lastDirection = null
+    }
+    const cancel = () => {
+        const active = destination !== null
+        finish()
+        if (active) element.scrollTo({ left: element.scrollLeft, behavior: 'instant' })
+    }
+    const scrolled = () => {
+        if (destination === null) return
+        if (Math.abs(element.scrollLeft - destination) < 1) finish()
+        else {
+            window.clearTimeout(settleTimer)
+            // Fallback for browsers without scrollend; no scrolling is performed here.
+            settleTimer = window.setTimeout(finish, 180)
+        }
+    }
+    const ended = () => {
+        if (destination !== null && Math.abs(element.scrollLeft - destination) < 1) finish()
     }
     const keydown = event => { if (SCROLL_KEYS.has(event.key)) cancel() }
     const visibility = () => { if (document.hidden) cancel() }
@@ -37,6 +53,8 @@ export function createRowScrollController(element) {
     element.addEventListener('pointerdown', cancel, { passive: true })
     element.addEventListener('touchstart', cancel, { passive: true })
     element.addEventListener('keydown', keydown)
+    element.addEventListener('scroll', scrolled, { passive: true })
+    element.addEventListener('scrollend', ended)
     window.addEventListener('resize', cancel)
     document.addEventListener('visibilitychange', visibility)
     motionPreference?.addEventListener?.('change', cancel)
@@ -48,23 +66,16 @@ export function createRowScrollController(element) {
             // completed frame. Reversing starts from the actual current position.
             const from = lastDirection === direction && destination !== null ? destination : start
             const end = rowScrollTarget(element, direction, from)
-            cancel()
+            if (end === destination && lastDirection === direction) return
+            finish()
             if (Math.abs(end - start) < 1 || motionPreference?.matches) {
-                element.scrollLeft = end
+                element.scrollTo({ left: end, behavior: 'instant' })
                 return
             }
             destination = end
             lastDirection = direction
-            let startedAt = null
-            const tick = timestamp => {
-                startedAt ??= timestamp
-                const progress = Math.min(1, (timestamp - startedAt) / ROW_SCROLL_DURATION_MS)
-                const eased = (1 - Math.cos(Math.PI * progress)) / 2
-                element.scrollLeft = start + (end - start) * eased
-                if (progress < 1) frame = window.requestAnimationFrame(tick)
-                else cancel()
-            }
-            frame = window.requestAnimationFrame(tick)
+            element.scrollTo({ left: end, behavior: 'smooth' })
+            settleTimer = window.setTimeout(finish, 1500)
         },
         cancel,
         destroy() {
@@ -73,6 +84,8 @@ export function createRowScrollController(element) {
             element.removeEventListener('pointerdown', cancel)
             element.removeEventListener('touchstart', cancel)
             element.removeEventListener('keydown', keydown)
+            element.removeEventListener('scroll', scrolled)
+            element.removeEventListener('scrollend', ended)
             window.removeEventListener('resize', cancel)
             document.removeEventListener('visibilitychange', visibility)
             motionPreference?.removeEventListener?.('change', cancel)

@@ -302,7 +302,7 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
 /* A load-triggered animation also fades cached images whose load event arrives
    before their initial paint. Retained image nodes do not restart this reveal. */
 .progressive-image-ready {
-  animation: progressive-image-reveal 500ms ease-in-out both;
+  animation: progressive-image-reveal 500ms ease-in-out;
 }
 
 @keyframes progressive-image-reveal {

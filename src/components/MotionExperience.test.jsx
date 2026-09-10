@@ -140,6 +140,28 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
   })
 
+  it('never applies visibility-driven vertical transforms to horizontal row cards', () => {
+    const observe = vi.fn()
+    vi.stubGlobal('IntersectionObserver', class {
+      observe = observe
+      disconnect() {}
+    })
+    const view = render(<MemoryRouter><main>
+      <div data-scroll-row=""><div className="album-card" data-testid="row-card" /></div>
+      <div className="album-card" data-testid="ordinary-card" />
+    </main><MotionExperience /></MemoryRouter>)
+    flushFrames()
+    const card = screen.getByTestId('row-card')
+    expect(observe).not.toHaveBeenCalledWith(card)
+    expect(card).not.toHaveClass('editorial-motion-frame')
+    expect(observe).toHaveBeenCalledWith(screen.getByTestId('ordinary-card'))
+    window.scrollY = 900
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(card.style.getPropertyValue('--editorial-card-y')).toBe('')
+    view.unmount()
+  })
+
   it('uses stronger consistent catalog motion on home, search, videos, and stats', () => {
     for (const path of ['/', '/search', '/videos', '/stats']) {
       const view = renderExperience(path)

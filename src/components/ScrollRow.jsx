@@ -86,6 +86,7 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
                 motion so browser snapping cannot add a second correction. */}
             <div
                 ref={scrollRef}
+                data-scroll-row=""
                 style={SCROLL_VIEWPORT_STYLE}
                 className={`flex overflow-x-auto gap-6 px-8 -mx-6 pt-6 pb-10 snap-x snap-mandatory md:snap-none scrollbar-hide ${className}`}
             >

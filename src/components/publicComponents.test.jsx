@@ -323,6 +323,7 @@ describe('scroll controls and progressive loading', () => {
       scrollWidth: { configurable: true, value: 1000 },
       clientWidth: { configurable: true, value: 300 },
     })
+    scroller.scrollTo = vi.fn(({ left }) => { scroller.scrollLeft = left })
     Array.from(scroller.children).forEach((child, index) => {
       Object.defineProperty(child, 'offsetLeft', { value: 32 + index * 240 })
     })

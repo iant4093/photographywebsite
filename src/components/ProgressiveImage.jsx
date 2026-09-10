@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { observeRetainedImage } from '../utils/imageRetention'
 import { imagePlaceholder } from '../utils/imagePlaceholder'
+import { captureImageSnapshot, releaseImageSnapshot, touchImageSnapshot } from '../utils/imageSnapshot'
 
 export default function ProgressiveImage({
     src,
@@ -20,6 +21,7 @@ export default function ProgressiveImage({
     const [failedResponsiveIdentity, setFailedResponsiveIdentity] = useState(null)
     const containerRef = useRef(null)
     const retentionRef = useRef(null)
+    const snapshotRef = useRef(null)
     const [placeholder, setPlaceholder] = useState({ hash: '', url: '' })
     const eagerPlaceholder = useMemo(() => eager ? imagePlaceholder(blurhash) : '', [blurhash, eager])
     const shouldLoad = eager || visibleSrc === src
@@ -31,12 +33,18 @@ export default function ProgressiveImage({
     const isLoaded = loadedIdentity === imageIdentity
 
     useEffect(() => {
+        const container = snapshotRef.current
+        return () => releaseImageSnapshot(container)
+    }, [src, srcSet])
+
+    useEffect(() => {
         if (!src || eager) return undefined
         const element = containerRef.current
         if (!element) return undefined
         const retained = observeRetainedImage(element, (visible) => {
             setVisibleSrc(visible ? src : null)
             if (!visible) setLoadedIdentity(null)
+            else touchImageSnapshot(snapshotRef.current)
             if (visible && blurhash) {
                 setPlaceholder(previous => previous.hash === blurhash ? previous
                     : { hash: blurhash, url: imagePlaceholder(blurhash) })
@@ -57,6 +65,7 @@ export default function ProgressiveImage({
                 <div className="progressive-image-placeholder absolute inset-0 z-0 pointer-events-none"
                     aria-hidden="true" style={{ backgroundImage: `url("${placeholderUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
             )}
+            <div ref={snapshotRef} className="absolute inset-0 z-0 pointer-events-none" aria-hidden="true" />
             {shouldLoad && (
                 <img
                     key={imageIdentity}
@@ -75,6 +84,9 @@ export default function ProgressiveImage({
                         retentionRef.current?.loaded(event.currentTarget)
                         setLoadedIdentity(imageIdentity)
                     }}
+                    // Copy only once the first reveal finishes: this keeps the
+                    // initial fade intact and avoids extra work on the load frame.
+                    onAnimationEnd={(event) => captureImageSnapshot(snapshotRef.current, event.currentTarget)}
                     onError={(event) => {
                         if (effectiveSrcSet) {
                             setFailedResponsiveIdentity(responsiveIdentity)
