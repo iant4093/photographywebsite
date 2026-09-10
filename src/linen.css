@@ -276,13 +276,18 @@
 /* Portfolio covers */
 .linen-site .linen-hero,
 .linen-site .linen-video-hero {
-  min-height: min(780px, 92svh);
+  /* Reserve room for the longer photo introduction on both cover pages. */
+  --portfolio-hero-height: clamp(37rem, 92svh, 780px);
+  min-height: var(--portfolio-hero-height);
   margin: calc(74px + 0.8rem) 0.8rem 0.8rem;
   border: 1px solid var(--color-charcoal);
 }
 
-.linen-site .linen-video-hero {
-  min-height: min(650px, 80svh);
+@media (min-width: 768px) {
+  .linen-site .linen-hero,
+  .linen-site .linen-video-hero {
+    --portfolio-hero-height: clamp(46.5rem, 92svh, 780px);
+  }
 }
 
 .linen-site .home-hero-overlay {
@@ -296,7 +301,7 @@
 }
 
 .linen-site .linen-hero-content {
-  min-height: min(780px, 92svh);
+  min-height: var(--portfolio-hero-height);
   display: flex;
   align-items: flex-end;
   padding-bottom: clamp(3rem, 8vw, 7rem);
