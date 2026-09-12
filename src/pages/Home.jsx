@@ -210,7 +210,7 @@ function Home() {
                 <div className="linen-hero-content relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="linen-hero-copy max-w-xs sm:max-w-sm md:max-w-md animate-fade-in">
                         <h1 className="font-serif text-5xl md:text-7xl font-normal text-white leading-[0.95] tracking-tight">Ian Truong<br />Photography</h1>
-                        <div className="flex flex-wrap items-center gap-4 mt-8">
+                        <div className="linen-hero-actions flex flex-wrap items-center gap-4">
                             <a
                                 href="#photo-albums"
                                 onClick={handleExplorePhotos}

@@ -276,7 +276,7 @@
 /* Portfolio covers */
 .linen-site .linen-hero,
 .linen-site .linen-video-hero {
-  /* Reserve room for the longer photo introduction on both cover pages. */
+  /* Keep the gallery covers the same height at each breakpoint. */
   --portfolio-hero-height: clamp(37rem, 92svh, 780px);
   min-height: var(--portfolio-hero-height);
   margin: calc(74px + 0.8rem) 0.8rem 0.8rem;
@@ -303,12 +303,17 @@
 .linen-site .linen-hero-content {
   min-height: var(--portfolio-hero-height);
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
+  padding-top: clamp(9rem, 26svh, 14rem);
   padding-bottom: clamp(3rem, 8vw, 7rem);
 }
 
 .linen-site .linen-hero-copy {
   padding-left: clamp(0rem, 5vw, 4rem);
+}
+
+.linen-site .linen-hero-actions {
+  margin-top: clamp(4rem, 10svh, 6rem);
 }
 
 .linen-site .linen-kicker,
