@@ -1,6 +1,5 @@
 import useHeroParallax from '../hooks/useHeroParallax'
 import SiteSelect from '../components/SiteSelect'
-import SectionStats from '../components/SectionStats'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigationType } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
@@ -299,8 +298,7 @@ function Home() {
                                 <div className="flex min-w-0 items-center gap-2 sm:gap-4">
                                     <span className="linen-category-number shrink-0">{String(categoryIndex + 1).padStart(2, '0')}</span>
                                     <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
-                                    <RandomPhotoExplorer category={category} variant="icon" />
-                                    <SectionStats category={category} />
+                                    <RandomPhotoExplorer category={category} variant="icon" showStats />
                                 </div>
                                 <div className="hidden sm:block h-px bg-warm-border flex-1" />
                                 <SiteSelect

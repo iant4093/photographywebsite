@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PhotoLightbox from './PhotoLightbox'
+import SectionStats from './SectionStats'
 import { fetchRandomPhotos, requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
     mediaFileName,
@@ -32,7 +33,7 @@ function warmStartingPhotos(images) {
     })
 }
 
-function RandomPhotoSession({ category = '', variant = 'link' }) {
+function RandomPhotoSession({ category = '', variant = 'link', showStats = false }) {
     const controllerRef = useRef(null)
     const requestRef = useRef(null)
     const photosRef = useRef([])
@@ -229,6 +230,7 @@ function RandomPhotoSession({ category = '', variant = 'link' }) {
                     </svg>
                 </button>
             )}
+            {showStats && <SectionStats category={normalizedCategory} />}
             {open && (
                 <PhotoLightbox
                     images={lightboxPhotos}
