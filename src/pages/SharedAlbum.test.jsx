@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -102,9 +102,18 @@ describe('SharedAlbum access and gallery', () => {
     renderShared('/sharedalbum/code-1')
     expect(screen.queryByRole('heading', { name: /Explore more/i })).toBeNull()
     expect(api.fetchAlbumsPage).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Album statistics')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
 
     const relatedLink = await screen.findByRole('link', { name: /Public Travel/ })
+    if (mediaType === 'photo') {
+      const stats = within(screen.getByLabelText('Album statistics'))
+      expect(stats.getByText('2')).toBeInTheDocument()
+      expect(stats.getByText('Camera')).toBeInTheDocument()
+      expect(stats.getByText('Lens (1)')).toBeInTheDocument()
+    } else {
+      expect(screen.queryByLabelText('Album statistics')).toBeNull()
+    }
     expect(relatedLink).toHaveAttribute('href', `/${mediaType === 'video' ? 'video' : 'album'}/public-other`)
     expect(screen.queryByText('Private Travel')).toBeNull()
     expect(api.fetchAlbumsPage).toHaveBeenCalledWith(
@@ -141,7 +150,7 @@ describe('SharedAlbum access and gallery', () => {
     fireEvent.click(first)
     expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveAttribute('src', 'https://x.test/p1-full')
     expect(screen.getByRole('img', { name: 'Full size preview' })).toHaveClass('linen-lightbox-photo')
-    expect(screen.getByText('Camera')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('Camera')).toBeInTheDocument()
     const overlay = screen.getByRole('img', { name: 'Full size preview' }).closest('.fixed')
     fireEvent.click(overlay.querySelector('button.absolute.right-4'))
     expect(screen.getByText('2 / 2')).toBeInTheDocument()

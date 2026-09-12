@@ -18,6 +18,7 @@ import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { pollZipJob } from '../utils/zipDownload'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
+import AlbumStats from '../components/AlbumStats'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import AccessibleLightbox from '../components/AccessibleLightbox'
 import PhotoLightbox from '../components/PhotoLightbox'
@@ -324,7 +325,7 @@ export default function SharedAlbum() {
             <div className="animate-fade-in">
                 {/* Album header */}
                 <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10">
-                    <div>
+                    <div className="min-w-0">
                         <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4">
                             {album.title}
                         </h1>
@@ -340,6 +341,7 @@ export default function SharedAlbum() {
                                 day: 'numeric',
                             })}
                         </p>
+                        {album.type !== 'video' && <AlbumStats images={images} />}
                     </div>
 
                     <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">

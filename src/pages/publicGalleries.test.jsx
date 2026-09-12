@@ -146,7 +146,7 @@ describe('AlbumGallery', () => {
     expect(fullPreview).toHaveAttribute('srcset', expect.stringContaining('https://x.test/1920 1920w'))
     expect(fullPreview).toHaveClass('linen-lightbox-photo')
     expect(document.querySelector('.linen-lightbox-placeholder')).toBeNull()
-    expect(screen.getByText('Camera')).toBeInTheDocument()
+    expect(screen.getByText('Camera', { selector: 'p' })).toBeInTheDocument()
     expect(screen.getByText('Lens')).toBeInTheDocument()
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))

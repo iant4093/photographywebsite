@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -58,6 +58,29 @@ beforeEach(() => {
 })
 
 describe('embedded album gallery', () => {
+    it.each([false, true])('refreshes album statistics with the gallery photos (embedded: %s)', async embedded => {
+        render(<AlbumGalleryContent albumId="a1" embedded={embedded} />)
+        const stats = within(await screen.findByLabelText('Album statistics'))
+        expect(stats.getByText('2')).toBeInTheDocument()
+        expect(stats.getByText('Sigma 18-50mm F2.8 (1)')).toBeInTheDocument()
+
+        api.fetchAlbumForViewing.mockResolvedValueOnce({ ...data, images: [data.images[1]] })
+        await act(async () => expiry.hook.mock.lastCall[1]())
+        expect(stats.getByText('1')).toBeInTheDocument()
+        expect(stats.queryByText(/Sigma/)).toBeNull()
+        expect(stats.getAllByText('Not recorded')).toHaveLength(2)
+
+        api.fetchAlbumForViewing.mockResolvedValueOnce({
+            ...data,
+            images: [...data.images, { id: 'three', exif: { model: 'Nikon Z6', lens: 'NIKKOR Z 50mm' } }],
+        })
+        await act(async () => expiry.hook.mock.lastCall[1]())
+        expect(stats.getByText('3')).toBeInTheDocument()
+        expect(stats.getByText('Sigma 18-50mm F2.8 (1)')).toBeInTheDocument()
+        expect(stats.getByText('NIKKOR Z 50mm (1)')).toBeInTheDocument()
+        expect(stats.getByText('Canon EOS R7 · Nikon Z6')).toBeInTheDocument()
+    })
+
     it.each([
         [390, 1],
         [768, 2],
@@ -133,7 +156,7 @@ describe('embedded album gallery', () => {
         trigger.focus()
         fireEvent.click(trigger)
         expect(screen.getByRole('dialog', { name: 'Photo viewer for Coastal Light' })).toBeInTheDocument()
-        expect(screen.getByText('Canon EOS R7')).toBeInTheDocument()
+        expect(within(screen.getByRole('dialog')).getByText('Canon EOS R7')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Show original photo' })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Download photo' })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Order a print of this photo' })).toBeInTheDocument()

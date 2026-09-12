@@ -8,6 +8,7 @@ import SkeletonGrid from '../components/SkeletonGrid'
 import PhotoLightbox from '../components/PhotoLightbox'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
+import AlbumStats from '../components/AlbumStats'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
 import { useScrollRestoration } from '../utils/scroll'
 import { useLocation } from 'react-router'
@@ -285,7 +286,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                     <div>
                         {/* Album header with slide-up animation */}
                         <div className="linen-gallery-header mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-warm-gray/10 animate-fade-in">
-                            <div className="animate-slide-up">
+                            <div className="min-w-0 animate-slide-up">
                                 <h1 className="font-serif text-4xl md:text-5xl font-semibold text-charcoal mb-4 w-fit">
                                     {album.title}
                                 </h1>
@@ -301,6 +302,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                         day: 'numeric',
                                     })}
                                 </p>
+                                <AlbumStats images={images} />
                             </div>
 
                             <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
