@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import PhotoLightbox from './PhotoLightbox'
+import userEvent from '@testing-library/user-event'
 
 vi.mock('../utils/mediaUrls', () => ({
   mediaBeforeDisplayUrl: image => image?.before?.status === 'ready' ? image.before.url || '' : '',
@@ -42,6 +43,62 @@ const comparisonPhoto = {
 }
 
 describe('PhotoLightbox', () => {
+  it('anchors zoom at the clicked detail and resets it when navigating or changing comparison', () => {
+    const onClose = vi.fn()
+    const props = { images: [comparisonPhoto, portrait], ariaLabel: 'Viewer', onClose }
+    const { rerender } = render(<PhotoLightbox {...props} index={0} />)
+    const edited = screen.getByAltText('Full size preview')
+    fireEvent.load(edited)
+    const frame = screen.getByRole('button', { name: 'Zoom in on photo' })
+    vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 50, width: 800, height: 600 })
+    const frameStyle = frame.getAttribute('style')
+    const footer = document.querySelector('.linen-lightbox-footer')
+    fireEvent.click(frame, { detail: 1, clientX: 700, clientY: 200 })
+    expect(edited).toHaveStyle({ transform: 'scale(2.5)', transformOrigin: '75% 25%' })
+    expect(frame).toHaveAttribute('data-camera-cursor', 'zoom-out')
+    expect(frame).toHaveAttribute('aria-pressed', 'true')
+    expect(frame.getAttribute('style')).toBe(frameStyle)
+    expect(document.querySelector('.linen-lightbox-footer')).toBe(footer)
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.click(frame)
+    expect(edited).toHaveStyle({ transform: 'scale(1)', transformOrigin: '75% 25%' })
+    expect(frame).toHaveAttribute('data-camera-cursor', 'zoom-in')
+
+    fireEvent.click(frame, { detail: 1, clientX: 100, clientY: 650 })
+    expect(edited).toHaveStyle({ transformOrigin: '0% 100%' })
+    fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+    const original = screen.getByAltText('Before — Camera JPG')
+    fireEvent.load(original)
+    expect(edited).toHaveStyle({ transform: 'scale(1)' })
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in on photo' }))
+    expect(original).not.toHaveAttribute('srcset')
+    expect(original).toHaveAttribute('src', comparisonPhoto.before.url)
+    expect(original).toHaveStyle({ transform: 'scale(2.5)' })
+    fireEvent.click(screen.getByRole('button', { name: 'Show edited photo' }))
+    expect(original).toHaveStyle({ transform: 'scale(1)' })
+    expect(edited).toHaveStyle({ transform: 'scale(1)' })
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in on photo' }))
+    rerender(<PhotoLightbox {...props} index={1} />)
+    fireEvent.load(screen.getByAltText('Full size preview'))
+    expect(screen.getByAltText('Full size preview')).toHaveStyle({ transform: 'scale(1)' })
+    expect(screen.getByRole('button', { name: 'Zoom in on photo' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('supports keyboard zoom at the center only after the photo is ready', async () => {
+    const user = userEvent.setup()
+    render(<PhotoLightbox images={[landscape]} index={0} ariaLabel="Viewer" onClose={vi.fn()} />)
+    const frame = screen.getByRole('button', { name: 'Zoom in on photo' })
+    expect(frame).toBeDisabled()
+    const photo = screen.getByAltText('Full size preview')
+    fireEvent.load(photo)
+    frame.focus()
+    await user.keyboard('{Enter}')
+    expect(photo).toHaveStyle({ transform: 'scale(2.5)', transformOrigin: '50% 50%' })
+    await user.keyboard(' ')
+    expect(photo).toHaveStyle({ transform: 'scale(1)' })
+    expect(frame).toHaveFocus()
+  })
+
   it('shows the complete safe camera settings and uses one intrinsic media frame', () => {
     const { rerender } = render(
       <PhotoLightbox images={[landscape, portrait]} index={0} ariaLabel="Photo viewer" onClose={vi.fn()} />,

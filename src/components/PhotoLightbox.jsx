@@ -9,6 +9,7 @@ import {
 } from '../utils/mediaUrls'
 import LightboxShareButton from './LightboxShareButton'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
+import PhotoZoomFrame from './PhotoZoomFrame'
 
 const PHOTO_CROSSFADE_MS = 360
 const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
@@ -94,7 +95,7 @@ function PhotoLightbox({
     loading = false,
     emptyMessage = '',
 }) {
-    const { containerRef, sizesFor } = useContainedImageSizes()
+    const { containerRef, sizesFor, bounds } = useContainedImageSizes()
     const [printing, setPrinting] = useState(false)
     const activeImage = images[index]
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
@@ -347,8 +348,11 @@ function PhotoLightbox({
                             style={{ gridTemplate: 'minmax(0, 1fr) / minmax(0, 1fr)' }}
                         >
                             {outgoingImage && (
-                                <img
+                                <PhotoZoomFrame
                                     key={`outgoing-${activeId}`}
+                                    bounds={bounds}
+                                    outgoing
+                                    visible={!showingBefore}
                                     src={outgoingImage.rawUrl}
                                     srcSet={outgoingImage.previewSrcSet || undefined}
                                     sizes={sizesFor(outgoingImage.image)}
@@ -361,8 +365,11 @@ function PhotoLightbox({
                                     className="linen-lightbox-photo linen-lightbox-photo-outgoing object-contain relative z-20"
                                 />
                             )}
-                            <img
+                            <PhotoZoomFrame
                                 key={`preview-${activeId}`}
+                                bounds={bounds}
+                                loaded={loadedImageId === activeId}
+                                visible={!showingBefore}
                                 src={activeRawUrl}
                                 fetchPriority="high"
                                 srcSet={previewSrcSet || undefined}
@@ -378,8 +385,11 @@ function PhotoLightbox({
                                 className={`linen-lightbox-photo linen-lightbox-edited object-contain relative z-30 ${loadedImageId === activeId ? 'is-loaded' : ''} ${showingBefore ? 'is-comparison-hidden' : ''}`}
                             />
                             {(comparisonRequested || comparison.loadedKey === beforeRequestKey) && beforeIsReady && !beforeLoadFailed && (
-                                <img
+                                <PhotoZoomFrame
                                     key={`original-${beforeRequestKey}`}
+                                    bounds={bounds}
+                                    loaded={showingBefore}
+                                    visible={showingBefore}
                                     src={beforeUrl}
                                     srcSet={beforeSrcSet || undefined}
                                     sizes={sizesFor(before)}

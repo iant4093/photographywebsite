@@ -41,5 +41,5 @@ export default function useContainedImageSizes() {
         return `${Math.max(1, Math.ceil(fittedWidth))}px`
     }, [bounds])
 
-    return { containerRef, sizesFor }
+    return { containerRef, sizesFor, bounds }
 }

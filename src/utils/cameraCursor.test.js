@@ -142,6 +142,18 @@ describe('camera cursor interaction and lifecycle', () => {
         expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'photo')
     })
 
+    it('switches magnifier direction after a zoom without needing pointer movement', async () => {
+        const photo = element('button', { 'data-camera-cursor': 'zoom-in' })
+        pointer(photo)
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'zoom-in')
+        const zoomInIcon = icon()
+        photo.dataset.cameraCursor = 'zoom-out'
+        await Promise.resolve()
+        flush()
+        expect(cursor()).toHaveAttribute('data-camera-cursor-state', 'zoom-out')
+        expect(icon()).not.toBe(zoomInIcon)
+    })
+
     it('reuses the native photo icon across albums and restores it after native text', () => {
         const first = element('button', { 'data-camera-cursor': 'photo' })
         const child = document.createElement('span')

@@ -6,6 +6,8 @@ const SYMBOLS = {
     next: '<path d="M3 12h18m-7-7 7 7-7 7"/>',
     previous: '<path d="M21 12H3m7-7-7 7 7 7"/>',
     close: '<path d="m5 5 14 14M19 5 5 19"/>',
+    'zoom-in': '<circle cx="10" cy="10" r="7"/><path d="m15 15 7 7M6.5 10h7M10 6.5v7"/>',
+    'zoom-out': '<circle cx="10" cy="10" r="7"/><path d="m15 15 7 7M6.5 10h7"/>',
     'drag-y': '<path d="M12 2v20M8 6l4-4 4 4M8 18l4 4 4-4M8 10h8m-8 4h8"/>',
     'drag-y-held': '<path d="M12 5v14M9 8l3-3 3 3M9 16l3 3 3-3M10 10.5h4m-4 3h4"/>',
     loading: '<circle cx="12" cy="12" r="9"/><path d="m12 3 5 9m3-6-6 9m4 4H8m4 2-5-9m-3 6 6-9M6 5h10"/>',
