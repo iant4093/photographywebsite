@@ -32,7 +32,7 @@ describe('MotionExperience film-strip scrollbar', () => {
 
   const flushFrames = () => {
     act(() => {
-      while (frames.length) frames.shift()()
+      while (frames.length) frames.shift().callback()
     })
   }
 
@@ -41,17 +41,24 @@ describe('MotionExperience film-strip scrollbar', () => {
     frameId = 0
     window.matchMedia = vi.fn(() => ({ matches: false }))
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback) => {
-      frames.push(callback)
       frameId += 1
+      frames.push({ id: frameId, callback })
       return frameId
     }))
-    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    vi.stubGlobal('cancelAnimationFrame', vi.fn(id => {
+      frames = frames.filter(frame => frame.id !== id)
+    }))
     vi.stubGlobal('IntersectionObserver', undefined)
     vi.stubGlobal('MutationObserver', class {
       observe() {}
       disconnect() {}
     })
-    vi.stubGlobal('PointerEvent', MouseEvent)
+    vi.stubGlobal('PointerEvent', class extends MouseEvent {
+      constructor(type, options) {
+        super(type, options)
+        this.pointerId = options.pointerId
+      }
+    })
     Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 1000 })
     Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 0 })
     Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 2000 })
@@ -118,12 +125,127 @@ describe('MotionExperience film-strip scrollbar', () => {
     fireEvent.pointerDown(rail, { button: 0, clientY: 400, pointerId: 7 })
     expect(rail).toHaveClass('is-dragging')
     expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 500, left: 0, behavior: 'instant' })
+    fireEvent.pointerUp(rail, { pointerId: 7 })
 
     fireEvent.pointerDown(thumb, { button: 0, clientY: 120, pointerId: 8 })
     fireEvent.pointerMove(rail, { clientY: 500, pointerId: 8 })
+    flushFrames()
     expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 791.6666666666666, left: 0, behavior: 'instant' })
     fireEvent.pointerUp(rail, { pointerId: 8 })
     expect(rail).not.toHaveClass('is-dragging')
+  })
+
+  function prepareRail() {
+    const view = renderExperience()
+    const rail = screen.getByRole('scrollbar')
+    const thumb = rail.firstElementChild
+    Object.defineProperty(rail, 'clientHeight', { configurable: true, value: 600 })
+    Object.defineProperty(thumb, 'offsetHeight', { configurable: true, value: 120 })
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue({ top: 100, height: 600 })
+    vi.spyOn(thumb, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 220, height: 120 })
+    rail.setPointerCapture = vi.fn()
+    rail.releasePointerCapture = vi.fn()
+    flushFrames()
+    return { view, rail, thumb }
+  }
+
+  it('coalesces fast pointer input and moves the thumb with the page without remeasuring layout', () => {
+    const { rail, thumb } = prepareRail()
+    fireEvent.pointerDown(thumb, { button: 0, clientY: 120, pointerId: 7 })
+    rail.getBoundingClientRect.mockClear()
+    thumb.getBoundingClientRect.mockClear()
+    const readHeight = vi.fn(() => 9000)
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, get: readHeight })
+    window.scrollTo.mockClear()
+
+    for (const clientY of [180, 250, 330, 400]) {
+      fireEvent.pointerMove(rail, { clientY, pointerId: 7 })
+    }
+    expect(window.scrollTo).not.toHaveBeenCalled()
+    expect(frames).toHaveLength(1)
+    flushFrames()
+    expect(window.scrollTo).toHaveBeenCalledOnce()
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 280 / 480 * 1000, left: 0, behavior: 'instant' })
+    expect(rail.style.getPropertyValue('--editorial-progress-offset')).toBe('280.00px')
+    expect(rail).toHaveAttribute('aria-valuenow', '58')
+    expect(readHeight).not.toHaveBeenCalled()
+    expect(rail.getBoundingClientRect).not.toHaveBeenCalled()
+    expect(thumb.getBoundingClientRect).not.toHaveBeenCalled()
+    // An older scroll event cannot overwrite the current drag position.
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(rail.style.getPropertyValue('--editorial-progress-offset')).toBe('280.00px')
+  })
+
+  it('preserves the grab offset across the full rail width and ignores another pointer', () => {
+    const { rail } = prepareRail()
+    fireEvent.pointerDown(rail, { button: 0, clientY: 200, pointerId: 7 })
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 0, left: 0, behavior: 'instant' })
+    fireEvent.pointerDown(rail, { button: 0, clientY: 400, pointerId: 8 })
+    fireEvent.pointerMove(rail, { clientY: 600, pointerId: 8 })
+    fireEvent.pointerUp(rail, { pointerId: 8 })
+    expect(rail).toHaveClass('is-dragging')
+    fireEvent.pointerMove(rail, { clientY: 248, pointerId: 7 })
+    flushFrames()
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 100, left: 0, behavior: 'instant' })
+  })
+
+  it('flushes the final pointer position on release and clamps both ends', () => {
+    const { rail, thumb } = prepareRail()
+    fireEvent.pointerDown(thumb, { button: 0, clientY: 120, pointerId: 7 })
+    fireEvent.pointerMove(rail, { clientY: -100, pointerId: 7 })
+    flushFrames()
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 0, left: 0, behavior: 'instant' })
+    fireEvent.pointerMove(rail, { clientY: 1000, pointerId: 7 })
+    fireEvent.pointerUp(rail, { pointerId: 7 })
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 1000, left: 0, behavior: 'instant' })
+    expect(rail.style.getPropertyValue('--editorial-progress-offset')).toBe('480.00px')
+    expect(rail).not.toHaveClass('is-dragging')
+    expect(frames).toHaveLength(0)
+  })
+
+  it.each(['pointercancel', 'lostpointercapture', 'blur', 'resize', 'unmount'])('cancels queued dragging on %s', (type) => {
+    const { view, rail, thumb } = prepareRail()
+    fireEvent.pointerDown(thumb, { button: 0, clientY: 120, pointerId: 7 })
+    fireEvent.pointerMove(rail, { clientY: 500, pointerId: 7 })
+    window.scrollTo.mockClear()
+    if (type === 'unmount') view.unmount()
+    else if (type === 'blur' || type === 'resize') fireEvent(window, new Event(type))
+    else fireEvent(rail, new PointerEvent(type, { bubbles: true, pointerId: 7 }))
+    flushFrames()
+    expect(window.scrollTo).not.toHaveBeenCalled()
+    expect(rail).not.toHaveClass('is-dragging')
+  })
+
+  it('caches rail geometry during ordinary scroll and refreshes it on resize', () => {
+    const { rail, thumb } = prepareRail()
+    const readPage = vi.fn(() => 3000)
+    const readRail = vi.fn(() => 800)
+    const readThumb = vi.fn(() => 120)
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, get: readPage })
+    Object.defineProperty(rail, 'clientHeight', { configurable: true, get: readRail })
+    Object.defineProperty(thumb, 'offsetHeight', { configurable: true, get: readThumb })
+    window.scrollY = 500
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(rail.style.getPropertyValue('--editorial-progress-offset')).toBe('240.00px')
+    for (const read of [readPage, readRail, readThumb]) expect(read).not.toHaveBeenCalled()
+    fireEvent.resize(window)
+    flushFrames()
+    expect(rail.style.getPropertyValue('--editorial-progress-offset')).toBe('170.00px')
+    expect(rail.style.getPropertyValue('--editorial-progress-travel')).toBe('680.00px')
+    for (const read of [readPage, readRail, readThumb]) expect(read).toHaveBeenCalledOnce()
+  })
+
+  it('lets the browser animate scroll progress while still updating accessible position', () => {
+    vi.stubGlobal('CSS', { supports: () => true })
+    const { rail } = prepareRail()
+    window.scrollY = 500
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(rail).toHaveAttribute('aria-valuenow', '50')
+    expect(rail.style.getPropertyValue('--editorial-progress-travel')).toBe('480.00px')
+    expect(rail.style.getPropertyValue('--editorial-progress-offset')).toBe('')
   })
 
   it('hides itself when the document does not scroll and preserves the native fallback', () => {

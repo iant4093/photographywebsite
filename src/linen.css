@@ -768,6 +768,7 @@
   background: none;
   cursor: pointer;
   touch-action: none;
+  user-select: none;
 }
 
 .linen-site .editorial-progress::before {
@@ -796,7 +797,8 @@
     radial-gradient(circle at calc(100% - 2px) 5px, var(--color-cream) 0 1.15px, transparent 1.4px) 0 0 / 100% 10px repeat-y,
     linear-gradient(90deg, #312b26 0 3px, var(--color-amber) 3px 9px, #312b26 9px 12px);
   box-shadow: 0 3px 9px rgba(41, 36, 31, 0.18);
-  transform: translateY(var(--editorial-progress-offset));
+  transform: translate3d(0, var(--editorial-progress-offset), 0);
+  will-change: transform;
   transition: none;
   cursor: grab;
 }
@@ -804,6 +806,20 @@
 .linen-site .editorial-progress.is-dragging i {
   cursor: grabbing;
   transition: none;
+}
+
+/* Let scrolling drive the compositor directly where supported. The JS
+   position remains the fallback and owns the handle during pointer dragging. */
+@supports (animation-timeline: scroll(root block)) {
+  .linen-site .editorial-progress:not(.is-dragging) i {
+    animation: editorial-film-scroll 1s linear both;
+    animation-timeline: scroll(root block);
+  }
+}
+
+@keyframes editorial-film-scroll {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, var(--editorial-progress-travel, 0px), 0); }
 }
 
 /* Floating print wall — homepage only. */

@@ -2,15 +2,10 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router'
 import useMediaQuery from '../hooks/useMediaQuery'
 
-const TARGET_SELECTOR = [
-    'main .linen-section-heading',
-    'main .photo-stats-hero',
-    'main .photo-stats-motion-section',
-    'main .album-card',
-    'main .linen-gallery-page [data-page-scroll-media]',
-].join(', ')
+const TARGET_CLASSES = ['linen-section-heading', 'photo-stats-hero', 'photo-stats-motion-section', 'album-card']
+const TARGET_SELECTOR = [...TARGET_CLASSES.map(name => `main .${name}`), 'main .linen-gallery-page [data-page-scroll-media]'].join(', ')
 // Detached removed subtrees no longer match the `main ...` selectors above.
-const CANDIDATE_SELECTOR = '.linen-section-heading, .photo-stats-hero, .photo-stats-motion-section, .album-card, [data-page-scroll-media], .editorial-motion-frame'
+const CANDIDATE_SELECTOR = [...TARGET_CLASSES.map(name => `.${name}`), '[data-page-scroll-media]', '.editorial-motion-frame'].join(', ')
 
 function changesMotionTargets(records) {
     return records.some(record => [...record.addedNodes, ...record.removedNodes].some(node => (
@@ -18,8 +13,10 @@ function changesMotionTargets(records) {
     )))
 }
 
-function setMotionStyle(target, property, value) {
-    if (target.style.getPropertyValue(property) !== value) target.style.setProperty(property, value)
+function setMotionStyle(target, property, value, unit = '', precision = 2) {
+    const name = `--editorial-${property}`
+    const formatted = value.toFixed(precision) + unit
+    if (target.style.getPropertyValue(name) !== formatted) target.style.setProperty(name, formatted)
 }
 
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value))
@@ -51,17 +48,18 @@ export default function MotionExperience() {
     const progressRef = useRef(null)
     const dragRef = useRef(null)
 
-    const scrollFromPointer = useCallback((clientY, pointerOffset) => {
+    const scrollFromPointer = useCallback(() => {
         const rail = progressRef.current
-        const thumb = rail?.firstElementChild
-        if (!rail || !thumb) return
+        const drag = dragRef.current
+        if (!rail || !drag) return
 
-        const railBounds = rail.getBoundingClientRect()
-        const thumbTravel = Math.max(rail.clientHeight - thumb.offsetHeight, 0)
-        const pageTravel = Math.max(document.documentElement.scrollHeight - window.innerHeight, 0)
-        if (thumbTravel <= 0 || pageTravel <= 0) return
-
-        const thumbTop = clamp(clientY - railBounds.top - pointerOffset, 0, thumbTravel)
+        drag.frame = null
+        const { clientY, railTop, pointerOffset, thumbTravel, pageTravel } = drag
+        const thumbTop = clamp(clientY - railTop - pointerOffset, 0, thumbTravel)
+        // Move the handle in the same frame as the page, without waiting for
+        // the next scroll event or measuring freshly animated page content.
+        setMotionStyle(rail, 'progress-offset', thumbTop, 'px')
+        rail.setAttribute('aria-valuenow', String(Math.round(thumbTop / thumbTravel * 100)))
         window.scrollTo({
             top: (thumbTop / thumbTravel) * pageTravel,
             left: 0,
@@ -69,51 +67,81 @@ export default function MotionExperience() {
         })
     }, [])
 
-    const handlePointerDown = useCallback((event) => {
-        if (event.button !== 0) return
+    const handlePointerDown = (event) => {
+        if (event.button !== 0 || dragRef.current) return
         const rail = progressRef.current
         const thumb = rail?.firstElementChild
         if (!rail || !thumb) return
 
+        const railBounds = rail.getBoundingClientRect()
         const thumbBounds = thumb.getBoundingClientRect()
-        const pointerOffset = event.target === thumb
+        const thumbTravel = Math.max(rail.clientHeight - thumb.offsetHeight, 0)
+        const pageTravel = Math.max(document.documentElement.scrollHeight - window.innerHeight, 0)
+        if (thumbTravel <= 0 || pageTravel <= 0) return
+
+        // The entire 44px-wide hit area should grab the handle without a jump.
+        const grabsThumb = event.clientY >= thumbBounds.top && event.clientY <= thumbBounds.bottom
+        const pointerOffset = grabsThumb
             ? event.clientY - thumbBounds.top
             : thumbBounds.height / 2
-        dragRef.current = { pointerId: event.pointerId, pointerOffset }
+        dragRef.current = {
+            rail, pointerId: event.pointerId, pointerOffset, thumbTravel, pageTravel,
+            railTop: railBounds.top, clientY: event.clientY, frame: null,
+        }
+        setMotionStyle(rail, 'progress-offset', thumbBounds.top - railBounds.top, 'px')
         rail.classList.add('is-dragging')
         rail.setPointerCapture?.(event.pointerId)
-        scrollFromPointer(event.clientY, pointerOffset)
+        rail.focus({ preventScroll: true })
+        if (!grabsThumb) scrollFromPointer()
+        else window.scrollTo({ top: window.scrollY, left: 0, behavior: 'instant' })
         event.preventDefault()
-    }, [scrollFromPointer])
+    }
 
-    const handlePointerMove = useCallback((event) => {
+    const handlePointerMove = (event) => {
         const drag = dragRef.current
         if (!drag || drag.pointerId !== event.pointerId) return
-        scrollFromPointer(event.clientY, drag.pointerOffset)
-    }, [scrollFromPointer])
+        drag.clientY = event.clientY
+        if (drag.frame === null) drag.frame = window.requestAnimationFrame(scrollFromPointer)
+    }
 
     const endPointerDrag = useCallback((event) => {
-        const rail = progressRef.current
         const drag = dragRef.current
         if (!drag || (event.pointerId !== undefined && drag.pointerId !== event.pointerId)) return
-        rail?.releasePointerCapture?.(drag.pointerId)
-        rail?.classList.remove('is-dragging')
+        const { rail } = drag
+        if (drag.frame !== null) {
+            window.cancelAnimationFrame(drag.frame)
+            if (event.type === 'pointerup') scrollFromPointer()
+        }
         dragRef.current = null
-    }, [])
+        rail.classList.remove('is-dragging')
+        if (!rail.hasPointerCapture || rail.hasPointerCapture(drag.pointerId)) rail.releasePointerCapture?.(drag.pointerId)
+    }, [scrollFromPointer])
 
-    const handleScrollKey = useCallback((event) => {
+    useEffect(() => {
+        const cancelDrag = () => endPointerDrag({})
+        window.addEventListener('blur', cancelDrag)
+        window.addEventListener('resize', cancelDrag)
+        return () => {
+            cancelDrag()
+            window.removeEventListener('blur', cancelDrag)
+            window.removeEventListener('resize', cancelDrag)
+        }
+    }, [pathname, reducedMotion, endPointerDrag])
+
+    const handleScrollKey = (event) => {
         const pageTravel = Math.max(document.documentElement.scrollHeight - window.innerHeight, 0)
         const pageStep = window.innerHeight * 0.85
         const lineStep = Math.min(120, window.innerHeight * 0.12)
-        let nextScroll = window.scrollY
-
-        if (event.key === 'ArrowDown') nextScroll += lineStep
-        else if (event.key === 'ArrowUp') nextScroll -= lineStep
-        else if (event.key === 'PageDown') nextScroll += pageStep
-        else if (event.key === 'PageUp') nextScroll -= pageStep
-        else if (event.key === 'Home') nextScroll = 0
-        else if (event.key === 'End') nextScroll = pageTravel
-        else return
+        const scrollY = window.scrollY
+        const nextScroll = {
+            ArrowDown: scrollY + lineStep,
+            ArrowUp: scrollY - lineStep,
+            PageDown: scrollY + pageStep,
+            PageUp: scrollY - pageStep,
+            Home: 0,
+            End: pageTravel,
+        }[event.key]
+        if (typeof nextScroll !== 'number') return
 
         event.preventDefault()
         window.scrollTo({
@@ -121,7 +149,7 @@ export default function MotionExperience() {
             left: 0,
             behavior: 'smooth',
         })
-    }, [])
+    }
 
     useEffect(() => {
         if (isAdmin || reducedMotion) return undefined
@@ -136,7 +164,10 @@ export default function MotionExperience() {
         let targets = []
         const metadata = new Map()
         let layoutDirty = true
+        let pageTravel = 0
+        let thumbTravel = 0
         const activeTargets = new Set()
+        const browserTracksScroll = window.CSS?.supports?.('animation-timeline', 'scroll(root block)') === true
 
         root.classList.add('editorial-motion-active', 'editorial-scrollbar-active')
 
@@ -184,9 +215,9 @@ export default function MotionExperience() {
                 if (!previous || previous.isMedia !== isMedia) target.classList.toggle('editorial-motion-media', isMedia)
                 metadata.set(target, { ...previous, position, isMedia, inScrollRow: Boolean(target.closest('[data-scroll-row]')) })
                 if (usesCatalogMotion) {
-                    setMotionStyle(target, '--editorial-x', '0px')
-                    setMotionStyle(target, '--editorial-card-rotation', '0deg')
-                    setMotionStyle(target, '--editorial-rotation', '0deg')
+                    setMotionStyle(target, 'x', 0, 'px', 0)
+                    setMotionStyle(target, 'card-rotation', 0, 'deg', 0)
+                    setMotionStyle(target, 'rotation', 0, 'deg', 0)
                 }
 
                 if (!previous) {
@@ -226,22 +257,31 @@ export default function MotionExperience() {
                     }
                     Object.assign(metadata.get(target), { top, height: target.offsetHeight })
                 })
+                pageTravel = Math.max(document.documentElement.scrollHeight - viewportHeight, 0)
+                // Hidden rails have zero dimensions. Reveal before measuring;
+                // this only runs when content or viewport dimensions change.
+                if (progressRail) {
+                    progressRail.hidden = pageTravel <= 1
+                    thumbTravel = Math.max(progressRail.clientHeight - progressRail.firstElementChild.offsetHeight, 0)
+                }
                 layoutDirty = false
             }
-            const pageTravel = Math.max(document.documentElement.scrollHeight - viewportHeight, 0)
             const pageProgress = clamp(scrollY / Math.max(pageTravel, 1), 0, 1)
-            let progressThumb = null
-            let isScrollable = false
-            let thumbTravel = 0
+
             if (progressRail) {
-                progressThumb = progressRail.firstElementChild
-                isScrollable = pageTravel > 1
-                thumbTravel = isScrollable && progressThumb
-                    ? Math.max(progressRail.clientHeight - progressThumb.offsetHeight, 0)
-                    : 0
+                setMotionStyle(progressRail, 'progress-travel', thumbTravel, 'px')
+                if (!dragRef.current) {
+                    const progressValue = String(Math.round(pageProgress * 100))
+                    if (progressRail.getAttribute('aria-valuenow') !== progressValue) progressRail.setAttribute('aria-valuenow', progressValue)
+                }
+                if (pageTravel > 1 && !browserTracksScroll && !dragRef.current) {
+                    setMotionStyle(progressRail,
+                        'progress-offset',
+                        pageProgress * thumbTravel, 'px',
+                    )
+                }
             }
 
-            const measurements = []
             targets.forEach((target) => {
                 const info = metadata.get(target)
                 // Keep horizontally clipped cards in step with their visible
@@ -259,37 +299,14 @@ export default function MotionExperience() {
                 const isMedia = info.isMedia
                 const amplitude = isMedia ? 1 : 0.76
 
-                measurements.push({ target, position, presence, phase, amplitude })
-            })
-
-            if (progressRail) {
-                if (progressRail.hidden === isScrollable) progressRail.hidden = !isScrollable
-                const progressValue = String(Math.round(pageProgress * 100))
-                if (progressRail.getAttribute('aria-valuenow') !== progressValue) progressRail.setAttribute('aria-valuenow', progressValue)
-                if (isScrollable && progressThumb) {
-                    setMotionStyle(progressRail,
-                        '--editorial-progress-offset',
-                        `${(pageProgress * thumbTravel).toFixed(2)}px`,
-                    )
-                }
-            }
-
-            measurements.forEach(({ target, position, presence, phase, amplitude }) => {
-                if (usesCatalogMotion) {
-                    setMotionStyle(target, '--editorial-y', `${(phase * -44).toFixed(2)}px`)
-                    setMotionStyle(target, '--editorial-card-y', `${(phase * -32).toFixed(2)}px`)
-                    setMotionStyle(target, '--editorial-card-scale', (0.87 + presence * 0.13).toFixed(5))
-                    setMotionStyle(target, '--editorial-scale', (0.93 + presence * 0.07).toFixed(5))
-                    return
-                }
-
-                setMotionStyle(target, '--editorial-x', `${(position * (1 - presence) * 36 * amplitude).toFixed(2)}px`)
-                setMotionStyle(target, '--editorial-y', `${(phase * -52 * amplitude).toFixed(2)}px`)
-                setMotionStyle(target, '--editorial-card-y', `${(phase * -16).toFixed(2)}px`)
-                setMotionStyle(target, '--editorial-card-rotation', `${(position * phase * 0.62).toFixed(3)}deg`)
-                setMotionStyle(target, '--editorial-card-scale', (0.978 + presence * 0.022).toFixed(5))
-                setMotionStyle(target, '--editorial-scale', (0.95 + presence * 0.05).toFixed(5))
-                setMotionStyle(target, '--editorial-rotation', `${(position * phase * 0.72 * amplitude).toFixed(3)}deg`)
+                setMotionStyle(target, 'y', phase * (usesCatalogMotion ? -44 : -52 * amplitude), 'px')
+                setMotionStyle(target, 'card-y', phase * (usesCatalogMotion ? -32 : -16), 'px')
+                setMotionStyle(target, 'card-scale', usesCatalogMotion ? 0.87 + presence * 0.13 : 0.978 + presence * 0.022, '', 5)
+                setMotionStyle(target, 'scale', usesCatalogMotion ? 0.93 + presence * 0.07 : 0.95 + presence * 0.05, '', 5)
+                if (usesCatalogMotion) return
+                setMotionStyle(target, 'x', position * (1 - presence) * 36 * amplitude, 'px')
+                setMotionStyle(target, 'card-rotation', position * phase * 0.62, 'deg', 3)
+                setMotionStyle(target, 'rotation', position * phase * 0.72 * amplitude, 'deg', 3)
             })
         }
 
@@ -311,6 +328,7 @@ export default function MotionExperience() {
         }
         const layoutObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(refreshLayout)
         layoutObserver?.observe(main)
+        if (progressRail) layoutObserver?.observe(progressRail)
         collectTargets()
         window.addEventListener('scroll', requestUpdate, { passive: true })
         window.addEventListener('resize', refreshLayout)
@@ -327,7 +345,7 @@ export default function MotionExperience() {
             if (collectFrame !== null) window.cancelAnimationFrame(collectFrame)
             targets.forEach(clearMotionStyles)
             root.classList.remove('editorial-motion-active', 'editorial-scrollbar-active')
-            progressRail?.style.removeProperty('--editorial-progress-offset')
+            // Preserve the handle position until the next route measures its layout.
         }
     }, [isAdmin, pathname, reducedMotion, usesCatalogMotion])
 
