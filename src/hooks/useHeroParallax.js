@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import useMediaQuery from './useMediaQuery'
 
 export default function useHeroParallax(ref, speed, maximum) {
-    const disabled = useMediaQuery('(prefers-reduced-motion: reduce), (pointer: coarse), (max-width: 720px)')
+    const disabled = useMediaQuery('(prefers-reduced-motion: reduce)')
     useEffect(() => {
         const hero = ref.current
         if (!hero || disabled) return undefined

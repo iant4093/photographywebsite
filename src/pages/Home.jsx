@@ -30,6 +30,7 @@ import { HOME_SECTION_SORT_OPTIONS, sortHomePhotoSections } from '../utils/homeS
 import { trackHeroExplore } from '../utils/analytics'
 import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 import usePublishedHero from '../hooks/usePublishedHero'
+import { heroImageSizes } from '../utils/heroImageSizes'
 
 const CATALOG_KEY = 'public-photos'
 const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer'))
@@ -37,7 +38,6 @@ const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer
 // retaining cursor pagination once the catalog grows beyond the API's cap.
 const PAGE_SIZE = 100
 const HERO_WIDTHS = [640, 960, 1280, 1920]
-const HERO_SIZES = '100vw'
 const heroSet = (format) => HERO_WIDTHS
     .map((width) => `/images/heroes/photo-${width}.${format} ${width}w`)
     .join(', ')
@@ -144,6 +144,7 @@ function Home() {
     const managedHomeUrl = heroCoverUrl()
     const responsiveHomeUrl = currentHeroUrl()
     const usePublishedVersion = publishedHero && failedHeroVersion !== publishedHero.version
+    const heroSizes = heroImageSizes(usePublishedVersion ? publishedHero.source : null)
     const useResponsiveHero = usePublishedVersion || (Boolean(responsiveHomeUrl) && !responsiveHeroFailed)
     const useBundledHero = !useResponsiveHero && (!managedHomeUrl || managedHomeFailed)
     const heroSrc = useResponsiveHero
@@ -177,20 +178,20 @@ function Home() {
                     <picture>
                         {useResponsiveHero ? (
                             <>
-                                <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentHeroSrcSet('avif')} sizes={HERO_SIZES} />
-                                <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentHeroSrcSet('webp')} sizes={HERO_SIZES} />
+                                <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentHeroSrcSet('avif')} sizes={heroSizes} />
+                                <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentHeroSrcSet('webp')} sizes={heroSizes} />
                             </>
                         ) : useBundledHero ? (
                             <>
-                            <source type="image/avif" srcSet={heroSet('avif')} sizes={HERO_SIZES} />
-                            <source type="image/webp" srcSet={heroSet('webp')} sizes={HERO_SIZES} />
+                            <source type="image/avif" srcSet={heroSet('avif')} sizes={heroSizes} />
+                            <source type="image/webp" srcSet={heroSet('webp')} sizes={heroSizes} />
                             </>
                         ) : null}
                         <img
                             ref={heroRef}
                             src={heroSrc}
                             srcSet={heroSrcSet}
-                            sizes={HERO_SIZES}
+                            sizes={heroSizes}
                             width="1280"
                             height="853"
                             alt="Ian Truong Photography portfolio cover"

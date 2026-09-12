@@ -1,4 +1,5 @@
 import { selectChoice } from '../test/selectChoice'
+import { readFileSync } from 'node:fs'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -389,10 +390,10 @@ describe('Home complete public catalog', () => {
     expect(catalog.setCatalogSnapshot).not.toHaveBeenCalled()
   })
 
-  it('animates parallax/reveals in-view content and disconnects observers on cleanup', async () => {
+  it.each([false, true])('animates photo parallax and cleans up (touch/mobile: %s)', async (mobile) => {
     catalog.getCatalogSnapshot.mockReturnValue({ items: [{ albumId: '1', title: 'Animated', type: 'photo', category: 'Travel' }], nextCursor: null })
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
-    window.matchMedia = vi.fn(() => ({ matches: false }))
+    window.matchMedia = vi.fn(query => ({ matches: mobile && /pointer: coarse|max-width/.test(query) }))
     Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 500 })
     let frameCallback
     window.requestAnimationFrame = vi.fn((callback) => { frameCallback = callback; return 9 })
@@ -449,6 +450,8 @@ describe('Home complete public catalog', () => {
     expect(fallback).toHaveAttribute('srcset')
     expect(fallback).toHaveClass('home-hero-media', 'parallax-hero')
     expect(container.querySelector('source[type="image/avif"]')).toBeTruthy()
+    expect(fallback.sizes).toContain('138svh')
+    container.querySelectorAll('picture source').forEach(source => expect(source.sizes).toBe(fallback.sizes))
   })
 
   it('paints the stable responsive hero without waiting for a manifest request', async () => {
@@ -457,6 +460,9 @@ describe('Home complete public catalog', () => {
     const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
     expect(hero).toHaveAttribute('fetchpriority', 'high')
+    const html = readFileSync('index.html', 'utf8')
+    expect(html.match(/imagesizes="([^"]+)"/)[1]).toBe(hero.sizes)
+    expect(hero.sizes).toContain('138svh')
     expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/site/hero/manifest.json'), expect.objectContaining({ cache: 'no-cache' }))
   })
 
@@ -475,6 +481,9 @@ describe('Home complete public catalog', () => {
     const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
     await waitFor(() => expect(hero).toHaveAttribute('src', expect.stringContaining(`/versions/v1/${first}/`)))
     expect(hero.getAttribute('srcset')).not.toContain('2560')
+    // Published 4:3 covers must size for their own crop, including AVIF/WebP.
+    expect(hero.sizes).toContain('1040px')
+    container.querySelectorAll('picture source').forEach(source => expect(source.sizes).toBe(hero.sizes))
     globalThis.fetch.mockImplementation(async () => new Response(JSON.stringify(manifest(second))))
     fireEvent(window, new Event('focus'))
     await waitFor(() => expect(hero).toHaveAttribute('src', expect.stringContaining(`/versions/v1/${second}/`)))
@@ -618,9 +627,9 @@ describe('Videos paginated catalog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('More videos could not be loaded.')
   })
 
-  it('animates its hero and reveals intersecting category sections', async () => {
+  it.each([false, true])('animates video parallax and cleans up (touch/mobile: %s)', async (mobile) => {
     catalog.getCatalogSnapshot.mockReturnValue({ items: [{ albumId: 'v', title: 'Animated video', type: 'video', category: 'Film' }], nextCursor: null })
-    window.matchMedia = vi.fn(() => ({ matches: false }))
+    window.matchMedia = vi.fn(query => ({ matches: mobile && /pointer: coarse|max-width/.test(query) }))
     Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 200 })
     let frameCallback
     window.requestAnimationFrame = vi.fn((next) => { frameCallback = next; return 4 })
@@ -668,5 +677,8 @@ describe('Videos paginated catalog', () => {
     const fallback = screen.getByRole('img', { name: 'Cinematography' })
     expect(fallback).toHaveAttribute('src', '/images/heroes/video-1280.jpg')
     expect(fallback).toHaveAttribute('srcset', expect.stringContaining('/images/heroes/video-960.jpg 960w'))
+    expect(fallback.sizes).toContain('138svh')
+    expect(fallback.sizes).toContain('+ 90px')
+    container.querySelectorAll('picture source').forEach(source => expect(source.sizes).toBe(fallback.sizes))
   })
 })

@@ -15,6 +15,7 @@ import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scrol
 import { warmVideoHoverRuntime } from '../utils/albumVideoHoverPreview'
 import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 import usePublishedHero from '../hooks/usePublishedHero'
+import { heroImageSizes } from '../utils/heroImageSizes'
 
 const CATALOG_KEY = 'public-videos'
 // The API enforces 100 as its maximum, which keeps today's video catalog to a
@@ -127,6 +128,7 @@ export default function Videos() {
     const managedHeroUrl = cdnUrl('site/hero/video/home')
     const responsiveHeroUrl = currentVideoHeroUrl()
     const usePublishedVersion = publishedHero && failedHeroVersion !== publishedHero.version
+    const heroSizes = heroImageSizes(usePublishedVersion ? publishedHero.source : null, 'video')
     const useResponsiveHero = usePublishedVersion || (Boolean(responsiveHeroUrl) && !responsiveHeroFailed)
     const useBundledHero = !useResponsiveHero && (!managedHeroUrl || managedHeroFailed)
     const heroSrc = useResponsiveHero
@@ -157,20 +159,20 @@ export default function Videos() {
                     <picture>
                         {useResponsiveHero ? (
                             <>
-                                <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentVideoHeroSrcSet('avif')} sizes="100vw" />
-                                <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentVideoHeroSrcSet('webp')} sizes="100vw" />
+                                <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentVideoHeroSrcSet('avif')} sizes={heroSizes} />
+                                <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentVideoHeroSrcSet('webp')} sizes={heroSizes} />
                             </>
                         ) : useBundledHero ? (
                             <>
-                                <source type="image/avif" srcSet={heroSet('avif')} sizes="100vw" />
-                                <source type="image/webp" srcSet={heroSet('webp')} sizes="100vw" />
+                                <source type="image/avif" srcSet={heroSet('avif')} sizes={heroSizes} />
+                                <source type="image/webp" srcSet={heroSet('webp')} sizes={heroSizes} />
                             </>
                         ) : null}
                         <img
                             ref={heroRef}
                             src={heroSrc}
                             srcSet={heroSrcSet}
-                            sizes="100vw"
+                            sizes={heroSizes}
                             width={useBundledHero ? 6177 : 1280}
                             height={useBundledHero ? 4118 : 853}
                             alt="Cinematography"
@@ -182,7 +184,7 @@ export default function Videos() {
                                 else if (useResponsiveHero) setResponsiveHeroFailed(true)
                                 else if (!useBundledHero) setManagedHeroFailed(true)
                             }}
-                            className="w-full h-[110%] object-cover object-center parallax-hero"
+                            className="video-hero-media w-full object-cover object-center parallax-hero"
                         />
                     </picture>
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/60 via-charcoal/40 to-cream" />

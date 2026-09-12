@@ -48,7 +48,6 @@ export default function MotionExperience() {
     const isAdmin = pathname.startsWith('/admin')
     const usesCatalogMotion = ['/', '/search', '/videos', '/stats'].includes(pathname)
     const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
-    const compactMotion = useMediaQuery('(pointer: coarse), (max-width: 720px)')
     const progressRef = useRef(null)
     const dragRef = useRef(null)
 
@@ -159,7 +158,7 @@ export default function MotionExperience() {
 
         const collectTargets = () => {
             collectFrame = null
-            const nextTargets = compactMotion ? [] : Array.from(new Set(main.querySelectorAll(TARGET_SELECTOR)))
+            const nextTargets = Array.from(new Set(main.querySelectorAll(TARGET_SELECTOR)))
                 .filter((element) => !element.closest('[role="dialog"]') && !element.classList.contains('fixed'))
             const nextSet = new Set(nextTargets)
 
@@ -330,7 +329,7 @@ export default function MotionExperience() {
             root.classList.remove('editorial-motion-active', 'editorial-scrollbar-active')
             progressRail?.style.removeProperty('--editorial-progress-offset')
         }
-    }, [compactMotion, isAdmin, pathname, reducedMotion, usesCatalogMotion])
+    }, [isAdmin, pathname, reducedMotion, usesCatalogMotion])
 
     if (isAdmin) return null
 

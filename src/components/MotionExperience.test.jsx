@@ -10,6 +10,11 @@ function renderExperience(path = '/') {
       <main>
         <section className="home-hero" />
         <div className="album-card" />
+        <div className="linen-section-heading" />
+        <section className="linen-gallery-page">
+          <div className="linen-media-frame" data-page-scroll-media />
+          <div role="dialog"><div data-page-scroll-media /></div>
+        </section>
         <header className="photo-stats-hero" />
         <section className="photo-stats-motion-section">
           <article className="photo-stats-card" />
@@ -345,7 +350,35 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(readTop).toHaveBeenCalledOnce()
   })
 
-  it('responds to mobile and reduced-motion changes without leaving stale layers', () => {
+  it.each(['(max-width: 720px)', '(pointer: coarse)'])('keeps scroll animations on every gallery route with %s', (deviceQuery) => {
+    window.matchMedia = vi.fn(query => ({ matches: query.includes(deviceQuery) }))
+    for (const path of ['/', '/videos', '/search', '/stats', '/explore', '/album/example', '/video/example', '/sharedalbum/example', '/dashboard']) {
+      const view = renderExperience(path)
+      const targets = [...view.container.querySelectorAll('.editorial-motion-frame')]
+      expect(targets.length).toBeGreaterThan(0)
+      expect(view.container.querySelector('.linen-media-frame')).toHaveClass('editorial-motion-frame')
+      expect(view.container.querySelector('[role="dialog"] [data-page-scroll-media]')).not.toHaveClass('editorial-motion-frame')
+      targets.forEach(target => {
+        Object.defineProperty(target, 'offsetTop', { configurable: true, value: 600 })
+        Object.defineProperty(target, 'offsetHeight', { configurable: true, value: 300 })
+      })
+      window.scrollY = 0
+      flushFrames()
+      const before = targets.map(target => target.style.cssText)
+      window.scrollY = 300
+      fireEvent.scroll(window)
+      flushFrames()
+      targets.forEach((target, index) => expect(target.style.cssText).not.toBe(before[index]))
+      window.scrollY = 0
+      fireEvent.scroll(window)
+      flushFrames()
+      targets.forEach((target, index) => expect(target.style.cssText).toBe(before[index]))
+      view.unmount()
+      targets.forEach(target => expect(target).not.toHaveClass('editorial-motion-frame'))
+    }
+  })
+
+  it('keeps motion after a mobile resize and responds to reduced-motion changes without stale layers', () => {
     const queries = new Map()
     window.matchMedia = vi.fn(query => {
       if (!queries.has(query)) queries.set(query, {
@@ -358,13 +391,17 @@ describe('MotionExperience film-strip scrollbar', () => {
     const view = renderExperience()
     flushFrames()
     expect(view.container.querySelectorAll('.is-motion-visible').length).toBeGreaterThan(0)
-    const compact = queries.get('(pointer: coarse), (max-width: 720px)')
-    act(() => { compact.matches = true; compact.notify() })
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    fireEvent.resize(window)
     flushFrames()
-    expect(view.container.querySelectorAll('.editorial-motion-frame')).toHaveLength(0)
+    expect(view.container.querySelectorAll('.is-motion-visible').length).toBeGreaterThan(0)
     expect(screen.getByRole('scrollbar')).toBeInTheDocument()
     const reduced = queries.get('(prefers-reduced-motion: reduce)')
     act(() => { reduced.matches = true; reduced.notify() })
     expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
+    expect(view.container.querySelectorAll('.editorial-motion-frame')).toHaveLength(0)
+    act(() => { reduced.matches = false; reduced.notify() })
+    flushFrames()
+    expect(view.container.querySelectorAll('.is-motion-visible').length).toBeGreaterThan(0)
   })
 })

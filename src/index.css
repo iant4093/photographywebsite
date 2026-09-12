@@ -239,9 +239,14 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
 /* Parallax hero background */
 .home-hero-media {
   width: 100%;
-  height: 100%;
+  height: calc(100% + 24px);
   object-fit: cover;
   object-position: 50% 50%;
+}
+
+.video-hero-media {
+  height: calc(100% + 60px);
+  margin-top: -60px;
 }
 
 .home-hero-overlay {
