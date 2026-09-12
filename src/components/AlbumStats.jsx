@@ -1,28 +1,10 @@
 import { useMemo } from 'react'
-
-function equipmentName(value) {
-    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
-}
+import { photoEquipment } from '../utils/photoStats'
 
 export default function AlbumStats({ images = [] }) {
     // Derive equipment from the current photos so removed lenses never leave
     // behind a stored count, and newly uploaded equipment appears automatically.
-    const { cameras, lenses } = useMemo(() => {
-        const cameraNames = new Set()
-        const lensCounts = new Map()
-
-        for (const image of images) {
-            const camera = equipmentName(image.exif?.model)
-            const lens = equipmentName(image.exif?.lens)
-            if (camera) cameraNames.add(camera)
-            if (lens) lensCounts.set(lens, (lensCounts.get(lens) || 0) + 1)
-        }
-
-        return {
-            cameras: [...cameraNames].sort((a, b) => a.localeCompare(b)),
-            lenses: [...lensCounts].sort(([a, countA], [b, countB]) => countB - countA || a.localeCompare(b)),
-        }
-    }, [images])
+    const { cameras, lenses } = useMemo(() => photoEquipment(images), [images])
 
     return (
         <dl aria-label="Album statistics" className="mt-5 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs leading-relaxed text-warm-gray">

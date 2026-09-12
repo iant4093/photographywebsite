@@ -19,7 +19,7 @@ describe('AlbumStats', () => {
         expect(stats().getByText('Cameras used')).toBeInTheDocument()
         expect(stats().getByText('Canon EOS R7 · Fujifilm X-T5')).toBeInTheDocument()
         expect(stats().getAllByRole('listitem').map(item => item.textContent)).toEqual([
-            'Sigma 18-50mm F2.8 (3)', 'XF 35mm F2 (1)',
+            'Sigma 18-50mm F2.8 (3)', 'Sirui Nightwalker 75mm T1.2 (1)', 'XF 35mm F2 (1)',
         ])
     })
 
@@ -52,13 +52,14 @@ describe('AlbumStats', () => {
         expect(stats().queryByText(/Canon|Fujifilm|Sigma|XF 35mm/)).toBeNull()
     })
 
-    it('handles empty albums and photos with missing or malformed EXIF without inventing equipment', () => {
+    it('attributes missing or malformed lens metadata to the manual Sirui lens', () => {
         const { rerender } = render(<AlbumStats />)
         expect(stats().getByText('0')).toBeInTheDocument()
         expect(stats().getAllByText('Not recorded')).toHaveLength(2)
 
         rerender(<AlbumStats images={[{}, { exif: null }, photo('  ', ''), photo(123, {})]} />)
         expect(stats().getByText('4')).toBeInTheDocument()
-        expect(stats().getAllByText('Not recorded')).toHaveLength(2)
+        expect(stats().getAllByText('Not recorded')).toHaveLength(1)
+        expect(stats().getByText('Sirui Nightwalker 75mm T1.2 (4)')).toBeInTheDocument()
     })
 })

@@ -293,6 +293,7 @@ export function fetchAlbumsPage(params = {}, options = {}) {
     record.promise = apiFetch(`${catalogPath}${query ? `?${query}` : ''}`, {
         headers: authHeaders(options.token),
         signal: controller.signal,
+        ...(options.force ? { cache: 'no-store' } : {}),
     }).then((payload) => {
         const page = Array.isArray(payload)
             ? normalizeLegacyCatalogPage(payload, normalized)

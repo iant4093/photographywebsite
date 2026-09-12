@@ -68,7 +68,8 @@ describe('embedded album gallery', () => {
         await act(async () => expiry.hook.mock.lastCall[1]())
         expect(stats.getByText('1')).toBeInTheDocument()
         expect(stats.queryByText(/Sigma/)).toBeNull()
-        expect(stats.getAllByText('Not recorded')).toHaveLength(2)
+        expect(stats.getAllByText('Not recorded')).toHaveLength(1)
+        expect(stats.getByText('Sirui Nightwalker 75mm T1.2 (1)')).toBeInTheDocument()
 
         api.fetchAlbumForViewing.mockResolvedValueOnce({
             ...data,
