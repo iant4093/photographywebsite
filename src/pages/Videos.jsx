@@ -192,7 +192,6 @@ export default function Videos() {
                 <div className="linen-hero-content relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="linen-hero-copy max-w-2xl animate-fade-in">
                         <h1 className="font-serif text-5xl md:text-7xl font-normal text-white leading-[0.95] tracking-tight w-fit">Videography</h1>
-                        <p className="mt-6 text-lg text-white/90 font-light leading-relaxed">Short films, moving portraits and moments gathered in motion.</p>
                     </div>
                 </div>
             </section>
