@@ -210,10 +210,6 @@ function Home() {
                 <div className="linen-hero-content relative max-w-7xl mx-auto px-6 py-32 md:py-48">
                     <div className="linen-hero-copy max-w-xs sm:max-w-sm md:max-w-md animate-fade-in">
                         <h1 className="font-serif text-5xl md:text-7xl font-normal text-white leading-[0.95] tracking-tight">Ian Truong<br />Photography</h1>
-                        <p className="mt-6 text-base md:text-lg text-white/90 font-light leading-relaxed">
-                            Hi, I'm Ian — welcome to my photography portfolio. I shoot wildlife, portraits, sports, and general
-                            photography as a hobby. Take a look around!
-                        </p>
                         <div className="flex flex-wrap items-center gap-4 mt-8">
                             <a
                                 href="#photo-albums"
