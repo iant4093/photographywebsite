@@ -43,6 +43,37 @@ const comparisonPhoto = {
 }
 
 describe('PhotoLightbox', () => {
+  it.each([
+    '.linen-lightbox-content',
+    '.linen-lightbox-media-stage',
+    '.linen-lightbox-media',
+    '.linen-lightbox-footer',
+    '.linen-lightbox-nav',
+    '.linen-lightbox-actions',
+    '.linen-lightbox-action-buttons',
+  ])('closes when clicking blank space in %s', (selector) => {
+    const onClose = vi.fn()
+    render(<PhotoLightbox images={[landscape, portrait]} index={0} ariaLabel="Viewer" onClose={onClose} />)
+    fireEvent.click(document.querySelector(selector))
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the viewer open when clicking a photo or a control icon', () => {
+    const onClose = vi.fn()
+    const onDownload = vi.fn()
+    const onNext = vi.fn()
+    render(<PhotoLightbox images={[landscape, portrait]} index={0} ariaLabel="Viewer" onClose={onClose} onDownload={onDownload} onNext={onNext} />)
+    const photo = screen.getByAltText(/^Photograph \d/)
+    fireEvent.load(photo)
+    fireEvent.click(photo)
+    expect(screen.getByRole('button', { name: 'Zoom out of photo' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Download photo' }).querySelector('path'))
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }).querySelector('path'))
+    expect(onDownload).toHaveBeenCalledOnce()
+    expect(onNext).toHaveBeenCalledOnce()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('anchors zoom at the clicked detail and resets it when navigating or changing comparison', () => {
     const onClose = vi.fn()
     const props = { images: [comparisonPhoto, portrait], ariaLabel: 'Viewer', onClose }
@@ -56,7 +87,7 @@ describe('PhotoLightbox', () => {
     const footer = document.querySelector('.linen-lightbox-footer')
     fireEvent.click(frame, { detail: 1, clientX: 700, clientY: 200 })
     expect(editedSurface).toHaveStyle({ transform: 'translate(-112.5%, -37.5%) scale(2.5)' })
-    expect(frame).toHaveAttribute('data-camera-cursor', 'zoom-out')
+    expect(frame).toHaveAttribute('data-camera-cursor', 'native')
     expect(frame).toHaveAttribute('aria-pressed', 'true')
     expect(frame.getAttribute('style')).toBe(frameStyle)
     expect(document.querySelector('.linen-lightbox-footer')).toBe(footer)
@@ -99,6 +130,20 @@ describe('PhotoLightbox', () => {
     await user.keyboard(' ')
     expect(photo.parentElement).toHaveStyle({ transform: 'translate(0%, 0%) scale(1)' })
     expect(frame).toHaveFocus()
+  })
+
+  it('pans a focused zoomed photo with arrow keys and resumes navigation after zooming out', async () => {
+    const onNext = vi.fn()
+    const user = userEvent.setup()
+    render(<PhotoLightbox images={[landscape, portrait]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onNext={onNext} />)
+    const photo = screen.getByAltText(/^Photograph \d/)
+    fireEvent.load(photo)
+    screen.getByRole('button', { name: 'Zoom in on photo' }).focus()
+    await user.keyboard('{Enter}{ArrowRight}{ArrowDown}')
+    expect(photo.parentElement).toHaveStyle({ transform: 'translate(-90%, -90%) scale(2.5)' })
+    expect(onNext).not.toHaveBeenCalled()
+    await user.keyboard('{Enter}{ArrowRight}')
+    expect(onNext).toHaveBeenCalledOnce()
   })
 
   it('shows the complete safe camera settings and uses one intrinsic media frame', () => {

@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 const ZOOM_SCALE = 2.5
-const INITIAL_ZOOM = { zoomed: false, x: 50, y: 50 }
+const INITIAL_ZOOM = { zoomed: false, x: 50, y: 50, panning: false }
+const PAN_THRESHOLD = 4
+const percent = value => Math.max(0, Math.min(100, value))
 
 function freshDetail(src) {
     return { src, requested: false, ready: false }
@@ -11,6 +13,8 @@ function freshDetail(src) {
 export default function PhotoZoomFrame({ bounds, loaded = false, visible = true, outgoing = false, ...imageProps }) {
     const [naturalSize, setNaturalSize] = useState(null)
     const [zoom, setZoom] = useState(INITIAL_ZOOM)
+    const panRef = useRef(null)
+    const suppressClickRef = useRef(false)
     const [detail, setDetail] = useState(() => freshDetail(imageProps.src))
     if (detail.src !== imageProps.src) setDetail(freshDetail(imageProps.src))
     if (!visible && zoom.zoomed) setZoom(INITIAL_ZOOM)
@@ -27,19 +31,78 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
     const toggleZoom = (event) => {
         event.stopPropagation()
         if (!interactive) return
+        // Browsers dispatch a click after a drag. Consume it without undoing
+        // the zoom; keyboard activation and the next tap still toggle normally.
+        if (suppressClickRef.current && event.detail > 0) {
+            suppressClickRef.current = false
+            return
+        }
+        suppressClickRef.current = false
         if (zoom.zoomed) {
-            setZoom(current => ({ ...current, zoomed: false }))
+            setZoom(current => ({ ...current, zoomed: false, panning: false }))
             return
         }
         const rect = event.currentTarget.getBoundingClientRect()
         const pointerClick = event.detail > 0 && rect.width > 0 && rect.height > 0
-        const percent = value => Math.max(0, Math.min(100, value))
         setZoom({
             zoomed: true,
+            panning: false,
             x: pointerClick ? percent((event.clientX - rect.left) / rect.width * 100) : 50,
             y: pointerClick ? percent((event.clientY - rect.top) / rect.height * 100) : 50,
         })
         if (imageProps.srcSet) setDetail(current => ({ ...current, requested: true }))
+    }
+
+    const startPan = (event) => {
+        if (!interactive || !zoom.zoomed || event.button !== 0 || event.isPrimary === false) return
+        const rect = event.currentTarget.getBoundingClientRect()
+        if (!rect.width || !rect.height) return
+        suppressClickRef.current = false
+        panRef.current = {
+            pointerId: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            width: rect.width,
+            height: rect.height,
+            moved: false,
+        }
+        // Retain the gesture even when the finger or mouse leaves the frame.
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+    }
+
+    const movePan = (event) => {
+        const pan = panRef.current
+        if (!interactive || !zoom.zoomed || !pan || pan.pointerId !== event.pointerId) return
+        const dx = event.clientX - pan.x
+        const dy = event.clientY - pan.y
+        if (!pan.moved && Math.hypot(dx, dy) < PAN_THRESHOLD) return
+        pan.moved = true
+        pan.x = event.clientX
+        pan.y = event.clientY
+        suppressClickRef.current = true
+        setZoom(current => ({
+            ...current,
+            panning: true,
+            x: percent(current.x - dx / (pan.width * (ZOOM_SCALE - 1)) * 100),
+            y: percent(current.y - dy / (pan.height * (ZOOM_SCALE - 1)) * 100),
+        }))
+    }
+
+    const endPan = (event) => {
+        if (panRef.current?.pointerId !== event.pointerId) return
+        panRef.current = null
+        setZoom(current => ({ ...current, panning: false }))
+        if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+    }
+
+    const panWithKeyboard = (event) => {
+        if (!interactive || !zoom.zoomed) return
+        const direction = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] }[event.key]
+        if (!direction) return
+        event.preventDefault()
+        setZoom(current => ({ ...current, x: percent(current.x + direction[0]), y: percent(current.y + direction[1]) }))
     }
 
     const detailFailed = (image) => {
@@ -63,14 +126,22 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
     return (
         <Frame
             type={outgoing ? undefined : 'button'}
-            className={`linen-lightbox-photo-frame ${loaded ? 'is-loaded' : ''} ${outgoing ? 'is-outgoing' : ''} ${visible ? '' : 'is-hidden'} ${zoom.zoomed ? 'is-zoomed' : ''}`}
+            className={`linen-lightbox-photo-frame ${loaded ? 'is-loaded' : ''} ${outgoing ? 'is-outgoing' : ''} ${visible ? '' : 'is-hidden'} ${zoom.zoomed ? 'is-zoomed' : ''} ${zoom.panning ? 'is-panning' : ''}`}
             style={{ width: fit === null ? undefined : width * fit, height: fit === null ? undefined : height * fit }}
             disabled={outgoing ? undefined : !interactive}
             aria-hidden={outgoing || !visible || undefined}
             aria-label={outgoing ? undefined : zoom.zoomed ? 'Zoom out of photo' : 'Zoom in on photo'}
             aria-pressed={outgoing ? undefined : zoom.zoomed}
-            data-camera-cursor={interactive ? zoom.zoomed ? 'zoom-out' : 'zoom-in' : 'native'}
+            aria-description={interactive && zoom.zoomed ? 'Drag or use arrow keys to move around. Click or tap to zoom out.' : undefined}
+            title={interactive && zoom.zoomed ? 'Drag to move around. Click or tap to zoom out.' : undefined}
+            data-camera-cursor={interactive && !zoom.zoomed ? 'zoom-in' : 'native'}
             onClick={outgoing ? undefined : toggleZoom}
+            onPointerDown={outgoing ? undefined : startPan}
+            onPointerMove={outgoing ? undefined : movePan}
+            onPointerUp={outgoing ? undefined : endPan}
+            onPointerCancel={outgoing ? undefined : endPan}
+            onLostPointerCapture={outgoing ? undefined : endPan}
+            onKeyDown={outgoing ? undefined : panWithKeyboard}
         >
             <div
                 className="linen-lightbox-photo-surface"

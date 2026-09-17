@@ -311,6 +311,14 @@ function PhotoLightbox({
                 : comparisonRequested ? 'Show edited photo' : 'Show original photo'
     const beforeTitle = beforeMessage || (showingBefore ? 'Before — Camera JPG. Show edited photo' : 'After — Edited. Show original camera JPG')
 
+    const handleBlankSpaceClick = (event) => {
+        // Layout wrappers fill the viewport, including the gaps beside the
+        // fitted photo and between controls. Only actual content keeps it open.
+        if (event.target.closest('button, a, img, input, select, textarea, [role="button"]')) return
+        event.stopPropagation()
+        onClose()
+    }
+
     return (
         <AccessibleLightbox
             ariaLabel={ariaLabel}
@@ -339,7 +347,7 @@ function PhotoLightbox({
 
             <div
                 className={`linen-lightbox-content flex-1 w-full min-h-0 flex flex-col items-center justify-center relative z-0 ${hasPhotoMetadata ? 'has-photo-metadata' : ''}`}
-                onClick={(event) => event.stopPropagation()}
+                onClick={handleBlankSpaceClick}
             >
                 <div className="linen-lightbox-media-stage flex-1 min-h-0 flex items-center justify-center w-full relative">
                     {activeImage ? (
@@ -429,7 +437,7 @@ function PhotoLightbox({
                 </div>
             </div>
 
-            <div className="linen-lightbox-footer">
+            <div className="linen-lightbox-footer" onClick={handleBlankSpaceClick}>
                 {(images.length > 1 || hasPhotoMetadata) && (
                     <nav className={`linen-lightbox-nav ${images.length > 1 ? 'has-navigation' : ''}`} aria-label="Photo navigation">
                         {images.length > 1 && (
@@ -482,7 +490,7 @@ function PhotoLightbox({
                 )}
 
                 {activeImage && (
-                    <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10" onClick={(event) => event.stopPropagation()}>
+                    <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
                         <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
                             {hasOriginalComparison && (
                                 <button

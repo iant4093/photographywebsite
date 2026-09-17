@@ -50,7 +50,16 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
 }
 
 .linen-lightbox-photo-frame.is-zoomed {
-  cursor: zoom-out;
+  cursor: grab;
+  touch-action: none;
+}
+
+.linen-lightbox-photo-frame.is-panning {
+  cursor: grabbing;
+}
+
+.linen-lightbox-photo-frame.is-panning .linen-lightbox-photo-surface {
+  transition: none;
 }
 
 .linen-lightbox-photo-frame:focus-visible {
