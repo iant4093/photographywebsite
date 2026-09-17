@@ -1,5 +1,5 @@
 import { selectChoice, expectSuggestion } from '../test/selectChoice'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -56,6 +56,40 @@ describe('Admin photo upload', () => {
       key: variant === 'original' ? `stored/${key.split('/').pop()}` : `stored/thumb-${key.split('/').pop()}`,
       requiredHeaders: { 'x-test': variant },
     }))
+  })
+
+  it('shows in-flight byte measurements and keeps saving visible until album confirmation', async () => {
+    vi.useFakeTimers()
+    try {
+      let now = 0
+      vi.spyOn(performance, 'now').mockImplementation(() => now)
+      const uploads = []
+      api.uploadFileToS3.mockImplementation((_url, file, _headers, { onProgress }) => new Promise(resolve => {
+        uploads.push({ file, onProgress, resolve })
+        onProgress({ loaded: 0, total: file.size })
+      }))
+      let confirmAlbum
+      api.createAlbum.mockImplementation(() => new Promise(resolve => { confirmAlbum = resolve }))
+      const { container } = mounted()
+      populate(container, [new File([new Uint8Array(2_000_000)], 'large.jpg', { type: 'image/jpeg' })])
+      await act(async () => { fireEvent.submit(container.querySelector('form')) })
+      expect(uploads).toHaveLength(2)
+      expect(screen.getByText('Measuring…')).toBeInTheDocument()
+      now = 2000
+      uploads[0].onProgress({ loaded: 1_000_000 })
+      act(() => vi.advanceTimersByTime(500))
+      expect(screen.getByText('500.0 KB/s')).toBeInTheDocument()
+      expect(screen.getByText('About 3s')).toBeInTheDocument()
+      expect(api.createAlbum).not.toHaveBeenCalled()
+      await act(async () => { uploads.forEach(({ file, onProgress, resolve }) => { onProgress({ loaded: file.size }); resolve() }) })
+      expect(screen.getByRole('status')).toHaveTextContent('Saving album…')
+      expect(screen.queryByText('500.0 KB/s')).toBeNull()
+      await act(async () => { confirmAlbum({ albumId: 'created' }) })
+      expect(screen.getByText('Album created successfully!')).toBeInTheDocument()
+      expect(screen.queryByRole('progressbar')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('defaults the album date from the browser local calendar date', () => {

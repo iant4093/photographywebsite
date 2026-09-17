@@ -2,6 +2,8 @@ import SiteSelect from '../components/SiteSelect'
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import DashboardBackLink from '../components/DashboardBackLink'
+import UploadProgress from '../components/UploadProgress'
+import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { processVideo } from '../utils/mediaUtils'
@@ -85,7 +87,7 @@ export default function UploadVideo() {
     const fileInputRef = useRef(null)
 
     const [uploading, setUploading] = useState(false)
-    const [progress, setProgress] = useState({ current: 0, total: 0, status: '' })
+    const { progress, startUpload } = useUploadProgress()
     const [success, setSuccess] = useState(false)
     const [error, setError] = useState('')
 
@@ -135,6 +137,7 @@ export default function UploadVideo() {
         setError('')
         setSuccess(false)
         setUploading(true)
+        const transfer = startUpload(videoFiles.map(({ file }) => file))
 
         try {
             const token = await getIdToken()
@@ -142,12 +145,9 @@ export default function UploadVideo() {
             const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
             const s3Prefix = `albums/${slug}-${albumId.slice(0, 8)}/`
 
-            setProgress({ current: 0, total: videoFiles.length, status: 'Processing thumbnails...' })
-
             let coverThumbUrlPublic = ''
             let coverBlurhash = ''
 
-            let completedUploads = 0
             const finalImages = await mapWithConcurrency(videoFiles, 2, async ({ file, time }, i) => {
 
                 // Add a tiny extra delay for the first video to ensure the browser's 
@@ -155,11 +155,11 @@ export default function UploadVideo() {
                 if (i === 0) await new Promise(r => setTimeout(r, 200));
 
                 // 1. Extract thumbnail
-                setProgress({ current: completedUploads, total: videoFiles.length, status: `Processing ${file.name}...` })
                 const { thumbnail, blurhash, width, height } = await processVideo(file, time)
+                const originalProgress = transfer.progressFor(`${i}:original`, file)
+                const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
 
                 // 2. Request urls
-                setProgress({ current: completedUploads, total: videoFiles.length, status: `Uploading ${file.name}...` })
                 const legacyRawKey = `${s3Prefix}${file.name}`
                 const legacyThumbKey = `${s3Prefix}thumb_${file.name}.jpg`
 
@@ -170,8 +170,8 @@ export default function UploadVideo() {
 
                 // 3. Upload raw video & thumbnail
                 await Promise.all([
-                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
-                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
+                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
+                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
                 ])
 
                 const rawKey = rawUpload.key || legacyRawKey
@@ -182,12 +182,11 @@ export default function UploadVideo() {
                     coverBlurhash = blurhash
                 }
 
-                completedUploads += 1
-                setProgress({ current: completedUploads, total: videoFiles.length, status: 'Uploaded' })
+                transfer.completeFile()
                 return { rawKey, thumbKey, blurhash, width, height, thumbnailTime: time }
             })
 
-            setProgress({ current: videoFiles.length, total: videoFiles.length, status: 'Creating Album Record & Kicking off Transcoding...' })
+            transfer.finalize()
 
             const createdAlbum = await createAlbum(token, {
                 albumId,
@@ -224,6 +223,7 @@ export default function UploadVideo() {
         } catch (err) {
             setError(err.message || 'Upload failed.')
         } finally {
+            transfer.stop()
             setUploading(false)
         }
     }
@@ -387,20 +387,7 @@ export default function UploadVideo() {
                         </label>
                     </div>
 
-                    {uploading && (
-                        <div className="mb-6">
-                            <div className="flex justify-between text-sm text-warm-gray mb-2">
-                                <span>{progress.status}</span>
-                                <span>{progress.current} / {progress.total} Videos</span>
-                            </div>
-                            <div className="w-full h-2 bg-cream-dark rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-gradient-to-r from-amber to-amber-dark rounded-full transition-all duration-500"
-                                    style={{ width: `${Math.max(5, (progress.current / progress.total) * 100)}%` }}
-                                />
-                            </div>
-                        </div>
-                    )}
+                    {uploading && <UploadProgress progress={progress} />}
 
                     <button
                         type="submit"

@@ -3,6 +3,8 @@ import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { v4 as uuidv4 } from 'uuid'
 import DashboardBackLink from '../components/DashboardBackLink'
+import UploadProgress from '../components/UploadProgress'
+import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
 import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { mapWithConcurrency } from '../utils/concurrency'
@@ -32,7 +34,7 @@ function Upload() {
 
     // Upload progress
     const [uploading, setUploading] = useState(false)
-    const [progress, setProgress] = useState({ current: 0, total: 0 })
+    const { progress, startUpload } = useUploadProgress()
     const [success, setSuccess] = useState(false)
     const [error, setError] = useState('')
 
@@ -75,6 +77,7 @@ function Upload() {
         setError('')
         setSuccess(false)
         setUploading(true)
+        const transfer = startUpload(photoFiles)
 
         try {
             const token = await getIdToken()
@@ -82,17 +85,16 @@ function Upload() {
             const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
             const s3Prefix = `albums/${slug}-${albumId.slice(0, 8)}/`
 
-            setProgress({ current: 0, total: photoFiles.length })
-
             let coverImageUrlPublic = ''
             let coverThumbUrlPublic = ''
             let coverBlurhash = ''
 
-            let completedUploads = 0
             const finalImages = await mapWithConcurrency(photoFiles, 2, async (file, i) => {
 
                 // 1. Process local thumbnail/hash
                 const { thumbnail, blurhash, width, height } = await processImage(file)
+                const originalProgress = transfer.progressFor(`${i}:original`, file)
+                const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
                 const isCover = i === 0
 
                 // 2. Request both Pre-signed URLs
@@ -106,8 +108,8 @@ function Upload() {
 
                 // 3. Upload both to S3
                 await Promise.all([
-                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
-                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
+                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
+                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
                 ])
 
                 const rawKey = rawUpload.key || legacyRawKey
@@ -119,12 +121,12 @@ function Upload() {
                     coverBlurhash = blurhash
                 }
 
-                completedUploads += 1
-                setProgress({ current: completedUploads, total: photoFiles.length })
+                transfer.completeFile()
                 return { rawKey, thumbKey, blurhash, width, height, originalFilename: uploadOriginalFilename(file.name) }
             })
 
             // Create album — cover is auto-set to first image by backend
+            transfer.finalize()
             const createdAlbum = await createAlbum(token, {
                 albumId,
                 title,
@@ -158,6 +160,7 @@ function Upload() {
         } catch (err) {
             setError(err.message || 'Upload failed.')
         } finally {
+            transfer.stop()
             setUploading(false)
         }
     }
@@ -361,20 +364,7 @@ function Upload() {
                     </div>
 
                     {/* Progress */}
-                    {uploading && (
-                        <div className="mb-6 animate-fade-in">
-                            <div className="flex justify-between text-sm text-warm-gray mb-2">
-                                <span>Uploading…</span>
-                                <span>{progress.current} / {progress.total}</span>
-                            </div>
-                            <div className="w-full h-2 bg-cream-dark rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-gradient-to-r from-amber to-amber-dark rounded-full transition-all duration-500"
-                                    style={{ width: `${(progress.current / progress.total) * 100}%` }}
-                                />
-                            </div>
-                        </div>
-                    )}
+                    {uploading && <UploadProgress progress={progress} />}
 
                     {/* Submit */}
                     <button

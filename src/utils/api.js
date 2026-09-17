@@ -6,6 +6,7 @@ import {
 } from './catalogState'
 import { annotateMediaExpiry } from './mediaUrls'
 import { clearExploreClientState } from './exploreState'
+import { uploadWithProgress } from './uploadTransport'
 
 // Production uses the single CloudFront front door. An explicit absolute URL
 // remains available for local/staged rollback while the migration is canaried.
@@ -622,12 +623,14 @@ export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, o
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         let response
         try {
-            response = await fetch(presignedUrl, {
-                method: 'PUT',
-                headers: uploadHeaders,
-                body: file,
-                signal: options.signal,
-            })
+            response = options.onProgress
+                ? await uploadWithProgress(presignedUrl, file, uploadHeaders, options)
+                : await fetch(presignedUrl, {
+                    method: 'PUT',
+                    headers: uploadHeaders,
+                    body: file,
+                    signal: options.signal,
+                })
         } catch (error) {
             if (error?.name === 'AbortError') throw error
             if (attempt < retries) {
@@ -647,6 +650,7 @@ export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, o
             status: response.status,
             code: 'UPLOAD_FAILED',
         })
+        options.onProgress?.({ loaded: file.size, total: file.size })
         return response
     }
 

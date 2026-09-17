@@ -2,6 +2,8 @@ import SiteSelect from '../components/SiteSelect'
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router'
 import DashboardBackLink from '../components/DashboardBackLink'
+import UploadProgress from '../components/UploadProgress'
+import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
 import AdminToasts from '../components/AdminToasts'
 import { useAdminToasts } from '../hooks/useAdminToasts'
@@ -210,6 +212,7 @@ function ManageAlbums() {
     const [addingFiles, setAddingFiles] = useState([])
     const [addingVideoFiles, setAddingVideoFiles] = useState([]) // [{ file, time }]
     const [uploadingMore, setUploadingMore] = useState(false)
+    const { progress: uploadProgress, startUpload } = useUploadProgress()
     const addFilesRef = useRef(null)
 
     // Per-video thumbnail editing state
@@ -672,6 +675,7 @@ function ManageAlbums() {
         if (!expandedAlbumId) return
 
         setUploadingMore(true)
+        const transfer = startUpload(isVideo ? addingVideoFiles.map(({ file }) => file) : addingFiles)
         setActionError('')
         const expandedAlbum = albums.find((a) => a.albumId === expandedAlbumId)
         try {
@@ -679,10 +683,12 @@ function ManageAlbums() {
             const s3Prefix = expandedAlbum?.s3Prefix || `albums/${expandedAlbumId}/`
 
             const finalItems = isVideo
-                ? await mapWithConcurrency(addingVideoFiles, 2, async (vf) => {
+                ? await mapWithConcurrency(addingVideoFiles, 2, async (vf, i) => {
                     const { file, time } = vf
                     // 1. Process local thumbnail/hash
                     const { thumbnail, blurhash, width, height } = await processVideo(file, time)
+                    const originalProgress = transfer.progressFor(`${i}:original`, file)
+                    const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
 
                     // 2. Request both Pre-signed URLs
                     const legacyRawKey = `${s3Prefix}${file.name}`
@@ -695,13 +701,14 @@ function ManageAlbums() {
 
                     // 3. Upload both to S3
                     await Promise.all([
-                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
-                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
+                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
+                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
                     ])
 
                     const rawKey = rawUpload.key || legacyRawKey
                     const thumbKey = thumbUpload.key || legacyThumbKey
 
+                    transfer.completeFile()
                     return {
                         rawKey,
                         thumbKey,
@@ -711,9 +718,11 @@ function ManageAlbums() {
                         thumbnailTime: time,
                     }
                 })
-                : await mapWithConcurrency(addingFiles, 2, async (file) => {
+                : await mapWithConcurrency(addingFiles, 2, async (file, i) => {
                     // 1. Process local thumbnail/hash
                     const { thumbnail, blurhash, width, height } = await processImage(file)
+                    const originalProgress = transfer.progressFor(`${i}:original`, file)
+                    const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
 
                     // 2. Request both Pre-signed URLs
                     const legacyRawKey = `${s3Prefix}${file.name}`
@@ -726,13 +735,14 @@ function ManageAlbums() {
 
                     // 3. Upload both to S3
                     await Promise.all([
-                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders),
-                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders)
+                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
+                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
                     ])
 
                     const rawKey = rawUpload.key || legacyRawKey
                     const thumbKey = thumbUpload.key || legacyThumbKey
 
+                    transfer.completeFile()
                     return {
                         rawKey,
                         thumbKey,
@@ -744,6 +754,7 @@ function ManageAlbums() {
                 })
 
             // Append to database
+            transfer.finalize()
             const result = await addImagesToAlbum(token, expandedAlbumId, finalItems)
 
             setAddingFiles([])
@@ -763,6 +774,7 @@ function ManageAlbums() {
         } catch (err) {
             setActionError(err.message)
         } finally {
+            transfer.stop()
             setUploadingMore(false)
         }
     }
@@ -1125,6 +1137,8 @@ function ManageAlbums() {
                                                                     {uploadingMore ? 'Uploading…' : 'Add'}
                                                                 </button>
                                                             </div>
+
+                                                            {uploadingMore && <UploadProgress progress={uploadProgress} />}
 
                                                             {typeFilter === 'video' && addingVideoFiles.length > 0 && (
                                                                 <div className="mt-4 space-y-3">
