@@ -6,7 +6,7 @@ Implementation began September 12; the owner authorized deployment on September 
 
 - Oregon-based individual photographer, Ian Truong; no registered entity claimed.
 - Publish **iant4093@gmail.com** for privacy, licensing, accessibility, and order support.
-- Updated September 17: allow any lawful use of owned photographs, including commercial use, editing, distribution, and resale, without credit or separate permission. Third-party rights are not granted.
+- Updated September 17: allow any lawful use of owned photographs, including commercial use, editing, distribution, and resale, without a separate permission request. Personal use requires no credit; commercial use requires clear credit to Ian Truong. Third-party rights are not granted.
 - Do not create client contracts or contract templates.
 
 ## Website changes
@@ -15,7 +15,7 @@ Implementation began September 12; the owner authorized deployment on September 
 | --- | --- |
 | Privacy | Expanded `/privacy` to describe actual providers, accounts, galleries, infrastructure logs, aggregate analytics, GPC/DNT, optional print processing, Google Drive and independent archives, retention criteria, requests/appeals, children, and changes. |
 | Local editor data | Added a working recovery-data removal control to `/privacy`; corrected the editor's misleading “nothing stored” text to disclose browser recovery storage. |
-| Photo use | Added `/terms` with the owner's broad no-attribution use grant, third-party rights limits, gallery access rules, and a photograph-concern/removal channel. No invented client agreements or releases. |
+| Photo use | Added `/terms` with the owner's broad use grant with attribution required for commercial use only, third-party rights limits, gallery access rules, and a photograph-concern/removal channel. No invented client agreements or releases. |
 | Print orders | Added `/print-policy` with seller/provider roles, checkout review, production/shipping and delay handling, seller refund responsibility and individually reviewed voluntary returns, and direct assistance. Policy links and a persistent Close control remain outside the vendor iframe; the isolated print bridge also links policies. |
 | Contact | Added the monitored email as a form/security-check alternative and announced form outcomes accessibly. |
 | Accessibility | Added `/accessibility`, authored photo descriptions in public/private/shared gallery controls and viewers, and admin tools for descriptions, video WebVTT captions/language, and transcripts. Video controls can toggle native captions and expose a transcript; track-load failures report an alternative. |

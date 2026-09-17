@@ -1,6 +1,6 @@
 # Legal and accessibility operations
 
-Owner decisions updated September 17, 2026: Ian Truong is an individual photographer in Oregon, with no registered entity; publish iant4093@gmail.com for support; permit any lawful use of owned photographs, including commercial use, without requiring credit or separate permission; do not create client contracts or contract templates.
+Owner decisions updated September 17, 2026: Ian Truong is an individual photographer in Oregon, with no registered entity; publish iant4093@gmail.com for support; permit any lawful use of owned photographs, including commercial use, without a separate permission request; personal use requires no credit, while commercial use requires clear credit to Ian Truong; do not create client contracts or contract templates.
 
 ## Business identity and scope
 

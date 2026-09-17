@@ -1,6 +1,6 @@
 # Website legal review — September 12, 2026
 
-**Follow-up:** This records the original audit. The owner subsequently confirmed Oregon, individual operation, the support email and, on September 17, broad photograph reuse without attribution, and declined client contracts. See [the implementation record](LEGAL_IMPLEMENTATION_2026-09-12.md) and [ongoing operations](LEGAL_OPERATIONS.md) for fixes and remaining owner-dependent work.
+**Follow-up:** This records the original audit. The owner subsequently confirmed Oregon, individual operation, the support email and, on September 17, broad photograph reuse with credit required for commercial use only, and declined client contracts. See [the implementation record](LEGAL_IMPLEMENTATION_2026-09-12.md) and [ongoing operations](LEGAL_OPERATIONS.md) for fixes and remaining owner-dependent work.
 
 Review of Ian Truong Photography for a US-based business serving mainly US customers, as confirmed by the owner. The live `/privacy` page was inspected and matched the local notice. Public routes, contact handling, analytics, print integration, media deletion/backups, editor storage, and selected accessibility and dependency-license code were also reviewed.
 

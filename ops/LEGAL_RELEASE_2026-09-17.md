@@ -7,8 +7,11 @@ separate README/architecture rewrite are excluded.
 ## Final owner choices and research
 
 Photographs owned by Ian may be reused for any lawful purpose, including
-commercial use, editing, distribution, and resale, without credit or a separate
-permission request. Copyright ownership remains with Ian. The grant does not
+commercial use, editing, distribution, and resale, without a separate
+permission request. The owner later corrected the credit rule: personal use
+requires no credit; commercial use requires clear credit to Ian Truong.
+The terms and print policy now reflect that correction. The earlier published
+permission is not retroactively rewritten for its existing recipients. Copyright ownership remains with Ian. The grant does not
 supply other people's privacy/publicity rights or grant private account access.
 The owner says the people he posts agree to publication. No signed releases or
 client contracts are claimed or created.
