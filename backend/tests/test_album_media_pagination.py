@@ -30,6 +30,17 @@ def record(**overrides):
 
 
 class AlbumMediaPaginationTests(unittest.TestCase):
+    def test_normalized_media_preserves_favorites_during_rebuild_and_update(self):
+        image = {**record()["images"][0], "isFavorite": True}
+        item = album_media_store.normalized_media_item(ALBUM_ID, image, 0)
+        self.assertIs(item["isFavorite"], True)
+        table = Mock()
+        with patch.object(album_media_store, "_table", return_value=table):
+            self.assertTrue(album_media_store.update_album_media(ALBUM_ID, item["mediaId"], {"isFavorite": False}))
+        update = table.update_item.call_args.kwargs
+        self.assertEqual(update["ExpressionAttributeNames"], {"#field0": "isFavorite"})
+        self.assertEqual(update["ExpressionAttributeValues"], {":value0": False})
+
     def event(self, params=None):
         return gateway_event(
             claims(groups=["Admins"]),

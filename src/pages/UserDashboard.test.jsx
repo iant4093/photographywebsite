@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { selectChoice } from '../test/selectChoice'
 import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -77,6 +78,53 @@ const images = [
 ]
 
 describe('UserDashboard', () => {
+  it('uses only owned albums for section navigation, sorting, year filters, and statistics', async () => {
+    api.fetchAlbumsFiltered.mockResolvedValue([
+      { ...albums[0], createdAt: '2026-01-01', imageCount: 2 },
+      { ...albums[0], albumId: 'older', title: 'Older portraits', createdAt: '2025-01-01', imageCount: 5 },
+      { ...albums[1], category: 'Travel', createdAt: '2024-01-01', imageCount: 1 },
+      { ...albums[4], category: 'Secret category', imageCount: 100 },
+    ])
+    mounted()
+    const nav = within(await screen.findByRole('navigation', { name: 'Your photos sections' }))
+    expect(nav.getAllByRole('button').map(button => button.textContent)).toEqual(['People', 'Travel'])
+    selectChoice(screen.getByRole('combobox', { name: 'Sort photos sections' }), '4')
+    expect(nav.getAllByRole('button').map(button => button.textContent)).toEqual(['Travel', 'People'])
+    selectChoice(screen.getByRole('combobox', { name: 'Filter People photos albums by year' }), '2025')
+    expect(screen.getByText('Older portraits')).toBeInTheDocument()
+    expect(screen.queryByText('Portraits')).toBeNull()
+    expect(screen.queryByText('Secret category')).toBeNull()
+    fireEvent.click(screen.getByLabelText('Show People photos statistics'))
+    expect(screen.getByText('2 albums · 7 photos')).toBeVisible()
+    const target = screen.getByRole('region', { name: 'People photos' })
+    target.scrollIntoView = vi.fn()
+    fireEvent.click(nav.getByRole('button', { name: 'People' }))
+    expect(target.scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('shows private album stats and confines favorites and downloads to the selected section', async () => {
+    api.fetchAlbum.mockResolvedValue({ images: [
+      { ...images[0], isFavorite: true }, images[1], { ...images[0], id: 'three', isFavorite: true },
+    ] })
+    mounted()
+    fireEvent.click((await screen.findByText('Portraits')).closest('.cursor-pointer'))
+    const featured = within(await screen.findByRole('region', { name: 'Featured photos' }))
+    expect(within(screen.getByLabelText('Album statistics')).getByText('3')).toBeInTheDocument()
+    expect(featured.getAllByRole('button')).toHaveLength(2)
+    fireEvent.click(featured.getAllByRole('button')[0])
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'ArrowLeft' })
+    expect(screen.getByText('2 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('Download Photo'))
+    await waitFor(() => expect(api.requestAlbumMediaDownload).toHaveBeenCalledWith('photo', 'three', 'token'))
+    expect(screen.queryByTitle('Share Photo')).toBeNull()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.click(within(screen.getByRole('region', { name: 'All photos' })).getByRole('button'))
+    expect(screen.getByText('1 / 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('Download Photo'))
+    await waitFor(() => expect(api.requestAlbumMediaDownload).toHaveBeenLastCalledWith('photo', 'two', 'token'))
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     auth.userEmail = 'viewer@example.com'
@@ -99,7 +147,7 @@ describe('UserDashboard', () => {
     mounted()
     expect(screen.getByRole('status')).toBeInTheDocument()
     expect(await screen.findByText('Portraits')).toBeInTheDocument()
-    expect(screen.getAllByText('Uncategorized')).toHaveLength(2)
+    expect(screen.getAllByRole('heading', { name: 'Uncategorized' })).toHaveLength(2)
     expect(screen.getByText('Your Videos')).toBeInTheDocument()
     expect(screen.getByText('3')).toBeInTheDocument()
     expect(screen.queryByText('Other owner')).toBeNull()
@@ -144,7 +192,7 @@ describe('UserDashboard', () => {
     expect(screen.getByRole('img', { name: /^Photograph \d/ })).toHaveAttribute('src', 'https://x.test/one-full')
     expect(screen.getByRole('img', { name: /^Photograph \d/ })).toHaveClass('linen-lightbox-photo')
     expect(screen.queryByRole('button', { name: 'Share photo' })).toBeNull()
-    expect(screen.getByText('Camera')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByText('Camera')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'ArrowRight' })
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'ArrowLeft' })

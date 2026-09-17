@@ -47,6 +47,19 @@ class ValidationTests(unittest.TestCase):
 
 
 class MediaAccessTests(unittest.TestCase):
+    def test_favorite_serialization_is_optional_boolean_and_excludes_identity(self):
+        source = {"rawKey": f"albums/{ALBUM_ID}/original/photo.jpg", "ownerEmail": "private@example.test"}
+        for visibility in ("public", "private", "unlisted"):
+            for favorite in (True, False):
+                with patch.object(media_access, "media_url", return_value="https://media.test/photo"):
+                    result = media_access.serialize_image({**source, "isFavorite": favorite}, visibility)
+                self.assertIs(result["isFavorite"], favorite)
+                self.assertNotIn("ownerEmail", result)
+                self.assertNotIn("rawKey", result)
+        for malformed in ("true", 1, None):
+            self.assertNotIn("isFavorite", media_access.serialize_image({**source, "isFavorite": malformed}, "public"))
+        self.assertNotIn("isFavorite", media_access.serialize_image(source, "public"))
+
     def setUp(self):
         self.image = {
             "rawKey": f"albums/{ALBUM_ID}/original/photo.jpg",

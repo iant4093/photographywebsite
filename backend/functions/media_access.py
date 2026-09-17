@@ -410,6 +410,8 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
         "url": media_url(key, visibility),
         "thumbnailUrl": media_url(thumb_key, visibility) if thumb_key else media_url(key, visibility),
     }
+    if isinstance(source.get("isFavorite"), bool):
+        result["isFavorite"] = source["isFavorite"]
     preview_keys = validated_preview_keys(source, album, preview_metadata) if album else {}
     if preview_keys:
         result["previewSrcSet"] = [

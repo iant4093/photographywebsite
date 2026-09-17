@@ -29,6 +29,33 @@ function mounted(entry = '/admin/albums') {
 }
 
 describe('ManageAlbums', () => {
+  it('toggles a persistent favorite heart and keeps the saved state after a failed update', async () => {
+    const item = { id: 'photo-one', rawKey: 'albums/photo/raw.jpg', thumbnailUrl: 'https://cdn.test/thumb.jpg' }
+    api.fetchAlbumMediaPage.mockResolvedValue({ album: albums[0], items: [item], nextCursor: null })
+    let finishSave
+    api.updateImageThumbnail.mockReturnValueOnce(new Promise(resolve => { finishSave = resolve }))
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    const heart = await screen.findByRole('button', { name: 'Favorite photo' })
+    expect(heart).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(heart)
+    expect(heart).toBeDisabled()
+    await waitFor(() => expect(api.updateImageThumbnail).toHaveBeenCalledWith('admin-token', 'photo', item.rawKey, { isFavorite: true }))
+    finishSave({ item: { ...item, isFavorite: true } })
+    const favorite = await screen.findByRole('button', { name: 'Unfavorite photo' })
+    expect(favorite).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(favorite).not.toBeDisabled())
+    api.updateImageThumbnail.mockRejectedValueOnce(new Error('Save failed'))
+    fireEvent.click(favorite)
+    await screen.findByText('Save failed')
+    expect(screen.getByRole('button', { name: 'Unfavorite photo' })).toHaveAttribute('aria-pressed', 'true')
+    api.updateImageThumbnail.mockResolvedValueOnce({ item: { ...item, isFavorite: false } })
+    fireEvent.click(favorite)
+    expect(await screen.findByRole('button', { name: 'Favorite photo' })).toHaveAttribute('aria-pressed', 'false')
+    expect(api.updateImageThumbnail).toHaveBeenLastCalledWith('admin-token', 'photo', item.rawKey, { isFavorite: false })
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     auth.getIdToken.mockResolvedValue('admin-token')

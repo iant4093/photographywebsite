@@ -495,6 +495,34 @@ class UpdateAlbumBranchTests(unittest.TestCase):
 
 
 class UpdateImageBranchTests(unittest.TestCase):
+    def test_favorites_persist_and_round_trip_for_every_visibility(self):
+        for visibility in ("public", "private", "unlisted"):
+            for favorite in (True, False):
+                with self.subTest(visibility=visibility, favorite=favorite), patch.object(
+                    update_image, "update_album_media", return_value=True
+                ) as normalized, patch.object(update_image, "request_public_api_invalidation") as invalidate:
+                    response, table = self._call(
+                        {"rawKey": RAW_KEY, "isFavorite": favorite},
+                        album(type="photo", visibility=visibility, mediaStoreVersion=1),
+                    )
+                self.assertEqual(response["statusCode"], 200)
+                self.assertIs(response_body(response)["item"]["isFavorite"], favorite)
+                self.assertEqual(normalized.call_args.args[2], {"isFavorite": favorite})
+                update = table.update_item.call_args.kwargs
+                self.assertIn("images[0].isFavorite = :isFavorite", update["UpdateExpression"])
+                self.assertIn("#expectedMediaKey = :expectedKey", update["ConditionExpression"])
+                self.assertEqual(invalidate.call_count, int(visibility == "public"))
+
+    def test_favorites_reject_non_booleans_videos_and_other_album_keys(self):
+        for value in (None, 0, 1, "true", [], {}):
+            response, table = self._call({"rawKey": RAW_KEY, "isFavorite": value}, album())
+            self.assertEqual(response["statusCode"], 400)
+            table.update_item.assert_not_called()
+        for record, key in ((album(type="video"), RAW_KEY), (album(), f"albums/{OTHER_ID}/original/photo.jpg")):
+            response, table = self._call({"rawKey": key, "isFavorite": True}, record)
+            self.assertEqual(response["statusCode"], 400)
+            table.update_item.assert_not_called()
+
     def test_accessibility_updates_round_trip_and_keep_normalized_media_in_sync(self):
         captions = "WEBVTT\n\n00:00.000 --> 00:02.000\nBirds singing."
         fields = {"altText": "A bird on a branch", "captionVtt": captions, "captionLanguage": "en-US", "transcript": "A bird sings on a branch."}

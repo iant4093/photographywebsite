@@ -207,6 +207,8 @@ function ManageAlbums() {
     // Album detail view (images) — tracks which albumId is expanded
     const [expandedAlbumId, setExpandedAlbumId] = useState(null)
     const [albumImages, setAlbumImages] = useState([])
+    const [savingFavorites, setSavingFavorites] = useState(() => new Set())
+    const favoriteRequests = useRef(new Set())
     const [loadingImages, setLoadingImages] = useState(false)
     const [loadingMoreMedia, setLoadingMoreMedia] = useState(false)
     const [mediaNextCursor, setMediaNextCursor] = useState(null)
@@ -574,6 +576,30 @@ function ManageAlbums() {
 
         } catch (err) {
             setActionError(err.message)
+        }
+    }
+
+    async function handleToggleFavorite(img) {
+        const rawKey = managementMediaKey(img)
+        const albumId = expandedAlbumId
+        const requestScope = mediaRequest.current
+        if (!rawKey || favoriteRequests.current.has(rawKey)) return
+        favoriteRequests.current.add(rawKey)
+        setSavingFavorites(new Set(favoriteRequests.current))
+        try {
+            const token = await getIdToken()
+            const isFavorite = img.isFavorite !== true
+            const result = await updateImageThumbnail(token, albumId, rawKey, { isFavorite })
+            if (mediaRequest.current === requestScope) {
+                setAlbumImages(current => current.map(item => managementMediaKey(item) === rawKey
+                    ? { ...item, ...result.item, isFavorite } : item))
+            }
+            setActionSuccess(isFavorite ? 'Photo added to featured photos.' : 'Photo removed from featured photos.')
+        } catch (err) {
+            setActionError(err.message || 'The favorite could not be saved. Please try again.')
+        } finally {
+            favoriteRequests.current.delete(rawKey)
+            setSavingFavorites(new Set(favoriteRequests.current))
         }
     }
 
@@ -1154,6 +1180,19 @@ function ManageAlbums() {
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
                                                                                 </svg>
                                                                             </button>
+                                                                            {typeFilter !== 'video' && <button
+                                                                                type="button"
+                                                                                onClick={() => handleToggleFavorite(img)}
+                                                                                title={img.isFavorite === true ? 'Unfavorite photo' : 'Favorite photo'}
+                                                                                aria-label={img.isFavorite === true ? 'Unfavorite photo' : 'Favorite photo'}
+                                                                                aria-pressed={img.isFavorite === true}
+                                                                                disabled={savingFavorites.has(managementMediaKey(img))}
+                                                                                className={`absolute top-2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber ${img.isFavorite === true ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-white/90 text-charcoal hover:bg-rose-50 hover:text-rose-600'}`}
+                                                                            >
+                                                                                <svg className="w-4 h-4" fill={img.isFavorite === true ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z" />
+                                                                                </svg>
+                                                                            </button>}
                                                                             {/* Remove button (top-right) */}
                                                                             <button
                                                                                 onClick={() => handleRemoveImage(img)}

@@ -47,6 +47,7 @@ SUMMARY_OPTIONAL_FIELDS = {
 DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl", "downloadUrl"}
 IMAGE_OPTIONAL_FIELDS = {
+    "isFavorite",
     "before",
     "previewSrcSet",
     "width",
@@ -362,6 +363,8 @@ def validate_detail(payload: object, expected_album_id: str) -> int:
             raise ProbeError("public image contains a forbidden field")
         if not isinstance(image["id"], str) or not image["id"]:
             raise ProbeError("public image has an invalid identifier")
+        if "isFavorite" in image and not isinstance(image["isFavorite"], bool):
+            raise ProbeError("public image favorite flag is invalid")
         for name in ("url", "thumbnailUrl", "downloadUrl"):
             _public_url(image[name])
         if "hlsUrl" in image:

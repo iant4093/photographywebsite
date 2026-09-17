@@ -58,6 +58,50 @@ beforeEach(() => {
 })
 
 describe('embedded album gallery', () => {
+    it('partitions 80 photos without repeats and wraps lightboxes within 30 featured or 50 other photos', async () => {
+        const images = Array.from({ length: 80 }, (_, index) => ({ id: `photo-${index}`, altText: `Unique photo ${index}`, url: `https://media.test/${index}.jpg`, isFavorite: index < 30 }))
+        api.fetchAlbumForViewing.mockResolvedValue({ ...data, images })
+        render(<AlbumGalleryContent albumId="a1" embedded />)
+        const featured = within(await screen.findByRole('region', { name: 'Featured photos' }))
+        const other = within(screen.getByRole('region', { name: 'All photos' }))
+        expect(featured.getAllByRole('button')).toHaveLength(30)
+        expect(other.getAllByRole('button')).toHaveLength(50)
+        expect(new Set(screen.getAllByRole('button', { name: /Open item/ }).map(button => button.getAttribute('aria-label').split('Unique photo ')[1])).size).toBe(80)
+        fireEvent.click(featured.getAllByRole('button')[0])
+        expect(screen.getByText('1 / 30')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
+        expect(screen.getByText('30 / 30')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+        expect(screen.getByText('1 / 30')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
+        fireEvent.click(other.getAllByRole('button')[0])
+        expect(screen.getByText('1 / 50')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
+        expect(screen.getByText('50 / 50')).toBeInTheDocument()
+        api.requestAlbumMediaDownload.mockResolvedValue({ downloadUrl: 'https://media.test/download' })
+        fireEvent.click(screen.getByTitle('Download Photo'))
+        await waitFor(() => expect(api.requestAlbumMediaDownload).toHaveBeenCalledWith('a1', 'photo-79', 'current-token'))
+    })
+
+    it('hides dividers without favorites and retains the open photo through a refreshed manifest', async () => {
+        render(<AlbumGalleryContent albumId="a1" embedded />)
+        fireEvent.click(await screen.findByRole('button', { name: 'Open item 2 from Coastal Light' }))
+        expect(screen.queryByRole('heading', { name: 'Featured photos' })).toBeNull()
+        expect(screen.queryByRole('heading', { name: 'All photos' })).toBeNull()
+        api.fetchAlbumForViewing.mockResolvedValueOnce({ ...data, images: [{ ...data.images[1], isFavorite: true }] })
+        await act(async () => expiry.hook.mock.lastCall[1]())
+        expect(screen.getByText('1 / 1')).toBeInTheDocument()
+        expect(screen.getByText('All photos in this album are featured.')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Next photo' })).toBeNull()
+    })
+
+    it('opens a shared photo inside its own section', async () => {
+        api.fetchAlbumForViewing.mockResolvedValue({ ...data, images: [{ ...data.images[0], isFavorite: true }, data.images[1]] })
+        render(<AlbumGalleryContent albumId="a1" initialPhotoId="two" />)
+        expect(await screen.findByText('1 / 1')).toBeInTheDocument()
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
     it.each([false, true])('refreshes album statistics with the gallery photos (embedded: %s)', async embedded => {
         render(<AlbumGalleryContent albumId="a1" embedded={embedded} />)
         const stats = within(await screen.findByLabelText('Album statistics'))

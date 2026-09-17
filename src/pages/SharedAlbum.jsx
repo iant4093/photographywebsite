@@ -1,3 +1,5 @@
+import usePhotoSections from '../hooks/usePhotoSections'
+import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router'
@@ -48,7 +50,7 @@ export default function SharedAlbum() {
     const zipControllerRef = useRef(null)
 
     // Lightbox
-    const [lightboxIndex, setLightboxIndex] = useState(null)
+    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev } = usePhotoSections(images, album?.type !== 'video')
     const sharedMediaId = (() => {
         const params = new URLSearchParams(location.search)
         return params.get('photo') || params.get('video')
@@ -74,7 +76,7 @@ export default function SharedAlbum() {
             setImages(nextImages)
             if (initialSharedMediaIdRef.current) {
                 const requestedIndex = nextImages.findIndex(image => mediaId(image) === initialSharedMediaIdRef.current)
-                if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
+                if (requestedIndex >= 0) openPhoto(nextImages[requestedIndex])
             }
             setAccessMessage('')
             setLoading(false)
@@ -85,7 +87,7 @@ export default function SharedAlbum() {
             }
         })
         return () => controller.abort()
-    }, [code, turnstileToken])
+    }, [code, turnstileToken, openPhoto])
 
     useEffect(() => () => zipControllerRef.current?.abort(), [])
 
@@ -94,11 +96,11 @@ export default function SharedAlbum() {
         setTurnstileToken(null)
         setAlbum(null)
         setImages([])
-        setLightboxIndex(null)
+        resetLightbox()
         setLoading(false)
-    }, [])
+    }, [resetLightbox])
     const requestMediaRefresh = useMediaExpiryRefresh(images, requireFreshVerification)
-    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(images, { albumId: album?.albumId, shareCode: code })
+    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(activeImages, { albumId: album?.albumId, shareCode: code })
 
     const handleManualSubmit = (e) => {
         e.preventDefault()
@@ -116,15 +118,8 @@ export default function SharedAlbum() {
     }
 
     // Lightbox navigation
-    const goNext = useCallback(() => {
-        setLightboxIndex((i) => (i + 1) % images.length)
-    }, [images.length])
-
-    const goPrev = useCallback(() => {
-        setLightboxIndex((i) => (i - 1 + images.length) % images.length)
-    }, [images.length])
     const closeLightbox = useCallback(() => {
-        setLightboxIndex(null)
+        resetLightbox()
         if (!sharedMediaId) return
         const params = new URLSearchParams(location.search)
         params.delete('photo')
@@ -133,12 +128,12 @@ export default function SharedAlbum() {
             replace: true,
             preventScrollReset: true,
         })
-    }, [location.pathname, location.search, navigate, sharedMediaId])
+    }, [location.pathname, location.search, navigate, sharedMediaId, resetLightbox])
 
     // Download a single image
     const downloadImage = async (e) => {
         e.stopPropagation()
-        const img = images[lightboxIndex]
+        const img = activeImages[lightboxIndex]
         if (!img) return
 
         try {
@@ -382,48 +377,53 @@ export default function SharedAlbum() {
                 )}
 
                 {/* Image grid */}
-                <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {images.map((img, index) => {
-                        const thumbUrl = mediaThumbnailUrl(img)
+                {album.type !== 'video' ? (
+                    <AlbumPhotoSections sections={sections} albumTitle={album.title} onOpen={openPhoto}
+                        onMediaError={() => requestMediaRefresh('media-error')} />
+                ) : (
+                    <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {images.map((img, index) => {
+                            const thumbUrl = mediaThumbnailUrl(img)
 
-                        return (
-                            <button
-                                data-camera-cursor="photo"
-                                data-page-scroll-media
-                                type="button"
-                                key={mediaId(img) || index}
-                                className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative text-left"
-                                onClick={() => setLightboxIndex(index)}
-                                aria-label={`Open item ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
-                            >
-                                <div
-                                    className="w-full h-full relative"
+                            return (
+                                <button
+                                    data-camera-cursor="photo"
+                                    data-page-scroll-media
+                                    type="button"
+                                    key={mediaId(img) || index}
+                                    className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative text-left"
+                                    onClick={() => openPhoto(img)}
+                                    aria-label={`Open item ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
                                 >
-                                    <ProgressiveImage
-                                        src={thumbUrl}
-                                        srcSet={mediaPreviewSrcSet(img) || undefined}
-                                        blurhash={img.blurhash}
-                                        width={img.width}
-                                        height={img.height}
-                                        sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                                        alt={img.altText || `Item ${index + 1} from ${album.title}`}
-                                        onError={() => requestMediaRefresh('media-error')}
-                                        className="w-full h-full"
-                                    />
-                                </div>
-                                {album.type === 'video' && (
-                                    <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                                        <div className="w-16 h-16 rounded-full bg-white/30 backdrop-blur-sm flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
-                                            <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
-                                                <path d="M8 5v14l11-7z" />
-                                            </svg>
-                                        </div>
+                                    <div
+                                        className="w-full h-full relative"
+                                    >
+                                        <ProgressiveImage
+                                            src={thumbUrl}
+                                            srcSet={mediaPreviewSrcSet(img) || undefined}
+                                            blurhash={img.blurhash}
+                                            width={img.width}
+                                            height={img.height}
+                                            sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                                            alt={img.altText || `Item ${index + 1} from ${album.title}`}
+                                            onError={() => requestMediaRefresh('media-error')}
+                                            className="w-full h-full"
+                                        />
                                     </div>
-                                )}
-                            </button>
-                        )
-                    })}
-                </div>
+                                    {album.type === 'video' && (
+                                        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                            <div className="w-16 h-16 rounded-full bg-white/30 backdrop-blur-sm flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                                                <svg className="w-8 h-8 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                                                    <path d="M8 5v14l11-7z" />
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    )}
+                                </button>
+                            )
+                        })}
+                    </div>
+                )}
 
                 {/* Empty state */}
                 {images.length === 0 && (
@@ -435,7 +435,7 @@ export default function SharedAlbum() {
 
             <ExploreMoreAlbums album={album} mediaType={album.type === 'video' ? 'video' : 'photo'} />
 
-            {lightboxIndex !== null && images[lightboxIndex] && album.type !== 'video' && (
+            {lightboxIndex !== null && activeImages[lightboxIndex] && album.type !== 'video' && (
                 <PhotoLightbox
                     images={lightboxImages}
                     index={lightboxIndex}
@@ -452,7 +452,7 @@ export default function SharedAlbum() {
                 />
             )}
 
-            {lightboxIndex !== null && images[lightboxIndex] && album.type === 'video' && (
+            {lightboxIndex !== null && activeImages[lightboxIndex] && album.type === 'video' && (
                 <AccessibleLightbox
                     ariaLabel={`Video player for ${album.title}`}
                     onClose={closeLightbox}

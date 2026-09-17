@@ -50,9 +50,9 @@ def handler(event, context):
         album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
         body = parse_json_body(event, max_bytes=32 * 1024)
         raw_key = require_string(body.get("rawKey"), "rawKey", maximum=1024)
-        if not ({"thumbKey", "blurhash", *ACCESSIBILITY_LIMITS} & body.keys()):
+        if not ({"thumbKey", "blurhash", "isFavorite", *ACCESSIBILITY_LIMITS} & body.keys()):
             _audit(event, context, "denied", "empty_update")
-            return error_response(400, "Provide thumbnail or accessibility metadata", code="invalid_request")
+            return error_response(400, "Provide thumbnail, favorite, or accessibility metadata", code="invalid_request")
 
         album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
         if not album:
@@ -69,6 +69,12 @@ def handler(event, context):
             return error_response(404, "Media not found", code="not_found")
 
         accessibility = {}
+        if "isFavorite" in body:
+            if not isinstance(body["isFavorite"], bool):
+                raise ValidationError("isFavorite must be a boolean")
+            if album.get("type") == "video":
+                raise ValidationError("Favorites are available for photo albums only")
+            accessibility["isFavorite"] = body["isFavorite"]
         for field, limit in ACCESSIBILITY_LIMITS.items():
             if field in body:
                 accessibility[field] = optional_string(body[field], field, maximum=limit)

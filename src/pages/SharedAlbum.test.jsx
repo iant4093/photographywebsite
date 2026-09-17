@@ -74,6 +74,24 @@ const photoData = {
 }
 
 describe('SharedAlbum access and gallery', () => {
+  it('opens shared favorites in their own deck and downloads the correct non-favorite', async () => {
+    api.fetchSharedAlbum.mockResolvedValue({ ...photoData, images: [
+      { ...photoData.images[0], isFavorite: true }, photoData.images[1],
+      { ...photoData.images[0], id: 'p3', isFavorite: true },
+    ] })
+    renderShared('/sharedalbum/code-1?photo=p3')
+    fireEvent.click(screen.getByRole('button', { name: 'Solve security check' }))
+    expect(await screen.findByText('2 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
+    expect(within(screen.getByRole('region', { name: 'Featured photos' })).getAllByRole('button')).toHaveLength(2)
+    fireEvent.click(within(screen.getByRole('region', { name: 'All photos' })).getByRole('button'))
+    expect(screen.getByText('1 / 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('Download Photo'))
+    await waitFor(() => expect(api.requestSharedMediaDownload).toHaveBeenCalledWith('code-1', 'p2'))
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     clearCatalogSnapshots()

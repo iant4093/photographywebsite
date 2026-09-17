@@ -1,9 +1,10 @@
+import usePhotoSections from '../hooks/usePhotoSections'
+import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useNavigationType } from 'react-router'
 import { fetchAlbumForViewing, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
-import ProgressiveImage from '../components/ProgressiveImage'
 import SkeletonGrid from '../components/SkeletonGrid'
 import PhotoLightbox from '../components/PhotoLightbox'
 import AlbumQrCode from '../components/AlbumQrCode'
@@ -15,8 +16,6 @@ import { useLocation } from 'react-router'
 import {
     mediaFileName,
     mediaId,
-    mediaPreviewSrcSet,
-    mediaThumbnailUrl,
     resolveMediaDownloadUrl,
     startBrowserDownload,
 } from '../utils/mediaUrls'
@@ -79,8 +78,8 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
     // Start the first grid row immediately at the current column breakpoint.
     const eagerImageCount = window.matchMedia?.('(min-width: 1024px)').matches ? 3
         : window.matchMedia?.('(min-width: 640px)').matches ? 2 : 1
-    // Lightbox state — store index for prev/next navigation
-    const [lightboxIndex, setLightboxIndex] = useState(null)
+    // Each photo section owns its lightbox navigation.
+    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev } = usePhotoSections(images)
 
     const loadAlbum = useCallback(async ({ signal, background = false, openPhotoId = '', reuseOriginals = true } = {}) => {
         const scope = albumRequestScopeRef.current
@@ -99,7 +98,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                 ? reuseOriginalPreviews(current, nextImages, { albumId }) : nextImages)
             if (!background && openPhotoId) {
                 const requestedIndex = nextImages.findIndex(image => mediaId(image) === openPhotoId)
-                if (requestedIndex >= 0) setLightboxIndex(requestedIndex)
+                if (requestedIndex >= 0) openPhoto(nextImages[requestedIndex])
             }
             setLoadError('')
             setMediaError('')
@@ -118,7 +117,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
         } finally {
             if (!background && !requestSignal.aborted) setLoading(false)
         }
-    }, [albumId, getIdToken])
+    }, [albumId, getIdToken, openPhoto])
 
     // Fetch album data on mount and clear stale content when the route changes.
     useEffect(() => {
@@ -128,7 +127,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
             if (controller.signal.aborted) return
             setAlbum(null)
             setImages([])
-            setLightboxIndex(null)
+            resetLightbox()
             setLoadError('')
             setMediaError('')
             setDownloading(false)
@@ -144,7 +143,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
             controller.abort()
             if (albumRequestScopeRef.current?.controller === controller) albumRequestScopeRef.current = null
         }
-    }, [albumId, loadAlbum])
+    }, [albumId, loadAlbum, resetLightbox])
 
     useEffect(() => () => zipControllerRef.current?.abort(), [albumId])
 
@@ -160,27 +159,18 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
         [loadAlbum],
     )
     const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)
-    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(images, { albumId, getIdToken })
-
-    // Lightbox navigation — wraps around at ends
-    const goNext = useCallback(() => {
-        setLightboxIndex((i) => (i + 1) % images.length)
-    }, [images.length])
-
-    const goPrev = useCallback(() => {
-        setLightboxIndex((i) => (i - 1 + images.length) % images.length)
-    }, [images.length])
+    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(activeImages, { albumId, getIdToken })
 
     const closeLightbox = useCallback(() => {
-        setLightboxIndex(null)
+        resetLightbox()
         initialSharedPhotoIdRef.current.photoId = null
         if (!embedded) onSharedPhotoClose?.()
-    }, [embedded, onSharedPhotoClose])
+    }, [embedded, onSharedPhotoClose, resetLightbox])
 
     // Download current lightbox image
     const downloadImage = async (e) => {
         e.stopPropagation()
-        const img = images[lightboxIndex]
+        const img = activeImages[lightboxIndex]
         if (!img) return
 
         try {
@@ -340,44 +330,8 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
 
                         {/* Image grid */}
                         <div className="mb-12">
-                            {loading ? (
-                                <SkeletonGrid count={6} type="photo" />
-                            ) : (
-                                <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {images.map((img, index) => {
-                                        const thumbUrl = mediaThumbnailUrl(img)
-
-                                        return (
-                                            <button
-                                                data-camera-cursor="photo"
-                                                data-page-scroll-media
-                                                type="button"
-                                                key={mediaId(img) || index}
-                                                className="linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
-                                                onClick={() => setLightboxIndex(index)}
-                                                aria-label={`Open item ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
-                                            >
-                                                <div className="linen-photo-viewport">
-                                                    <ProgressiveImage
-                                                        src={thumbUrl}
-                                                        eager={index < eagerImageCount}
-                                                        srcSet={mediaPreviewSrcSet(img) || undefined}
-                                                        blurhash={img.blurhash}
-                                                        width={img.width}
-                                                        height={img.height}
-                                                        sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                                                        alt={img.altText || `Item ${index + 1} from ${album.title}`}
-                                                        onError={() => requestMediaRefresh('media-error')}
-                                                        className="w-full h-full"
-                                                    />
-                                                    {/* Warm overlay on hover */}
-                                                    <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                                                </div>
-                                            </button>
-                                        )
-                                    })}
-                                </div>
-                            )}
+                            <AlbumPhotoSections sections={sections} albumTitle={album.title} onOpen={openPhoto}
+                                eagerImageCount={eagerImageCount} onMediaError={() => requestMediaRefresh('media-error')} />
 
                             {/* Empty state */}
                             {!loading && images.length === 0 && (
@@ -390,7 +344,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                         {!embedded && <ExploreMoreAlbums album={album} mediaType="photo" />}
 
                         {/* Lightbox Overlay */}
-                        {lightboxIndex !== null && images[lightboxIndex] && (
+                        {lightboxIndex !== null && activeImages[lightboxIndex] && (
                             <PhotoLightbox
                                 images={lightboxImages}
                                 index={lightboxIndex}

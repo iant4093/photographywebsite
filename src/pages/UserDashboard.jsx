@@ -1,25 +1,24 @@
+import usePhotoSections from '../hooks/usePhotoSections'
+import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useNavigationType } from 'react-router'
 import { useAuth } from '../context/auth'
 import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { motion } from 'framer-motion'
-import ProgressiveImage from '../components/ProgressiveImage'
-import AlbumCard from '../components/AlbumCard'
-import ScrollRow from '../components/ScrollRow'
+import PrivateAlbumCatalog from '../components/PrivateAlbumCatalog'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { useScrollRestoration, saveVerticalScroll, getSavedScroll, markAsRevealed } from '../utils/scroll'
+import { useScrollRestoration, saveVerticalScroll, getSavedScroll } from '../utils/scroll'
 import {
     mediaFileName,
     mediaId,
-    mediaPreviewSrcSet,
-    mediaThumbnailUrl,
     resolveMediaDownloadUrl,
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import { useMediaExpiryRefresh } from '../utils/useMediaExpiryRefresh'
 import { reuseOriginalPreviews } from '../utils/originalPreviewReuse'
 import { pollZipJob } from '../utils/zipDownload'
+import AlbumStats from '../components/AlbumStats'
 import PhotoLightbox from '../components/PhotoLightbox'
 import { openPrintOrder } from '../utils/printOrders'
 
@@ -47,8 +46,8 @@ function UserDashboard() {
     const zipControllerRef = useRef(null)
     const selectedImageScopeRef = useRef(null)
 
-    // Lightbox state — store index instead of URL for prev/next navigation
-    const [lightboxIndex, setLightboxIndex] = useState(null)
+    // Each photo section owns its lightbox navigation.
+    const { sections, activeImages, lightboxIndex, openPhoto, resetLightbox, goNext, goPrev } = usePhotoSections(images)
 
     // Save scroll position before entering an album detail view
     const savedScrollY = useRef(0)
@@ -124,7 +123,7 @@ function UserDashboard() {
         const frame = requestAnimationFrame(() => {
             setSelectedAlbum(null)
             setImages([])
-            setLightboxIndex(null)
+            resetLightbox()
             setLoadingImages(false)
         })
         return () => {
@@ -132,7 +131,7 @@ function UserDashboard() {
             selectedImageScopeRef.current?.controller.abort()
             selectedImageScopeRef.current = null
         }
-    }, [location.key, userEmail])
+    }, [location.key, userEmail, resetLightbox])
 
     const loadSelectedImages = useCallback(async (album, { background = false, reuseOriginals = true } = {}) => {
         if (!album) return []
@@ -169,7 +168,7 @@ function UserDashboard() {
         [loadSelectedImages, selectedAlbum],
     )
     const requestSelectedRefresh = useMediaExpiryRefresh(images, refreshSelectedMedia)
-    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(images, { albumId: selectedAlbum?.albumId, getIdToken })
+    const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(activeImages, { albumId: selectedAlbum?.albumId, getIdToken })
 
     // Open photo album to view images inline
     async function openAlbum(album) {
@@ -187,7 +186,7 @@ function UserDashboard() {
         selectedImageScopeRef.current = { albumId: album.albumId, controller: new AbortController() }
         setSelectedAlbum(album)
         setImages([])
-        setLightboxIndex(null)
+        resetLightbox()
         setMediaError('')
         await loadSelectedImages(album).catch(() => {})
     }
@@ -224,20 +223,12 @@ function UserDashboard() {
         }
     }
 
-    // Lightbox navigation — wraps around at ends
-    const goNext = useCallback(() => {
-        setLightboxIndex((i) => (i + 1) % images.length)
-    }, [images.length])
-
-    const goPrev = useCallback(() => {
-        setLightboxIndex((i) => (i - 1 + images.length) % images.length)
-    }, [images.length])
-    const closeLightbox = useCallback(() => setLightboxIndex(null), [])
+    const closeLightbox = resetLightbox
 
     // Download current lightbox image
     const downloadImage = async (e) => {
         e.stopPropagation()
-        const img = images[lightboxIndex]
+        const img = activeImages[lightboxIndex]
         if (!img) return
 
         try {
@@ -276,55 +267,12 @@ function UserDashboard() {
     const photoAlbums = useMemo(() => albums.filter(a => a.type !== 'video'), [albums]);
     const videoAlbums = useMemo(() => albums.filter(a => a.type === 'video'), [albums]);
 
-    const groupAlbums = useCallback((albumList) => {
-        const grouped = albumList.reduce((acc, album) => {
-            const cat = album.category || 'Uncategorized';
-            if (!acc[cat]) acc[cat] = [];
-            acc[cat].push(album);
-            return acc;
-        }, {});
-        return Object.keys(grouped).sort((a, b) => {
-            if (a === 'Uncategorized') return 1;
-            if (b === 'Uncategorized') return -1;
-            return a.localeCompare(b);
-        }).map(cat => ({ category: cat, items: grouped[cat] }));
-    }, []);
-
-    const photoCategories = useMemo(() => groupAlbums(photoAlbums), [photoAlbums, groupAlbums]);
-    const videoCategories = useMemo(() => groupAlbums(videoAlbums), [videoAlbums, groupAlbums]);
-
     const pageVariants = {
         initial: { opacity: 0, y: 15 },
         animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
         exit: { opacity: 0, y: -15, transition: { duration: 0.3, ease: "easeIn" } }
     }
 
-    const renderAlbumGrid = (categoriesList) => {
-        return categoriesList.map(({ category, items }, categoryIndex) => (
-            <div key={category}>
-                <div className="flex items-center gap-4 mb-6">
-                    <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
-                    <h3 className="font-serif text-2xl font-normal text-charcoal">{category}</h3>
-                    <div className="h-px bg-warm-border flex-1"></div>
-                </div>
-                <ScrollRow scrollKey={`user-${category}`}>
-                    {items.map((album) => (
-                        <div
-                            key={album.albumId}
-                            className="shrink-0 w-[280px] sm:w-[320px] md:w-[340px] snap-start stagger-child"
-                        >
-                            <AlbumCard
-                                album={album}
-                                onOpen={() => openAlbum(album)}
-                                onImageError={() => requestCoverRefresh('media-error')}
-                                onMouseEnter={() => markAsRevealed(`user-album-${album.albumId}`)}
-                            />
-                        </div>
-                    ))}
-                </ScrollRow>
-            </div>
-        ))
-    }
 
     return (
         <motion.div
@@ -346,7 +294,7 @@ function UserDashboard() {
                                 selectedImageScopeRef.current = null
                                 setSelectedAlbum(null)
                                 setImages([])
-                                setLightboxIndex(null)
+                                resetLightbox()
                                 setLoadingImages(false)
                                 requestAnimationFrame(() => window.scrollTo({ top: savedScrollY.current, behavior: 'instant' }))
                             }}
@@ -358,10 +306,11 @@ function UserDashboard() {
                             Back to Albums
                         </button>
 
-                        <div className="linen-gallery-header flex items-start justify-between mb-8 pb-6 border-b border-warm-border">
+                        <div className="linen-gallery-header flex flex-col sm:flex-row gap-6 items-start justify-between mb-8 pb-6 border-b border-warm-border">
                             <div>
                                 <h2 className="font-serif text-3xl font-semibold text-charcoal">{selectedAlbum.title}</h2>
-                                {selectedAlbum.description && <p className="mt-2 text-warm-gray">{selectedAlbum.description}</p>}
+                                {selectedAlbum.description && <p className="mt-2 text-warm-gray whitespace-pre-wrap">{selectedAlbum.description}</p>}
+                                {!loadingImages && <AlbumStats images={images} />}
                             </div>
                             <button
                                 onClick={downloadAll}
@@ -396,39 +345,8 @@ function UserDashboard() {
                                 <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
                             </div>
                         ) : (
-                            <div className="linen-media-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {images.map((img, index) => {
-                                    const thumbUrl = mediaThumbnailUrl(img)
-
-                                    return (
-                                        <button
-                                            data-camera-cursor="photo"
-                                            data-page-scroll-media
-                                            type="button"
-                                            key={mediaId(img) || index}
-                                            className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative text-left"
-                                            onClick={() => setLightboxIndex(index)}
-                                            aria-label={`Open item ${index + 1} from ${selectedAlbum.title}${img.altText ? ` — ${img.altText}` : ''}`}
-                                        >
-                                            <div className="relative w-full h-full">
-                                                <ProgressiveImage
-                                                    src={thumbUrl}
-                                                    srcSet={mediaPreviewSrcSet(img) || undefined}
-                                                    blurhash={img.blurhash}
-                                                    width={img.width}
-                                                    height={img.height}
-                                                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                                                    alt={img.altText || `Photo ${index + 1} from ${selectedAlbum.title}`}
-                                                    onError={() => requestSelectedRefresh('media-error')}
-                                                    className="w-full h-full"
-                                                />
-                                                {/* Warm overlay on hover */}
-                                                <div className="absolute inset-0 bg-gradient-to-t from-charcoal/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                                            </div>
-                                        </button>
-                                    )
-                                })}
-                            </div>
+                            <AlbumPhotoSections sections={sections} albumTitle={selectedAlbum.title} onOpen={openPhoto} itemLabel="Photo"
+                                onMediaError={() => requestSelectedRefresh('media-error')} />
                         )}
                     </div>
                 ) : (
@@ -458,7 +376,7 @@ function UserDashboard() {
                                             </p>
                                         </div>
                                         <div className="flex flex-col gap-8">
-                                            {renderAlbumGrid(photoCategories)}
+                                            <PrivateAlbumCatalog albums={photoAlbums} mediaType="photo" onOpen={openAlbum} onMediaError={() => requestCoverRefresh('media-error')} />
                                         </div>
                                     </div>
                                 )}
@@ -473,7 +391,7 @@ function UserDashboard() {
                                             </p>
                                         </div>
                                         <div className="flex flex-col gap-8">
-                                            {renderAlbumGrid(videoCategories)}
+                                            <PrivateAlbumCatalog albums={videoAlbums} mediaType="video" onOpen={openAlbum} onMediaError={() => requestCoverRefresh('media-error')} />
                                         </div>
                                     </div>
                                 )}
@@ -483,7 +401,7 @@ function UserDashboard() {
                 )}
             </div>
 
-            {lightboxIndex !== null && images[lightboxIndex] && (
+            {lightboxIndex !== null && activeImages[lightboxIndex] && (
                 <PhotoLightbox
                     images={lightboxImages}
                     index={lightboxIndex}

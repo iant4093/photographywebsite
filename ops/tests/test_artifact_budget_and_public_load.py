@@ -81,6 +81,17 @@ def original_descriptor(album_id=ALBUM_ONE, media_id="a" * 24):
 
 
 class OriginalComparisonPublicContractTests(unittest.TestCase):
+    def test_favorite_flag_is_an_optional_boolean_without_private_fields(self):
+        for value in (True, False):
+            payload = detail()
+            payload["images"][0]["isFavorite"] = value
+            self.assertEqual(public_load.validate_detail(payload, ALBUM_ONE), 1)
+        for value in ("true", 1, None, {"ownerEmail": "private@example.test"}):
+            payload = detail()
+            payload["images"][0]["isFavorite"] = value
+            with self.assertRaises(public_load.ProbeError):
+                public_load.validate_detail(payload, ALBUM_ONE)
+
     def test_only_photos_accept_exact_ready_or_state_only_comparisons(self):
         for before in (original_descriptor(), {"status": "unresolved"}, {"status": "pending"}, {"status": "unavailable"}, {"status": "failed"}):
             payload = detail()

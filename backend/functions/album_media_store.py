@@ -33,6 +33,7 @@ MEDIA_FIELDS = frozenset({
     "mediaConvertJobId",
     "originalFilename",
     "altText",
+    "isFavorite",
     "captionVtt",
     "captionLanguage",
     "transcript",
