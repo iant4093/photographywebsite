@@ -1,7 +1,8 @@
-"""Admin-only update of bounded, non-sensitive image metadata."""
+"""Admin-only update of bounded media display metadata."""
 
 import os
 import logging
+import re
 
 import boto3
 
@@ -17,6 +18,7 @@ from validation_helpers import ValidationError, optional_string, parse_json_body
 
 table = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
 logger = logging.getLogger("photography_api.album_write")
+ACCESSIBILITY_LIMITS = {"altText": 500, "captionVtt": 16000, "captionLanguage": 35, "transcript": 8000}
 
 
 def _audit(event, context, outcome, reason_code):
@@ -48,9 +50,9 @@ def handler(event, context):
         album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
         body = parse_json_body(event, max_bytes=32 * 1024)
         raw_key = require_string(body.get("rawKey"), "rawKey", maximum=1024)
-        if "thumbKey" not in body and "blurhash" not in body:
+        if not ({"thumbKey", "blurhash", *ACCESSIBILITY_LIMITS} & body.keys()):
             _audit(event, context, "denied", "empty_update")
-            return error_response(400, "Provide thumbKey and/or blurhash", code="invalid_request")
+            return error_response(400, "Provide thumbnail or accessibility metadata", code="invalid_request")
 
         album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
         if not album:
@@ -65,6 +67,22 @@ def handler(event, context):
         if target_index is None:
             _audit(event, context, "denied", "media_not_found")
             return error_response(404, "Media not found", code="not_found")
+
+        accessibility = {}
+        for field, limit in ACCESSIBILITY_LIMITS.items():
+            if field in body:
+                accessibility[field] = optional_string(body[field], field, maximum=limit)
+        if any(field in accessibility for field in ("captionVtt", "captionLanguage", "transcript")) and album.get("type") != "video":
+            raise ValidationError("Captions and transcripts are available for video albums only")
+        language = accessibility.get("captionLanguage", "")
+        if language and not re.fullmatch(r"[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{1,8})*", language):
+            raise ValidationError("Use a language tag such as en or en-US")
+        captions = accessibility.get("captionVtt", "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+        if captions:
+            timestamp = r"(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}"
+            if not re.match(r"^WEBVTT(?:[ \t][^\n]*)?\n\n", captions) or not re.search(rf"(?m)^{timestamp}[ \t]+-->[ \t]+{timestamp}(?:[ \t][^\n]*)?$", captions):
+                raise ValidationError("Captions must be a WebVTT file with a WEBVTT header and timed cues")
+            accessibility["captionVtt"] = captions
 
         update_parts = []
         values = {}
@@ -98,6 +116,9 @@ def handler(event, context):
             values[":blurhash"] = blurhash
             if is_cover:
                 update_parts.append("coverBlurhash = :blurhash")
+        for field, value in accessibility.items():
+            update_parts.append(f"images[{target_index}].{field} = :{field}")
+            values[f":{field}"] = value
 
         if obsolete_thumb:
             preflight_deletion(keys=[obsolete_thumb], max_versions=100)
@@ -107,11 +128,14 @@ def handler(event, context):
         table.update_item(
             Key={"albumId": album_id},
             UpdateExpression="SET " + ", ".join(update_parts),
-            ConditionExpression="attribute_exists(albumId)",
-            ExpressionAttributeValues=values,
+            # Refuse to attach descriptions/captions to a different image if
+            # another administrator removed or reordered the manifest meanwhile.
+            ConditionExpression=f"attribute_exists(albumId) AND images[{target_index}].#expectedMediaKey = :expectedKey",
+            ExpressionAttributeNames={"#expectedMediaKey": "rawKey" if images[target_index].get("rawKey") else "key"},
+            ExpressionAttributeValues={**values, ":expectedKey": raw_key},
         )
         if album.get("mediaStoreVersion") == 1:
-            normalized_fields = {}
+            normalized_fields = dict(accessibility)
             if ":thumbKey" in values:
                 normalized_fields["thumbKey"] = values[":thumbKey"]
             if ":blurhash" in values:
@@ -134,7 +158,7 @@ def handler(event, context):
                 catalog=True,
                 reason="album-media-updated",
             )
-        updated_image = {**images[target_index]}
+        updated_image = {**images[target_index], **accessibility}
         if ":thumbKey" in values:
             updated_image["thumbKey"] = values[":thumbKey"]
         if ":blurhash" in values:

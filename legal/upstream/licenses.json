@@ -1,0 +1,17 @@
+{
+  "@react-three/fiber@9.7.0": {
+    "file": "react-three-fiber-9.7.0-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/0a107412ac64667b1908422e859447952f57feef/LICENSE",
+    "sha256": "9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a"
+  },
+  "isomorphic-unfetch@3.1.0": {
+    "file": "isomorphic-unfetch-3.1.0-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/developit/unfetch/3.1.0/LICENSE.md",
+    "sha256": "48847c33de7ee90f023d97dd90055cb8fe1e54edb7b956c90e19db852773ce18"
+  },
+  "blurhash@2.0.5": {
+    "file": "blurhash-2.0.5-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/woltapp/blurhash/master/License.md",
+    "sha256": "e2066f9b0007ff98f6ab4677b2e2016a5cb183fe9d43d02570b56f4cb6fa76f0"
+  }
+}

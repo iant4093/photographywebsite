@@ -7,9 +7,11 @@ origin. The Fotomoto script is never loaded by the authenticated application;
 the application frames only that exact isolated origin. Closing the dialog
 returns to the same photograph and scroll position.
 
-The store uses Fotomoto's **Free** subscription. There is no monthly subscription
-or Auto Pickup credential. A print-ready file is uploaded manually only after a
-customer places an order.
+The integration is designed for Fotomoto's **Free** subscription and manual
+print-ready file delivery after an order. The actual subscription and payment
+settings have not been verified: the dashboard required login on September 17,
+2026. Do not treat the existence of this integration as confirmation that the
+store is ready to accept paid orders.
 
 ## Security and data flow
 
@@ -51,9 +53,12 @@ Store ID: `f3b4ffed02e8ae181e8de27d1b75195593fbcd49`
    <https://my.fotomoto.com/store/f3b4ffed02e8ae181e8de27d1b75195593fbcd49>.
 2. In the signup/subscription settings, select **Free** (`$0/month`). Current
    plan details are at <https://www.fotomoto.com/home/pricing>. The Free plan
-   charges a transaction fee on sales and does not include Auto Pickup or
-   framed prints.
-3. Connect the existing **Stripe** account for customer payments. Add the card
+   charges **22% per sale**, plus payment-processor fees, and does not include
+   Auto Pickup or framed prints. Rates checked September 17, 2026; recheck before
+   choosing a plan. Production and shipping costs also need to be covered.
+3. Connect an appropriate **Stripe or PayPal** account for customer payments.
+   Account creation, identity verification, and financial setup must be completed
+   by the owner. Add the card
    or PayPal source Fotomoto will charge for the lab's production and shipping
    cost. Fotomoto's registration and payment checklist is at
    <https://support.fotomoto.com/hc/en-us/articles/41739217927827-How-to-register-a-Fotomoto-account-created-via-the-Fotomoto-Partner-Program>.
@@ -93,7 +98,7 @@ Customer flow:
 2. Choose an enabled product, size, crop, quantity, and shipping option in the
    Fotomoto panel. If you close the vendor panel, use **Reopen print options**;
    closing the website dialog returns to the photograph.
-3. Complete payment through Fotomoto's Stripe checkout.
+3. Complete payment using the payment options offered in Fotomoto checkout.
 4. Receive Fotomoto's order confirmation and shipment updates. The customer
    never needs an account on the photography website.
 
@@ -116,10 +121,49 @@ Photographer flow after an order:
 There is no scheduled application job, catalog backfill, credential rotation,
 or ongoing gallery synchronization. Normal uploads, visibility changes, share
 revocation, and album deletion require no Fotomoto maintenance. The only manual
-work is supplying a print-ready JPEG when a real order is received.
+file-delivery work is supplying a print-ready JPEG when a real order is received.
+The seller must also monitor orders, delivery deadlines, customer service, and
+refunds; these responsibilities are not automated away.
 
 The Fotomoto API-mode and widget references used by the implementation are:
 
 - <https://support.fotomoto.com/hc/en-us/articles/41750590989971-Getting-Started-with-the-Fotomoto-API>
 - <https://support.fotomoto.com/hc/en-us/articles/41750603193107-Fotomoto-API-Function-reference-page>
 - <https://support.fotomoto.com/hc/en-us/articles/41750547895059-How-to-make-sure-the-Fotomoto-script-is-loaded>
+
+## Seller responsibilities and launch review — September 17, 2026
+
+Publish the seller as **Ian Truong**, an individual in Oregon, and use
+**iant4093@gmail.com** for order support. Check these in the dashboard, along
+with enabled products, selling prices, shipping destinations, payment receipt,
+lab-cost billing, and tax settings. Product costs and profit calculations must
+be checked inside the actual dashboard; they were not verified here. Do not
+select a paid plan, create a financial account, or accept vendor agreements on
+the owner's behalf without the necessary authorization.
+
+Fotomoto offers automatic lab fulfillment, but this integration still requires
+manual delivery of the original print-ready file. Monitor incoming order
+notifications promptly. The vendor describes up to seven business days of
+production after receiving files, with shipping transit additional. This is a
+vendor estimate, not a new customer delivery promise; honor the actual order
+estimate and required delay/refund rules. [Production and shipping](https://support.fotomoto.com/hc/en-us/articles/41714911153043-How-long-should-it-take-to-receive-my-order)
+
+Refund requests are the seller's responsibility under the newer Fotomoto
+support policy. The older marketing page's 30-day statement conflicts with it.
+Before opening sales, reconcile any displayed checkout return promise with
+`/print-policy`; any more favorable promise made with an order must be honored.
+The website considers voluntary returns individually and preserves mandatory
+remedies. [Refund policy](https://support.fotomoto.com/hc/en-us/articles/41715076303379-Fotomoto-Refund-Policy)
+
+Fotomoto's terms require appropriate content permissions, including releases
+for recognizable people/property as specified by that contract. The owner's
+confirmation of permission to post does not establish all vendor-required
+releases or rights for every commercial use. Do not treat public location as
+a substitute. Review the terms before offering affected images for sale; no
+release documents or client contracts were created. [Fotomoto terms](https://www.fotomoto.com/help/terms)
+
+Tax collection depends on configuration and applicable obligations; Oregon
+location alone does not establish what is owed elsewhere. Import duties can
+be charged at the destination separately from checkout. Do not promise that
+Fotomoto automatically resolves all tax obligations. [Payments and tax settings](https://support.fotomoto.com/hc/en-us/articles/41713497061907-How-can-I-get-paid-for-the-products-I-sell-using-Fotomoto),
+[International import charges](https://support.fotomoto.com/hc/en-us/articles/41749634252307-Are-taxes-and-custom-fees-on-items-shipped-internationally-added-to-orders)

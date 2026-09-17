@@ -4,9 +4,14 @@ import VideoControls from './VideoControls'
 import VideoPlayer from './VideoPlayer'
 import { selectChoice } from '../test/selectChoice'
 
-function setup({ extended = false } = {}) {
+function setup({ extended = false, captions = false } = {}) {
     const video = document.createElement('video')
     const player = document.createElement('div')
+    const captionTrack = { kind: 'captions', mode: 'showing' }
+    const tracks = Object.assign([captionTrack], {
+        addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })
+    if (captions) Object.defineProperty(video, 'textTracks', { value: tracks })
     Object.defineProperty(video, 'duration', { configurable: true, value: 125 })
     Object.defineProperty(video, 'paused', { configurable: true, writable: true, value: true })
     video.play = vi.fn(async () => { video.paused = false; video.dispatchEvent(new Event('play')) })
@@ -29,8 +34,8 @@ function setup({ extended = false } = {}) {
         })
     }
     const parentKey = vi.fn()
-    const view = render(<div onKeyDown={parentKey}><VideoControls videoRef={{ current: video }} playerRef={{ current: player }} /></div>)
-    return { video, player, parentKey, ...view }
+    const view = render(<div onKeyDown={parentKey}><VideoControls videoRef={{ current: video }} playerRef={{ current: player }} captionKey={captions ? 'caption-track' : ''} /></div>)
+    return { video, player, parentKey, captionTrack, tracks, ...view }
 }
 
 afterEach(() => {
@@ -38,6 +43,52 @@ afterEach(() => {
 })
 
 describe('custom video controls', () => {
+    it('toggles caption visibility and follows native text-track changes', () => {
+        const { captionTrack, tracks, unmount } = setup({ captions: true })
+        const toggle = screen.getByRole('button', { name: 'Captions' })
+        expect(toggle).toHaveAttribute('aria-pressed', 'true')
+        fireEvent.click(toggle)
+        expect(captionTrack.mode).toBe('hidden')
+        expect(toggle).toHaveAttribute('aria-pressed', 'false')
+        fireEvent.click(toggle)
+        expect(captionTrack.mode).toBe('showing')
+        act(() => {
+            captionTrack.mode = 'disabled'
+            tracks.addEventListener.mock.calls[0][1]()
+        })
+        expect(toggle).toHaveAttribute('aria-pressed', 'false')
+        unmount()
+        expect(tracks.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+    })
+
+    it('loads authored captions locally, exposes a transcript, and releases replaced tracks', () => {
+        const original = Object.getOwnPropertyDescriptor(HTMLTrackElement.prototype, 'track')
+        const track = { mode: 'disabled' }
+        Object.defineProperty(HTMLTrackElement.prototype, 'track', { configurable: true, get: () => track })
+        const createUrl = vi.fn().mockReturnValueOnce('blob:first').mockReturnValueOnce('blob:second')
+        vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: vi.fn() }))
+        const captionVtt = 'WEBVTT\n\n00:00.000 --> 00:02.000\nBirdsong.'
+        try {
+            const view = render(<VideoPlayer videoInfo={{ captionVtt, captionLanguage: 'en', transcript: 'A bird sings.', altText: 'A bird on a branch' }} />)
+            expect(view.container.querySelector('track')).toHaveAttribute('src', 'blob:first')
+            expect(track.mode).toBe('showing')
+            expect(screen.getByLabelText('A bird on a branch')).toBeInTheDocument()
+            expect(screen.getByText('Transcript & visual description')).toBeInTheDocument()
+            expect(screen.getByText('A bird sings.')).toBeInTheDocument()
+            fireEvent.error(view.container.querySelector('track'))
+            expect(screen.getByRole('status')).toHaveTextContent('Captions could not load')
+            view.rerender(<VideoPlayer videoInfo={{ captionVtt: captionVtt.replace('Birdsong.', 'Wind.'), captionLanguage: 'en' }} />)
+            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first')
+            expect(screen.queryByRole('status')).toBeNull()
+            view.unmount()
+            expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:second')
+        } finally {
+            if (original) Object.defineProperty(HTMLTrackElement.prototype, 'track', original)
+            else delete HTMLTrackElement.prototype.track
+            vi.unstubAllGlobals()
+        }
+    })
+
     it('plays, pauses, seeks, and shows media time without triggering gallery shortcuts', async () => {
         const { video, parentKey } = setup()
         expect(screen.getByText('0:00 / 2:05')).toBeInTheDocument()

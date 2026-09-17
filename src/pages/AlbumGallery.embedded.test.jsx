@@ -133,7 +133,7 @@ describe('embedded album gallery', () => {
         expect(api.requestAlbumOriginalComparison).not.toHaveBeenCalled()
         fireEvent.click(openPhoto)
         fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
-        await waitFor(() => expect(screen.getByAltText('Before — Camera JPG')).toHaveAttribute('src', data.images[0].before.url))
+        await waitFor(() => expect(screen.getByAltText(/^Before editing — /)).toHaveAttribute('src', data.images[0].before.url))
         expect(api.requestAlbumOriginalComparison).toHaveBeenCalledWith('a1', 'one', 'current-token', { signal: expect.any(AbortSignal) })
         expect(api.fetchAlbumForViewing).toHaveBeenCalledOnce()
     })

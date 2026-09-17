@@ -10,6 +10,7 @@ import {
 import LightboxShareButton from './LightboxShareButton'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
 import PhotoZoomFrame from './PhotoZoomFrame'
+import { photoDescription } from '../utils/mediaAccessibility'
 
 const PHOTO_CROSSFADE_MS = 360
 const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
@@ -374,7 +375,7 @@ function PhotoLightbox({
                                 fetchPriority="high"
                                 srcSet={previewSrcSet || undefined}
                                 sizes={sizesFor(activeImage)}
-                                alt="Full size preview"
+                                alt={photoDescription(activeImage, ariaLabel, index, images.length)}
                                 aria-hidden={showingBefore || undefined}
                                 onLoad={handleFullImageLoad}
                                 onError={onMediaError}
@@ -393,7 +394,7 @@ function PhotoLightbox({
                                     src={beforeUrl}
                                     srcSet={beforeSrcSet || undefined}
                                     sizes={sizesFor(before)}
-                                    alt="Before — Camera JPG"
+                                    alt={`Before editing — ${photoDescription(activeImage, ariaLabel, index, images.length)}`}
                                     aria-hidden={!showingBefore || undefined}
                                     onLoad={handleBeforeLoad}
                                     onError={handleBeforeError}

@@ -9,6 +9,7 @@ function openPrintModal(path = '/print.html#session=capability') {
 
 describe('PrintOrderModal', () => {
     afterEach(() => {
+        fireEvent.keyDown(window, { key: 'Escape' })
         document.body.style.overflow = ''
         document.documentElement.removeAttribute('data-lightbox-scroll-lock')
     })
@@ -25,7 +26,8 @@ describe('PrintOrderModal', () => {
         expect(dialog).toBeInTheDocument()
         expect(frame).toHaveAttribute('src', `${configuredPrintOrigin()}/print.html#session=capability`)
         expect(frame).toHaveFocus()
-        expect(screen.queryByRole('button', { name: /close print options/i })).toBeNull()
+        expect(screen.getByRole('button', { name: /close print options/i })).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Shipping & returns' })).toHaveAttribute('href', '/print-policy')
 
         fireEvent(window, new MessageEvent('message', {
             origin: configuredPrintOrigin(),
@@ -70,13 +72,19 @@ describe('PrintOrderModal', () => {
         expect(loading).toHaveClass('is-hidden')
 
         fireEvent.keyDown(window, { key: 'Tab' })
-        expect(frame).toHaveFocus()
+        expect(screen.getByRole('link', { name: 'Shipping & returns' })).toHaveFocus()
         fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
         expect(frame).toHaveFocus()
 
         fireEvent.mouseDown(dialog.firstElementChild)
         expect(screen.getByRole('dialog')).toBeInTheDocument()
         fireEvent.mouseDown(dialog)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('can close without interacting with the third-party checkout', async () => {
+        openPrintModal()
+        fireEvent.click(await screen.findByRole('button', { name: 'Close print options' }))
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 

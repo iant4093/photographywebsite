@@ -3,6 +3,7 @@ import { Turnstile } from '@marsidev/react-turnstile'
 import { Link } from 'react-router'
 import { sendContactMessage } from '../utils/api'
 import { trackContactSubmission } from '../utils/analytics'
+import { SupportEmail } from '../components/LegalPage'
 
 export default function Contact() {
     const turnstileRef = useRef(null)
@@ -55,7 +56,7 @@ export default function Contact() {
 
             <form onSubmit={handleSubmit} className="bg-white rounded-3xl p-8 md:p-12 shadow-warm-lg border border-warm-border">
                 {status.message && (
-                    <div className={`mb-8 p-4 rounded-xl border text-sm ${status.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+                    <div role={status.type === 'error' ? 'alert' : 'status'} className={`mb-8 p-4 rounded-xl border text-sm ${status.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
                         {status.message}
                     </div>
                 )}
@@ -135,6 +136,10 @@ export default function Contact() {
                     {submitting ? 'Sending...' : 'Send Message'}
                 </button>
             </form>
+            <p className="mt-6 text-sm leading-relaxed text-warm-gray text-center">
+                Prefer email, need an accessible alternative, or have a privacy or photo-removal request? <SupportEmail />
+                <span className="block mt-2">Please include the relevant page or photograph, and keep passwords and payment details out of your message.</span>
+            </p>
         </div>
     )
 }

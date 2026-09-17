@@ -20,6 +20,10 @@ const Stats = lazy(() => import('./pages/Stats'))
 const SharedAlbum = lazy(() => import('./pages/SharedAlbum'))
 const Contact = lazy(() => import('./pages/Contact'))
 const Privacy = lazy(() => import('./pages/Privacy'))
+const Terms = lazy(() => import('./pages/Terms'))
+const PrintPolicy = lazy(() => import('./pages/PrintPolicy'))
+const Accessibility = lazy(() => import('./pages/Accessibility'))
+const Licenses = lazy(() => import('./pages/Licenses'))
 const Login = lazy(() => import('./pages/Login'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AwsCosts = lazy(() => import('./pages/AwsCosts'))
@@ -113,6 +117,10 @@ function App() {
                         <Route path="/sharedalbum/:code" element={<SharedAlbum />} />
                         <Route path="/contact" element={<Contact />} />
                         <Route path="/privacy" element={<Privacy />} />
+                        <Route path="/terms" element={<Terms />} />
+                        <Route path="/print-policy" element={<PrintPolicy />} />
+                        <Route path="/accessibility" element={<Accessibility />} />
+                        <Route path="/licenses" element={<Licenses />} />
                         <Route path="/login" element={<Login />} />
 
                         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />

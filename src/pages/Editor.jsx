@@ -1003,7 +1003,7 @@ export default function Editor() {
         <div className="editor-page">
             <header className="editor-heading">
                 <h1>Photo Editor</h1>
-                <p>Edit standard photos and camera RAW files entirely on your device. Nothing is uploaded or stored by the website.</p>
+                <p>Edit standard photos and camera RAW files entirely on your device. Photos are not uploaded. A recovery copy and your edits are saved in this browser; clear them with Close Photo or in <a href="/privacy" className="underline underline-offset-4">Privacy</a>.</p>
             </header>
 
             <section ref={shellRef} className="editor-shell" data-preview-engine={livePreviewEngine} aria-label="Photo editor workspace">

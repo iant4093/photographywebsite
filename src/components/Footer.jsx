@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import './LegalPage.css'
 
 // Simple footer with warm styling
 function Footer({ editorial = true }) {
@@ -13,13 +14,17 @@ function Footer({ editorial = true }) {
                 ) : (
                     <p className="text-sm text-warm-gray">&copy; {new Date().getFullYear()} Ian Truong</p>
                 )}
-                <div className="linen-footer-links flex items-center gap-6">
+                <div className="linen-footer-links legal-footer-links flex items-center gap-6">
                     <Link
                         to="/privacy"
                         className="text-sm text-warm-gray hover:text-amber-dark transition-colors duration-300"
                     >
                         Privacy
                     </Link>
+                    <Link to="/terms" className="text-sm text-warm-gray hover:text-amber-dark">Terms & photo use</Link>
+                    <Link to="/print-policy" className="text-sm text-warm-gray hover:text-amber-dark">Prints & returns</Link>
+                    <Link to="/accessibility" className="text-sm text-warm-gray hover:text-amber-dark">Accessibility</Link>
+                    <Link to="/licenses" className="text-sm text-warm-gray hover:text-amber-dark">Licenses</Link>
                     <a
                         href="https://www.instagram.com/iant4093/"
                         target="_blank"

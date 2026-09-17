@@ -183,7 +183,7 @@ describe('Photo Editor page', () => {
         const { container } = render(<Editor />)
         expect(screen.getByRole('heading', { name: 'Photo Editor' })).toBeInTheDocument()
         expect(screen.getByText(/entirely on your device/)).toBeInTheDocument()
-        expect(screen.getByText(/Nothing is uploaded or stored/)).toBeInTheDocument()
+        expect(screen.getByText(/Photos are not uploaded/)).toHaveTextContent('saved in this browser')
         const file = new File(['jpeg'], 'mountain.jpg', { type: 'image/jpeg' })
         await user.upload(container.querySelector('input[type="file"]'), file)
 

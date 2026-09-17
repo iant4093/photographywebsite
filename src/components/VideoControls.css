@@ -35,3 +35,6 @@
   .site-video-time { font-size: .65rem; }
   .site-video-controls { padding-inline: .4rem; }
 }
+.site-video-transcript { max-height: 12rem; overflow: auto; padding: .75rem 1rem; background: #171613; color: #fff9ee; font-size: .875rem; }
+.site-video-transcript summary { cursor: pointer; padding: .25rem 0; }
+.site-video-transcript p { white-space: pre-wrap; line-height: 1.6; margin-top: .75rem; }

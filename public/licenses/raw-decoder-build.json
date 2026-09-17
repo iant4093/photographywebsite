@@ -1,0 +1,36 @@
+{
+  "librawVersion": "0.22.2",
+  "librawLicense": "CDDL-1.0",
+  "sourceUrl": "https://www.libraw.org/data/LibRaw-0.22.2.tar.gz",
+  "compiler": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 4.0.18-git",
+  "compilerFlags": [
+    "-O2",
+    "--no-entry",
+    "-std=c++17",
+    "-fexceptions",
+    "-DLIBRAW_NOTHREADS",
+    "-DLIBRAW_NODLL",
+    "-DUSE_JPEG",
+    "-DUSE_ZLIB",
+    "-sUSE_LIBJPEG=1",
+    "-sUSE_ZLIB=1",
+    "-lembind",
+    "-sMODULARIZE=1",
+    "-sEXPORT_NAME=createRawConvertCore",
+    "-sENVIRONMENT=web,worker,node",
+    "-sDYNAMIC_EXECUTION=0",
+    "-sALLOW_MEMORY_GROWTH=1",
+    "-sMAXIMUM_MEMORY=2147483648",
+    "-sEXPORTED_RUNTIME_METHODS=FS",
+    "-sFORCE_FILESYSTEM=1"
+  ],
+  "files": {
+    "public/licenses/libraw-source.tar.gz": "de86b035655accff8d4010f1a221fdf50d353cb7b1422ba26f14a0db92612cfa",
+    "scripts/raw-decoder-bindings.cpp": "1f282a24ed106f2a10060a934c1a969d614b318d4783f2762cc87b7f0b0d751f",
+    "src/editor/vendor/rawconvert-core.js": "1ff61e5f84afc761827cb2d43b553317e6c775a2272a3c3a14769c3217f2603a",
+    "src/editor/vendor/rawconvert-core.wasm": "5f11161b898a15190ff619dcfc38e299f04781c90ce3870c426bf9d6994b5943",
+    "scripts/build-raw-decoder.py": "9af6332196cb06742f182fb541c3c5390cd7d92bac0064fe175b0cf4ec0ee976",
+    "public/licenses/build-raw-decoder.py": "9af6332196cb06742f182fb541c3c5390cd7d92bac0064fe175b0cf4ec0ee976",
+    "public/licenses/raw-decoder-bindings.cpp": "1f282a24ed106f2a10060a934c1a969d614b318d4783f2762cc87b7f0b0d751f"
+  }
+}

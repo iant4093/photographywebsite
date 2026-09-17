@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router'
 import DashboardBackLink from '../components/DashboardBackLink'
 import UploadProgress from '../components/UploadProgress'
 import { useUploadProgress } from '../hooks/useUploadProgress'
+import MediaAccessibilityEditor from '../components/MediaAccessibilityEditor'
 import { useAuth } from '../context/auth'
 import AdminToasts from '../components/AdminToasts'
 import { useAdminToasts } from '../hooks/useAdminToasts'
@@ -219,6 +220,7 @@ function ManageAlbums() {
     const [editingThumbKey, setEditingThumbKey] = useState(null) // rawKey of video being edited
     const [editingThumbTime, setEditingThumbTime] = useState(0)
     const [updatingThumb, setUpdatingThumb] = useState(false)
+    const [editingAccessibilityKey, setEditingAccessibilityKey] = useState(null)
     const scrubberVideoRef = useRef(null)  // ref to the scrubber's <video> element
 
     const { toasts, notify, dismiss } = useAdminToasts()
@@ -521,7 +523,7 @@ function ManageAlbums() {
 
     // Delete entire album
     async function handleDelete(albumId) {
-        if (!confirm('Are you sure you want to delete this album and all its photos?')) return
+        if (!confirm('Delete this website album and its gallery files? Google Drive backups and separate archives are retained. For a privacy deletion request, inventory and review those copies separately before removing the album.')) return
         setActionError('')
         setAlbumSaving(albumId, true)
         try {
@@ -602,6 +604,16 @@ function ManageAlbums() {
     }
 
 
+
+    async function saveAccessibility(image, fields) {
+        const rawKey = managementMediaKey(image)
+        if (!rawKey) throw new Error('This item has no management key. Refresh the album and try again.')
+        const token = await getIdToken()
+        const result = await updateImageThumbnail(token, expandedAlbumId, rawKey, fields)
+        setAlbumImages(current => current.map(item => managementMediaKey(item) === rawKey
+            ? { ...item, ...fields, ...(result.item || {}) } : item))
+        setActionSuccess('Accessibility text saved.')
+    }
 
     // Change the thumbnail of an already-uploaded video using the scrubber's video element
     async function handleChangeVideoThumbnail(img) {
@@ -1183,6 +1195,11 @@ function ManageAlbums() {
                                                                                 decoding="async"
                                                                             />
                                                                             {/* Set as cover button (top-left) */}
+                                                                            <button type="button" onClick={() => setEditingAccessibilityKey(imgKey)}
+                                                                                className="absolute top-11 left-2 px-2 py-1 rounded bg-black/80 text-white text-xs focus-visible:outline-2 focus-visible:outline-white"
+                                                                                aria-label={`Edit description${typeFilter === 'video' ? ' and captions' : ''} for item ${idx + 1}`}>
+                                                                                Describe
+                                                                            </button>
                                                                             <button
                                                                                 onClick={() => handleSetCover(img)}
                                                                                 title="Set as album cover"
@@ -1249,6 +1266,15 @@ function ManageAlbums() {
                                                                 </div>
                                                             )}
 
+                                                            {albumImages.some(image => managementMediaKey(image) === editingAccessibilityKey) && (
+                                                                <MediaAccessibilityEditor
+                                                                    key={`${expandedAlbumId}-${editingAccessibilityKey}`}
+                                                                    image={albumImages.find(image => managementMediaKey(image) === editingAccessibilityKey)}
+                                                                    isVideo={typeFilter === 'video'}
+                                                                    onSave={fields => saveAccessibility(albumImages.find(image => managementMediaKey(image) === editingAccessibilityKey), fields)}
+                                                                    onClose={() => setEditingAccessibilityKey(null)}
+                                                                />
+                                                            )}
                                                             {/* Inline thumbnail editor */}
                                                             {typeFilter === 'video' && editingThumbKey && albumImages.some(i => (i.rawKey || i.key) === editingThumbKey) && (
                                                                 <div className="mt-4 p-4 bg-cream/50 rounded-xl border border-warm-border animate-slide-up">

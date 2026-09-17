@@ -394,7 +394,7 @@ export default function SharedAlbum() {
                                 key={mediaId(img) || index}
                                 className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-all duration-500 aspect-[4/3] relative text-left"
                                 onClick={() => setLightboxIndex(index)}
-                                aria-label={`Open item ${index + 1} from ${album.title}`}
+                                aria-label={`Open item ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
                             >
                                 <div
                                     className="w-full h-full relative"
@@ -406,7 +406,7 @@ export default function SharedAlbum() {
                                         width={img.width}
                                         height={img.height}
                                         sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                                        alt={`Item ${index + 1} from ${album.title}`}
+                                        alt={img.altText || `Item ${index + 1} from ${album.title}`}
                                         onError={() => requestMediaRefresh('media-error')}
                                         className="w-full h-full"
                                     />

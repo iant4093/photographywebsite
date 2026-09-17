@@ -274,10 +274,10 @@ describe('Home complete public catalog', () => {
 
     expect(screen.getByRole('dialog', { name: 'Random photos from Ian Truong Photography' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Finding random photos')
-    expect(screen.queryByAltText('Full size preview')).toBeNull()
+    expect(screen.queryByAltText(/^Photograph \d/)).toBeNull()
     await act(async () => finishRequest(payload))
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
-    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://media.test/first.jpg')
+    expect(screen.getByAltText(/^Photograph \d/)).toHaveAttribute('src', 'https://media.test/first.jpg')
     fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }))
@@ -294,7 +294,7 @@ describe('Home complete public catalog', () => {
     api.requestAlbumOriginalComparison.mockResolvedValue({ before: { status: 'unavailable' } })
     routed(<Home />)
     fireEvent.click(await screen.findByRole('button', { name: /explore random photos/i }))
-    await screen.findByAltText('Full size preview')
+    await screen.findByAltText(/^Photograph \d/)
     fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
     expect(api.requestAlbumOriginalComparison).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
@@ -302,10 +302,10 @@ describe('Home complete public catalog', () => {
     expect(api.requestAlbumOriginalComparison).toHaveBeenCalledWith('album-two', 'second', null, { signal: expect.any(AbortSignal) })
     expect(api.fetchRandomPhotos).toHaveBeenCalledOnce()
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
-    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', second.url)
+    expect(screen.getByAltText(/^Photograph \d/)).toHaveAttribute('src', second.url)
     fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }))
     expect(screen.getByText('1 / 2')).toBeInTheDocument()
-    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', first.url)
+    expect(screen.getByAltText(/^Photograph \d/)).toHaveAttribute('src', first.url)
   })
 
   it('opens a category-scoped shuffle without substituting the cached album cover', async () => {
@@ -336,7 +336,7 @@ describe('Home complete public catalog', () => {
 
     expect(screen.getByRole('dialog', { name: 'Random photos from Birding' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Finding random photos')
-    expect(screen.queryByAltText('Full size preview')).toBeNull()
+    expect(screen.queryByAltText(/^Photograph \d/)).toBeNull()
     expect(api.fetchRandomPhotos).toHaveBeenCalledWith({
       category: 'Birding',
       limit: 6,
@@ -352,7 +352,7 @@ describe('Home complete public catalog', () => {
       }],
     }))
     await waitFor(() => expect(screen.getByText('1 / 1')).toBeInTheDocument())
-    expect(screen.getByAltText('Full size preview')).toHaveAttribute('src', 'https://media.test/bird.jpg')
+    expect(screen.getByAltText(/^Photograph \d/)).toHaveAttribute('src', 'https://media.test/bird.jpg')
   })
 
   it('clears a broken cursor snapshot, reports errors, and retries', async () => {

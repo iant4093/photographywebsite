@@ -28,6 +28,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run lint
+      - name: Exercise redistributed RAW decoder
+        run: npm run test:raw-decoder
       - name: Run frontend tests with deterministic public configuration
         env:
           VITE_API_BASE_URL: /api

@@ -7,6 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores([
     'dist/**',
+    'src/editor/vendor/**',
     'coverage/**',
     '**/.venv*/**',
     'backend/.aws-sam/**',

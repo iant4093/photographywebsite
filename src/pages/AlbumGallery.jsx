@@ -355,7 +355,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                                 key={mediaId(img) || index}
                                                 className="linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                                                 onClick={() => setLightboxIndex(index)}
-                                                aria-label={`Open item ${index + 1} from ${album.title}`}
+                                                aria-label={`Open item ${index + 1} from ${album.title}${img.altText ? ` — ${img.altText}` : ''}`}
                                             >
                                                 <div className="linen-photo-viewport">
                                                     <ProgressiveImage
@@ -366,7 +366,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                                         width={img.width}
                                                         height={img.height}
                                                         sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                                                        alt={`Item ${index + 1} from ${album.title}`}
+                                                        alt={img.altText || `Item ${index + 1} from ${album.title}`}
                                                         onError={() => requestMediaRefresh('media-error')}
                                                         className="w-full h-full"
                                                     />

@@ -492,6 +492,52 @@ class UpdateAlbumBranchTests(unittest.TestCase):
 
 
 class UpdateImageBranchTests(unittest.TestCase):
+    def test_accessibility_updates_round_trip_and_keep_normalized_media_in_sync(self):
+        captions = "WEBVTT\n\n00:00.000 --> 00:02.000\nBirds singing."
+        fields = {"altText": "A bird on a branch", "captionVtt": captions, "captionLanguage": "en-US", "transcript": "A bird sings on a branch."}
+        with patch.object(update_image, "update_album_media", return_value=True) as normalized, patch.object(
+            update_image, "request_public_api_invalidation"
+        ) as invalidate:
+            response, table = self._call({"rawKey": RAW_KEY, **fields}, album(type="video", mediaStoreVersion=1))
+        self.assertEqual(response["statusCode"], 200)
+        for key, value in fields.items():
+            self.assertEqual(response_body(response)["item"][key], value)
+        self.assertEqual(normalized.call_args.args[2], fields)
+        invalidate.assert_called_once()
+        update = table.update_item.call_args.kwargs
+        self.assertIn("images[0].#expectedMediaKey = :expectedKey", update["ConditionExpression"])
+        self.assertEqual(update["ExpressionAttributeValues"][":expectedKey"], RAW_KEY)
+        self.assertNotIn("thumbKey", update["UpdateExpression"])
+
+    def test_accessibility_validates_before_writing_and_accepts_clearing(self):
+        invalid = [
+            {"altText": "a" * 501}, {"altText": ["not text"]},
+            {"captionVtt": "not a caption file"}, {"captionVtt": "WEBVTT\n\nNo timed cues"},
+            {"captionLanguage": "English language"}, {"transcript": "a" * 8001},
+            {"captionVtt": "a" * 16001}, {"rawKey": f"albums/{OTHER_ID}/original/photo.jpg", "altText": "Wrong album"},
+        ]
+        for fields in invalid:
+            with self.subTest(fields=list(fields)):
+                response, table = self._call({"rawKey": RAW_KEY, **fields}, album(type="video"))
+                self.assertEqual(response["statusCode"], 400)
+                table.update_item.assert_not_called()
+        for field in ("captionVtt", "transcript", "captionLanguage"):
+            response, table = self._call({"rawKey": RAW_KEY, field: ""}, album(type="photo"))
+            self.assertEqual(response["statusCode"], 400)
+            table.update_item.assert_not_called()
+        fields = {"altText": "", "captionVtt": "", "captionLanguage": "", "transcript": ""}
+        with patch.object(update_image, "request_public_api_invalidation"):
+            response, _ = self._call({"rawKey": RAW_KEY, **fields}, album(type="video"))
+        self.assertEqual(response["statusCode"], 200)
+        for key in fields:
+            self.assertEqual(response_body(response)["item"].get(key, ""), "")
+
+    def test_caption_import_normalizes_bom_and_windows_newlines(self):
+        with patch.object(update_image, "request_public_api_invalidation"):
+            response, _ = self._call({"rawKey": RAW_KEY, "captionVtt": "\ufeffWEBVTT\r\n\r\n00:00:01.000 --> 00:00:02.000\r\nHello.\r\n"}, album(type="video"))
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response_body(response)["item"]["captionVtt"], "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello.")
+
     def _call(self, body, record=None, **extra):
         table = Mock()
         table.meta.client.exceptions.ConditionalCheckFailedException = type("ConditionalCheckFailedException", (Exception,), {})

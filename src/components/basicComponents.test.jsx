@@ -63,7 +63,7 @@ describe('small presentational and routing components', () => {
 
     const privacy = routed(<Privacy />)
     expect(screen.getByRole('heading', { name: 'Privacy Notice' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Retention and sharing' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Retention, backups, and deletion' })).toBeInTheDocument()
     privacy.unmount()
 
     const users = routed(<ManageUsers />)

@@ -44,6 +44,22 @@ describe('ManageAlbums', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
   })
 
+  it('saves an authored photo description through the protected media update API', async () => {
+    const item = { id: 'opaque-media-id', rawKey: 'albums/photo/raw.jpg', thumbnailUrl: 'https://cdn.test/thumb.jpg' }
+    api.fetchAlbumMediaPage.mockResolvedValue({ album: albums[0], items: [item], nextCursor: null })
+    api.updateImageThumbnail.mockResolvedValue({ item: { ...item, altText: 'Waves breaking on a rocky shore' } })
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit description for item 1' }))
+    fireEvent.change(screen.getByLabelText('Photo description (alt text)'), { target: { value: 'Waves breaking on a rocky shore' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save accessibility text' }))
+    await waitFor(() => expect(api.updateImageThumbnail).toHaveBeenCalledWith('admin-token', 'photo', item.rawKey, { altText: 'Waves breaking on a rocky shore' }))
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Edit media accessibility' })).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit description for item 1' }))
+    expect(screen.getByLabelText('Photo description (alt text)')).toHaveValue('Waves breaking on a rocky shore')
+  })
+
   it('loads, type-filters, groups, and switches among public, link-only, and private scopes', async () => {
     mounted()
     expect(screen.getByText('Manage Photo Albums')).toBeInTheDocument()

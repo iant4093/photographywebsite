@@ -408,7 +408,7 @@ function UserDashboard() {
                                             key={mediaId(img) || index}
                                             className="linen-media-frame group cursor-pointer rounded-xl overflow-hidden shadow-warm-sm hover:shadow-warm-lg transition-shadow duration-500 aspect-[4/3] relative text-left"
                                             onClick={() => setLightboxIndex(index)}
-                                            aria-label={`Open item ${index + 1} from ${selectedAlbum.title}`}
+                                            aria-label={`Open item ${index + 1} from ${selectedAlbum.title}${img.altText ? ` — ${img.altText}` : ''}`}
                                         >
                                             <div className="relative w-full h-full">
                                                 <ProgressiveImage
@@ -418,7 +418,7 @@ function UserDashboard() {
                                                     width={img.width}
                                                     height={img.height}
                                                     sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                                                    alt={`Photo ${index + 1} from ${selectedAlbum.title}`}
+                                                    alt={img.altText || `Photo ${index + 1} from ${selectedAlbum.title}`}
                                                     onError={() => requestSelectedRefresh('media-error')}
                                                     className="w-full h-full"
                                                 />

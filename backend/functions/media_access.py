@@ -431,7 +431,7 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
     else:
         result.update(url_expiry_metadata())
         result["freshDownloadRequired"] = True
-    for field in ("width", "height", "blurhash", "exif", "thumbnailTime"):
+    for field in ("width", "height", "blurhash", "exif", "thumbnailTime", "altText", "captionVtt", "captionLanguage", "transcript"):
         if field in source:
             result[field] = source[field]
 

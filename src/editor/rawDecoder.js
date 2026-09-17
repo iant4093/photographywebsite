@@ -1,6 +1,6 @@
 import rawWorkerUrl from 'rawconvert-wasm/dist/worker.js?url'
-import rawCoreUrl from 'rawconvert-wasm/dist/rawconvert-core.js?url'
-import rawWasmUrl from 'rawconvert-wasm/dist/rawconvert-core.wasm?url'
+import rawCoreUrl from './vendor/rawconvert-core.js?url'
+import rawWasmUrl from './vendor/rawconvert-core.wasm?url'
 
 const RAW_EXTENSIONS = new Set(['3fr', 'arw', 'cr2', 'cr3', 'dcr', 'dng', 'erf', 'fff', 'iiq', 'kdc', 'mef', 'mos', 'mrw', 'nef', 'nrw', 'orf', 'pef', 'raf', 'raw', 'rw2', 'rwl', 'srw', 'x3f'])
 

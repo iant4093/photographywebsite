@@ -93,6 +93,15 @@ export default function PrintOrderModal({ src, onClose }) {
             }}
         >
             <div className="print-order-modal__panel">
+                <div className="print-order-modal__header">
+                    <nav aria-label="Print order information">
+                        <a href="/print-policy" target="_blank" rel="noopener noreferrer">Shipping & returns</a>
+                        <a href="/terms" target="_blank" rel="noopener noreferrer">Photo use</a>
+                        <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+                        <a href="mailto:iant4093@gmail.com?subject=Print%20order%20support">Order help</a>
+                    </nav>
+                    <button type="button" onClick={onClose} aria-label="Close print options">Close</button>
+                </div>
                 <div className={`print-order-modal__loading ${loaded ? 'is-hidden' : ''}`} role="status">
                     Preparing print options…
                 </div>

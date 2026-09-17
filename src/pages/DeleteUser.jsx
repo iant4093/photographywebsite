@@ -75,7 +75,7 @@ function DeleteUser() {
                 <div className="mb-10">
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">Delete User</h1>
                     <p className="mt-2 text-warm-gray">
-                        Permanently remove a user and <strong>all</strong> their albums and photos. This cannot be undone.
+                        Permanently remove a website account and its owned galleries. Google Drive backups, separate archives, emails, and print-provider records require separate review for a privacy deletion request.
                     </p>
                 </div>
 
@@ -102,7 +102,7 @@ function DeleteUser() {
                                 Delete {selectedUser.email}?
                             </h3>
                             <p className="text-sm text-warm-gray text-center mb-6">
-                                This will permanently delete the user, <strong>all their albums</strong>, and <strong>all their photos</strong>. This action cannot be undone.
+                                This permanently deletes the website account and its owned gallery files. It does not erase Drive backups, separate archives, emails, or print-provider records. For a privacy request, inventory those records before deleting the account so you can locate every related copy. Website deletion cannot be undone here.
                             </p>
 
                             <div className="mb-6">

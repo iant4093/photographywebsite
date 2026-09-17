@@ -8,12 +8,27 @@ const timestamp = seconds => {
     return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`
 }
 
-export default function VideoControls({ videoRef, playerRef }) {
+export default function VideoControls({ videoRef, playerRef, captionKey = '' }) {
     const [media, setMedia] = useState({ paused: true, time: 0, duration: 0, muted: true, volume: 1, rate: 1 })
     const [fullscreen, setFullscreen] = useState(false)
     const [canFullscreen, setCanFullscreen] = useState(false)
     const [canPip, setCanPip] = useState(false)
     const [notice, setNotice] = useState('')
+    const [captionsOn, setCaptionsOn] = useState(true)
+    useEffect(() => {
+        const tracks = videoRef.current?.textTracks
+        const sync = () => setCaptionsOn(Array.from(tracks || []).some(track => track.kind === 'captions' && track.mode === 'showing'))
+        tracks?.addEventListener?.('change', sync)
+        sync()
+        return () => tracks?.removeEventListener?.('change', sync)
+    }, [captionKey, videoRef])
+
+    const toggleCaptions = () => {
+        const tracks = Array.from(videoRef.current?.textTracks || []).filter(track => track.kind === 'captions')
+        const next = !tracks.some(track => track.mode === 'showing')
+        tracks.forEach(track => { track.mode = next ? 'showing' : 'hidden' })
+        setCaptionsOn(next)
+    }
 
     useEffect(() => {
         const video = videoRef.current
@@ -88,6 +103,7 @@ export default function VideoControls({ videoRef, playerRef }) {
                 </label>
                 <SiteSelect aria-label="Playback speed" className="site-video-speed" value={media.rate} options={SPEEDS}
                     onChange={value => { videoRef.current.playbackRate = Number(value) }} />
+                {captionKey && <button type="button" onClick={toggleCaptions} aria-label="Captions" aria-pressed={captionsOn}>CC</button>}
                 {canPip && <button type="button" onClick={togglePip} aria-label="Picture in picture"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="1" fill="none" stroke="currentColor" /><path d="M10 10h6v5h-6z" /></svg></button>}
                 {canFullscreen && <button type="button" onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit fullscreen video' : 'Fullscreen video'}>
                     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 2H2v5m11-5h5v5M2 13v5h5m11-5v5h-5" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
