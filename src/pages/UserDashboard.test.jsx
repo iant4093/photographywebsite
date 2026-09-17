@@ -78,6 +78,17 @@ const images = [
 ]
 
 describe('UserDashboard', () => {
+  it('shuffles only accessible photos and opens the chosen photo in its featured section', async () => {
+    api.fetchAlbumsFiltered.mockResolvedValue([albums[0], { ...albums[4], imageCount: 1000 }])
+    api.fetchAlbum.mockResolvedValue({ images: images.map(image => ({ ...image, isFavorite: true })) })
+    mounted()
+    fireEvent.click(await screen.findByRole('button', { name: 'Shuffle People photos' }))
+    expect(await screen.findByRole('dialog', { name: 'Photo viewer for Portraits' })).toBeInTheDocument()
+    expect(screen.getByText(/^[12] \/ 2$/)).toBeInTheDocument()
+    expect(api.fetchAlbum).toHaveBeenCalledWith('photo', 'token', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(api.fetchAlbum.mock.calls.every(([id]) => id === 'photo')).toBe(true)
+  })
+
   it('uses only owned albums for section navigation, sorting, year filters, and statistics', async () => {
     api.fetchAlbumsFiltered.mockResolvedValue([
       { ...albums[0], createdAt: '2026-01-01', imageCount: 2 },

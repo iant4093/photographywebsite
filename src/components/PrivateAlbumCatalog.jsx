@@ -23,6 +23,16 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
     ), [grouped, sort])
     const { sections, setCategoryYear } = useAlbumYearFilters(grouped)
     const mediaLabel = mediaType === 'video' ? 'videos' : 'photos'
+    const shuffleSection = category => {
+        const candidates = grouped[category].filter(album => album.imageCount !== 0)
+        const total = candidates.reduce((sum, album) => sum + Math.max(1, Number(album.imageCount) || 1), 0)
+        let position = Math.random() * total
+        const selected = candidates.find(album => {
+            position -= Math.max(1, Number(album.imageCount) || 1)
+            return position < 0
+        })
+        if (selected) onOpen(selected, { randomPhoto: true })
+    }
     return <div>
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
             <nav aria-label={`Your ${mediaLabel} sections`} className="flex flex-wrap gap-2">
@@ -47,6 +57,14 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
                     <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-6">
                         <span className="linen-category-number">{String(categoryIndex + 1).padStart(2, '0')}</span>
                         <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
+                        {mediaType === 'photo' && <button type="button" className="linen-theme-toggle"
+                            aria-label={`Shuffle ${category} photos`} title={`Shuffle ${category} photos`}
+                            disabled={!grouped[category].some(album => album.imageCount !== 0)}
+                            onClick={() => shuffleSection(category)}>
+                            <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                <path d="M3 7h3c4 0 8 10 12 10h3M17 13l4 4-4 4M3 17h3c1.5 0 3-1.5 4.5-3.5M13.5 10.5C15 8.5 16.5 7 18 7h3M17 3l4 4-4 4" />
+                            </svg>
+                        </button>}
                         <details className="relative">
                             <summary aria-label={`Show ${category} ${mediaLabel} statistics`} className="linen-theme-toggle cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                                 <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7v1" /></svg>

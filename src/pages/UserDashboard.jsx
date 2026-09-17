@@ -171,7 +171,7 @@ function UserDashboard() {
     const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(activeImages, { albumId: selectedAlbum?.albumId, getIdToken })
 
     // Open photo album to view images inline
-    async function openAlbum(album) {
+    async function openAlbum(album, { randomPhoto = false } = {}) {
         savedScrollY.current = window.scrollY
         selectedImageScopeRef.current?.controller.abort()
         selectedImageScopeRef.current = null
@@ -188,7 +188,10 @@ function UserDashboard() {
         setImages([])
         resetLightbox()
         setMediaError('')
-        await loadSelectedImages(album).catch(() => {})
+        const loadedImages = await loadSelectedImages(album).catch(() => [])
+        if (randomPhoto && loadedImages.length && selectedImageScopeRef.current?.albumId === album.albumId) {
+            openPhoto(loadedImages[Math.floor(Math.random() * loadedImages.length)])
+        }
     }
 
     // Download all photos in the album as a ZIP file (Using Backend Generator)
