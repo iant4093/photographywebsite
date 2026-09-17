@@ -112,6 +112,19 @@ describe('Admin photo upload', () => {
     expect(firstBody.uploadRequestId).toBe(firstBody.albumId)
   })
 
+  it('accepts corrected album details after validation rejection without reuploading', async () => {
+    api.createAlbum.mockRejectedValueOnce(Object.assign(new Error('Title is too long'), { status: 400 }))
+    const { container } = mounted()
+    populate(container, [new File(['one'], 'one.jpg', { type: 'image/jpeg' })], { title: 'x'.repeat(201) })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText('Title is too long')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Album Title *'), { target: { value: 'Corrected title' } })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText('Album created successfully!')).toBeInTheDocument()
+    expect(api.uploadFileToS3).toHaveBeenCalledTimes(2)
+    expect(api.createAlbum.mock.calls[1][1]).toEqual({ ...api.createAlbum.mock.calls[0][1], title: 'Corrected title' })
+  })
+
   it('defaults the album date from the browser local calendar date', () => {
     mounted()
 

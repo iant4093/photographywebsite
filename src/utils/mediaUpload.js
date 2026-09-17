@@ -194,5 +194,11 @@ export function createMediaUploadSession({ albumId, s3Prefix, entries, video = f
         // A retry after a lost save response must repeat the same request,
         // including its date and visibility, even if form fields were edited.
         commitBody(body) { commitBody ||= body; return commitBody },
+        rejectCommit(error) {
+            // A definitive validation rejection lets the user fix the form.
+            // Ambiguous network/5xx failures must replay the original payload.
+            // The backend still rejects changed requests if a record exists.
+            if (error?.status === 400) commitBody = undefined
+        },
     }
 }

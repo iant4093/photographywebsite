@@ -32,8 +32,11 @@ infrastructure, acceleration service, resource capacity, or dependency.
   their existing behavior.
 
 Resume is in-memory, for this page and selection. Reloading/closing the page or
-choosing different files starts a new upload. A save retry keeps the original
+choosing different files starts a new upload. An interrupted save retry keeps the original
 album details; edit the album after the retry succeeds if details need changing.
+An explicit validation rejection permits correcting details while still reusing
+uploaded files. The backend continues to reject changed requests if a record
+already exists.
 
 ## Measured results
 
@@ -76,7 +79,7 @@ improvement for comparison dispatch. They are separate from normal unit tests.
 
 ## Validation
 
-- 1,149 frontend tests; line coverage 94.34%, branch coverage 84.39%.
+- 1,150 frontend tests; line coverage 94.35%, branch coverage 84.41%.
 - 644 backend tests; line coverage 89.82%, branch coverage 81.77%.
 - 422 ops tests (three existing skips); line coverage 86.55%, branches 80.76%.
 - Preview-worker coverage, RAW decoder checks, ESLint, production build,

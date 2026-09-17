@@ -200,6 +200,7 @@ export default function UploadVideo() {
             if (fileInputRef.current) fileInputRef.current.value = ''
 
         } catch (err) {
+            uploadSession.current?.rejectCommit(err)
             setError(err.message || 'Upload failed.')
         } finally {
             transfer.stop()
@@ -242,7 +243,7 @@ export default function UploadVideo() {
                 {error && (
                     <div className="mb-8 p-5 rounded-2xl bg-red-50 border border-red-200 text-red-700">
                         <p>{error}</p>
-                        <p className="mt-2 text-sm">{UPLOAD_RETRY_HINT} If saving already started, retries keep the original album details.</p>
+                        <p className="mt-2 text-sm">{UPLOAD_RETRY_HINT} If the save response was interrupted, retries keep the original album details.</p>
                     </div>
                 )}
 
