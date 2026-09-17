@@ -294,10 +294,12 @@ function Home() {
                             className="mb-16 scroll-animate catalog-section"
                             style={{ transitionDelay: `${Math.min(categoryIndex, 4) * 80}ms` }}
                         >
-                            <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-8">
-                                <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+                            <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4 mb-8">
+                                <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:gap-4">
                                     <span className="linen-category-number shrink-0">{String(categoryIndex + 1).padStart(2, '0')}</span>
                                     <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-2 sm:gap-4">
                                     <RandomPhotoExplorer category={category} variant="icon" showStats />
                                 </div>
                                 <div className="hidden sm:block h-px bg-warm-border flex-1" />
