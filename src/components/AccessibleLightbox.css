@@ -82,7 +82,8 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
   min-height: 0;
   transform-origin: 0 0;
   transition: transform 240ms cubic-bezier(0.2, 0, 0.2, 1);
-  will-change: transform;
+  /* Let the browser rasterize at the zoomed scale. A permanent will-change:
+     transform can stretch a cached, fitted-size bitmap even after full detail loads. */
 }
 
 .linen-lightbox-photo {
