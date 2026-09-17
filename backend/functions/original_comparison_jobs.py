@@ -1,4 +1,6 @@
 """Photo-only, best-effort dispatch; scheduled reconciliation repairs missed sends."""
+from concurrent.futures import ThreadPoolExecutor
+
 import json
 import logging
 import os
@@ -19,39 +21,49 @@ def enqueue_original_comparisons(album_id, images):
     album_id = validate_uuid(album_id)
     keys = sorted({image.get("rawKey") or image.get("key") for image in images or []
                    if isinstance(image, dict) and (image.get("rawKey") or image.get("key"))})
+    if not keys:
+        return 0
+    # Create low-level clients before starting threads. Boto3 resources and
+    # sessions are not thread-safe; clients can share their connection pools.
     client = boto3.client("sqs")
-    sent = 0
-    for offset in range(0, len(keys), 10):
+    table_name = os.environ.get("ORIGINAL_COMPARISON_TABLE", "").strip()
+    marker_client = boto3.client("dynamodb") if table_name else None
+    queued_until = str(int(time.time()) + 86400)
+
+    def dispatch(batch):
         response = client.send_message_batch(QueueUrl=queue, Entries=[
             {"Id": str(index), "MessageBody": json.dumps({"albumId": album_id, "rawKey": key})}
-            for index, key in enumerate(keys[offset:offset + 10])
+            for index, key in enumerate(batch)
         ])
         if response.get("Failed"):
             raise RuntimeError("Original comparison dispatch was incomplete")
-        sent += len(response.get("Successful", []))
-        # A long initial backfill can span many reconciliation intervals. Mark
-        # accepted jobs without overwriting a worker's completed record; a failed
-        # marker write is harmless and the worker remains idempotent.
-        table_name = os.environ.get("ORIGINAL_COMPARISON_TABLE", "").strip()
-        if table_name:
+        # Preserve the conditional marker: a fast worker's completed record
+        # must never be replaced by this enqueue operation.
+        if marker_client is not None:
             from media_access import media_id_for_key
-            table = boto3.resource("dynamodb").Table(table_name)
             for success in response.get("Successful", []):
-                raw_key = keys[offset + int(success["Id"])]
+                raw_key = batch[int(success["Id"])]
                 try:
-                    table.update_item(
-                        Key={"albumId": album_id, "mediaId": media_id_for_key(raw_key)},
+                    marker_client.update_item(
+                        TableName=table_name,
+                        Key={"albumId": {"S": album_id}, "mediaId": {"S": media_id_for_key(raw_key)}},
                         UpdateExpression=("SET queuedUntil = :until, rawKey = :raw, "
                                           "#status = if_not_exists(#status, :pending)"),
                         ConditionExpression="attribute_not_exists(#status) OR #status = :pending",
                         ExpressionAttributeNames={"#status": "status"},
-                        ExpressionAttributeValues={":until": int(time.time()) + 86400,
-                                                   ":raw": raw_key, ":pending": "pending"},
+                        ExpressionAttributeValues={":until": {"N": queued_until},
+                                                   ":raw": {"S": raw_key}, ":pending": {"S": "pending"}},
                     )
                 except ClientError as error:
                     if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
                         logger.error("original_queue_marker_failed error_type=%s", type(error).__name__)
-    return sent
+        return len(response.get("Successful", []))
+
+    batches = [keys[offset:offset + 10] for offset in range(0, len(keys), 10)]
+    # Same SQS/DynamoDB operations, at most eight outstanding requests. Join
+    # before returning: Lambda may freeze threads as soon as a handler returns.
+    with ThreadPoolExecutor(max_workers=min(8, len(batches))) as executor:
+        return sum(executor.map(dispatch, batches))
 
 
 def request_original_comparisons(album_id, images):

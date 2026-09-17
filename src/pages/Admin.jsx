@@ -1,16 +1,15 @@
 import SiteSelect from '../components/SiteSelect'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { v4 as uuidv4 } from 'uuid'
 import DashboardBackLink from '../components/DashboardBackLink'
 import UploadProgress from '../components/UploadProgress'
 import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
-import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
-import { mapWithConcurrency } from '../utils/concurrency'
+import { createAlbum, listUsers, fetchAlbums } from '../utils/api'
+import { createMediaUploadSession, UPLOAD_RETRY_HINT } from '../utils/mediaUpload'
 import { processImage } from '../utils/mediaUtils'
 import { currentLocalDateInputValue } from '../utils/date'
-import { uploadOriginalFilename } from '../utils/mediaUrls'
 
 // Upload page — create album for main gallery or specific user
 function Upload() {
@@ -31,6 +30,8 @@ function Upload() {
 
     // File input ref to clear after upload
     const fileInputRef = useRef(null)
+    const uploadSession = useRef(null)
+    useEffect(() => () => uploadSession.current?.cancel(), [])
 
     // Upload progress
     const [uploading, setUploading] = useState(false)
@@ -80,55 +81,26 @@ function Upload() {
         const transfer = startUpload(photoFiles)
 
         try {
-            const token = await getIdToken()
-            const albumId = uuidv4()
-            const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-            const s3Prefix = `albums/${slug}-${albumId.slice(0, 8)}/`
-
-            let coverImageUrlPublic = ''
-            let coverThumbUrlPublic = ''
-            let coverBlurhash = ''
-
-            const finalImages = await mapWithConcurrency(photoFiles, 2, async (file, i) => {
-
-                // 1. Process local thumbnail/hash
-                const { thumbnail, blurhash, width, height } = await processImage(file)
-                const originalProgress = transfer.progressFor(`${i}:original`, file)
-                const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
-                const isCover = i === 0
-
-                // 2. Request both Pre-signed URLs
-                const legacyRawKey = `${s3Prefix}${file.name}`
-                const legacyThumbKey = `${s3Prefix}thumb_${file.name}`
-
-                const [rawUpload, thumbUpload] = await Promise.all([
-                    requestUploadUrl(token, albumId, legacyRawKey, file.type, file.size, 'original'),
-                    requestUploadUrl(token, albumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
-                ])
-
-                // 3. Upload both to S3
-                await Promise.all([
-                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
-                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
-                ])
-
-                const rawKey = rawUpload.key || legacyRawKey
-                const thumbKey = thumbUpload.key || legacyThumbKey
-
-                if (isCover) {
-                    coverImageUrlPublic = rawKey
-                    coverThumbUrlPublic = thumbKey
-                    coverBlurhash = blurhash
-                }
-
-                transfer.completeFile()
-                return { rawKey, thumbKey, blurhash, width, height, originalFilename: uploadOriginalFilename(file.name) }
-            })
-
-            // Create album — cover is auto-set to first image by backend
+            const entries = photoFiles.map(file => ({ file }))
+            if (!uploadSession.current?.matches(entries)) {
+                const albumId = uuidv4()
+                const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+                uploadSession.current = createMediaUploadSession({
+                    albumId, s3Prefix: `albums/${slug}-${albumId.slice(0, 8)}/`, entries, video: false,
+                })
+            }
+            const session = uploadSession.current
+            const { albumId, s3Prefix } = session
+            const finalImages = await session.run({ getIdToken, prepare: file => processImage(file), transfer })
+            const coverThumbUrlPublic = finalImages[0].thumbKey
+            const coverBlurhash = finalImages[0].blurhash
+            const coverImageUrlPublic = finalImages[0].rawKey
             transfer.finalize()
-            const createdAlbum = await createAlbum(token, {
+            const token = await getIdToken()
+
+            const createdAlbum = await createAlbum(token, session.commitBody({
                 albumId,
+                uploadRequestId: albumId,
                 title,
                 description,
                 category: category || 'Uncategorized',
@@ -142,9 +114,10 @@ function Upload() {
                 ownerEmail: visibility === 'private' ? ownerEmail : '',
                 isShared: visibility === 'unlisted',
                 backupToGoogleDrive,
-            })
+            }))
+            uploadSession.current = null
 
-            if (visibility === 'unlisted' && createdAlbum && createdAlbum.shareCode) {
+            if (createdAlbum?.shareCode) {
                 setSuccess(`${window.location.origin}/sharedalbum/${createdAlbum.shareCode}`)
             } else {
                 setSuccess(true)
@@ -212,6 +185,7 @@ function Upload() {
                 {error && (
                     <div className="mb-8 p-5 rounded-2xl bg-red-50 border border-red-200 text-red-700 animate-scale-in">
                         <p>{error}</p>
+                        <p className="mt-2 text-sm">{UPLOAD_RETRY_HINT} If saving already started, retries keep the original album details.</p>
                     </div>
                 )}
 
@@ -334,6 +308,7 @@ function Upload() {
                             <input
                                 ref={fileInputRef}
                                 type="file"
+                                disabled={uploading}
                                 accept="image/*"
                                 multiple
                                 onChange={(e) => setPhotoFiles(Array.from(e.target.files))}

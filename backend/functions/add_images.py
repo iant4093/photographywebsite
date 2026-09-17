@@ -157,12 +157,18 @@ def handler(event, context):
             if album_type == "photo":
                 request_random_photo_pool_refresh()
         _audit(event, context, "success", "media_added", media_count=len(fresh_images))
+        # A lost save response is retried with the same keys. Return canonical
+        # records for every requested item so the manager can restore its UI
+        # without another read or uploading duplicate copies.
+        requested_raw_keys = {image["rawKey"] for image in images}
+        saved_images = [image for image in candidate["images"]
+                        if (image.get("rawKey") or image.get("key")) in requested_raw_keys]
         return json_response(200, {
             "message": "Images appended successfully",
             "added": len(fresh_images),
             "album": serialize_album_summary(candidate, include_admin=True),
             "items": serialize_images(
-                {**candidate, "images": fresh_images},
+                {**candidate, "images": saved_images},
                 include_internal=True,
             ),
         })

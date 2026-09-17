@@ -23,8 +23,8 @@ import {
     addImagesToAlbum,
     updateImageThumbnail,
 } from '../utils/api'
-import { mediaDisplayUrl, mediaThumbnailUrl, uploadOriginalFilename } from '../utils/mediaUrls'
-import { mapWithConcurrency } from '../utils/concurrency'
+import { mediaDisplayUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
+import { createMediaUploadSession, UPLOAD_RETRY_HINT } from '../utils/mediaUpload'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 
 function urlPathMatchesKey(value, key) {
@@ -213,6 +213,8 @@ function ManageAlbums() {
     const [addingFiles, setAddingFiles] = useState([])
     const [addingVideoFiles, setAddingVideoFiles] = useState([]) // [{ file, time }]
     const [uploadingMore, setUploadingMore] = useState(false)
+    const uploadSession = useRef(null)
+    useEffect(() => () => uploadSession.current?.cancel(), [])
     const { progress: uploadProgress, startUpload } = useUploadProgress()
     const addFilesRef = useRef(null)
 
@@ -691,83 +693,21 @@ function ManageAlbums() {
         setActionError('')
         const expandedAlbum = albums.find((a) => a.albumId === expandedAlbumId)
         try {
-            const token = await getIdToken()
-            const s3Prefix = expandedAlbum?.s3Prefix || `albums/${expandedAlbumId}/`
-
-            const finalItems = isVideo
-                ? await mapWithConcurrency(addingVideoFiles, 2, async (vf, i) => {
-                    const { file, time } = vf
-                    // 1. Process local thumbnail/hash
-                    const { thumbnail, blurhash, width, height } = await processVideo(file, time)
-                    const originalProgress = transfer.progressFor(`${i}:original`, file)
-                    const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
-
-                    // 2. Request both Pre-signed URLs
-                    const legacyRawKey = `${s3Prefix}${file.name}`
-                    const legacyThumbKey = `${s3Prefix}thumb_${file.name}.jpg`
-
-                    const [rawUpload, thumbUpload] = await Promise.all([
-                        requestUploadUrl(token, expandedAlbumId, legacyRawKey, file.type, file.size, 'original'),
-                        requestUploadUrl(token, expandedAlbumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
-                    ])
-
-                    // 3. Upload both to S3
-                    await Promise.all([
-                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
-                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
-                    ])
-
-                    const rawKey = rawUpload.key || legacyRawKey
-                    const thumbKey = thumbUpload.key || legacyThumbKey
-
-                    transfer.completeFile()
-                    return {
-                        rawKey,
-                        thumbKey,
-                        blurhash,
-                        width,
-                        height,
-                        thumbnailTime: time,
-                    }
+            const entries = isVideo ? addingVideoFiles : addingFiles.map(file => ({ file }))
+            if (!uploadSession.current?.matches(entries, expandedAlbumId)) {
+                uploadSession.current = createMediaUploadSession({
+                    albumId: expandedAlbumId, entries, video: isVideo,
+                    s3Prefix: expandedAlbum?.s3Prefix || `albums/${expandedAlbumId}/`,
                 })
-                : await mapWithConcurrency(addingFiles, 2, async (file, i) => {
-                    // 1. Process local thumbnail/hash
-                    const { thumbnail, blurhash, width, height } = await processImage(file)
-                    const originalProgress = transfer.progressFor(`${i}:original`, file)
-                    const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
-
-                    // 2. Request both Pre-signed URLs
-                    const legacyRawKey = `${s3Prefix}${file.name}`
-                    const legacyThumbKey = `${s3Prefix}thumb_${file.name}`
-
-                    const [rawUpload, thumbUpload] = await Promise.all([
-                        requestUploadUrl(token, expandedAlbumId, legacyRawKey, file.type, file.size, 'original'),
-                        requestUploadUrl(token, expandedAlbumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
-                    ])
-
-                    // 3. Upload both to S3
-                    await Promise.all([
-                        uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
-                        uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
-                    ])
-
-                    const rawKey = rawUpload.key || legacyRawKey
-                    const thumbKey = thumbUpload.key || legacyThumbKey
-
-                    transfer.completeFile()
-                    return {
-                        rawKey,
-                        thumbKey,
-                        blurhash,
-                        width,
-                        height,
-                        originalFilename: uploadOriginalFilename(file.name),
-                    }
-                })
-
-            // Append to database
+            }
+            const session = uploadSession.current
+            const finalItems = await session.run({
+                getIdToken, transfer,
+                prepare: isVideo ? (file, time) => processVideo(file, time) : file => processImage(file),
+            })
             transfer.finalize()
-            const result = await addImagesToAlbum(token, expandedAlbumId, finalItems)
+            const result = await addImagesToAlbum(await getIdToken(), expandedAlbumId, finalItems)
+            uploadSession.current = null
 
             setAddingFiles([])
             setAddingVideoFiles([])
@@ -777,14 +717,18 @@ function ManageAlbums() {
             // If every prior media page is loaded, append the freshly signed
             // records. Otherwise keep the current page stable and update count.
             if (!mediaNextCursor && Array.isArray(result.items)) {
-                setAlbumImages((current) => [...current, ...result.items])
+                setAlbumImages((current) => {
+                    const items = new Map(current.map(item => [managementMediaKey(item), item]))
+                    result.items.forEach(item => items.set(managementMediaKey(item), item))
+                    return [...items.values()]
+                })
             }
             patchAlbum(expandedAlbumId, result.album || {
                 imageCount: Number(expandedAlbum?.imageCount || albumImages.length) + finalItems.length,
             })
 
         } catch (err) {
-            setActionError(err.message)
+            setActionError(`${err.message || 'Upload failed.'} ${UPLOAD_RETRY_HINT}`)
         } finally {
             transfer.stop()
             setUploadingMore(false)
@@ -1136,6 +1080,7 @@ function ManageAlbums() {
                                                                 <input
                                                                     ref={addFilesRef}
                                                                     type="file"
+                                                                    disabled={uploadingMore}
                                                                     accept={typeFilter === 'video' ? 'video/*' : 'image/*'}
                                                                     multiple
                                                                     onChange={typeFilter === 'video' ? handleVideoFileChange : (e) => setAddingFiles(Array.from(e.target.files))}

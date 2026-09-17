@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  requestUploadUrl: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAlbums: vi.fn(),
+  requestUploadUrls: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAlbums: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processVideo: vi.fn() }))
@@ -44,10 +44,12 @@ describe('UploadVideo', () => {
     media.processVideo.mockResolvedValue({
       thumbnail: new Blob(['poster'], { type: 'image/jpeg' }), blurhash: 'VIDEOHASH', width: 1920, height: 1080,
     })
-    api.requestUploadUrl.mockImplementation(async (_token, _albumId, key, _type, _size, variant) => ({
-      uploadUrl: `https://upload.test/${variant}`,
-      key: variant === 'original' ? `stored/${key.split('/').pop()}` : `stored/${key.split('/').pop()}`,
-      requiredHeaders: { 'x-test': variant },
+    api.requestUploadUrls.mockImplementation(async (_token, _albumId, files) => ({
+      uploads: files.map(({ filename: key, kind: variant }) => ({
+        uploadUrl: `https://upload.test/${variant}`,
+        key: variant === 'original' ? `stored/${key.split('/').pop()}` : `stored/${key.split('/').pop()}`,
+        requiredHeaders: { 'x-test': variant },
+      })),
     }))
     vi.stubGlobal('URL', {
       ...URL,
@@ -96,7 +98,8 @@ describe('UploadVideo', () => {
     expect(await screen.findByText(/Video album created successfully!/)).toBeInTheDocument()
     expect(media.processVideo).toHaveBeenCalledWith(files[0], 7)
     expect(media.processVideo).toHaveBeenCalledWith(files[1], 0)
-    expect(api.requestUploadUrl).toHaveBeenCalledTimes(4)
+    // The first video retains its decoder warmup; ready videos need not wait for it.
+    expect(api.requestUploadUrls).toHaveBeenCalledTimes(2)
     expect(api.uploadFileToS3).toHaveBeenCalledTimes(4)
     expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
       albumId: '87654321-abcd-4567-8901-123456789012', type: 'video', title: 'Wedding Film!',
@@ -114,8 +117,8 @@ describe('UploadVideo', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalled()
   })
 
-  it('creates a link-only video album with legacy keys and a share URL', async () => {
-    api.requestUploadUrl.mockResolvedValue({ uploadUrl: 'https://upload.test', requiredHeaders: {} })
+  it('creates a link-only video album with server-selected keys and a share URL', async () => {
+    api.requestUploadUrls.mockImplementation(async (_token, albumId, files) => ({ uploads: files.map(({ kind }) => ({ uploadUrl: 'https://upload.test', key: `albums/${albumId}/${kind}/server.jpg`, requiredHeaders: {} })) }))
     api.createAlbum.mockResolvedValue({ shareCode: 'film-share' })
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
@@ -127,8 +130,8 @@ describe('UploadVideo', () => {
     expect(screen.getByText(`${window.location.origin}/sharedalbum/film-share`)).toBeInTheDocument()
     expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
       category: 'Uncategorized', visibility: 'unlisted', ownerEmail: '', isShared: true,
-      coverImageUrl: 'albums/wedding-film-87654321/thumb_clip.mp4.jpg',
-      images: [expect.objectContaining({ rawKey: 'albums/wedding-film-87654321/clip.mp4' })],
+      coverImageUrl: 'albums/87654321-abcd-4567-8901-123456789012/thumbnail/server.jpg',
+      images: [expect.objectContaining({ rawKey: 'albums/87654321-abcd-4567-8901-123456789012/original/server.jpg' })],
     }))
   })
 
@@ -168,7 +171,7 @@ describe('UploadVideo', () => {
     fireEvent.submit(container.querySelector('form'))
 
     expect(await screen.findByText(/Export the video as H\.264 MP4/i)).toBeInTheDocument()
-    expect(api.requestUploadUrl).not.toHaveBeenCalled()
+    expect(api.requestUploadUrls).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Upload Video(s)' })).toBeEnabled()
   })
 })

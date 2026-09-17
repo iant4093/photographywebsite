@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   fetchDriveBackupStatus: vi.fn(), retryDriveBackup: vi.fn(), fetchAlbumsFilteredPage: vi.fn(), fetchAllAlbums: vi.fn(), readCachedAlbumsPage: vi.fn(), listUsersPage: vi.fn(), updateAlbum: vi.fn(), updateGalleryOrder: vi.fn(), deleteAlbum: vi.fn(), deleteImages: vi.fn(),
-  requestUploadUrl: vi.fn(), uploadFileToS3: vi.fn(), fetchAlbumMediaPage: vi.fn(), addImagesToAlbum: vi.fn(), updateImageThumbnail: vi.fn(),
+  requestUploadUrl: vi.fn(), requestUploadUrls: vi.fn(), uploadFileToS3: vi.fn(), fetchAlbumMediaPage: vi.fn(), addImagesToAlbum: vi.fn(), updateImageThumbnail: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processImage: vi.fn(), processVideo: vi.fn(), extractFrameFromVideoElement: vi.fn() }))
@@ -12,7 +12,7 @@ const media = vi.hoisted(() => ({ processImage: vi.fn(), processVideo: vi.fn(), 
 vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/mediaUtils', () => media)
-vi.mock('../utils/mediaUrls', () => ({ mediaDisplayUrl: (item) => item.url || item.rawKey, mediaThumbnailUrl: (item) => item.thumbnailUrl || item.thumbKey }))
+vi.mock('../utils/mediaUrls', () => ({ mediaDisplayUrl: (item) => item.url || item.rawKey, mediaThumbnailUrl: (item) => item.thumbnailUrl || item.thumbKey, uploadOriginalFilename: name => name }))
 vi.mock('../utils/concurrency', () => ({ mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)) }))
 
 import ManageAlbums from './ManageAlbums'
@@ -42,6 +42,30 @@ describe('ManageAlbums', () => {
     api.deleteAlbum.mockResolvedValue({})
     api.fetchAlbumMediaPage.mockResolvedValue({ album: null, items: [], nextCursor: null })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
+  })
+
+  it('retries appending uploaded photos without transferring them again', async () => {
+    media.processImage.mockResolvedValue({ thumbnail: new Blob(['t']), width: 400, height: 300, blurhash: 'hash' })
+    api.requestUploadUrls.mockResolvedValue({ uploads: [
+      { uploadUrl: 'https://upload.test/raw', key: 'albums/photo/original/new.jpg' },
+      { uploadUrl: 'https://upload.test/thumb', key: 'albums/photo/thumbnail/new.jpg' },
+    ] })
+    api.uploadFileToS3.mockResolvedValue(undefined)
+    api.addImagesToAlbum.mockRejectedValueOnce(new Error('Save timed out')).mockResolvedValue({ added: 0, items: [{ rawKey: 'albums/photo/original/new.jpg', thumbnailUrl: 'https://cdn.test/new.jpg' }], album: { ...albums[0], imageCount: 1 } })
+    const { container } = mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    await screen.findByText('Add more photos')
+    fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [new File(['raw'], 'new.jpg', { type: 'image/jpeg' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add', exact: true }))
+    expect(await screen.findByText(/Save timed out/)).toBeInTheDocument()
+    auth.getIdToken.mockResolvedValue('refreshed-token')
+    fireEvent.click(screen.getByRole('button', { name: 'Add', exact: true }))
+    expect(await screen.findByText('Added 1 image(s)!')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Edit description for item 1' })).toBeInTheDocument()
+    expect(api.uploadFileToS3).toHaveBeenCalledTimes(2)
+    expect(api.addImagesToAlbum.mock.calls[1][0]).toBe('refreshed-token')
+    expect(api.addImagesToAlbum.mock.calls[1][2]).toEqual(api.addImagesToAlbum.mock.calls[0][2])
   })
 
   it('saves an authored photo description through the protected media update API', async () => {

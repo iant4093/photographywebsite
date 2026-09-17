@@ -151,6 +151,16 @@ describe('public API client behavior', () => {
     expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined()
   })
 
+  it('authorizes a bounded batch through the existing protected endpoint', async () => {
+    const uploads = [{ key: 'albums/a/original/x.jpg', uploadUrl: 'https://upload.test' }]
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ uploads }))
+    vi.stubGlobal('fetch', fetchMock)
+    const files = [{ filename: 'a.jpg', contentType: 'image/jpeg', size: 3, kind: 'original' }]
+    expect(await api.requestUploadUrls('token', 'a', files)).toEqual({ uploads })
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/upload-url$/)
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer token' }, body: JSON.stringify({ albumId: 'a', files }) })
+  })
+
   it('calls every mutation endpoint with encoded identifiers, authorization, JSON, and null 204 handling', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true })))
     vi.stubGlobal('fetch', fetchMock)

@@ -543,7 +543,7 @@ class OriginalStoreAndDispatchTests(OfflineTestCase):
         images = [{"rawKey": f"albums/{ALBUM_ID}/original/{index}.jpg"} for index in range(11)]
         with patch.object(jobs.boto3, "client", return_value=client) as factory:
             self.assertEqual(jobs.enqueue_original_comparisons(ALBUM_ID, images + images + [None, {}]), 11)
-        factory.assert_called_once_with("sqs")
+        self.assertEqual(factory.call_args_list, [call("sqs"), call("dynamodb")])
         self.assertEqual([len(entry.kwargs["Entries"]) for entry in client.send_message_batch.call_args_list], [10, 1])
         for entry in client.send_message_batch.call_args_list:
             self.assertEqual(entry.kwargs["QueueUrl"], ENV["ORIGINAL_COMPARISON_QUEUE_URL"])
@@ -551,9 +551,8 @@ class OriginalStoreAndDispatchTests(OfflineTestCase):
                 payload = json.loads(message["MessageBody"])
                 self.assertEqual(set(payload), {"albumId", "rawKey"})
                 self.assertEqual(payload["albumId"], ALBUM_ID)
-        self.assertEqual({entry[0] for entry in client.method_calls}, {"send_message_batch"})
-        self.resource.Table.assert_called_with(ENV["ORIGINAL_COMPARISON_TABLE"])
-        updates = self.resource.Table.return_value.update_item.call_args_list
+        self.assertEqual({entry[0] for entry in client.method_calls}, {"send_message_batch", "update_item"})
+        updates = client.update_item.call_args_list
         self.assertEqual(len(updates), 11)
         for update in updates:
             self.assertEqual(update.kwargs["ConditionExpression"], "attribute_not_exists(#status) OR #status = :pending")
@@ -562,10 +561,10 @@ class OriginalStoreAndDispatchTests(OfflineTestCase):
     def test_queue_marker_race_cannot_replace_a_completed_worker_record(self):
         client = Mock()
         client.send_message_batch.return_value = {"Successful": [{"Id": "0"}]}
-        self.resource.Table.return_value.update_item.side_effect = error("ConditionalCheckFailedException")
+        client.update_item.side_effect = error("ConditionalCheckFailedException")
         with patch.object(jobs.boto3, "client", return_value=client):
             self.assertEqual(jobs.enqueue_original_comparisons(ALBUM_ID, [IMAGE]), 1)
-        update = self.resource.Table.return_value.update_item.call_args.kwargs
+        update = client.update_item.call_args.kwargs
         self.assertEqual(update["ConditionExpression"], "attribute_not_exists(#status) OR #status = :pending")
 
     def test_disabled_queue_is_noop_and_dispatch_failures_are_best_effort(self):

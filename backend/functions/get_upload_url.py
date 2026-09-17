@@ -79,6 +79,34 @@ def _validate_upload_intent(body):
     return album_id, content_type, kind, extension, size, max_bytes
 
 
+def _sign_upload(intent):
+    album_id, content_type, kind, extension, size, max_bytes = intent
+    key = f"albums/{album_id}/{kind}/{uuid.uuid4().hex}{extension}"
+    tagging = f"visibility={PENDING_VISIBILITY}"
+    expires_in = max(60, min(int(os.environ.get("UPLOAD_URL_TTL_SECONDS", "300")), 900))
+    upload_url = s3.generate_presigned_url(
+        "put_object",
+        Params={
+            "Bucket": bucket_name(),
+            "Key": key,
+            "ContentType": content_type,
+            "ContentLength": size,
+            "Tagging": tagging,
+        },
+        ExpiresIn=expires_in,
+    )
+    return {
+        "uploadUrl": upload_url,
+        "key": key,
+        "requiredHeaders": {
+            "Content-Type": content_type,
+            "x-amz-tagging": tagging,
+        },
+        "expiresIn": expires_in,
+        "maxBytes": max_bytes,
+    }
+
+
 from front_door import verify_front_door_request
 
 
@@ -91,35 +119,21 @@ def handler(event, context):
         return denied
     try:
         body = parse_json_body(event, max_bytes=16 * 1024)
-        album_id, content_type, kind, extension, size, max_bytes = _validate_upload_intent(body)
-        key = f"albums/{album_id}/{kind}/{uuid.uuid4().hex}{extension}"
-        tagging = f"visibility={PENDING_VISIBILITY}"
-        expires_in = max(60, min(int(os.environ.get("UPLOAD_URL_TTL_SECONDS", "300")), 900))
-        upload_url = s3.generate_presigned_url(
-            "put_object",
-            Params={
-                "Bucket": bucket_name(),
-                "Key": key,
-                "ContentType": content_type,
-                "ContentLength": size,
-                "Tagging": tagging,
-            },
-            ExpiresIn=expires_in,
-        )
+        # A bounded wave uses one authorization request for both objects per
+        # photo. Validate the entire batch before signing anything. The legacy
+        # single-file response remains supported for older clients and editors.
+        if "files" in body:
+            files = body["files"]
+            if not isinstance(files, list) or not 1 <= len(files) <= 8:
+                raise ValidationError("files must contain between 1 and 8 upload intents")
+            if any(not isinstance(entry, dict) for entry in files):
+                raise ValidationError("Each upload intent must be an object")
+            intents = [_validate_upload_intent({**entry, "albumId": body.get("albumId")}) for entry in files]
+            result = {"uploads": [_sign_upload(intent) for intent in intents]}
+        else:
+            result = _sign_upload(_validate_upload_intent(body))
         _audit(event, context, "success", "upload_authorized")
-        return json_response(
-            200,
-            {
-                "uploadUrl": upload_url,
-                "key": key,
-                "requiredHeaders": {
-                    "Content-Type": content_type,
-                    "x-amz-tagging": tagging,
-                },
-                "expiresIn": expires_in,
-                "maxBytes": max_bytes,
-            },
-        )
+        return json_response(200, result)
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_upload")
         return error_response(400, str(error), code="invalid_upload")

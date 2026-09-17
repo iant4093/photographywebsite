@@ -278,6 +278,9 @@ class AddImagesBranchTests(unittest.TestCase):
         self.table.get_item.return_value = {"Item": album()}
         response = self._call({"images": [{"rawKey": RAW_KEY}]})
         self.assertEqual(response_body(response)["added"], 0)
+        # A retry returns already-saved records for the manager to reconcile.
+        self.assertEqual(len(response_body(response)["items"]), 1)
+        self.assertEqual(response_body(response)["items"][0]["rawKey"], RAW_KEY)
         self.table.update_item.assert_not_called()
         self.assertEqual(self._call({"images": [None]})["statusCode"], 400)
 

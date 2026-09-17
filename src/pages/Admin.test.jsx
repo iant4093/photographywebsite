@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  requestUploadUrl: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAlbums: vi.fn(),
+  requestUploadUrls: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAlbums: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processImage: vi.fn() }))
@@ -51,10 +51,12 @@ describe('Admin photo upload', () => {
     media.processImage.mockImplementation(async () => ({
       thumbnail: new Blob(['thumb'], { type: 'image/jpeg' }), blurhash: 'LEHASH', width: 1800, height: 1200,
     }))
-    api.requestUploadUrl.mockImplementation(async (_token, _albumId, key, _type, _size, variant) => ({
-      uploadUrl: `https://upload.test/${variant}`,
-      key: variant === 'original' ? `stored/${key.split('/').pop()}` : `stored/thumb-${key.split('/').pop()}`,
-      requiredHeaders: { 'x-test': variant },
+    api.requestUploadUrls.mockImplementation(async (_token, _albumId, files) => ({
+      uploads: files.map(({ filename: key, kind: variant }) => ({
+        uploadUrl: `https://upload.test/${variant}`,
+        key: variant === 'original' ? `stored/${key.split('/').pop()}` : `stored/thumb-${key.split('/').pop()}`,
+        requiredHeaders: { 'x-test': variant },
+      })),
     }))
   })
 
@@ -73,6 +75,7 @@ describe('Admin photo upload', () => {
       const { container } = mounted()
       populate(container, [new File([new Uint8Array(2_000_000)], 'large.jpg', { type: 'image/jpeg' })])
       await act(async () => { fireEvent.submit(container.querySelector('form')) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
       expect(uploads).toHaveLength(2)
       expect(screen.getByText('Measuring…')).toBeInTheDocument()
       now = 2000
@@ -90,6 +93,23 @@ describe('Admin photo upload', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('retries a lost save response with fresh authorization, the same album and no repeated uploads', async () => {
+    api.createAlbum.mockRejectedValueOnce(new Error('Save timed out'))
+    const { container } = mounted()
+    populate(container, [new File(['one'], 'one.jpg', { type: 'image/jpeg' })])
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText('Save timed out')).toBeInTheDocument()
+    const firstBody = api.createAlbum.mock.calls[0][1]
+    auth.getIdToken.mockResolvedValue('refreshed-token')
+    fireEvent.change(screen.getByLabelText('Album Title *'), { target: { value: 'Changed after timeout' } })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText('Album created successfully!')).toBeInTheDocument()
+    expect(api.uploadFileToS3).toHaveBeenCalledTimes(2)
+    expect(api.requestUploadUrls).toHaveBeenCalledTimes(1)
+    expect(api.createAlbum.mock.calls[1]).toEqual(['refreshed-token', firstBody])
+    expect(firstBody.uploadRequestId).toBe(firstBody.albumId)
   })
 
   it('defaults the album date from the browser local calendar date', () => {
@@ -122,7 +142,7 @@ describe('Admin photo upload', () => {
 
     expect(await screen.findByText('Album created successfully!')).toBeInTheDocument()
     expect(media.processImage).toHaveBeenCalledTimes(2)
-    expect(api.requestUploadUrl).toHaveBeenCalledTimes(4)
+    expect(api.requestUploadUrls).toHaveBeenCalledTimes(1)
     expect(api.uploadFileToS3).toHaveBeenCalledTimes(4)
     expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
       albumId: '12345678-abcd-4567-8901-123456789012',
@@ -139,8 +159,8 @@ describe('Admin photo upload', () => {
     expect(screen.getByLabelText('Album Title *')).toHaveValue('')
   })
 
-  it('creates a link-only album and falls back to legacy object keys', async () => {
-    api.requestUploadUrl.mockResolvedValue({ uploadUrl: 'https://upload.test', requiredHeaders: {} })
+  it('creates a link-only album using server-selected object keys', async () => {
+    api.requestUploadUrls.mockImplementation(async (_token, albumId, files) => ({ uploads: files.map(({ kind }) => ({ uploadUrl: 'https://upload.test', key: `albums/${albumId}/${kind}/server.jpg`, requiredHeaders: {} })) }))
     api.createAlbum.mockResolvedValue({ shareCode: 'share-123' })
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
@@ -152,8 +172,8 @@ describe('Admin photo upload', () => {
     expect(screen.getByText(`${window.location.origin}/sharedalbum/share-123`)).toBeInTheDocument()
     expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
       category: 'Uncategorized', visibility: 'unlisted', ownerEmail: '', isShared: true,
-      coverImageUrl: 'albums/summer-light-12345678/Cover.png',
-      coverThumbKey: 'albums/summer-light-12345678/thumb_Cover.png',
+      coverImageUrl: 'albums/12345678-abcd-4567-8901-123456789012/original/server.jpg',
+      coverThumbKey: 'albums/12345678-abcd-4567-8901-123456789012/thumbnail/server.jpg',
     }))
   })
 

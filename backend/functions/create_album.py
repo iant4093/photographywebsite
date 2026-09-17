@@ -4,6 +4,7 @@ import concurrent.futures
 import datetime
 import decimal
 import html
+import hashlib
 import json
 import logging
 import os
@@ -191,6 +192,9 @@ def handler(event, context):
         claims = get_caller_claims(event)
         body = parse_json_body(event)
         album_id = validate_uuid(body.get("albumId"))
+        upload_request_id = validate_uuid(body["uploadRequestId"]) if "uploadRequestId" in body else None
+        upload_request_hash = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
         album_type = validate_album_type(body.get("type"))
         visibility = validate_visibility(body.get("visibility"), default="public")
         title = require_string(body.get("title"), "title", maximum=200)
@@ -235,6 +239,9 @@ def handler(event, context):
             "status": "pending",
             "createdBySub": claims["sub"],
         }
+        if upload_request_id:
+            item.update(uploadRequestId=upload_request_id, uploadRequestHash=upload_request_hash,
+                        uploadActorSub=claims["sub"])
         # ownerSub is the partition key of OwnerSubCreatedAtIndex. DynamoDB
         # rejects empty strings for any table or index key, so non-private
         # albums must omit this attribute rather than persisting "".
@@ -251,10 +258,23 @@ def handler(event, context):
             if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
                 raise
             existing = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+            matching_retry = bool(
+                existing and upload_request_id
+                and existing.get("uploadRequestId") == upload_request_id
+                and existing.get("uploadRequestHash") == upload_request_hash
+                and existing.get("uploadActorSub") == claims["sub"]
+            )
+            if matching_retry and existing.get("status") == "active" and not existing.get("createdBySub"):
+                # A lost HTTP response must not create another album, rerun
+                # media jobs, or resend a private-album notification.
+                _audit(event, context, "success", "album_created", media_count=len(existing.get("images", [])),
+                       visibility=existing.get("visibility"))
+                return json_response(201, serialize_album_summary(existing, include_admin=True))
             if (
                 not existing
                 or existing.get("status") not in {"pending", "active"}
                 or existing.get("createdBySub") != claims["sub"]
+                or (upload_request_id and not matching_retry)
             ):
                 _audit(event, context, "denied", "album_conflict")
                 return error_response(409, "Album already exists", code="conflict")

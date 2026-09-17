@@ -40,6 +40,9 @@ export function createUploadProgress(files, now = () => performance.now()) {
     return {
         progressFor,
         snapshot,
+        restorePart(key, file) {
+            transfers.set(key, { size: file.size, loaded: file.size })
+        },
         completeFile() { completedFiles += 1 },
         finalize() { phase = 'saving' },
     }

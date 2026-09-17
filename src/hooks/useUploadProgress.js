@@ -18,6 +18,7 @@ export function useUploadProgress() {
         const timer = window.setInterval(publish, 500)
         const session = {
             progressFor: tracker.progressFor,
+            restorePart: tracker.restorePart,
             completeFile() { tracker.completeFile(); publish() },
             finalize() { tracker.finalize(); window.clearInterval(timer); publish() },
             stop() { stopped = true; window.clearInterval(timer) },

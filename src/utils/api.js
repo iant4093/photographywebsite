@@ -592,6 +592,15 @@ export function requestUploadUrl(token, albumId, filename, contentType, size, ki
     })
 }
 
+export function requestUploadUrls(token, albumId, files, options = {}) {
+    return apiFetch('/upload-url', {
+        method: 'POST',
+        headers: authHeaders(token),
+        body: JSON.stringify({ albumId, files }),
+        signal: options.signal,
+    })
+}
+
 export function requestHeroUploadUrl(token, file, options = {}) {
     return apiFetch('/admin/hero/upload-url', {
         method: 'POST',

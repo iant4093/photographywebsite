@@ -5,9 +5,9 @@ import DashboardBackLink from '../components/DashboardBackLink'
 import UploadProgress from '../components/UploadProgress'
 import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
-import { requestUploadUrl, uploadFileToS3, createAlbum, listUsers, fetchAlbums } from '../utils/api'
+import { createAlbum, listUsers, fetchAlbums } from '../utils/api'
 import { processVideo } from '../utils/mediaUtils'
-import { mapWithConcurrency } from '../utils/concurrency'
+import { createMediaUploadSession, UPLOAD_RETRY_HINT } from '../utils/mediaUpload'
 import { currentLocalDateInputValue } from '../utils/date'
 
 // Helper component for picking a thumbnail time for a video
@@ -85,6 +85,8 @@ export default function UploadVideo() {
     const [existingCategories, setExistingCategories] = useState([])
 
     const fileInputRef = useRef(null)
+    const uploadSession = useRef(null)
+    useEffect(() => () => uploadSession.current?.cancel(), [])
 
     const [uploading, setUploading] = useState(false)
     const { progress, startUpload } = useUploadProgress()
@@ -140,56 +142,32 @@ export default function UploadVideo() {
         const transfer = startUpload(videoFiles.map(({ file }) => file))
 
         try {
-            const token = await getIdToken()
-            const albumId = uuidv4()
-            const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-            const s3Prefix = `albums/${slug}-${albumId.slice(0, 8)}/`
-
-            let coverThumbUrlPublic = ''
-            let coverBlurhash = ''
-
-            const finalImages = await mapWithConcurrency(videoFiles, 2, async ({ file, time }, i) => {
-
-                // Add a tiny extra delay for the first video to ensure the browser's 
-                // media subsystem is fully ready for off-screen drawing
-                if (i === 0) await new Promise(r => setTimeout(r, 200));
-
-                // 1. Extract thumbnail
-                const { thumbnail, blurhash, width, height } = await processVideo(file, time)
-                const originalProgress = transfer.progressFor(`${i}:original`, file)
-                const thumbnailProgress = transfer.progressFor(`${i}:thumbnail`, thumbnail)
-
-                // 2. Request urls
-                const legacyRawKey = `${s3Prefix}${file.name}`
-                const legacyThumbKey = `${s3Prefix}thumb_${file.name}.jpg`
-
-                const [rawUpload, thumbUpload] = await Promise.all([
-                    requestUploadUrl(token, albumId, legacyRawKey, file.type, file.size, 'original'),
-                    requestUploadUrl(token, albumId, legacyThumbKey, 'image/jpeg', thumbnail.size, 'thumbnail'),
-                ])
-
-                // 3. Upload raw video & thumbnail
-                await Promise.all([
-                    uploadFileToS3(rawUpload.uploadUrl, file, rawUpload.requiredHeaders, { onProgress: originalProgress }),
-                    uploadFileToS3(thumbUpload.uploadUrl, thumbnail, thumbUpload.requiredHeaders, { onProgress: thumbnailProgress })
-                ])
-
-                const rawKey = rawUpload.key || legacyRawKey
-                const thumbKey = thumbUpload.key || legacyThumbKey
-
-                if (i === 0) {
-                    coverThumbUrlPublic = thumbKey
-                    coverBlurhash = blurhash
-                }
-
-                transfer.completeFile()
-                return { rawKey, thumbKey, blurhash, width, height, thumbnailTime: time }
+            const entries = videoFiles
+            if (!uploadSession.current?.matches(entries)) {
+                const albumId = uuidv4()
+                const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+                uploadSession.current = createMediaUploadSession({
+                    albumId, s3Prefix: `albums/${slug}-${albumId.slice(0, 8)}/`, entries, video: true,
+                })
+            }
+            const session = uploadSession.current
+            const { albumId, s3Prefix } = session
+            const finalImages = await session.run({
+                getIdToken, transfer,
+                prepare: async (file, time, index) => {
+                    // Preserve the initial browser media-subsystem warmup.
+                    if (index === 0) await new Promise(resolve => setTimeout(resolve, 200))
+                    return processVideo(file, time)
+                },
             })
-
+            const coverThumbUrlPublic = finalImages[0].thumbKey
+            const coverBlurhash = finalImages[0].blurhash
             transfer.finalize()
+            const token = await getIdToken()
 
-            const createdAlbum = await createAlbum(token, {
+            const createdAlbum = await createAlbum(token, session.commitBody({
                 albumId,
+                uploadRequestId: albumId,
                 type: 'video', // Indicates backend should kick off MediaConvert
                 title,
                 description,
@@ -204,9 +182,10 @@ export default function UploadVideo() {
                 ownerEmail: visibility === 'private' ? ownerEmail : '',
                 isShared: visibility === 'unlisted',
                 backupToGoogleDrive,
-            })
+            }))
+            uploadSession.current = null
 
-            if (visibility === 'unlisted' && createdAlbum && createdAlbum.shareCode) {
+            if (createdAlbum?.shareCode) {
                 setSuccess(`${window.location.origin}/sharedalbum/${createdAlbum.shareCode}`)
             } else {
                 setSuccess(true)
@@ -263,6 +242,7 @@ export default function UploadVideo() {
                 {error && (
                     <div className="mb-8 p-5 rounded-2xl bg-red-50 border border-red-200 text-red-700">
                         <p>{error}</p>
+                        <p className="mt-2 text-sm">{UPLOAD_RETRY_HINT} If saving already started, retries keep the original album details.</p>
                     </div>
                 )}
 
@@ -350,6 +330,7 @@ export default function UploadVideo() {
                             <input
                                 ref={fileInputRef}
                                 type="file"
+                                disabled={uploading}
                                 accept="video/*"
                                 multiple
                                 onChange={handleFileChange}
