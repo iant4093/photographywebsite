@@ -49,6 +49,17 @@ describe('continuous pulling past the footer', () => {
         pullWheel(40)
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
+    it('moves the footer immediately while retaining the activation time guard', () => {
+        wheel({ deltaY: 60 })
+        expect(onProgress).toHaveBeenLastCalledWith(0.3)
+        expect(onTrigger).not.toHaveBeenCalled()
+        advance(1100)
+        startTouch()
+        advance(30)
+        moveTouch(550)
+        expect(onProgress).toHaveBeenLastCalledWith(1)
+        expect(onTrigger).not.toHaveBeenCalled()
+    })
     it('lets sustained active scrolling continue after reaching the bottom, without a pause', () => {
         Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 })
         pullWheel(10)

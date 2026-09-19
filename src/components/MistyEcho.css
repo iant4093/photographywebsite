@@ -1,29 +1,50 @@
+.linen-site .linen-footer.misty-footer-lift {
+    background: color-mix(in srgb, var(--color-cream-dark) 58%, var(--color-cream));
+    translate: 0 calc(-1 * var(--misty-lift, 0px));
+    transition: translate 380ms cubic-bezier(.2, .8, .25, 1);
+}
+
 .misty-pull {
     position: fixed;
     z-index: 14999;
-    left: 50%;
-    bottom: max(22px, env(safe-area-inset-bottom));
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 17px 7px 9px;
-    border: 1px solid rgb(96 64 92 / 16%);
-    border-radius: 999px;
-    background: #fff4e4;
-    color: #664362;
-    box-shadow: 0 4px 20px rgb(46 24 57 / 12%);
-    font: 500 13px / 1.4 'Inter Variable', sans-serif;
-    white-space: nowrap;
+    inset: 0;
+    overflow: hidden;
     pointer-events: none;
     user-select: none;
-    opacity: clamp(0, calc((var(--pull) - .16) * 4), 1);
-    transform: translate(-50%, calc((1 - var(--pull)) * 18px));
-    transition: transform 160ms ease-out, opacity 180ms ease-out;
 }
 
-.misty-pull-track, .misty-pull-progress { stroke: currentColor; stroke-width: 2; }
-.misty-pull-track { opacity: .12; }
-.misty-pull-progress { transform: rotate(-90deg); transform-origin: center; stroke-linecap: round; }
+.misty-pull-pocket {
+    position: absolute;
+    inset: auto 0 0;
+    height: 140px;
+    background: radial-gradient(ellipse at 50% 0, #443541, #241e27 75%);
+    box-shadow: inset 0 8px 18px rgb(0 0 0 / 22%);
+    transform: translateY(calc(140px - var(--misty-lift)));
+    transition: transform 380ms cubic-bezier(.2, .8, .25, 1);
+}
+
+.linen-site .linen-footer.misty-footer-lift[data-misty-pulling],
+.misty-pull[data-pulling="true"] .misty-pull-pocket { transition-duration: 70ms; }
+
+.misty-pull-paw {
+    position: absolute;
+    left: calc(50% - 36px);
+    top: -22px;
+    opacity: clamp(0, calc(var(--pull) * 8), 1);
+    filter: drop-shadow(0 3px 3px rgb(0 0 0 / 25%));
+    transition: opacity 160ms ease;
+}
+
+.misty-pull-pocket span {
+    position: absolute;
+    top: 34px;
+    left: calc(50% + 48px);
+    max-width: calc(50% - 60px);
+    color: #ecd7cf;
+    font: italic 15px / 1.4 'Playfair Display Variable', Georgia, serif;
+    opacity: clamp(0, calc((var(--pull) - .25) * 3), 1);
+    transition: opacity 160ms ease;
+}
 
 .misty-echo {
     position: fixed;
@@ -133,5 +154,6 @@
 .misty-echo-still .misty-echo-signoff { transform: translateX(-50%); }
 
 @media (prefers-reduced-motion: reduce) {
-    .misty-pull { transition: none; }
+    .linen-site .linen-footer.misty-footer-lift,
+    .misty-pull-pocket, .misty-pull-paw, .misty-pull-pocket span { transition: none; }
 }

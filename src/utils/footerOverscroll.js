@@ -75,13 +75,13 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         const now = performance.now()
         startedAt ??= now
         distance = nextDistance
-        const progress = Math.min(1, distance / requiredDistance, (now - startedAt) / requiredMs)
+        const progress = Math.min(1, distance / requiredDistance)
         if (!warmed && distance >= requiredDistance * 0.2) {
             warmed = true
             onAttempt?.()
         }
         onProgress?.(progress)
-        if (progress >= 1) {
+        if (progress >= 1 && now - startedAt >= requiredMs) {
             triggered = true
             onProgress?.(0)
             onTrigger()

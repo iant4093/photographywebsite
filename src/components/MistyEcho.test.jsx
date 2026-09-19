@@ -22,13 +22,33 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Misty echo lifecycle', () => {
-    it('shows continuous pull progress and releases it when pulling stops', () => {
-        render(<MistyEcho />)
+    it('lifts the actual footer with the paw and restores it when pulling stops', () => {
+        render(<><footer className="linen-footer" /><MistyEcho /></>)
+        const footer = document.querySelector('.linen-footer')
         act(() => handlers.onProgress(0.6))
         expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0.6' })
         expect(document.querySelector('.misty-pull')).toHaveTextContent('keep pulling…')
+        expect(footer).toHaveClass('misty-footer-lift')
+        expect(footer).toHaveAttribute('data-misty-pulling')
+        const firstLift = parseFloat(footer.style.getPropertyValue('--misty-lift'))
+        expect(firstLift).toBeGreaterThan(50)
+        act(() => handlers.onProgress(0.9))
+        expect(parseFloat(footer.style.getPropertyValue('--misty-lift'))).toBeGreaterThan(firstLift)
         act(() => handlers.onProgress(0))
         expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0' })
+        expect(footer).toHaveStyle({ '--misty-lift': '0px' })
+        expect(footer).not.toHaveAttribute('data-misty-pulling')
+    })
+    it('removes the footer lift when navigating away during a pull', () => {
+        render(<footer className="linen-footer" />)
+        const footer = document.querySelector('.linen-footer')
+        const view = render(<MistyEcho />)
+        act(() => handlers.onProgress(0.7))
+        view.unmount()
+        expect(footer).not.toHaveClass('misty-footer-lift')
+        expect(footer).not.toHaveAttribute('data-misty-pulling')
+        expect(footer.style.getPropertyValue('--misty-lift')).toBe('')
+        expect(document.querySelector('.misty-pull')).toBeNull()
     })
     it('stays idle until deliberate interaction, reuses previews, and cleans up after six seconds', async () => {
         const view = render(<MistyEcho />)
