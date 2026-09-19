@@ -12,7 +12,7 @@ export default function MistyEcho() {
             if (!entries.some(entry => entry.isIntersecting)) return
             setNearFooter(true)
             observer.disconnect()
-        }, { rootMargin: '0px 0px 240px 0px' })
+        }, { rootMargin: '0px 0px 1000px 0px' })
         observer.observe(footer)
         return () => observer.disconnect()
     }, [])

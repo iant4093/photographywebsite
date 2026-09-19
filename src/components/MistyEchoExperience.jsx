@@ -4,7 +4,7 @@ import { installFooterOverscroll } from '../utils/footerOverscroll'
 import './MistyEcho.css'
 
 const DURATION_MS = 6000
-const COOLDOWN_MS = 30000
+const COOLDOWN_MS = 12000
 const FONTS = ['"Comic Sans MS", "Chalkboard SE", cursive', '"Impact", "Arial Black", sans-serif',
     '"Playfair Display Variable", Georgia, serif', '"Courier New", monospace', '"Marker Felt", "Bradley Hand", cursive']
 const COLORS = ['#fff0bd', '#ffb8cb', '#c8edff', '#d4ffce', '#e0c5ff']
@@ -27,6 +27,8 @@ function makeEchoes(photos) {
 export default function MistyEchoExperience() {
     const [echoes, setEchoes] = useState(null)
     const [pull, setPull] = useState(0)
+    const [waking, setWaking] = useState(false)
+    const [still, setStill] = useState(false)
 
     useEffect(() => {
         const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -45,10 +47,10 @@ export default function MistyEchoExperience() {
             clearTimeout(loadTimer)
             clearTimeout(finishTimer)
             active = false
-            if (!disposed) { setEchoes(null); setPull(0) }
+            if (!disposed) { setEchoes(null); setPull(0); setWaking(false) }
         }
         const prepare = () => {
-            if (motion.matches || active || performance.now() < cooldownUntil) return null
+            if (active || performance.now() < cooldownUntil) return null
             if (loading) return loading
             controller = new AbortController()
             const signal = controller.signal
@@ -64,20 +66,25 @@ export default function MistyEchoExperience() {
             const request = prepare()
             if (!request) return
             active = true
-            cooldownUntil = performance.now() + COOLDOWN_MS
+            setWaking(true)
+            setPull(1)
             const photos = await request
             if (request !== loading) return
-            if (disposed || !active || motion.matches || !photos.length) {
+            if (disposed || !active || !photos.length) {
                 if (!disposed && active) stop()
                 return
             }
             clearTimeout(loadTimer)
+            cooldownUntil = performance.now() + COOLDOWN_MS
+            setWaking(false)
+            setPull(0)
+            setStill(motion.matches)
             setEchoes(makeEchoes(photos))
             finishTimer = setTimeout(stop, DURATION_MS)
         }
         const onProgress = (value) => {
-            if (disposed) return
-            setPull(motion.matches || active || performance.now() < cooldownUntil ? 0 : Math.round(value * 50) / 50)
+            if (disposed || active) return
+            setPull(performance.now() < cooldownUntil ? 0 : Math.round(value * 50) / 50)
         }
         const disposeTrigger = installFooterOverscroll({ onAttempt: prepare, onTrigger: trigger, onProgress })
         const onKeyDown = (event) => { if (event.key === 'Escape') stop() }
@@ -115,10 +122,10 @@ export default function MistyEchoExperience() {
                         <path d="M12 26c0-3 5-8 8-8s8 5 8 8c0 5-5 2-8 2s-8 3-8-2Z" />
                     </g>
                 </svg>
-                <span>keep pulling…</span>
+                <span>{waking ? 'Misty is waking up…' : 'keep pulling…'}</span>
             </div>
             {echoes && (
-                <div className="misty-echo" aria-hidden="true">
+                <div className={`misty-echo${still ? ' misty-echo-still' : ''}`} aria-hidden="true">
                     <div className="misty-echo-glow" />
                     {echoes.map((echo, index) => (
                         <div key={index} className="misty-echo-path" style={{

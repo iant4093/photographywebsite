@@ -122,6 +122,16 @@
     74%, 90% { opacity: 1; transform: translate(-50%, 0); }
 }
 
+.misty-echo-still .misty-echo-copy:not(:last-child) { display: none; }
+.misty-echo-still .misty-echo-copy {
+    animation: none;
+    opacity: 1;
+    transform: translate(calc(-50% + var(--echo-x)), calc(-50% + var(--echo-y))) scale(var(--echo-size)) rotate(var(--echo-turn));
+    will-change: auto;
+}
+.misty-echo-still .misty-echo-glow, .misty-echo-still .misty-echo-signoff { animation: none; opacity: 1; }
+.misty-echo-still .misty-echo-signoff { transform: translateX(-50%); }
+
 @media (prefers-reduced-motion: reduce) {
-    .misty-echo, .misty-pull { display: none; }
+    .misty-pull { transition: none; }
 }

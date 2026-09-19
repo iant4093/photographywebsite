@@ -43,7 +43,7 @@ describe('Misty echo lifecycle', () => {
         expect(document.querySelector('.misty-echo')).toBeNull()
         await trigger()
         expect(loadMistyEchoPhotos).toHaveBeenCalledTimes(1)
-        await act(() => vi.advanceTimersByTimeAsync(30000))
+        await act(() => vi.advanceTimersByTimeAsync(6000))
         await trigger()
         expect(loadMistyEchoPhotos).toHaveBeenCalledTimes(2)
         view.unmount()
@@ -59,13 +59,13 @@ describe('Misty echo lifecycle', () => {
         view.unmount()
         expect(dispose).toHaveBeenCalledTimes(1)
     })
-    it('does not fetch or animate with reduced motion', async () => {
+    it('lets reduced-motion visitors discover a still version of Misty', async () => {
         motion.matches = true
         render(<MistyEcho />)
         act(() => handlers.onProgress(0.6))
         await trigger()
-        expect(loadMistyEchoPhotos).not.toHaveBeenCalled()
-        expect(document.querySelector('.misty-echo')).toBeNull()
+        expect(loadMistyEchoPhotos).toHaveBeenCalledTimes(1)
+        expect(document.querySelector('.misty-echo')).toHaveClass('misty-echo-still')
         expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0' })
     })
     it('silently skips unavailable Misty photos', async () => {
@@ -73,5 +73,21 @@ describe('Misty echo lifecycle', () => {
         render(<MistyEcho />)
         await trigger()
         expect(document.querySelector('.misty-echo')).toBeNull()
+        loadMistyEchoPhotos.mockResolvedValue(['https://media.test/cat-thumb.jpg'])
+        await trigger()
+        expect(document.querySelector('.misty-echo')).not.toBeNull()
+    })
+    it('keeps the paw visible while the triggered previews are loading', async () => {
+        let finishLoading
+        loadMistyEchoPhotos.mockImplementation(() => new Promise(resolve => { finishLoading = resolve }))
+        render(<MistyEcho />)
+        let pending
+        await act(async () => { pending = handlers.onTrigger(); await vi.advanceTimersByTimeAsync(0) })
+        expect(document.querySelector('.misty-pull')).toHaveTextContent('Misty is waking up…')
+        act(() => handlers.onProgress(0))
+        expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '1' })
+        await act(async () => { finishLoading(['https://media.test/cat-thumb.jpg']); await pending })
+        expect(document.querySelector('.misty-echo')).not.toBeNull()
+        expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0' })
     })
 })

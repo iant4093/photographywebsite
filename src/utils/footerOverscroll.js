@@ -1,20 +1,20 @@
-const BOTTOM_GRACE_MS = 250
-const RELEASE_MS = 380
-const WHEEL_PULL_PX = 1200
-const WHEEL_PULL_MS = 900
-const TOUCH_PULL_PX = 180
-const TOUCH_PULL_MS = 450
+const BOTTOM_GRACE_MS = 160
+const RELEASE_MS = 1000
+const WHEEL_PULL_PX = 200
+const WHEEL_PULL_MS = 80
+const TOUCH_PULL_PX = 80
+const TOUCH_PULL_MS = 80
 const INTERACTIVE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="listbox"], [role="dialog"], [aria-modal="true"]'
 
-// Build resistance from continued input past the footer. Touch input has a
-// physical contact; wheel input also needs sustained pressure and a check for
-// the decaying tail of a trackpad fling, since browsers expose no momentum flag.
+// Ignore momentum arriving from the page, then accept a normal pull at the
+// footer. Once a pull is intentional, its natural taper must not erase progress.
 export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
     let bottomSince = null
     let lastWheelAt = -Infinity
     let lastDelta = 0
     let falling = 0
     let momentum = false
+    let wheelArmed = false
     let distance = 0
     let startedAt = null
     let warmed = false
@@ -29,6 +29,7 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         startedAt = null
         warmed = false
         triggered = false
+        wheelArmed = false
         onProgress?.(0)
     }
 
@@ -40,8 +41,8 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         const rect = footer.getBoundingClientRect()
         const bodyStyle = getComputedStyle(document.body)
         const rootStyle = getComputedStyle(document.documentElement)
-        return rect.height > 0 && rect.bottom <= viewport + 3 && rect.bottom > 0
-            && root.scrollHeight - viewport - Math.max(0, window.scrollY) <= 3
+        return rect.height > 0 && rect.bottom <= viewport + 12 && rect.bottom > 0
+            && root.scrollHeight - viewport - Math.max(0, window.scrollY) <= 12
             && !document.querySelector('[aria-modal="true"], dialog[open]')
             && !['hidden', 'clip'].includes(bodyStyle.overflowY || bodyStyle.overflow)
             && !['hidden', 'clip'].includes(rootStyle.overflowY || rootStyle.overflow)
@@ -61,7 +62,7 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         if (!(target instanceof Element) || target.closest(INTERACTIVE)
             || (keyboard && target.closest('a, button'))) return false
         // Scrolling a panel belongs to that panel, even at its own bottom.
-        for (let node = target; node && node !== document.body; node = node.parentElement) {
+        for (let node = target; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
             const style = getComputedStyle(node)
             if (/(auto|scroll)/.test(`${style.overflowY} ${style.overflowX}`)
                 && (node.scrollHeight > node.clientHeight + 2 || node.scrollWidth > node.clientWidth + 2)) return false
@@ -89,16 +90,21 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
 
     const onWheel = (event) => {
         if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
-            || event.deltaY <= 0 || Math.abs(event.deltaX) >= event.deltaY || !eligibleTarget(event.target)) {
+            || event.deltaY < -6 || !eligibleTarget(event.target)) {
             resetPull()
             lastDelta = 0
             return
         }
+        // Small sign changes and sideways jitter are common during a real
+        // trackpad pull. Leave existing progress alone until the release timer.
+        if (event.deltaY < 0.5 || Math.abs(event.deltaX) >= event.deltaY) return
         const now = performance.now()
+        const wasAtBottom = bottomSince !== null
+        const freshGesture = now - lastWheelAt > 160
         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1
         const delta = event.deltaY * unit
         if (now - lastWheelAt > RELEASE_MS) resetPull()
-        if (now - lastWheelAt > 220 || delta > lastDelta * 1.25) {
+        if (freshGesture || (delta >= 6 && delta > lastDelta * 1.3)) {
             falling = 0
             momentum = false
         } else if (delta < lastDelta * 0.97) {
@@ -108,13 +114,18 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         lastDelta = delta
         lastWheelAt = now
         updateBottom()
-        if (bottomSince === null || now - bottomSince < BOTTOM_GRACE_MS || momentum || delta < 4) {
+        if (bottomSince === null) {
             resetPull()
             return
         }
+        if (!wheelArmed) {
+            wheelArmed = (wasAtBottom && freshGesture)
+                || (now - bottomSince >= BOTTOM_GRACE_MS && !momentum)
+            if (!wheelArmed) return
+        }
         clearTimeout(releaseTimer)
         releaseTimer = setTimeout(resetPull, RELEASE_MS)
-        applyPull(distance + Math.min(delta, 64), WHEEL_PULL_PX, WHEEL_PULL_MS)
+        applyPull(distance + Math.min(delta, 80), WHEEL_PULL_PX, WHEEL_PULL_MS)
     }
 
     const onTouchStart = (event) => {
@@ -122,6 +133,7 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         touch = !event.defaultPrevented && event.touches.length === 1 && eligibleTarget(event.target)
             ? { x: event.touches[0].clientX, bottomY: atFooter() ? event.touches[0].clientY : null, id: event.touches[0].identifier }
             : null
+        if (touch?.bottomY != null) startedAt = performance.now()
     }
     const cancelTouch = () => {
         touch = null
