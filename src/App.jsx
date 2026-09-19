@@ -13,6 +13,7 @@ import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePrelo
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
+const MistyEcho = lazy(() => import('./components/MistyEcho').catch(() => ({ default: () => null })))
 const Search = lazy(() => import('./pages/Search'))
 const Explore = lazy(() => import('./pages/Explore'))
 const Editor = lazy(() => import('./pages/Editor'))
@@ -146,6 +147,7 @@ function App() {
             </main>
             {!isImmersiveRoute && <BackToTop />}
             {!isImmersiveRoute && <Footer />}
+            <Suspense fallback={null}><MistyEcho key={location.key} /></Suspense>
             {!isImmersiveRoute && <MotionExperience />}
         </div>
     )
