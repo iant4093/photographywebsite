@@ -22,6 +22,14 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Misty echo lifecycle', () => {
+    it('shows continuous pull progress and releases it when pulling stops', () => {
+        render(<MistyEcho />)
+        act(() => handlers.onProgress(0.6))
+        expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0.6' })
+        expect(document.querySelector('.misty-pull')).toHaveTextContent('keep pulling…')
+        act(() => handlers.onProgress(0))
+        expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0' })
+    })
     it('stays idle until deliberate interaction, reuses previews, and cleans up after six seconds', async () => {
         const view = render(<MistyEcho />)
         expect(loadMistyEchoPhotos).not.toHaveBeenCalled()
@@ -54,9 +62,11 @@ describe('Misty echo lifecycle', () => {
     it('does not fetch or animate with reduced motion', async () => {
         motion.matches = true
         render(<MistyEcho />)
+        act(() => handlers.onProgress(0.6))
         await trigger()
         expect(loadMistyEchoPhotos).not.toHaveBeenCalled()
         expect(document.querySelector('.misty-echo')).toBeNull()
+        expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0' })
     })
     it('silently skips unavailable Misty photos', async () => {
         loadMistyEchoPhotos.mockRejectedValue(new Error('Offline'))

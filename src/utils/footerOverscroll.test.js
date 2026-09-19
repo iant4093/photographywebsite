@@ -2,24 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent } from '@testing-library/react'
 import { installFooterOverscroll } from './footerOverscroll'
 
-describe('the deliberate footer secret', () => {
-    let dispose
-    let onAttempt
-    let onTrigger
-    let now
-    let footer
-    const advance = (ms = 400) => { now += ms }
+describe('continuous pulling past the footer', () => {
+    let dispose, onAttempt, onTrigger, onProgress, footer
+    const advance = (ms = 50) => vi.advanceTimersByTime(ms)
     const wheel = (props = {}, target = document.body) => fireEvent.wheel(target, { deltaY: 120, ...props })
-    const attempts = () => { for (let i = 0; i < 3; i++) { advance(); wheel() } }
-    const swipe = (from = 500, to = 350, target = document.body) => {
-        fireEvent.touchStart(target, { touches: [{ identifier: 1, clientX: 150, clientY: from }] })
-        fireEvent.touchMove(target, { touches: [{ identifier: 1, clientX: 150, clientY: to }] })
-        fireEvent.touchEnd(target, { touches: [], changedTouches: [{ identifier: 1, clientX: 150, clientY: to }] })
+    const pullWheel = (count = 24, props = {}, target = document.body) => {
+        for (let i = 0; i < count; i++) { wheel(props, target); advance() }
+    }
+    const point = (y, x = 150) => ({ identifier: 1, clientX: x, clientY: y })
+    const startTouch = (y = 650, target = document.body) => fireEvent.touchStart(target, { touches: [point(y)] })
+    const moveTouch = (y, target = document.body) => fireEvent.touchMove(target, { touches: [point(y)] })
+    const endTouch = () => fireEvent.touchEnd(document.body, { touches: [], changedTouches: [point(400)] })
+    const pullTouch = (start = 650, target = document.body) => {
+        startTouch(start, target)
+        for (let y = start - 20; y >= start - 240; y -= 20) { advance(); moveTouch(y, target) }
     }
 
     beforeEach(() => {
-        now = 0
-        vi.spyOn(performance, 'now').mockImplementation(() => now)
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
         Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
         Object.defineProperty(window, 'scrollY', { configurable: true, value: 1200 })
         Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 2000 })
@@ -27,115 +27,164 @@ describe('the deliberate footer secret', () => {
         footer.className = 'linen-footer'
         footer.getBoundingClientRect = () => ({ top: 650, bottom: 800, height: 150 })
         document.body.append(footer)
-        onAttempt = vi.fn()
-        onTrigger = vi.fn()
-        dispose = installFooterOverscroll({ onAttempt, onTrigger })
-        advance(800)
+        onAttempt = vi.fn(); onTrigger = vi.fn(); onProgress = vi.fn()
+        dispose = installFooterOverscroll({ onAttempt, onTrigger, onProgress })
+        advance(300)
     })
     afterEach(() => {
         dispose()
         document.body.replaceChildren()
         document.body.style.overflow = ''
+        vi.useRealTimers()
     })
 
-    it('requires three distinct downward gestures after settling at the footer', () => {
-        wheel()
+    it('triggers from one sustained wheel pull, with buildup before the animation', () => {
+        pullWheel(10)
+        expect(onProgress).toHaveBeenLastCalledWith(expect.any(Number))
+        expect(onProgress.mock.calls.at(-1)[0]).toBeGreaterThan(0.2)
+        expect(onTrigger).not.toHaveBeenCalled()
+        pullWheel(14)
         expect(onAttempt).toHaveBeenCalledTimes(1)
-        advance(); wheel()
-        expect(onTrigger).not.toHaveBeenCalled()
-        advance(); wheel()
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+        pullWheel(40)
         expect(onTrigger).toHaveBeenCalledTimes(1)
     })
-    it('does not count the gesture that lands at the bottom or its momentum', () => {
-        now = 100
-        for (let i = 0; i < 200; i++) { wheel({ deltaY: 300 - i }); advance(20) }
-        expect(onAttempt).not.toHaveBeenCalled()
-        expect(onTrigger).not.toHaveBeenCalled()
-        attempts()
-        expect(onTrigger).toHaveBeenCalledTimes(1)
-    })
-    it('counts a long continuous wheel stream as only one attempt', () => {
-        for (let i = 0; i < 200; i++) { wheel(); advance(20) }
-        expect(onAttempt).toHaveBeenCalledTimes(1)
-        expect(onTrigger).not.toHaveBeenCalled()
-    })
-    it('ignores tiny nudges, horizontal gestures, and zoom gestures', () => {
-        for (const props of [{ deltaY: 10 }, { deltaX: 200 }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
-            for (let i = 0; i < 3; i++) { advance(); wheel(props) }
-        }
-        expect(onAttempt).not.toHaveBeenCalled()
-    })
-    it('handles wheel line units and collects small deltas within a fresh gesture', () => {
-        wheel({ deltaY: 7, deltaMode: 1 })
-        advance()
-        for (let i = 0; i < 10; i++) { wheel({ deltaY: 10 }); advance(20) }
-        advance(); wheel({ deltaY: 1, deltaMode: 2 })
-        expect(onTrigger).toHaveBeenCalledTimes(1)
-    })
-    it('resets after scrolling up or waiting too long between attempts', () => {
-        wheel(); advance(); wheel()
-        wheel({ deltaY: -50 })
-        advance(); wheel()
-        expect(onTrigger).not.toHaveBeenCalled()
-        advance(6000); wheel(); advance(); wheel()
-        expect(onTrigger).not.toHaveBeenCalled()
-        advance(); wheel()
-        expect(onTrigger).toHaveBeenCalledTimes(1)
-    })
-    it('requires the actual page bottom, not just a visible footer', () => {
+    it('lets sustained active scrolling continue after reaching the bottom, without a pause', () => {
         Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 })
-        attempts()
-        expect(onAttempt).not.toHaveBeenCalled()
+        pullWheel(10)
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1200 })
+        fireEvent.scroll(window)
+        pullWheel(30)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
     })
-    it('does not run without the site footer', () => {
+    it('rejects a decaying fling arriving at the footer, including its long tail', () => {
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 })
+        wheel({ deltaY: 500 }); advance()
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1200 })
+        fireEvent.scroll(window)
+        for (let i = 0; i < 80; i++) { wheel({ deltaY: Math.max(18, 450 * 0.9 ** i) }); advance(20) }
+        expect(onTrigger).not.toHaveBeenCalled()
+        expect(onAttempt).not.toHaveBeenCalled()
+        pullWheel(24)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+    })
+    it('rejects a fresh fling at the bottom and a single huge wheel event', () => {
+        wheel({ deltaY: 100000 }); advance(500)
+        for (let i = 0; i < 80; i++) { wheel({ deltaY: Math.max(18, 600 * 0.9 ** i) }); advance(20) }
+        expect(onTrigger).not.toHaveBeenCalled()
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+    })
+    it('does not treat three short swipes as a secret gesture sequence', () => {
+        for (let i = 0; i < 3; i++) { pullWheel(3); advance(500) }
+        expect(onTrigger).not.toHaveBeenCalled()
+    })
+    it('releases pressure when input stops or reverses', () => {
+        pullWheel(14)
+        advance(400)
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+        pullWheel(12)
+        expect(onTrigger).not.toHaveBeenCalled()
+        wheel({ deltaY: -30 }); advance()
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+        pullWheel(12)
+        expect(onTrigger).not.toHaveBeenCalled()
+    })
+    it('accepts slower continuous trackpad input as the resistance builds', () => {
+        pullWheel(110, { deltaY: 12 })
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+    })
+    it.each([{ deltaY: 2 }, { deltaX: 200 }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }])('ignores accidental or modified scrolling: %j', props => {
+        pullWheel(40, props)
+        expect(onAttempt).not.toHaveBeenCalled()
+        expect(onTrigger).not.toHaveBeenCalled()
+    })
+    it.each([{ deltaY: 5, deltaMode: 1 }, { deltaY: 1, deltaMode: 2 }])('supports wheel units: %j', props => {
+        pullWheel(24, props)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+    })
+    it('requires the actual page bottom and a visible site footer', () => {
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 })
+        pullWheel()
         footer.remove()
-        attempts()
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1200 })
+        pullWheel()
         expect(onAttempt).not.toHaveBeenCalled()
     })
-    it('ignores nested scrolling, form controls, and open dialogs', () => {
+    it('ignores nested scrolling, form controls, open dialogs, and scroll locks', () => {
         const panel = document.createElement('div')
         panel.style.overflowY = 'auto'
         Object.defineProperty(panel, 'scrollHeight', { value: 500 })
         Object.defineProperty(panel, 'clientHeight', { value: 100 })
-        document.body.append(panel)
-        for (let i = 0; i < 3; i++) { advance(); wheel({}, panel) }
         const input = document.createElement('textarea')
-        document.body.append(input)
-        for (let i = 0; i < 3; i++) { advance(); wheel({}, input) }
+        document.body.append(panel, input)
+        pullWheel(24, {}, panel); pullWheel(24, {}, input)
         const dialog = document.createElement('div')
-        dialog.setAttribute('aria-modal', 'true')
-        document.body.append(dialog)
-        attempts()
-        expect(onAttempt).not.toHaveBeenCalled()
-    })
-    it('ignores body scroll locks', () => {
+        dialog.setAttribute('aria-modal', 'true'); document.body.append(dialog)
+        pullWheel(); dialog.remove()
         document.body.style.overflow = 'hidden'
-        attempts()
+        pullWheel()
         expect(onAttempt).not.toHaveBeenCalled()
     })
-    it('supports three fresh upward finger swipes at the bottom', () => {
-        swipe(); advance(); swipe()
+    it('allows a real scroll pull over footer links without activating the link', () => {
+        const link = document.createElement('a')
+        link.href = '/terms'; footer.append(link)
+        const click = vi.fn(); link.addEventListener('click', click)
+        pullWheel(24, {}, link)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+        expect(click).not.toHaveBeenCalled()
+    })
+    it('activates during a single long touch pull, before lifting the finger', () => {
+        pullTouch()
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+        moveTouch(350)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+        endTouch()
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+    })
+    it('allows a touch drag to reach the footer and keep pulling in the same gesture', () => {
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 })
+        startTouch(750); advance(); moveTouch(650)
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1200 })
+        fireEvent.scroll(window)
+        advance(); moveTouch(600)
+        for (let y = 580; y >= 360; y -= 20) { advance(); moveTouch(y) }
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+    })
+    it('rejects quick touch flicks and releases short pulls immediately', () => {
+        startTouch(); advance(50); moveTouch(350); endTouch()
         expect(onTrigger).not.toHaveBeenCalled()
-        advance(); swipe()
+        for (let i = 0; i < 3; i++) {
+            startTouch(); advance(500); moveTouch(540); endTouch()
+        }
+        expect(onTrigger).not.toHaveBeenCalled()
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+    })
+    it('cancels reversing, horizontal, and multi-touch pulls', () => {
+        startTouch(); advance(100); moveTouch(550); moveTouch(600)
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+        fireEvent.touchMove(document.body, { touches: [point(450, 250)] })
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+        startTouch()
+        fireEvent.touchMove(document.body, { touches: [point(450), { ...point(450), identifier: 2 }] })
+        expect(onTrigger).not.toHaveBeenCalled()
+    })
+    it('supports holding a downward key at the footer, with keyup releasing pressure', () => {
+        for (let i = 0; i < 3; i++) {
+            fireEvent.keyDown(document.body, { key: 'PageDown' }); advance(100)
+            fireEvent.keyUp(document.body, { key: 'PageDown' })
+        }
+        expect(onTrigger).not.toHaveBeenCalled()
+        fireEvent.keyDown(document.body, { key: 'PageDown' })
+        for (let i = 0; i < 30; i++) { advance(); fireEvent.keyDown(document.body, { key: 'PageDown', repeat: true }) }
         expect(onTrigger).toHaveBeenCalledTimes(1)
+        fireEvent.keyUp(document.body, { key: 'PageDown' })
+        expect(onProgress).toHaveBeenLastCalledWith(0)
     })
-    it('does not count arriving swipes, short swipes, downward swipes, or multi-touch', () => {
-        now = 100; swipe()
-        advance(800); swipe(500, 480)
-        advance(); swipe(300, 500)
-        fireEvent.touchStart(document.body, { touches: [{ identifier: 1, clientY: 500 }, { identifier: 2, clientY: 500 }] })
-        fireEvent.touchEnd(document.body, { touches: [], changedTouches: [{ identifier: 1, clientY: 300 }] })
-        expect(onAttempt).not.toHaveBeenCalled()
-    })
-    it('supports deliberate keyboard presses but ignores a held key', () => {
-        for (let i = 0; i < 20; i++) { advance(); fireEvent.keyDown(document.body, { key: 'PageDown', repeat: true }) }
-        expect(onAttempt).not.toHaveBeenCalled()
-        for (const key of ['End', 'PageDown', ' ']) { advance(); fireEvent.keyDown(document.body, { key }) }
-        expect(onTrigger).toHaveBeenCalledTimes(1)
-    })
-    it('removes all listeners on disposal', () => {
-        dispose()
-        attempts()
-        expect(onAttempt).not.toHaveBeenCalled()
+    it('removes listeners and the pending release timer on disposal', () => {
+        pullWheel(5); dispose()
+        onProgress.mockClear()
+        advance(1000); pullWheel(); pullTouch()
+        expect(onTrigger).not.toHaveBeenCalled()
+        expect(onProgress).not.toHaveBeenCalled()
     })
 })

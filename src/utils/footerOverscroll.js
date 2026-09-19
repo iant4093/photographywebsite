@@ -1,25 +1,35 @@
-const SETTLE_MS = 700
-const GESTURE_GAP_MS = 220
-const ATTEMPT_WINDOW_MS = 5000
-const MIN_ATTEMPT_SPACING_MS = 350
-const INTERACTIVE = 'input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="listbox"], [role="dialog"], [aria-modal="true"]'
+const BOTTOM_GRACE_MS = 250
+const RELEASE_MS = 380
+const WHEEL_PULL_PX = 1200
+const WHEEL_PULL_MS = 900
+const TOUCH_PULL_PX = 180
+const TOUCH_PULL_MS = 450
+const INTERACTIVE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="listbox"], [role="dialog"], [aria-modal="true"]'
 
-// Count fresh gestures, never wheel-event volume: a single trackpad fling can
-// produce hundreds of events after the document has reached the footer.
-export function installFooterOverscroll({ onAttempt, onTrigger }) {
+// Build resistance from continued input past the footer. Touch input has a
+// physical contact; wheel input also needs sustained pressure and a check for
+// the decaying tail of a trackpad fling, since browsers expose no momentum flag.
+export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
     let bottomSince = null
     let lastWheelAt = -Infinity
-    let wheelDistance = 0
-    let wheelEligible = false
-    let attempts = 0
-    let lastAttemptAt = -Infinity
+    let lastDelta = 0
+    let falling = 0
+    let momentum = false
+    let distance = 0
+    let startedAt = null
+    let warmed = false
+    let triggered = false
+    let releaseTimer
     let touch = null
+    let activeKey = null
 
-    const resetAttempts = () => {
-        attempts = 0
-        lastAttemptAt = -Infinity
-        wheelEligible = false
-        wheelDistance = 0
+    const resetPull = () => {
+        clearTimeout(releaseTimer)
+        distance = 0
+        startedAt = null
+        warmed = false
+        triggered = false
+        onProgress?.(0)
     }
 
     const atFooter = () => {
@@ -40,16 +50,17 @@ export function installFooterOverscroll({ onAttempt, onTrigger }) {
     const updateBottom = () => {
         if (!atFooter()) {
             bottomSince = null
-            resetAttempts()
+            resetPull()
+            if (touch) touch.bottomY = null
         } else if (bottomSince === null) {
             bottomSince = performance.now()
         }
     }
 
-    const eligibleTarget = (target) => {
-        if (!(target instanceof Element) || target.closest(INTERACTIVE)) return false
-        // Scroll gestures inside any scrollable panel belong to that panel,
-        // including when it has already reached its own bottom.
+    const eligibleTarget = (target, keyboard = false) => {
+        if (!(target instanceof Element) || target.closest(INTERACTIVE)
+            || (keyboard && target.closest('a, button'))) return false
+        // Scrolling a panel belongs to that panel, even at its own bottom.
         for (let node = target; node && node !== document.body; node = node.parentElement) {
             const style = getComputedStyle(node)
             if (/(auto|scroll)/.test(`${style.overflowY} ${style.overflowX}`)
@@ -58,96 +69,122 @@ export function installFooterOverscroll({ onAttempt, onTrigger }) {
         return true
     }
 
-    const ready = (target) => {
-        updateBottom()
-        return bottomSince !== null && performance.now() - bottomSince >= SETTLE_MS
-            && eligibleTarget(target)
-    }
-
-    const countAttempt = () => {
+    const applyPull = (nextDistance, requiredDistance, requiredMs) => {
+        if (triggered) return
         const now = performance.now()
-        if (now - lastAttemptAt < MIN_ATTEMPT_SPACING_MS) return
-        if (now - lastAttemptAt > ATTEMPT_WINDOW_MS) attempts = 0
-        lastAttemptAt = now
-        attempts += 1
-        if (attempts === 1) onAttempt?.()
-        if (attempts >= 3) {
-            resetAttempts()
+        startedAt ??= now
+        distance = nextDistance
+        const progress = Math.min(1, distance / requiredDistance, (now - startedAt) / requiredMs)
+        if (!warmed && distance >= requiredDistance * 0.2) {
+            warmed = true
+            onAttempt?.()
+        }
+        onProgress?.(progress)
+        if (progress >= 1) {
+            triggered = true
+            onProgress?.(0)
             onTrigger()
         }
     }
 
     const onWheel = (event) => {
-        const now = performance.now()
-        const freshGesture = now - lastWheelAt >= GESTURE_GAP_MS
-        lastWheelAt = now
         if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
-            || event.deltaY <= 0 || Math.abs(event.deltaX) >= event.deltaY || !ready(event.target)) {
-            resetAttempts()
+            || event.deltaY <= 0 || Math.abs(event.deltaX) >= event.deltaY || !eligibleTarget(event.target)) {
+            resetPull()
+            lastDelta = 0
             return
         }
-        if (freshGesture) {
-            wheelDistance = 0
-            wheelEligible = true
-        }
-        if (!wheelEligible) return
+        const now = performance.now()
         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1
-        wheelDistance += Math.min(event.deltaY * unit, 160)
-        if (wheelDistance >= 100) {
-            wheelEligible = false
-            countAttempt()
+        const delta = event.deltaY * unit
+        if (now - lastWheelAt > RELEASE_MS) resetPull()
+        if (now - lastWheelAt > 220 || delta > lastDelta * 1.25) {
+            falling = 0
+            momentum = false
+        } else if (delta < lastDelta * 0.97) {
+            falling += 1
+            if (falling >= 3) momentum = true
+        } else if (!momentum) falling = 0
+        lastDelta = delta
+        lastWheelAt = now
+        updateBottom()
+        if (bottomSince === null || now - bottomSince < BOTTOM_GRACE_MS || momentum || delta < 4) {
+            resetPull()
+            return
         }
+        clearTimeout(releaseTimer)
+        releaseTimer = setTimeout(resetPull, RELEASE_MS)
+        applyPull(distance + Math.min(delta, 64), WHEEL_PULL_PX, WHEEL_PULL_MS)
     }
 
     const onTouchStart = (event) => {
-        touch = !event.defaultPrevented && event.touches.length === 1 && ready(event.target)
-            ? { x: event.touches[0].clientX, y: event.touches[0].clientY, id: event.touches[0].identifier }
+        resetPull()
+        touch = !event.defaultPrevented && event.touches.length === 1 && eligibleTarget(event.target)
+            ? { x: event.touches[0].clientX, bottomY: atFooter() ? event.touches[0].clientY : null, id: event.touches[0].identifier }
             : null
-        if (!touch) resetAttempts()
+    }
+    const cancelTouch = () => {
+        touch = null
+        resetPull()
     }
     const onTouchMove = (event) => {
         if (!touch) return
         const current = event.touches[0]
-        if (event.touches.length !== 1 || current.identifier !== touch.id
-            || current.clientY > touch.y + 12 || Math.abs(current.clientX - touch.x) > 60) {
-            touch = null
-            resetAttempts()
+        if (event.defaultPrevented || event.touches.length !== 1 || current.identifier !== touch.id
+            || Math.abs(current.clientX - touch.x) > 60 || !eligibleTarget(event.target)) {
+            cancelTouch()
+            return
         }
-    }
-    const onTouchEnd = (event) => {
-        const start = touch
-        touch = null
-        const end = Array.from(event.changedTouches).find(point => point.identifier === start?.id)
-        if (!start || !end || !ready(event.target)) return
-        const distance = start.y - end.clientY
-        if (distance >= 80 && distance > Math.abs(start.x - end.clientX) * 1.5) countAttempt()
-    }
-    const cancelTouch = () => {
-        touch = null
-        resetAttempts()
+        updateBottom()
+        if (bottomSince === null) return
+        // A drag may begin above the footer: only its remaining travel once the
+        // footer is reached contributes. Keep the finger down to activate.
+        touch.bottomY ??= current.clientY
+        const travel = Math.max(0, touch.bottomY - current.clientY)
+        if (travel < distance - 6) {
+            touch.bottomY = current.clientY
+            resetPull()
+            return
+        }
+        if (travel > 0) applyPull(travel, TOUCH_PULL_PX, TOUCH_PULL_MS)
     }
     const onKeyDown = (event) => {
-        if (['ArrowUp', 'PageUp', 'Home', 'Escape'].includes(event.key)) resetAttempts()
+        if (['ArrowUp', 'PageUp', 'Home', 'Escape'].includes(event.key)) {
+            activeKey = null
+            resetPull()
+        }
         if (!['ArrowDown', 'PageDown', 'End', ' '].includes(event.key)
-            || event.defaultPrevented || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
-        if (ready(event.target)) countAttempt()
-        else resetAttempts()
+            || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+        updateBottom()
+        if (bottomSince === null || !eligibleTarget(event.target, true)) {
+            activeKey = null
+            resetPull()
+            return
+        }
+        if (!event.repeat) { resetPull(); activeKey = event.key }
+        if (activeKey !== event.key) return
+        clearTimeout(releaseTimer)
+        releaseTimer = setTimeout(resetPull, RELEASE_MS + 400)
+        applyPull(distance + 48, WHEEL_PULL_PX, WHEEL_PULL_MS)
     }
+    const onKeyUp = () => { activeKey = null; resetPull() }
     const onBlur = () => {
         bottomSince = null
+        activeKey = null
         cancelTouch()
     }
 
     const listeners = [
         [window, 'scroll', updateBottom], [window, 'resize', onBlur],
         [window, 'wheel', onWheel], [window, 'touchstart', onTouchStart],
-        [window, 'touchmove', onTouchMove], [window, 'touchend', onTouchEnd],
+        [window, 'touchmove', onTouchMove], [window, 'touchend', cancelTouch],
         [window, 'touchcancel', cancelTouch], [window, 'keydown', onKeyDown],
-        [window, 'blur', onBlur], [document, 'visibilitychange', onBlur],
+        [window, 'keyup', onKeyUp], [window, 'blur', onBlur], [document, 'visibilitychange', onBlur],
     ]
     for (const [target, type, handler] of listeners) target.addEventListener(type, handler, { passive: true })
     updateBottom()
     return () => {
+        clearTimeout(releaseTimer)
         for (const [target, type, handler] of listeners) target.removeEventListener(type, handler)
     }
 }
