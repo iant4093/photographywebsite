@@ -2339,11 +2339,8 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertNotIn("delete", frontend)
         self.assertIn("get-public-access-block", frontend)
         self.assertIn("OriginAccessControlId", frontend)
-        self.assertLess(frontend.index('"$root/index.html"'), frontend.index("create-invalidation"))
-        self.assertIn(
-            "--paths '/' '/index.html' '/print.html' '/theme-init.js' '/dark-theme.css' '/images/heroes/*' '/favicon.svg'",
-            frontend,
-        )
+        self.assertLess(frontend.index("frontend_changes.py prepare"), frontend.index("create-invalidation"))
+        self.assertIn('--invalidation-batch "file://${RUNNER_TEMP}/frontend-changes.invalidation.json"', frontend)
         self.assertNotIn("--paths '/*'", frontend)
         self.assertIn('if [[ "$api" == "/api" ]]', smoke)
         self.assertIn('api="${site}${api}"', smoke)

@@ -1,5 +1,6 @@
 """Private original-photo index snapshots and comparison records, independent of galleries."""
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -9,6 +10,8 @@ import boto3
 
 INDEX_KEY = {"albumId": "__SYSTEM__", "mediaId": "original-index-v1"}
 MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024
+UNMATCHED_RETRY_SECONDS = 86400
+FAILURE_RETRY_SECONDS = 900
 _snapshot_cache = {"key": None, "value": None}
 
 
@@ -62,6 +65,35 @@ def source_version(source):
     return str(source.get("md5Checksum") or "")
 
 
+def image_revision(image):
+    """Notice edited matching metadata without storing another photo manifest."""
+    return hashlib.sha256(json.dumps(image, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def retry_due(image, record, generation, now):
+    """Negative matches are checked daily forever, or sooner on changed inputs.
+
+    Failures have a bounded cooldown even if an SQS redelivery or another index
+    generation arrives. A successful comparison clears that failure history.
+    """
+    status = record.get("status")
+    if status == "failed":
+        return now >= int(record.get("nextAttemptAt", int(record.get("updatedAt", 0)) + FAILURE_RETRY_SECONDS))
+    if status not in {"unavailable", "ambiguous"}:
+        return True
+    if record.get("indexGeneration") != generation:
+        return True
+    if record.get("imageRevision") and record["imageRevision"] != image_revision(image):
+        return True
+    deadline = int(record.get("nextAttemptAt", int(record.get("updatedAt", 0)) + UNMATCHED_RETRY_SECONDS))
+    return now >= deadline
+
+
+def failure_retry(previous, now):
+    count = min(max(int(previous.get("failureCount", 0)), 0) + 1, 8)
+    return count, now + min(UNMATCHED_RETRY_SECONDS, FAILURE_RETRY_SECONDS * 2 ** (count - 1))
+
+
 def needs_work(image, record, candidates, generation, now=None):
     now = int(time.time()) if now is None else now
     if not record or record.get("rawKey") != (image.get("rawKey") or image.get("key")):
@@ -71,8 +103,8 @@ def needs_work(image, record, candidates, generation, now=None):
     if record.get("status") == "pending" and int(record.get("queuedUntil", 0)) > now:
         return False
     if record.get("status") == "ready":
+        if record.get("imageRevision") and record["imageRevision"] != image_revision(image):
+            return True
         source = candidates.get(record.get("sourceFileId"))
         return not source or source_version(source) != record.get("sourceChecksum")
-    # Every new index generation retries missing sources (including a late Drive
-    # backup); failures retry even if no Drive files changed.
-    return record.get("indexGeneration") != generation or record.get("status") in {"failed", "pending", "processing"}
+    return retry_due(image, record, generation, now)

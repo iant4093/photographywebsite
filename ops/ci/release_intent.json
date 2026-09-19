@@ -44,9 +44,9 @@
     {"logicalId": "MediaResponseHeadersPolicy", "resourceType": "AWS::CloudFront::ResponseHeadersPolicy", "action": "Modify", "propertyPaths": ["ResponseHeadersPolicyConfig"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "UserPool", "resourceType": "AWS::Cognito::UserPool", "action": "Modify", "propertyPaths": ["UserPoolName"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "UserPoolClient", "resourceType": "AWS::Cognito::UserPoolClient", "action": "Modify", "propertyPaths": ["ClientName"], "allowNoDetails": false, "allowProtectedModify": true},
-    {"logicalId": "PreviewJobFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["FilterPattern"], "allowNoDetails": false},
+    {"logicalId": "PreviewJobFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["FilterPattern", "MetricTransformations"], "allowNoDetails": false},
     {"logicalId": "HoverPreviewManifestFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "HoverPreviewManifestFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["FilterPattern"], "allowNoDetails": false},
+    {"logicalId": "HoverPreviewManifestFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["FilterPattern", "MetricTransformations"], "allowNoDetails": false},
     {"logicalId": "PublicPreviewRewriteFunction", "resourceType": "AWS::CloudFront::Function", "action": "Modify", "propertyPaths": ["FunctionCode"], "allowNoDetails": false},
     {"logicalId": "GetPublicAlbumsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "GetPublicAlbumFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "MemorySize"], "allowNoDetails": false},
@@ -228,6 +228,12 @@
     {"logicalId": "DriveBackupStateTable", "resourceType": "AWS::DynamoDB::Table", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GoogleDriveBackupFunctionBackupIntents", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "AdminDriveBackupsFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
-    {"logicalId": "GoogleDriveBackupFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["ManagedPolicyArns", "Policies"], "allowNoDetails": false, "allowProtectedModify": true}
+    {"logicalId": "GoogleDriveBackupFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["ManagedPolicyArns", "Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "AuditDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
+    {"logicalId": "AuditFailureMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
+    {"logicalId": "PreviewJobCompletedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
+    {"logicalId": "LoginDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
+    {"logicalId": "ApiAuthorizationDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
+    {"logicalId": "FrontDoorDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false}
   ]
 }

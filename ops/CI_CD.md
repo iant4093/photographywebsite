@@ -66,12 +66,16 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   Other additions or changes to existing values remain rejected.
 - Backend execution uses a separate role and must reach `UPDATE_COMPLETE` before
   frontend deployment. Empty backend changes are an explicit safe no-op.
-- Frontend deployment never deletes S3 objects. Fingerprinted assets receive
-  immutable caching, other static files receive short caching, `index.html` is
-  uploaded last with no-cache metadata, and an exact invalidation for `/`,
-  `/index.html`, hero assets, and the favicon is awaited. Fingerprinted
-  `/assets/*` objects intentionally survive deploys in edge caches; other
-  non-fingerprinted files naturally revalidate on their five-minute metadata.
+- Frontend deployment never deletes S3 objects. The uploader compares object
+  content and cache metadata and uploads only changed files, with `index.html`
+  last. Fingerprinted assets retain immutable caching; other static files use
+  five-minute caching and HTML entrypoints use no-cache metadata. Only changed
+  HTML, theme, hero, favicon, manifest, and service-worker paths are invalidated.
+  The publication manifest advances after the invalidation waiter succeeds, so
+  an interrupted publication repeats its outstanding invalidations. Actual
+  object checks also repair a rollback after a partial failed upload. Unchanged
+  redeployments create no invalidation; `/assets/*` stays cached. These steps run
+  under the existing production release/rollback lock and need no new IAM grants.
 - A manual workflow can only redeploy independently attested artifacts from a
   successful `main` production workflow path whose exact SHA remains in `main`
   history. Guard, deploy, and smoke scripts stay at the current trusted control

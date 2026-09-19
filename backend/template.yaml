@@ -4276,7 +4276,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: AuditDenied
           MetricValue: '1'
-          DefaultValue: 0
 
   AuditFailureMetricFilter:
     Type: AWS::Logs::MetricFilter
@@ -4287,7 +4286,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: AuditFailure
           MetricValue: '1'
-          DefaultValue: 0
 
   PreviewJobFailureMetricFilter:
     Type: AWS::Logs::MetricFilter
@@ -4298,7 +4296,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/PreviewV2
           MetricName: PreviewJobFailure
           MetricValue: '1'
-          DefaultValue: 0
 
   PreviewJobCompletedMetricFilter:
     Type: AWS::Logs::MetricFilter
@@ -4309,7 +4306,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/PreviewV2
           MetricName: PreviewJobCompleted
           MetricValue: '1'
-          DefaultValue: 0
 
   HoverPreviewManifestFailureMetricFilter:
     Type: AWS::Logs::MetricFilter
@@ -4320,7 +4316,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/HoverPreview
           MetricName: ManifestBuildFailure
           MetricValue: '1'
-          DefaultValue: 0
 
   LoginDeniedMetricFilter:
     Type: AWS::Logs::MetricFilter
@@ -4331,7 +4326,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: LoginDenied
           MetricValue: '1'
-          DefaultValue: 0
 
   ApiAuthorizationDeniedMetricFilter:
     Type: AWS::Logs::MetricFilter
@@ -4342,7 +4336,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: ApiAuthorizationDenied
           MetricValue: '1'
-          DefaultValue: 0
 
   FrontDoorDeniedMetricFilter:
     Type: AWS::Logs::MetricFilter
@@ -4353,7 +4346,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: FrontDoorDenied
           MetricValue: '1'
-          DefaultValue: 0
 
   ApiServerErrorAlarm:
     Type: AWS::CloudWatch::Alarm

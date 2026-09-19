@@ -313,9 +313,53 @@ class OriginalWorkerTests(OfflineTestCase):
             worker.process_job(self.job)
 
     def test_sqs_partial_failure_retries_only_failed_message(self):
-        with patch.object(worker, "process_job", side_effect=["ready", RuntimeError("private"), "skipped"]):
-            result = worker.handler({"Records": [{"messageId": str(index), "body": json.dumps(self.job)} for index in range(3)]}, None)
-        self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "1"}]})
+        with patch.object(worker, "process_job", side_effect=["ready", RuntimeError("private"), "skipped", "deferred_failure", "deferred"]):
+            result = worker.handler({"Records": [{"messageId": str(index), "body": json.dumps(self.job)} for index in range(5)]}, None)
+        self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "1"}, {"itemIdentifier": "3"}]})
+
+    def test_duplicate_negative_delivery_defers_without_reading_photos_or_publishing(self):
+        self.table.update_item.return_value = {"Attributes": {
+            "status": "unavailable", "indexGeneration": STATE["generation"], "nextAttemptAt": 88400,
+        }}
+        with patch.object(worker.time, "time", return_value=3000):
+            self.assertEqual(worker.process_job(self.job), "deferred")
+        self.publish.assert_not_called()
+        self.s3.get_object.assert_not_called()
+        self.assertEqual(self.table.update_item.call_args.kwargs["UpdateExpression"], "REMOVE leaseOwner, leaseUntil")
+
+    def test_cooling_failure_remains_retryable_for_queue_redrive(self):
+        self.table.update_item.return_value = {"Attributes": {"status": "failed", "nextAttemptAt": 88400}}
+        with patch.object(worker.time, "time", return_value=3000):
+            self.assertEqual(worker.process_job(self.job), "deferred_failure")
+        self.publish.assert_not_called()
+        self.s3.get_object.assert_not_called()
+
+    def test_daily_negative_retry_schedules_another_day_without_giving_up(self):
+        self.match.return_value = {"status": "unavailable"}
+        with patch.object(worker.time, "time", return_value=90000):
+            self.assertEqual(worker.process_job(self.job), "unavailable")
+        record = self.publish.call_args.args[2]
+        self.assertEqual(record["nextAttemptAt"], 90000 + 86400)
+        self.assertEqual(record["imageRevision"], store.image_revision(IMAGE))
+        self.assertFalse(store.needs_work(IMAGE, record, {}, STATE["generation"], now=90001))
+        self.assertTrue(store.needs_work(IMAGE, record, {}, STATE["generation"], now=90000 + 86400))
+
+    def test_failure_cooldown_survives_queue_redelivery_and_grows_to_daily_limit(self):
+        self.match.side_effect = RuntimeError("temporary failure")
+        self.table.update_item.return_value = {"Attributes": {"failureCount": 3}}
+        with patch.object(worker.time, "time", return_value=5000), self.assertRaises(RuntimeError):
+            worker.process_job(self.job)
+        values = self.table.update_item.call_args.kwargs["ExpressionAttributeValues"]
+        self.assertEqual(values[":count"], 4)
+        self.assertEqual(values[":next"], 5000 + 7200)
+        self.assertFalse(store.retry_due(IMAGE, {"status": "failed", "nextAttemptAt": values[":next"]}, "changed", 5001))
+        self.assertEqual(store.failure_retry({"failureCount": 100}, 5000), (8, 5000 + 86400))
+
+    def test_photo_metadata_change_rechecks_a_negative_before_daily_deadline(self):
+        record = {"status": "unavailable", "indexGeneration": STATE["generation"],
+                  "nextAttemptAt": 88400, "imageRevision": store.image_revision(IMAGE)}
+        self.assertFalse(store.retry_due(IMAGE, record, STATE["generation"], 3000))
+        self.assertTrue(store.retry_due({**IMAGE, "originalFilename": "corrected.JPG"}, record, STATE["generation"], 3000))
 
 
 class OriginalPublishTests(OfflineTestCase):
@@ -349,6 +393,47 @@ class OriginalIndexTests(OfflineTestCase):
         self.drive.changes.return_value = ([], "after-scan")
         self.s3 = Mock()
         self.stack.enter_context(patch.object(refresh.boto3, "client", return_value=self.s3))
+
+    def test_unchanged_archive_reuses_snapshot_and_generation_but_advances_cursor(self):
+        first, _ = refresh.refresh_index(self.drive, {}, 2000)
+        self.s3.reset_mock()
+        self.drive.changes.return_value = ([], "new-cursor")
+        with patch.object(refresh, "load_snapshot", return_value={"files": [SOURCE, ROOT]}):
+            second, _ = refresh.refresh_index(self.drive, first, 2900)
+        self.assertEqual(second["generation"], first["generation"])
+        self.assertEqual(second["indexKey"], first["indexKey"])
+        self.assertEqual(second["pageToken"], "new-cursor")
+        self.s3.put_object.assert_not_called()
+
+    def test_daily_snapshot_renewal_does_not_reset_matching_generation(self):
+        first, _ = refresh.refresh_index(self.drive, {}, 2000)
+        second, _ = refresh.refresh_index(self.drive, first, 2000 + 86400)
+        self.assertEqual(second["generation"], first["generation"])
+        self.assertNotEqual(second["indexKey"], first["indexKey"])
+        self.assertEqual(second["snapshotCreatedAt"], 2000 + 86400)
+        self.assertEqual(self.s3.put_object.call_count, 2)
+
+    def test_generation_tracks_matching_inputs_and_membership_not_provider_bookkeeping(self):
+        generation = refresh.archive_generation([SOURCE], ROOT_ID)
+        self.assertEqual(generation, refresh.archive_generation(
+            [{**SOURCE, "version": "8", "modifiedTime": "later"}], ROOT_ID))
+        for source in ({**SOURCE, "name": "renamed.jpg"}, {**SOURCE, "md5Checksum": "b" * 32},
+                       {**SOURCE, "imageMediaMetadata": {"cameraModel": "changed"}},
+                       {**SOURCE, "capabilities": {"canDownload": False}}):
+            self.assertNotEqual(generation, refresh.archive_generation([source], ROOT_ID))
+        self.assertNotEqual(generation, refresh.archive_generation([], ROOT_ID))
+        self.assertNotEqual(generation, refresh.archive_generation([SOURCE], "other-root"))
+
+    def test_late_original_becomes_eligible_on_next_delta_without_waiting_for_daily_retry(self):
+        self.drive.list_inventory.return_value = [ROOT]
+        first, _ = refresh.refresh_index(self.drive, {}, 2000)
+        record = {"rawKey": RAW_KEY, "status": "unavailable", "updatedAt": 2000,
+                  "nextAttemptAt": 88400, "indexGeneration": first["generation"]}
+        self.assertFalse(store.needs_work(IMAGE, record, {}, first["generation"], now=2900))
+        self.drive.changes.return_value = ([{"fileId": SOURCE["id"], "file": SOURCE}], "late-original")
+        with patch.object(refresh, "load_snapshot", return_value={"files": [ROOT]}):
+            second, candidates = refresh.refresh_index(self.drive, first, 2900)
+        self.assertTrue(store.needs_work(IMAGE, record, {i["id"]: i for i in candidates}, second["generation"], now=2900))
 
     def test_full_scan_replays_changes_from_cursor_taken_before_inventory(self):
         newly_uploaded = {**SOURCE, "id": "late-upload", "name": "DSC_0002.JPG"}
@@ -507,13 +592,13 @@ class OriginalStoreAndDispatchTests(OfflineTestCase):
         self.assertIsNone(store._snapshot_cache["key"])
 
     def test_work_decision_retries_late_backups_failures_and_changed_sources(self):
-        base = {"rawKey": RAW_KEY, "indexGeneration": STATE["generation"]}
+        base = {"rawKey": RAW_KEY, "indexGeneration": STATE["generation"], "updatedAt": 2000}
         ready = {**base, "status": "ready", "sourceFileId": SOURCE["id"], "sourceChecksum": CHECKSUM}
         candidates = {SOURCE["id"]: SOURCE}
         self.assertFalse(store.needs_work(IMAGE, ready, candidates, STATE["generation"]))
         self.assertTrue(store.needs_work(IMAGE, ready, {}, STATE["generation"]))
         self.assertTrue(store.needs_work(IMAGE, ready, {SOURCE["id"]: {**SOURCE, "md5Checksum": "b" * 32}}, STATE["generation"]))
-        self.assertFalse(store.needs_work(IMAGE, {**base, "status": "unavailable"}, candidates, STATE["generation"]))
+        self.assertFalse(store.needs_work(IMAGE, {**base, "status": "unavailable"}, candidates, STATE["generation"], now=2001))
         self.assertTrue(store.needs_work(IMAGE, {**base, "status": "unavailable"}, candidates, "new-index"))
         for status in ("pending", "failed", "processing"):
             self.assertTrue(store.needs_work(IMAGE, {**base, "status": status}, candidates, STATE["generation"]))

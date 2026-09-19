@@ -64,6 +64,52 @@ Before this change, the hourly job submitted six paths per run: 4,320 paths in a
 30-day month, or $16.60 after the shared 1,000-path free allowance, excluding other
 invalidation activity. This is an avoided-usage estimate, not a guaranteed bill.
 
+## Original-photo comparison retries
+
+The index coordinator still polls Drive changes every 15 minutes and rebuilds
+the inventory daily to cover cursor/metadata gaps. Its matching generation is
+a stable digest of archive membership and matching inputs, independent of the
+snapshot object key and provider bookkeeping. Unchanged snapshots are reused
+and renewed at least daily, before the existing seven-day S3 expiration.
+
+Unavailable and ambiguous matches are retried on a changed archive generation
+or changed photo metadata, and otherwise once 24 hours have elapsed, at the next
+15-minute reconciliation. There is no final-attempt cutoff: photos continue to
+be checked indefinitely. A later original can therefore be discovered at the
+next archive refresh without waiting for the daily fallback. A match still
+requires the existing filename, capture-time, and camera evidence; retries
+cannot guarantee a match when originals or matching evidence never arrive.
+
+Transient failures back off from 15 minutes to a maximum of 24 hours. Queue
+redeliveries respect the same cooldown and leave the existing comparison result
+intact. Deferred failures remain batch failures so SQS redrive and DLQ alarms
+still detect persistent failures; scheduled discovery continues after the
+cooldown even if an older delivery has reached the DLQ. Leases, atomic
+membership/state checks, and private preview storage are
+preserved. After rollout, verify unchanged refreshes stop requeueing the same
+unavailable photos; verify a changed original and an elapsed daily deadline
+each make a comparison eligible again. Cost Explorer can lag the live metric
+improvement, so first inspect worker invocation and DynamoDB consumed-write
+metrics.
+
+## Sparse event metrics and storage
+
+Application log filters publish a value only when an event
+matches, without continuously publishing zeroes. Their matching patterns,
+metric names, alarm thresholds and notification routes remain intact. Event
+alarms use `Sum`, one evaluation period, and `TreatMissingData: notBreaching`.
+CloudWatch may retain a sparse breach in its evaluation lookback longer than a
+zero-filled series; detection remains active. The separate security-notification
+stack's filters keep their existing zero defaults. The backup-freshness heartbeat
+continues publishing its regular values and treats missing data as breaching.
+Do not apply sparse-event semantics to that heartbeat.
+
+Release cleanup preserves the existing 180-day/five-known-good-release policy.
+Current photos, derivatives and album ZIPs used by downloads remain live data.
+Reusing archive snapshots reduces repeated `index/` objects, and the existing
+seven-day lifecycle ages out prior snapshots automatically. No photo, backup,
+or rollback retention is shortened.
+
 ## Admin cost report
 
 The protected `/admin/costs` page provides an account-wide Cost Explorer

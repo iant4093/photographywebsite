@@ -14,7 +14,10 @@ from botocore.exceptions import ClientError
 from PIL import Image, ImageCms, ImageOps
 
 from media_access import media_id_for_key, validate_album_media_key
-from original_comparison_store import comparison_table, index_state, load_snapshot
+from original_comparison_store import (
+    UNMATCHED_RETRY_SECONDS, comparison_table, failure_retry, image_revision,
+    index_state, load_snapshot, retry_due,
+)
 from original_drive import OriginalDrive
 from original_match import build_match_index, extract_evidence, match_original, project_archive
 from validation_helpers import validate_uuid
@@ -160,9 +163,18 @@ def process_job(job):
             return "busy"
         raise
     previous = response.get("Attributes", {})
-    record = {**key, "rawKey": raw_key, "schemaVersion": 1, "updatedAt": now, "status": "pending"}
+    record = {**key, "rawKey": raw_key, "schemaVersion": 1, "updatedAt": now,
+              "imageRevision": image_revision(image), "status": "pending"}
     try:
         state = index_state()
+        if not retry_due(image, previous, state.get("generation"), now):
+            # A duplicate/old queue delivery must respect the same cooldown as
+            # reconciliation. Release only our lease and preserve the result.
+            table.update_item(
+                Key=key, UpdateExpression="REMOVE leaseOwner, leaseUntil",
+                ConditionExpression="leaseOwner = :owner", ExpressionAttributeValues={":owner": owner},
+            )
+            return "deferred_failure" if previous.get("status") == "failed" else "deferred"
         if not state.get("indexKey"):
             publish(album, image, record, owner)
             return "pending"
@@ -180,6 +192,7 @@ def process_job(job):
         match = match_original(evidence, match_index(state))
         if match["status"] != "matched":
             record["status"] = "ambiguous" if match["status"] == "ambiguous" else "unavailable"
+            record["nextAttemptAt"] = now + UNMATCHED_RETRY_SECONDS
             publish(album, image, record, owner)
             return record["status"]
         source = match["source"]
@@ -191,7 +204,8 @@ def process_job(job):
                 and previous.get("sourceFileId") == source["id"] and previous.get("websiteEtag") == record["websiteEtag"]):
             # Repeated queue delivery and later index generations reuse immutable outputs.
             keep = {k: v for k, v in previous.items() if k not in {"leaseOwner", "leaseUntil"}}
-            keep.update(indexGeneration=state["generation"], updatedAt=now)
+            keep.update(indexGeneration=state["generation"], updatedAt=now,
+                        imageRevision=record["imageRevision"])
             publish(album, image, keep, owner)
             return "ready"
         drive = OriginalDrive.from_environment()
@@ -225,11 +239,14 @@ def process_job(job):
         # Preserve a retryable failure instead of misreporting a provider outage
         # as a missing original. No source paths/provider errors enter logs.
         try:
+            failure_count, next_attempt = failure_retry(previous, now)
             table.update_item(
-                Key=key, UpdateExpression="SET #status = :failed, updatedAt = :now REMOVE leaseOwner, leaseUntil",
+                Key=key, UpdateExpression=("SET #status = :failed, updatedAt = :now, "
+                                          "failureCount = :count, nextAttemptAt = :next REMOVE leaseOwner, leaseUntil"),
                 ConditionExpression="leaseOwner = :owner",
                 ExpressionAttributeNames={"#status": "status"},
-                ExpressionAttributeValues={":failed": "failed", ":now": now, ":owner": owner},
+                ExpressionAttributeValues={":failed": "failed", ":now": now, ":owner": owner,
+                                           ":count": failure_count, ":next": next_attempt},
             )
         except ClientError:
             pass
@@ -242,6 +259,10 @@ def handler(event, context):
         try:
             status = process_job(json.loads(message["body"]))
             logger.info("original_comparison_completed status=%s", status)
+            if status == "deferred_failure":
+                # Preserve SQS redrive/DLQ alerting for persistent failures.
+                # The daily reconciler also retries after the cooldown expires.
+                failures.append({"itemIdentifier": message["messageId"]})
         except Exception as error:
             logger.error("original_comparison_failed error_type=%s", type(error).__name__)
             failures.append({"itemIdentifier": message["messageId"]})

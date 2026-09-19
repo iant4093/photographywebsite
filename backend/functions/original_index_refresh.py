@@ -1,5 +1,6 @@
 """Read-only Drive indexing and resumable discovery of existing/future gallery photos."""
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -15,6 +16,18 @@ from original_drive import OriginalDrive
 from original_match import project_archive
 
 logger = logging.getLogger("photography_api.original_comparison")
+SNAPSHOT_REFRESH_SECONDS = 86400  # Renew well before the seven-day S3 expiry.
+
+
+def archive_generation(candidates, root_id):
+    # Ignore provider bookkeeping (version/modifiedTime) but include every input
+    # that can change a match, source identity, access, or archive membership.
+    fields = ("id", "name", "parents", "mimeType", "md5Checksum", "size",
+              "imageMediaMetadata", "capabilities")
+    matching = [{key: item[key] for key in fields if key in item}
+                for item in sorted(candidates, key=lambda item: item["id"])]
+    payload = json.dumps([root_id, matching], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def apply_changes(files, changes):
@@ -59,18 +72,28 @@ def refresh_index(drive, previous, now):
         changes, token = drive.changes(token)
         files = apply_changes(files, changes)
     candidates = project_archive(files, drive.root_id)
-    generation = uuid.uuid4().hex
-    snapshot = {"schemaVersion": 1, "rootId": drive.root_id, "files": files}
-    payload = json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False).encode()
+    generation = archive_generation(candidates, drive.root_id)
+    snapshot = {"schemaVersion": 1, "rootId": drive.root_id,
+                "files": sorted(files, key=lambda item: item["id"])}
+    payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     if len(payload) > 100 * 1024 * 1024:
         raise ValueError("Original index exceeds size limit")
-    key = f"index/{generation}.json.gz"
-    boto3.client("s3").put_object(
-        Bucket=os.environ["ORIGINAL_PREVIEW_BUCKET"], Key=key,
-        Body=gzip.compress(payload), ContentType="application/gzip",
-        ServerSideEncryption="AES256", CacheControl="private, no-store",
-    )
+    digest = hashlib.sha256(payload).hexdigest()
+    reusable = (previous.get("snapshotDigest") == digest and previous.get("indexKey")
+                and 0 <= now - int(previous.get("snapshotCreatedAt", 0)) < SNAPSHOT_REFRESH_SECONDS)
+    if reusable:
+        key, snapshot_created = previous["indexKey"], int(previous["snapshotCreatedAt"])
+    else:
+        # Snapshot identity is independent of matching generation. Renewing an
+        # unchanged snapshot must not requeue every unavailable comparison.
+        key, snapshot_created = f"index/{uuid.uuid4().hex}.json.gz", now
+        boto3.client("s3").put_object(
+            Bucket=os.environ["ORIGINAL_PREVIEW_BUCKET"], Key=key,
+            Body=gzip.compress(payload), ContentType="application/gzip",
+            ServerSideEncryption="AES256", CacheControl="private, no-store",
+        )
     state = {"indexKey": key, "generation": generation, "rootId": drive.root_id,
+             "snapshotDigest": digest, "snapshotCreatedAt": snapshot_created,
              "pageToken": token, "updatedAt": now,
              "lastFullScanAt": now if full_scan else int(previous["lastFullScanAt"]),
              "jpgCount": len(candidates)}
