@@ -125,15 +125,12 @@ export default function MistyEchoExperience() {
         <>
             <div className="misty-pull" data-pulling={pull > 0} aria-hidden="true" style={{ '--pull': pull, '--misty-lift': liftForPull(pull) }}>
                 <div className="misty-pull-pocket">
-                    <svg className="misty-pull-paw" viewBox="0 0 72 150" width="72" height="150" fill="none">
-                        <path d="M17 150 18 54C7 46 6 32 13 27c-2-13 9-19 16-12 4-12 17-11 20 1 10-6 20 3 16 14 6 8 0 21-10 26l3 94" fill="#302d32" stroke="#777078" strokeWidth="2" />
-                        <path d="m20 63 6 5m26-7-6 7M20 100l5 5m29 7-5 5" stroke="#514b53" strokeWidth="3" strokeLinecap="round" />
-                        <g fill="#dea5b1">
-                            <ellipse cx="19" cy="34" rx="5" ry="7" transform="rotate(-22 19 34)" />
-                            <ellipse cx="34" cy="25" rx="5.5" ry="7" />
-                            <ellipse cx="50" cy="30" rx="5" ry="7" transform="rotate(20 50 30)" />
-                            <path d="M25 51c-2-5 5-14 11-14s13 9 11 14c-2 5-7 1-11 1s-9 4-11-1Z" />
-                        </g>
+                    <svg className="misty-pull-paw" viewBox="0 0 32 32" width="28" height="28" fill="currentColor">
+                        <ellipse cx="6" cy="13" rx="3" ry="4" transform="rotate(-25 6 13)" />
+                        <ellipse cx="12" cy="7" rx="3" ry="4" />
+                        <ellipse cx="20" cy="7" rx="3" ry="4" />
+                        <ellipse cx="26" cy="13" rx="3" ry="4" transform="rotate(25 26 13)" />
+                        <path d="M8 25c-2-4 4-11 8-11s10 7 8 11c-2 4-5 1-8 1s-6 3-8-1Z" />
                     </svg>
                     <span>{waking ? 'Misty is waking up…' : 'keep pulling…'}</span>
                 </div>
