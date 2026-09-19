@@ -4,11 +4,13 @@ const WHEEL_PULL_PX = 200
 const WHEEL_PULL_MS = 80
 const TOUCH_PULL_PX = 80
 const TOUCH_PULL_MS = 80
+const LAYOUT_SETTLE_MS = 750
+const LOADING_CONTENT = '[aria-busy="true"], .animate-spin, .skeleton-shimmer'
 const INTERACTIVE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="listbox"], [role="dialog"], [aria-modal="true"]'
 
 // Ignore momentum arriving from the page, then accept a normal pull at the
 // footer. Once a pull is intentional, its natural taper must not erase progress.
-export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
+export function installFooterOverscroll({ onAttempt, onTrigger, onProgress, onCancel }) {
     let bottomSince = null
     let lastWheelAt = -Infinity
     let lastDelta = 0
@@ -22,6 +24,13 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
     let releaseTimer
     let touch = null
     let activeKey = null
+    const root = document.scrollingElement || document.documentElement
+    const content = document.getElementById('main-content') || document.querySelector('main') || document.body
+    let pageHeight = root.scrollHeight
+    let wasLoading = null
+    let stableSince = performance.now()
+    let needsFreshWheel = true
+    let settleTimer
 
     const resetPull = () => {
         clearTimeout(releaseTimer)
@@ -33,10 +42,31 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         onProgress?.(0)
     }
 
+    const pageReady = () => {
+        const height = root.scrollHeight
+        const loading = document.readyState !== 'complete'
+            || content.matches(LOADING_CONTENT) || Boolean(content.querySelector(LOADING_CONTENT))
+        if (loading || loading !== wasLoading || Math.abs(height - pageHeight) > 2) {
+            const changed = loading !== wasLoading || Math.abs(height - pageHeight) > 2
+            pageHeight = height
+            wasLoading = loading
+            stableSince = performance.now()
+            clearTimeout(settleTimer)
+            if (!loading) settleTimer = setTimeout(updateBottom, LAYOUT_SETTLE_MS)
+            needsFreshWheel = true
+            bottomSince = null
+            touch = null
+            activeKey = null
+            resetPull()
+            if (changed) onCancel?.()
+        }
+        return !loading && performance.now() - stableSince >= LAYOUT_SETTLE_MS
+    }
+
     const atFooter = () => {
+        if (!pageReady()) return false
         const footer = document.querySelector('.linen-footer')
         if (!footer || document.visibilityState === 'hidden') return false
-        const root = document.scrollingElement || document.documentElement
         const viewport = window.innerHeight
         const rect = footer.getBoundingClientRect()
         const bodyStyle = getComputedStyle(document.body)
@@ -114,10 +144,14 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
         lastDelta = delta
         lastWheelAt = now
         updateBottom()
+        if (freshGesture && pageReady()) needsFreshWheel = false
         if (bottomSince === null) {
             resetPull()
             return
         }
+        // Input begun on a temporary loading footer must end before a fresh
+        // pull can count against the final, settled page.
+        if (needsFreshWheel) return
         if (!wheelArmed) {
             wheelArmed = (wasAtBottom && freshGesture)
                 || (now - bottomSince >= BOTTOM_GRACE_MS && !momentum)
@@ -130,7 +164,7 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
 
     const onTouchStart = (event) => {
         resetPull()
-        touch = !event.defaultPrevented && event.touches.length === 1 && eligibleTarget(event.target)
+        touch = pageReady() && !event.defaultPrevented && event.touches.length === 1 && eligibleTarget(event.target)
             ? { x: event.touches[0].clientX, bottomY: atFooter() ? event.touches[0].clientY : null, id: event.touches[0].identifier }
             : null
         if (touch?.bottomY != null) startedAt = performance.now()
@@ -188,15 +222,23 @@ export function installFooterOverscroll({ onAttempt, onTrigger, onProgress }) {
 
     const listeners = [
         [window, 'scroll', updateBottom], [window, 'resize', onBlur],
+        [window, 'load', updateBottom], [document, 'readystatechange', updateBottom],
         [window, 'wheel', onWheel], [window, 'touchstart', onTouchStart],
         [window, 'touchmove', onTouchMove], [window, 'touchend', cancelTouch],
         [window, 'touchcancel', cancelTouch], [window, 'keydown', onKeyDown],
         [window, 'keyup', onKeyUp], [window, 'blur', onBlur], [document, 'visibilitychange', onBlur],
     ]
+    const resizeObserver = new ResizeObserver(updateBottom)
+    resizeObserver.observe(document.body)
+    const contentObserver = new MutationObserver(updateBottom)
+    contentObserver.observe(content, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-busy'] })
     for (const [target, type, handler] of listeners) target.addEventListener(type, handler, { passive: true })
     updateBottom()
     return () => {
         clearTimeout(releaseTimer)
+        clearTimeout(settleTimer)
+        resizeObserver.disconnect()
+        contentObserver.disconnect()
         for (const [target, type, handler] of listeners) target.removeEventListener(type, handler)
     }
 }

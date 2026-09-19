@@ -153,7 +153,7 @@ export default function Videos() {
     }
 
     return (
-        <div ref={pageRef} className="animate-fade-in">
+        <div ref={pageRef} className="animate-fade-in" aria-busy={loading || loadingMore}>
             <section className="linen-video-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>

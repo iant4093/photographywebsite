@@ -314,7 +314,7 @@ function AlbumTimeline({ albums, loading, error, onRetry }) {
             </div>
 
             {loading && (
-                <div className="photo-stats-timeline-status" role="status">Loading the album timeline…</div>
+                <div className="photo-stats-timeline-status" role="status" aria-busy="true">Loading the album timeline…</div>
             )}
             {!loading && error && (
                 <div className="photo-stats-timeline-status photo-stats-timeline-error" role="alert">
@@ -473,7 +473,7 @@ export default function Stats() {
             </header>
 
             {loading && (
-                <div className="photo-stats-loading" role="status" aria-label="Loading photography statistics" aria-live="polite">
+                <div className="photo-stats-loading" role="status" aria-label="Loading photography statistics" aria-live="polite" aria-busy="true">
                     <span className="photo-stats-spinner" aria-hidden="true" />
                     <p>Developing the numbers…</p>
                 </div>

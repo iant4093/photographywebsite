@@ -472,7 +472,7 @@ function ExploreModule({ mode }) {
                         <span>{isColor ? '01' : '02'}</span>
                         <h2 id="explore-filter-title">Choose a {isColor ? 'color' : 'lens'}</h2>
                     </div>
-                    {facetLoading && <p className="explore-facet-status" role="status">Reading the visual index…</p>}
+                    {facetLoading && <p className="explore-facet-status" role="status" aria-busy="true">Reading the visual index…</p>}
                     {facetError && <p className="explore-error explore-facet-error" role="alert">{facetError}</p>}
                     {!facetLoading && !facetError && isColor && (
                         <div className="explore-color-options">
@@ -518,7 +518,7 @@ function ExploreModule({ mode }) {
                         <ExploreShuffleButton label={`${activeLabel} photographs`} loading={reshuffling} disabled={loading} onClick={reshuffle} />
                     </div>
                 )}
-                {loading && <div className="explore-loading" role="status">Finding photographs…</div>}
+                {loading && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
                 {resultError && <p className="explore-error" role="alert">{resultError}</p>}
                 {!facetLoading && !facetError && !loading && !resultError && !activeFacet && (
                     <div className="explore-empty"><h2>No indexed photographs</h2><p>Try another Explore module.</p></div>
@@ -876,7 +876,7 @@ function TemporalExplorer({ mode }) {
                         <span>{mode === 'time' ? '05' : '06'}</span>
                         <h2 id="explore-temporal-filter-title">Choose a {config.prompt}</h2>
                     </div>
-                    {facetState.loading && <p className="explore-facet-status" role="status">Reading capture metadata…</p>}
+                    {facetState.loading && <p className="explore-facet-status" role="status" aria-busy="true">Reading capture metadata…</p>}
                     {facetState.error && <p className="explore-error explore-facet-error" role="alert">{facetState.error}</p>}
                     {!facetState.loading && !facetState.error && (
                         <div className={`explore-temporal-options explore-temporal-options--${mode}`}>
@@ -912,7 +912,7 @@ function TemporalExplorer({ mode }) {
                         />
                     </div>
                 )}
-                {loading && <div className="explore-loading" role="status">Finding photographs…</div>}
+                {loading && <div className="explore-loading" role="status" aria-busy="true">Finding photographs…</div>}
                 {resultError && <p className="explore-error" role="alert">{resultError}</p>}
                 {!facetState.loading && !facetState.error && !activeFacet && (
                     <div className="explore-empty"><h2>No dated photographs yet</h2><p>Photos without trustworthy capture dates are intentionally omitted.</p></div>
@@ -1201,7 +1201,7 @@ function ExposureExplorer() {
                     </div>
                 </section>
 
-                {loading && <div className="explore-loading" role="status">Reading exposure settings…</div>}
+                {loading && <div className="explore-loading" role="status" aria-busy="true">Reading exposure settings…</div>}
                 {facetState.error && <p className="explore-error" role="alert">{facetState.error}</p>}
                 {resultError && <p className="explore-error" role="alert">{resultError}</p>}
                 {!loading && !facetState.error && !resultError && (
@@ -1257,7 +1257,7 @@ function GuessSettingsGame() {
             <ExploreHeader title="Guess the Settings" detail="Look closely at the photograph, then choose the setting you think made it." />
             <section className="explore-game max-w-7xl mx-auto px-6 pb-20 md:pb-28">
                 <ExploreBackLink />
-                {loading && <div className="explore-loading" role="status">Building a settings round…</div>}
+                {loading && <div className="explore-loading" role="status" aria-busy="true">Building a settings round…</div>}
                 {error && <p className="explore-error" role="alert">{error}</p>}
                 {!loading && !error && images.length === 0 && (
                     <div className="explore-empty"><h2>Not enough settings yet</h2><p>The game needs photographs with complete exposure metadata.</p></div>

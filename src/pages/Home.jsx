@@ -56,6 +56,7 @@ function Home() {
 
     const [albums, setAlbums] = useState(initialSnapshot?.items || [])
     const [loading, setLoading] = useState(!initialSnapshot)
+    const [catalogPending, setCatalogPending] = useState(true)
     const [error, setError] = useState(null)
     const [loadAttempt, setLoadAttempt] = useState(0)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
@@ -111,7 +112,7 @@ function Home() {
                 setError(requestError.message || 'Photos could not be loaded.')
             })
             .finally(() => {
-                if (!controller.signal.aborted) setLoading(false)
+                if (!controller.signal.aborted) { setLoading(false); setCatalogPending(false) }
             })
         return () => controller.abort()
     }, [loadAttempt, savePage])
@@ -172,7 +173,7 @@ function Home() {
     const { sections: photoSections, setCategoryYear } = useAlbumYearFilters(groupedPhotoAlbums)
 
     return (
-        <div ref={pageRef}>
+        <div ref={pageRef} aria-busy={catalogPending}>
             <section className="home-hero linen-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>
@@ -274,6 +275,7 @@ function Home() {
                             onClick={() => {
                                 setError(null)
                                 setLoading(albums.length === 0)
+                                setCatalogPending(true)
                                 setLoadAttempt((attempt) => attempt + 1)
                             }}
                             className="mt-4 px-5 py-2 rounded-xl border border-red-700 hover:bg-red-50 transition-colors"

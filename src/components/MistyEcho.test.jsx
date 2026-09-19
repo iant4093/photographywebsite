@@ -55,6 +55,7 @@ describe('Misty echo lifecycle', () => {
         expect(loadMistyEchoPhotos).not.toHaveBeenCalled()
         await trigger()
         expect(document.querySelector('.misty-echo')).toHaveAttribute('aria-hidden', 'true')
+        expect(document.querySelector('.misty-echo')).not.toHaveTextContent(/you found Misty/i)
         const images = [...document.querySelectorAll('.misty-echo img')]
         expect(images.length).toBeLessThanOrEqual(60)
         expect(new Set(images.map(image => image.src))).toEqual(new Set(['https://media.test/cat-thumb.jpg']))
@@ -108,6 +109,17 @@ describe('Misty echo lifecycle', () => {
         expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '1' })
         await act(async () => { finishLoading(['https://media.test/cat-thumb.jpg']); await pending })
         expect(document.querySelector('.misty-echo')).not.toBeNull()
+        expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0' })
+    })
+    it('cancels pending cats when the page becomes unsettled', async () => {
+        let finishLoading
+        loadMistyEchoPhotos.mockImplementation(() => new Promise(resolve => { finishLoading = resolve }))
+        render(<MistyEcho />)
+        let pending
+        await act(async () => { pending = handlers.onTrigger(); await vi.advanceTimersByTimeAsync(0) })
+        act(() => handlers.onCancel())
+        await act(async () => { finishLoading(['https://media.test/cat-thumb.jpg']); await pending })
+        expect(document.querySelector('.misty-echo')).toBeNull()
         expect(document.querySelector('.misty-pull')).toHaveStyle({ '--pull': '0' })
     })
 })

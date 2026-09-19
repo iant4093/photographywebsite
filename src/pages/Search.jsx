@@ -239,7 +239,7 @@ export default function Search() {
 
                 {loading && albums.length === 0 && <SkeletonGrid count={6} />}
                 {loading && albums.length > 0 && (
-                    <p className="archive-search-loading" role="status">Refreshing the complete archive…</p>
+                    <p className="archive-search-loading" role="status" aria-busy="true">Refreshing the complete archive…</p>
                 )}
                 {error && (
                     <div className="archive-search-error" role="alert">

@@ -95,7 +95,7 @@ export default function MistyEchoExperience() {
             if (disposed || active) return
             updatePull(performance.now() < cooldownUntil ? 0 : Math.round(value * 50) / 50)
         }
-        const disposeTrigger = installFooterOverscroll({ onAttempt: prepare, onTrigger: trigger, onProgress })
+        const disposeTrigger = installFooterOverscroll({ onAttempt: prepare, onTrigger: trigger, onProgress, onCancel: stop })
         const onKeyDown = (event) => { if (event.key === 'Escape') stop() }
         const onVisibility = () => { if (document.hidden) stop() }
         const onScroll = () => {
@@ -152,7 +152,6 @@ export default function MistyEchoExperience() {
                             ))}
                         </div>
                     ))}
-                    <div className="misty-echo-signoff">you found Misty. <span>meow.</span></div>
                 </div>
             )}
         </>,

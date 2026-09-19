@@ -3,7 +3,7 @@ import { fireEvent } from '@testing-library/react'
 import { installFooterOverscroll } from './footerOverscroll'
 
 describe('continuous pulling past the footer', () => {
-    let dispose, onAttempt, onTrigger, onProgress, footer
+    let dispose, onAttempt, onTrigger, onProgress, onCancel, footer, resize
     const advance = (ms = 50) => vi.advanceTimersByTime(ms)
     const wheel = (props = {}, target = document.body) => fireEvent.wheel(target, { deltaY: 120, ...props })
     const pullWheel = (count = 24, props = {}, target = document.body) => {
@@ -20,6 +20,12 @@ describe('continuous pulling past the footer', () => {
 
     beforeEach(() => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+        vi.spyOn(document, 'readyState', 'get').mockReturnValue('complete')
+        vi.stubGlobal('ResizeObserver', class {
+            constructor(callback) { resize = callback }
+            observe() {}
+            disconnect() {}
+        })
         Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
         Object.defineProperty(window, 'scrollY', { configurable: true, value: 1200 })
         Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 2000 })
@@ -27,15 +33,17 @@ describe('continuous pulling past the footer', () => {
         footer.className = 'linen-footer'
         footer.getBoundingClientRect = () => ({ top: 650, bottom: 800, height: 150 })
         document.body.append(footer)
-        onAttempt = vi.fn(); onTrigger = vi.fn(); onProgress = vi.fn()
-        dispose = installFooterOverscroll({ onAttempt, onTrigger, onProgress })
-        advance(300)
+        onAttempt = vi.fn(); onTrigger = vi.fn(); onProgress = vi.fn(); onCancel = vi.fn()
+        dispose = installFooterOverscroll({ onAttempt, onTrigger, onProgress, onCancel })
+        advance(1000)
+        onCancel.mockClear()
     })
     afterEach(() => {
         dispose()
         document.body.replaceChildren()
         document.body.style.overflow = ''
         vi.useRealTimers()
+        vi.unstubAllGlobals()
     })
 
     it('triggers from one sustained wheel pull, with buildup before the animation', () => {
@@ -209,5 +217,57 @@ describe('continuous pulling past the footer', () => {
         advance(1000); pullWheel(); pullTouch()
         expect(onTrigger).not.toHaveBeenCalled()
         expect(onProgress).not.toHaveBeenCalled()
+    })
+
+    it.each(['loading', 'interactive'])('blocks input until the document has finished loading: %s', state => {
+        vi.spyOn(document, 'readyState', 'get').mockReturnValue(state)
+        pullWheel(); pullTouch()
+        expect(onAttempt).not.toHaveBeenCalled()
+        vi.spyOn(document, 'readyState', 'get').mockReturnValue('complete')
+        fireEvent.load(window)
+        pullWheel(4)
+        expect(onTrigger).not.toHaveBeenCalled()
+        advance(1000)
+        pullWheel(4)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+    })
+    it.each(['busy', 'spinner', 'skeleton'])('blocks a temporary loading footer for as long as content is pending: %s', indicator => {
+        const pending = document.createElement('div')
+        if (indicator === 'busy') pending.setAttribute('aria-busy', 'true')
+        else pending.className = indicator === 'spinner' ? 'animate-spin' : 'skeleton-shimmer'
+        document.body.append(pending)
+        advance(5000)
+        pullWheel(); pullTouch()
+        expect(onAttempt).not.toHaveBeenCalled()
+        pending.remove(); resize()
+        // Keep scrolling while the final page settles: this old gesture cannot activate it.
+        pullWheel(30)
+        expect(onTrigger).not.toHaveBeenCalled()
+        advance(300)
+        pullWheel(4)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+    })
+    it('cancels a partial pull and pending previews when the page grows, then requires a fresh pull', () => {
+        pullWheel(2, { deltaY: 60 })
+        Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 2600 })
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 1800 })
+        resize()
+        expect(onCancel).toHaveBeenCalledTimes(1)
+        expect(onProgress).toHaveBeenLastCalledWith(0)
+        pullWheel(30)
+        expect(onTrigger).not.toHaveBeenCalled()
+        advance(300)
+        pullWheel(4)
+        expect(onTrigger).toHaveBeenCalledTimes(1)
+    })
+    it('ignores a touch drag begun while content is loading even if it finishes mid-drag', () => {
+        const pending = document.createElement('div')
+        pending.setAttribute('aria-busy', 'true'); document.body.append(pending)
+        startTouch()
+        pending.remove(); resize(); advance(1000)
+        moveTouch(350)
+        expect(onTrigger).not.toHaveBeenCalled()
+        endTouch(); pullTouch()
+        expect(onTrigger).toHaveBeenCalledTimes(1)
     })
 })

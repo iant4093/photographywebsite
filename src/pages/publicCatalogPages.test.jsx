@@ -162,6 +162,23 @@ describe('Home complete public catalog', () => {
     vi.unstubAllGlobals()
   })
 
+  it('stays busy while automatic catalog pages are still arriving', async () => {
+    let deliverPage, finish
+    catalog.loadCompleteCatalog.mockImplementation(({ onPage }) => {
+      deliverPage = onPage
+      return new Promise(resolve => { finish = resolve })
+    })
+    const { container } = routed(<Home />)
+    expect(container.firstChild).toHaveAttribute('aria-busy', 'true')
+    const items = [{ albumId: '1', title: 'First page', category: 'Wildlife', type: 'photo' }]
+    await act(async () => deliverPage({ items, nextCursor: 'two' }))
+    expect(screen.getByText('First page')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Loading gallery' })).toBeNull()
+    expect(container.firstChild).toHaveAttribute('aria-busy', 'true')
+    await act(async () => { deliverPage({ items, nextCursor: null }); finish({ items, nextCursor: null }) })
+    expect(container.firstChild).toHaveAttribute('aria-busy', 'false')
+  })
+
   it('renders every automatically fetched page grouped and sorted without a load-more affordance', async () => {
     catalog.loadCompleteCatalog.mockImplementation(async ({ fetchPage, onPage }) => {
       const first = await fetchPage(null)
