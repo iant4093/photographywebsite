@@ -93,10 +93,12 @@ export default function Search() {
         const loadCatalog = async ({ key, type }) => {
             const snapshot = getCatalogSnapshot(key)
             const hasFreshSnapshot = Boolean(snapshot && !snapshot.stale)
+            let lastSaved
             const save = ({ items, nextCursor }) => {
                 const reconciled = reconcilePublicCatalogItems(items, type)
                 setCatalogSnapshot(key, { items: reconciled, nextCursor })
                 setAlbumsByType((current) => ({ ...current, [type]: reconciled }))
+                lastSaved = items
             }
 
             try {
@@ -111,9 +113,10 @@ export default function Search() {
                     initialCursor: hasFreshSnapshot ? snapshot.nextCursor : null,
                     hasInitialPage: hasFreshSnapshot,
                     signal: controller.signal,
+                    publishIntervalMs: 100,
                     onPage: save,
                 })
-                if (!controller.signal.aborted) save(result)
+                if (!controller.signal.aborted && result.items !== lastSaved) save(result)
             } catch (requestError) {
                 if (
                     requestError instanceof CatalogPaginationError
@@ -143,6 +146,12 @@ export default function Search() {
     }, [loadAttempt])
 
     const albums = useMemo(() => mergeCatalogs(albumsByType), [albumsByType])
+    const searchIndex = useMemo(() => albums.map(album => ({
+        album,
+        timestamp: albumTimestamp(album),
+        year: albumYear(album),
+        terms: [album.title, album.description, album.category].map(normalizeSearchValue),
+    })), [albums])
     const categories = useMemo(() => [...new Set(
         albums.map((album) => album.category || 'Uncategorized'),
     )].sort((left, right) => {
@@ -150,8 +159,8 @@ export default function Search() {
         if (right === 'Uncategorized') return -1
         return left.localeCompare(right)
     }), [albums])
-    const years = useMemo(() => [...new Set(albums.map(albumYear).filter(Boolean))]
-        .sort((left, right) => Number(right) - Number(left)), [albums])
+    const years = useMemo(() => [...new Set(searchIndex.map(item => item.year).filter(Boolean))]
+        .sort((left, right) => Number(right) - Number(left)), [searchIndex])
 
     const requestedType = searchParams.get('type') || 'all'
     const type = TYPE_OPTIONS.has(requestedType) ? requestedType : 'all'
@@ -162,27 +171,27 @@ export default function Search() {
 
     const results = useMemo(() => {
         const needle = normalizeSearchValue(resultQuery)
-        return albums
-            .filter((album) => {
+        return searchIndex
+            .filter(({ album, year: indexedYear, terms }) => {
                 if (type === 'video' && album.type !== 'video') return false
                 if (type === 'photo' && album.type === 'video') return false
                 if (category !== 'all' && (album.category || 'Uncategorized') !== category) return false
-                if (year !== 'all' && albumYear(album) !== year) return false
+                if (year !== 'all' && indexedYear !== year) return false
                 if (!needle) return true
-                return [album.title, album.description, album.category]
-                    .some((value) => normalizeSearchValue(value).includes(needle))
+                return terms.some((value) => value.includes(needle))
             })
-            .sort((left, right) => {
+            .sort(({ album: left, timestamp: leftTime }, { album: right, timestamp: rightTime }) => {
                 if (sort === 'title') {
                     return String(left.title || '').localeCompare(String(right.title || ''), undefined, {
                         sensitivity: 'base',
                     }) || String(left.albumId).localeCompare(String(right.albumId))
                 }
                 const direction = sort === 'oldest' ? 1 : -1
-                return (albumTimestamp(left) - albumTimestamp(right)) * direction
+                return (leftTime - rightTime) * direction
                     || String(left.title || '').localeCompare(String(right.title || ''))
             })
-    }, [albums, category, resultQuery, sort, type, year])
+            .map(item => item.album)
+    }, [searchIndex, category, resultQuery, sort, type, year])
 
     const updateParam = (name, value, defaultValue = 'all') => {
         const next = new URLSearchParams(searchParams)

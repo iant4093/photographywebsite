@@ -250,6 +250,69 @@ describe('loadCompleteCatalog', () => {
         expect(snapshots[0].nextCursor).toBe('page-two')
     })
 
+    it('batches rapid pages without mutating earlier snapshots or losing updated albums', async () => {
+        const fetchPage = vi.fn()
+            .mockResolvedValueOnce({ items: [{ albumId: 'one', title: 'old' }], nextCursor: 'two' })
+            .mockResolvedValueOnce({ items: [{ albumId: 'one', title: 'new' }, { albumId: 'two' }], nextCursor: 'three' })
+            .mockResolvedValueOnce({ items: [{ albumId: 'three' }], nextCursor: null })
+        const onPage = vi.fn()
+        const result = await loadCompleteCatalog({ fetchPage, onPage, publishIntervalMs: 100 })
+        expect(onPage).toHaveBeenCalledTimes(2)
+        expect(onPage.mock.calls[0][0].items).toEqual([{ albumId: 'one', title: 'old' }])
+        expect(result.items).toEqual([{ albumId: 'one', title: 'new' }, { albumId: 'two' }, { albumId: 'three' }])
+        expect(onPage.mock.calls[1][0]).toBe(result)
+    })
+
+    it('publishes a buffered page promptly while a later network request is slow', async () => {
+        vi.useFakeTimers()
+        let finish
+        const fetchPage = vi.fn()
+            .mockResolvedValueOnce({ items: [{ albumId: 'one' }], nextCursor: 'two' })
+            .mockResolvedValueOnce({ items: [{ albumId: 'two' }], nextCursor: 'three' })
+            .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+        const onPage = vi.fn()
+        const result = loadCompleteCatalog({ fetchPage, onPage, publishIntervalMs: 100 })
+        await vi.advanceTimersByTimeAsync(99)
+        expect(onPage).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(onPage.mock.calls[1][0].items).toHaveLength(2)
+        finish({ items: [{ albumId: 'three' }], nextCursor: null })
+        await result
+        expect(onPage).toHaveBeenCalledTimes(3)
+        expect(vi.getTimerCount()).toBe(0)
+        vi.useRealTimers()
+    })
+
+    it('flushes received pages on network failure and cancels deferred publication on abort', async () => {
+        const onPage = vi.fn()
+        const failure = new Error('offline')
+        await expect(loadCompleteCatalog({
+            publishIntervalMs: 100,
+            onPage,
+            fetchPage: vi.fn()
+                .mockResolvedValueOnce({ items: [{ albumId: 'one' }], nextCursor: 'two' })
+                .mockResolvedValueOnce({ items: [{ albumId: 'two' }], nextCursor: 'three' })
+                .mockRejectedValueOnce(failure),
+        })).rejects.toBe(failure)
+        expect(onPage.mock.calls[1][0]).toMatchObject({ items: [{ albumId: 'one' }, { albumId: 'two' }], nextCursor: 'three' })
+
+        vi.useFakeTimers()
+        const controller = new AbortController()
+        const publish = vi.fn()
+        const result = loadCompleteCatalog({
+            publishIntervalMs: 100, onPage: publish, signal: controller.signal,
+            fetchPage: vi.fn()
+                .mockResolvedValueOnce({ items: [{ albumId: 'one' }], nextCursor: 'two' })
+                .mockResolvedValueOnce({ items: [{ albumId: 'two' }], nextCursor: 'three' })
+                .mockImplementationOnce(async () => { controller.abort(); return { items: [], nextCursor: null } }),
+        })
+        await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+        await vi.runAllTimersAsync()
+        expect(publish).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+        vi.useRealTimers()
+    })
+
     it('resumes an incomplete cached catalog from its next cursor', async () => {
         const requestedCursors = []
         const result = await loadCompleteCatalog({

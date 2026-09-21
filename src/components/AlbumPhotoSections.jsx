@@ -16,7 +16,7 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                     data-page-scroll-media
                     type="button"
                     key={mediaId(img) || index}
-                    className="linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
+                    className="album-photo-tile linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                     onClick={() => onOpen(img)}
                     aria-label={`Open item ${index + 1} from ${albumTitle}${section.title ? ` — ${section.title}` : ''}${img.altText ? ` — ${img.altText}` : ''}`}
                 >

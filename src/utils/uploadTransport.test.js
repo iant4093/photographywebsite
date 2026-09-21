@@ -28,6 +28,7 @@ describe('measured signed uploads', () => {
         const headers = { 'Content-Type': 'image/jpeg', 'x-amz-tagging': 'visibility=pending' }
         let finished = false
         const result = uploadFileToS3('https://upload.test/signed', file, headers, { onProgress }).then(response => { finished = true; return response })
+        await vi.dynamicImportSettled()
         const xhr = requests[0]
         expect(xhr.open).toHaveBeenCalledWith('PUT', 'https://upload.test/signed')
         expect(xhr.headers).toEqual(headers)
@@ -51,6 +52,7 @@ describe('measured signed uploads', () => {
         const file = new File(['abc'], 'x.jpg', { type: 'image/jpeg' })
         const result = uploadFileToS3('https://upload.test', file, {}, { onProgress })
         const rejected = expect(result).rejects.toMatchObject({ code: 'UPLOAD_FAILED', status: 403 })
+        await vi.dynamicImportSettled()
         requests[0].upload.onprogress({ loaded: 2 })
         requests[0].onerror()
         await vi.advanceTimersByTimeAsync(601)
@@ -66,6 +68,7 @@ describe('measured signed uploads', () => {
         vi.useFakeTimers()
         const result = uploadFileToS3('https://upload.test', new Blob(['abc']), {}, { onProgress: vi.fn() })
         const rejected = expect(result).rejects.toMatchObject({ code: 'UPLOAD_NETWORK_ERROR' })
+        await vi.dynamicImportSettled()
         requests[0].status = 503
         requests[0].onload()
         await vi.advanceTimersByTimeAsync(601)
@@ -79,11 +82,22 @@ describe('measured signed uploads', () => {
         const options = { signal: controller.signal, onProgress: vi.fn() }
         const result = uploadFileToS3('https://upload.test', new Blob(['abc']), {}, options)
         const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' })
+        await vi.dynamicImportSettled()
         controller.abort()
         await rejected
         expect(requests[0].abort).toHaveBeenCalledOnce()
         expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
         await expect(uploadFileToS3('https://upload.test', new Blob(['abc']), {}, options)).rejects.toMatchObject({ name: 'AbortError' })
         expect(requests).toHaveLength(1)
+    })
+
+    it('does not start a transfer when cancelled while loading the upload transport', async () => {
+        const controller = new AbortController()
+        const result = uploadFileToS3('https://upload.test', new Blob(['abc']), {}, {
+            signal: controller.signal, onProgress: vi.fn(),
+        })
+        controller.abort()
+        await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+        expect(requests).toHaveLength(0)
     })
 })

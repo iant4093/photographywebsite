@@ -48,13 +48,35 @@ function forget(storage, jobKey) {
 
 function defaultSleep(delayMs, signal) {
     return new Promise((resolve, reject) => {
-        const timer = window.setTimeout(resolve, delayMs)
-        const abort = () => {
+        const startedAt = Date.now()
+        let timer
+        const page = typeof document === 'undefined' ? null : document
+        const cleanup = () => {
             window.clearTimeout(timer)
+            signal?.removeEventListener('abort', abort)
+            page?.removeEventListener('visibilitychange', schedule)
+        }
+        const finish = () => {
+            cleanup()
+            resolve()
+        }
+        const abort = () => {
+            cleanup()
             reject(new DOMException('Request aborted', 'AbortError'))
         }
+        const schedule = () => {
+            window.clearTimeout(timer)
+            // Returning to the tab resumes promptly, but never before the
+            // normal backoff/server cooldown would have allowed another poll.
+            const interval = page?.visibilityState === 'hidden' ? Math.max(delayMs, 60_000) : delayMs
+            timer = window.setTimeout(finish, Math.max(0, startedAt + interval - Date.now()))
+        }
         if (signal?.aborted) abort()
-        else signal?.addEventListener('abort', abort, { once: true })
+        else {
+            signal?.addEventListener('abort', abort, { once: true })
+            page?.addEventListener('visibilitychange', schedule)
+            schedule()
+        }
     })
 }
 

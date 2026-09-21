@@ -13,6 +13,74 @@ function memoryStorage() {
 
 describe('pollZipJob', () => {
     afterEach(() => vi.useRealTimers())
+    it('slows background polling and resumes on return without losing the completed download', async () => {
+        vi.useFakeTimers()
+        let visibility = 'visible'
+        vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+        const request = vi.fn()
+            .mockResolvedValueOnce({ status: 'processing' })
+            .mockResolvedValueOnce({ status: 'ready', url: 'ready' })
+        const result = pollZipJob({ jobKey: 'background', request, storage: memoryStorage() })
+        await vi.advanceTimersByTimeAsync(500)
+        visibility = 'hidden'
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(20000)
+        expect(request).toHaveBeenCalledTimes(1)
+        visibility = 'visible'
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(0)
+        await expect(result).resolves.toBe('ready')
+        expect(request).toHaveBeenCalledTimes(2)
+        expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('keeps checking in the background at a slower interval', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+        const request = vi.fn()
+            .mockResolvedValueOnce({ status: 'processing' })
+            .mockResolvedValueOnce({ status: 'ready', url: 'ready' })
+        const result = pollZipJob({ jobKey: 'hidden', request, storage: memoryStorage() })
+        await vi.advanceTimersByTimeAsync(59999)
+        expect(request).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(1)
+        await expect(result).resolves.toBe('ready')
+    })
+
+    it('does not bypass a server cooldown when the tab becomes visible', async () => {
+        vi.useFakeTimers()
+        let visibility = 'hidden'
+        vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+        const request = vi.fn()
+            .mockRejectedValueOnce(Object.assign(new Error('limited'), { status: 429, retryAfterMs: 45000 }))
+            .mockResolvedValueOnce({ status: 'ready', url: 'ready' })
+        const result = pollZipJob({ jobKey: 'cooldown', request, storage: memoryStorage() })
+        await vi.advanceTimersByTimeAsync(10000)
+        visibility = 'visible'
+        document.dispatchEvent(new Event('visibilitychange'))
+        await vi.advanceTimersByTimeAsync(34999)
+        expect(request).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(1)
+        await expect(result).resolves.toBe('ready')
+    })
+
+    it('removes visibility listeners and timers after cancellation', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+        const remove = vi.spyOn(document, 'removeEventListener')
+        const controller = new AbortController()
+        const request = vi.fn().mockResolvedValue({ status: 'processing' })
+        const result = pollZipJob({ jobKey: 'cancel-hidden', request, signal: controller.signal, storage: memoryStorage() })
+        const rejection = expect(result).rejects.toMatchObject({ name: 'AbortError' })
+        await vi.advanceTimersByTimeAsync(100)
+        controller.abort()
+        await rejection
+        document.dispatchEvent(new Event('visibilitychange'))
+        expect(request).toHaveBeenCalledTimes(1)
+        expect(remove).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
+        expect(vi.getTimerCount()).toBe(0)
+    })
+
     it('backs off until a ready URL is returned and clears recovery state', async () => {
         const storage = memoryStorage()
         const request = vi.fn()

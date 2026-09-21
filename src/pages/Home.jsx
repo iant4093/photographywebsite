@@ -92,6 +92,13 @@ function Home() {
             initialCursor: hasFreshSnapshot ? snapshot.nextCursor : null,
             hasInitialPage: hasFreshSnapshot,
             signal: controller.signal,
+            publishIntervalMs: 100,
+            beforeNextPage: async () => {
+                setCatalogPending(false)
+                const { waitForCatalogBrowse } = await import('../utils/catalogBrowse')
+                await waitForCatalogBrowse(document.getElementById('photo-albums'), controller.signal)
+                if (!controller.signal.aborted) setCatalogPending(true)
+            },
             onPage: ({ items, nextCursor: cursor }) => {
                 if (controller.signal.aborted) return
                 savePage(items, cursor)
@@ -149,9 +156,9 @@ function Home() {
     const heroSrc = useResponsiveHero
         ? (usePublishedVersion ? heroManifestImageUrl(publishedHero) : responsiveHomeUrl)
         : (useBundledHero ? '/images/heroes/photo-1280.jpg' : managedHomeUrl)
-    const heroSrcSet = useResponsiveHero
-        ? (usePublishedVersion ? heroManifestSrcSet(publishedHero, 'jpeg') : currentHeroSrcSet('jpeg'))
-        : (useBundledHero ? heroSet('jpg') : undefined)
+    const heroSrcSet = (format) => useResponsiveHero
+        ? (usePublishedVersion ? heroManifestSrcSet(publishedHero, format) : currentHeroSrcSet(format))
+        : (useBundledHero ? heroSet(format === 'jpeg' ? 'jpg' : format) : undefined)
     const { groupedPhotoAlbums, curatedPhotoCategories } = useMemo(() => {
         const grouped = photoAlbums.reduce((result, album) => {
             const category = album.category || 'Uncategorized'
@@ -175,21 +182,13 @@ function Home() {
             <section className="home-hero linen-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>
-                        {useResponsiveHero ? (
-                            <>
-                                <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentHeroSrcSet('avif')} sizes={heroSizes} />
-                                <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentHeroSrcSet('webp')} sizes={heroSizes} />
-                            </>
-                        ) : useBundledHero ? (
-                            <>
-                            <source type="image/avif" srcSet={heroSet('avif')} sizes={heroSizes} />
-                            <source type="image/webp" srcSet={heroSet('webp')} sizes={heroSizes} />
-                            </>
-                        ) : null}
+                        {(useResponsiveHero || useBundledHero) && ['avif', 'webp'].map(format => (
+                            <source key={format} type={`image/${format}`} srcSet={heroSrcSet(format)} sizes={heroSizes} />
+                        ))}
                         <img
                             ref={heroRef}
                             src={heroSrc}
-                            srcSet={heroSrcSet}
+                            srcSet={heroSrcSet('jpeg')}
                             sizes={heroSizes}
                             width="1280"
                             height="853"

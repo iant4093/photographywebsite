@@ -277,6 +277,18 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
   content-visibility: visible;
 }
 
+/* Individual tiles have a fixed aspect ratio, so skipping their offscreen
+   contents preserves gallery geometry, focus targets, and browser search. */
+.album-photo-tile {
+  content-visibility: auto;
+}
+
+@media print {
+  .album-photo-tile {
+    content-visibility: visible;
+  }
+}
+
 .skeleton-shimmer {
   transform: translateX(-100%);
   background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.42) 50%, transparent 100%);

@@ -1,4 +1,4 @@
-import { isSafeCursor, mergeUniqueById } from './apiResponse'
+import { isSafeCursor } from './apiResponse'
 
 const catalogSnapshots = new Map()
 const pendingCatalogMutations = new Map()
@@ -243,6 +243,8 @@ export async function loadCompleteCatalog({
     hasInitialPage = false,
     onPage,
     signal,
+    beforeNextPage,
+    publishIntervalMs = 0,
 }) {
     if (typeof fetchPage !== 'function') throw new TypeError('fetchPage must be a function')
 
@@ -253,36 +255,84 @@ export async function loadCompleteCatalog({
     throwIfAborted(signal)
     if (hasInitialPage && !cursor) return { items, nextCursor: null }
 
-    for (let pageNumber = 0; pageNumber < MAX_CATALOG_PAGES; pageNumber += 1) {
-        throwIfAborted(signal)
-        if (cursor) {
-            if (seenCursors.has(cursor)) {
-                throw new CatalogPaginationError(
-                    'The service returned an invalid pagination sequence.',
-                    'REPEATED_CURSOR',
-                )
-            }
-            seenCursors.add(cursor)
+    const merged = new Map()
+    const merge = (pageItems) => {
+        for (const item of pageItems) {
+            const key = item?.albumId || item?.id
+            if (key) merged.set(key, item)
         }
-
-        const page = await fetchPage(cursor)
-        throwIfAborted(signal)
-        items = mergeUniqueById(items, page?.items || [])
-        cursor = page?.nextCursor ?? null
-        if (!isSafeCursor(cursor)) {
-            throw new CatalogPaginationError(
-                'The service returned an invalid pagination cursor.',
-                'BAD_CURSOR',
-            )
-        }
-
+    }
+    merge(initialItems)
+    let lastPublishedAt = null
+    let pending = false
+    let continuationReady = !beforeNextPage
+    let publishTimer
+    const cancelPublish = () => clearTimeout(publishTimer)
+    const publish = () => {
+        cancelPublish()
+        items = [...merged.values()]
         const snapshot = { items, nextCursor: cursor }
+        pending = false
+        lastPublishedAt = Date.now()
         onPage?.(snapshot)
-        if (!cursor) return snapshot
+        return snapshot
     }
 
-    throw new CatalogPaginationError(
-        'The catalog exceeded the safe pagination limit.',
-        'PAGE_LIMIT',
-    )
+    signal?.addEventListener('abort', cancelPublish, { once: true })
+    try {
+        for (let pageNumber = 0; pageNumber < MAX_CATALOG_PAGES; pageNumber += 1) {
+            throwIfAborted(signal)
+            if (cursor) {
+                if (seenCursors.has(cursor)) {
+                    throw new CatalogPaginationError(
+                        'The service returned an invalid pagination sequence.',
+                        'REPEATED_CURSOR',
+                    )
+                }
+                seenCursors.add(cursor)
+            }
+
+            // An empty first page must never strand the gallery behind a browse gate.
+            if ((hasInitialPage || pageNumber > 0) && merged.size && !continuationReady) {
+                if (pending) publish()
+                await beforeNextPage()
+                throwIfAborted(signal)
+                continuationReady = true
+            }
+            let page
+            try {
+                page = await fetchPage(cursor)
+            } catch (error) {
+                if (pending && !signal?.aborted) publish()
+                throw error
+            }
+            throwIfAborted(signal)
+            merge(page?.items || [])
+            cursor = page?.nextCursor ?? null
+            if (!isSafeCursor(cursor)) {
+                throw new CatalogPaginationError(
+                    'The service returned an invalid pagination cursor.',
+                    'BAD_CURSOR',
+                )
+            }
+
+            pending = true
+            if (!cursor) return publish()
+            if (lastPublishedAt === null || Date.now() - lastPublishedAt >= publishIntervalMs) publish()
+            else {
+                cancelPublish()
+                publishTimer = setTimeout(() => {
+                    if (pending && !signal?.aborted) publish()
+                }, publishIntervalMs - (Date.now() - lastPublishedAt))
+            }
+        }
+
+        throw new CatalogPaginationError(
+            'The catalog exceeded the safe pagination limit.',
+            'PAGE_LIMIT',
+        )
+    } finally {
+        cancelPublish()
+        signal?.removeEventListener('abort', cancelPublish)
+    }
 }

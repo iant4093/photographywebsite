@@ -6,12 +6,12 @@ import {
 } from './catalogState'
 import { annotateMediaExpiry } from './mediaUrls'
 import { clearExploreClientState } from './exploreState'
-import { uploadWithProgress } from './uploadTransport'
 
 // Production uses the single CloudFront front door. An explicit absolute URL
 // remains available for local/staged rollback while the migration is canaried.
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const DEFAULT_TIMEOUT_MS = 15_000
+const MAX_AUTOMATIC_RETRY_DELAY_MS = 60_000
 const PUBLIC_CATALOG_TTL_MS = 5 * 60_000
 // Authenticated catalogs are cached only in this JavaScript process. The auth
 // provider clears the cache on sign-out, and API responses remain `no-store` so
@@ -77,12 +77,28 @@ function combineSignals(...signals) {
 
 function wait(delayMs, signal) {
     return new Promise((resolve, reject) => {
-        const timer = window.setTimeout(resolve, delayMs)
-        signal?.addEventListener('abort', () => {
-            window.clearTimeout(timer)
+        if (signal?.aborted) {
             reject(new DOMException('Request aborted', 'AbortError'))
-        }, { once: true })
+            return
+        }
+        const finish = () => {
+            signal?.removeEventListener('abort', abort)
+            resolve()
+        }
+        const timer = window.setTimeout(finish, delayMs)
+        const abort = () => {
+            window.clearTimeout(timer)
+            signal?.removeEventListener('abort', abort)
+            reject(new DOMException('Request aborted', 'AbortError'))
+        }
+        signal?.addEventListener('abort', abort, { once: true })
     })
+}
+
+function responseRetryDelay(response, attempt, baseMs = 250, jitterMs = 150) {
+    const backoff = (response.status === 429 ? Math.max(baseMs, 1000) : baseMs) * (2 ** attempt)
+    return Math.max(backoff, retryAfterMilliseconds(response.headers?.get('retry-after')))
+        + Math.random() * jitterMs
 }
 
 async function readErrorMessage(response) {
@@ -126,9 +142,15 @@ export async function apiFetch(path, options = {}, config = {}) {
             if (!response.ok) {
                 const retryable = [408, 425, 429, 500, 502, 503, 504].includes(response.status)
                 if (retryable && attempt < retries) {
-                    await response.text().catch(() => '')
-                    await wait(250 * (2 ** attempt) + Math.random() * 150, options.signal)
-                    continue
+                    const delay = responseRetryDelay(response, attempt)
+                    // A longer server cooldown is surfaced to the caller rather
+                    // than shortened into an early retry or an unbounded wait.
+                    if (delay <= MAX_AUTOMATIC_RETRY_DELAY_MS) {
+                        await response.text().catch(() => '')
+                        window.clearTimeout(timeout)
+                        await wait(delay, options.signal)
+                        continue
+                    }
                 }
                 const safeDetail = await readErrorMessage(response)
                 throw new ApiError(userMessageForStatus(response.status, safeDetail), {
@@ -649,8 +671,10 @@ export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, o
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         let response
         try {
+            // Visitors never need the XHR progress transport. Load it only
+            // when an upload actually requests progress reporting.
             response = options.onProgress
-                ? await uploadWithProgress(presignedUrl, file, uploadHeaders, options)
+                ? await (await import('./uploadTransport')).uploadWithProgress(presignedUrl, file, uploadHeaders, options)
                 : await fetch(presignedUrl, {
                     method: 'PUT',
                     headers: uploadHeaders,
@@ -668,9 +692,12 @@ export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, o
 
         const retryable = [408, 425, 429, 500, 502, 503, 504].includes(response.status)
         if (retryable && attempt < retries) {
-            await response.text().catch(() => '')
-            await wait(400 * (2 ** attempt) + Math.random() * 200, options.signal)
-            continue
+            const delay = responseRetryDelay(response, attempt, 400, 200)
+            if (delay <= MAX_AUTOMATIC_RETRY_DELAY_MS) {
+                await response.text().catch(() => '')
+                await wait(delay, options.signal)
+                continue
+            }
         }
         if (!response.ok) throw new ApiError('The upload could not be completed. Please try again.', {
             status: response.status,
