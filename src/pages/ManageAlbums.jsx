@@ -415,7 +415,7 @@ function ManageAlbums() {
         setAlbumImages([])
         setMediaNextCursor(null)
         setCategoryFilter('')
-        setCollapsedCategories(new Set())
+        setCollapsedCategories(new Set(sortedCategories))
         setViewMode('arrange')
     }
 
@@ -892,7 +892,7 @@ function ManageAlbums() {
 
                 {canReorderGallery && !loading && albums.length > 0 && (
                     <div className="mb-8 rounded-2xl border border-amber/20 bg-amber/5 px-5 py-4 text-sm text-warm-gray">
-                        Use the category arrows to arrange sections and the album arrows to arrange cards within a section. Albums default to newest first until you customize their order.
+                        Use the category arrows to arrange sections. Choose Show albums to reorder individual albums within a section.
                     </div>
                 )}
 
@@ -914,13 +914,13 @@ function ManageAlbums() {
                         <p>No albums found.</p>
                     </div>
                 ) : (
-                    <div className="space-y-12">
+                    <div className={viewMode === 'arrange' ? 'space-y-6' : 'space-y-12'}>
                         {sortedCategories.filter((cat) => !sortedCategories.includes(categoryFilter) || cat === categoryFilter).map((cat) => (
                             <div key={cat} className="animate-fade-in">
-                                <div className="flex items-center gap-4 mb-6">
-                                    <h2 className="font-serif text-2xl font-medium text-charcoal">{cat}</h2>
+                                <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${collapsedCategories.has(cat) ? '' : 'mb-6'}`}>
+                                    <h2 className="min-w-0 font-serif text-2xl font-medium text-charcoal [overflow-wrap:anywhere]">{cat}</h2>
                                     <span className="text-sm text-warm-gray">{groupedAlbums[cat].length}{loadingMore || catalogError ? '+' : ''}</span>
-                                    {viewMode === 'manage' && <button type="button" aria-label={`${collapsedCategories.has(cat) ? 'Expand' : 'Collapse'} ${cat}`} aria-expanded={!collapsedCategories.has(cat)} onClick={() => setCollapsedCategories((current) => { const next = new Set(current); if (next.has(cat)) next.delete(cat); else next.add(cat); return next })} className="text-sm text-amber-dark underline">{collapsedCategories.has(cat) ? 'Show' : 'Hide'}</button>}
+                                    <button type="button" aria-label={`${collapsedCategories.has(cat) ? 'Expand' : 'Collapse'} ${cat}`} aria-expanded={!collapsedCategories.has(cat)} onClick={() => setCollapsedCategories((current) => { const next = new Set(current); if (next.has(cat)) next.delete(cat); else next.add(cat); return next })} className="shrink-0 text-sm text-amber-dark underline">{collapsedCategories.has(cat) ? 'Show albums' : 'Hide albums'}</button>
                                     {canReorderGallery && (
                                         <div className="flex gap-2 shrink-0">
                                             <button

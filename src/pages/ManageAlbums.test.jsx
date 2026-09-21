@@ -163,6 +163,7 @@ describe('ManageAlbums', () => {
     expect(titlesBefore).toEqual(['Alpha', 'Zulu'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Arrange Gallery' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Travel' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Zulu earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
       'admin-token', { albumType: 'photo', albumIds: ['z-album', 'a-album'] },
@@ -188,12 +189,20 @@ describe('ManageAlbums', () => {
       .toEqual(['Astro', 'Hikes'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Arrange Gallery' }))
+    expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Expand Hikes' })).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(screen.getByRole('button', { name: 'Move Hikes category earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
       'admin-token', { albumType: 'photo', categoryNames: ['Hikes', 'Astro'] },
     ))
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
       .toEqual(['Hikes', 'Astro'])
+    expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Hikes' }))
+    expect(screen.getByText('Trail')).toBeInTheDocument()
+    expect(screen.queryByText('Stars')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Hikes' }))
+    expect(screen.queryByText('Trail')).toBeNull()
   })
 
   it('supports independent video category and album ordering on the optimized list', async () => {
@@ -206,6 +215,7 @@ describe('ManageAlbums', () => {
     await screen.findByText('Film B')
 
     fireEvent.click(screen.getByRole('button', { name: 'Arrange Gallery' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Films' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Film B earlier' }))
     await waitFor(() => expect(api.updateGalleryOrder).toHaveBeenCalledWith(
       'admin-token',
