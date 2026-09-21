@@ -570,7 +570,7 @@
   opacity: 0;
   pointer-events: none;
   box-shadow: none;
-  transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease;
+  transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease, scale 150ms ease;
 }
 
 .linen-site.linen-admin .admin-media-tile:is(:hover, :focus-visible, :has(:focus-visible)) > .admin-media-action {
@@ -580,6 +580,22 @@
 
 .linen-site.linen-admin .admin-media-tile:is(:hover, :focus-visible, :has(:focus-visible)) > .admin-media-action:disabled {
   opacity: 0.5;
+}
+
+.linen-site.linen-admin .admin-media-favorite {
+  color: var(--color-charcoal);
+  background-color: var(--color-cream-dark);
+}
+
+.linen-site.linen-admin .admin-media-favorite[aria-pressed="true"] {
+  color: #fff;
+  background-color: #e11d48;
+}
+
+.linen-site.linen-admin .admin-media-favorite:not(:disabled):is(:hover, :focus-visible) {
+  color: #fff;
+  background-color: #be123c;
+  scale: 1.1;
 }
 
 .linen-site.linen-admin {

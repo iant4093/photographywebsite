@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -38,6 +38,8 @@ describe('ManageAlbums', () => {
     await screen.findByText('Summer')
     fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
     const heart = await screen.findByRole('button', { name: 'Favorite photo' })
+    expect(within(screen.getByRole('group', { name: 'Item 1 controls' })).getAllByRole('button').map(button => button.getAttribute('title')))
+      .toEqual(['Set as album cover', 'Favorite photo', 'Remove'])
     expect(heart).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(heart)
     expect(heart).toBeDisabled()
@@ -89,26 +91,10 @@ describe('ManageAlbums', () => {
     auth.getIdToken.mockResolvedValue('refreshed-token')
     fireEvent.click(screen.getByRole('button', { name: 'Add', exact: true }))
     expect(await screen.findByText('Added 1 image(s)!')).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: 'Edit description for item 1' })).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: 'Item 1 controls' })).toBeInTheDocument()
     expect(api.uploadFileToS3).toHaveBeenCalledTimes(2)
     expect(api.addImagesToAlbum.mock.calls[1][0]).toBe('refreshed-token')
     expect(api.addImagesToAlbum.mock.calls[1][2]).toEqual(api.addImagesToAlbum.mock.calls[0][2])
-  })
-
-  it('saves an authored photo description through the protected media update API', async () => {
-    const item = { id: 'opaque-media-id', rawKey: 'albums/photo/raw.jpg', thumbnailUrl: 'https://cdn.test/thumb.jpg' }
-    api.fetchAlbumMediaPage.mockResolvedValue({ album: albums[0], items: [item], nextCursor: null })
-    api.updateImageThumbnail.mockResolvedValue({ item: { ...item, altText: 'Waves breaking on a rocky shore' } })
-    mounted()
-    await screen.findByText('Summer')
-    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit description for item 1' }))
-    fireEvent.change(screen.getByLabelText('Photo description (alt text)'), { target: { value: 'Waves breaking on a rocky shore' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save accessibility text' }))
-    await waitFor(() => expect(api.updateImageThumbnail).toHaveBeenCalledWith('admin-token', 'photo', item.rawKey, { altText: 'Waves breaking on a rocky shore' }))
-    await waitFor(() => expect(screen.queryByRole('form', { name: 'Edit media accessibility' })).toBeNull())
-    fireEvent.click(screen.getByRole('button', { name: 'Edit description for item 1' }))
-    expect(screen.getByLabelText('Photo description (alt text)')).toHaveValue('Waves breaking on a rocky shore')
   })
 
   it('loads, type-filters, groups, and switches among public, link-only, and private scopes', async () => {
