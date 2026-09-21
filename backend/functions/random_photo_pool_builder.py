@@ -8,6 +8,7 @@ from boto3.dynamodb.conditions import Attr, Key
 
 from media_access import album_media_prefixes, bucket_name, load_preview_metadata_for_albums
 from cache_invalidation import request_public_api_invalidation
+from featured_photo_pools import build_featured_reference_pools, replace_featured_pools
 from random_photo_pools import build_pool_previews, build_reference_pools, replace_materialized_pools
 
 
@@ -81,4 +82,13 @@ def handler(event, context):
     )
     if result["changed"] and os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip():
         request_public_api_invalidation(random_photos=True, reason="random-photo-pool-refreshed")
-    return result
+    featured = replace_featured_pools(
+        preview_table, build_featured_reference_pools(albums), previews=previews,
+    )
+    logger.info(
+        "featured_photo_pools_refreshed pool_count=%d total_photos=%d changed=%s",
+        featured["poolCount"], featured["totalPhotos"], featured["changed"],
+    )
+    if featured["changed"] and os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip():
+        request_public_api_invalidation(featured_photos=True, reason="featured-photo-pool-refreshed")
+    return {**result, "featured": featured}

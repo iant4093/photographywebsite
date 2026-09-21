@@ -194,6 +194,18 @@ class PreviewWorkerTests(unittest.TestCase):
         rule = next(rule for rule in rules if rule["logicalId"] == "GetPublicAlbumFunction" and rule["action"] == "Modify")
         self.assertIn("MemorySize", rule["propertyPaths"])
 
+    def test_featured_photos_reuse_public_handler_and_refresh_queue(self) -> None:
+        public = resource_block("GetPublicAlbumFunction")
+        update = resource_block("UpdateImageFunction")
+        self.assertIn("Path: /public/featured-photos", public)
+        self.assertIn("RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue", update)
+        self.assertIn("- !GetAtt RandomPhotoRefreshQueue.Arn", update)
+        self.assertIn("Action: sqs:SendMessage", update)
+        rules = json.loads((ROOT / "ops/ci/release_intent.json").read_text())["rules"]
+        rule = next(rule for rule in rules if rule["logicalId"] == "GetPublicAlbumFunctionGetFeaturedPhotosPermission")
+        self.assertEqual(rule["resourceType"], "AWS::Lambda::Permission")
+        self.assertEqual(rule["action"], "Add")
+
     def test_hover_previews_use_bounded_immutable_materialization(self) -> None:
         metadata = resource_block("PreviewMetadataTable")
         queue = resource_block("HoverPreviewRefreshQueue")

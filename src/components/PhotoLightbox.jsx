@@ -96,6 +96,7 @@ function PhotoLightbox({
     onBeforeRefresh,
     onMediaError,
     loading = false,
+    loadingMessage = 'Finding random photos…',
     emptyMessage = '',
 }) {
     const { containerRef, sizesFor, bounds } = useContainedImageSizes()
@@ -444,7 +445,7 @@ function PhotoLightbox({
                     ) : (
                         <div className="text-center text-white px-6">
                             {loading ? (
-                                <p role="status" className="text-sm tracking-[0.18em] uppercase">Finding random photos…</p>
+                                <p role="status" className="text-sm tracking-[0.18em] uppercase">{loadingMessage}</p>
                             ) : (
                                 <>
                                     <p role="alert" className="text-sm">{emptyMessage}</p>

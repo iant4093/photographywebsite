@@ -500,7 +500,9 @@ class UpdateImageBranchTests(unittest.TestCase):
             for favorite in (True, False):
                 with self.subTest(visibility=visibility, favorite=favorite), patch.object(
                     update_image, "update_album_media", return_value=True
-                ) as normalized, patch.object(update_image, "request_public_api_invalidation") as invalidate:
+                ) as normalized, patch.object(update_image, "request_public_api_invalidation") as invalidate, patch.object(
+                    update_image, "request_random_photo_pool_refresh"
+                ) as refresh:
                     response, table = self._call(
                         {"rawKey": RAW_KEY, "isFavorite": favorite},
                         album(type="photo", visibility=visibility, mediaStoreVersion=1),
@@ -512,6 +514,7 @@ class UpdateImageBranchTests(unittest.TestCase):
                 self.assertIn("images[0].isFavorite = :isFavorite", update["UpdateExpression"])
                 self.assertIn("#expectedMediaKey = :expectedKey", update["ConditionExpression"])
                 self.assertEqual(invalidate.call_count, int(visibility == "public"))
+                self.assertEqual(refresh.call_count, int(visibility == "public"))
 
     def test_favorites_reject_non_booleans_videos_and_other_album_keys(self):
         for value in (None, 0, 1, "true", [], {}):

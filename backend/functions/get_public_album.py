@@ -45,6 +45,7 @@ from media_access import (
     serialize_images,
     validated_preview_keys,
 )
+from featured_photo_pools import featured_images, load_featured_references
 from random_photo_pools import compact_reference, load_pool_references, normalized_category
 from original_comparison_access import (
     original_comparison_hint,
@@ -1350,6 +1351,140 @@ def _random_photos_response(event):
     )
 
 
+def _scan_featured_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
+    sample = []
+    total_photos = 0
+    # Apply the same normalized category semantics as the materialized decks,
+    # including albums without a category in the Uncategorized section.
+    for album in _random_photo_albums():
+        if not _active_public_photo_album(album):
+            continue
+        if category and normalized_category(album.get("category")) != normalized_category(category):
+            continue
+        for image in featured_images(album):
+            total_photos += 1
+            candidate = (album, image)
+            if len(sample) < limit:
+                sample.append(candidate)
+                continue
+            replacement = secrets.randbelow(total_photos)
+            if replacement < limit:
+                sample[replacement] = candidate
+
+    return sample, total_photos
+
+
+def _materialized_featured_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
+    try:
+        pool = load_featured_references(_preview_table(), dynamodb, category, limit=limit)
+    except Exception as error:
+        logger.warning(
+            "featured_photo_pool_read_failed error_type=%s",
+            type(error).__name__,
+        )
+        return None
+    if pool is None:
+        return None
+
+    references = pool["references"]
+    albums = _batch_albums(item["albumId"] for item in references)
+    sample = []
+    favorites_by_album = {}
+    for reference in references:
+        album = albums.get(reference["albumId"])
+        if not _active_public_photo_album(album):
+            return None
+        if category and normalized_category(album.get("category")) != normalized_category(
+            category
+        ):
+            return None
+        if reference["albumId"] not in favorites_by_album:
+            favorites_by_album[reference["albumId"]] = {
+                media_id_for_key(image["rawKey"]): image for image in featured_images(album)
+            }
+        image = favorites_by_album[reference["albumId"]].get(reference["mediaId"])
+        if image is None:
+            return None
+        sample.append((album, image))
+    return sample, pool["totalPhotos"], pool.get("previews", {})
+
+
+def _featured_photos_response(event):
+    started = time.monotonic()
+    category = _random_photo_category(event)
+    params = (event or {}).get("queryStringParameters") or {}
+    limit = _positive_limit(params.get("limit"), RANDOM_PHOTO_LIMIT, RANDOM_PHOTO_LIMIT)
+    materialized = _materialized_featured_photo_sample(category, limit)
+    if materialized is None:
+        sample, total_photos = _scan_featured_photo_sample(category, limit)
+        previews = {}
+    else:
+        sample, total_photos, previews = materialized
+    sampled_at = time.monotonic()
+
+    grouped = {}
+    for album, image in sample:
+        group = grouped.setdefault(album["albumId"], {"album": album, "images": []})
+        group["images"].append(image)
+
+    images = []
+    metadata_by_album = {}
+    missing = []
+    precomputed_count = 0
+    for group in grouped.values():
+        album = group["album"]
+        album_id = album["albumId"]
+        metadata_by_album[album_id] = {}
+        missing_images = []
+        for image in group["images"]:
+            media_id = media_id_for_key(image["rawKey"])
+            cached = previews.get(compact_reference(album_id, media_id))
+            metadata = {
+                **cached, "albumId": album_id, "mediaId": media_id, "status": "ready",
+            } if isinstance(cached, dict) else None
+            if validated_preview_keys(image, album, metadata):
+                metadata_by_album[album_id][media_id] = metadata
+                precomputed_count += 1
+            else:
+                missing_images.append(image)
+        if missing_images:
+            missing.append((album, missing_images))
+    if missing:
+        for album_id, metadata in load_preview_metadata_for_albums(missing).items():
+            metadata_by_album.setdefault(album_id, {}).update(metadata)
+    for group in grouped.values():
+        album = group["album"]
+        serialized = serialize_images(
+            {**album, "images": group["images"]},
+            preview_metadata_by_id=metadata_by_album.get(album["albumId"], {}),
+        )
+        images.extend(
+            {
+                **image,
+                "albumId": album.get("albumId", ""),
+                "albumTitle": album.get("title", ""),
+                "albumCategory": album.get("category", "Uncategorized"),
+            }
+            for image in serialized
+        )
+
+    secrets.SystemRandom().shuffle(images)
+    body = {"images": images, "totalPhotos": total_photos}
+    if category:
+        body["category"] = category
+    logger.info(
+        "featured_photos_served source=%s photos=%d precomputed=%d sample_ms=%.1f total_ms=%.1f",
+        "pool" if materialized is not None else "fallback",
+        len(images), precomputed_count, (sampled_at - started) * 1000,
+        (time.monotonic() - started) * 1000,
+    )
+    return json_response(
+        200,
+        body,
+        cache_control="public, max-age=0, s-maxage=300, stale-while-revalidate=600",
+    )
+
+
 def _base_shell():
     """Read the current deployed shell without coupling Lambda to Vite hashes."""
     now = time.monotonic()
@@ -1569,6 +1704,13 @@ def handler(event, context):
         return _social_preview_response(event)
     route_key = ((event or {}).get("requestContext") or {}).get("routeKey", "")
     raw_path = (event or {}).get("rawPath", "")
+    if route_key == "GET /public/featured-photos" or raw_path.endswith("/public/featured-photos"):
+        try:
+            return _featured_photos_response(event)
+        except ValidationError as error:
+            return error_response(400, str(error), code="invalid_request")
+        except Exception as error:
+            return internal_error(context, error, "get_featured_photos")
     if route_key == "GET /public/random-photos" or raw_path.endswith("/public/random-photos"):
         try:
             return _random_photos_response(event)

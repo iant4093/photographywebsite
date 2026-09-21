@@ -400,6 +400,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("GetAnalyticsReportFunctionGetAnalyticsReportPermission", "AWS::Lambda::Permission"),
                 ("GetPublicAlbumFunctionGetAlbumSocialPreviewPermission", "AWS::Lambda::Permission"),
                 ("GetPublicAlbumFunctionGetRandomPhotosPermission", "AWS::Lambda::Permission"),
+                ("GetPublicAlbumFunctionGetFeaturedPhotosPermission", "AWS::Lambda::Permission"),
                 ("GetPublicAlbumFunctionGetExplorePermission", "AWS::Lambda::Permission"),
                 ("GetDownloadUrlFunctionAlbumOriginalComparisonPermission", "AWS::Lambda::Permission"),
                 ("GetDownloadUrlFunctionSharedOriginalComparisonPermission", "AWS::Lambda::Permission"),

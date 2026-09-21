@@ -34,6 +34,7 @@ import usePublishedHero from '../hooks/usePublishedHero'
 import { heroImageSizes } from '../utils/heroImageSizes'
 
 const CATALOG_KEY = 'public-photos'
+const FeaturedPhotoExplorer = lazy(() => import('../components/FeaturedPhotoExplorer'))
 const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer'))
 // Fetch the complete current public catalog in one compressed response while
 // retaining cursor pagination once the catalog grows beyond the API's cap.
@@ -228,6 +229,9 @@ function Home() {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
                                 </Link>
+                                <Suspense fallback={<span className="px-1 py-2 text-white/70">Explore Featured Photos</span>}>
+                                    <FeaturedPhotoExplorer />
+                                </Suspense>
                                 <Suspense fallback={<span className="px-1 py-2 text-white/70">Explore Random Photos</span>}>
                                     <RandomPhotoExplorer />
                                 </Suspense>
@@ -308,6 +312,9 @@ function Home() {
                                     </h3>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+                                    <Suspense fallback={<span className="inline-block h-10 w-10" aria-hidden="true" />}>
+                                        <FeaturedPhotoExplorer category={category} variant="icon" />
+                                    </Suspense>
                                     <Suspense fallback={<span className="inline-block h-10 w-20" aria-hidden="true" />}>
                                         <RandomPhotoExplorer category={category} variant="icon" showStats />
                                     </Suspense>

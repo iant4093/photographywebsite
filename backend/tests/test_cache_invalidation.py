@@ -36,10 +36,11 @@ class CacheInvalidationTests(unittest.TestCase):
         request = self.client.create_invalidation.call_args.kwargs
         self.assertEqual(request["DistributionId"], "frontend")
         self.assertEqual(request["InvalidationBatch"]["Paths"], {
-            "Quantity": 3,
+            "Quantity": 4,
             "Items": [
                 "/api/public/albums*",
                 "/api/public/explore*",
+                "/api/public/featured-photos*",
                 "/api/public/random-photos*",
             ],
         })
@@ -52,11 +53,12 @@ class CacheInvalidationTests(unittest.TestCase):
                 catalog=True, random_photos=True,
             )
         paths = self.client.create_invalidation.call_args.kwargs['InvalidationBatch']['Paths']
-        self.assertEqual(paths['Quantity'], 3)
+        self.assertEqual(paths['Quantity'], 4)
         covered = [
             '/api/public/albums', '/api/public/albums?category=travel&page=2',
             f'/api/public/albums/{ALBUM_ID}', f'/api/public/albums/{ALBUM_ID}?page=2',
             '/api/public/explore', '/api/public/explore?cursor=next',
+            '/api/public/featured-photos', '/api/public/featured-photos?mode=category&value=Hikes&limit=6',
             '/api/public/random-photos', '/api/public/random-photos?category=travel',
         ]
         for url in covered:
@@ -202,6 +204,7 @@ class CacheInvalidationTests(unittest.TestCase):
             album_ids={ALBUM_ID},
             catalog=True,
             random_photos=False,
+            featured_photos=False,
             reason="batched-public-mutation",
             strict=True,
         )
@@ -236,7 +239,7 @@ class CacheInvalidationTests(unittest.TestCase):
                 {"body": json.dumps({"version": 1, "catalog": True, "albumId": ALBUM_ID})},
             ]}, None)
         paths = self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"]
-        self.assertEqual(paths["Quantity"], 3)
+        self.assertEqual(paths["Quantity"], 4)
         self.assertIn("/api/public/albums*", paths["Items"])
         self.assertIn("/api/public/explore*", paths["Items"])
 

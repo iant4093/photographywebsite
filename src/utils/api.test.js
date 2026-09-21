@@ -5,6 +5,7 @@ import {
     fetchAlbumForViewing,
     fetchAlbumsPage,
     fetchRandomPhotos,
+    fetchFeaturedPhotos,
     prefetchPublicAlbum,
     readCachedPublicAlbum,
 } from './api'
@@ -327,6 +328,24 @@ describe('random public photos', () => {
         await fetchRandomPhotos({ category: 'Hikes', limit: 80, priority: 'low' })
         expect(request.mock.calls[0][0]).toMatch(/\/public\/random-photos\?limit=6$/)
         expect(request.mock.calls[1][0]).toMatch(/\?mode=category&value=Hikes&limit=80$/)
+        expect(request.mock.calls[1][1].priority).toBe('low')
+    })
+})
+
+describe('featured photo API', () => {
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('uses a separate endpoint and cache-compatible category and batch parameters', async () => {
+        const request = vi.fn().mockImplementation(async () => jsonResponse({
+            images: [{ mediaId: 'favorite', isFavorite: true }], totalPhotos: 12,
+        }))
+        vi.stubGlobal('fetch', request)
+        const starter = await fetchFeaturedPhotos({ limit: 6 })
+        await fetchFeaturedPhotos({ category: ' Birding & Wildlife ', limit: 80, priority: 'low' })
+        expect(starter.images[0].isFavorite).toBe(true)
+        expect(starter.totalPhotos).toBe(12)
+        expect(request.mock.calls[0][0]).toMatch(/\/public\/featured-photos\?limit=6$/)
+        expect(request.mock.calls[1][0]).toMatch(/\/public\/featured-photos\?mode=category&value=Birding\+%26\+Wildlife&limit=80$/)
         expect(request.mock.calls[1][1].priority).toBe('low')
     })
 })

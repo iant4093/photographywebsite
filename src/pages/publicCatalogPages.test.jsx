@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   requestAlbumOriginalComparison: vi.fn(),
   fetchAlbumsPage: vi.fn(),
   fetchRandomPhotos: vi.fn(),
+  fetchFeaturedPhotos: vi.fn(),
   requestAlbumMediaDownload: vi.fn(),
 }))
 const catalog = vi.hoisted(() => ({
@@ -38,6 +39,7 @@ vi.mock('../components/ScrollRow', () => ({ default: ({ children, scrollKey }) =
 import Home from './Home'
 import Videos from './Videos'
 import { clearRandomPhotoSessionCache } from '../utils/randomPhotoSession'
+import { clearFeaturedPhotoSessionCache } from '../utils/featuredPhotoSession'
 
 function routed(ui) {
   return render(<MemoryRouter>{ui}</MemoryRouter>)
@@ -151,6 +153,8 @@ describe('Home complete public catalog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearRandomPhotoSessionCache()
+    clearFeaturedPhotoSessionCache()
+    api.fetchFeaturedPhotos.mockResolvedValue({ images: [], totalPhotos: 0 })
     api.fetchRandomPhotos.mockResolvedValue({ images: [] })
     catalog.getCatalogSnapshot.mockReturnValue(null)
     scroll.isRevealed.mockReturnValue(false)
@@ -160,6 +164,24 @@ describe('Home complete public catalog', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('places featured above random and scopes section hearts without preloading on mount', async () => {
+    const items = [{ albumId: '1', title: 'Hike', category: 'Hikes', type: 'photo' }]
+    catalog.getCatalogSnapshot.mockReturnValue({ items, nextCursor: null })
+    catalog.loadCompleteCatalog.mockResolvedValue({ items, nextCursor: null })
+    routed(<Home />)
+    const featured = await screen.findByRole('button', { name: 'Explore Featured Photos' })
+    const random = await screen.findByRole('button', { name: 'Explore Random Photos' })
+    expect(featured.compareDocumentPosition(random) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const section = await screen.findByRole('button', { name: 'Explore featured photos in Hikes' })
+    expect(api.fetchFeaturedPhotos).not.toHaveBeenCalled()
+    fireEvent.click(section)
+    expect(await screen.findByRole('alert')).toHaveTextContent('No featured photos are available in Hikes yet.')
+    expect(api.fetchFeaturedPhotos).toHaveBeenCalledExactlyOnceWith({
+      category: 'Hikes', limit: 6, signal: expect.any(AbortSignal),
+    })
+    expect(api.fetchRandomPhotos).not.toHaveBeenCalled()
   })
 
   it('stays busy while automatic catalog pages are still arriving', async () => {

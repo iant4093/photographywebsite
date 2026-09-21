@@ -357,6 +357,23 @@ export function fetchRandomPhotos(options = {}) {
         }))
 }
 
+export function fetchFeaturedPhotos(options = {}) {
+    const category = typeof options.category === 'string' ? options.category.trim() : ''
+    const params = new URLSearchParams(category ? { mode: 'category', value: category } : {})
+    if (options.limit != null) params.set('limit', String(options.limit))
+    const query = params.size ? `?${params}` : ''
+    return apiFetch(`/public/featured-photos${query}`, {
+        signal: options.signal,
+        ...(options.priority ? { priority: options.priority } : {}),
+    }, { timeoutMs: 30_000 })
+        .then((payload) => ({
+            ...payload,
+            images: Array.isArray(payload?.images)
+                ? payload.images.map(annotateMediaExpiry)
+                : [],
+        }))
+}
+
 export function fetchAlbumsFiltered(params = {}, token = null, options = {}) {
     return fetchAllAlbums(params, { ...options, token })
 }

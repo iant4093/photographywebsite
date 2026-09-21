@@ -73,7 +73,7 @@ def _create_invalidation(distribution_id, paths, reason, *, strict):
         return False
 
 
-def invalidate_public_api_batch(*, album_ids=None, catalog=False, random_photos=False, reason="public-album", strict=False):
+def invalidate_public_api_batch(*, album_ids=None, catalog=False, random_photos=False, featured_photos=False, reason="public-album", strict=False):
     """Invalidate anonymous representations in one bounded provider request."""
     # Validate even when the catalog wildcard already covers these albums.
     validated_albums = sorted({validate_uuid(value) for value in album_ids or []})
@@ -86,6 +86,8 @@ def invalidate_public_api_batch(*, album_ids=None, catalog=False, random_photos=
         paths.extend(f"/api/public/albums/{album_id}" for album_id in validated_albums)
     if catalog or random_photos:
         paths.append("/api/public/random-photos*")
+    if catalog or featured_photos:
+        paths.append("/api/public/featured-photos*")
     distribution_id = os.environ.get(
         "FRONTEND_DISTRIBUTION_ID",
         DEFAULT_FRONTEND_DISTRIBUTION_ID,
@@ -93,18 +95,19 @@ def invalidate_public_api_batch(*, album_ids=None, catalog=False, random_photos=
     return _create_invalidation(distribution_id, paths, reason, strict=strict)
 
 
-def invalidate_public_api(*, album_id=None, catalog=False, random_photos=False, reason="public-album", strict=False):
+def invalidate_public_api(*, album_id=None, catalog=False, random_photos=False, featured_photos=False, reason="public-album", strict=False):
     """Synchronously invalidate only anonymous API representations."""
     return invalidate_public_api_batch(
         album_ids=[album_id] if album_id else [],
         catalog=catalog,
         random_photos=random_photos,
+        featured_photos=featured_photos,
         reason=reason,
         strict=strict,
     )
 
 
-def request_public_api_invalidation(*, album_id=None, catalog=False, random_photos=False, reason="public-album"):
+def request_public_api_invalidation(*, album_id=None, catalog=False, random_photos=False, featured_photos=False, reason="public-album"):
     """Queue non-security cache work so an admin write returns immediately.
 
     Deployments without the queue retain the former synchronous behavior,
@@ -117,6 +120,7 @@ def request_public_api_invalidation(*, album_id=None, catalog=False, random_phot
             album_id=validated_album_id,
             catalog=catalog,
             random_photos=random_photos,
+            featured_photos=featured_photos,
             reason=reason,
         )
     try:
@@ -127,6 +131,7 @@ def request_public_api_invalidation(*, album_id=None, catalog=False, random_phot
                 "albumId": validated_album_id,
                 "catalog": bool(catalog),
                 "randomPhotos": bool(random_photos),
+                "featuredPhotos": bool(featured_photos),
                 "reason": str(reason)[:64],
             }, separators=(",", ":")),
         )

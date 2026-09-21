@@ -12,6 +12,7 @@ from auth_helpers import require_admin
 from cache_invalidation import request_public_api_invalidation
 from deletion_helpers import DeletionTooLargeError, delete_keys_all_versions, preflight_deletion
 from media_access import media_id_for_key, serialize_images, tag_keys_visibility, validate_album_media_key
+from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, optional_string, parse_json_body, require_string, validate_uuid
 
@@ -159,6 +160,8 @@ def handler(event, context):
         if obsolete_thumb:
             delete_keys_all_versions([obsolete_thumb])
         if album.get("visibility") == "public":
+            if "isFavorite" in accessibility:
+                request_random_photo_pool_refresh()
             request_public_api_invalidation(
                 album_id=album_id,
                 catalog=True,

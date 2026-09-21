@@ -12,8 +12,8 @@ NPM ?= npm
 # This list is intentionally explicit: an unmapped function fails the build
 # instead of falling back to copying the entire functions directory.
 SOURCES_GetPublicAlbumsFunction := cursor_helpers.py front_door.py gallery_order.py get_public_albums.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py
-SOURCES_GetPublicAlbumFunction := cursor_helpers.py explore_index.py front_door.py get_public_album.py media_access.py random_photo_pools.py response_helpers.py validation_helpers.py original_comparison_access.py
-SOURCES_RandomPhotoPoolBuilderFunction := cache_invalidation.py media_access.py random_photo_pool_builder.py random_photo_pools.py validation_helpers.py original_comparison_access.py
+SOURCES_GetPublicAlbumFunction := cursor_helpers.py explore_index.py front_door.py get_public_album.py media_access.py random_photo_pools.py response_helpers.py validation_helpers.py original_comparison_access.py featured_photo_pools.py
+SOURCES_RandomPhotoPoolBuilderFunction := cache_invalidation.py media_access.py random_photo_pool_builder.py random_photo_pools.py validation_helpers.py original_comparison_access.py featured_photo_pools.py
 SOURCES_CacheInvalidationWorkerFunction := cache_invalidation.py cache_invalidation_worker.py media_access.py original_comparison_access.py validation_helpers.py
 SOURCES_HoverPreviewManifestBuilderFunction := album_media_store.py cache_invalidation.py hover_preview_manifest_builder.py media_access.py validation_helpers.py original_comparison_access.py
 SOURCES_GetAlbumsFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py gallery_order.py get_albums.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py
@@ -38,7 +38,7 @@ SOURCES_DeleteImagesFunction := drive_backup_jobs.py album_media_store.py audit_
 SOURCES_TagMediaObjectFunction := media_access.py tag_media_object.py validation_helpers.py original_comparison_access.py
 SOURCES_GetDownloadUrlFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_download_url.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py
 SOURCES_PreparePrintFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py media_access.py prepare_print.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py
-SOURCES_UpdateImageFunction := album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py deletion_helpers.py front_door.py media_access.py response_helpers.py update_image.py validation_helpers.py original_comparison_access.py
+SOURCES_UpdateImageFunction := album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py deletion_helpers.py front_door.py media_access.py response_helpers.py update_image.py validation_helpers.py original_comparison_access.py random_pool_refresh.py
 SOURCES_GetUploadUrlFunction := audit_helpers.py auth_helpers.py front_door.py get_upload_url.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py
 SOURCES_HeroCoverFunction := audit_helpers.py auth_helpers.py front_door.py hero_cover.py response_helpers.py validation_helpers.py
 SOURCES_CreateUserFunction := audit_helpers.py auth_helpers.py create_user.py front_door.py response_helpers.py validation_helpers.py

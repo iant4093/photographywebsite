@@ -128,6 +128,7 @@ expected_routes = {
     ("GET", "/public/albums/{albumId}"),
     ("GET", "/public/explore"),
     ("GET", "/public/random-photos"),
+    ("GET", "/public/featured-photos"),
     ("GET", "/public/stats"),
     ("GET", "/albums"),
     ("GET", "/albums/{albumId}"),

@@ -1904,6 +1904,14 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        GetFeaturedPhotos:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /public/featured-photos
+            Method: GET
+            Auth:
+              Authorizer: NONE
         GetRandomPhotos:
           Type: HttpApi
           Properties:
@@ -3684,6 +3692,7 @@ Resources:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
@@ -3700,7 +3709,9 @@ Resources:
               Resource: !GetAtt AlbumMediaTable.Arn
             - Effect: Allow
               Action: sqs:SendMessage
-              Resource: !GetAtt CacheInvalidationQueue.Arn
+              Resource:
+                - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
                 - s3:ListBucketVersions

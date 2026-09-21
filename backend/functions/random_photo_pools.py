@@ -167,7 +167,7 @@ def _content_digest(pools, previews):
     ).encode("utf-8")).hexdigest()
 
 
-def _pool_inventory(table):
+def _pool_inventory(table, partition=POOL_PARTITION):
     fields = ("mediaId", "recordType", "schemaVersion", "poolId", "generation",
               "category", "totalPhotos", "shardSize", "shardCount", "contentDigest",
               "shardIndex")
@@ -176,7 +176,7 @@ def _pool_inventory(table):
     while True:
         query = {
             "KeyConditionExpression": "albumId = :partition",
-            "ExpressionAttributeValues": {":partition": POOL_PARTITION},
+            "ExpressionAttributeValues": {":partition": partition},
             "ProjectionExpression": ", ".join(f"#f{i}" for i in range(len(fields))),
             "ExpressionAttributeNames": {f"#f{i}": field for i, field in enumerate(fields)},
             "ConsistentRead": True,
@@ -219,9 +219,9 @@ def _unchanged_generation(existing, pools, digest):
     return None
 
 
-def replace_materialized_pools(table, pools, *, generation=None, generated_at=None, previews=None):
+def replace_materialized_pools(table, pools, *, generation=None, generated_at=None, previews=None, partition=POOL_PARTITION):
     """Reuse complete unchanged decks; otherwise publish, switch, then clean up."""
-    existing = _pool_inventory(table)
+    existing = _pool_inventory(table, partition)
     digest = _content_digest(pools, previews or {})
     unchanged_generation = _unchanged_generation(existing, pools, digest)
     if unchanged_generation:
@@ -249,7 +249,7 @@ def replace_materialized_pools(table, pools, *, generation=None, generated_at=No
                     index * POOL_SHARD_SIZE:(index + 1) * POOL_SHARD_SIZE
                 ]
                 batch.put_item(Item={
-                    "albumId": POOL_PARTITION,
+                    "albumId": partition,
                     "mediaId": sort_key,
                     "recordType": POOL_SHARD_RECORD_TYPE,
                     "schemaVersion": POOL_SCHEMA_VERSION,
@@ -262,7 +262,7 @@ def replace_materialized_pools(table, pools, *, generation=None, generated_at=No
             meta_key = metadata_sort_key(category)
             desired_keys.add(meta_key)
             metadata_items.append({
-                "albumId": POOL_PARTITION,
+                "albumId": partition,
                 "mediaId": meta_key,
                 "recordType": POOL_RECORD_TYPE,
                 "schemaVersion": POOL_SCHEMA_VERSION,
@@ -284,7 +284,7 @@ def replace_materialized_pools(table, pools, *, generation=None, generated_at=No
     if stale_keys:
         with table.batch_writer() as batch:
             for sort_key in stale_keys:
-                batch.delete_item(Key={"albumId": POOL_PARTITION, "mediaId": sort_key})
+                batch.delete_item(Key={"albumId": partition, "mediaId": sort_key})
     return {
         "generation": generation,
         "poolCount": len(metadata_items),
@@ -327,13 +327,13 @@ def _valid_metadata(item, category):
     }
 
 
-def _batch_get_shards(resource, table, keys, preview_offsets):
+def _batch_get_shards(resource, table, keys, preview_offsets, partition=POOL_PARTITION):
     # Offset keys let a six-photo request project just six preview records,
     # without transferring all 256 records in each shard.
     offset_names = {f"#p{offset}": str(offset) for offset in sorted(set(preview_offsets))}
     request = {
         table.name: {
-            "Keys": [{"albumId": POOL_PARTITION, "mediaId": key} for key in keys],
+            "Keys": [{"albumId": partition, "mediaId": key} for key in keys],
             "ConsistentRead": False,
             "ProjectionExpression": (
                 "mediaId,recordType,schemaVersion,poolId,generation,shardIndex,#refs,"
@@ -355,10 +355,10 @@ def _batch_get_shards(resource, table, keys, preview_offsets):
     raise RuntimeError("Random photo pool shard reads remained unprocessed")
 
 
-def load_pool_references(table, resource, category=None, *, now=None, limit=DEFAULT_SAMPLE_LIMIT):
+def load_pool_references(table, resource, category=None, *, now=None, limit=DEFAULT_SAMPLE_LIMIT, partition=POOL_PARTITION):
     """Read only the shards needed for this five-minute sample window."""
     metadata = table.get_item(
-        Key={"albumId": POOL_PARTITION, "mediaId": metadata_sort_key(category)},
+        Key={"albumId": partition, "mediaId": metadata_sort_key(category)},
         ConsistentRead=False,
     ).get("Item")
     valid = _valid_metadata(metadata, category)
@@ -368,7 +368,7 @@ def load_pool_references(table, resource, category=None, *, now=None, limit=DEFA
         if category is None:
             return None
         ready = table.get_item(
-            Key={"albumId": POOL_PARTITION, "mediaId": metadata_sort_key(None)},
+            Key={"albumId": partition, "mediaId": metadata_sort_key(None)},
             ConsistentRead=False,
         ).get("Item")
         return {
@@ -395,7 +395,7 @@ def load_pool_references(table, resource, category=None, *, now=None, limit=DEFA
         for index in shard_indexes
     ]
     shards = _batch_get_shards(
-        resource, table, shard_keys, [position % POOL_SHARD_SIZE for position in positions]
+        resource, table, shard_keys, [position % POOL_SHARD_SIZE for position in positions], partition
     )
 
     references_by_position = {}
