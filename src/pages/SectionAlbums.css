@@ -1,0 +1,35 @@
+.linen-site .section-photo-actions {
+    display: flex;
+    flex: none;
+    gap: 12px;
+}
+
+.linen-site .section-photo-actions > .linen-theme-toggle,
+.linen-site .section-photo-actions > span {
+    width: 56px;
+    height: 56px;
+}
+
+.linen-site .section-photo-actions > .linen-theme-toggle .linen-theme-icon {
+    inset: 0;
+    width: 26px;
+    height: 26px;
+    margin: auto;
+}
+
+@media (min-width: 768px) {
+    .linen-site .section-photo-actions {
+        gap: 16px;
+    }
+
+    .linen-site .section-photo-actions > .linen-theme-toggle,
+    .linen-site .section-photo-actions > span {
+        width: 64px;
+        height: 64px;
+    }
+
+    .linen-site .section-photo-actions > .linen-theme-toggle .linen-theme-icon {
+        width: 30px;
+        height: 30px;
+    }
+}

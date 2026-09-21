@@ -3,12 +3,27 @@ import { Link, MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { selectChoice } from '../test/selectChoice'
 import { clearCatalogSnapshots, setCatalogSnapshot } from '../utils/catalogState'
+import { clearFeaturedPhotoSessionCache } from '../utils/featuredPhotoSession'
+import { clearRandomPhotoSessionCache } from '../utils/randomPhotoSession'
+import { fetchSectionStats } from '../utils/sectionStats'
 import SectionAlbums from './SectionAlbums'
 
-const api = vi.hoisted(() => ({ fetchAlbumsPage: vi.fn() }))
+const api = vi.hoisted(() => ({
+    fetchAlbumsPage: vi.fn(),
+    fetchFeaturedPhotos: vi.fn(),
+    fetchRandomPhotos: vi.fn(),
+    requestAlbumMediaDownload: vi.fn(),
+    requestAlbumPrintSession: vi.fn(),
+    requestAlbumOriginalComparison: vi.fn(),
+}))
 vi.mock('../utils/api', () => api)
+vi.mock('../utils/sectionStats', () => ({ fetchSectionStats: vi.fn() }))
 vi.mock('../components/AlbumCard', () => ({ default: ({ album }) => <Link to={`/album/${album.albumId}`}>{album.title}</Link> }))
 vi.mock('../components/VideoAlbumCard', () => ({ default: ({ album }) => <Link to={`/video/${album.albumId}`}>{album.title}</Link> }))
+vi.mock('../components/PhotoLightbox', () => ({ default: ({ images, ariaLabel, onClose }) => <div role="dialog" aria-label={ariaLabel}>
+    {images.length} photographs
+    <button onClick={onClose}>Close viewer</button>
+</div> }))
 
 const album = (albumId, category, extra = {}) => ({ albumId, category, title: albumId, type: 'photo', visibility: 'public', createdAt: '2026-03-04T12:00:00Z', ...extra })
 function Detail() {
@@ -23,7 +38,13 @@ function mount(path = '/sections/photo/Travel') {
 }
 
 describe('section album pages', () => {
-    beforeEach(() => { clearCatalogSnapshots(); api.fetchAlbumsPage.mockReset() })
+    beforeEach(() => {
+        clearCatalogSnapshots()
+        clearFeaturedPhotoSessionCache()
+        clearRandomPhotoSessionCache()
+        Object.values(api).forEach(mock => mock.mockReset())
+        fetchSectionStats.mockReset()
+    })
 
     it('loads every page, limits albums to the section and media type, and preserves curated order', async () => {
         api.fetchAlbumsPage.mockResolvedValueOnce({ items: [album('Second', 'Travel', { galleryOrder: 2 }), album('Elsewhere', 'People')], nextCursor: 'next-page' })
@@ -52,6 +73,42 @@ describe('section album pages', () => {
         mount(`/sections/video/${encodeURIComponent('Trips / 100% & Friends')}`)
         expect(await screen.findByRole('link', { name: 'Film' })).toHaveAttribute('href', '/video/Film')
         expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Trips / 100% & Friends')
+        expect(screen.queryByRole('group', { name: /photo tools/ })).not.toBeInTheDocument()
+    })
+
+    it('opens all three photo tools for the current section across all years without fetching on mount', async () => {
+        const category = 'Trips / 100% & Friends'
+        setCatalogSnapshot('public-photos', { items: [album('New', category), album('Old', category, { createdAt: '2024-05-01T12:00:00Z' })], nextCursor: null })
+        const photo = { id: 'one', albumId: 'Old', isFavorite: true, thumbnailUrl: 'https://media.test/one.webp' }
+        api.fetchFeaturedPhotos.mockResolvedValue({ images: [photo], totalPhotos: 1 })
+        api.fetchRandomPhotos.mockResolvedValue({ images: [photo], totalPhotos: 1 })
+        fetchSectionStats.mockResolvedValue({ albumCount: 2, photoCount: 1, cameras: [], lenses: [] })
+        mount(`/sections/photo/${encodeURIComponent(category)}`)
+
+        const featured = await screen.findByRole('button', { name: `Explore featured photos in ${category}` })
+        const random = screen.getByRole('button', { name: `Shuffle ${category} photos` })
+        const stats = screen.getByRole('button', { name: `Show ${category} statistics` })
+        expect(api.fetchFeaturedPhotos).not.toHaveBeenCalled()
+        expect(api.fetchRandomPhotos).not.toHaveBeenCalled()
+        expect(fetchSectionStats).not.toHaveBeenCalled()
+        selectChoice(screen.getByRole('combobox'), '2024')
+
+        fireEvent.click(featured)
+        await waitFor(() => expect(screen.getByRole('dialog', { name: `Featured photos from ${category}` })).toHaveTextContent('1 photographs'))
+        expect(api.fetchFeaturedPhotos).toHaveBeenCalledExactlyOnceWith({ category, limit: 6, signal: expect.any(AbortSignal) })
+        fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
+
+        fireEvent.click(random)
+        await waitFor(() => expect(screen.getByRole('dialog', { name: `Random photos from ${category}` })).toHaveTextContent('1 photographs'))
+        expect(api.fetchRandomPhotos).toHaveBeenCalledExactlyOnceWith({ category, limit: 6, signal: expect.any(AbortSignal) })
+        fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
+
+        fireEvent.click(stats)
+        expect(await screen.findByRole('dialog', { name: `${category} statistics` })).toHaveTextContent('Section statistics · All years')
+        await waitFor(() => expect(fetchSectionStats).toHaveBeenCalledExactlyOnceWith(category, { signal: expect.any(AbortSignal) }))
+        fireEvent.click(screen.getByRole('button', { name: 'Close section statistics' }))
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.getByRole('combobox')).toHaveValue('2024')
     })
 
     it('handles empty sections and retryable failures', async () => {

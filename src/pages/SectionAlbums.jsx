@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import VideoAlbumCard from '../components/VideoAlbumCard'
@@ -9,7 +9,10 @@ import { fetchAlbumsPage } from '../utils/api'
 import { CatalogPaginationError, deleteCatalogSnapshot, getCatalogSnapshot, loadCompleteCatalog, reconcilePublicCatalogItems, setCatalogSnapshot } from '../utils/catalogState'
 import { sortGalleryAlbums } from '../utils/galleryOrder'
 import { navigateBackOr } from '../utils/navigation'
+import './SectionAlbums.css'
 
+const FeaturedPhotoExplorer = lazy(() => import('../components/FeaturedPhotoExplorer'))
+const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer'))
 const EMPTY = []
 
 export default function SectionAlbums() {
@@ -81,9 +84,17 @@ export default function SectionAlbums() {
             <h1 className="font-serif text-4xl md:text-6xl text-charcoal [overflow-wrap:anywhere]">{category}</h1>
             <p>{grouped[category].length} {grouped[category].length === 1 ? 'album' : 'albums'}</p>
         </header>
-        <div className="mb-8 flex items-center justify-between gap-4">
-            <p className="text-sm text-warm-gray">{year === 'all' ? 'All years' : year} · {albums.length} {albums.length === 1 ? 'album' : 'albums'}</p>
-            <SiteSelect aria-label={`Filter ${category} albums by year`} value={year} onChange={value => setCategoryYear(category, value)} options={options} className="w-32" />
+        <div className="mb-8 flex flex-wrap items-center gap-x-6 gap-y-5">
+            {mediaType === 'photo' && <div key={category} className="section-photo-actions" role="group" aria-label={`${category} photo tools`}>
+                <Suspense fallback={<><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" /></>}>
+                    <FeaturedPhotoExplorer category={category} variant="icon" />
+                    <RandomPhotoExplorer category={category} variant="icon" showStats />
+                </Suspense>
+            </div>}
+            <div className="flex min-w-0 flex-1 basis-64 items-center justify-between gap-4">
+                <p className="text-sm text-warm-gray">{year === 'all' ? 'All years' : year} · {albums.length} {albums.length === 1 ? 'album' : 'albums'}</p>
+                <SiteSelect aria-label={`Filter ${category} albums by year`} value={year} onChange={value => setCategoryYear(category, value)} options={options} className="w-32 shrink-0" />
+            </div>
         </div>
         {loading && !albums.length && <SkeletonGrid count={6} type={mediaType} />}
         {error && <div role="alert" className="mb-8 text-red-700"><p>{error}</p><button type="button" onClick={() => setAttempt(value => value + 1)} className="mt-3 underline cursor-pointer">Try again</button></div>}
