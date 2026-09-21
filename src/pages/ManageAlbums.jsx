@@ -1155,7 +1155,7 @@ function ManageAlbums() {
                                                                     const isEditingThisThumb = editingThumbKey === imgKey
 
                                                                     return (
-                                                                        <div key={imgKey} className="group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30">
+                                                                        <div key={imgKey} tabIndex={0} role="group" aria-label={`Item ${idx + 1} controls`} className="admin-media-tile group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30">
                                                                             <img
                                                                                 src={thumbUrl}
                                                                                 alt=""
@@ -1167,14 +1167,14 @@ function ManageAlbums() {
                                                                             />
                                                                             {/* Set as cover button (top-left) */}
                                                                             <button type="button" onClick={() => setEditingAccessibilityKey(imgKey)}
-                                                                                className="absolute top-11 left-2 px-2 py-1 rounded bg-black/80 text-white text-xs focus-visible:outline-2 focus-visible:outline-white"
+                                                                                className="admin-media-action absolute top-11 left-2 px-2 py-1 rounded bg-black/80 text-white text-xs focus-visible:outline-2 focus-visible:outline-white"
                                                                                 aria-label={`Edit description${typeFilter === 'video' ? ' and captions' : ''} for item ${idx + 1}`}>
                                                                                 Describe
                                                                             </button>
                                                                             <button
                                                                                 onClick={() => handleSetCover(img)}
                                                                                 title="Set as album cover"
-                                                                                className="absolute top-2 left-2 w-7 h-7 rounded-full bg-amber/80 hover:bg-amber text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                                                className="admin-media-action absolute top-2 left-2 w-7 h-7 rounded-full bg-amber/80 hover:bg-amber text-white flex items-center justify-center cursor-pointer"
                                                                             >
                                                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
@@ -1187,7 +1187,7 @@ function ManageAlbums() {
                                                                                 aria-label={img.isFavorite === true ? 'Unfavorite photo' : 'Favorite photo'}
                                                                                 aria-pressed={img.isFavorite === true}
                                                                                 disabled={savingFavorites.has(managementMediaKey(img))}
-                                                                                className={`absolute top-2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber ${img.isFavorite === true ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-white/90 text-charcoal hover:bg-rose-50 hover:text-rose-600'}`}
+                                                                                className={`admin-media-action absolute top-2 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber ${img.isFavorite === true ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-white/90 text-charcoal hover:bg-rose-50 hover:text-rose-600'}`}
                                                                             >
                                                                                 <svg className="w-4 h-4" fill={img.isFavorite === true ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z" />
@@ -1197,7 +1197,7 @@ function ManageAlbums() {
                                                                             <button
                                                                                 onClick={() => handleRemoveImage(img)}
                                                                                 title="Remove"
-                                                                                className="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/80 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                                                                className="admin-media-action absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer"
                                                                             >
                                                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1223,7 +1223,7 @@ function ManageAlbums() {
                                                                                             }
                                                                                         }}
                                                                                         title="Change thumbnail"
-                                                                                        className={`absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-lg text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center gap-1 ${isEditingThisThumb ? 'bg-amber' : 'bg-black/60 hover:bg-amber'}`}
+                                                                                        className={`admin-media-action absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-lg text-white text-xs font-medium cursor-pointer flex items-center gap-1 ${isEditingThisThumb ? 'bg-amber' : 'bg-black/60 hover:bg-amber'}`}
                                                                                     >
                                                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />

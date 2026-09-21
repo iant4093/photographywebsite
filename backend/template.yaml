@@ -3686,6 +3686,7 @@ Resources:
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:

@@ -7,9 +7,9 @@ const MAX_STALE_SNAPSHOT_AGE_MS = 30 * 60_000
 const MAX_PENDING_MUTATION_AGE_MS = 10 * 60_000
 const MAX_CATALOG_PAGES = 100
 const MAX_PERSISTED_ITEMS = 500
-// v5 refetches older snapshots that omitted lightweight preview metadata.
-const SNAPSHOT_SCHEMA_VERSION = 5
-const SNAPSHOT_STORAGE_PREFIX = 'ian:public-catalog:v5:'
+// v6 refetches snapshots whose mutation overlays discarded gallery ordering.
+const SNAPSHOT_SCHEMA_VERSION = 6
+const SNAPSHOT_STORAGE_PREFIX = 'ian:public-catalog:v6:'
 const PERSISTED_CATALOG_KEYS = ['public-photos', 'public-videos']
 const PUBLIC_ALBUM_FIELDS = [
     'albumId',
@@ -217,6 +217,7 @@ export function reconcilePublicCatalogItems(items, type) {
     }
 
     for (const [albumId, mutation] of pendingCatalogMutations) {
+        const catalogAlbum = reconciled.get(albumId)
         reconciled.delete(albumId)
         const album = mutation.album
         if (
@@ -225,7 +226,18 @@ export function reconcilePublicCatalogItems(items, type) {
             && (album.status === undefined || album.status === 'active')
             && albumMatchesType(album, type)
         ) {
-            reconciled.set(albumId, album)
+            // Mutation responses contain album metadata, while the catalog
+            // joins the separately stored gallery settings. Keep those current
+            // positions when overlaying an upload/create/edit response.
+            const orderedAlbum = { ...album }
+            if (catalogAlbum && (catalogAlbum.type || 'photo') === (album.type || 'photo')) {
+                if (catalogAlbum.galleryOrder !== undefined) orderedAlbum.galleryOrder = catalogAlbum.galleryOrder
+                if (
+                    (catalogAlbum.category || 'Uncategorized') === (album.category || 'Uncategorized')
+                    && catalogAlbum.galleryCategoryOrder !== undefined
+                ) orderedAlbum.galleryCategoryOrder = catalogAlbum.galleryCategoryOrder
+            }
+            reconciled.set(albumId, orderedAlbum)
         }
     }
 

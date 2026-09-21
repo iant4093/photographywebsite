@@ -566,6 +566,22 @@
 }
 
 /* Admin studio — same materials, deliberately calmer than public galleries. */
+.linen-site.linen-admin main .admin-media-tile > button.admin-media-action {
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: none;
+  transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-within) > .admin-media-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-within) > .admin-media-action:disabled {
+  opacity: 0.5;
+}
+
 .linen-site.linen-admin {
   background:
     linear-gradient(rgba(243, 239, 230, 0.9), rgba(243, 239, 230, 0.9)),

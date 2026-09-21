@@ -169,11 +169,11 @@ def handler(event, context):
             updated_image["thumbKey"] = values[":thumbKey"]
         if ":blurhash" in values:
             updated_image["blurhash"] = values[":blurhash"]
-        _audit(event, context, "success", "media_updated")
         serialized = serialize_images(
             {**album, "images": [updated_image]},
             include_internal=True,
         )
+        _audit(event, context, "success", "media_updated")
         return json_response(200, {
             "message": "Media metadata updated",
             "mediaId": raw_key,

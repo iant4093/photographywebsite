@@ -10,6 +10,7 @@ import {
     recordPublicCatalogUpsert,
     setCatalogSnapshot,
 } from './catalogState'
+import { sortGalleryAlbums, sortGalleryCategories } from './galleryOrder'
 
 describe('loadCompleteCatalog', () => {
     afterEach(() => {
@@ -53,9 +54,9 @@ describe('loadCompleteCatalog', () => {
             nextCursor: null,
         })
 
-        const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v5:public-photos'))
+        const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v6:public-photos'))
         expect(stored).toMatchObject({
-            version: 5,
+            version: 6,
             items: [{
                 albumId: 'album-one',
                 title: 'Visible',
@@ -72,14 +73,14 @@ describe('loadCompleteCatalog', () => {
         // Clearing only memory is intentionally unavailable: deletion removes
         // the persisted copy too, preventing stale data from being resurrected.
         deleteCatalogSnapshot('public-photos')
-        expect(sessionStorage.getItem('ian:public-catalog:v5:public-photos')).toBeNull()
+        expect(sessionStorage.getItem('ian:public-catalog:v6:public-photos')).toBeNull()
     })
 
     it('hydrates a valid tab snapshot and rejects malformed persisted state', () => {
         vi.useFakeTimers()
         vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
-        sessionStorage.setItem('ian:public-catalog:v5:public-videos', JSON.stringify({
-            version: 5,
+        sessionStorage.setItem('ian:public-catalog:v6:public-videos', JSON.stringify({
+            version: 6,
             savedAt: Date.now(),
             nextCursor: null,
             items: [{ albumId: 'video-one', title: 'Film', ownerEmail: 'discard@example.test' }],
@@ -90,9 +91,9 @@ describe('loadCompleteCatalog', () => {
         })
         expect(getCatalogSnapshot('public-videos').items[0]).not.toHaveProperty('ownerEmail')
 
-        sessionStorage.setItem('ian:public-catalog:v5:public-photos', '{bad-json')
+        sessionStorage.setItem('ian:public-catalog:v6:public-photos', '{bad-json')
         expect(getCatalogSnapshot('public-photos')).toBeNull()
-        expect(sessionStorage.getItem('ian:public-catalog:v5:public-photos')).toBeNull()
+        expect(sessionStorage.getItem('ian:public-catalog:v6:public-photos')).toBeNull()
     })
 
     it('preserves lightweight photo preview metadata through a tab reload', () => {
@@ -102,21 +103,21 @@ describe('loadCompleteCatalog', () => {
             hoverPreviewManifestUrl: 'https://media.test/public-previews/album-one/hover.json',
         }
         setCatalogSnapshot('public-photos', { items: [album], nextCursor: null })
-        const persisted = sessionStorage.getItem('ian:public-catalog:v5:public-photos')
+        const persisted = sessionStorage.getItem('ian:public-catalog:v6:public-photos')
         deleteCatalogSnapshot('public-photos')
-        sessionStorage.setItem('ian:public-catalog:v5:public-photos', persisted)
+        sessionStorage.setItem('ian:public-catalog:v6:public-photos', persisted)
         expect(getCatalogSnapshot('public-photos').items).toEqual([album])
     })
 
-    it('ignores older snapshots without preview metadata so the page refetches the catalog', () => {
-        sessionStorage.setItem('ian:public-catalog:v4:public-photos', JSON.stringify({
-            version: 4, savedAt: Date.now(), nextCursor: null,
+    it('ignores older snapshots that may have lost gallery order so the page refetches the catalog', () => {
+        sessionStorage.setItem('ian:public-catalog:v5:public-photos', JSON.stringify({
+            version: 5, savedAt: Date.now(), nextCursor: null,
             items: [{ albumId: 'old', visibility: 'public' }],
         }))
         try {
             expect(getCatalogSnapshot('public-photos')).toBeNull()
         } finally {
-            sessionStorage.removeItem('ian:public-catalog:v4:public-photos')
+            sessionStorage.removeItem('ian:public-catalog:v5:public-photos')
         }
     })
 
@@ -158,6 +159,36 @@ describe('loadCompleteCatalog', () => {
         expect(reconcilePublicCatalogItems(staleItems, 'photo').map((album) => album.albumId))
             .toEqual(['new-photo'])
         expect(reconcilePublicCatalogItems(staleItems, 'video')).toEqual([])
+    })
+
+    it('preserves curated sections and album positions after a new album is edited or uploaded', () => {
+        const items = [
+            { albumId: 'misty', type: 'photo', visibility: 'public', category: 'Misty', galleryCategoryOrder: 4 },
+            { albumId: 'prague', type: 'photo', visibility: 'public', category: 'Prague 2026', galleryCategoryOrder: 5, galleryOrder: 0 },
+            { albumId: 'prague-two', type: 'photo', visibility: 'public', category: 'Prague 2026', galleryOrder: 1 },
+            { albumId: 'spain', type: 'photo', visibility: 'public', category: 'Spain 2026', galleryCategoryOrder: 6 },
+        ]
+        // Create/edit responses omit the independently stored gallery settings.
+        recordPublicCatalogUpsert({ albumId: 'prague', type: 'photo', visibility: 'public', category: 'Prague 2026', title: 'Updated title' })
+        // Uploading invalidates the snapshot but keeps the recent mutation.
+        invalidateCatalogSnapshots()
+        const reconciled = reconcilePublicCatalogItems(items, 'photo')
+        const grouped = Object.groupBy(reconciled, album => album.category)
+        expect(sortGalleryCategories(Object.keys(grouped), grouped)).toEqual(['Misty', 'Prague 2026', 'Spain 2026'])
+        expect(sortGalleryAlbums(grouped['Prague 2026']).map(album => album.albumId)).toEqual(['prague', 'prague-two'])
+        expect(reconciled.find(album => album.albumId === 'prague')).toMatchObject({ title: 'Updated title', galleryCategoryOrder: 5, galleryOrder: 0 })
+        // A later arrangement must win over any positions on an older overlay.
+        recordPublicCatalogUpsert({ ...items[1], title: 'Another edit' })
+        expect(reconcilePublicCatalogItems([{ ...items[1], galleryOrder: 3, galleryCategoryOrder: 2 }], 'photo')[0])
+            .toMatchObject({ galleryOrder: 3, galleryCategoryOrder: 2 })
+    })
+
+    it('does not carry an old category position into a renamed or moved section', () => {
+        recordPublicCatalogUpsert({ albumId: 'album', type: 'photo', visibility: 'public', category: 'New section' })
+        const items = [{ albumId: 'album', type: 'photo', visibility: 'public', category: 'Old section', galleryCategoryOrder: 1, galleryOrder: 2 }]
+        const [result] = reconcilePublicCatalogItems(items, 'photo')
+        expect(result).toMatchObject({ category: 'New section', galleryOrder: 2 })
+        expect(result).not.toHaveProperty('galleryCategoryOrder')
     })
 
     it('expires mutation overlays and distinguishes invalidation from logout clearing', () => {

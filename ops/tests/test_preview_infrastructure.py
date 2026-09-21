@@ -240,6 +240,12 @@ class PreviewWorkerTests(unittest.TestCase):
 
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):
+    def test_media_update_response_has_its_public_cdn_configuration(self) -> None:
+        # Favorites are saved before the updated photo is serialized. Without
+        # this setting, a successful public write becomes a misleading 500.
+        block = resource_block("UpdateImageFunction")
+        self.assertIn("CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName", block)
+
     def test_protected_preview_delivery_rechecks_visibility_while_public_aliases_are_cached(self) -> None:
         policy = resource_block("ImagesBucketPolicy")
         protected_cache = resource_block("PreviewMediaCachePolicy")
