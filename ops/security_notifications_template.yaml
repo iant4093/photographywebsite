@@ -333,7 +333,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: RootActivity
           MetricValue: '1'
-          DefaultValue: 0
 
   CloudTrailChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -346,7 +345,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: CloudTrailConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   IamChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -359,7 +357,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: IamConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   KmsChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -372,7 +369,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: KmsSecurityConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   SecurityRoutingChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -385,7 +381,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: SecurityRoutingConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   SecurityServiceChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -398,7 +393,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: SecurityServiceConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   DetectionTopologyChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -411,7 +405,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: SecurityServiceConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   ManagedSecurityOrganizationChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -424,7 +417,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: SecurityServiceConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   DataProtectionChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -437,7 +429,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: DataProtectionConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   BackupProtectionChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -450,7 +441,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: DataProtectionConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   DataRetentionAndOwnershipChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -463,7 +453,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: DataProtectionConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   InfrastructureProtectionChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -476,7 +465,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: InfrastructureProtectionConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   InfrastructureExecutionChangeMetric:
     Type: AWS::Logs::MetricFilter
@@ -489,7 +477,6 @@ Resources:
         - MetricNamespace: IanTruongPhotography/Security
           MetricName: InfrastructureProtectionConfigurationChange
           MetricValue: '1'
-          DefaultValue: 0
 
   RootActivityAlarm:
     Type: AWS::CloudWatch::Alarm

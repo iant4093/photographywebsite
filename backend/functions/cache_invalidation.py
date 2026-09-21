@@ -75,21 +75,17 @@ def _create_invalidation(distribution_id, paths, reason, *, strict):
 
 def invalidate_public_api_batch(*, album_ids=None, catalog=False, random_photos=False, reason="public-album", strict=False):
     """Invalidate anonymous representations in one bounded provider request."""
+    # Validate even when the catalog wildcard already covers these albums.
+    validated_albums = sorted({validate_uuid(value) for value in album_ids or []})
     paths = []
     if catalog:
-        paths.extend((
-            "/api/public/albums",
-            "/api/public/albums?*",
-            "/api/public/explore",
-            "/api/public/explore?*",
-        ))
+        # One suffix wildcard covers the exact URL and every query variant.
+        # Albums also covers detail URLs, so do not pay for overlapping paths.
+        paths.extend(("/api/public/albums*", "/api/public/explore*"))
+    else:
+        paths.extend(f"/api/public/albums/{album_id}" for album_id in validated_albums)
     if catalog or random_photos:
-        paths.extend((
-            "/api/public/random-photos",
-            "/api/public/random-photos?*",
-        ))
-    for album_id in sorted(set(album_ids or [])):
-        paths.append(f"/api/public/albums/{validate_uuid(album_id)}")
+        paths.append("/api/public/random-photos*")
     distribution_id = os.environ.get(
         "FRONTEND_DISTRIBUTION_ID",
         DEFAULT_FRONTEND_DISTRIBUTION_ID,

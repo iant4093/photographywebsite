@@ -1208,6 +1208,10 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/apigateway/ian-photography-*'
               - !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/ian-photography/application/*'
               - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:${ApplicationStackName}-*'
+          - Sid: UpdateExactSecurityEventMetricFilters
+            Effect: Allow
+            Action: logs:PutMetricFilter
+            Resource: !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'
           - Sid: ReadExactNotificationStackDriftResources
             Effect: Allow
             Action:

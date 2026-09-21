@@ -2,6 +2,7 @@
 
 import os
 import json
+from fnmatch import fnmatchcase
 import unittest
 from unittest.mock import Mock, patch
 
@@ -35,18 +36,60 @@ class CacheInvalidationTests(unittest.TestCase):
         request = self.client.create_invalidation.call_args.kwargs
         self.assertEqual(request["DistributionId"], "frontend")
         self.assertEqual(request["InvalidationBatch"]["Paths"], {
-            "Quantity": 7,
+            "Quantity": 3,
             "Items": [
-                "/api/public/albums",
-                f"/api/public/albums/{ALBUM_ID}",
-                "/api/public/albums?*",
-                "/api/public/explore",
-                "/api/public/explore?*",
-                "/api/public/random-photos",
-                "/api/public/random-photos?*",
+                "/api/public/albums*",
+                "/api/public/explore*",
+                "/api/public/random-photos*",
             ],
         })
         self.assertTrue(request["InvalidationBatch"]["CallerReference"].startswith("album-updated-"))
+
+    def test_catalog_wildcards_cover_all_public_variants_without_other_namespaces(self):
+        with patch.object(cache_invalidation, "_client", return_value=self.client):
+            cache_invalidation.invalidate_public_api_batch(
+                album_ids=[ALBUM_ID, ALBUM_ID, "22222222-2222-4222-8222-222222222222"],
+                catalog=True, random_photos=True,
+            )
+        paths = self.client.create_invalidation.call_args.kwargs['InvalidationBatch']['Paths']
+        self.assertEqual(paths['Quantity'], 3)
+        covered = [
+            '/api/public/albums', '/api/public/albums?category=travel&page=2',
+            f'/api/public/albums/{ALBUM_ID}', f'/api/public/albums/{ALBUM_ID}?page=2',
+            '/api/public/explore', '/api/public/explore?cursor=next',
+            '/api/public/random-photos', '/api/public/random-photos?category=travel',
+        ]
+        for url in covered:
+            with self.subTest(url=url):
+                self.assertTrue(any(fnmatchcase(url, path) for path in paths['Items']))
+        for url in ['/api/admin/albums', '/api/public/stats', '/index.html', '/assets/app.js',
+                    f'/albums/{ALBUM_ID}/photo.jpg', f'/public-previews/{ALBUM_ID}/photo.webp']:
+            with self.subTest(url=url):
+                self.assertFalse(any(fnmatchcase(url, path) for path in paths['Items']))
+
+    def test_album_only_batch_keeps_exact_scope_and_removes_duplicates(self):
+        with patch.object(cache_invalidation, "_client", return_value=self.client):
+            cache_invalidation.invalidate_public_api_batch(album_ids=[ALBUM_ID, ALBUM_ID])
+        self.assertEqual(self.client.create_invalidation.call_args.kwargs['InvalidationBatch']['Paths'], {
+            'Quantity': 1, 'Items': [f'/api/public/albums/{ALBUM_ID}'],
+        })
+
+    def test_catalog_does_not_skip_album_identity_validation(self):
+        with patch.object(cache_invalidation, "_client", return_value=self.client):
+            with self.assertRaises(validation_helpers.ValidationError):
+                cache_invalidation.invalidate_public_api_batch(album_ids=['../admin'], catalog=True)
+        self.client.create_invalidation.assert_not_called()
+
+    def test_strict_public_revocation_stays_synchronous_and_propagates_failure(self):
+        self.client.create_invalidation.side_effect = ClientError(
+            {'Error': {'Code': 'AccessDenied'}}, 'CreateInvalidation',
+        )
+        with patch.dict(os.environ, {'CACHE_INVALIDATION_QUEUE_URL': 'https://sqs.test/cache'}), \
+                patch.object(cache_invalidation, '_queue_client') as queue, \
+                patch.object(cache_invalidation, '_client', return_value=self.client):
+            with self.assertRaises(ClientError):
+                cache_invalidation.invalidate_public_api(album_id=ALBUM_ID, catalog=True, strict=True)
+        queue.assert_not_called()
 
     def test_public_preview_invalidation_requires_valid_album_and_distribution(self):
         with patch.dict(os.environ, {"IMAGES_DISTRIBUTION_ID": "media"}), patch.object(
@@ -177,8 +220,8 @@ class CacheInvalidationTests(unittest.TestCase):
             result = cache_invalidation_worker.handler({"Records": [{"body": body}]}, None)
         self.assertTrue(result["invalidated"])
         self.assertEqual(self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"], {
-            "Quantity": 2,
-            "Items": ["/api/public/random-photos", "/api/public/random-photos?*"],
+            "Quantity": 1,
+            "Items": ["/api/public/random-photos*"],
         })
 
     def test_random_photo_synchronous_fallback_and_mixed_batch_preserve_scope(self):
@@ -187,15 +230,15 @@ class CacheInvalidationTests(unittest.TestCase):
         }), patch.object(cache_invalidation, "_client", return_value=self.client):
             cache_invalidation.request_public_api_invalidation(random_photos=True)
             self.assertEqual(self.client.create_invalidation.call_args.kwargs[
-                "InvalidationBatch"]["Paths"]["Quantity"], 2)
+                "InvalidationBatch"]["Paths"]["Quantity"], 1)
             cache_invalidation_worker.handler({"Records": [
                 {"body": json.dumps({"version": 1, "randomPhotos": True})},
                 {"body": json.dumps({"version": 1, "catalog": True, "albumId": ALBUM_ID})},
             ]}, None)
         paths = self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"]
-        self.assertEqual(paths["Quantity"], 7)
-        self.assertIn(f"/api/public/albums/{ALBUM_ID}", paths["Items"])
-        self.assertIn("/api/public/explore?*", paths["Items"])
+        self.assertEqual(paths["Quantity"], 3)
+        self.assertIn("/api/public/albums*", paths["Items"])
+        self.assertIn("/api/public/explore*", paths["Items"])
 
 
 if __name__ == "__main__":

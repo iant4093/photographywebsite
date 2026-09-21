@@ -387,6 +387,15 @@ compare declared alarm-topic tags instead of reporting a false removal. The
 inventory statement never grants `logs:GetLogEvents`, and the deployment roles
 never receive secure-parameter values.
 
+Security event metric updates have a separate `logs:PutMetricFilter` grant on
+the exact production security log group. This permits the notification stack
+to remove continuous zero publication while retaining its matching patterns,
+event metrics, and alarms. It does not grant log-group deletion, filter deletion,
+retention changes, or notification changes. Review and apply the bootstrap
+managed-policy change before executing the notification filter change set;
+rollback requires the same permission. Confirm the former changes only that
+managed policy and the latter changes only the 13 metric transformations.
+
 HTTP API access-log reconciliation uses CloudWatch Logs delivery metadata and
 resource-policy APIs. AWS does not support resource-level IAM scoping for
 these actions, so the execution role grants only their documented lifecycle

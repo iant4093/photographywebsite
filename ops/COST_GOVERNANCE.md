@@ -51,9 +51,14 @@ metadata or shards, legacy generations without digests, and incomplete prior
 publications trigger a rebuild. Inventory reads are strongly consistent, and
 obsolete generations are removed only after new shards and metadata publish.
 
-Changed decks enqueue only the two random-photo API paths, including query-string
-variants. The existing worker coalesces these with any pending album/catalog
-changes. Privacy and visibility-revocation invalidations retain their synchronous
+Changed decks enqueue one random-photo API wildcard covering the exact URL and
+query-string variants. Catalog updates invalidate three endpoint wildcards:
+`/api/public/albums*`, `/api/public/explore*`, and `/api/public/random-photos*`.
+The albums wildcard also clears album details, so covered individual paths are
+omitted. Album-only updates keep exact validated album paths. This slightly
+broadens catalog cache eviction while reducing billed paths. The existing worker
+coalesces pending album/catalog changes. Privacy and visibility-revocation
+invalidations retain their synchronous
 media and public API paths. The optional `randomPhotos` field extends the existing
 queue message format; during a mixed-version rollout or rollback, old consumers
 can omit that refresh, with staleness bounded by the existing public API cache TTL.
@@ -99,8 +104,13 @@ matches, without continuously publishing zeroes. Their matching patterns,
 metric names, alarm thresholds and notification routes remain intact. Event
 alarms use `Sum`, one evaluation period, and `TreatMissingData: notBreaching`.
 CloudWatch may retain a sparse breach in its evaluation lookback longer than a
-zero-filled series; detection remains active. The separate security-notification
-stack's filters keep their existing zero defaults. The backup-freshness heartbeat
+zero-filled series; detection remains active. The security-notification stack's
+13 filters also publish only matching events; several filters share a metric,
+producing eight distinct event metrics. For this security stack, the CloudFormation
+execution role can update metric filters only on the exact production log group, with no
+additional log deletion or retention permissions. Apply the reviewed bootstrap
+policy change before the security filter change so both deployment and rollback
+can update the filters. The backup-freshness heartbeat
 continues publishing its regular values and treats missing data as breaching.
 Do not apply sparse-event semantics to that heartbeat.
 

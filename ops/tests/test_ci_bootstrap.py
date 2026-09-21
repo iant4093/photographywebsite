@@ -881,6 +881,21 @@ fi
         }
         self.assertEqual(allow_star, allowed)
 
+    def test_security_metric_update_grants_only_put_on_the_exact_log_group(self):
+        from cfnlint.decode import decode
+
+        template, errors = decode(str(TEMPLATE_PATH))
+        self.assertEqual(errors, [])
+        statements = template['Resources']['CloudFormationExecutionEncryptionAndObservabilityPolicy'][
+            'Properties']['PolicyDocument']['Statement']
+        grant = next(s for s in statements if s['Sid'] == 'UpdateExactSecurityEventMetricFilters')
+        self.assertEqual(grant, {
+            'Sid': 'UpdateExactSecurityEventMetricFilters',
+            'Effect': 'Allow',
+            'Action': 'logs:PutMetricFilter',
+            'Resource': {'Fn::Sub': 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'},
+        })
+
     def test_execution_permissions_use_bounded_managed_policies(self):
         from cfnlint.decode import decode
 

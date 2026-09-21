@@ -107,7 +107,7 @@ class FrontendChangesTests(unittest.TestCase):
 class SparseMonitoringTests(unittest.TestCase):
     def test_sparse_filters_keep_every_matching_event_and_compatible_alarms(self):
         count = 0
-        for name in ['backend/template.yaml']:
+        for name in ['backend/template.yaml', 'ops/security_notifications_template.yaml']:
             template, errors = decode(str(ROOT / name))
             self.assertFalse(errors)
             resources = template['Resources']
@@ -126,7 +126,7 @@ class SparseMonitoringTests(unittest.TestCase):
                             self.assertEqual(ap['TreatMissingData'], 'notBreaching')
                             self.assertEqual(ap['Statistic'], 'Sum')
                             self.assertEqual(ap['EvaluationPeriods'], 1)
-        self.assertEqual(count, 8)
+        self.assertEqual(count, 21)
         self.assertIn('TreatMissingData: breaching', (ROOT / 'ops/security_backup_template.yaml').read_text())
         intent = load_release_intent(json.loads((ROOT / 'ops/ci/release_intent.json').read_text()))
         for resource in ['PreviewJobCompletedMetricFilter', 'AuditFailureMetricFilter']:
