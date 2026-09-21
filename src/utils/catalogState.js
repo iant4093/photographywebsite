@@ -34,6 +34,12 @@ const PUBLIC_ALBUM_FIELDS = [
     'galleryCategoryOrder',
 ]
 
+function pickAlbumFields(album, fields = PUBLIC_ALBUM_FIELDS) {
+    return Object.fromEntries(fields
+        .filter((field) => album?.[field] !== undefined)
+        .map((field) => [field, album[field]]))
+}
+
 function prunePendingCatalogMutations() {
     const cutoff = Date.now() - MAX_PENDING_MUTATION_AGE_MS
     for (const [albumId, mutation] of pendingCatalogMutations) {
@@ -85,11 +91,7 @@ function validatedSnapshot(value) {
         || !album.albumId
     ))) return null
     return {
-        items: value.items.map((album) => Object.fromEntries(
-            PUBLIC_ALBUM_FIELDS
-                .filter((field) => album[field] !== undefined)
-                .map((field) => [field, album[field]]),
-        )),
+        items: value.items.map((album) => pickAlbumFields(album)),
         nextCursor: value.nextCursor ?? null,
         savedAt: value.savedAt,
     }
@@ -117,11 +119,7 @@ function persistSnapshot(key, snapshot) {
     const storage = snapshotStorage()
     if (!storage || !Array.isArray(snapshot.items) || snapshot.items.length > MAX_PERSISTED_ITEMS) return
     try {
-        const items = snapshot.items.map((album) => Object.fromEntries(
-            PUBLIC_ALBUM_FIELDS
-                .filter((field) => album?.[field] !== undefined)
-                .map((field) => [field, album[field]]),
-        ))
+        const items = snapshot.items.map((album) => pickAlbumFields(album))
         storage.setItem(storageKey(key), JSON.stringify({
             version: SNAPSHOT_SCHEMA_VERSION,
             items,
@@ -187,11 +185,7 @@ export function recordPublicCatalogUpsert(album) {
     const retainedFields = album.visibility === 'public'
         ? PUBLIC_ALBUM_FIELDS
         : ['albumId', 'type', 'visibility', 'status']
-    const publicAlbum = Object.fromEntries(
-        retainedFields
-            .filter((field) => album[field] !== undefined)
-            .map((field) => [field, album[field]]),
-    )
+    const publicAlbum = pickAlbumFields(album, retainedFields)
     pendingCatalogMutations.set(albumId, {
         kind: 'upsert',
         album: publicAlbum,
@@ -229,15 +223,11 @@ export function reconcilePublicCatalogItems(items, type) {
             // Mutation responses contain album metadata, while the catalog
             // joins the separately stored gallery settings. Keep those current
             // positions when overlaying an upload/create/edit response.
-            const orderedAlbum = { ...album }
-            if (catalogAlbum && (catalogAlbum.type || 'photo') === (album.type || 'photo')) {
-                if (catalogAlbum.galleryOrder !== undefined) orderedAlbum.galleryOrder = catalogAlbum.galleryOrder
-                if (
-                    (catalogAlbum.category || 'Uncategorized') === (album.category || 'Uncategorized')
-                    && catalogAlbum.galleryCategoryOrder !== undefined
-                ) orderedAlbum.galleryCategoryOrder = catalogAlbum.galleryCategoryOrder
+            const galleryFields = ['galleryOrder']
+            if ((catalogAlbum?.category || 'Uncategorized') === (album.category || 'Uncategorized')) {
+                galleryFields.push('galleryCategoryOrder')
             }
-            reconciled.set(albumId, orderedAlbum)
+            reconciled.set(albumId, { ...album, ...pickAlbumFields(catalogAlbum, galleryFields) })
         }
     }
 
