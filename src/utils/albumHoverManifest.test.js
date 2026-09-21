@@ -73,6 +73,17 @@ describe('immutable album hover manifests', () => {
         expect(request).not.toHaveBeenCalled()
     })
 
+    it('derives same-media variants from the validated URL, ignoring supplied variant URLs', async () => {
+        const body = payload()
+        body.images[0].previewSrcSet = [{ width: 1920, url: 'https://other.example.test/untrusted.webp' }]
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(body)))
+        const manifest = await fetchAlbumHoverManifest(album)
+        expect(manifest.images[0].previewSrcSet).toEqual([640, 960, 1440, 1920].map(width => ({
+            width,
+            url: body.images[0].url.replace('-w640.webp', `-w${width}.webp`),
+        })))
+    })
+
     it.each([
         [{ ...album, hoverPreviewVersion: 'b'.repeat(24) }, payload()],
         [{ ...album, hoverPreviewManifestUrl: manifestUrl.replace('media.example.test', 'other.example.test') }, payload()],
@@ -80,6 +91,11 @@ describe('immutable album hover manifests', () => {
         [album, payload({ images: [] })],
         [album, payload({ images: [{ ...payload().images[0], width: 960 }] })],
         [album, payload({ images: [payload().images[0], payload().images[0]] })],
+        ...[
+            payload().images[0].url.replace('media.example.test', 'other.example.test'),
+            payload().images[0].url.replace(albumId, '22222222-2222-4222-8222-222222222222'),
+            payload().images[0].url.replace('-w640.webp', '-w1920.webp'),
+        ].map(url => [album, payload({ images: [{ ...payload().images[0], url }, payload().images[1]] })]),
     ])('rejects malformed pointers and payloads', async (record, body) => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(body)))
         await expect(fetchAlbumHoverManifest(record)).rejects.toThrow(/hover manifest/i)

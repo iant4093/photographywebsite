@@ -16,6 +16,7 @@ function AlbumCard({
     onMouseEnter,
     showNewFlag = false,
     preview = false,
+    responsivePreview = false,
     imageSizes = '(min-width: 1024px) 360px, (min-width: 640px) 320px, 280px',
 }) {
     const intentTimer = useRef(null)
@@ -71,11 +72,12 @@ function AlbumCard({
                 loadManifest: () => fetchAlbumHoverManifest(album),
                 loadDetail: prefetchDetail,
                 trigger,
+                responsive: responsivePreview,
             })
         }).catch(() => {
             if (hoverController.current === pending) hoverController.current = null
         })
-    }, [album, canPrefetch, coverImageUrl, prefetchDetail, preview, stopHoverPreview])
+    }, [album, canPrefetch, coverImageUrl, prefetchDetail, preview, responsivePreview, stopHoverPreview])
 
     useEffect(() => {
         if (!preview || !canPrefetch) return undefined

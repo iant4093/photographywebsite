@@ -71,6 +71,62 @@ describe('album hover preview selection', () => {
         expect(canRunAlbumHoverPreview()).toBe(false)
     })
 
+    it.each([[320, 640], [640, 640], [641, 960], [961, 1440], [1441, 1920], [4000, 1920]])('selects an available variant for %ipx, capped at the largest preview', (target, expected) => {
+        const images = [{ width: 1800, height: 1200, previewSrcSet: previews('landscape') }]
+        const [frame] = selectAlbumHoverPreviews({ images }, '', () => 0, target)
+        expect(frame.url).toBe(`https://media.example.test/landscape-${expected}.webp`)
+        expect(frame.fallbackUrl).toBe(expected > 640 ? 'https://media.example.test/landscape-640.webp' : undefined)
+    })
+
+    it.each([false, true])('loads one responsive frame at a time and handles a failed larger image (cancelled=%s)', async cancelled => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('hover: hover') }))
+        vi.stubGlobal('devicePixelRatio', 2)
+        const requests = []
+        let failFirst
+        vi.stubGlobal('Image', class {
+            constructor() {
+                const image = document.createElement('img')
+                Object.defineProperty(image, 'src', { set(url) {
+                    image.setAttribute('src', url)
+                    requests.push(url)
+                    if (requests.length === 1) failFirst = () => image.onerror?.()
+                    else queueMicrotask(() => /-640\.webp$/.test(url) ? image.onload?.() : image.onerror?.())
+                } })
+                return image
+            }
+        })
+        const container = document.createElement('div')
+        Object.defineProperty(container, 'clientWidth', { value: 505 })
+        const loadDetail = vi.fn()
+        const loadManifest = vi.fn().mockResolvedValue({ schemaVersion: 1, version: 'a'.repeat(24),
+            images: [1, 2].map(id => ({ url: `https://media.example.test/${id}-640.webp`, width: 640, height: 427, previewSrcSet: previews(id) })),
+        })
+        const controller = start({ container, loadManifest, loadDetail, responsive: true })
+        try {
+            await vi.advanceTimersByTimeAsync(649)
+            expect(requests).toEqual([])
+            await vi.advanceTimersByTimeAsync(1)
+            expect(requests).toHaveLength(1)
+            expect(requests[0]).toMatch(/-1440\.webp$/)
+            if (cancelled) controller.stop()
+            failFirst()
+            await vi.advanceTimersByTimeAsync(16)
+            if (cancelled) {
+                expect(requests).toHaveLength(1)
+                expect(container.querySelector('img')).toBeNull()
+            } else {
+                expect(requests).toHaveLength(2)
+                expect(container.querySelector('img')).toHaveAttribute('src', requests[0].replace('-1440.webp', '-640.webp'))
+                await vi.advanceTimersByTimeAsync(2 * (2200 + 16))
+                expect(requests.filter(url => url.endsWith('-1440.webp'))).toHaveLength(2)
+                expect(requests.filter(url => url.endsWith('-640.webp'))).toHaveLength(3)
+                expect(container.querySelectorAll('img').length).toBeLessThanOrEqual(2)
+            }
+            expect(loadDetail).not.toHaveBeenCalled()
+        } finally { controller.stop(); vi.useRealTimers() }
+    })
+
     it('shuffles already validated manifest frames without requiring responsive metadata', () => {
         const manifest = {
             schemaVersion: 1,
@@ -86,9 +142,10 @@ describe('album hover preview selection', () => {
         ])
     })
 
-    it('plays a finite mobile photo sequence without fetching full album details and releases every frame', async () => {
+    it.each([[false, 640], [true, 1440]])('plays a finite mobile sequence (responsive=%s) without full album details and releases every frame', async (responsive, expectedWidth) => {
         vi.useFakeTimers()
         vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query === MOBILE_PREVIEW_QUERY }))
+        vi.stubGlobal('devicePixelRatio', 3)
         vi.stubGlobal('Image', class {
             constructor() {
                 const image = document.createElement('img')
@@ -97,15 +154,17 @@ describe('album hover preview selection', () => {
             }
         })
         const container = document.createElement('div')
+        Object.defineProperty(container, 'clientWidth', { value: 325 })
         const loadDetail = vi.fn()
         const loadManifest = vi.fn().mockResolvedValue({
             schemaVersion: 1, version: 'a'.repeat(24),
-            images: [1, 2, 3, 4, 5].map(id => ({ url: `https://media.test/${id}.webp`, width: 640, height: 427 })),
+            images: [1, 2, 3, 4, 5].map(id => ({ url: previews(id)[0].url, width: 640, height: 427, previewSrcSet: previews(id) })),
         })
-        const controller = start({ container, loadManifest, loadDetail, trigger: 'focus' })
+        const controller = start({ container, loadManifest, loadDetail, trigger: 'focus', responsive })
         try {
             await vi.advanceTimersByTimeAsync(16)
             expect(container.querySelectorAll('.album-card-photo-preview')).toHaveLength(1)
+            expect(container.querySelector('img').src).toMatch(new RegExp(`-${expectedWidth}\\.webp$`))
             for (let step = 0; step < 90; step++) {
                 await vi.advanceTimersByTimeAsync(100)
                 expect(container.querySelectorAll('img').length).toBeLessThanOrEqual(2)

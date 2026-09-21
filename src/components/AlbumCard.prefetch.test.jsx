@@ -127,7 +127,7 @@ describe('AlbumCard intent prefetch', () => {
         expect(prefetchPublicAlbum).not.toHaveBeenCalled()
     })
 
-    it('cycles decoded 640px previews after sustained desktop hover and restores the cover on leave', async () => {
+    it.each([[false, 640], [true, 1440]])('cycles correctly sized previews (responsive=%s) and restores the cover on leave', async (responsivePreview, expectedWidth) => {
         const previewSrcSet = (name) => [640, 960, 1440, 1920]
             .map((width) => ({ width, url: `https://media.example.test/${name}-${width}.webp` }))
         prefetchPublicAlbum.mockResolvedValue({
@@ -152,7 +152,9 @@ describe('AlbumCard intent prefetch', () => {
             }
         })
 
-        renderCard({ preview: true })
+        vi.stubGlobal('devicePixelRatio', 2)
+        const view = renderCard({ preview: true, responsivePreview })
+        Object.defineProperty(view.container.querySelector('.album-card-image'), 'clientWidth', { value: 505 })
         const link = screen.getByRole('link', { name: /Public album/ })
         fireEvent.mouseEnter(link)
         await act(async () => { await vi.dynamicImportSettled() })
@@ -166,9 +168,9 @@ describe('AlbumCard intent prefetch', () => {
         })
         await act(async () => { await vi.advanceTimersByTimeAsync(16) })
         const firstFrame = document.querySelector('.album-card-image > img[aria-hidden="true"]')
-        expect(firstFrame.getAttribute('src')).toMatch(/-(640)\.webp$/)
+        expect(firstFrame.getAttribute('src')).toMatch(new RegExp(`-${expectedWidth}\\.webp$`))
         expect(firstFrame).toHaveStyle({ opacity: '1' })
-        expect(firstFrame.getAttribute('src')).not.toContain('cover-640')
+        expect(firstFrame.getAttribute('src')).not.toContain('cover-')
         expect(prefetchPublicAlbum).toHaveBeenCalledWith(album.albumId)
 
         const firstUrl = firstFrame.getAttribute('src')
@@ -182,7 +184,7 @@ describe('AlbumCard intent prefetch', () => {
         const incomingFrame = transitionFrames.at(-1)
         expect(transitionFrames).toHaveLength(2)
         expect(incomingFrame.getAttribute('src')).not.toBe(firstUrl)
-        expect(incomingFrame.getAttribute('src')).not.toContain('portrait-640')
+        expect(incomingFrame.getAttribute('src')).not.toContain('portrait-')
         expect(incomingFrame).toHaveStyle({ opacity: '1' })
         expect(firstFrame).toHaveStyle({ opacity: '1' })
 
@@ -226,7 +228,9 @@ describe('AlbumCard intent prefetch', () => {
             }
         })
 
-        renderCard({ album: manifestAlbum, preview: true })
+        vi.stubGlobal('devicePixelRatio', 2)
+        const view = renderCard({ album: manifestAlbum, preview: true, responsivePreview: true })
+        Object.defineProperty(view.container.querySelector('.album-card-image'), 'clientWidth', { value: 505 })
         const link = screen.getByRole('link', { name: /Public album/ })
         fireEvent.mouseEnter(link)
         await act(async () => { await vi.dynamicImportSettled() })
@@ -240,5 +244,6 @@ describe('AlbumCard intent prefetch', () => {
         expect(globalThis.fetch).toHaveBeenCalledOnce()
         expect(prefetchPublicAlbum).toHaveBeenCalledExactlyOnceWith(album.albumId)
         expect(document.querySelector('.album-card-image > img[aria-hidden="true"]')).toBeInTheDocument()
+        expect(document.querySelector('.album-card-photo-preview').src).toMatch(/-w1440\.webp$/)
     })
 })

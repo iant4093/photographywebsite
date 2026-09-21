@@ -21,7 +21,7 @@ export function canRunAlbumHoverPreview() {
     return canRunAlbumPreview()
 }
 
-export function selectAlbumHoverPreviews(detail, coverImageUrl, random = Math.random) {
+export function selectAlbumHoverPreviews(detail, coverImageUrl, random = Math.random, targetWidth = ALBUM_HOVER_PREVIEW_WIDTH) {
     const isManifest = detail?.schemaVersion === 1 && typeof detail?.version === 'string'
     const coverPath = comparablePath(coverImageUrl)
     const seen = new Set()
@@ -39,10 +39,13 @@ export function selectAlbumHoverPreviews(detail, coverImageUrl, random = Math.ra
             return !coverPath || !imagePaths.includes(coverPath)
         })
         .map((image) => {
-            if (isManifest && typeof image?.url === 'string') return { url: image.url }
-            const preview = mediaPreviewCandidates(image)
-                .find(({ width }) => width === ALBUM_HOVER_PREVIEW_WIDTH)
-            return preview?.url ? { url: preview.url } : null
+            const previews = mediaPreviewCandidates(image)
+            if (isManifest && !previews.length && typeof image?.url === 'string') return { url: image.url }
+            const preview = previews.find(({ width }) => width >= targetWidth) || previews.at(-1)
+            return preview?.url ? {
+                url: preview.url,
+                ...(preview.width > ALBUM_HOVER_PREVIEW_WIDTH ? { fallbackUrl: previews[0].url } : {}),
+            } : null
         })
         .filter((preview) => {
             if (!preview || seen.has(preview.url)) return false
@@ -94,7 +97,7 @@ function stylePreviewImage(image) {
     })
 }
 
-export function start({ container, coverImageUrl, loadManifest, loadDetail, trigger = 'hover' }) {
+export function start({ container, coverImageUrl, loadManifest, loadDetail, trigger = 'hover', responsive = false }) {
     if (!canRunAlbumPreview(trigger)) return { stop() {} }
     const mobile = trigger === 'focus'
 
@@ -143,7 +146,10 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
             }
         }
         if (!active) return
-        const frames = selectAlbumHoverPreviews(detail, coverImageUrl).slice(0, mobile ? 3 : ALBUM_HOVER_PREVIEW_LIMIT)
+        const targetWidth = responsive
+            ? Math.max(ALBUM_HOVER_PREVIEW_WIDTH, Math.ceil((container?.clientWidth || 0) * (window.devicePixelRatio || 1)))
+            : ALBUM_HOVER_PREVIEW_WIDTH
+        const frames = selectAlbumHoverPreviews(detail, coverImageUrl, Math.random, targetWidth).slice(0, mobile ? 3 : ALBUM_HOVER_PREVIEW_LIMIT)
         if (frames.length < 2) return
 
         let frameIndex = 0
@@ -156,9 +162,19 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
                 frameIndex += 1
                 if (failed.has(candidate.url)) continue
                 try {
+                    let image
+                    try {
+                        image = await preloadAlbumHoverPreview(candidate.url)
+                    } catch (error) {
+                        if (!active || !candidate.fallbackUrl) throw error
+                        image = await preloadAlbumHoverPreview(candidate.fallbackUrl)
+                        // Reuse the successful fallback on subsequent loops.
+                        candidate.url = candidate.fallbackUrl
+                        delete candidate.fallbackUrl
+                    }
                     nextFrame = {
                         ...candidate,
-                        image: await preloadAlbumHoverPreview(candidate.url),
+                        image,
                     }
                 } catch {
                     failed.add(candidate.url)

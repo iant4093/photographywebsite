@@ -102,7 +102,12 @@ function validateManifest(payload, identity) {
             throw new Error('Album hover manifest contained an invalid image')
         }
         seen.add(url.href)
-        return { url: url.href, width, height }
+        // Ready V3 metadata requires all four deterministic siblings. Derive
+        // these only after checking the origin, album, media ID, and 640px URL.
+        return { url: url.href, width, height, previewSrcSet: [640, 960, 1440, 1920].map(width => ({
+            width,
+            url: url.href.replace(/-w640\.webp$/, `-w${width}.webp`),
+        })) }
     })
     return {
         schemaVersion: 1,

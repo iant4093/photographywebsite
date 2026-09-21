@@ -10,6 +10,15 @@ existing album-detail path during rollout or a transient manifest failure.
 - A manifest contains two to twelve unique landscape 640px V3 WebP previews.
 - The current cover is excluded. Candidate ordering is deterministic; the
   browser shuffles up to five frames independently for each hover.
+- Larger photo-section cards select the smallest of the existing 640, 960,
+  1440, and 1920px V3 variants that covers their rendered width at the device's
+  pixel density. After validating a manifest's 640px URL, the browser derives
+  the same-media sibling URLs; the builder already requires the complete ready
+  variant set. This keeps the manifest contract/cache unchanged and needs no
+  backfill or additional album-detail request. Each frame loads on demand and
+  falls back to its 640px sibling if the larger file fails. Other card locations
+  retain 640px animation frames. Reduced-motion/data-saver settings and the
+  three-frame mobile limit still apply.
 - Objects live under `albums/{albumId}/preview/v3/hover-{version}.json`, are
   tagged `visibility=public`, and are served only through the guarded
   `public-previews/{albumId}/v3/` CloudFront alias.
