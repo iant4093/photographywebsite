@@ -3,6 +3,14 @@ export const MAX_RECENT_IMAGES = 24
 export const MAX_RECENT_IMAGE_BYTES = 24 * 1024 * 1024
 const UNKNOWN_IMAGE_BYTES = 1024 * 1024
 
+function backgroundLoadLimit() {
+    const connection = navigator.connection
+    if (connection?.saveData) return 0
+    return /(^|-)2g$|3g/.test(connection?.effectiveType || '')
+        || (connection?.downlink > 0 && connection.downlink < 2)
+        || connection?.rtt >= 150 ? 1 : 2
+}
+
 // These are estimates of decoded pixels, not network transfer sizes. With a
 // width-descriptor srcset, naturalWidth is density-corrected; use the selected
 // source width so high-DPI images cannot silently exceed the retention budget.
@@ -38,8 +46,18 @@ function createRetentionObserver() {
     const observers = new Map()
     const waiting = new Set()
     const loading = new Set()
+    const priorityWaiting = new Set()
+    const priorityLoading = new Set()
+    let viewportObserver = null
+    const startPriorityLoad = element => {
+        priorityWaiting.delete(element)
+        priorityLoading.add(element)
+        const record = records.get(element)
+        record.resident = true
+        record.change(true)
+    }
     const pump = () => {
-        if (loadFrame !== null || document.hidden || !waiting.size) return
+        if (loadFrame !== null || document.hidden || (!waiting.size && !priorityWaiting.size)) return
         loadFrame = requestAnimationFrame(() => {
             loadFrame = null
             if (document.hidden) return
@@ -52,11 +70,29 @@ function createRetentionObserver() {
                 record.resident = true
                 record.change(true)
             }
+            // Visible photos never wait for an offscreen download to finish,
+            // including after a fast scroll or browser Back restoration.
+            for (const element of priorityWaiting) {
+                if (records.get(element)?.inViewport) startPriorityLoad(element)
+            }
+            // Both observers must have reported before starting speculation.
+            // Eager first-row images participate in this gate too.
+            if ([...priorityWaiting, ...priorityLoading].some(element => {
+                const record = records.get(element)
+                return !record.viewportKnown || (record.inViewport && priorityLoading.has(element))
+            })) return
+            const limit = backgroundLoadLimit()
+            for (const element of priorityWaiting) {
+                if (priorityLoading.size >= limit) break
+                startPriorityLoad(element)
+            }
         })
     }
     const releaseLoad = element => {
         waiting.delete(element)
         loading.delete(element)
+        priorityWaiting.delete(element)
+        priorityLoading.delete(element)
         pump()
     }
     const forget = element => {
@@ -90,7 +126,8 @@ function createRetentionObserver() {
             if (!record || !entry.isIntersecting) continue
             record.visible = true
             forget(entry.target)
-            if (record.near && !record.resident) waiting.add(entry.target)
+            if (record.viewportFirst && !record.resident) priorityWaiting.add(entry.target)
+            else if (record.near && !record.resident) waiting.add(entry.target)
             else {
                 record.resident = true
                 record.change(true)
@@ -101,7 +138,8 @@ function createRetentionObserver() {
             if (!record || entry.isIntersecting) continue
             record.visible = false
             waiting.delete(entry.target)
-            if (!record.resident || recent.has(entry.target)) continue
+            priorityWaiting.delete(entry.target)
+            if (record.eager || !record.resident || recent.has(entry.target)) continue
             record.expiresAt = Date.now() + RECENT_IMAGE_LIFETIME_MS
             recent.set(entry.target, record)
             recentBytes += record.bytes
@@ -125,16 +163,32 @@ function createRetentionObserver() {
         prune()
     }
     document.addEventListener('visibilitychange', hidden)
+    navigator.connection?.addEventListener?.('change', pump)
 
     return {
-        add(element, change, near) {
+        add(element, change, near, { viewportFirst = false, eager = false }) {
             const observer = observerFor(near)
-            records.set(element, { change, near, observer, visible: false, resident: false, bytes: UNKNOWN_IMAGE_BYTES })
+            records.set(element, { change, near, observer, viewportFirst, eager,
+                viewportKnown: false, inViewport: false, visible: false, resident: eager, bytes: UNKNOWN_IMAGE_BYTES })
+            if (viewportFirst) {
+                viewportObserver ??= new IntersectionObserver(entries => {
+                    for (const entry of entries) {
+                        const record = records.get(entry.target)
+                        if (!record) continue
+                        record.viewportKnown = true
+                        record.inViewport = entry.isIntersecting
+                    }
+                    pump()
+                }, { rootMargin: '0px', threshold: 0 })
+                if (eager) priorityLoading.add(element)
+                viewportObserver.observe(element)
+            }
             observer.observe(element)
         },
         loaded(element, image) {
             const record = records.get(element)
             if (!record) return
+            if (record.viewportFirst) record.resident = true
             const bytes = decodedImageBytes(image)
             if (recent.has(element)) recentBytes += bytes - record.bytes
             record.bytes = bytes
@@ -144,6 +198,7 @@ function createRetentionObserver() {
         remove(element) {
             forget(element)
             records.get(element)?.observer.unobserve?.(element)
+            if (records.get(element)?.viewportFirst) viewportObserver?.unobserve(element)
             records.delete(element)
             releaseLoad(element)
             prune()
@@ -153,21 +208,25 @@ function createRetentionObserver() {
             window.clearTimeout(timer)
             if (loadFrame !== null) cancelAnimationFrame(loadFrame)
             observers.forEach(observer => observer.disconnect())
+            viewportObserver?.disconnect()
             waiting.clear()
             loading.clear()
+            priorityWaiting.clear()
+            priorityLoading.clear()
             document.removeEventListener('visibilitychange', hidden)
+            navigator.connection?.removeEventListener?.('change', pump)
         },
     }
 }
 
-export function observeRetainedImage(element, change, near = false) {
+export function observeRetainedImage(element, change, near = false, priority = {}) {
     if (typeof IntersectionObserver === 'undefined') {
         change(true)
         return { loaded() {}, dispose() {} }
     }
     shared ??= createRetentionObserver()
     const owner = shared
-    owner.add(element, change, near)
+    owner.add(element, change, near, priority)
     return {
         loaded: image => owner.loaded(element, image),
         dispose() {

@@ -2,7 +2,7 @@ import { memo, useId } from 'react'
 import ProgressiveImage from './ProgressiveImage'
 import { mediaId, mediaPreviewSrcSet, mediaThumbnailUrl } from '../utils/mediaUrls'
 
-const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTitle, onOpen, onMediaError, eagerImageCount = 0, itemLabel = 'Item' }) {
+const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTitle, onOpen, onMediaError, eagerImageCount = 0, itemLabel = 'Item', prioritizeViewport = false }) {
     const id = useId()
     return <div className="space-y-12">
         {sections.map((section, sectionIndex) => <section key={section.key} aria-labelledby={section.title ? `${id}-${section.key}` : undefined}>
@@ -24,6 +24,7 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                         <ProgressiveImage
                             src={mediaThumbnailUrl(img)}
                             eager={sectionIndex === 0 && index < eagerImageCount}
+                            viewportFirst={prioritizeViewport}
                             srcSet={mediaPreviewSrcSet(img) || undefined}
                             blurhash={img.blurhash}
                             width={img.width}

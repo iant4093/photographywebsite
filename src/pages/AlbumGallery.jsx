@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import { fetchAlbumForViewing, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
-import SkeletonGrid from '../components/SkeletonGrid'
+import AlbumLoadingSkeleton from '../components/AlbumLoadingSkeleton'
 import PhotoLightbox from '../components/PhotoLightbox'
 import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
@@ -242,7 +242,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
 
 
     return (
-        <div aria-busy={loading} className={`linen-gallery-page flex-1 animate-fade-in ${embedded ? 'linen-gallery-page--embedded pb-8' : 'pb-16 pt-[88px] md:pt-[104px]'}`}>
+        <div aria-busy={loading} className={`linen-gallery-page flex-1 animate-fade-in ${embedded ? 'linen-gallery-page--embedded pb-8' : 'min-h-screen pb-16 pt-[88px] md:pt-[104px]'}`}>
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}
                 {onBack && <button
@@ -256,11 +256,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                 </button>}
 
                 {/* Loading state */}
-                {loading && (
-                    <div className="flex justify-center py-32" role="status" aria-label="Loading album">
-                        <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
-                    </div>
-                )}
+                {loading && <AlbumLoadingSkeleton />}
 
                 {!loading && !album && (
                     <div className="py-24 text-center">
@@ -329,7 +325,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                         {/* Image grid */}
                         <div className="mb-12">
                             <AlbumPhotoSections sections={sections} albumTitle={album.title} onOpen={openPhoto}
-                                eagerImageCount={eagerImageCount} onMediaError={handleMediaError} />
+                                eagerImageCount={eagerImageCount} onMediaError={handleMediaError} prioritizeViewport />
 
                             {/* Empty state */}
                             {!loading && images.length === 0 && (

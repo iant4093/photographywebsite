@@ -134,10 +134,10 @@ describe('embedded album gallery', () => {
         vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
             matches: viewportWidth >= Number(query.match(/\d+/)?.[0]),
         }))
-        let notifyIntersection
+        const callbacks = new Map()
         const observer = { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() }
-        vi.spyOn(globalThis, 'IntersectionObserver').mockImplementation(function (callback) {
-            notifyIntersection = callback
+        vi.spyOn(globalThis, 'IntersectionObserver').mockImplementation(function (callback, config) {
+            callbacks.set(config.rootMargin, callback)
             return observer
         })
         api.fetchAlbumForViewing.mockResolvedValueOnce({
@@ -149,7 +149,7 @@ describe('embedded album gallery', () => {
         render(<AlbumGalleryContent albumId="a1" embedded />)
         await screen.findByRole('heading', { name: 'Coastal Light' })
         // The heading can commit before ProgressiveImage's lazy-observer effects run.
-        await waitFor(() => expect(observer.observe).toHaveBeenCalledTimes(5 - firstRowCount))
+        await waitFor(() => expect(observer.observe).toHaveBeenCalledTimes(10))
 
         for (let index = 0; index < 5; index++) {
             const image = screen.queryByRole('img', { name: `Item ${index + 1} from Coastal Light` })
@@ -162,9 +162,13 @@ describe('embedded album gallery', () => {
         }
 
         // Later rows wait for observer admission, then load without a second lazy gate.
-        const nextRow = observer.observe.mock.calls[0][0]
-        act(() => notifyIntersection([{ target: nextRow, isIntersecting: true }], observer))
-        const laterImage = screen.getByRole('img', { name: `Item ${firstRowCount + 1} from Coastal Light` })
+        const targets = [...new Set(observer.observe.mock.calls.map(([target]) => target))]
+        const nextRow = targets[firstRowCount]
+        act(() => {
+            callbacks.get('800px')([{ target: nextRow, isIntersecting: true }])
+            callbacks.get('0px')([{ target: nextRow, isIntersecting: true }])
+        })
+        const laterImage = await screen.findByRole('img', { name: `Item ${firstRowCount + 1} from Coastal Light` })
         expect(laterImage).toHaveAttribute('loading', 'eager')
         expect(laterImage).toHaveAttribute('fetchpriority', 'auto')
     })

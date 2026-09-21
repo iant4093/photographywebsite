@@ -8,6 +8,7 @@ import DocumentMetadata from './components/DocumentMetadata'
 import AnalyticsTracker from './components/AnalyticsTracker'
 import Home from './pages/Home'
 import RouteScrollRestoration from './components/RouteScrollRestoration'
+import AlbumLoadingSkeleton from './components/AlbumLoadingSkeleton'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 
@@ -52,8 +53,10 @@ const SectionAlbums = lazy(() => import('./pages/SectionAlbums'))
 if (typeof window !== 'undefined') window.history.scrollRestoration = 'manual'
 
 function PageLoading() {
+    const { pathname } = useLocation()
+    if (pathname.startsWith('/album/')) return <AlbumLoadingSkeleton standalone />
     return (
-        <div className="flex min-h-[60vh] items-center justify-center pt-[88px]" role="status" data-route-loading="">
+        <div className="flex min-h-screen items-center justify-center pt-[88px]" role="status" data-route-loading="">
             <span className="sr-only">Loading page</span>
             <div className="h-10 w-10 animate-spin rounded-full border-3 border-amber border-t-transparent" />
         </div>

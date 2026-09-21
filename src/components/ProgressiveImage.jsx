@@ -14,6 +14,7 @@ export default function ProgressiveImage({
     height,
     eager = false,
     near = false,
+    viewportFirst = false,
     className = '',
     style,
     onError,
@@ -22,7 +23,11 @@ export default function ProgressiveImage({
     const [loadedIdentity, setLoadedIdentity] = useState(null)
     const [fastReveal, setFastReveal] = useState(false)
     const loadStarted = useRef(0)
-    const imageRef = useCallback(image => { if (image) loadStarted.current = performance.now() }, [])
+    const imageNode = useRef(null)
+    const imageRef = useCallback(image => {
+        imageNode.current = image
+        if (image) loadStarted.current = performance.now()
+    }, [])
     const [failedResponsiveIdentity, setFailedResponsiveIdentity] = useState(null)
     const containerRef = useRef(null)
     const retentionRef = useRef(null)
@@ -43,7 +48,7 @@ export default function ProgressiveImage({
     }, [src, srcSet])
 
     useEffect(() => {
-        if (!src || eager) return undefined
+        if (!src || (eager && !viewportFirst)) return undefined
         const element = containerRef.current
         if (!element) return undefined
         const retained = observeRetainedImage(element, (visible) => {
@@ -54,13 +59,15 @@ export default function ProgressiveImage({
                 setPlaceholder(previous => previous.hash === blurhash ? previous
                     : { hash: blurhash, url: imagePlaceholder(blurhash) })
             }
-        }, near)
+        }, near, { viewportFirst, eager })
         retentionRef.current = retained
+        // A memory-cached eager image may finish before this effect subscribes.
+        if (imageNode.current?.complete && imageNode.current.naturalWidth) retained.loaded(imageNode.current)
         return () => {
             retained.dispose()
             if (retentionRef.current === retained) retentionRef.current = null
         }
-    }, [blurhash, eager, near, src])
+    }, [blurhash, eager, near, src, viewportFirst])
 
     const placeholderUrl = eager ? eagerPlaceholder : placeholder.hash === blurhash ? placeholder.url : ''
 
