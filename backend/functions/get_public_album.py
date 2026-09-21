@@ -1472,6 +1472,17 @@ def _render_shell(shell, metadata):
             _meta_tag("property", "og:image:height", height),
         ))
     block = "\n  " + "\n  ".join(tags) + "\n"
+    # Only a validated, active public album receives an early anonymous JSON
+    # hint. The browser can fetch it alongside the route JS and reuse the same
+    # cacheable response when the viewer initializes; private links stay generic.
+    public_route = re.fullmatch(
+        re.escape(SITE_ORIGIN) + r"/(?:album|video)/([0-9a-f-]{36})", metadata["url"]
+    )
+    if public_route:
+        block += (
+            '<link rel="preload" as="fetch" crossorigin="anonymous" '
+            f'href="/api/public/albums/{public_route.group(1)}" />\n'
+        )
     return re.sub(r"</head>", block + "</head>", rendered, count=1, flags=re.IGNORECASE)
 
 
@@ -1512,12 +1523,7 @@ def _html_response(body):
     }
 
 
-def _social_preview_response(event):
-    try:
-        shell = _base_shell()
-    except Exception as error:
-        return internal_error(None, error, "load_social_preview_shell")
-
+def _social_album(event):
     params = (event or {}).get("pathParameters") or {}
     route_kind = params.get("albumType")
     album = None
@@ -1536,8 +1542,19 @@ def _social_preview_response(event):
         except Exception as error:
             # Preserve direct-navigation availability without leaking provider or record details.
             logger.warning("social_preview_album_lookup_failed error_type=%s", type(error).__name__)
-    metadata = _social_metadata(album, route_kind)
-    return _html_response(_render_shell(shell, metadata))
+    return _social_metadata(album, route_kind)
+
+
+def _social_preview_response(event):
+    # A cold/expired frontend-shell read and the public metadata lookup are
+    # independent. Do not put both origin waits on the visitor's critical path.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        metadata = executor.submit(_social_album, event)
+        try:
+            shell = _base_shell()
+        except Exception as error:
+            return internal_error(None, error, "load_social_preview_shell")
+        return _html_response(_render_shell(shell, metadata.result()))
 
 
 from front_door import verify_front_door_request

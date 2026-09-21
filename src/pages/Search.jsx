@@ -1,6 +1,6 @@
 import SiteSelect from '../components/SiteSelect'
-import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbumsPage } from '../utils/api'
@@ -22,6 +22,12 @@ const CATALOGS = [
 const TYPE_OPTIONS = new Set(['all', 'photo', 'video'])
 const SORT_OPTIONS = new Set(['newest', 'oldest', 'title'])
 const SEARCH_CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 1080px) 50vw, (min-width: 1440px) 520px, 400px'
+
+const SearchResults = memo(function SearchResults({ albums }) {
+    return <div className="archive-search-results">
+        {albums.map(album => <AlbumCard key={album.albumId} album={album} imageSizes={SEARCH_CARD_SIZES} />)}
+    </div>
+})
 
 function initialCatalogs() {
     return Object.fromEntries(CATALOGS.map(({ key, type }) => {
@@ -54,6 +60,25 @@ function mergeCatalogs(catalogs) {
 
 export default function Search() {
     const [searchParams, setSearchParams] = useSearchParams()
+    const location = useLocation()
+    const urlQuery = searchParams.get('q') || ''
+    const [draft, setDraft] = useState(() => ({ key: location.key, query: urlQuery }))
+    // External navigation wins immediately, including Back while a URL update
+    // is pending. The input itself never waits for a timer or result rendering.
+    if (draft.key !== location.key) setDraft({ key: location.key, query: urlQuery })
+    const query = draft.key === location.key ? draft.query : urlQuery
+    const resultQuery = useDeferredValue(query)
+
+    useEffect(() => {
+        if (query === urlQuery) return undefined
+        const timer = window.setTimeout(() => {
+            const next = new URLSearchParams(searchParams)
+            if (query) next.set('q', query)
+            else next.delete('q')
+            setSearchParams(next, { replace: true })
+        }, 150)
+        return () => window.clearTimeout(timer)
+    }, [query, urlQuery, searchParams, setSearchParams, location.key])
     const [albumsByType, setAlbumsByType] = useState(initialCatalogs)
     const [loading, setLoading] = useState(() => CATALOGS.some(({ key }) => {
         const snapshot = getCatalogSnapshot(key)
@@ -128,7 +153,6 @@ export default function Search() {
     const years = useMemo(() => [...new Set(albums.map(albumYear).filter(Boolean))]
         .sort((left, right) => Number(right) - Number(left)), [albums])
 
-    const query = searchParams.get('q') || ''
     const requestedType = searchParams.get('type') || 'all'
     const type = TYPE_OPTIONS.has(requestedType) ? requestedType : 'all'
     const requestedSort = searchParams.get('sort') || 'newest'
@@ -137,7 +161,7 @@ export default function Search() {
     const year = years.includes(searchParams.get('year')) ? searchParams.get('year') : 'all'
 
     const results = useMemo(() => {
-        const needle = normalizeSearchValue(query)
+        const needle = normalizeSearchValue(resultQuery)
         return albums
             .filter((album) => {
                 if (type === 'video' && album.type !== 'video') return false
@@ -158,10 +182,12 @@ export default function Search() {
                 return (albumTimestamp(left) - albumTimestamp(right)) * direction
                     || String(left.title || '').localeCompare(String(right.title || ''))
             })
-    }, [albums, category, query, sort, type, year])
+    }, [albums, category, resultQuery, sort, type, year])
 
     const updateParam = (name, value, defaultValue = 'all') => {
         const next = new URLSearchParams(searchParams)
+        if (query) next.set('q', query)
+        else next.delete('q')
         if (!value || value === defaultValue) next.delete(name)
         else next.set(name, value)
         setSearchParams(next, { replace: true })
@@ -197,7 +223,7 @@ export default function Search() {
                                 id="archive-search-input"
                                 type="search"
                                 value={query}
-                                onChange={(event) => updateParam('q', event.target.value, '')}
+                                onChange={(event) => setDraft({ key: location.key, query: event.target.value })}
                                 placeholder="Try wildlife, Spain, portraits…"
                                 autoComplete="off"
                             />
@@ -229,10 +255,10 @@ export default function Search() {
                     </div>
                 </div>
 
-                <div className="archive-search-summary" aria-live="polite">
+                <div className="archive-search-summary" aria-live="polite" aria-busy={query !== resultQuery}>
                     <p>
                         <strong>{results.length}</strong> {results.length === 1 ? 'album' : 'albums'}
-                        {query.trim() ? <> matching “{query.trim()}”</> : ' in the public archive'}
+                        {resultQuery.trim() ? <> matching “{resultQuery.trim()}”</> : ' in the public archive'}
                     </p>
                     {hasFilters && <button type="button" onClick={clearFilters}>Reset search</button>}
                 </div>
@@ -258,11 +284,7 @@ export default function Search() {
                 )}
 
                 {results.length > 0 && (
-                    <div className="archive-search-results">
-                        {results.map((album) => (
-                            <AlbumCard key={album.albumId} album={album} imageSizes={SEARCH_CARD_SIZES} />
-                        ))}
-                    </div>
+                    <SearchResults albums={results} />
                 )}
 
                 {!loading && !error && results.length === 0 && (

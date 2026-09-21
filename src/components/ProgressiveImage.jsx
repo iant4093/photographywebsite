@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { observeRetainedImage } from '../utils/imageRetention'
 import { imagePlaceholder } from '../utils/imagePlaceholder'
 import { captureImageSnapshot, releaseImageSnapshot, touchImageSnapshot } from '../utils/imageSnapshot'
+import { isImageReady, markImageReady } from '../utils/imageReadiness'
 
 export default function ProgressiveImage({
     src,
@@ -12,12 +13,16 @@ export default function ProgressiveImage({
     width,
     height,
     eager = false,
+    near = false,
     className = '',
     style,
     onError,
 }) {
     const [visibleSrc, setVisibleSrc] = useState(eager ? src : null)
     const [loadedIdentity, setLoadedIdentity] = useState(null)
+    const [fastReveal, setFastReveal] = useState(false)
+    const loadStarted = useRef(0)
+    const imageRef = useCallback(image => { if (image) loadStarted.current = performance.now() }, [])
     const [failedResponsiveIdentity, setFailedResponsiveIdentity] = useState(null)
     const containerRef = useRef(null)
     const retentionRef = useRef(null)
@@ -49,13 +54,13 @@ export default function ProgressiveImage({
                 setPlaceholder(previous => previous.hash === blurhash ? previous
                     : { hash: blurhash, url: imagePlaceholder(blurhash) })
             }
-        })
+        }, near)
         retentionRef.current = retained
         return () => {
             retained.dispose()
             if (retentionRef.current === retained) retentionRef.current = null
         }
-    }, [blurhash, eager, src])
+    }, [blurhash, eager, near, src])
 
     const placeholderUrl = eager ? eagerPlaceholder : placeholder.hash === blurhash ? placeholder.url : ''
 
@@ -68,6 +73,7 @@ export default function ProgressiveImage({
             <div ref={snapshotRef} className="absolute inset-0 z-0 pointer-events-none" aria-hidden="true" />
             {shouldLoad && (
                 <img
+                    ref={imageRef}
                     key={imageIdentity}
                     src={src}
                     srcSet={effectiveSrcSet}
@@ -81,6 +87,9 @@ export default function ProgressiveImage({
                     fetchPriority={eager ? 'high' : 'auto'}
                     decoding="async"
                     onLoad={(event) => {
+                        const url = event.currentTarget.currentSrc || event.currentTarget.src
+                        setFastReveal(isImageReady(url) || performance.now() - loadStarted.current < 80)
+                        markImageReady(url)
                         retentionRef.current?.loaded(event.currentTarget)
                         setLoadedIdentity(imageIdentity)
                     }}
@@ -93,9 +102,10 @@ export default function ProgressiveImage({
                             return
                         }
                         setLoadedIdentity(imageIdentity)
+                        retentionRef.current?.loaded(event.currentTarget)
                         onError?.(event)
                     }}
-                    className={`absolute inset-0 z-0 h-full w-full object-cover ${isLoaded ? 'opacity-100 progressive-image-ready' : 'opacity-0'}`}
+                    className={`absolute inset-0 z-0 h-full w-full object-cover ${isLoaded ? `opacity-100 progressive-image-ready ${fastReveal ? 'progressive-image-returned' : ''}` : 'opacity-0'}`}
                 />
             )}
         </div>

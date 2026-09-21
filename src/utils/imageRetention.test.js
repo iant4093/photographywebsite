@@ -105,6 +105,41 @@ describe('bounded recent image retention', () => {
         expect(vi.getTimerCount()).toBe(0)
     })
 
+    it('bounds featured loads to two, prioritizes visible cards and releases slots on completion or removal', () => {
+        const list = Array.from({ length: 5 }, () => {
+            const element = document.createElement('div'), change = vi.fn()
+            const controller = observeRetainedImage(element, change, true)
+            disposers.push(controller.dispose)
+            return { element, change, ...controller }
+        })
+        expect(options).toMatchObject({ rootMargin: '120px 0px', scrollMargin: '0px 100px' })
+        enter(list.map(item => item.element))
+        vi.advanceTimersByTime(20)
+        expect(list.map(item => item.change.mock.calls.length)).toEqual([1, 1, 0, 0, 0])
+        leave([list[2].element])
+        list[0].loaded(image(640, 400))
+        vi.advanceTimersByTime(20)
+        expect(list[2].change).not.toHaveBeenCalled()
+        expect(list[3].change).toHaveBeenCalledWith(true)
+        list[1].dispose(); disposers.splice(1, 1)
+        vi.advanceTimersByTime(20)
+        expect(list[4].change).toHaveBeenCalledWith(true)
+    })
+
+    it('pauses a queued featured frame when hidden before animation callbacks run', () => {
+        const element = document.createElement('div'), change = vi.fn()
+        const controller = observeRetainedImage(element, change, true)
+        disposers.push(controller.dispose)
+        enter([element])
+        const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+        vi.advanceTimersByTime(20)
+        expect(change).not.toHaveBeenCalled()
+        hidden.mockReturnValue(false)
+        document.dispatchEvent(new Event('visibilitychange'))
+        vi.advanceTimersByTime(20)
+        expect(change).toHaveBeenCalledWith(true)
+    })
+
     it('falls back to normal image loading when observers are unavailable', () => {
         vi.stubGlobal('IntersectionObserver', undefined)
         const a = register()

@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import unittest
+import threading
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -345,13 +346,33 @@ class PublicAlbumDetailTests(unittest.TestCase):
         get_public_album._shell_cache.update(html=None, expires_at=0.0)
         with patch.object(
             get_public_album, "_base_shell", side_effect=RuntimeError("provider detail")
-        ):
+        ), patch.object(get_public_album, "_social_album", return_value={}):
             response = get_public_album.handler(
                 {"pathParameters": {"albumType": "album", "albumId": ALBUM_ID}},
                 None,
             )
         self.assertEqual(response["statusCode"], 500)
         self.assertNotIn("provider detail", response["body"])
+
+    def test_document_overlaps_shell_and_metadata_reads(self):
+        metadata_started = threading.Event()
+        shell_started = threading.Event()
+
+        def metadata(event):
+            metadata_started.set()
+            self.assertTrue(shell_started.wait(2))
+            return get_public_album._social_metadata(None, "album")
+
+        def shell():
+            shell_started.set()
+            self.assertTrue(metadata_started.wait(2))
+            return self.SHELL
+
+        with patch.object(get_public_album, "_base_shell", side_effect=shell), patch.object(
+            get_public_album, "_social_album", side_effect=metadata
+        ):
+            response = get_public_album._social_preview_response({})
+        self.assertEqual(response["statusCode"], 200)
 
     def test_public_detail_returns_cacheable_allowlisted_body(self):
         stored = public_album(ownerEmail="private@example.test", shareCode="private-code")
@@ -636,6 +657,10 @@ class PublicAlbumDetailTests(unittest.TestCase):
             f'<link rel="canonical" href="https://iantruongphotography.com/album/{ALBUM_ID}"',
             response["body"],
         )
+        self.assertIn(
+            f'<link rel="preload" as="fetch" crossorigin="anonymous" href="/api/public/albums/{ALBUM_ID}"',
+            response["body"],
+        )
         self.assertEqual(response["body"].count('property="og:title"'), 1)
         self.assertEqual(response["body"].count('name="twitter:title"'), 1)
         self.assertEqual(response["body"].count('name="description"'), 1)
@@ -675,6 +700,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
                 )
             self.assertEqual(response["statusCode"], 200)
             self.assertIn("Ian Truong Photography portfolio cover", response["body"])
+            self.assertNotIn('as="fetch"', response["body"])
             self.assertNotIn("Private title", response["body"])
             self.assertNotIn("Wrong type title", response["body"])
             self.assertIn('href="https://iantruongphotography.com/"', response["body"])

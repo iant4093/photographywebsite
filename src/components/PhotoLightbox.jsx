@@ -11,6 +11,8 @@ import LightboxShareButton from './LightboxShareButton'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
 import PhotoZoomFrame from './PhotoZoomFrame'
 import { photoDescription } from '../utils/mediaAccessibility'
+import { isImageReady, markImageReady } from '../utils/imageReadiness'
+import { prefetchPhoto } from '../utils/photoPrefetch'
 
 const PHOTO_CROSSFADE_MS = 360
 const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
@@ -20,7 +22,7 @@ function freshComparison(id) {
     return { id, requested: false, returningToEdit: false, attempt: 0, loadedKey: null, failedKey: null }
 }
 
-function afterImageDecode(image, onReady, onError) {
+function afterImageDecode(image, onReady, onError, animate = true) {
     if (!image?.isConnected) return
     const src = image.getAttribute('src')
     const srcSet = image.getAttribute('srcset')
@@ -31,7 +33,7 @@ function afterImageDecode(image, onReady, onError) {
         if (!isCurrent()) return
         // Establish the hidden layer's initial style even when a cached image
         // decodes before the browser's first paint, so its fade still runs.
-        image.getBoundingClientRect()
+        if (animate) image.getBoundingClientRect()
         onReady()
     }
     const failed = () => {
@@ -100,9 +102,10 @@ function PhotoLightbox({
     const [printing, setPrinting] = useState(false)
     const activeImage = images[index]
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
-    const [preview, setPreview] = useState(() => ({ id: activeId, ready: null, outgoing: null }))
+    const [preview, setPreview] = useState(() => ({ id: activeId, ready: null, outgoing: null, changedAt: performance.now(), rapid: false }))
     const loadedImageId = preview.ready?.id
     const outgoingImage = preview.outgoing
+    const transitionMs = preview.rapid ? 0 : preview.ready?.cached ? 140 : PHOTO_CROSSFADE_MS
     const activeRawUrl = activeImage ? mediaDisplayUrl(activeImage) : ''
     const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
     const [comparison, setComparison] = useState(() => freshComparison(activeId))
@@ -125,7 +128,15 @@ function PhotoLightbox({
     // Only carry the immediately preceding decoded photo into a navigation fade.
     // Advancing again must never resurrect an older outgoing layer, even when
     // the skipped photo has not loaded or its fade has not finished.
-    if (preview.id !== activeId) setPreview({ id: activeId, ready: null, outgoing: preview.ready })
+    if (preview.id !== activeId) {
+        setPreview({ ...preview, id: activeId, ready: null, outgoing: preview.ready })
+    }
+
+    const navigatePhoto = (navigate) => {
+        const now = performance.now()
+        setPreview(current => ({ ...current, changedAt: now, rapid: now - current.changedAt < 220 }))
+        navigate?.()
+    }
 
     // Returning to a previous photograph also starts with its edit.
     if (comparison.id !== activeId) setComparison(freshComparison(activeId))
@@ -136,9 +147,19 @@ function PhotoLightbox({
         // Slow or failed loads cannot leave a stale photograph on screen.
         const timer = window.setTimeout(() => {
             setPreview(current => current.outgoing === outgoingImage ? { ...current, outgoing: null } : current)
-        }, PHOTO_CROSSFADE_MS)
+        }, Math.max(0, transitionMs - (performance.now() - preview.changedAt)))
         return () => window.clearTimeout(timer)
-    }, [outgoingImage])
+    }, [outgoingImage, preview.changedAt, transitionMs])
+
+    useEffect(() => {
+        if (loadedImageId !== activeId || images.length < 2 || !bounds.width || !bounds.height) return undefined
+        let release = () => {}
+        const timer = window.setTimeout(() => {
+            const next = images[(index + 1) % images.length]
+            release = prefetchPhoto(next, Number.parseFloat(sizesFor(next)))
+        }, 200)
+        return () => { window.clearTimeout(timer); release() }
+    }, [activeId, loadedImageId, images, index, sizesFor, bounds.width, bounds.height])
 
     useEffect(() => () => {
         refreshedOriginalsRef.current.clear()
@@ -221,16 +242,22 @@ function PhotoLightbox({
     const isLegacyOrDemo = typeof activeImage === 'string'
     const hasOriginalComparison = Boolean(before && ['unresolved', 'ready', 'pending', 'unavailable', 'failed'].includes(before.status))
     const hasPhotoMetadata = !isLegacyOrDemo && Boolean(activeImage?.exif)
-    const handleFullImageLoad = (event) => afterImageDecode(event.currentTarget, () => {
-        const ready = {
-            id: activeId,
-            image: activeImage,
-            rawUrl: activeRawUrl,
-            previewSrcSet,
-        }
+    const handleFullImageLoad = (event) => {
+        const url = event.currentTarget.currentSrc || event.currentTarget.src
+        const cached = isImageReady(url)
+        afterImageDecode(event.currentTarget, () => {
+            const ready = {
+                id: activeId,
+                image: activeImage,
+                rawUrl: activeRawUrl,
+                previewSrcSet,
+                cached,
+            }
 
-        setPreview(current => current.id === activeId ? { ...current, ready } : current)
-    }, onMediaError)
+            markImageReady(url)
+            setPreview(current => current.id === activeId ? { ...current, ready } : current)
+        }, onMediaError, !cached && !preview.rapid)
+    }
 
     const handlePrint = async (event) => {
         event.stopPropagation()
@@ -323,9 +350,9 @@ function PhotoLightbox({
         <AccessibleLightbox
             ariaLabel={ariaLabel}
             onClose={onClose}
-            onNext={images.length > 1 ? onNext : undefined}
-            onPrevious={images.length > 1 ? onPrevious : undefined}
-            className="linen-responsive-lightbox linen-photo-lightbox fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0"
+            onNext={images.length > 1 ? () => navigatePhoto(onNext) : undefined}
+            onPrevious={images.length > 1 ? () => navigatePhoto(onPrevious) : undefined}
+            className={`linen-responsive-lightbox linen-photo-lightbox ${transitionMs === 0 ? 'linen-photo-rapid' : transitionMs === 140 ? 'linen-photo-cached' : ''} fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0`}
         >
             <button
                 type="button"
@@ -443,7 +470,7 @@ function PhotoLightbox({
                         {images.length > 1 && (
                             <button
                                 type="button"
-                                onClick={(event) => { event.stopPropagation(); onPrevious() }}
+                                onClick={(event) => { event.stopPropagation(); navigatePhoto(onPrevious) }}
                                 className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                 aria-label="Previous photo"
                                 data-camera-cursor="previous"
@@ -476,7 +503,7 @@ function PhotoLightbox({
                         {images.length > 1 && (
                             <button
                                 type="button"
-                                onClick={(event) => { event.stopPropagation(); onNext() }}
+                                onClick={(event) => { event.stopPropagation(); navigatePhoto(onNext) }}
                                 className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                 aria-label="Next photo"
                                 data-camera-cursor="next"

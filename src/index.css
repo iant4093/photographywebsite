@@ -304,10 +304,14 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
   }
 }
 
-/* A load-triggered animation also fades cached images whose load event arrives
-   before their initial paint. Retained image nodes do not restart this reveal. */
+/* New images get a brief reveal. Returning/quick images are visible immediately;
+   the tiny animation still delivers the snapshot's completion event. */
 .progressive-image-ready {
-  animation: progressive-image-reveal 500ms ease-in-out;
+  animation: progressive-image-reveal 180ms ease-out;
+}
+
+.progressive-image-ready.progressive-image-returned {
+  animation-duration: 1ms;
 }
 
 @keyframes progressive-image-reveal {

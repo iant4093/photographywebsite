@@ -127,7 +127,7 @@ export default function Videos() {
     const { sections: videoSections, setCategoryYear } = useAlbumYearFilters(groupedVideoAlbums)
     const managedHeroUrl = cdnUrl('site/hero/video/home')
     const responsiveHeroUrl = currentVideoHeroUrl()
-    const usePublishedVersion = publishedHero && failedHeroVersion !== publishedHero.version
+    const usePublishedVersion = publishedHero && (!publishedHero.useAlias || responsiveHeroFailed) && failedHeroVersion !== publishedHero.version
     const heroSizes = heroImageSizes(usePublishedVersion ? publishedHero.source : null, 'video')
     const useResponsiveHero = usePublishedVersion || (Boolean(responsiveHeroUrl) && !responsiveHeroFailed)
     const useBundledHero = !useResponsiveHero && (!managedHeroUrl || managedHeroFailed)

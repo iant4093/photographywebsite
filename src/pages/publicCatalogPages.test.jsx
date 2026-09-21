@@ -478,12 +478,13 @@ describe('Home complete public catalog', () => {
     expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
     expect(hero).toHaveAttribute('fetchpriority', 'high')
     const html = readFileSync('index.html', 'utf8')
-    expect(html.match(/imagesizes="([^"]+)"/)[1]).toBe(hero.sizes)
+    expect(html).not.toContain('rel="preload" as="image"')
+    expect(readFileSync('public/theme-init.js', 'utf8')).toContain(hero.sizes)
     expect(hero.sizes).toContain('138svh')
     expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/site/hero/manifest.json'), expect.objectContaining({ cache: 'no-cache' }))
   })
 
-  it('replaces a cached photo hero with the published version and updates an already open page', async () => {
+  it('keeps the preloaded alias until publication changes or an alias fails', async () => {
     const manifest = (version) => ({
       schemaVersion: 1, version, source: { width: 800, height: 600 },
       variants: Object.fromEntries(['avif', 'webp', 'jpeg'].map((format) => [format, [{
@@ -496,6 +497,9 @@ describe('Home complete public catalog', () => {
     catalog.loadCompleteCatalog.mockResolvedValue({ items: [], nextCursor: null })
     const { container } = routed(<Home />)
     const hero = screen.getByRole('img', { name: 'Ian Truong Photography portfolio cover' })
+    await act(async () => {})
+    expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/current/hero.jpg'))
+    fireEvent.error(hero)
     await waitFor(() => expect(hero).toHaveAttribute('src', expect.stringContaining(`/versions/v1/${first}/`)))
     expect(hero.getAttribute('srcset')).not.toContain('2560')
     // Published 4:3 covers must size for their own crop, including AVIF/WebP.
@@ -527,7 +531,11 @@ describe('Videos paginated catalog', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(manifest))))
     api.fetchAlbumsPage.mockResolvedValue({ items: [], nextCursor: null })
     routed(<Videos />)
-    await waitFor(() => expect(screen.getByRole('img', { name: 'Cinematography' })).toHaveAttribute('src', expect.stringContaining(`/versions/video/v1/${version}/`)))
+    await act(async () => {})
+    const hero = screen.getByRole('img', { name: 'Cinematography' })
+    expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/video/current/hero.jpg'))
+    fireEvent.error(hero)
+    await waitFor(() => expect(hero).toHaveAttribute('src', expect.stringContaining(`/versions/video/v1/${version}/`)))
     vi.unstubAllGlobals()
   })
 

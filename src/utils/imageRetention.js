@@ -34,6 +34,31 @@ function createRetentionObserver() {
     const recent = new Map()
     let recentBytes = 0
     let timer = null
+    let loadFrame = null
+    const observers = new Map()
+    const waiting = new Set()
+    const loading = new Set()
+    const pump = () => {
+        if (loadFrame !== null || document.hidden || !waiting.size) return
+        loadFrame = requestAnimationFrame(() => {
+            loadFrame = null
+            if (document.hidden) return
+            for (const element of waiting) {
+                if (loading.size >= 2) break
+                waiting.delete(element)
+                const record = records.get(element)
+                if (!record?.visible) continue
+                loading.add(element)
+                record.resident = true
+                record.change(true)
+            }
+        })
+    }
+    const releaseLoad = element => {
+        waiting.delete(element)
+        loading.delete(element)
+        pump()
+    }
     const forget = element => {
         const record = recent.get(element)
         if (!record) return
@@ -45,6 +70,7 @@ function createRetentionObserver() {
         forget(element)
         record.resident = false
         record.change(false)
+        releaseLoad(element)
     }
     const prune = () => {
         window.clearTimeout(timer)
@@ -57,40 +83,53 @@ function createRetentionObserver() {
         const oldest = recent.values().next().value
         if (oldest) timer = window.setTimeout(prune, Math.max(0, oldest.expiresAt - now))
     }
-    const observer = new IntersectionObserver(entries => {
+    const notify = entries => {
         // Protect returning images before making room for newly distant ones.
         for (const entry of entries) {
             const record = records.get(entry.target)
             if (!record || !entry.isIntersecting) continue
+            record.visible = true
             forget(entry.target)
-            record.resident = true
-            record.change(true)
+            if (record.near && !record.resident) waiting.add(entry.target)
+            else {
+                record.resident = true
+                record.change(true)
+            }
         }
         for (const entry of entries) {
             const record = records.get(entry.target)
-            if (!record || entry.isIntersecting || !record.resident || recent.has(entry.target)) continue
+            if (!record || entry.isIntersecting) continue
+            record.visible = false
+            waiting.delete(entry.target)
+            if (!record.resident || recent.has(entry.target)) continue
             record.expiresAt = Date.now() + RECENT_IMAGE_LIFETIME_MS
             recent.set(entry.target, record)
             recentBytes += record.bytes
         }
         prune()
-    }, {
-        rootMargin: '800px',
-        // rootMargin alone cannot see past nested horizontal scroll clipping.
-        // Older browsers ignore this option; retention still works there.
-        scrollMargin: '0px 360px',
-        threshold: 0,
-    })
+        pump()
+    }
+    const observerFor = near => {
+        if (!observers.has(near)) observers.set(near, new IntersectionObserver(notify, {
+            rootMargin: near ? '120px 0px' : '800px',
+            // Only the featured strip uses the narrow, queued loading window.
+            // Both policies still share the same decoded-memory/retention cap.
+            scrollMargin: near ? '0px 100px' : '0px 360px',
+            threshold: 0,
+        }))
+        return observers.get(near)
+    }
     const hidden = () => {
-        if (!document.hidden) return
+        if (!document.hidden) { pump(); return }
         for (const element of recent.keys()) evict(element)
         prune()
     }
     document.addEventListener('visibilitychange', hidden)
 
     return {
-        add(element, change) {
-            records.set(element, { change, resident: false, bytes: UNKNOWN_IMAGE_BYTES })
+        add(element, change, near) {
+            const observer = observerFor(near)
+            records.set(element, { change, near, observer, visible: false, resident: false, bytes: UNKNOWN_IMAGE_BYTES })
             observer.observe(element)
         },
         loaded(element, image) {
@@ -99,31 +138,36 @@ function createRetentionObserver() {
             const bytes = decodedImageBytes(image)
             if (recent.has(element)) recentBytes += bytes - record.bytes
             record.bytes = bytes
+            releaseLoad(element)
             prune()
         },
         remove(element) {
             forget(element)
+            records.get(element)?.observer.unobserve?.(element)
             records.delete(element)
-            observer.unobserve?.(element)
+            releaseLoad(element)
             prune()
             return records.size
         },
         destroy() {
             window.clearTimeout(timer)
-            observer.disconnect()
+            if (loadFrame !== null) cancelAnimationFrame(loadFrame)
+            observers.forEach(observer => observer.disconnect())
+            waiting.clear()
+            loading.clear()
             document.removeEventListener('visibilitychange', hidden)
         },
     }
 }
 
-export function observeRetainedImage(element, change) {
+export function observeRetainedImage(element, change, near = false) {
     if (typeof IntersectionObserver === 'undefined') {
         change(true)
         return { loaded() {}, dispose() {} }
     }
     shared ??= createRetentionObserver()
     const owner = shared
-    owner.add(element, change)
+    owner.add(element, change, near)
     return {
         loaded: image => owner.loaded(element, image),
         dispose() {

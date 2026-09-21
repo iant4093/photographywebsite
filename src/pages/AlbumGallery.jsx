@@ -159,6 +159,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
         [loadAlbum],
     )
     const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)
+    const handleMediaError = useCallback(() => requestMediaRefresh('media-error'), [requestMediaRefresh])
     const { images: lightboxImages, refreshOriginal } = usePhotoOriginalRefresh(activeImages, { albumId, getIdToken })
 
     const closeLightbox = useCallback(() => {
@@ -331,7 +332,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                         {/* Image grid */}
                         <div className="mb-12">
                             <AlbumPhotoSections sections={sections} albumTitle={album.title} onOpen={openPhoto}
-                                eagerImageCount={eagerImageCount} onMediaError={() => requestMediaRefresh('media-error')} />
+                                eagerImageCount={eagerImageCount} onMediaError={handleMediaError} />
 
                             {/* Empty state */}
                             {!loading && images.length === 0 && (
@@ -358,7 +359,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                 shareTitle={`${album.title} — Ian Truong Photography`}
                                 shareUrl={image => shareUrlForAlbumPhoto(albumId, mediaId(image))}
                                 onBeforeRefresh={refreshOriginal}
-                                onMediaError={() => requestMediaRefresh('media-error')}
+                                onMediaError={handleMediaError}
                             />
                         )}
                     </div>

@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import { fetchHeroManifest, HERO_PUBLISHED_EVENT } from '../utils/mediaUrls'
 
-// Fixed aliases paint immediately. Revalidation switches to immutable URLs so
-// an open browser cannot keep reusing an earlier upload under the same URL.
+// A route revisit can reuse this document's already-decoded alias. Remember its
+// original version across mounts so later publications still use fresh URLs.
+const aliasVersions = new Map()
+
+// Current aliases must revalidate and paint immediately. The first manifest
+// establishes their version; renaming that same image would download it twice.
+// A later publication still switches an open page to its immutable new URLs.
 export default function usePublishedHero(heroType) {
     const [published, setPublished] = useState(null)
     useEffect(() => {
@@ -10,8 +15,11 @@ export default function usePublishedHero(heroType) {
         let pending = false
         const apply = (manifest) => {
             if (manifest && !controller.signal.aborted) {
+                const alias = aliasVersions.get(heroType) || { version: manifest.version, changed: false }
+                alias.changed ||= alias.version !== manifest.version
+                aliasVersions.set(heroType, alias)
                 setPublished((current) => current?.heroType === heroType && current.manifest.version === manifest.version
-                    ? current : { heroType, manifest })
+                    ? current : { heroType, manifest: { ...manifest, useAlias: !alias.changed } })
             }
         }
         const refresh = async () => {

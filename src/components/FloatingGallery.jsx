@@ -3,12 +3,13 @@ import { Link } from 'react-router'
 import ProgressiveImage from './ProgressiveImage'
 import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
 import useMediaQuery from '../hooks/useMediaQuery'
+import useAlbumIntent from '../hooks/useAlbumIntent'
+import { gallerySessionSeed } from '../utils/gallerySeed'
 
 const TILT_PATTERN = [-0.3, 0.14, 0.28, -0.12]
 const LANE_COUNT = 3
 const MAX_ALBUMS_PER_LANE = 10
-const PAGE_RANDOM_SEED = globalThis.crypto?.randomUUID?.()
-    || `${Date.now()}-${Math.random()}`
+const PAGE_RANDOM_SEED = gallerySessionSeed()
 const EDGE_FADE = 'linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)'
 const EDGE_FADE_STYLE = {
     WebkitMaskImage: EDGE_FADE,
@@ -64,8 +65,10 @@ function buildGalleryLanes(albums, maximum = MAX_ALBUMS_PER_LANE, seed = PAGE_RA
 }
 
 function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = '' }) {
+    const intent = useAlbumIntent(album)
     return (
         <Link
+            {...intent}
             data-camera-cursor="photo"
             to={`/album/${album.albumId}`}
             className="floating-print-card"
@@ -75,6 +78,7 @@ function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = ''
         >
             <span className="floating-frame-number">{String(position + 1).padStart(2, '0')}</span>
             <ProgressiveImage
+                near
                 src={albumCoverUrl(album)}
                 srcSet={responsiveSrcSet}
                 sizes="(max-width: 720px) 208px, (max-width: 1440px) 24vw, 352px"

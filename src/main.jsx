@@ -6,6 +6,9 @@ import App from './App'
 import './index.css'
 import './linen.css'
 import { registerPwa } from './utils/pwa'
+import { warmDirectAlbum } from './utils/albumEntry'
+
+warmDirectAlbum(window.location.pathname)
 
 const releaseSha = import.meta.env.VITE_RELEASE_SHA ?? ''
 if (/^[0-9a-f]{40}$/.test(releaseSha)) {

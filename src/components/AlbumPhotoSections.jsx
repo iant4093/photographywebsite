@@ -1,8 +1,8 @@
-import { useId } from 'react'
+import { memo, useId } from 'react'
 import ProgressiveImage from './ProgressiveImage'
 import { mediaId, mediaPreviewSrcSet, mediaThumbnailUrl } from '../utils/mediaUrls'
 
-export default function AlbumPhotoSections({ sections, albumTitle, onOpen, onMediaError, eagerImageCount = 0, itemLabel = 'Item' }) {
+const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTitle, onOpen, onMediaError, eagerImageCount = 0, itemLabel = 'Item' }) {
     const id = useId()
     return <div className="space-y-12">
         {sections.map((section, sectionIndex) => <section key={section.key} aria-labelledby={section.title ? `${id}-${section.key}` : undefined}>
@@ -40,4 +40,6 @@ export default function AlbumPhotoSections({ sections, albumTitle, onOpen, onMed
             {section.title && section.images.length === 0 && <p className="py-8 text-warm-gray">All photos in this album are featured.</p>}
         </section>)}
     </div>
-}
+})
+
+export default AlbumPhotoSections

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import ProgressiveImage from './ProgressiveImage'
 import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
@@ -217,4 +217,4 @@ function AlbumCard({
     )
 }
 
-export default AlbumCard
+export default memo(AlbumCard)

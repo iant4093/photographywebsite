@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { fetchAllAlbums } from '../utils/api'
+import useMuseumPreparation from '../hooks/useMuseumPreparation'
 import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
 import {
     buildMuseumCatalog,
@@ -3662,7 +3663,7 @@ function RoomFocalLandmark({ room, materials }) {
     )
 }
 
-function CategoryRoom({ room, active, gateRequested, detailed, materials, inspectionWidth, onGatePassabilityChange }) {
+const CategoryRoom = memo(function CategoryRoom({ room, constructed, prepared, active, gateRequested, detailed, materials, inspectionWidth, onGatePassabilityChange }) {
     const roomWidth = room.width
     const skylights = useMemo(() => museumRoomSkylights(room), [room])
     const outerWallX = room.outerX
@@ -3716,7 +3717,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
     const interiorResident = retainMuseumRoomPresentation(active, gateClosed)
     const baseReadyCount = baseReady ? roomPaintingIds.size : 0
     const roomReady = active && baseReady
-    const gateOpen = museumRoomGateOpen({ active, requested: gateRequested })
+    const gateOpen = prepared && museumRoomGateOpen({ active, requested: gateRequested })
     const publishBaseReady = useCallback((nextReady) => {
         if (baseReadyRef.current === nextReady) return
         baseReadyRef.current = nextReady
@@ -3762,6 +3763,8 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
         if (!import.meta.env.DEV) return
         const current = JSON.parse(document.documentElement.dataset.museumRooms || '{}')
         current[room.id] = {
+            constructed,
+            prepared,
             active,
             gateRequested,
             gateOpen,
@@ -3771,7 +3774,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
             required: roomPaintingIds.size,
         }
         document.documentElement.dataset.museumRooms = JSON.stringify(current)
-    }, [active, baseReadyCount, gateOpen, gateRequested, interiorResident, room.id, roomPaintingIds.size, roomReady])
+    }, [active, baseReadyCount, constructed, prepared, gateOpen, gateRequested, interiorResident, room.id, roomPaintingIds.size, roomReady])
     useEffect(() => {
         if (!active || !detailed) {
             return scheduleMuseumVisibleTask(() => setAllowDetail(false), 0)
@@ -3786,10 +3789,8 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
     ), [room.id])
     const roomTint = ['#d8cab8', '#c9cbbd', '#d3c2bb', '#c7bdaf'][roomVariant]
     const roomInteriorUserData = useMemo(() => ({ museumRoomInterior: room.id }), [room.id])
-    // Every static batch is authored once during initial scene construction.
-    // Activating a large room then changes visibility and starts compact cover
-    // work instead of synchronously rebuilding walls, frames, plaques, lights,
-    // and placeholder atlases on the visitor's movement frame.
+    // Static batches are built once, with distant rooms staggered after entry.
+    // Once prepared, activation only changes visibility and cover residency.
     const presentationPaintings = room.paintings
     return (
         <group>
@@ -3817,10 +3818,9 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
                     </mesh>
                 ))}
             </group>
-            {/* Static presentation remains constructed but leaves the render
-                list while concealed. A retiring room stays visible until its
-                physical curtain is fully closed. */}
-            <group visible={interiorResident} userData={roomInteriorUserData}>
+            {/* Deferred interiors remain behind closed physical gates. Once built,
+                their presentation stays resident and visibility remains cheap. */}
+            {constructed && <group visible={interiorResident} userData={roomInteriorUserData}>
                 <BakedIrradianceFloor
                     position={[room.centerX, -0.11, room.centerZ]}
                     size={[room.depth, roomWidth]}
@@ -3941,7 +3941,7 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
                 positions={visibleLightXs.map(x => [x, room.centerZ])}
                 ceilingY={ceilingFixtureY}
             />
-            </group>
+            </group>}
             <AnimatedPortalGate
                 roomId={room.id}
                 side={room.side}
@@ -3952,9 +3952,9 @@ function CategoryRoom({ room, active, gateRequested, detailed, materials, inspec
             />
         </group>
     )
-}
+})
 
-function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsEnabled, shadowsEnabled, inspectionWidth, onGatePassabilityChange }) {
+function MainHall({ layout, preparedRooms, activeRoomId, activeRoomIds, materials, reflectionsEnabled, shadowsEnabled, inspectionWidth, onGatePassabilityChange }) {
     const hallCenterZ = (MUSEUM_DIMENSIONS.lobbyFrontZ + layout.hallBackZ) / 2
     const bayCount = Math.max(1, Math.ceil(layout.rooms.length / 2))
     const bays = useMemo(() => Array.from({ length: bayCount }, (_, index) => ({
@@ -4130,6 +4130,8 @@ function MainHall({ layout, activeRoomId, activeRoomIds, materials, reflectionsE
                 <CategoryRoom
                     key={room.id}
                     room={room}
+                    constructed={preparedRooms.constructed.has(room.id)}
+                    prepared={preparedRooms.ready.has(room.id)}
                     active={residentRooms.has(room.id)}
                     gateRequested={activeRoomId === room.id}
                     detailed={activeRoomId === room.id}
@@ -4996,12 +4998,12 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, onRendererSt
                 warmPinnedTextures.clear()
                 trimCoverTextureCache()
             }
-            publishStage('preparing-rooms', { roomCount: layout.rooms.length })
+            publishStage('preparing-rooms', { roomCount: initialRooms.length })
             await prewarmMuseumRoomInteriors(
                 gl,
                 scene,
                 camera,
-                layout,
+                { rooms: initialRooms },
                 ratio => publishProgress(0.74 + (ratio * 0.16)),
                 controller.signal,
             )
@@ -5499,6 +5501,26 @@ function RendererHealth({ input, onPause, onStatus }) {
 
 const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, albumOpen, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onResolutionChange, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const materials = useMuseumMaterials()
+    const { gl, scene, camera } = useThree()
+    const prepareRoom = useCallback(async (room, signal) => {
+        try {
+            await prewarmMuseumRoomInteriors(gl, scene, camera, { rooms: [room] }, null, signal)
+        } finally {
+            // Background upload renders use a room camera. Restore the visitor's
+            // view in this same turn, before the browser can present a frame.
+            if (!signal.aborted) gl.render(scene, camera)
+        }
+    }, [gl, scene, camera])
+    const preparationFailed = useCallback(() => onRendererStatus?.('restart'), [onRendererStatus])
+    const preparedRooms = useMuseumPreparation({
+        rooms: layout.rooms,
+        initialIds: controlsEnabled.activeRoomIds,
+        nearbyIds: controlsEnabled.activeRoomIds,
+        enabled: sceneReady && !albumOpen,
+        busy: museumInteractionIsBusy,
+        prepare: prepareRoom,
+        onError: preparationFailed,
+    })
     const cinematicShadows = !touchMode && !isFirefoxBrowser()
     const inspectionWidth = useMemo(
         () => preferredMuseumInspectionCoverWidth(touchMode),
@@ -5537,6 +5559,7 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
             <directionalLight position={[7, 6, -12]} intensity={0.12} color="#b4cadb" castShadow={false} />
             <MainHall
                 layout={layout}
+                preparedRooms={preparedRooms}
                 activeRoomId={controlsEnabled.activeRoomId}
                 activeRoomIds={controlsEnabled.activeRoomIds}
                 materials={materials}

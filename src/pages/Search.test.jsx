@@ -1,7 +1,7 @@
 import { selectChoice } from '../test/selectChoice'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({ fetchAlbumsPage: vi.fn() }))
 const catalog = vi.hoisted(() => ({
@@ -58,7 +58,8 @@ const VIDEO_ALBUMS = [
 
 function LocationProbe() {
     const location = useLocation()
-    return <output aria-label="Current query">{location.search}</output>
+    const navigate = useNavigate()
+    return <><output aria-label="Current query">{location.search}</output><button onClick={() => navigate('/search?q=city')}>Navigate search</button></>
 }
 
 function renderSearch(entry = '/search') {
@@ -71,6 +72,7 @@ function renderSearch(entry = '/search') {
 }
 
 describe('Search', () => {
+    afterEach(() => vi.useRealTimers())
     beforeEach(() => {
         vi.clearAllMocks()
         catalog.snapshots.clear()
@@ -142,6 +144,32 @@ describe('Search', () => {
         expect(screen.getByRole('heading', { name: 'No albums found' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Show the full archive' }))
         expect(screen.getAllByTestId('search-result')).toHaveLength(3)
+    })
+
+    it('keeps typing immediate, coalesces URL writes and cancels stale edits after navigation', async () => {
+        vi.useFakeTimers()
+        renderSearch()
+        await act(async () => {})
+        const input = screen.getByLabelText('Search the archive')
+        fireEvent.change(input, { target: { value: 'b' } })
+        fireEvent.change(input, { target: { value: 'bird' } })
+        expect(input).toHaveValue('bird')
+        expect(screen.getByLabelText('Current query')).toBeEmptyDOMElement()
+        await act(async () => vi.advanceTimersByTime(150))
+        expect(screen.getByLabelText('Current query')).toHaveTextContent('?q=bird')
+        fireEvent.change(input, { target: { value: 'pending' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Navigate search' }))
+        expect(input).toHaveValue('city')
+        await act(async () => vi.advanceTimersByTime(300))
+        expect(screen.getByLabelText('Current query')).toHaveTextContent('?q=city')
+        fireEvent.change(input, { target: { value: 'birds' } })
+        selectChoice(screen.getByLabelText('Format'), 'photo')
+        expect(input).toHaveValue('birds')
+        expect(screen.getByLabelText('Current query')).toHaveTextContent('q=birds&type=photo')
+        fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+        await act(async () => vi.advanceTimersByTime(300))
+        expect(input).toHaveValue('')
+        expect(screen.getByLabelText('Current query')).toHaveTextContent('?type=photo')
     })
 
     it('loads both uncached catalogs to completion', async () => {

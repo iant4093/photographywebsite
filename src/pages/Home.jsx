@@ -144,7 +144,7 @@ function Home() {
     const photoAlbums = useMemo(() => albums.filter((album) => album.type !== 'video'), [albums])
     const managedHomeUrl = heroCoverUrl()
     const responsiveHomeUrl = currentHeroUrl()
-    const usePublishedVersion = publishedHero && failedHeroVersion !== publishedHero.version
+    const usePublishedVersion = publishedHero && (!publishedHero.useAlias || responsiveHeroFailed) && failedHeroVersion !== publishedHero.version
     const heroSizes = heroImageSizes(usePublishedVersion ? publishedHero.source : null)
     const useResponsiveHero = usePublishedVersion || (Boolean(responsiveHomeUrl) && !responsiveHeroFailed)
     const useBundledHero = !useResponsiveHero && (!managedHomeUrl || managedHomeFailed)
@@ -302,7 +302,9 @@ function Home() {
                                     <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-2 sm:gap-4">
-                                    <RandomPhotoExplorer category={category} variant="icon" showStats />
+                                    <Suspense fallback={<span className="inline-block h-10 w-20" aria-hidden="true" />}>
+                                        <RandomPhotoExplorer category={category} variant="icon" showStats />
+                                    </Suspense>
                                 </div>
                                 <div className="hidden sm:block h-px bg-warm-border flex-1" />
                                 <SiteSelect

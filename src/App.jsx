@@ -147,7 +147,7 @@ function App() {
             </main>
             {!isImmersiveRoute && <BackToTop />}
             {!isImmersiveRoute && <Footer />}
-            <Suspense fallback={null}><MistyEcho key={location.key} /></Suspense>
+            <Suspense fallback={null}><MistyEcho key={location.pathname} /></Suspense>
             {!isImmersiveRoute && <MotionExperience />}
         </div>
     )
