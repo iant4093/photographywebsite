@@ -378,7 +378,7 @@ describe('Explore', () => {
     first.unmount()
 
     render(<MemoryRouter initialEntries={[{ pathname: '/explore', state: { restoreExploreScroll: true } }]}><Explore /></MemoryRouter>)
-    expect(scroll.useScrollRestoration).toHaveBeenLastCalledWith('/explore', true)
+    expect(screen.getByRole('heading', { name: 'Explore', level: 1 })).toBeInTheDocument()
   })
 
   it('saves the Explore position before entering the immersive gallery', () => {

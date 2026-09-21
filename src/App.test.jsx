@@ -58,13 +58,17 @@ vi.mock('./pages/EditUser', () => ({ default: () => <h1>Edit user route</h1> }))
 vi.mock('./pages/UserDashboard', () => ({ default: () => <h1>Dashboard route</h1> }))
 vi.mock('./pages/NotFound', () => ({ default: () => <h1>Not found route</h1> }))
 vi.mock('./pages/VideoGallery', () => ({ default: () => <h1>Video route</h1> }))
+vi.mock('./pages/SectionAlbums', () => ({ default: () => <h1>Section albums route</h1> }))
 vi.mock('./pages/Videos', () => ({ default: () => <h1>Videos route</h1> }))
 
 import App from './App'
+import { clearRouteScrollPositions } from './utils/routeScroll'
 
 describe('App routing shell', () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
+    clearRouteScrollPositions()
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
   })
 
@@ -109,13 +113,14 @@ describe('App routing shell', () => {
     })
   })
 
-  it('does not overwrite dashboard scroll restoration when returning from a module', async () => {
+  it('restores dashboard scroll when returning from a module', async () => {
     render(<MemoryRouter initialEntries={['/admin/site-health']}><App /></MemoryRouter>)
     expect(await screen.findByRole('heading', { name: 'Site health route' })).toBeInTheDocument()
+    sessionStorage.setItem('ian-photography-admin-dashboard-scroll', '560')
     window.scrollTo.mockClear()
     fireEvent.click(screen.getByRole('link', { name: 'Back to dashboard' }))
     expect(await screen.findByRole('heading', { name: 'Admin route' })).toBeInTheDocument()
-    await waitFor(() => expect(window.scrollTo).not.toHaveBeenCalled())
+    await waitFor(() => expect(window.scrollTo).toHaveBeenCalledWith({ top: 560, left: 0, behavior: 'instant' }))
   })
 
   it('uses the stored theme and exposes its toggle on protected admin routes', async () => {
@@ -141,7 +146,7 @@ describe('App routing shell', () => {
   })
 
   it.each([
-    ['/album/id', 'Album route'], ['/video/id', 'Video route'], ['/sharedalbum/code', 'Shared route'],
+    ['/sections/photo/Hikes', 'Section albums route'], ['/sections/video/Films', 'Section albums route'], ['/album/id', 'Album route'], ['/video/id', 'Video route'], ['/sharedalbum/code', 'Shared route'],
     ['/contact', 'Contact route'], ['/privacy', 'Privacy route'], ['/login', 'Login route'],
     ['/search', 'Search route'], ['/explore', 'Explore route'], ['/editor', 'Editor route'], ['/stats', 'Stats route'],
     ['/admin', 'Admin route'], ['/admin/security', 'Admin security route'], ['/admin/costs', 'AWS costs route'], ['/admin/analytics', 'Website analytics route'], ['/admin/drive-usage', 'Google Drive usage route'], ['/admin/github-analytics', 'GitHub analytics route'], ['/admin/site-health', 'Site health route'], ['/admin/audit-log', 'Audit log route'],

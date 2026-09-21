@@ -23,7 +23,6 @@ import {
   markAsRevealed,
   saveHorizontalScroll,
   saveVerticalScroll,
-  useScrollRestoration,
 } from './scroll'
 import { useMediaExpiryRefresh } from './useMediaExpiryRefresh'
 
@@ -123,22 +122,7 @@ describe('scroll memory and restoration', () => {
     expect(getSavedScroll('/gallery')).toBe(88)
   })
 
-  it('records scroll events and restores POP navigation twice', () => {
-    window.scrollY = 135
-    const first = renderHook(() => useScrollRestoration('/restore', false))
-    window.dispatchEvent(new Event('scroll'))
-    first.unmount()
 
-    renderHook(() => useScrollRestoration('/restore', true))
-    expect(window.scrollTo).toHaveBeenCalledWith({ top: 135, behavior: 'instant' })
-    act(() => vi.advanceTimersByTime(10))
-    expect(window.scrollTo).toHaveBeenCalledTimes(2)
-  })
-
-  it('does not scroll when a POP route has no saved position', () => {
-    renderHook(() => useScrollRestoration('/never-visited', true))
-    expect(window.scrollTo).not.toHaveBeenCalled()
-  })
 })
 
 describe('useMediaExpiryRefresh', () => {

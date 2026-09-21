@@ -10,6 +10,8 @@ import Privacy from '../pages/Privacy'
 import Footer from './Footer'
 import ProtectedRoute from './ProtectedRoute'
 import SkeletonGrid from './SkeletonGrid'
+import RouteScrollRestoration from './RouteScrollRestoration'
+import { clearRouteScrollPositions } from '../utils/routeScroll'
 
 
 function routed(ui, initialPath = '/') {
@@ -98,6 +100,7 @@ describe('small presentational and routing components', () => {
   })
 
   it('restores the saved dashboard position when returning from a module', () => {
+    clearRouteScrollPositions()
     window.sessionStorage.clear()
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 640 })
     const first = routed(<AdminDashboard />)
@@ -112,6 +115,7 @@ describe('small presentational and routing components', () => {
     })
     render(
       <MemoryRouter initialEntries={[{ pathname: '/admin', state: { restoreDashboardScroll: true } }]}>
+        <RouteScrollRestoration />
         <AdminDashboard />
       </MemoryRouter>,
     )

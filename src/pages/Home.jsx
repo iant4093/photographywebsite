@@ -1,7 +1,8 @@
+import useNavigationState from '../hooks/useNavigationState'
 import useHeroParallax from '../hooks/useHeroParallax'
 import SiteSelect from '../components/SiteSelect'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigationType } from 'react-router'
+import { Link } from 'react-router'
 import AlbumCard from '../components/AlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
@@ -17,7 +18,7 @@ import {
     reconcilePublicCatalogItems,
     setCatalogSnapshot,
 } from '../utils/catalogState'
-import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
+import { isRevealed, markAsRevealed } from '../utils/scroll'
 import {
     currentHeroSrcSet,
     currentHeroUrl,
@@ -43,16 +44,12 @@ const heroSet = (format) => HERO_WIDTHS
     .join(', ')
 
 function Home() {
-    const navigationType = useNavigationType()
-    const location = useLocation()
     const [initialSnapshot] = useState(() => getCatalogSnapshot(CATALOG_KEY))
     const catalogSnapshotRef = useRef(initialSnapshot)
     const pageRef = useRef(null)
     const heroRef = useRef(null)
     const publishedHero = usePublishedHero('photo')
     const [failedHeroVersion, setFailedHeroVersion] = useState(null)
-
-    useScrollRestoration(location.pathname, navigationType === 'POP')
 
     const [albums, setAlbums] = useState(initialSnapshot?.items || [])
     const [loading, setLoading] = useState(!initialSnapshot)
@@ -61,7 +58,7 @@ function Home() {
     const [loadAttempt, setLoadAttempt] = useState(0)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
     const [managedHomeFailed, setManagedHomeFailed] = useState(false)
-    const [sectionSort, setSectionSort] = useState(0)
+    const [sectionSort, setSectionSort] = useNavigationState('section-sort', 0)
 
     const handleExplorePhotos = useCallback((event) => {
         const target = document.getElementById('photo-albums')
@@ -299,7 +296,16 @@ function Home() {
                             <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4 mb-8">
                                 <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:gap-4">
                                     <span className="linen-category-number shrink-0">{String(categoryIndex + 1).padStart(2, '0')}</span>
-                                    <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
+                                    <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">
+                                        <Link to={`/sections/photo/${encodeURIComponent(category)}`}
+                                            className="inline-flex min-h-11 items-center gap-2 hover:text-amber transition-colors"
+                                            aria-label={`View all ${category} photo albums`}>
+                                            {category}
+                                            <svg aria-hidden="true" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                <path d="M5 12h14m-6-6 6 6-6 6" />
+                                            </svg>
+                                        </Link>
+                                    </h3>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-2 sm:gap-4">
                                     <Suspense fallback={<span className="inline-block h-10 w-20" aria-hidden="true" />}>

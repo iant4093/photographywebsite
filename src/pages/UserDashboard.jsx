@@ -2,13 +2,13 @@ import usePhotoSections from '../hooks/usePhotoSections'
 import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useLocation, useNavigate, useNavigationType } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { useAuth } from '../context/auth'
 import { fetchAlbumsFiltered, fetchAlbum, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { motion } from 'framer-motion'
 import PrivateAlbumCatalog from '../components/PrivateAlbumCatalog'
 import SkeletonGrid from '../components/SkeletonGrid'
-import { useScrollRestoration, saveVerticalScroll, getSavedScroll } from '../utils/scroll'
+import { saveVerticalScroll } from '../utils/scroll'
 import {
     mediaFileName,
     mediaId,
@@ -27,10 +27,7 @@ function UserDashboard() {
     const { userEmail, getIdToken } = useAuth()
     const location = useLocation()
     const navigate = useNavigate()
-    const navType = useNavigationType()
 
-    // Manage scroll memory for this page
-    useScrollRestoration(location.pathname, navType === 'POP')
     const [albums, setAlbums] = useState([])
     const [loading, setLoading] = useState(true)
     const [loadError, setLoadError] = useState('')
@@ -103,18 +100,6 @@ function UserDashboard() {
         [loadAlbums],
     )
     const requestCoverRefresh = useMediaExpiryRefresh(albums, refreshAlbumCovers)
-
-    // Restore scroll position after data loads on POP navigation
-    useEffect(() => {
-        if (!loading && navType === 'POP') {
-            const saved = getSavedScroll(location.pathname)
-            if (saved !== undefined) {
-                requestAnimationFrame(() => {
-                    window.scrollTo({ top: saved, behavior: 'instant' })
-                })
-            }
-        }
-    }, [loading, location.pathname, navType])
 
     // Reset to albums list when navigating to this page (e.g. clicking Dashboard in nav)
     useEffect(() => {
@@ -283,6 +268,7 @@ function UserDashboard() {
             initial="initial"
             animate="animate"
             exit="exit"
+            aria-busy={loading || loadingImages}
             className="linen-user-dashboard flex-1 bg-cream animate-fade-in"
         >
             {/* Header section with User Info */}

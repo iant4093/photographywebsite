@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import useNavigationState from './useNavigationState'
 
 function albumYear(album) {
     const timestamp = Date.parse(album.createdAt || '')
     return Number.isFinite(timestamp) ? String(new Date(timestamp).getFullYear()) : ''
 }
 
-export default function useAlbumYearFilters(groupedAlbums) {
-    const [selectedYears, setSelectedYears] = useState({})
+export default function useAlbumYearFilters(groupedAlbums, scope = 'albums') {
+    const [selectedYears, setSelectedYears] = useNavigationState(`${scope}-years`, {})
     const sections = useMemo(() => Object.fromEntries(
         Object.entries(groupedAlbums).map(([category, albums]) => {
             // Use the album date shown on the cards, not its upload date.

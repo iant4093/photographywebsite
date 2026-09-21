@@ -1,20 +1,9 @@
-import { useLayoutEffect } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import { motion } from 'framer-motion'
-import { readDashboardScroll, rememberDashboardScroll } from '../utils/dashboardScroll'
+import { rememberDashboardScroll } from '../utils/dashboardScroll'
 
 // Admin dashboard — hub for portfolio, account, and service controls
 function AdminDashboard() {
-    const location = useLocation()
-
-    useLayoutEffect(() => {
-        if (!location.state?.restoreDashboardScroll) return undefined
-        const frame = window.requestAnimationFrame(() => {
-            window.scrollTo({ top: readDashboardScroll(), left: 0, behavior: 'instant' })
-        })
-        return () => window.cancelAnimationFrame(frame)
-    }, [location.key, location.state])
-
     // Widget data for the available admin actions
     const widgets = [
         {

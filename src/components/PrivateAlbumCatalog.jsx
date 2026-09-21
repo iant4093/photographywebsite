@@ -1,4 +1,5 @@
-import { useId, useMemo, useState } from 'react'
+import useNavigationState from '../hooks/useNavigationState'
+import { useId, useMemo } from 'react'
 import AlbumCard from './AlbumCard'
 import ScrollRow from './ScrollRow'
 import SiteSelect from './SiteSelect'
@@ -11,7 +12,7 @@ import { markAsRevealed } from '../utils/scroll'
 // section stats and discovery endpoints must not be used for private galleries.
 export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMediaError }) {
     const id = useId()
-    const [sort, setSort] = useState(0)
+    const [sort, setSort] = useNavigationState(`private-${mediaType}-sort`, 0)
     const grouped = useMemo(() => {
         const result = Object.create(null)
         for (const album of albums) (result[album.category || 'Uncategorized'] ||= []).push(album)
@@ -21,7 +22,7 @@ export default function PrivateAlbumCatalog({ albums, mediaType, onOpen, onMedia
     const categories = useMemo(() => sortHomePhotoSections(
         sortGalleryCategories(Object.keys(grouped), grouped), grouped, sort,
     ), [grouped, sort])
-    const { sections, setCategoryYear } = useAlbumYearFilters(grouped)
+    const { sections, setCategoryYear } = useAlbumYearFilters(grouped, `private-${mediaType}`)
     const mediaLabel = mediaType === 'video' ? 'videos' : 'photos'
     const shuffleSection = category => {
         const candidates = grouped[category].filter(album => album.imageCount !== 0)

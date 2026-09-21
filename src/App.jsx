@@ -1,18 +1,19 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Route, Routes, useLocation, useNavigationType } from 'react-router'
+import { Route, Routes, useLocation } from 'react-router'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
 import BackToTop from './components/BackToTop'
 import DocumentMetadata from './components/DocumentMetadata'
-import MotionExperience from './components/MotionExperience'
 import AnalyticsTracker from './components/AnalyticsTracker'
 import Home from './pages/Home'
+import RouteScrollRestoration from './components/RouteScrollRestoration'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
 const CameraCursor = lazy(() => import('./components/CameraCursor'))
+const MotionExperience = lazy(() => import('./components/MotionExperience'))
 const MistyEcho = lazy(() => import('./components/MistyEcho').catch(() => ({ default: () => null })))
 const Search = lazy(() => import('./pages/Search'))
 const Explore = lazy(() => import('./pages/Explore'))
@@ -46,12 +47,13 @@ const UserDashboard = lazy(() => import('./pages/UserDashboard'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 const VideoGallery = lazy(loadVideoGalleryRoute)
 const Videos = lazy(() => import('./pages/Videos'))
+const SectionAlbums = lazy(() => import('./pages/SectionAlbums'))
 
 if (typeof window !== 'undefined') window.history.scrollRestoration = 'manual'
 
 function PageLoading() {
     return (
-        <div className="flex min-h-[60vh] items-center justify-center pt-[88px]" role="status">
+        <div className="flex min-h-[60vh] items-center justify-center pt-[88px]" role="status" data-route-loading="">
             <span className="sr-only">Loading page</span>
             <div className="h-10 w-10 animate-spin rounded-full border-3 border-amber border-t-transparent" />
         </div>
@@ -60,10 +62,8 @@ function PageLoading() {
 
 function App() {
     const location = useLocation()
-    const navigationType = useNavigationType()
     const isAdminRoute = location.pathname.startsWith('/admin')
     const isImmersiveRoute = location.pathname === '/explore/immersive-gallery'
-    const restoreDashboardScroll = location.state?.restoreDashboardScroll === true
     const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)
     const theme = preferredTheme
 
@@ -78,20 +78,9 @@ function App() {
         applyDocumentTheme(nextTheme)
     }
 
-    useEffect(() => {
-        if (restoreDashboardScroll) return
-        if (location.hash) {
-            const frame = window.requestAnimationFrame(() => {
-                document.getElementById(location.hash.slice(1))?.scrollIntoView?.({ block: 'start' })
-            })
-            return () => window.cancelAnimationFrame(frame)
-        }
-        if (navigationType !== 'POP') window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-        return
-    }, [location.hash, location.pathname, navigationType, restoreDashboardScroll])
-
     return (
         <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} ${isImmersiveRoute ? 'linen-immersive' : ''} min-h-screen flex flex-col bg-cream`}>
+            <RouteScrollRestoration />
             <DocumentMetadata />
             <AnalyticsTracker />
             <Suspense fallback={null}><CameraCursor enabled={!isImmersiveRoute} routeKey={location.pathname} /></Suspense>
@@ -108,6 +97,7 @@ function App() {
                     <Routes location={location}>
                         <Route path="/" element={<Home />} />
                         <Route path="/videos" element={<Videos />} />
+                        <Route path="/sections/:mediaType/:category" element={<SectionAlbums />} />
                         <Route path="/search" element={<Search />} />
                         <Route path="/explore/*" element={<Explore />} />
                         <Route path="/editor" element={<Editor />} />
@@ -148,7 +138,7 @@ function App() {
             {!isImmersiveRoute && <BackToTop />}
             {!isImmersiveRoute && <Footer />}
             <Suspense fallback={null}><MistyEcho key={location.pathname} /></Suspense>
-            {!isImmersiveRoute && <MotionExperience />}
+            {!isImmersiveRoute && <Suspense fallback={null}><MotionExperience /></Suspense>}
         </div>
     )
 }

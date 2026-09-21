@@ -1,4 +1,5 @@
-import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
+import { useRef, useState, useEffect, useCallback, useLayoutEffect, useContext } from 'react'
+import { UNSAFE_LocationContext } from 'react-router'
 import { saveHorizontalScroll, getHorizontalScroll } from '../utils/scroll'
 import { createRowScrollController } from '../utils/rowScroll'
 
@@ -10,9 +11,12 @@ const SCROLL_VIEWPORT_STYLE = {
 }
 
 // Horizontal scroll row with left/right arrow buttons on desktop
-export default function ScrollRow({ children, className = '', scrollKey }) {
+export default function ScrollRow({ children, className = '', scrollKey: rowKey }) {
+    const location = useContext(UNSAFE_LocationContext)?.location
+    const scrollKey = rowKey && location ? `${location.key}:${location.pathname}:${rowKey}` : rowKey
     const scrollRef = useRef(null)
     const controllerRef = useRef(null)
+    const restoringRef = useRef(false)
     const [canScrollLeft, setCanScrollLeft] = useState(false)
     const [canScrollRight, setCanScrollRight] = useState(false)
 
@@ -32,8 +36,30 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
         const el = scrollRef.current
         if (!el) return
         const saved = getHorizontalScroll(scrollKey)
-        if (saved !== undefined) {
+        if (saved === undefined) return
+        restoringRef.current = true
+        const restore = () => {
             el.scrollLeft = saved
+            if (Math.abs(el.scrollLeft - saved) <= 1) {
+                restoringRef.current = false
+                observer?.disconnect()
+                mutations.disconnect()
+            }
+        }
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(restore)
+        const mutations = new MutationObserver(restore)
+        observer?.observe(el)
+        mutations.observe(el, { childList: true, subtree: true })
+        const cancel = () => { restoringRef.current = false; observer?.disconnect(); mutations.disconnect() }
+        el.addEventListener('pointerdown', cancel)
+        el.addEventListener('wheel', cancel, { passive: true })
+        el.addEventListener('keydown', cancel)
+        restore()
+        return () => {
+            cancel()
+            el.removeEventListener('pointerdown', cancel)
+            el.removeEventListener('wheel', cancel)
+            el.removeEventListener('keydown', cancel)
         }
     }, [scrollKey])
 
@@ -47,7 +73,7 @@ export default function ScrollRow({ children, className = '', scrollKey }) {
 
         let frame = null
         const handleScroll = () => {
-            if (scrollKey) saveHorizontalScroll(scrollKey, el.scrollLeft)
+            if (scrollKey && !restoringRef.current) saveHorizontalScroll(scrollKey, el.scrollLeft)
             if (frame === null) {
                 frame = window.requestAnimationFrame(() => {
                     frame = null

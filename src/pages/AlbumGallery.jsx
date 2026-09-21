@@ -2,7 +2,7 @@ import usePhotoSections from '../hooks/usePhotoSections'
 import AlbumPhotoSections from '../components/AlbumPhotoSections'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams, useNavigate, useNavigationType } from 'react-router'
+import { useParams, useNavigate } from 'react-router'
 import { fetchAlbumForViewing, requestAlbumMediaDownload, requestAlbumPrintSession, requestAlbumZip } from '../utils/api'
 import { useAuth } from '../context/auth'
 import SkeletonGrid from '../components/SkeletonGrid'
@@ -11,7 +11,6 @@ import AlbumQrCode from '../components/AlbumQrCode'
 import AlbumShareButton from '../components/AlbumShareButton'
 import AlbumStats from '../components/AlbumStats'
 import ExploreMoreAlbums from '../components/ExploreMoreAlbums'
-import { useScrollRestoration } from '../utils/scroll'
 import { useLocation } from 'react-router'
 import {
     mediaFileName,
@@ -34,9 +33,7 @@ import { shareUrlForAlbumPhoto } from '../utils/share'
 function AlbumGallery() {
     const { albumId } = useParams()
     const navigate = useNavigate()
-    const navType = useNavigationType()
     const location = useLocation()
-    useScrollRestoration(location.pathname, navType === 'POP')
 
     const clearSharedPhoto = useCallback(() => {
         const params = new URLSearchParams(location.search)
@@ -245,7 +242,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
 
 
     return (
-        <div className={`linen-gallery-page flex-1 animate-fade-in ${embedded ? 'linen-gallery-page--embedded pb-8' : 'pb-16 pt-[88px] md:pt-[104px]'}`}>
+        <div aria-busy={loading} className={`linen-gallery-page flex-1 animate-fade-in ${embedded ? 'linen-gallery-page--embedded pb-8' : 'pb-16 pt-[88px] md:pt-[104px]'}`}>
             <div className="max-w-7xl mx-auto px-6 pt-8 md:pt-12">
                 {/* Back link — uses browser back to preserve scroll position */}
                 {onBack && <button

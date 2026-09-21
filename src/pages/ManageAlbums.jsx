@@ -1,3 +1,4 @@
+import useNavigationState from '../hooks/useNavigationState'
 import SiteSelect from '../components/SiteSelect'
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router'
@@ -192,10 +193,10 @@ function ManageAlbums() {
     const { getIdToken } = useAuth()
 
     // Scope: 'public' for main gallery, or a user email for private albums
-    const [scope, setScope] = useState('public')
+    const [scope, setScope] = useNavigationState('scope', 'public')
     const [users, setUsers] = useState([])
     const [userSearch, setUserSearch] = useState('')
-    const [viewMode, setViewMode] = useState('manage')
+    const [viewMode, setViewMode] = useNavigationState('viewMode', 'manage')
 
     // Editing state
     const [editingAlbum, setEditingAlbum] = useState(null)
@@ -230,8 +231,8 @@ function ManageAlbums() {
     const { toasts, notify, dismiss } = useAdminToasts()
     const setActionSuccess = useCallback((message) => notify(message), [notify])
     const setActionError = useCallback((message) => notify(message, 'error'), [notify])
-    const [categoryFilter, setCategoryFilter] = useState('')
-    const [collapsedCategories, setCollapsedCategories] = useState(() => new Set())
+    const [categoryFilter, setCategoryFilter] = useNavigationState('categoryFilter', '')
+    const [collapsedCategories, setCollapsedCategories] = useNavigationState('collapsedCategories', () => new Set())
     const mediaRequest = useRef(0)
     const [savingOrder, setSavingOrder] = useState(false)
     const [savingAlbumIds, setSavingAlbumIds] = useState(() => new Set())
@@ -395,7 +396,11 @@ function ManageAlbums() {
         }
     }
 
+    const previousCatalogScope = useRef(`${scope}:${typeFilter}`)
     useEffect(() => {
+        const key = `${scope}:${typeFilter}`
+        if (previousCatalogScope.current === key) return
+        previousCatalogScope.current = key
         mediaRequest.current += 1
         const timer = window.setTimeout(() => {
             setExpandedAlbumId(null)
@@ -407,7 +412,7 @@ function ManageAlbums() {
             setCollapsedCategories(new Set())
         }, 0)
         return () => { window.clearTimeout(timer); mediaRequest.current += 1 }
-    }, [scope, typeFilter])
+    }, [scope, typeFilter, setCategoryFilter, setCollapsedCategories, setViewMode])
 
     function enterArrangeMode() {
         if (loadingMore || catalogError) return
@@ -792,7 +797,7 @@ function ManageAlbums() {
     }, [albums]);
 
     return (
-        <div className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
+        <div aria-busy={loading || loadingMore} className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
             <div className="animate-slide-up">
                 {/* Back link */}
                 <DashboardBackLink className="inline-flex items-center gap-2 text-sm font-medium text-warm-gray hover:text-amber transition-colors duration-200 mb-8">

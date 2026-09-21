@@ -91,9 +91,9 @@ describe('UserDashboard', () => {
 
   it('uses only owned albums for section navigation, sorting, year filters, and statistics', async () => {
     api.fetchAlbumsFiltered.mockResolvedValue([
-      { ...albums[0], createdAt: '2026-01-01', imageCount: 2 },
-      { ...albums[0], albumId: 'older', title: 'Older portraits', createdAt: '2025-01-01', imageCount: 5 },
-      { ...albums[1], category: 'Travel', createdAt: '2024-01-01', imageCount: 1 },
+      { ...albums[0], createdAt: '2026-06-01T12:00:00Z', imageCount: 2 },
+      { ...albums[0], albumId: 'older', title: 'Older portraits', createdAt: '2025-06-01T12:00:00Z', imageCount: 5 },
+      { ...albums[1], category: 'Travel', createdAt: '2024-06-01T12:00:00Z', imageCount: 1 },
       { ...albums[4], category: 'Secret category', imageCount: 100 },
     ])
     mounted()
@@ -331,7 +331,7 @@ describe('UserDashboard', () => {
     await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('photo could not be downloaded')))
   })
 
-  it('renders initial, empty, and selected-image failure states and restores saved POP scroll', async () => {
+  it('renders initial, empty, and selected-image failure states', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     api.fetchAlbumsFiltered.mockRejectedValueOnce(new Error('load failed'))
     const first = mounted()
@@ -350,7 +350,6 @@ describe('UserDashboard', () => {
     mounted()
     fireEvent.click((await screen.findByText('Portraits')).closest('.cursor-pointer'))
     expect(await screen.findByRole('alert')).toHaveTextContent('photos in this album could not be loaded')
-    expect(window.scrollTo).toHaveBeenCalledWith({ top: 333, behavior: 'instant' })
   })
 
   it('skips loading without an authenticated email', () => {

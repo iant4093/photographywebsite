@@ -1,5 +1,6 @@
+import useNavigationState from '../hooks/useNavigationState'
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import PhotoLightbox from '../components/PhotoLightbox'
 import ProgressiveImage from '../components/ProgressiveImage'
 import { requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
@@ -16,7 +17,6 @@ import {
 } from '../utils/exploreApi'
 import {
     readExploreBrowseState,
-    saveExploreBrowseScroll,
     writeExploreBrowseState,
 } from '../utils/exploreState'
 import { buildSettingsDeck, buildSettingsRoundForImage, EXPOSURE_GROUPS } from '../utils/exposure'
@@ -32,7 +32,7 @@ import {
 import './Explore.css'
 import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForAlbumPhoto } from '../utils/share'
-import { saveVerticalScroll, useScrollRestoration } from '../utils/scroll'
+import { saveVerticalScroll } from '../utils/scroll'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 
 const PAGE_SIZE = 24
@@ -102,12 +102,6 @@ function ExploreHeader({ title = 'Explore', detail = 'Choose a different way int
 }
 
 function ExploreLanding() {
-    const location = useLocation()
-    const navigationType = useNavigationType()
-    useScrollRestoration(
-        location.pathname,
-        navigationType === 'POP' || Boolean(location.state?.restoreExploreScroll),
-    )
     const warmModule = useCallback((mode) => {
         prefetchExploreModule(mode).catch(() => {})
     }, [])
@@ -306,7 +300,7 @@ function ExploreModule({ mode }) {
     const [facets, setFacets] = useState([])
     const [facetLoading, setFacetLoading] = useState(true)
     const [facetError, setFacetError] = useState('')
-    const [pageState, setPageState] = useState({ key: '', items: [], nextCursor: null, error: '' })
+    const [pageState, setPageState] = useNavigationState('explore-page', { key: '', items: [], nextCursor: null, error: '' })
     const [loadingMore, setLoadingMore] = useState(false)
     const [reshuffling, setReshuffling] = useState(false)
     const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -322,7 +316,7 @@ function ExploreModule({ mode }) {
             .then(({ items, initialPage }) => {
                 setFacets(items)
                 if (initialPage?.value) {
-                    setPageState({
+                    setPageState(current => current.key ? current : {
                         key: `${mode}:${initialPage.value}`,
                         items: initialPage.items,
                         nextCursor: initialPage.nextCursor,
@@ -337,7 +331,7 @@ function ExploreModule({ mode }) {
                 if (!controller.signal.aborted) setFacetLoading(false)
             })
         return () => controller.abort()
-    }, [isColor, mode])
+    }, [isColor, mode, setPageState])
 
     const requestedValue = isColor ? searchParams.get('color') : searchParams.get('lens')
     const activeFacet = useMemo(() => {
@@ -374,7 +368,7 @@ function ExploreModule({ mode }) {
                 }
             })
         return () => controller.abort()
-    }, [hasCurrentPage, mode, requestKey, value])
+    }, [hasCurrentPage, mode, requestKey, value, setPageState])
 
     const chooseFacet = nextValue => setSearchParams(isColor ? { color: nextValue } : { lens: nextValue })
     const loadMore = useCallback(async () => {
@@ -399,7 +393,7 @@ function ExploreModule({ mode }) {
         } finally {
             setLoadingMore(false)
         }
-    }, [loadingMore, mode, nextCursor, requestKey, value])
+    }, [loadingMore, mode, nextCursor, requestKey, value, setPageState])
 
     const reshuffle = useCallback(async () => {
         if (!value || loading || reshuffling) return
@@ -425,7 +419,7 @@ function ExploreModule({ mode }) {
         } finally {
             setReshuffling(false)
         }
-    }, [loading, mode, requestKey, reshuffling, value])
+    }, [loading, mode, requestKey, reshuffling, value, setPageState])
 
     const handleDownload = useCallback(async (event, image) => {
         event.stopPropagation()
@@ -568,12 +562,11 @@ function TemporalExplorer({ mode }) {
     const config = TEMPORAL_CONFIG[mode]
     const [searchParams, setSearchParams] = useSearchParams()
     const [facetState, setFacetState] = useState({ items: [], initialPage: null, loading: true, error: '' })
-    const [pageState, setPageState] = useState({ key: '', items: [], nextCursor: null, seed: '', error: '' })
+    const [pageState, setPageState] = useNavigationState('explore-page', { key: '', items: [], nextCursor: null, seed: '', error: '' })
     const [loadingMoreKey, setLoadingMoreKey] = useState('')
     const [reshufflingKey, setReshufflingKey] = useState('')
     const [lightboxIndex, setLightboxIndex] = useState(null)
     const [lightboxRequestKey, setLightboxRequestKey] = useState('')
-    const restoreRef = useRef(null)
     const currentRequestKeyRef = useRef('')
     const pageStateRef = useRef(pageState)
     const photoOperationRef = useRef({ generation: 0, controller: null })
@@ -670,7 +663,7 @@ function TemporalExplorer({ mode }) {
             seed: next.seed,
             scrollY,
         })
-    }, [])
+    }, [setPageState])
 
     useEffect(() => {
         let disposed = false
@@ -678,6 +671,7 @@ function TemporalExplorer({ mode }) {
         const loadPage = async () => {
             await Promise.resolve()
             if (disposed || !requestKey || facetState.loading || facetState.error) return
+            if (pageStateRef.current.key === requestKey && pageStateRef.current.items.length) return
             const snapshot = readExploreBrowseState(requestKey)
             if (snapshot) {
                 const restored = {
@@ -690,7 +684,6 @@ function TemporalExplorer({ mode }) {
                 }
                 pageStateRef.current = restored
                 setPageState(restored)
-                restoreRef.current = { key: requestKey, scrollY: snapshot.scrollY }
                 if (!snapshot.stale) return
             }
 
@@ -752,34 +745,8 @@ function TemporalExplorer({ mode }) {
         }
     }, [
         activeFacet, beginPhotoOperation, cancelPhotoOperation, commitPage, facetState.error,
-        facetState.initialPage, facetState.loading, mode, photoOperationIsCurrent, requestKey, value,
+        facetState.initialPage, facetState.loading, mode, photoOperationIsCurrent, requestKey, value, setPageState,
     ])
-
-    useEffect(() => {
-        if (!requestKey) return undefined
-        const save = () => saveExploreBrowseScroll(requestKey, window.scrollY)
-        window.addEventListener('pagehide', save)
-        return () => {
-            window.removeEventListener('pagehide', save)
-            save()
-        }
-    }, [requestKey])
-
-    useEffect(() => {
-        const restore = restoreRef.current
-        if (!restore || restore.key !== requestKey || !items.length) return undefined
-        restoreRef.current = null
-        let secondFrame = 0
-        const firstFrame = window.requestAnimationFrame(() => {
-            secondFrame = window.requestAnimationFrame(() => {
-                try { window.scrollTo({ top: restore.scrollY, left: 0, behavior: 'instant' }) } catch { /* optional */ }
-            })
-        })
-        return () => {
-            window.cancelAnimationFrame(firstFrame)
-            if (secondFrame) window.cancelAnimationFrame(secondFrame)
-        }
-    }, [items.length, requestKey])
 
     const chooseFacet = nextValue => {
         if (nextValue === value) return
@@ -826,7 +793,7 @@ function TemporalExplorer({ mode }) {
             if (photoOperationIsCurrent(operation, requestKey)) setLoadingMoreKey('')
         }
     }, [
-        beginPhotoOperation, commitPage, loading, loadingMore, mode, nextCursor,
+        beginPhotoOperation, commitPage, loading, loadingMore, mode, nextCursor, setPageState,
         photoOperationIsCurrent, requestKey, reshuffling, value,
     ])
 
@@ -862,7 +829,7 @@ function TemporalExplorer({ mode }) {
             if (photoOperationIsCurrent(operation, requestKey)) setReshufflingKey('')
         }
     }, [
-        activeFacet, beginPhotoOperation, commitPage, loading, loadingMore, mode,
+        activeFacet, beginPhotoOperation, commitPage, loading, loadingMore, mode, setPageState,
         photoOperationIsCurrent, requestKey, reshuffling, value,
     ])
 
@@ -1016,11 +983,10 @@ function ExposureExplorer() {
         exposureSelection(searchParams.get('setting')) || { groupId: 'aperture', optionId: 'wide' },
     )
     const [facetState, setFacetState] = useState({ groups: [], loading: true, error: '' })
-    const [pageState, setPageState] = useState({ key: '', items: [], total: 0, nextCursor: null, error: '' })
+    const [pageState, setPageState] = useNavigationState('explore-page', { key: '', items: [], total: 0, nextCursor: null, error: '' })
     const [loadingMore, setLoadingMore] = useState(false)
     const [reshuffling, setReshuffling] = useState(false)
-    const [groupId, setGroupId] = useState(initialSelection.current.groupId)
-    const [optionId, setOptionId] = useState(initialSelection.current.optionId)
+    const { groupId, optionId } = exposureSelection(searchParams.get('setting')) || initialSelection.current
     const [lightboxIndex, setLightboxIndex] = useState(null)
     const currentValueRef = useRef('')
     const group = EXPOSURE_GROUPS.find(candidate => candidate.id === groupId) || EXPOSURE_GROUPS[0]
@@ -1044,7 +1010,7 @@ function ExposureExplorer() {
                 if (initialPage?.value) {
                     const requestedValue = `${initialSelection.current.groupId}:${initialSelection.current.optionId}`
                     if (initialPage.value === requestedValue) {
-                        setPageState({
+                        setPageState(current => current.key === initialPage.value ? current : {
                             key: initialPage.value,
                             items: initialPage.items,
                             total: initialPage.total ?? initialPage.items.length,
@@ -1060,7 +1026,7 @@ function ExposureExplorer() {
                 }
             })
         return () => controller.abort()
-    }, [])
+    }, [setPageState])
 
     useEffect(() => {
         if (facetState.loading || facetState.error || hasCurrentPage) return undefined
@@ -1079,7 +1045,7 @@ function ExposureExplorer() {
                 }
             })
         return () => controller.abort()
-    }, [facetState.error, facetState.loading, hasCurrentPage, total, value])
+    }, [facetState.error, facetState.loading, hasCurrentPage, total, value, setPageState])
 
     const chooseGroup = nextGroup => {
         const next = EXPOSURE_GROUPS.find(candidate => candidate.id === nextGroup)
@@ -1087,14 +1053,11 @@ function ExposureExplorer() {
         const counts = facetState.groups.find(candidate => candidate.id === next.id)?.options || []
         const populated = next.options.find(option => counts.find(row => row.id === option.id)?.photos > 0)
         const nextOptionId = populated?.id || next.options[0].id
-        setGroupId(next.id)
-        setOptionId(nextOptionId)
         setSearchParams({ setting: `${next.id}:${nextOptionId}` }, { replace: true })
         setLightboxIndex(null)
     }
 
     const chooseOption = nextOptionId => {
-        setOptionId(nextOptionId)
         setSearchParams({ setting: `${group.id}:${nextOptionId}` }, { replace: true })
         setLightboxIndex(null)
     }
@@ -1122,7 +1085,7 @@ function ExposureExplorer() {
         } finally {
             setLoadingMore(false)
         }
-    }, [loadingMore, nextCursor, value])
+    }, [loadingMore, nextCursor, value, setPageState])
 
     const reshuffle = useCallback(async () => {
         if (reshuffling) return
@@ -1154,7 +1117,7 @@ function ExposureExplorer() {
         } finally {
             setReshuffling(false)
         }
-    }, [reshuffling, value])
+    }, [reshuffling, value, setPageState])
 
     return (
         <div className="explore-page animate-fade-in pt-[74px]">

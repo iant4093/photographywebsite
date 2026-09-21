@@ -1,7 +1,8 @@
+import useNavigationState from '../hooks/useNavigationState'
 import useHeroParallax from '../hooks/useHeroParallax'
 import SiteSelect from '../components/SiteSelect'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigationType } from 'react-router'
+import { Link } from 'react-router'
 import VideoAlbumCard from '../components/VideoAlbumCard'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
@@ -11,7 +12,7 @@ import { getCatalogSnapshot, reconcilePublicCatalogItems, setCatalogSnapshot } f
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
 import { sortVideoSections, VIDEO_SECTION_SORT_OPTIONS } from '../utils/videoSectionSort'
 import { cdnUrl, HERO_CURRENT_WIDTHS, heroManifestSrcSet, heroManifestImageUrl } from '../utils/mediaUrls'
-import { isRevealed, markAsRevealed, useScrollRestoration } from '../utils/scroll'
+import { isRevealed, markAsRevealed } from '../utils/scroll'
 import { warmVideoHoverRuntime } from '../utils/albumVideoHoverPreview'
 import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 import usePublishedHero from '../hooks/usePublishedHero'
@@ -38,14 +39,11 @@ const currentVideoHeroSrcSet = (format = 'jpeg') => {
 }
 
 export default function Videos() {
-    const navigationType = useNavigationType()
-    const location = useLocation()
     const [initialSnapshot] = useState(() => getCatalogSnapshot(CATALOG_KEY))
     const pageRef = useRef(null)
     const heroRef = useRef(null)
     const publishedHero = usePublishedHero('video')
     const [failedHeroVersion, setFailedHeroVersion] = useState(null)
-    useScrollRestoration(location.pathname, navigationType === 'POP')
 
     const [albums, setAlbums] = useState(initialSnapshot?.items || [])
     const [nextCursor, setNextCursor] = useState(initialSnapshot?.nextCursor || null)
@@ -54,7 +52,7 @@ export default function Videos() {
     const [error, setError] = useState(null)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
     const [managedHeroFailed, setManagedHeroFailed] = useState(false)
-    const [sectionSort, setSectionSort] = useState(0)
+    const [sectionSort, setSectionSort] = useNavigationState('section-sort', 0)
 
     const savePage = useCallback((items, cursor) => {
         const reconciledItems = reconcilePublicCatalogItems(items, 'video')
@@ -228,7 +226,16 @@ export default function Videos() {
                                 <div className="flex items-center gap-3 sm:gap-4 mb-8">
                                     <div className="flex min-w-0 items-center gap-2 sm:gap-4">
                                         <span className="linen-category-number shrink-0">{String(categoryIndex + 1).padStart(2, '0')}</span>
-                                        <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">{category}</h3>
+                                        <h3 className="font-serif text-2xl font-normal text-charcoal min-w-0 [overflow-wrap:anywhere]">
+                                            <Link to={`/sections/video/${encodeURIComponent(category)}`}
+                                                className="inline-flex min-h-11 items-center gap-2 hover:text-amber transition-colors"
+                                                aria-label={`View all ${category} video albums`}>
+                                                {category}
+                                                <svg aria-hidden="true" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                    <path d="M5 12h14m-6-6 6 6-6 6" />
+                                                </svg>
+                                            </Link>
+                                        </h3>
                                     </div>
                                     <div className="hidden sm:block h-px bg-warm-border flex-1" />
                                     <SiteSelect
