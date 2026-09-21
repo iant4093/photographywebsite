@@ -24,8 +24,10 @@ export default function ProgressiveImage({
     const [fastReveal, setFastReveal] = useState(false)
     const loadStarted = useRef(0)
     const imageNode = useRef(null)
+    const imageSettled = useRef(false)
     const imageRef = useCallback(image => {
         imageNode.current = image
+        imageSettled.current = false
         if (image) loadStarted.current = performance.now()
     }, [])
     const [failedResponsiveIdentity, setFailedResponsiveIdentity] = useState(null)
@@ -61,8 +63,9 @@ export default function ProgressiveImage({
             }
         }, near, { viewportFirst, eager })
         retentionRef.current = retained
-        // A memory-cached eager image may finish before this effect subscribes.
-        if (imageNode.current?.complete && imageNode.current.naturalWidth) retained.loaded(imageNode.current)
+        // Cached images and final errors may settle before a subscription.
+        const image = imageNode.current
+        if (image && (imageSettled.current || (image.complete && image.naturalWidth))) retained.loaded(image)
         return () => {
             retained.dispose()
             if (retentionRef.current === retained) retentionRef.current = null
@@ -94,6 +97,7 @@ export default function ProgressiveImage({
                     fetchPriority={eager ? 'high' : 'auto'}
                     decoding="async"
                     onLoad={(event) => {
+                        imageSettled.current = true
                         const url = event.currentTarget.currentSrc || event.currentTarget.src
                         setFastReveal(isImageReady(url) || performance.now() - loadStarted.current < 80)
                         markImageReady(url)
@@ -108,6 +112,7 @@ export default function ProgressiveImage({
                             setFailedResponsiveIdentity(responsiveIdentity)
                             return
                         }
+                        imageSettled.current = true
                         setLoadedIdentity(imageIdentity)
                         retentionRef.current?.loaded(event.currentTarget)
                         onError?.(event)

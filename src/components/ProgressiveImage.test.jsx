@@ -159,7 +159,7 @@ describe('ProgressiveImage responsive fallback', () => {
         expect(screen.getByRole('img', { name: 'Preview' })).toHaveAttribute('srcset')
     })
 
-    it('releases album background loading after both responsive and fallback sources fail', () => {
+    it.each([false, true])('releases album background loading after both sources fail, including resubscription=%s', resubscribe => {
         vi.useFakeTimers()
         const callbacks = new Map()
         vi.stubGlobal('IntersectionObserver', class {
@@ -169,10 +169,11 @@ describe('ProgressiveImage responsive fallback', () => {
             disconnect() {}
         })
         const onError = vi.fn()
-        const view = render(<>
-            <ProgressiveImage eager viewportFirst src="/missing.jpg" srcSet="/missing-640.webp 640w" alt="First" onError={onError} />
+        const gallery = blurhash => <>
+            <ProgressiveImage eager viewportFirst src="/missing.jpg" srcSet="/missing-640.webp 640w" blurhash={blurhash} alt="First" onError={onError} />
             <ProgressiveImage viewportFirst src="/second.jpg" alt="Second" />
-        </>)
+        </>
+        const view = render(gallery('initial'))
         const [first, second] = view.container.children
         act(() => {
             callbacks.get('800px')([{ target: first, isIntersecting: true }, { target: second, isIntersecting: true }])
@@ -183,6 +184,10 @@ describe('ProgressiveImage responsive fallback', () => {
         act(() => vi.advanceTimersByTime(20))
         expect(screen.queryByRole('img', { name: 'Second' })).toBeNull()
         fireEvent.error(screen.getByRole('img', { name: 'First' }))
+        if (resubscribe) {
+            view.rerender(gallery('updated'))
+            act(() => callbacks.get('0px')([{ target: first, isIntersecting: true }]))
+        }
         act(() => vi.advanceTimersByTime(20))
         expect(onError).toHaveBeenCalledOnce()
         expect(screen.getByRole('img', { name: 'Second' })).toHaveAttribute('src', '/second.jpg')
