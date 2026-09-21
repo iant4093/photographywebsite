@@ -573,12 +573,12 @@
   transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease;
 }
 
-.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-within) > .admin-media-action {
+.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-visible, :has(:focus-visible)) > .admin-media-action {
   opacity: 1;
   pointer-events: auto;
 }
 
-.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-within) > .admin-media-action:disabled {
+.linen-site.linen-admin .admin-media-tile:is(:hover, :focus-visible, :has(:focus-visible)) > .admin-media-action:disabled {
   opacity: 0.5;
 }
 
