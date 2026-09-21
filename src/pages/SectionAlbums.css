@@ -1,20 +1,38 @@
 .linen-site .section-photo-actions {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     flex: none;
+    width: 100%;
     gap: 12px;
 }
 
 .linen-site .section-photo-actions > .linen-theme-toggle,
 .linen-site .section-photo-actions > span {
-    width: 56px;
+    width: 100%;
     height: 56px;
 }
 
+.linen-site .section-photo-actions > .linen-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding-inline: 16px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
 .linen-site .section-photo-actions > .linen-theme-toggle .linen-theme-icon {
-    inset: 0;
-    width: 26px;
-    height: 26px;
-    margin: auto;
+    position: static;
+    flex: none;
+    width: 24px;
+    height: 24px;
+}
+
+@media (min-width: 640px) {
+    .linen-site .section-photo-actions {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 
 @media (min-width: 768px) {
@@ -24,12 +42,15 @@
 
     .linen-site .section-photo-actions > .linen-theme-toggle,
     .linen-site .section-photo-actions > span {
-        width: 64px;
         height: 64px;
     }
 
+    .linen-site .section-photo-actions > .linen-theme-toggle {
+        font-size: 16px;
+    }
+
     .linen-site .section-photo-actions > .linen-theme-toggle .linen-theme-icon {
-        width: 30px;
-        height: 30px;
+        width: 28px;
+        height: 28px;
     }
 }

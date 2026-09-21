@@ -32,7 +32,7 @@ function warmStartingPhotos(images) {
     })
 }
 
-function FeaturedPhotoSession({ category = '', variant = 'link' }) {
+function FeaturedPhotoSession({ category = '', variant = 'link', showLabel = false }) {
     const controllerRef = useRef(null)
     const requestRef = useRef(null)
     const photosRef = useRef([])
@@ -215,6 +215,7 @@ function FeaturedPhotoSession({ category = '', variant = 'link' }) {
                     <svg className="linen-theme-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />
                     </svg>
+                    {showLabel && <span>Featured photos</span>}
                 </button>
             ) : (
                 <button

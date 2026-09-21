@@ -87,8 +87,8 @@ export default function SectionAlbums() {
         <div className="mb-8 flex flex-wrap items-center gap-x-6 gap-y-5">
             {mediaType === 'photo' && <div key={category} className="section-photo-actions" role="group" aria-label={`${category} photo tools`}>
                 <Suspense fallback={<><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" /></>}>
-                    <FeaturedPhotoExplorer category={category} variant="icon" />
-                    <RandomPhotoExplorer category={category} variant="icon" showStats />
+                    <FeaturedPhotoExplorer category={category} variant="icon" showLabel />
+                    <RandomPhotoExplorer category={category} variant="icon" showStats showLabel />
                 </Suspense>
             </div>}
             <div className="flex min-w-0 flex-1 basis-64 items-center justify-between gap-4">

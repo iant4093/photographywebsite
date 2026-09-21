@@ -86,7 +86,7 @@ describe('section album pages', () => {
         mount(`/sections/photo/${encodeURIComponent(category)}`)
 
         const featured = await screen.findByRole('button', { name: `Explore featured photos in ${category}` })
-        const random = screen.getByRole('button', { name: `Shuffle ${category} photos` })
+        const random = screen.getByRole('button', { name: `Explore random photos in ${category}` })
         const stats = screen.getByRole('button', { name: `Show ${category} statistics` })
         expect(api.fetchFeaturedPhotos).not.toHaveBeenCalled()
         expect(api.fetchRandomPhotos).not.toHaveBeenCalled()

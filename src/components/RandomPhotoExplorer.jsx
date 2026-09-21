@@ -33,7 +33,7 @@ function warmStartingPhotos(images) {
     })
 }
 
-function RandomPhotoSession({ category = '', variant = 'link', showStats = false }) {
+function RandomPhotoSession({ category = '', variant = 'link', showStats = false, showLabel = false }) {
     const controllerRef = useRef(null)
     const requestRef = useRef(null)
     const photosRef = useRef([])
@@ -47,7 +47,7 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
     const { images: lightboxPhotos, refreshOriginal } = usePhotoOriginalRefresh(photos)
     const normalizedCategory = useMemo(() => category.trim(), [category])
     const buttonLabel = normalizedCategory
-        ? `Shuffle ${normalizedCategory} photos`
+        ? (showLabel ? `Explore random photos in ${normalizedCategory}` : `Shuffle ${normalizedCategory} photos`)
         : 'Explore Random Photos'
     const lightboxLabel = normalizedCategory
         ? `Random photos from ${normalizedCategory}`
@@ -215,6 +215,7 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
                     <svg className="linen-theme-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M4 4h3l10 16h3M20 4h-3l-3.5 5.6M4 20h3l3.5-5.6" />
                     </svg>
+                    {showLabel && <span>Random photos</span>}
                 </button>
             ) : (
                 <button
@@ -230,7 +231,7 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
                     </svg>
                 </button>
             )}
-            {showStats && <SectionStats category={normalizedCategory} />}
+            {showStats && <SectionStats category={normalizedCategory} showLabel={showLabel} />}
             {open && (
                 <PhotoLightbox
                     images={lightboxPhotos}
