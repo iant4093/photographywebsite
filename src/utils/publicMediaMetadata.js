@@ -1,4 +1,4 @@
-import { cdnDomain, cdnUrl, PREVIEW_VERSION, PREVIEW_WIDTHS } from './mediaUrls'
+import { cdnDomain, cdnUrl, PREVIEW_VERSION, PREVIEW_WIDTHS, HERO_PUBLISHED_EVENT } from './mediaUrls'
 
 const HERO_VERSION_PATTERN = /^[a-f0-9]{32}$/
 
@@ -87,3 +87,35 @@ export async function albumCoverPreviewSrcSet(album) {
     return result
 }
 
+
+// Installed only after the shared metadata module loads; a route may have
+// unmounted meanwhile. Initial cover loading is independent of this scheduler.
+export function observeHeroRefresh(element, heroType, refresh, signal) {
+    if (signal.aborted) return
+    let nearby = true
+    const refreshNearby = () => { if (nearby) void refresh() }
+    const hero = element?.closest('section') || element
+    const observer = hero && typeof IntersectionObserver !== 'undefined'
+        ? new IntersectionObserver(([entry]) => {
+            const returning = !nearby && entry.isIntersecting
+            nearby = entry.isIntersecting
+            if (returning) refreshNearby()
+        }, { rootMargin: '600px 0px' }) : null
+    observer?.observe(hero)
+    const onPublished = ({ detail }) => {
+        if (detail?.heroType === heroType) void refresh()
+    }
+    const timer = setInterval(refreshNearby, 15_000)
+    window.addEventListener('focus', refreshNearby)
+    window.addEventListener('pageshow', refreshNearby)
+    window.addEventListener(HERO_PUBLISHED_EVENT, onPublished)
+    document.addEventListener('visibilitychange', refreshNearby)
+    signal.addEventListener('abort', () => {
+        observer?.disconnect()
+        clearInterval(timer)
+        window.removeEventListener('focus', refreshNearby)
+        window.removeEventListener('pageshow', refreshNearby)
+        window.removeEventListener(HERO_PUBLISHED_EVENT, onPublished)
+        document.removeEventListener('visibilitychange', refreshNearby)
+    }, { once: true })
+}

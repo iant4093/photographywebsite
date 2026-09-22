@@ -162,6 +162,7 @@ export default function MotionExperience() {
         let updateFrame = null
         let collectFrame = null
         let targets = []
+        let rowTargets = []
         const metadata = new Map()
         let layoutDirty = true
         let pageTravel = 0
@@ -247,6 +248,7 @@ export default function MotionExperience() {
             // producing jumps on slow direction changes. Never read card layout
             // during ordinary scrolling, and finish all reads before writes.
             if (layoutDirty) {
+                rowTargets = []
                 targets.forEach(target => {
                     let top = 0
                     let element = target
@@ -255,7 +257,15 @@ export default function MotionExperience() {
                         element = element.offsetParent
                         if (element) top += element.clientTop
                     }
-                    Object.assign(metadata.get(target), { top, height: target.offsetHeight })
+                    const info = metadata.get(target)
+                    Object.assign(info, { top, height: target.offsetHeight })
+                    if (info.inScrollRow) rowTargets.push({ target, info })
+                })
+                rowTargets.sort((left, right) => left.info.top - right.info.top)
+                let maxBottom = -Infinity
+                rowTargets.forEach(entry => {
+                    maxBottom = Math.max(maxBottom, entry.info.top + entry.info.height)
+                    entry.maxBottom = maxBottom
                 })
                 pageTravel = Math.max(document.documentElement.scrollHeight - viewportHeight, 0)
                 // Hidden rails have zero dimensions. Reveal before measuring;
@@ -282,15 +292,7 @@ export default function MotionExperience() {
                 }
             }
 
-            targets.forEach((target) => {
-                const info = metadata.get(target)
-                // Keep horizontally clipped cards in step with their visible
-                // neighbors before they slide into view. IntersectionObserver
-                // still limits compositor hints to individual nearby cards;
-                // cached vertical bounds limit work to nearby rows.
-                if (info.inScrollRow) {
-                    if (info.top - scrollY > viewportHeight + 160 || info.top + info.height - scrollY < -160) return
-                } else if (!activeTargets.has(target)) return
+            const updateTarget = (target, info) => {
                 const measuredHeight = Math.min(Math.max(info.height, 1), viewportHeight)
                 const progress = clamp((viewportHeight - (info.top - scrollY)) / (viewportHeight + measuredHeight), 0, 1)
                 const phase = (progress - 0.5) * 2
@@ -307,7 +309,26 @@ export default function MotionExperience() {
                 setMotionStyle(target, 'x', position * (1 - presence) * 36 * amplitude, 'px')
                 setMotionStyle(target, 'card-rotation', position * phase * 0.62, 'deg', 3)
                 setMotionStyle(target, 'rotation', position * phase * 0.72 * amplitude, 'deg', 3)
+            }
+            activeTargets.forEach(target => {
+                const info = metadata.get(target)
+                if (!info.inScrollRow) updateTarget(target, info)
             })
+            // Find nearby row cards using cached vertical bounds. Include clipped
+            // horizontal neighbors, and tall cards overlapping earlier rows.
+            const top = scrollY - 160
+            const bottom = scrollY + viewportHeight + 160
+            let low = 0
+            let high = rowTargets.length
+            while (low < high) {
+                const middle = (low + high) >>> 1
+                if (rowTargets[middle].info.top <= bottom) low = middle + 1
+                else high = middle
+            }
+            for (let index = low - 1; index >= 0 && rowTargets[index].maxBottom >= top; index -= 1) {
+                const { target, info } = rowTargets[index]
+                if (info.top + info.height >= top) updateTarget(target, info)
+            }
         }
 
         const mutationObserver = new MutationObserver(records => {

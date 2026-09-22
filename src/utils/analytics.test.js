@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({ sendAnalyticsEvents: vi.fn() }))
 vi.mock('./api', () => ({ sendAnalyticsEvents: api.sendAnalyticsEvents }))
@@ -16,6 +16,7 @@ import {
 } from './analytics'
 
 describe('privacy-preserving analytics utility', () => {
+    afterEach(() => { resetAnalyticsForTests(); vi.useRealTimers() })
     beforeEach(() => {
         resetAnalyticsForTests()
         localStorage.clear()
@@ -40,6 +41,77 @@ describe('privacy-preserving analytics utility', () => {
         localStorage.clear()
         Object.defineProperty(navigator, 'globalPrivacyControl', { configurable: true, value: true })
         expect(analyticsPreference()).toEqual({ enabled: false, source: 'privacy-signal' })
+    })
+
+    it('shares one uploader and batches events arriving during a slow request', async () => {
+        vi.useFakeTimers()
+        let finish
+        api.sendAnalyticsEvents.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+        trackAnalyticsEvent({ name: 'site_visit' })
+        const pending = flushAnalytics()
+        for (let index = 0; index < 45; index++) trackAnalyticsEvent({ name: 'page_view', index })
+        await vi.advanceTimersByTimeAsync(1500)
+        expect(api.sendAnalyticsEvents).toHaveBeenCalledTimes(1)
+        expect(flushAnalytics()).toBe(pending)
+        finish()
+        await pending
+        expect(api.sendAnalyticsEvents.mock.calls.map(([events]) => events.length)).toEqual([1, 20, 20, 5])
+        const delivered = api.sendAnalyticsEvents.mock.calls.slice(1).flatMap(([events]) => events)
+        expect(delivered.map(event => event.index)).toEqual(Array.from({ length: 45 }, (_, index) => index))
+    })
+
+    it('starts exit delivery immediately while an earlier request is still pending', async () => {
+        let finish
+        api.sendAnalyticsEvents.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+        trackAnalyticsEvent({ name: 'site_visit' })
+        const pending = flushAnalytics()
+        for (let index = 0; index < 25; index++) trackAnalyticsEvent({ name: 'page_view', index })
+        await flushAnalytics({ exiting: true })
+        await flushAnalytics({ exiting: true })
+        expect(api.sendAnalyticsEvents.mock.calls.map(([events]) => events.length)).toEqual([1, 20, 5])
+        finish()
+        await pending
+        expect(api.sendAnalyticsEvents).toHaveBeenCalledTimes(3)
+    })
+
+    it.each(['preference', 'privacy-signal'])('discards pending events when %s opts out during a request', async (source) => {
+        let finish
+        api.sendAnalyticsEvents.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+        trackAnalyticsEvent({ name: 'site_visit' })
+        const pending = flushAnalytics()
+        trackAnalyticsEvent({ name: 'page_view' })
+        if (source === 'preference') setAnalyticsPreference(false)
+        else Object.defineProperty(navigator, 'globalPrivacyControl', { configurable: true, value: true })
+        finish()
+        await pending
+        await flushAnalytics({ exiting: true })
+        expect(api.sendAnalyticsEvents).toHaveBeenCalledTimes(1)
+    })
+
+    it('continues after a failed batch without retries and accepts later events', async () => {
+        vi.useFakeTimers()
+        api.sendAnalyticsEvents.mockRejectedValueOnce(new Error('offline'))
+        trackAnalyticsEvent({ name: 'site_visit' })
+        await flushAnalytics()
+        trackAnalyticsEvent({ name: 'page_view' })
+        await vi.advanceTimersByTimeAsync(750)
+        expect(api.sendAnalyticsEvents.mock.calls.map(([events]) => events[0].name)).toEqual(['site_visit', 'page_view'])
+    })
+
+    it('does not strand an event queued between draining and releasing the uploader', async () => {
+        vi.useFakeTimers()
+        let finish
+        api.sendAnalyticsEvents.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+        trackAnalyticsEvent({ name: 'site_visit' })
+        const pending = flushAnalytics()
+        finish()
+        await Promise.resolve()
+        await Promise.resolve()
+        trackAnalyticsEvent({ name: 'page_view' })
+        await pending
+        await vi.advanceTimersByTimeAsync(750)
+        expect(api.sendAnalyticsEvents).toHaveBeenCalledTimes(2)
+        expect(api.sendAnalyticsEvents).toHaveBeenLastCalledWith([{ name: 'page_view' }])
     })
 
     it('classifies only coarse referrer and device categories', () => {

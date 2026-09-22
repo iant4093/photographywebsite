@@ -33,10 +33,12 @@ export default function AnalyticsTracker() {
         // private-gallery load to public-site performance after SPA navigation.
         if (!isPublicAnalyticsPath(pathnameRef.current)) return undefined
         let active = true
+        const controller = new AbortController()
+        const options = { signal: controller.signal }
         const reportVital = ({ name, value, rating }) => {
             if (!active || !isPublicAnalyticsPath(pathnameRef.current)) return
             trackWebVital(name, Number(value.toFixed(3)), rating)
-            if (document.visibilityState === 'hidden') void flushAnalytics()
+            if (document.visibilityState === 'hidden') void flushAnalytics({ exiting: true })
         }
         import('web-vitals').then(({ onCLS, onINP, onLCP }) => {
             if (!active) return
@@ -47,7 +49,8 @@ export default function AnalyticsTracker() {
             // Performance telemetry is optional and must never affect the site.
         })
 
-        const onPageHide = () => void flushAnalytics()
+        const onPageHide = () => void flushAnalytics({ exiting: true })
+        const onVisibilityChange = () => { if (document.hidden) onPageHide() }
         const onError = (event) => {
             if (!isPublicAnalyticsPath(pathnameRef.current)) return
             trackFrontendError(event.target && event.target !== window ? 'resource' : 'runtime')
@@ -56,14 +59,13 @@ export default function AnalyticsTracker() {
             if (isPublicAnalyticsPath(pathnameRef.current)) trackFrontendError('unhandled-rejection')
         }
 
-        window.addEventListener('pagehide', onPageHide)
-        window.addEventListener('error', onError, true)
-        window.addEventListener('unhandledrejection', onRejection)
+        window.addEventListener('pagehide', onPageHide, options)
+        document.addEventListener('visibilitychange', onVisibilityChange, options)
+        window.addEventListener('error', onError, { ...options, capture: true })
+        window.addEventListener('unhandledrejection', onRejection, options)
         return () => {
             active = false
-            window.removeEventListener('pagehide', onPageHide)
-            window.removeEventListener('error', onError, true)
-            window.removeEventListener('unhandledrejection', onRejection)
+            controller.abort()
         }
     }, [])
 

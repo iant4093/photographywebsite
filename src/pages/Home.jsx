@@ -49,7 +49,7 @@ function Home() {
     const catalogSnapshotRef = useRef(initialSnapshot)
     const pageRef = useRef(null)
     const heroRef = useRef(null)
-    const publishedHero = usePublishedHero('photo')
+    const publishedHero = usePublishedHero('photo', heroRef)
     const [failedHeroVersion, setFailedHeroVersion] = useState(null)
 
     const [albums, setAlbums] = useState(initialSnapshot?.items || [])

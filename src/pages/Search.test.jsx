@@ -146,6 +146,30 @@ describe('Search', () => {
         expect(screen.getAllByTestId('search-result')).toHaveLength(3)
     })
 
+    it('preserves title ties, date ties, and relative order when narrowing and clearing filters', () => {
+        const items = [
+            { albumId: 'c', title: 'Alpha', category: 'Keep', createdAt: '2026-01-01' },
+            { albumId: 'b', title: 'Álpha', category: 'Skip', createdAt: '2026-01-01' },
+            { albumId: 'a', title: 'alpha', category: 'Keep', createdAt: '2026-01-01' },
+            { albumId: 'z', title: 'Zulu', category: 'Keep', createdAt: 'invalid' },
+        ]
+        catalog.snapshots.set('public-photos', { items, nextCursor: null })
+        catalog.snapshots.set('public-videos', { items: [], nextCursor: null })
+        renderSearch('/search?sort=title')
+        const ids = () => screen.getAllByTestId('search-result').map(node => node.getAttribute('href').split('/').pop())
+        expect(ids()).toEqual(['a', 'b', 'c', 'z'])
+        selectChoice(screen.getByLabelText('Category'), 'Keep')
+        expect(ids()).toEqual(['a', 'c', 'z'])
+        fireEvent.change(screen.getByLabelText('Search the archive'), { target: { value: 'alpha' } })
+        expect(ids()).toEqual(['a', 'c'])
+        fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+        selectChoice(screen.getByLabelText('Order'), 'oldest')
+        expect(ids()).toEqual(['z', 'a', 'c'])
+        selectChoice(screen.getByLabelText('Order'), 'newest')
+        expect(ids()).toEqual(['a', 'c', 'z'])
+        expect(items.map(item => item.albumId)).toEqual(['c', 'b', 'a', 'z'])
+    })
+
     it('keeps typing immediate, coalesces URL writes and cancels stale edits after navigation', async () => {
         vi.useFakeTimers()
         renderSearch()

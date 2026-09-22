@@ -332,6 +332,45 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(clipped.style.getPropertyValue('--editorial-card-y')).toBe('')
   })
 
+  it('finds row cards in layout order across large jumps, overlapping heights, and resized rows', () => {
+    vi.stubGlobal('IntersectionObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+    const view = render(<MemoryRouter><main><div data-scroll-row="">
+      {['lower', 'tall', 'upper', 'edge'].map(id => <div className="album-card" data-testid={id} key={id} />)}
+    </div></main><MotionExperience /></MemoryRouter>)
+    const cards = ['lower', 'tall', 'upper', 'edge'].map(id => screen.getByTestId(id))
+    const tops = [5000, 0, 500, 6160]
+    const heights = [300, 7000, 300, 300]
+    cards.forEach((card, index) => {
+      Object.defineProperty(card, 'offsetTop', { configurable: true, get: () => tops[index] })
+      Object.defineProperty(card, 'offsetHeight', { configurable: true, get: () => heights[index] })
+    })
+    flushFrames()
+    const writes = cards.map(card => vi.spyOn(card.style, 'setProperty'))
+    window.scrollY = 5000
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(writes[0]).toHaveBeenCalled()
+    expect(writes[1]).toHaveBeenCalled()
+    expect(writes[2]).not.toHaveBeenCalled()
+    expect(writes[3]).toHaveBeenCalled() // Inclusive viewport + 160px boundary.
+    expect(cards[0].style.getPropertyValue('--editorial-card-y')).toBe('-17.23px')
+    expect(cards[1].style.getPropertyValue('--editorial-card-y')).toBe('-32.00px')
+    writes.forEach(write => write.mockClear())
+    tops[0] = 10000
+    fireEvent.resize(window)
+    flushFrames()
+    expect(writes[0]).not.toHaveBeenCalled()
+    window.scrollY = 9500
+    fireEvent.scroll(window)
+    flushFrames()
+    expect(cards[0].style.getPropertyValue('--editorial-card-y')).toBe('7.38px')
+    view.unmount()
+    cards.forEach(card => expect(card.style.getPropertyValue('--editorial-card-y')).toBe(''))
+  })
+
   it('uses stronger consistent catalog motion on home, search, videos, and stats', () => {
     for (const path of ['/', '/search', '/videos', '/stats']) {
       const view = renderExperience(path)

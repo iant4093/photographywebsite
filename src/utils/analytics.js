@@ -8,6 +8,7 @@ const PRIVATE_PATH_PREFIXES = ['/admin', '/dashboard', '/login', '/sharedalbum']
 
 let queue = []
 let flushTimer = null
+let flushPromise = null
 
 function storage() {
     try {
@@ -76,7 +77,7 @@ export function classifyDevice() {
 }
 
 function scheduleFlush() {
-    if (flushTimer !== null) return
+    if (flushTimer !== null || flushPromise) return
     flushTimer = window.setTimeout(() => {
         flushTimer = null
         void flushAnalytics()
@@ -91,22 +92,38 @@ export function trackAnalyticsEvent(event) {
     return true
 }
 
-export async function flushAnalytics() {
+async function sendBatch() {
+    const events = queue.splice(0, MAX_BATCH_SIZE)
+    try {
+        await sendAnalyticsEvents(events)
+    } catch {
+        // Analytics must never interrupt browsing or retry indefinitely.
+    }
+}
+
+export function flushAnalytics({ exiting = false } = {}) {
     if (flushTimer !== null) window.clearTimeout(flushTimer)
     flushTimer = null
-    if (!analyticsPreference().enabled) {
-        queue = []
-        return
+    if (!analyticsPreference().enabled) queue = []
+    if (exiting) {
+        // Start keepalive requests now: awaiting an earlier upload could strand
+        // queued events when this document is discarded. Splicing prevents overlap.
+        const pending = []
+        while (queue.length > 0) pending.push(sendBatch())
+        return Promise.all(pending)
     }
-    while (queue.length > 0) {
-        const events = queue.splice(0, MAX_BATCH_SIZE)
-        try {
-            await sendAnalyticsEvents(events)
-        } catch {
-            // Analytics must never interrupt the visitor experience or retry
-            // indefinitely. A missed aggregate sample is preferable.
+    if (flushPromise) return flushPromise
+    if (!queue.length) return Promise.resolve()
+    flushPromise = (async () => {
+        while (queue.length > 0) {
+            if (!analyticsPreference().enabled) { queue = []; break }
+            await sendBatch()
         }
-    }
+    })().finally(() => {
+        flushPromise = null
+        if (queue.length) scheduleFlush()
+    })
+    return flushPromise
 }
 
 export function trackSiteVisit() {
@@ -162,6 +179,7 @@ export function ratingForVital(metric, value) {
 }
 
 export function resetAnalyticsForTests() {
+    flushPromise = null
     queue = []
     if (flushTimer !== null && typeof window !== 'undefined') window.clearTimeout(flushTimer)
     flushTimer = null

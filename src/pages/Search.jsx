@@ -58,6 +58,9 @@ function mergeCatalogs(catalogs) {
     return [...unique.values()]
 }
 
+const titleCollator = new Intl.Collator(undefined, { sensitivity: 'base' })
+const defaultCollator = new Intl.Collator()
+
 export default function Search() {
     const [searchParams, setSearchParams] = useSearchParams()
     const location = useLocation()
@@ -169,9 +172,19 @@ export default function Search() {
     const category = categories.includes(searchParams.get('category')) ? searchParams.get('category') : 'all'
     const year = years.includes(searchParams.get('year')) ? searchParams.get('year') : 'all'
 
+    const orderedIndex = useMemo(() => [...searchIndex].sort((left, right) => {
+        if (sort === 'title') {
+            return titleCollator.compare(String(left.album.title || ''), String(right.album.title || ''))
+                || defaultCollator.compare(String(left.album.albumId), String(right.album.albumId))
+        }
+        const direction = sort === 'oldest' ? 1 : -1
+        return (left.timestamp - right.timestamp) * direction
+            || defaultCollator.compare(String(left.album.title || ''), String(right.album.title || ''))
+    }), [searchIndex, sort])
+
     const results = useMemo(() => {
         const needle = normalizeSearchValue(resultQuery)
-        return searchIndex
+        return orderedIndex
             .filter(({ album, year: indexedYear, terms }) => {
                 if (type === 'video' && album.type !== 'video') return false
                 if (type === 'photo' && album.type === 'video') return false
@@ -180,18 +193,8 @@ export default function Search() {
                 if (!needle) return true
                 return terms.some((value) => value.includes(needle))
             })
-            .sort(({ album: left, timestamp: leftTime }, { album: right, timestamp: rightTime }) => {
-                if (sort === 'title') {
-                    return String(left.title || '').localeCompare(String(right.title || ''), undefined, {
-                        sensitivity: 'base',
-                    }) || String(left.albumId).localeCompare(String(right.albumId))
-                }
-                const direction = sort === 'oldest' ? 1 : -1
-                return (leftTime - rightTime) * direction
-                    || String(left.title || '').localeCompare(String(right.title || ''))
-            })
             .map(item => item.album)
-    }, [searchIndex, category, resultQuery, sort, type, year])
+    }, [orderedIndex, category, resultQuery, type, year])
 
     const updateParam = (name, value, defaultValue = 'all') => {
         const next = new URLSearchParams(searchParams)

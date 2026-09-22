@@ -42,7 +42,7 @@ export default function Videos() {
     const [initialSnapshot] = useState(() => getCatalogSnapshot(CATALOG_KEY))
     const pageRef = useRef(null)
     const heroRef = useRef(null)
-    const publishedHero = usePublishedHero('video')
+    const publishedHero = usePublishedHero('video', heroRef)
     const [failedHeroVersion, setFailedHeroVersion] = useState(null)
 
     const [albums, setAlbums] = useState(initialSnapshot?.items || [])

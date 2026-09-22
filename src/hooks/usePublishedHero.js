@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchHeroManifest, HERO_PUBLISHED_EVENT } from '../utils/mediaUrls'
+import { fetchHeroManifest } from '../utils/mediaUrls'
 
 // A route revisit can reuse this document's already-decoded alias. Remember its
 // original version across mounts so later publications still use fresh URLs.
@@ -8,7 +8,7 @@ const aliasVersions = new Map()
 // Current aliases must revalidate and paint immediately. The first manifest
 // establishes their version; renaming that same image would download it twice.
 // A later publication still switches an open page to its immutable new URLs.
-export default function usePublishedHero(heroType) {
+export default function usePublishedHero(heroType, heroRef) {
     const [published, setPublished] = useState(null)
     useEffect(() => {
         const controller = new AbortController()
@@ -23,7 +23,7 @@ export default function usePublishedHero(heroType) {
             }
         }
         const refresh = async () => {
-            if (document.hidden || pending) return
+            if (controller.signal.aborted || document.hidden || pending) return
             pending = true
             try {
                 apply(await fetchHeroManifest({
@@ -36,23 +36,13 @@ export default function usePublishedHero(heroType) {
                 pending = false
             }
         }
-        const onPublished = ({ detail }) => {
-            if (detail?.heroType === heroType) void refresh()
-        }
         void refresh()
-        const timer = setInterval(refresh, 15_000)
-        window.addEventListener('focus', refresh)
-        window.addEventListener('pageshow', refresh)
-        window.addEventListener(HERO_PUBLISHED_EVENT, onPublished)
-        document.addEventListener('visibilitychange', refresh)
-        return () => {
-            controller.abort()
-            clearInterval(timer)
-            window.removeEventListener('focus', refresh)
-            window.removeEventListener('pageshow', refresh)
-            window.removeEventListener(HERO_PUBLISHED_EVENT, onPublished)
-            document.removeEventListener('visibilitychange', refresh)
-        }
-    }, [heroType])
+        // The manifest already loads this module in parallel with its request.
+        // Keep background refresh scheduling out of the initial page script.
+        import('../utils/publicMediaMetadata').then(({ observeHeroRefresh }) => {
+            observeHeroRefresh(heroRef?.current, heroType, refresh, controller.signal)
+        }).catch(() => {})
+        return () => controller.abort()
+    }, [heroType, heroRef])
     return published?.heroType === heroType ? published.manifest : null
 }
