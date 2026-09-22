@@ -92,6 +92,15 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(response_body(response)["downloadUrl"], "https://signed.example")
         self.assertEqual(presign.call_args.args[0], RAW_KEY)
 
+    def test_origin_denial_still_precedes_validation_and_database_access(self):
+        denial = {"statusCode": 403, "body": "Forbidden"}
+        with patch.object(get_download_url, "verify_front_door_request", return_value=denial), patch.object(
+            get_download_url, "parse_json_body"
+        ) as parse, patch.object(get_download_url, "get_album_record") as lookup:
+            self.assertEqual(get_download_url.handler(self._event(), None), denial)
+        parse.assert_not_called()
+        lookup.assert_not_called()
+
     def test_arbitrary_or_unknown_media_id_is_not_signed(self):
         with patch.object(get_download_url, "get_album_record", return_value=self.album), patch.object(
             get_download_url, "get_verified_claims", return_value=None
@@ -99,6 +108,25 @@ class DownloadTests(unittest.TestCase):
             response = get_download_url.handler(self._event("0" * 24), None)
         self.assertEqual(response["statusCode"], 404)
         presign.assert_not_called()
+
+    def test_malformed_download_and_comparison_requests_never_read_album_or_identity(self):
+        for path in ({"albumId": ALBUM_ID}, {"shareCode": "share-code-123"}):
+            for route in ("download-url", "original-comparison"):
+                for body in ("not-json", "[]", "{}", '{"mediaId":123}',
+                             json.dumps({"mediaId": "not-a-media-id"}),
+                             json.dumps({"mediaId": MEDIA_ID, "padding": "x" * 8192})):
+                    with self.subTest(path=path, route=route, body_length=len(body)), patch.object(
+                        get_download_url, "get_album_record"
+                    ) as lookup, patch.object(get_download_url, "get_verified_claims") as identity, patch.object(
+                        get_download_url, "check_rate_limit"
+                    ) as rate, patch.object(get_download_url, "presigned_get_url") as sign:
+                        event = {**self._event(), "pathParameters": path, "body": body, "rawPath": f"/test/{route}"}
+                        response = get_download_url.handler(event, None)
+                    self.assertEqual(response["statusCode"], 404)
+                    lookup.assert_not_called()
+                    identity.assert_not_called()
+                    rate.assert_not_called()
+                    sign.assert_not_called()
 
     def test_private_non_owner_is_denied(self):
         private = {**self.album, "visibility": "private", "ownerSub": "owner"}

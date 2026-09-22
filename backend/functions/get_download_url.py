@@ -65,6 +65,17 @@ def handler(event, context):
         share_code = path.get("shareCode")
         if album_id:
             album_id = validate_uuid(album_id)
+        elif not isinstance(share_code, str) or not SHARE_CODE_PATTERN.fullmatch(share_code):
+            return _not_found()
+
+        # Validate the bounded request before looking up any album or identity.
+        # Invalid public and shared requests keep the same opaque 404 response.
+        body = parse_json_body(event, max_bytes=8 * 1024)
+        media_id = require_string(body.get("mediaId"), "mediaId", maximum=24).lower()
+        if not MEDIA_ID_PATTERN.fullmatch(media_id):
+            return _not_found()
+
+        if album_id:
             album = get_album_record(album_id=album_id)
             if not album:
                 return _not_found()
@@ -74,7 +85,7 @@ def handler(event, context):
             access_auth = "jwt" if claims else "none"
             action = "album_original_comparison" if comparison else "album_download"
             limit = 100
-        elif isinstance(share_code, str) and SHARE_CODE_PATTERN.fullmatch(share_code):
+        else:
             album = get_album_record(share_code=share_code)
             if not album:
                 return _not_found()
@@ -86,13 +97,6 @@ def handler(event, context):
             access_actor, access_auth = "anonymous", "share_grant"
             action = "shared_original_comparison" if comparison else "shared_download"
             limit = 40
-        else:
-            return _not_found()
-
-        body = parse_json_body(event, max_bytes=8 * 1024)
-        media_id = require_string(body.get("mediaId"), "mediaId", maximum=24).lower()
-        if not MEDIA_ID_PATTERN.fullmatch(media_id):
-            return _not_found()
         image = find_image_by_media_id(album, media_id)
         if not image:
             return _not_found()

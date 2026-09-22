@@ -169,6 +169,38 @@ expected_routes = {
     ("PUT", "/users/{email}"),
 }
 assert actual_routes == expected_routes
+stage = processed["Resources"]["ApiStage"]["Properties"]
+assert stage["DefaultRouteSettings"]["DetailedMetricsEnabled"] is False
+throttles = stage["RouteSettings"]
+expected_throttles = {
+    "POST /login": (2, 10),
+    "POST /login/challenge": (2, 10),
+    "POST /contact": (2, 10),
+    "POST /albums/{albumId}/zip": (5, 20),
+    "POST /shared/{shareCode}/zip": (5, 20),
+    "POST /albums/{albumId}/download-url": (5, 20),
+    "POST /shared/{shareCode}/download-url": (5, 20),
+    "POST /albums/{albumId}/original-comparison": (5, 20),
+    "POST /shared/{shareCode}/original-comparison": (5, 20),
+    "POST /albums/{albumId}/print": (2, 10),
+    "POST /shared/{shareCode}/print": (2, 10),
+    "POST /print/session": (2, 10),
+    "POST /analytics/events": (10, 25),
+    "GET /public/explore": (5, 15),
+}
+assert set(throttles) == set(expected_throttles)
+for route, (rate, burst) in expected_throttles.items():
+    assert tuple(route.split(" ", 1)) in actual_routes
+    assert throttles[route] == {"ThrottlingRateLimit": rate, "ThrottlingBurstLimit": burst}
+# Eight simultaneous ZIP downloaders polling every two seconds must fit the
+# configured aggregate token bucket, including their simultaneous first polls.
+for route in ("POST /albums/{albumId}/zip", "POST /shared/{shareCode}/zip"):
+    rate, burst = expected_throttles[route]
+    tokens = burst
+    for elapsed in range(0, 62, 2):
+        tokens = min(burst, tokens + (rate * 2 if elapsed else 0))
+        assert tokens >= 8
+        tokens -= 8
 """
         candidates = [sys.executable]
         sam_executable = shutil.which("sam")

@@ -35,6 +35,56 @@ WAF is defense in depth.
   dedicated per-IP and global limits so arbitrary filter values cannot turn
   repeated requests into unbounded DynamoDB usage.
 
+## No-additional-fee API controls
+
+The API Gateway stage default remains 25 requests/second with a burst of 50.
+Route overrides apply to aggregate traffic across callers, not each visitor:
+
+| Routes | Requests/second | Burst |
+|---|---:|---:|
+| Login, login challenge, contact, album/shared print, print session | 2 | 10 |
+| Album/shared ZIP status, download URL, and original comparison | 5 | 20 |
+| Analytics event ingestion | 10 | 25 |
+| Public Explore | 5 | 15 |
+
+Other routes retain the stage default, including gallery lists/details and
+uploads. Detailed route metrics stay disabled. Browser retry delays and ZIP
+polling already respect cooldowns; these overrides add no paid resource.
+
+The existing six WAF rules remain attached only to the frontend distribution.
+Within each 300-second window, the configured API per-IP target is 900 and
+the API global target remains 3,000. Explore has targets of 120 per IP and
+1,200 globally. Rules retain BLOCK actions, privacy-safe logging, and the same
+scope and evaluation window. These are approximate request-rate targets, not
+hard ceilings. A shared IP or global limit can also affect legitimate callers.
+
+Download and original-comparison handlers validate their bounded request body
+and media identifier before database or identity lookup. Valid requests retain
+all album authorization and media membership checks. Confirmed application
+rate-limit denials are cached within each Lambda process until the database's
+original window expiry. The cache holds at most 1,024 hashed entries, never
+caches permission to proceed or database failures, and falls back to DynamoDB
+on misses, expiry, eviction, or a changed policy. It is an optimization of the
+shared limiter, not a replacement for it.
+
+The normal release deploys the API stage and handler changes. WAF parameter
+tuning requires a separate CloudFormation UPDATE change set for the existing
+WAF stack: explicitly set `ApiPerIpRequestLimit=900`,
+`ExplorePerIpRequestLimit=120`, and `ExploreGlobalRequestLimit=1200`, and use
+previous values for every other parameter. Review that only the existing web
+ACL's rules change, with no ACL replacement or new resource. CloudFormation may
+also report conditional reevaluation of the unchanged logging configuration's
+`ResourceArn` reference; require its definition to be identical and the ACL's
+physical ARN to remain unchanged. Changing defaults in the template alone does
+not update live parameter values. Rate-rule updates
+can briefly reset counting; deploy and verify one controlled update.
+
+For rollback, restore WAF parameter values 1,200 / 300 / 1,500 respectively
+through another reviewed change set, and use the previous attested backend
+release to restore the stage and handlers. Keep origin verification enforced.
+These changes do not add media WAF inspection, alarms, budgets, paid bot
+controls, or an automatic cutoff, and do not cap bandwidth charges.
+
 ## Validate and update
 
 Normal `main` releases preserve the deployed front-door parameters. A front-

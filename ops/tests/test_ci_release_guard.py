@@ -100,6 +100,17 @@ class ChangeSetGateTests(unittest.TestCase):
             {"Add": 0, "Modify": 0, "Total": 0},
         )
 
+    def test_route_throttle_intent_does_not_authorize_other_stage_changes(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        allowed = change(logical_id="ApiStage", resource_type="AWS::ApiGatewayV2::Stage", property_name="RouteSettings")
+        self.assertEqual(release_guard.gate_change_set([{"Changes": [allowed]}], release_intent=intent)["Modify"], 1)
+        for updates in ({"property_name": "AccessLogSettings"}, {"replacement": "True"}, {"logical_id": "OtherStage"}):
+            item = change(**{"logical_id": "ApiStage", "resource_type": "AWS::ApiGatewayV2::Stage", "property_name": "RouteSettings", **updates})
+            with self.subTest(updates=updates), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set([{"Changes": [item]}], release_intent=intent)
+
     def test_rejects_removal_unknown_action_and_protected_resources(self):
         cases = [
             change(action="Remove"),

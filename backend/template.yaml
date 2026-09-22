@@ -1698,6 +1698,51 @@ Resources:
         DetailedMetricsEnabled: false
         ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
         ThrottlingRateLimit: !Ref ApiThrottleRateLimit
+      # Route limits are shared across callers, so keep room for concurrent
+      # visitors and ZIP status polling. No paid detailed metrics are enabled.
+      RouteSettings:
+        'POST /login':
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 10
+        'POST /login/challenge':
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 10
+        'POST /contact':
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 10
+        'POST /albums/{albumId}/zip':
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 20
+        'POST /shared/{shareCode}/zip':
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 20
+        'POST /albums/{albumId}/download-url':
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 20
+        'POST /shared/{shareCode}/download-url':
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 20
+        'POST /albums/{albumId}/original-comparison':
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 20
+        'POST /shared/{shareCode}/original-comparison':
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 20
+        'POST /albums/{albumId}/print':
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 10
+        'POST /shared/{shareCode}/print':
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 10
+        'POST /print/session':
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 10
+        'POST /analytics/events':
+          ThrottlingRateLimit: 10
+          ThrottlingBurstLimit: 25
+        'GET /public/explore':
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 15
       Tags:
         Application: IanTruongPhotography
         Stage: !Ref Stage

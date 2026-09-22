@@ -8,6 +8,8 @@ import os
 import time
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
+from threading import Lock
 
 import boto3
 from botocore.exceptions import ClientError
@@ -16,6 +18,37 @@ from secret_helpers import resolve_secret
 
 
 _rate_table = None
+_denied_requests = OrderedDict()
+_denied_requests_lock = Lock()
+_MAX_DENIED_REQUESTS = 1024
+
+
+def _cached_denial(key, now):
+    with _denied_requests_lock:
+        expires_at = _denied_requests.get(key)
+        if expires_at is None:
+            return False
+        if expires_at <= now:
+            del _denied_requests[key]
+            return False
+        _denied_requests.move_to_end(key)
+        return True
+
+
+def _remember_denial(key, attributes, now, window_seconds):
+    # Only cache a confirmed database decision, never a provider failure. Use
+    # the stored window expiry so repeat requests cannot prolong a block.
+    try:
+        expires_at = int(attributes["ttl"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return
+    if not now < expires_at <= now + window_seconds:
+        return
+    with _denied_requests_lock:
+        _denied_requests[key] = expires_at
+        _denied_requests.move_to_end(key)
+        while len(_denied_requests) > _MAX_DENIED_REQUESTS:
+            _denied_requests.popitem(last=False)
 
 
 def _get_rate_table():
@@ -55,7 +88,12 @@ def check_rate_limit(identifier, action, max_requests, window_seconds, *, fail_c
     current_time = int(time.time() if now is None else now)
     expiry = current_time + window_seconds
     try:
-        key = {"identifier": _identifier_hash(identifier, action)}
+        identifier_hash = _identifier_hash(identifier, action)
+        # Policy/table changes must not inherit a decision from another scope.
+        cache_key = (os.environ.get("RATE_LIMIT_TABLE", ""), identifier_hash, max_requests, window_seconds)
+        if _cached_denial(cache_key, current_time):
+            return False
+        key = {"identifier": identifier_hash}
         table = _get_rate_table()
         try:
             response = table.update_item(
@@ -76,7 +114,10 @@ def check_rate_limit(identifier, action, max_requests, window_seconds, *, fail_c
                 ExpressionAttributeValues={":one": 1},
                 ReturnValues="ALL_NEW",
             )
-        count = int(response.get("Attributes", {}).get("count", max_requests + 1))
+        attributes = response.get("Attributes", {})
+        count = int(attributes.get("count", max_requests + 1))
+        if count > max_requests and "count" in attributes:
+            _remember_denial(cache_key, attributes, current_time, window_seconds)
         return count <= max_requests
     except Exception:
         return not fail_closed

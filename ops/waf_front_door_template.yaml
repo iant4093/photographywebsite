@@ -33,7 +33,7 @@ Parameters:
     Description: Optional existing KMS key whose policy already permits CloudWatch Logs in us-east-1.
   ApiPerIpRequestLimit:
     Type: Number
-    Default: 1200
+    Default: 900
     MinValue: 10
     MaxValue: 2000000000
     Description: Maximum API requests tracked per viewer IP during each five-minute window.
@@ -47,13 +47,13 @@ Parameters:
       Exceeding it can temporarily deny legitimate API traffic while static pages remain available.
   ExplorePerIpRequestLimit:
     Type: Number
-    Default: 300
+    Default: 120
     MinValue: 10
     MaxValue: 2000000000
     Description: Maximum Explore API requests tracked per viewer IP during each five-minute window.
   ExploreGlobalRequestLimit:
     Type: Number
-    Default: 1500
+    Default: 1200
     MinValue: 10
     MaxValue: 2000000000
     Description: >-
