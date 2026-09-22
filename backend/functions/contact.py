@@ -5,7 +5,7 @@ import os
 from audit_helpers import emit_audit_event
 from email_helpers import send_email
 from response_helpers import error_response, internal_error, json_response
-from security_helpers import check_rate_limit, sanitize_text, verify_turnstile
+from security_helpers import check_rate_limit, is_rate_limit_denied, sanitize_text, verify_turnstile
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_email
 
 
@@ -24,6 +24,12 @@ def handler(event, context):
         token = require_string(body.get("turnstileToken"), "turnstileToken", maximum=4096)
         ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
 
+        if is_rate_limit_denied(ip, "contact", max_requests=3, window_seconds=600):
+            emit_audit_event(
+                event_name="contact.submit", outcome="denied", action="contact.message.submit",
+                resource_type="contact", reason_code="rate_limited", event=event, context=context,
+            )
+            return error_response(429, "Too many contact requests. Please try again later.", code="rate_limited")
         if not verify_turnstile(token, ip, expected_action="contact"):
             emit_audit_event(
                 event_name="contact.submit", outcome="denied", action="contact.message.submit",

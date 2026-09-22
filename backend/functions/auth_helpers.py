@@ -47,10 +47,13 @@ def _get_jwks_client():
     if _jwks_client is None or getattr(_jwks_client, "uri", None) != expected_uri:
         _jwks_client = PyJWKClient(
             expected_uri,
-            cache_keys=True,
+            # The set has a TTL; the optional per-key cache does not. Reuse the
+            # set so retired keys stop being trusted after the next refresh.
+            cache_keys=False,
             cache_jwk_set=True,
             lifespan=600,
             timeout=5,
+            cooldown_duration=30,
         )
     return _jwks_client
 
@@ -140,6 +143,12 @@ def get_verified_claims(event, required=True):
         import jwt
 
         issuer, client_id = _configuration()
+        # Reject unsupported/oversized headers before any key lookup. These
+        # unverified fields only restrict work; jwt.decode still verifies trust.
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if header.get("alg") != "RS256" or not isinstance(kid, str) or not 1 <= len(kid) <= 256:
+            raise AuthError()
         signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
         claims = jwt.decode(
             token,

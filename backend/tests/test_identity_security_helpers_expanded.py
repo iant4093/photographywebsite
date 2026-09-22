@@ -96,7 +96,10 @@ class AuthHelperBranchTests(unittest.TestCase):
                 auth_helpers._bearer_token({"headers": {"authorization": header}})
 
     def test_bearer_decode_redacts_provider_failures_and_preserves_auth_errors(self):
-        fake_jwt = SimpleNamespace(decode=Mock(side_effect=RuntimeError("token details")))
+        fake_jwt = SimpleNamespace(
+            decode=Mock(side_effect=RuntimeError("token details")),
+            get_unverified_header=Mock(return_value={"alg": "RS256", "kid": "test-key"}),
+        )
         with patch.dict("sys.modules", {"jwt": fake_jwt}), patch.object(
             auth_helpers,
             "_get_jwks_client",

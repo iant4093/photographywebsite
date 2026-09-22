@@ -1,4 +1,4 @@
-PyJWT==2.13.0
+PyJWT==2.14.0
 cryptography==50.0.0
 requests==2.34.2
 urllib3==2.7.0

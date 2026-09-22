@@ -2,6 +2,7 @@
 
 import base64
 import json
+import math
 import re
 import uuid
 
@@ -11,9 +12,54 @@ class ValidationError(Exception):
 
 
 MAX_JSON_BODY_BYTES = 256 * 1024
+MAX_JSON_DEPTH = 32
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ALLOWED_VISIBILITIES = {"public", "private", "unlisted"}
 ALLOWED_ALBUM_TYPES = {"photo", "video"}
+
+
+def _check_json_depth(raw):
+    # Bound nesting before the decoder allocates containers. Braces inside
+    # strings (including escaped quotes/backslashes) do not count as nesting.
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise ValidationError("Request body is nested too deeply")
+        elif char in "]}":
+            depth -= 1
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValidationError("Request body contains duplicate fields")
+        result[key] = value
+    return result
+
+
+def _finite_json_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValidationError("Request body contains an invalid number")
+    return number
+
+
+def _reject_json_constant(_value):
+    raise ValidationError("Request body contains an invalid number")
 
 
 def parse_json_body(event, *, max_bytes=MAX_JSON_BODY_BYTES):
@@ -23,15 +69,28 @@ def parse_json_body(event, *, max_bytes=MAX_JSON_BODY_BYTES):
     if not isinstance(raw, str):
         raise ValidationError("Request body must be JSON")
     if (event or {}).get("isBase64Encoded"):
+        if len(raw) > 4 * ((max_bytes + 2) // 3):
+            raise ValidationError("Request body is too large")
         try:
-            raw = base64.b64decode(raw, validate=True).decode("utf-8")
+            decoded = base64.b64decode(raw, validate=True)
+            if len(decoded) > max_bytes:
+                raise ValidationError("Request body is too large")
+            raw = decoded.decode("utf-8")
         except (ValueError, UnicodeDecodeError):
             raise ValidationError("Request body must be valid JSON") from None
-    if len(raw.encode("utf-8")) > max_bytes:
+    if len(raw) > max_bytes:
         raise ValidationError("Request body is too large")
     try:
-        body = json.loads(raw)
-    except (TypeError, ValueError):
+        if len(raw.encode("utf-8")) > max_bytes:
+            raise ValidationError("Request body is too large")
+        _check_json_depth(raw)
+        body = json.loads(
+            raw,
+            object_pairs_hook=_unique_json_object,
+            parse_float=_finite_json_float,
+            parse_constant=_reject_json_constant,
+        )
+    except (TypeError, ValueError, RecursionError):
         raise ValidationError("Request body must be valid JSON") from None
     if not isinstance(body, dict):
         raise ValidationError("Request body must be a JSON object")

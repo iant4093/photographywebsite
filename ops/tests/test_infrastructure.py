@@ -103,6 +103,17 @@ for logical_id, resource in template["Resources"].items():
         properties["ContentUri"] = f"s3://sam-contract-test/{logical_id}.zip"
 
 processed = Translator({}, Parser()).translate(template, {})
+share_role = processed["Resources"]["GetSharedAlbumFunctionRole"]["Properties"]
+share_reads = [
+    statement
+    for policy in share_role["Policies"]
+    for statement in policy.get("PolicyDocument", {}).get("Statement", [])
+    if statement.get("Action") == "dynamodb:GetItem"
+]
+assert share_reads == [{
+    "Effect": "Allow", "Action": "dynamodb:GetItem",
+    "Resource": {"Fn::GetAtt": ["AlbumsTable", "Arn"]},
+}], share_reads
 api = processed["Resources"]["Api"]
 assert api["Type"] == "AWS::ApiGatewayV2::Api"
 assert api["Properties"]["FailOnWarnings"] is True
@@ -1159,7 +1170,7 @@ class MigrationAndPackagingTests(unittest.TestCase):
         self.assertIn('cp "functions/$$source" "$(ARTIFACTS_DIR)/"', MAKEFILE)
         self.assertNotIn("cp functions/*.json", MAKEFILE)
         for dependency in (
-            "PyJWT==2.13.0",
+            "PyJWT==2.14.0",
             "cryptography==50.0.0",
             "resend==2.34.0",
             "ExifRead==3.5.1",

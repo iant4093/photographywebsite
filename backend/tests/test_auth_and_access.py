@@ -47,7 +47,10 @@ class AuthenticationTests(unittest.TestCase):
 
     def test_manual_bearer_decode_is_restricted_to_rs256(self):
         decoded = claims()
-        fake_jwt = SimpleNamespace(decode=Mock(return_value=decoded))
+        fake_jwt = SimpleNamespace(
+            decode=Mock(return_value=decoded),
+            get_unverified_header=Mock(return_value={"alg": "RS256", "kid": "test-key"}),
+        )
         signing = SimpleNamespace(key="public-key")
         with patch.dict("sys.modules", {"jwt": fake_jwt}), patch.object(
             auth_helpers, "_get_jwks_client", return_value=Mock(get_signing_key_from_jwt=Mock(return_value=signing))

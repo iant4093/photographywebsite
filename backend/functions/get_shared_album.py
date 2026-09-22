@@ -11,8 +11,8 @@ from album_access import authorize_album
 from auth_helpers import AuthError, auth_error_response
 from media_access import serialize_album_detail, serialize_images
 from response_helpers import error_response, internal_error, json_response
-from security_helpers import check_rate_limit, verify_turnstile
-from validation_helpers import ValidationError
+from security_helpers import check_rate_limit, is_rate_limit_denied, verify_turnstile
+from validation_helpers import ValidationError, validate_uuid
 
 
 SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
@@ -49,6 +49,9 @@ def handler(event, context):
             return error_response(404, "Shared album not found", code="not_found")
         headers = {str(key).lower(): value for key, value in ((event or {}).get("headers") or {}).items()}
         turnstile_token = headers.get("x-turnstile-token", "")
+        if is_rate_limit_denied(ip, "shared_album", max_requests=30, window_seconds=300):
+            _audit(event, context, "denied", "rate_limited")
+            return error_response(429, "Too many requests. Please try again later.", code="rate_limited")
         if not verify_turnstile(turnstile_token, ip, expected_action="shared_album"):
             _audit(event, context, "denied", "captcha_failed")
             return error_response(403, "Security verification failed", code="captcha_failed")
@@ -65,7 +68,13 @@ def handler(event, context):
         if len(items) != 1:
             _audit(event, context, "denied", "share_not_found")
             return error_response(404, "Shared album not found", code="not_found")
-        album = items[0]
+        # The index is eventually consistent: use it only to locate the album,
+        # then authorize against its current sharing state and media manifest.
+        album_id = validate_uuid(items[0].get("albumId"))
+        album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+        if not isinstance(album, dict) or album.get("isShared") is not True or album.get("shareCode") != share_code:
+            _audit(event, context, "denied", "share_access_denied")
+            return error_response(404, "Shared album not found", code="not_found")
         authorize_album(album, share_code=share_code)
 
         # Compatibility shape: current shared frontend expects album fields and

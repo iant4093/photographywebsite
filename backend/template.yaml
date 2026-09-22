@@ -2392,6 +2392,9 @@ Resources:
               Action: dynamodb:Query
               Resource: !Sub '${AlbumsTable.Arn}/index/ShareCodeIndex'
             - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt PreviewMetadataTable.Arn
             - Effect: Allow

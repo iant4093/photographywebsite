@@ -85,6 +85,34 @@ release to restore the stage and handlers. Keep origin verification enforced.
 These changes do not add media WAF inspection, alarms, budgets, paid bot
 controls, or an automatic cutoff, and do not cap bandwidth charges.
 
+## Application hardening
+
+Manual Cognito JWT verification uses PyJWT 2.14.0, a ten-minute JWKS cache,
+and a 30-second cooldown for unknown-key refreshes. Unsupported algorithms and
+missing or oversized key IDs are rejected before fetching keys. The unbounded
+per-key cache is disabled so retired keys are no longer trusted after a set
+refresh. A newly published key can take up to 30 seconds to be discovered when
+the client has just refreshed; known valid keys continue working during that
+cooldown and during a failed refresh while their cached set remains valid.
+
+Login, login challenges, contact, and shared-album viewing peek at confirmed
+IP blocks before Turnstile. This does not consume quota, extend a block, inspect
+username blocks before CAPTCHA, or cache an allowance. A miss still requires
+Turnstile followed by the existing authoritative limiter.
+
+JSON bodies retain their endpoint-specific byte limits and additionally reject
+duplicate object keys, non-finite numbers (including exponent overflow), and
+nesting beyond 32 containers. Encoded bodies are size-checked before base64
+decoding. Normal Unicode text, arrays, numbers, and escaped strings remain valid.
+
+Shared-album viewing uses the share index only to find the album ID, then reads
+the base table consistently and checks the current share code, enabled state,
+visibility, and status before serializing any media. A failed read never falls
+back to the stale index record. This adds one metered read for a uniquely matched
+share; it does not invalidate already-issued URLs before their normal expiry.
+Deploy the handler and its narrow `dynamodb:GetItem` permission on `AlbumsTable`
+together using the backend template. No new AWS resources are required.
+
 ## Validate and update
 
 Normal `main` releases preserve the deployed front-door parameters. A front-

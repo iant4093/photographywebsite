@@ -73,6 +73,27 @@ def _identifier_hash(identifier, action):
     return f"{action}#{digest}"
 
 
+def is_rate_limit_denied(identifier, action, max_requests, window_seconds, *, now=None):
+    """Peek at a confirmed local block without consuming quota or querying its table.
+
+    False means unknown, not allowed: callers must still verify Turnstile and
+    use the authoritative rate limiter. Cache misses/errors cannot grant access.
+    """
+    with _denied_requests_lock:
+        if not _denied_requests:
+            return False
+    try:
+        if not isinstance(action, str) or not action or len(action) > 64:
+            return False
+        max_requests, window_seconds = int(max_requests), int(window_seconds)
+        if max_requests < 1 or window_seconds < 1:
+            return False
+        key = (os.environ.get("RATE_LIMIT_TABLE", ""), _identifier_hash(identifier, action), max_requests, window_seconds)
+        return _cached_denial(key, int(time.time() if now is None else now))
+    except Exception:
+        return False
+
+
 def check_rate_limit(identifier, action, max_requests, window_seconds, *, fail_closed=True, now=None):
     """Atomic fixed-window rate limiter that resets expired-but-not-deleted rows."""
     if not isinstance(action, str) or not action or len(action) > 64:

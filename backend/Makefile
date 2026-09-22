@@ -62,12 +62,12 @@ DEPS_OriginalIndexRefreshFunction := google-auth==2.56.0 requests==2.34.2 ExifRe
 DEPS_OriginalComparisonWorkerFunction := google-auth==2.56.0 requests==2.34.2 ExifRead==3.5.1 Pillow==12.3.0
 PIP_PLATFORM_OriginalComparisonWorkerFunction := manylinux_2_28_x86_64
 
-DEPS_GetAlbumFunction := PyJWT==2.13.0 cryptography==50.0.0
-DEPS_GetAdminAlbumMediaFunction := PyJWT==2.13.0 cryptography==50.0.0
-DEPS_GetAlbumsFunction := PyJWT==2.13.0 cryptography==50.0.0
-DEPS_CreateZipFunction := PyJWT==2.13.0 cryptography==50.0.0
-DEPS_GetDownloadUrlFunction := PyJWT==2.13.0 cryptography==50.0.0
-DEPS_PreparePrintFunction := PyJWT==2.13.0 cryptography==50.0.0
+DEPS_GetAlbumFunction := PyJWT==2.14.0 cryptography==50.0.0
+DEPS_GetAdminAlbumMediaFunction := PyJWT==2.14.0 cryptography==50.0.0
+DEPS_GetAlbumsFunction := PyJWT==2.14.0 cryptography==50.0.0
+DEPS_CreateZipFunction := PyJWT==2.14.0 cryptography==50.0.0
+DEPS_GetDownloadUrlFunction := PyJWT==2.14.0 cryptography==50.0.0
+DEPS_PreparePrintFunction := PyJWT==2.14.0 cryptography==50.0.0
 DEPS_ContactFunction := resend==2.34.0
 DEPS_CreateAlbumFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6
 DEPS_UpdateAlbumFunction := segno==1.6.6

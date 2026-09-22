@@ -283,6 +283,7 @@ class SharedAlbumBranchTests(unittest.TestCase):
     def _call(self, *, code=SHARE_CODE, verify=True, allowed=True, items=None, authorize_error=None, query_error=None):
         table = Mock()
         table.query.return_value = {"Items": items if items is not None else [album(visibility="unlisted", isShared=True, shareCode=code)]}
+        table.get_item.return_value = {"Item": album(visibility="unlisted", isShared=True, shareCode=code)}
         table.query.side_effect = query_error
         with patch.object(get_shared_album, "table", table), patch.object(
             get_shared_album, "verify_turnstile", return_value=verify
