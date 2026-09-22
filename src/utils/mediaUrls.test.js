@@ -1,4 +1,4 @@
-import { normalizeHeroManifest } from './heroManifestValidation'
+import { normalizeHeroManifest } from './publicMediaMetadata'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     albumCoverPreviewSrcSet,
@@ -157,6 +157,34 @@ describe('media URL compatibility', () => {
         expect(mediaFileName({ id: 'https://example.com/path/photo.jpg?signature=secret' }))
             .toBe('photo.jpg')
         expect(mediaFileName(null, 'photo.jpg')).toBe('photo.jpg')
+    })
+
+    it('shares cover derivation across concurrent cards and recomputes a changed cover', async () => {
+        const albumId = '223e4567-e89b-42d3-a456-426614174000'
+        const digest = vi.spyOn(crypto.subtle, 'digest')
+        const album = { albumId, coverImageUrl: cdnUrl(`albums/${albumId}/original/shared.jpg`) }
+        const values = await Promise.all([albumCoverPreviewSrcSet(album), albumCoverPreviewSrcSet({ ...album })])
+        expect(values[0]).toBe(values[1])
+        await expect(albumCoverPreviewSrcSet(album)).resolves.toBe(values[0])
+        expect(digest).toHaveBeenCalledOnce()
+        const changed = await albumCoverPreviewSrcSet({ ...album, coverImageUrl: album.coverImageUrl.replace('shared.jpg', 'changed.jpg') })
+        expect(changed).not.toBe(values[0])
+        expect(digest).toHaveBeenCalledTimes(2)
+    })
+
+    it('retries a failed cover calculation and bounds the cache across large catalogs', async () => {
+        const albumId = '323e4567-e89b-42d3-a456-426614174000'
+        const album = index => ({ albumId, coverImageUrl: cdnUrl(`albums/${albumId}/original/bounded-${index}.jpg`) })
+        const digest = vi.spyOn(crypto.subtle, 'digest')
+        digest.mockRejectedValueOnce(new Error('crypto unavailable'))
+        await expect(albumCoverPreviewSrcSet(album(0))).rejects.toThrow('crypto unavailable')
+        await expect(albumCoverPreviewSrcSet(album(0))).resolves.toContain('-w640.webp')
+        for (let index = 1; index <= 256; index++) await albumCoverPreviewSrcSet(album(index))
+        digest.mockClear()
+        await albumCoverPreviewSrcSet(album(256))
+        expect(digest).not.toHaveBeenCalled()
+        await albumCoverPreviewSrcSet(album(0))
+        expect(digest).toHaveBeenCalledOnce()
     })
 
     it('extracts explicit expiry metadata from AWS signed display URLs only', () => {

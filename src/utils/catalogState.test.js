@@ -16,6 +16,7 @@ describe('loadCompleteCatalog', () => {
     afterEach(() => {
         clearCatalogSnapshots()
         vi.useRealTimers()
+        vi.unstubAllGlobals()
     })
 
     it('stores, marks stale, expires, deletes, and clears catalog snapshots', () => {
@@ -54,6 +55,7 @@ describe('loadCompleteCatalog', () => {
             nextCursor: null,
         })
 
+        window.dispatchEvent(new Event('pagehide'))
         const stored = JSON.parse(sessionStorage.getItem('ian:public-catalog:v6:public-photos'))
         expect(stored).toMatchObject({
             version: 6,
@@ -103,10 +105,72 @@ describe('loadCompleteCatalog', () => {
             hoverPreviewManifestUrl: 'https://media.test/public-previews/album-one/hover.json',
         }
         setCatalogSnapshot('public-photos', { items: [album], nextCursor: null })
+        window.dispatchEvent(new Event('pagehide'))
         const persisted = sessionStorage.getItem('ian:public-catalog:v6:public-photos')
         deleteCatalogSnapshot('public-photos')
         sessionStorage.setItem('ian:public-catalog:v6:public-photos', persisted)
         expect(getCatalogSnapshot('public-photos').items).toEqual([album])
+    })
+
+    it('coalesces persistence during idle time while memory stays immediately current', () => {
+        let idle
+        vi.stubGlobal('requestIdleCallback', vi.fn(callback => { idle = callback; return 7 }))
+        vi.stubGlobal('cancelIdleCallback', vi.fn())
+        const setItem = vi.spyOn(sessionStorage, 'setItem')
+        const first = { items: [{ albumId: 'one' }], nextCursor: 'two' }
+        const final = { items: [{ albumId: 'one' }, { albumId: 'two' }], nextCursor: null }
+        setCatalogSnapshot('public-photos', first)
+        setCatalogSnapshot('public-photos', final)
+        expect(getCatalogSnapshot('public-photos').items).toBe(final.items)
+        expect(setItem).not.toHaveBeenCalled()
+        expect(window.requestIdleCallback).toHaveBeenCalledExactlyOnceWith(expect.any(Function), { timeout: 1000 })
+        idle()
+        expect(setItem).toHaveBeenCalledOnce()
+        expect(JSON.parse(setItem.mock.calls[0][1]).items).toHaveLength(2)
+    })
+
+    it('flushes before backgrounding and never resurrects invalidated snapshots from queued writes', () => {
+        let idle
+        vi.stubGlobal('requestIdleCallback', callback => { idle = callback; return 3 })
+        vi.stubGlobal('cancelIdleCallback', vi.fn())
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+        setCatalogSnapshot('public-photos', { items: [{ albumId: 'one' }] })
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+        document.dispatchEvent(new Event('visibilitychange'))
+        expect(sessionStorage.getItem('ian:public-catalog:v6:public-photos')).not.toBeNull()
+        expect(window.cancelIdleCallback).toHaveBeenCalledWith(3)
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+        setCatalogSnapshot('public-photos', { items: [{ albumId: 'private-now' }] })
+        invalidateCatalogSnapshots()
+        idle()
+        window.dispatchEvent(new Event('pagehide'))
+        expect(sessionStorage.getItem('ian:public-catalog:v6:public-photos')).toBeNull()
+    })
+
+    it('keeps other pending catalogs when one is deleted and falls back when idle scheduling is unavailable', () => {
+        vi.useFakeTimers()
+        vi.stubGlobal('requestIdleCallback', undefined)
+        setCatalogSnapshot('public-photos', { items: [{ albumId: 'one' }] })
+        setCatalogSnapshot('public-videos', { items: [{ albumId: 'video' }] })
+        deleteCatalogSnapshot('public-photos')
+        vi.advanceTimersByTime(149)
+        expect(sessionStorage.getItem('ian:public-catalog:v6:public-videos')).toBeNull()
+        vi.advanceTimersByTime(1)
+        expect(sessionStorage.getItem('ian:public-catalog:v6:public-photos')).toBeNull()
+        expect(JSON.parse(sessionStorage.getItem('ian:public-catalog:v6:public-videos')).items[0].albumId).toBe('video')
+        expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('retains a usable memory snapshot if background storage is unavailable or the catalog is too large', () => {
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+        vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => { throw new Error('quota') })
+        const items = [{ albumId: 'one' }]
+        expect(() => setCatalogSnapshot('public-photos', { items })).not.toThrow()
+        expect(getCatalogSnapshot('public-photos').items).toBe(items)
+        const large = Array.from({ length: 501 }, (_, index) => ({ albumId: String(index) }))
+        setCatalogSnapshot('public-videos', { items: large })
+        expect(getCatalogSnapshot('public-videos').items).toBe(large)
+        expect(sessionStorage.getItem('ian:public-catalog:v6:public-videos')).toBeNull()
     })
 
     it('ignores older snapshots that may have lost gallery order so the page refetches the catalog', () => {

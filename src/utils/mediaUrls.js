@@ -1,4 +1,4 @@
-const cdnDomain = import.meta.env.VITE_CLOUDFRONT_DOMAIN
+export const cdnDomain = import.meta.env.VITE_CLOUDFRONT_DOMAIN
 
 const DISPLAY_URL_FIELDS = [
     'url',
@@ -8,14 +8,13 @@ const DISPLAY_URL_FIELDS = [
     'coverThumbnailUrl',
 ]
 
-const PREVIEW_VERSION = 3
-const PREVIEW_WIDTHS = [640, 960, 1440, 1920]
+export const PREVIEW_VERSION = 3
+export const PREVIEW_WIDTHS = [640, 960, 1440, 1920]
 export const HERO_COVER_KEY = 'site/hero/home'
 export const HERO_MANIFEST_KEY = 'site/hero/manifest.json'
 export const HERO_CURRENT_PREFIX = 'site/hero/current'
 export const HERO_CURRENT_WIDTHS = Object.freeze([640, 960, 1280, 1920, 2560])
 export const HERO_PUBLISHED_EVENT = 'gallery-hero-published'
-const ALBUM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 function safePreviewUrl(value) {
     if (typeof value !== 'string' || value.length > 4096 || /[\s,]/.test(value)) return ''
@@ -185,7 +184,7 @@ export async function fetchHeroManifest({ signal, heroType = 'photo' } = {}) {
             cache: 'no-cache',
             signal,
         }),
-        import('./heroManifestValidation'),
+        import('./publicMediaMetadata'),
     ])
     if (!response.ok) return null
     try {
@@ -207,25 +206,10 @@ export function heroManifestImageUrl(manifest) {
     return (candidates?.find(({ width }) => width >= 1280) || candidates?.at(-1))?.url || ''
 }
 
+// Share the already-lazy public metadata module with hero validation.
 export async function albumCoverPreviewSrcSet(album) {
-    const albumId = typeof album?.albumId === 'string' ? album.albumId.toLowerCase() : ''
-    if (!ALBUM_ID_PATTERN.test(albumId) || !globalThis.crypto?.subtle) return ''
-    const cover = album?.coverImageUrl
-    if (typeof cover !== 'string' || !cover.startsWith('https://')) return ''
-    let rawKey
-    try {
-        const parsed = new URL(cover)
-        if (cdnDomain && parsed.hostname !== cdnDomain) return ''
-        rawKey = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''))
-    } catch {
-        return ''
-    }
-    if (!rawKey.startsWith('albums/') || rawKey.includes('\\') || rawKey.split('/').some((part) => !part || part === '.' || part === '..')) return ''
-    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawKey))
-    const mediaId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
-    return PREVIEW_WIDTHS
-        .map((width) => `${cdnUrl(`public-previews/${albumId}/v${PREVIEW_VERSION}/${mediaId}-w${width}.webp`)} ${width}w`)
-        .join(', ')
+    const { albumCoverPreviewSrcSet: derive } = await import('./publicMediaMetadata')
+    return derive(album)
 }
 
 export function albumCoverUrl(album) {

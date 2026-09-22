@@ -13,6 +13,69 @@ const previews = (name) => [640, 960, 1440, 1920]
 describe('album hover preview selection', () => {
     afterEach(() => vi.unstubAllGlobals())
 
+    it.each([[640, 427, 2], [1920, 1280, 5]])('reuses small decoded frames but bounds larger frames (%i x %i)', async (width, height, expectedLoads) => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('hover: hover') }))
+        const loaded = []
+        vi.stubGlobal('Image', class {
+            constructor() {
+                const image = document.createElement('img')
+                Object.defineProperties(image, { naturalWidth: { value: width }, naturalHeight: { value: height } })
+                image.decode = () => Promise.resolve()
+                loaded.push(image)
+                return image
+            }
+        })
+        const container = document.createElement('div')
+        const loadManifest = vi.fn().mockResolvedValue({ schemaVersion: 1, version: 'cached',
+            images: [1, 2].map(id => ({ url: `https://media.example.test/${id}.webp`, width: 640, height: 427 })),
+        })
+        const controller = start({ container, loadManifest })
+        try {
+            await vi.advanceTimersByTimeAsync(10000)
+            expect(loaded).toHaveLength(expectedLoads)
+            expect(container.querySelectorAll('img').length).toBeLessThanOrEqual(2)
+            expect(container.querySelector('img').style.opacity).toBe('1')
+            controller.stop()
+            expect(container.querySelector('img')).toBeNull()
+            expect(vi.getTimerCount()).toBe(0)
+            const restarted = start({ container, loadManifest })
+            await vi.advanceTimersByTimeAsync(700)
+            expect(loaded).toHaveLength(expectedLoads + 1)
+            restarted.stop()
+        } finally { controller.stop(); vi.useRealTimers() }
+    })
+
+    it('keeps the surviving reused frame visible when all other frames fail', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('hover: hover') }))
+        const loaded = []
+        vi.stubGlobal('Image', class {
+            constructor() {
+                const image = document.createElement('img')
+                Object.defineProperties(image, { naturalWidth: { value: 640 }, naturalHeight: { value: 427 }, src: {
+                    set(url) {
+                        image.setAttribute('src', url)
+                        loaded.push(url)
+                        queueMicrotask(() => url.includes('bad') ? image.onerror?.() : image.onload?.())
+                    },
+                } })
+                return image
+            }
+        })
+        const container = document.createElement('div')
+        const controller = start({ container, loadManifest: async () => ({ schemaVersion: 1, version: 'one-good',
+            images: ['good', 'bad'].map(id => ({ url: `https://media.example.test/${id}.webp`, width: 640, height: 427 })),
+        }) })
+        try {
+            await vi.advanceTimersByTimeAsync(10000)
+            expect(loaded).toHaveLength(2)
+            expect(container.querySelectorAll('img')).toHaveLength(1)
+            expect(container.querySelector('img')).toHaveAttribute('src', 'https://media.example.test/good.webp')
+            expect(container.querySelector('img').style.opacity).toBe('1')
+        } finally { controller.stop(); vi.useRealTimers() }
+    })
+
     it('cancels a photo preview before loading when its row scrolls', async () => {
         vi.useFakeTimers()
         vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('hover: hover') }))

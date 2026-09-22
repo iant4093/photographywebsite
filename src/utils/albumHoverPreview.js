@@ -7,6 +7,7 @@ export const ALBUM_HOVER_FRAME_MS = 2200
 export const ALBUM_HOVER_FADE_MS = 600
 export const ALBUM_HOVER_PREVIEW_WIDTH = 640
 export const ALBUM_HOVER_PREVIEW_LIMIT = 5
+const MAX_DECODED_FRAME_BYTES = 12 * 1024 * 1024
 
 function comparablePath(value) {
     if (!value) return ''
@@ -105,6 +106,8 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
     let currentImage = null
     const timers = new Set()
     const previewImages = new Set()
+    const decodedFrames = new Map()
+    let decodedBytes = 0
     const stop = () => {
         active = false
         removeLifecycle()
@@ -112,9 +115,29 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
         timers.clear()
         previewImages.forEach((image) => image.remove())
         previewImages.clear()
+        decodedFrames.clear()
+        decodedBytes = 0
         currentImage = null
     }
     const removeLifecycle = stopPreviewOnLeave(stop)
+    const loadFrame = async url => {
+        const cached = decodedFrames.get(url)
+        if (cached) return cached.image
+        const image = await preloadAlbumHoverPreview(url)
+        const bytes = image.naturalWidth * image.naturalHeight * 4
+        // Retain only this active sequence, with a decoded-pixel budget. Large
+        // responsive frames keep the existing streaming behavior.
+        if (active && bytes > 0 && bytes <= MAX_DECODED_FRAME_BYTES) {
+            while (decodedBytes + bytes > MAX_DECODED_FRAME_BYTES) {
+                const [key, oldest] = decodedFrames.entries().next().value
+                decodedFrames.delete(key)
+                decodedBytes -= oldest.bytes
+            }
+            decodedFrames.set(url, { image, bytes })
+            decodedBytes += bytes
+        }
+        return image
+    }
     const later = (callback, delay) => {
         const timer = window.setTimeout(() => {
             timers.delete(timer)
@@ -164,10 +187,10 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
                 try {
                     let image
                     try {
-                        image = await preloadAlbumHoverPreview(candidate.url)
+                        image = await loadFrame(candidate.url)
                     } catch (error) {
                         if (!active || !candidate.fallbackUrl) throw error
-                        image = await preloadAlbumHoverPreview(candidate.fallbackUrl)
+                        image = await loadFrame(candidate.fallbackUrl)
                         // Reuse the successful fallback on subsequent loops.
                         candidate.url = candidate.fallbackUrl
                         delete candidate.fallbackUrl
@@ -182,12 +205,14 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
             }
             if (!nextFrame || !active) return
 
-            const previousImage = currentImage
             const nextImage = nextFrame.image
-            stylePreviewImage(nextImage)
-            previewImages.add(nextImage)
-            container?.appendChild(nextImage)
-            currentImage = nextImage
+            const previousImage = currentImage === nextImage ? null : currentImage
+            if (currentImage !== nextImage) {
+                stylePreviewImage(nextImage)
+                previewImages.add(nextImage)
+                container?.appendChild(nextImage)
+                currentImage = nextImage
+            }
             later(() => {
                 nextImage.style.opacity = '1'
                 if (previousImage) {

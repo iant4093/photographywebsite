@@ -15,8 +15,20 @@ export default function usePhotoSections(images, enabled = true) {
             { key: 'all', title: 'All photos', images: images.filter(image => image.isFavorite !== true) },
         ]
     }, [images, enabled])
-    const activeImages = sections.find(section => section.images.some(image => mediaId(image) === selectedId))?.images || EMPTY_IMAGES
-    const index = activeImages.findIndex(image => mediaId(image) === selectedId)
+    const positions = useMemo(() => {
+        const lookup = new Map()
+        for (const section of sections) {
+            section.images.forEach((image, index) => {
+                const id = mediaId(image)
+                // Keep the first occurrence, matching the former list search.
+                if (!lookup.has(id)) lookup.set(id, { images: section.images, index })
+            })
+        }
+        return lookup
+    }, [sections])
+    const selected = positions.get(selectedId)
+    const activeImages = selected?.images || EMPTY_IMAGES
+    const index = selected?.index ?? -1
     const lightboxIndex = index < 0 ? null : index
     const openPhoto = useCallback(image => setSelectedId(mediaId(image)), [])
     const resetLightbox = useCallback(() => setSelectedId(null), [])

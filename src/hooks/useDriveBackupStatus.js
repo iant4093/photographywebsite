@@ -12,12 +12,16 @@ export default function useDriveBackupStatus(albumIds, getIdToken, notify) {
         const controller = new AbortController()
         let timer
         let attempts = 0
+        let polling = false
         async function poll() {
-            if (document.hidden) return
+            if (document.hidden || polling || controller.signal.aborted || !ids.length) return
+            polling = true
+            window.clearTimeout(timer)
             try {
                 const token = await getIdToken()
                 const items = []
                 for (let offset = 0; offset < ids.length; offset += 100) {
+                    if (controller.signal.aborted) return
                     const result = await fetchDriveBackupStatus(token, ids.slice(offset, offset + 100), { signal: controller.signal })
                     items.push(...result.items)
                 }
@@ -39,6 +43,8 @@ export default function useDriveBackupStatus(albumIds, getIdToken, notify) {
                     setStatuses(Object.fromEntries(ids.map((id) => [id, { status: 'unavailable' }])))
                     if (attempts++ < 3) timer = window.setTimeout(poll, 15000)
                 }
+            } finally {
+                polling = false
             }
         }
         const visibility = () => { if (!document.hidden) { window.clearTimeout(timer); poll() } }

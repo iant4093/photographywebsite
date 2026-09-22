@@ -1,4 +1,4 @@
-import { cdnUrl } from './mediaUrls'
+import { cdnDomain, cdnUrl, PREVIEW_VERSION, PREVIEW_WIDTHS } from './mediaUrls'
 
 const HERO_VERSION_PATTERN = /^[a-f0-9]{32}$/
 
@@ -47,5 +47,43 @@ export function normalizeHeroManifest(value, heroType = 'photo') {
         source: { width: sourceWidth, height: sourceHeight },
         variants,
     }
+}
+
+
+const ALBUM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const coverPreviewSets = new Map()
+const MAX_COVER_PREVIEW_SETS = 256
+
+export async function albumCoverPreviewSrcSet(album) {
+    const albumId = typeof album?.albumId === 'string' ? album.albumId.toLowerCase() : ''
+    if (!ALBUM_ID_PATTERN.test(albumId) || !globalThis.crypto?.subtle) return ''
+    const cover = album?.coverImageUrl
+    if (typeof cover !== 'string' || !cover.startsWith('https://')) return ''
+    let rawKey
+    try {
+        const parsed = new URL(cover)
+        if (cdnDomain && parsed.hostname !== cdnDomain) return ''
+        rawKey = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''))
+    } catch {
+        return ''
+    }
+    if (!rawKey.startsWith('albums/') || rawKey.includes('\\') || rawKey.split('/').some((part) => !part || part === '.' || part === '..')) return ''
+    const key = `${albumId}\n${cover}`
+    let result = coverPreviewSets.get(key)
+    if (result) coverPreviewSets.delete(key)
+    else {
+        result = globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawKey)).then(digest => {
+            const mediaId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
+            return PREVIEW_WIDTHS
+                .map((width) => `${cdnUrl(`public-previews/${albumId}/v${PREVIEW_VERSION}/${mediaId}-w${width}.webp`)} ${width}w`)
+                .join(', ')
+        }).catch(error => {
+            if (coverPreviewSets.get(key) === result) coverPreviewSets.delete(key)
+            throw error
+        })
+    }
+    coverPreviewSets.set(key, result)
+    if (coverPreviewSets.size > MAX_COVER_PREVIEW_SETS) coverPreviewSets.delete(coverPreviewSets.keys().next().value)
+    return result
 }
 

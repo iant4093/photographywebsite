@@ -2,6 +2,8 @@ import { isSafeCursor } from './apiResponse'
 
 const catalogSnapshots = new Map()
 const pendingCatalogMutations = new Map()
+const pendingWrites = new Map()
+let cancelWrite = null
 const MAX_SNAPSHOT_AGE_MS = 5 * 60_000
 const MAX_STALE_SNAPSHOT_AGE_MS = 30 * 60_000
 const MAX_PENDING_MUTATION_AGE_MS = 10 * 60_000
@@ -131,7 +133,44 @@ function persistSnapshot(key, snapshot) {
     }
 }
 
+function cancelPendingWrite() {
+    cancelWrite?.()
+    cancelWrite = null
+    window.removeEventListener('pagehide', flushPendingWrites)
+    document.removeEventListener('visibilitychange', flushWhenHidden)
+}
+
+function flushPendingWrites() {
+    cancelPendingWrite()
+    for (const [key, snapshot] of pendingWrites) persistSnapshot(key, snapshot)
+    pendingWrites.clear()
+}
+
+function flushWhenHidden() {
+    if (document.hidden) flushPendingWrites()
+}
+
+function scheduleSnapshot(key, snapshot) {
+    if (!PERSISTED_CATALOG_KEYS.includes(key) || typeof window === 'undefined') return
+    pendingWrites.set(key, snapshot)
+    if (document.hidden) { flushPendingWrites(); return }
+    if (cancelWrite) return
+    // Memory is current immediately; coalesce serialization/storage work away
+    // from input, while preserving the newest snapshot on reload or tab hide.
+    if (typeof window.requestIdleCallback === 'function') {
+        const id = window.requestIdleCallback(flushPendingWrites, { timeout: 1000 })
+        cancelWrite = () => window.cancelIdleCallback(id)
+    } else {
+        const id = window.setTimeout(flushPendingWrites, 150)
+        cancelWrite = () => window.clearTimeout(id)
+    }
+    window.addEventListener('pagehide', flushPendingWrites)
+    document.addEventListener('visibilitychange', flushWhenHidden)
+}
+
 function removePersistedSnapshot(key) {
+    pendingWrites.delete(key)
+    if (!pendingWrites.size && typeof window !== 'undefined') cancelPendingWrite()
     try {
         snapshotStorage()?.removeItem(storageKey(key))
     } catch {
@@ -158,7 +197,7 @@ export function getCatalogSnapshot(key) {
 export function setCatalogSnapshot(key, value) {
     const snapshot = { ...value, savedAt: Date.now() }
     catalogSnapshots.set(key, snapshot)
-    persistSnapshot(key, snapshot)
+    scheduleSnapshot(key, snapshot)
 }
 
 export function invalidateCatalogSnapshots() {
