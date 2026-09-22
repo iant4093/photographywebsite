@@ -117,63 +117,76 @@ def _add_counter(counters, metric_key, *, count=1, value=Decimal("0")):
     current["sum"] += value
 
 
-def _validate_and_aggregate(events, country):
-    counters = {}
-    album_cache = {}
+def _validate_events(events):
+    """Validate the entire bounded batch without any database work."""
     site_visits = 0
     for event in events:
         if not isinstance(event, dict):
             raise ValidationError("Analytics events must be objects")
         name = event.get("name")
+        if not isinstance(name, str):
+            raise ValidationError("Analytics event name was invalid")
         if name in SIMPLE_EVENTS:
             _require_exact_keys(event, {"name"})
-            _add_counter(counters, f"event#{name}")
             continue
 
         if name == "site_visit":
             _require_exact_keys(event, {"name", "source", "device"})
             source = event.get("source")
             device = event.get("device")
-            if source not in ALLOWED_SOURCES or device not in ALLOWED_DEVICES:
+            if not isinstance(source, str) or not isinstance(device, str) or source not in ALLOWED_SOURCES or device not in ALLOWED_DEVICES:
                 raise ValidationError("Visit dimensions were invalid")
             site_visits += 1
             if site_visits > 1:
                 raise ValidationError("Only one site visit is accepted per batch")
-            _add_counter(counters, "event#site_visit")
-            _add_counter(counters, f"source#{source}")
-            _add_counter(counters, f"device#{device}")
-            _add_counter(counters, f"country#{country}")
             continue
 
         if name in ALBUM_EVENTS:
             _require_exact_keys(event, {"name", "albumId"})
-            album = _public_album(event.get("albumId"), album_cache)
-            if name in {"photo_download", "zip_request"} and album["type"] != "photo":
-                raise ValidationError("Photo event album type was invalid")
-            _add_counter(counters, f"event#{name}")
-            if name == "album_view":
-                _add_counter(counters, f"album#{album['type']}#{album['albumId']}")
-                _add_counter(counters, f"category#{album['category']}")
+            validate_uuid(event.get("albumId"))
             continue
 
         if name == "web_vital":
             _require_exact_keys(event, {"name", "metric", "value", "rating"})
             metric = event.get("metric")
             rating = event.get("rating")
-            if metric not in ALLOWED_VITALS or rating not in ALLOWED_RATINGS:
+            if not isinstance(metric, str) or not isinstance(rating, str) or metric not in ALLOWED_VITALS or rating not in ALLOWED_RATINGS:
                 raise ValidationError("Web Vital dimensions were invalid")
-            _add_counter(counters, f"vital#{metric}#{rating}", value=_decimal_value(event.get("value")))
+            _decimal_value(event.get("value"))
             continue
 
         if name == "frontend_error":
             _require_exact_keys(event, {"name", "kind"})
             kind = event.get("kind")
-            if kind not in ALLOWED_ERROR_KINDS:
+            if not isinstance(kind, str) or kind not in ALLOWED_ERROR_KINDS:
                 raise ValidationError("Frontend error kind was invalid")
-            _add_counter(counters, f"error#{kind}")
             continue
 
         raise ValidationError("Analytics event name was invalid")
+
+
+def _aggregate(events, country):
+    counters = {}
+    album_cache = {}
+    for event in events:
+        name = event["name"]
+        if name in SIMPLE_EVENTS:
+            _add_counter(counters, f"event#{name}")
+        elif name == "site_visit":
+            for metric in ("event#site_visit", f"source#{event['source']}", f"device#{event['device']}", f"country#{country}"):
+                _add_counter(counters, metric)
+        elif name in ALBUM_EVENTS:
+            album = _public_album(event["albumId"], album_cache)
+            if name in {"photo_download", "zip_request"} and album["type"] != "photo":
+                raise ValidationError("Photo event album type was invalid")
+            _add_counter(counters, f"event#{name}")
+            if name == "album_view":
+                _add_counter(counters, f"album#{album['type']}#{album['albumId']}")
+                _add_counter(counters, f"category#{album['category']}")
+        elif name == "web_vital":
+            _add_counter(counters, f"vital#{event['metric']}#{event['rating']}", value=_decimal_value(event["value"]))
+        elif name == "frontend_error":
+            _add_counter(counters, f"error#{event['kind']}")
     return counters
 
 
@@ -203,15 +216,16 @@ def handler(event, context):
     try:
         _validate_origin(event)
         source_ip = str(((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown"))[:64]
-        if not check_rate_limit(source_ip, "analytics", max_requests=60, window_seconds=60, fail_closed=True):
-            return error_response(429, "Too many analytics requests", code="rate_limited")
         body = parse_json_body(event, max_bytes=16 * 1024)
         if set(body) != {"events"} or not isinstance(body.get("events"), list):
             raise ValidationError("events must be an array")
         events = body["events"]
         if not 1 <= len(events) <= MAX_EVENTS:
             raise ValidationError(f"events must contain between 1 and {MAX_EVENTS} items")
-        counters = _validate_and_aggregate(events, _country(event))
+        _validate_events(events)
+        if not check_rate_limit(source_ip, "analytics", max_requests=60, window_seconds=60, fail_closed=True):
+            return error_response(429, "Too many analytics requests", code="rate_limited")
+        counters = _aggregate(events, _country(event))
         _store_counters(counters, _local_day())
         return json_response(202, {"accepted": len(events)})
     except ValidationError as error:

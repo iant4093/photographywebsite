@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiCache = vi.hoisted(() => ({ clearApiCache: vi.fn(), clearCatalogSnapshots: vi.fn() }))
@@ -299,4 +299,117 @@ describe('AuthProvider', () => {
     expect(sessionStorage.getItem(clientStorageKey)).toBeNull()
     await waitFor(() => expect(signOut).toHaveBeenCalled())
   })
+  function storedUser(email, groups = []) {
+    const prefix = `CognitoIdentityServiceProvider.${import.meta.env.VITE_COGNITO_CLIENT_ID}`
+    const idToken = jwt({ email, sub: email, iss: 'pool', 'cognito:groups': groups })
+    localStorage.setItem(`${prefix}.LastAuthUser`, email)
+    localStorage.setItem(`${prefix}.${email}.idToken`, idToken)
+    const session = { isValid: () => true, getIdToken: () => ({ getJwtToken: () => idToken }) }
+    const account = {
+      getUsername: () => email,
+      getSession: vi.fn(callback => callback(null, session)),
+      getUserData: vi.fn(callback => callback(null, { UserMFASettingList: ['SOFTWARE_TOKEN_MFA'] })),
+      signOut: vi.fn(),
+    }
+    cognito.currentUser = account
+    return { prefix, account, session }
+  }
+
+  function storageChange(key, storageArea = localStorage) {
+    const event = new StorageEvent('storage', { key })
+    Object.defineProperty(event, 'storageArea', { value: storageArea })
+    fireEvent(window, event)
+  }
+
+  it('clears an already-open tab when another tab logs out or clears storage', async () => {
+    storedUser('first@example.com')
+    mount()
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('first@example.com|viewer|signed'))
+    apiCache.clearApiCache.mockClear()
+    localStorage.clear()
+    storageChange(null)
+    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out|not-required')
+    expect(apiCache.clearApiCache).toHaveBeenCalledWith({ sessionChanged: true })
+    expect(apiCache.clearCatalogSnapshots).toHaveBeenCalled()
+  })
+
+  it('switches accounts across tabs, ignores unrelated storage, and does not recheck MFA on token refresh', async () => {
+    const { prefix, account } = storedUser('admin@example.com', ['Admins'])
+    mount()
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('admin@example.com|admin|signed|enabled'))
+    const calls = account.getUserData.mock.calls.length
+    localStorage.setItem(`${prefix}.admin@example.com.idToken`, jwt({ email: 'admin@example.com', sub: 'admin@example.com', iss: 'pool', exp: 999999, 'cognito:groups': ['Admins'] }))
+    storageChange(`${prefix}.admin@example.com.idToken`)
+    storageChange('unrelated')
+    storageChange(null, sessionStorage)
+    expect(account.getUserData).toHaveBeenCalledTimes(calls)
+    storedUser('second@example.com')
+    storageChange(`${prefix}.LastAuthUser`)
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('second@example.com|viewer|signed|not-required'))
+    expect(apiCache.clearApiCache).toHaveBeenCalledWith({ sessionChanged: true })
+  })
+
+  it('does not restore an initial session after logout while Cognito is still responding', async () => {
+    const { account, session } = storedUser('old@example.com')
+    let finish
+    account.getSession.mockImplementation(callback => { finish = callback })
+    mount()
+    await waitFor(() => expect(account.getSession).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    await act(async () => { finish(null, session) })
+    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out|not-required')
+  })
+
+  it('does not persist a delayed login response after logout', async () => {
+    let finish
+    fetch.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: 'login' }))
+    await waitFor(() => expect(finish).toBeTypeOf('function'))
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    await act(async () => finish(response({ AuthenticationResult: { IdToken: jwt({ email: 'old@example.com' }), AccessToken: 'a', RefreshToken: 'r' } })))
+    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
+    expect(cognito.users).toHaveLength(0)
+    expect(screen.getByTestId('result')).toHaveTextContent('session changed')
+  })
+
+  it('rejects a login response if another tab changed the session before its storage event arrived', async () => {
+    let finish
+    fetch.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: 'login' }))
+    await waitFor(() => expect(finish).toBeTypeOf('function'))
+    localStorage.setItem(`ian:auth-session:${import.meta.env.VITE_COGNITO_CLIENT_ID}`, 'other-tab-logout')
+    await act(async () => finish(response({ AuthenticationResult: { IdToken: jwt({ email: 'old@example.com' }), AccessToken: 'a', RefreshToken: 'r' } })))
+    expect(cognito.users).toHaveLength(0)
+    expect(screen.getByTestId('result')).toHaveTextContent('session changed')
+  })
+
+  it('does not return a pending identity token after logout', async () => {
+    const { account, session } = storedUser('old@example.com')
+    mount()
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('old@example.com|viewer|signed'))
+    let finish
+    account.getSession.mockImplementation(callback => { finish = callback })
+    fireEvent.click(screen.getByRole('button', { name: 'token' }))
+    await waitFor(() => expect(finish).toBeTypeOf('function'))
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    await act(async () => { finish(null, session) })
+    expect(screen.getByTestId('result')).toHaveTextContent('session changed')
+    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
+  })
+
+  it('does not apply an old MFA response after another account signs in', async () => {
+    const { prefix, account } = storedUser('admin@example.com', ['Admins'])
+    let finish
+    account.getUserData.mockImplementation(callback => { finish = callback })
+    mount()
+    await waitFor(() => expect(account.getUserData).toHaveBeenCalled())
+    storedUser('viewer@example.com')
+    storageChange(`${prefix}.LastAuthUser`)
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('viewer@example.com|viewer|signed|not-required'))
+    await act(async () => { finish(null, { UserMFASettingList: ['SOFTWARE_TOKEN_MFA'] }) })
+    expect(screen.getByTestId('state')).toHaveTextContent('viewer@example.com|viewer|signed|not-required')
+  })
+
 })

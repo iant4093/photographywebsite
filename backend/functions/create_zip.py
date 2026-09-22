@@ -12,7 +12,7 @@ from album_access import authorize_album
 from auth_helpers import AuthError, auth_error_response, get_verified_claims, is_admin
 from media_access import bucket_name, presigned_get_url
 from response_helpers import error_response, internal_error, json_response
-from security_helpers import check_rate_limit
+from security_helpers import check_rate_limit, is_rate_limit_denied
 from validation_helpers import ValidationError, validate_uuid
 from zip_helpers import get_album_record, raw_image_keys, zip_keys
 from zip_jobs import enqueue_zip, object_metadata
@@ -68,6 +68,10 @@ def handler(event, context):
         claims = None
         if album_id:
             album_id = validate_uuid(album_id)
+            ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
+            if is_rate_limit_denied(f"{ip}:{album_id}", "zip_status", 120, 300):
+                _audit(event, context, "denied", "rate_limited")
+                return error_response(429, "Too many ZIP requests. Please try again later.", code="rate_limited")
             claims = get_verified_claims(event, required=False)
             album = get_album_record(album_id=album_id)
             if not album:

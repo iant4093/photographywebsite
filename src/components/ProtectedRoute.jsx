@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import { Navigate } from 'react-router'
 import { useAuth } from '../context/auth'
 
@@ -6,6 +7,7 @@ import { useAuth } from '../context/auth'
 function ProtectedRoute({ children, adminOnly = false, allowMfaSetup = false }) {
     const {
         user,
+        userEmail,
         loading,
         isAdmin,
         adminMfaStatus,
@@ -64,7 +66,7 @@ function ProtectedRoute({ children, adminOnly = false, allowMfaSetup = false }) 
         }
     }
 
-    return children
+    return <Fragment key={user.getUsername?.() || userEmail}>{children}</Fragment>
 }
 
 export default ProtectedRoute

@@ -23,6 +23,19 @@ const catalogCache = new Map()
 const catalogRequests = new Map()
 const publicAlbumCache = new Map()
 const publicAlbumRequests = new Map()
+let cacheGeneration = 0
+let authGeneration = 0
+
+function catalogAuthScope(token) {
+    if (!token) return null
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+        if (typeof payload.sub === 'string' && payload.sub) {
+            return JSON.stringify([payload.iss, payload.aud, payload.sub])
+        }
+    } catch { /* Opaque test/legacy tokens still need separate cache entries. */ }
+    return token
+}
 
 export class ApiError extends Error {
     constructor(message, { status = 0, code = 'API_ERROR', retryAfterMs = 0 } = {}) {
@@ -115,6 +128,7 @@ async function readErrorMessage(response) {
 }
 
 export async function apiFetch(path, options = {}, config = {}) {
+    const session = authGeneration
     const {
         timeoutMs = DEFAULT_TIMEOUT_MS,
         retries = options.method && options.method !== 'GET' ? 0 : 1,
@@ -160,7 +174,12 @@ export async function apiFetch(path, options = {}, config = {}) {
                 })
             }
             if (response.status === 204) return null
-            return response.json()
+            return response.json().then((payload) => {
+                if (options.headers?.Authorization && session !== authGeneration) {
+                    throw new DOMException('Session changed', 'AbortError')
+                }
+                return payload
+            })
         } catch (error) {
             if (error?.name === 'AbortError') {
                 if (options.signal?.aborted) throw error
@@ -251,7 +270,9 @@ function subscribeToCatalogRequest(record, signal) {
     })
 }
 
-export function clearApiCache() {
+export function clearApiCache({ sessionChanged = false } = {}) {
+    cacheGeneration += 1
+    if (sessionChanged) authGeneration += 1
     catalogCache.clear()
     for (const record of catalogRequests.values()) record.controller.abort()
     catalogRequests.clear()
@@ -274,8 +295,9 @@ function invalidateAlbumCatalog({ album, deletedAlbumId } = {}) {
 
 export function readCachedAlbumsPage(params = {}, options = {}) {
     const normalized = normalizeCatalogParams(params)
+    if (options.authenticated && !options.token) return null
     const prefix = options.authenticated
-        ? `auth:${normalized.ownerEmail || normalized.ownerSub || 'admin'}`
+        ? `auth:${catalogAuthScope(options.token)}`
         : 'public'
     const cached = catalogCache.get(`${prefix}:${catalogKey(normalized)}`)
     return cached && cached.expiresAt > Date.now() ? cached.value : null
@@ -288,7 +310,7 @@ export function fetchAlbumsPage(params = {}, options = {}) {
 
     const normalized = normalizeCatalogParams(params)
     const isPublic = !options.token
-    const key = `${isPublic ? 'public' : `auth:${normalized.ownerEmail || normalized.ownerSub || 'admin'}`}:${catalogKey(normalized)}`
+    const key = `${isPublic ? 'public' : `auth:${catalogAuthScope(options.token)}`}:${catalogKey(normalized)}`
     const cached = catalogCache.get(key)
     if (!options.force && cached?.expiresAt > Date.now()) {
         return Promise.resolve(cached.value)
@@ -312,12 +334,16 @@ export function fetchAlbumsPage(params = {}, options = {}) {
         : normalized
     const query = new URLSearchParams(wireParams).toString()
     const record = { controller, subscribers: 0, promise: null }
+    const generation = cacheGeneration
     const catalogPath = isPublic ? '/public/albums' : '/albums'
     record.promise = apiFetch(`${catalogPath}${query ? `?${query}` : ''}`, {
         headers: authHeaders(options.token),
         signal: controller.signal,
         ...(options.force ? { cache: 'no-store' } : {}),
     }).then((payload) => {
+        if (generation !== cacheGeneration || controller.signal.aborted) {
+            throw new DOMException('Request aborted', 'AbortError')
+        }
         const page = Array.isArray(payload)
             ? normalizeLegacyCatalogPage(payload, normalized)
             : normalizePage(payload)
@@ -461,10 +487,14 @@ export function fetchAlbum(albumId, token = null, options = {}) {
     if (prior?.controller.signal.aborted) publicAlbumRequests.delete(key)
     const controller = new AbortController()
     const record = { controller, subscribers: 0, promise: null }
+    const generation = cacheGeneration
     record.promise = apiFetch(`${albumPath}/${encodeURIComponent(key)}`, {
         signal: controller.signal,
         ...(options.force ? { cache: 'no-store' } : {}),
     }).then(normalizeAlbumDetail).then((data) => {
+        if (generation !== cacheGeneration || controller.signal.aborted) {
+            throw new DOMException('Request aborted', 'AbortError')
+        }
         setCachedPublicAlbum(key, data)
         return data
     }).finally(() => {

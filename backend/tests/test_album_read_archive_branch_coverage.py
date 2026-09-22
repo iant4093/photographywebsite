@@ -182,12 +182,12 @@ class GetAlbumsBranchTests(unittest.TestCase):
             os.environ, {"OWNER_SUB_CREATED_AT_INDEX": "owner-index"}
         ):
             items, key = get_albums._fetch_page(
-                visibility="private", album_type="photo", limit=10, start_key={"albumId": "start"}, owner_sub="sub"
+                visibility="private", album_type="photo", limit=10, start_key={"albumId": ALBUM_ID}, owner_sub="sub"
             )
         self.assertEqual(len(items), 1)
         self.assertIsNone(key)
         self.assertEqual(table.query.call_args.kwargs["IndexName"], "owner-index")
-        self.assertEqual(table.query.call_args.kwargs["ExclusiveStartKey"], {"albumId": "start"})
+        self.assertEqual(table.query.call_args.kwargs["ExclusiveStartKey"], {"albumId": ALBUM_ID})
 
         table.reset_mock()
         table.query.return_value = {"Items": [album()], "LastEvaluatedKey": None}

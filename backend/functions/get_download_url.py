@@ -15,7 +15,7 @@ from media_access import (
 )
 from original_comparison_access import load_original_comparisons_for_albums, serialize_original_comparison
 from response_helpers import error_response, internal_error, json_response
-from security_helpers import check_rate_limit
+from security_helpers import check_rate_limit, is_rate_limit_denied
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_uuid
 from zip_helpers import get_album_record
 
@@ -75,7 +75,13 @@ def handler(event, context):
         if not MEDIA_ID_PATTERN.fullmatch(media_id):
             return _not_found()
 
+        ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
         if album_id:
+            action = "album_original_comparison" if comparison else "album_download"
+            if is_rate_limit_denied(f"{ip}:{album_id}", action, 100, 300):
+                _audit(event, context, "denied", "rate_limited")
+                kind = "comparison" if comparison else "download"
+                return error_response(429, f"Too many {kind} requests. Please try again later.", code="rate_limited")
             album = get_album_record(album_id=album_id)
             if not album:
                 return _not_found()
@@ -103,7 +109,6 @@ def handler(event, context):
         raw_key = image.get("rawKey") or image.get("key") if isinstance(image, dict) else image
         raw_key = validate_album_media_key(raw_key, album=album)
 
-        ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
         if not check_rate_limit(f"{ip}:{album['albumId']}", action, limit, 300, fail_closed=True):
             _audit(event, context, "denied", "rate_limited", actor_type=access_actor, auth_method=access_auth)
             kind = "comparison" if comparison else "download"

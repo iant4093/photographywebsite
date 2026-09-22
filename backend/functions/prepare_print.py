@@ -30,7 +30,7 @@ from auth_helpers import AuthError, auth_error_response, get_verified_claims, is
 from front_door import verify_front_door_request
 from media_access import find_image_by_media_id, public_url, validate_album_media_key
 from response_helpers import error_response, internal_error, json_response
-from security_helpers import check_rate_limit
+from security_helpers import check_rate_limit, is_rate_limit_denied
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_uuid
 from zip_helpers import get_album_record
 
@@ -252,8 +252,16 @@ def _prepare(event, context, body):
     album_id = path.get("albumId")
     share_code = path.get("shareCode")
     access_actor = access_auth = None
+    media_id = require_string(body.get("mediaId"), "mediaId", maximum=24).lower()
+    if not MEDIA_ID_PATTERN.fullmatch(media_id):
+        return _not_found()
+    ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
     if album_id:
-        album = get_album_record(album_id=validate_uuid(album_id))
+        album_id = validate_uuid(album_id)
+        if is_rate_limit_denied(f"{ip}:{album_id}", "album_print", 30, 300):
+            _audit(event, context, "denied", "rate_limited")
+            return error_response(429, "Too many print requests. Please try again later.", code="rate_limited")
+        album = get_album_record(album_id=album_id)
         if not album:
             return _not_found()
         claims = get_verified_claims(event, required=False)
@@ -272,10 +280,8 @@ def _prepare(event, context, body):
         return _not_found()
     if album.get("type", "photo") == "video":
         return _not_found()
-    media_id = require_string(body.get("mediaId"), "mediaId", maximum=24).lower()
-    if not MEDIA_ID_PATTERN.fullmatch(media_id) or not find_image_by_media_id(album, media_id):
+    if not find_image_by_media_id(album, media_id):
         return _not_found()
-    ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
     if not check_rate_limit(f"{ip}:{album['albumId']}", rate_action, rate_limit, 300, fail_closed=True):
         _audit(event, context, "denied", "rate_limited", actor_type=access_actor, auth_method=access_auth)
         return error_response(429, "Too many print requests. Please try again later.", code="rate_limited")
@@ -287,6 +293,10 @@ def _prepare(event, context, body):
 
 def _redeem(event, context, body):
     payload = _verify_token(require_string(body.get("sessionToken"), "sessionToken", maximum=2048))
+    ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
+    if is_rate_limit_denied(f"{ip}:{payload['a']}", "print_redeem", 30, 300):
+        _audit(event, context, "denied", "rate_limited", actor_type="anonymous", auth_method="service")
+        return error_response(429, "Too many print requests. Please try again later.", code="rate_limited")
     album = get_album_record(album_id=payload["a"])
     if (
         not album
@@ -302,7 +312,6 @@ def _redeem(event, context, body):
     image = find_image_by_media_id(album, payload["m"])
     if not image:
         return _not_found()
-    ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
     if not check_rate_limit(f"{ip}:{album['albumId']}", "print_redeem", 30, 300, fail_closed=True):
         _audit(event, context, "denied", "rate_limited", actor_type="anonymous", auth_method="service")
         return error_response(429, "Too many print requests. Please try again later.", code="rate_limited")

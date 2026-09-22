@@ -8,7 +8,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
-from cursor_helpers import decode_cursor, encode_cursor
+from cursor_helpers import catalog_index_unavailable, decode_cursor, encode_cursor, validate_catalog_cursor
 from gallery_order import apply_gallery_order, load_gallery_settings
 from media_access import serialize_album_summary
 from response_helpers import error_response, internal_error, json_response
@@ -57,6 +57,7 @@ def _active_filter(album_type):
 
 def _fetch_page(*, album_type, limit, start_key):
     """Query the narrow index and retain security-equivalent rollout fallbacks."""
+    validate_catalog_cursor(start_key, visibility="public")
     query_kind = "summary" if _index_enabled("summary") else (
         "visibility" if _index_enabled("visibility") else None
     )
@@ -91,7 +92,7 @@ def _fetch_page(*, album_type, limit, start_key):
                 )
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code", "")
-            if query_kind and code in {"ValidationException", "ResourceNotFoundException"}:
+            if query_kind and catalog_index_unavailable(error):
                 logger.warning("public_catalog_index_unavailable kind=%s", query_kind)
                 if query_kind == "summary" and _index_enabled("visibility"):
                     # Both public indexes have the same visibility/createdAt
@@ -106,6 +107,8 @@ def _fetch_page(*, album_type, limit, start_key):
                     items = []
                     loops = 0
                 continue
+            if cursor_key and code == "ValidationException":
+                raise ValidationError("Invalid cursor") from None
             raise
 
         page_items = response.get("Items", [])

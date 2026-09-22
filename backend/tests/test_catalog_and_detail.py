@@ -98,7 +98,7 @@ class CatalogTests(unittest.TestCase):
                 visibility="public",
                 album_type=None,
                 limit=10,
-                start_key={"albumId": "cursor", "visibility": "public", "createdAt": "now"},
+                start_key={"albumId": ALBUM_ID, "visibility": "public", "createdAt": "now"},
                 public_summary_only=True,
             )
 
@@ -107,7 +107,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(query.call_args_list[1].kwargs["IndexName"], "VisibilityCreatedAtIndex")
         self.assertEqual(
             query.call_args_list[1].kwargs["ExclusiveStartKey"],
-            {"albumId": "cursor", "visibility": "public", "createdAt": "now"},
+            {"albumId": ALBUM_ID, "visibility": "public", "createdAt": "now"},
         )
 
     def test_legacy_missing_image_count_falls_back_without_count_regression(self):

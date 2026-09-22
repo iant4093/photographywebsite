@@ -128,7 +128,7 @@ describe('public API client behavior', () => {
 
     const first = await api.fetchAlbumsPage(params, { token: 'token' })
     await expect(api.fetchAlbumsPage(params, { token: 'token' })).resolves.toBe(first)
-    expect(api.readCachedAlbumsPage(params, { authenticated: true })).toBe(first)
+    expect(api.readCachedAlbumsPage(params, { authenticated: true, token: 'token' })).toBe(first)
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     api.clearApiCache()
@@ -403,4 +403,51 @@ describe('public API client behavior', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(aborted))
     await expect(api.uploadFileToS3('https://upload.test', file)).rejects.toBe(aborted)
   })
+  it('isolates authenticated catalogs by account while retaining same-account refresh caching', async () => {
+    const token = (sub, suffix) => `header.${btoa(JSON.stringify({ iss: 'pool', aud: 'client', sub }))}.${suffix}`
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'account-a' }], nextCursor: null }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'account-b' }], nextCursor: null }))
+    vi.stubGlobal('fetch', fetchMock)
+    const params = { visibility: 'private' }
+    const first = await api.fetchAlbumsPage(params, { token: token('a', 'first') })
+    await expect(api.fetchAlbumsPage(params, { token: token('a', 'refreshed') })).resolves.toBe(first)
+    await expect(api.fetchAlbumsPage(params, { token: token('b', 'first') })).resolves.toMatchObject({ items: [{ albumId: 'account-b' }] })
+    expect(api.readCachedAlbumsPage(params, { authenticated: true })).toBeNull()
+    expect(api.readCachedAlbumsPage(params, { authenticated: true, token: token('a', 'refreshed') })).toBe(first)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not deduplicate different accounts with opaque credentials', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => jsonResponse({ items: [{ albumId: options.headers.Authorization }], nextCursor: null })))
+    const [a, b] = await Promise.all([
+      api.fetchAlbumsPage({ visibility: 'private' }, { token: 'account-a' }),
+      api.fetchAlbumsPage({ visibility: 'private' }, { token: 'account-b' }),
+    ])
+    expect(a.items[0].albumId).toBe('Bearer account-a')
+    expect(b.items[0].albumId).toBe('Bearer account-b')
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['catalog', 'public-detail', 'private-detail'])('ignores a late %s response after session clearing, even if fetch ignores abort', async (kind) => {
+    let finishBody
+    let started
+    const bodyStarted = new Promise(resolve => { started = resolve })
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: () => { started(); return new Promise(resolve => { finishBody = resolve }) },
+    })))
+    const request = kind === 'catalog'
+      ? api.fetchAlbumsPage({ visibility: 'private' }, { token: 'old-account' })
+      : api.fetchAlbum('one', kind === 'private-detail' ? 'old-account' : null)
+    const settled = request.catch(error => error)
+    await bodyStarted
+    api.clearApiCache({ sessionChanged: true })
+    finishBody(kind === 'catalog' ? { items: [{ albumId: 'old-private' }], nextCursor: null } : { album: { albumId: 'one' }, images: [] })
+    expect((await settled).name).toBe('AbortError')
+    expect(api.readCachedAlbumsPage({ visibility: 'private' }, { authenticated: true, token: 'old-account' })).toBeNull()
+    expect(api.readCachedPublicAlbum('one')).toBeNull()
+  })
+
 })

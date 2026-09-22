@@ -30,17 +30,18 @@ export default function useAdminAlbumCatalog(params, getIdToken, ownerEmail = ''
         const merge = (items) => items.filter((album) => changes.get(album.albumId) !== null).map((album) => ({ ...album, ...changes.get(album.albumId) }))
         const accepts = (album) => (params.type === 'video' ? album.type === 'video' : album.type !== 'video')
             && (!ownerEmail || String(album.ownerEmail || '').toLowerCase() === ownerEmail.toLowerCase())
-        const cached = readCachedAlbumsPage(params, { authenticated: true })
         const timer = window.setTimeout(async () => {
             setCatalogError('')
-            setLoading(!cached && changed)
             setLoadingMore(true)
-            if (changed) setAlbums(cached ? merge(cached.items.filter(accepts)) : [])
             const loaded = new Map()
             const seen = new Set()
             let cursor = null
             try {
                 const token = await getIdToken()
+                if (controller.signal.aborted) return
+                const cached = readCachedAlbumsPage(params, { authenticated: true, token })
+                setLoading(!cached && changed)
+                if (changed) setAlbums(cached ? merge(cached.items.filter(accepts)) : [])
                 do {
                     let page
                     // A mutation clears shared API requests. Resume this page

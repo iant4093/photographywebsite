@@ -10,6 +10,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from album_access import decode_cursor, encode_cursor
+from cursor_helpers import catalog_index_unavailable, validate_catalog_cursor
 from auth_helpers import AuthError, auth_error_response, get_verified_claims, is_admin
 from gallery_order import apply_gallery_order, load_gallery_settings
 from media_access import serialize_album_summary
@@ -79,6 +80,7 @@ def _fetch_page(
     admin_all=False, admin_owner_email=None, public_summary_only=False,
 ):
     """Use a configured index, falling back to a security-equivalent filtered scan."""
+    validate_catalog_cursor(start_key, visibility=visibility, owner_sub=owner_sub, admin_all=admin_all)
     query_kind = None
     if public_summary_only and visibility == "public" and _index_enabled("public_summary"):
         query_kind = "public_summary"
@@ -143,7 +145,7 @@ def _fetch_page(
                 response = table.scan(**params)
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code", "")
-            if query_kind and code in {"ValidationException", "ResourceNotFoundException"}:
+            if query_kind and catalog_index_unavailable(error):
                 logger.warning("album_index_unavailable kind=%s", query_kind)
                 # A summary index rollout can fall back to the existing ALL
                 # visibility index before using the bounded filtered scan.
@@ -157,6 +159,8 @@ def _fetch_page(
                     items = []
                     loops = 0
                 continue
+            if cursor_key and code == "ValidationException":
+                raise ValidationError("Invalid cursor") from None
             raise
 
         page_items = response.get("Items", [])
