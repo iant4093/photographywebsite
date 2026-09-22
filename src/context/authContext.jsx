@@ -92,7 +92,7 @@ function persistentIdentity() {
 
 function publishSessionChange() {
     // Only a notification nonce is shared; credentials stay in Cognito storage.
-    const nonce = crypto.randomUUID()
+    const nonce = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
     window.localStorage.setItem(sessionChangeKey, nonce)
     return nonce
 }

@@ -412,4 +412,18 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('state')).toHaveTextContent('viewer@example.com|viewer|signed|not-required')
   })
 
+  it('keeps logout working when the browser lacks randomUUID', async () => {
+    const savedCrypto = globalThis.crypto
+    vi.stubGlobal('crypto', {})
+    try {
+      mount()
+      fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+      const signal = localStorage.getItem(`ian:auth-session:${import.meta.env.VITE_COGNITO_CLIENT_ID}`)
+      expect(signal).toMatch(/^[0-9]+-/)
+      expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
+    } finally {
+      vi.stubGlobal('crypto', savedCrypto)
+    }
+  })
+
 })
