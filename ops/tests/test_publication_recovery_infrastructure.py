@@ -53,8 +53,26 @@ class PublicationRecoveryInfrastructureTests(unittest.TestCase):
                          ["ReportBatchItemFailures"])
 
     def test_thumbnail_cleanup_can_revoke_existing_distribution_cache(self):
-        self.assertEqual(self.allowed("UpdateImageFunction", {"Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}"}),
-                         {"cloudfront:CreateInvalidation"})
+        for function in ("UpdateImageFunction", "DeleteAlbumFunction", "DeleteImagesFunction", "DeleteUserFunction"):
+            self.assertEqual(self.allowed(function, {"Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}"}),
+                             {"cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"})
+
+    def test_new_continuations_reuse_existing_handlers_with_exact_queue_wiring(self):
+        for variable, function in (("TAGGING_WORKER_FUNCTION_NAME", "TagMediaObjectFunction"),
+                                   ("MEDIA_DELETION_WORKER_FUNCTION_NAME", "DeleteImagesFunction"),
+                                   ("DELETION_WORKER_FUNCTION_NAME", "DeleteAlbumFunction")):
+            self.assertEqual(self.resources["CacheInvalidationWorkerFunction"]["Properties"]["Environment"]["Variables"][variable], {"Ref": function})
+            self.assertEqual(self.allowed("CacheInvalidationWorkerFunction", {"Fn::GetAtt": [function, "Arn"]}), {"lambda:InvokeFunction"})
+            self.assertEqual(self.resources[function]["Properties"]["Environment"]["Variables"]["CACHE_INVALIDATION_QUEUE_URL"], {"Ref": "CacheInvalidationQueue"})
+            self.assertEqual(self.allowed(function, {"Fn::GetAtt": ["CacheInvalidationQueue", "Arn"]}), {"sqs:SendMessage"})
+
+    def test_video_deletion_can_only_inspect_and_cancel_existing_account_jobs(self):
+        for function in ("DeleteAlbumFunction", "DeleteImagesFunction", "DeleteUserFunction"):
+            self.assertEqual(self.allowed(function, {"Fn::Sub": "arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:jobs/*"}),
+                             {"mediaconvert:GetJob", "mediaconvert:CancelJob"})
+            self.assertEqual(self.allowed(function, {"Fn::Sub": "arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:queues/Default"}),
+                             {"mediaconvert:SearchJobs"})
+            self.assertFalse(any(action.startswith("mediaconvert:") for action in self.allowed(function, "*")))
 
     def test_visibility_completion_can_only_read_its_existing_distribution_purge(self):
         self.assertEqual(self.allowed("UpdateAlbumFunction", {"Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}"}),

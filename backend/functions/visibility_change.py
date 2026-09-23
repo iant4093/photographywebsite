@@ -5,6 +5,7 @@ import os
 import time
 import uuid
 import drive_backup_jobs
+from cleanup_work import schedule
 
 from cache_invalidation import _queue_client, prepare_media_revocation, advance_media_revocation
 from dynamodb_helpers import ensure_album_item_budget
@@ -129,11 +130,11 @@ def advance(table, album, context=None):
             save_progress(table, album)
             if complete:
                 return target
-            enqueue(album["albumId"], delay=15)
+            schedule(album["albumId"], pending, lambda: save_progress(table, album), "album-visibility")
             return None
         if pending["phase"] not in {"objects", "purge", "commit"}:
             raise MediaMutationBusy("Album privacy progress is invalid")
-    enqueue(album["albumId"])
+    schedule(album["albumId"], pending, lambda: save_progress(table, album), "album-visibility")
     return None
 
 

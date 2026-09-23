@@ -7,7 +7,7 @@ import boto3
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import AuthError, auth_error_response, require_admin
 from deletion_helpers import DeletionTooLargeError, preflight_deletion
-from delete_album import DeletionConflict, delete_album_record
+from delete_album import DeletionConflict, DeletionPending, delete_album_record
 from drive_backup_jobs import DriveBackupBusy
 from media_access import album_media_prefixes
 from owner_helpers import assert_admin_target_mutable, albums_owned_by, cognito_identity, table
@@ -50,6 +50,7 @@ def handler(event, context):
     denied = require_admin(event)
     if denied:
         return denied
+    current = None
     try:
         email = validate_email(((event or {}).get("pathParameters") or {}).get("email"))
         username, subject, _ = cognito_identity(cognito, USER_POOL_ID, email)
@@ -102,7 +103,11 @@ def handler(event, context):
     except AuthError as error:
         _audit(event, context, "denied", "protected_admin_target")
         return auth_error_response(error)
+    except DeletionPending:
+        return json_response(202, {"pending": True, "retryAfter": 30})
     except (DeletionConflict, DriveBackupBusy) as error:
+        if current and current.get("status") == "deleting":
+            return json_response(202, {"pending": True, "retryAfter": 30})
         return error_response(409, str(error), code="deletion_pending")
     except DeletionTooLargeError:
         _audit(event, context, "denied", "deletion_too_large")

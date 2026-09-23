@@ -8,7 +8,6 @@ import re
 import boto3
 
 from album_access import decode_cursor, encode_cursor
-from album_media_store import MEDIA_STORE_VERSION, normalized_media_item, query_album_media
 from auth_helpers import require_admin
 from front_door import verify_front_door_request
 from media_access import media_id_for_key, serialize_album_detail, serialize_images
@@ -72,14 +71,9 @@ def handler(event, context):
         revision = "v2:" + hashlib.sha256(json.dumps([_raw(image) for image in images], separators=(",", ":")).encode()).hexdigest()[:32]
         offset = _page_start(cursor, album_id, images, revision)
         items = images[offset:offset + limit]
-        if album.get("mediaStoreVersion") == MEDIA_STORE_VERSION:
-            start = normalized_media_item(album_id, images[offset - 1], offset - 1) if offset else None
-            start_key = {key: start[key] for key in ("albumId", "mediaId", "orderKey")} if start else None
-            normalized, _ = query_album_media(album_id, limit, start_key)
-            # A GSI can briefly lag a completed repair. The manifest is already
-            # in this read, so never lose a page to a partial/stale index view.
-            if [_raw(item) for item in normalized] == [_raw(item) for item in items]:
-                items = normalized
+        # The consistent manifest read already contains the authoritative
+        # metadata. Matching identities in an eventual index do not establish
+        # fresh thumbnails, favorites or accessibility text.
         next_offset = offset + len(items)
         next_key = {"after": _raw(items[-1]), "offset": str(next_offset), "version": revision} if items and next_offset < len(images) else None
         removed = set((album.get("pendingMediaDeletion") or {}).get("requested", []))

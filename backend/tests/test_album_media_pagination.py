@@ -74,7 +74,7 @@ class AlbumMediaPaginationTests(unittest.TestCase):
         self.assertIsNone(second["nextCursor"])
         self.assertEqual(first["album"]["imageCount"], 2)
 
-    def test_normalized_marker_uses_ordered_media_query(self):
+    def test_normalized_marker_keeps_authoritative_metadata_without_index_reads(self):
         album = record(mediaStoreVersion=1)
         item = album_media_store.normalized_media_item(ALBUM_ID, album["images"][0], 0)
         with patch.object(
@@ -82,7 +82,7 @@ class AlbumMediaPaginationTests(unittest.TestCase):
             "get_item",
             return_value={"Item": album},
         ), patch.object(
-            get_album_media,
+            album_media_store,
             "query_album_media",
             return_value=([item], {"albumId": ALBUM_ID, "mediaId": item["mediaId"], "orderKey": item["orderKey"]}),
         ) as query, patch.object(
@@ -96,7 +96,7 @@ class AlbumMediaPaginationTests(unittest.TestCase):
         ):
             payload = response_body(get_album_media.handler(self.event({"limit": "1"}), None))
 
-        query.assert_called_once_with(ALBUM_ID, 1, None)
+        query.assert_not_called()
         self.assertEqual(payload["items"][0]["rawKey"], album["images"][0]["rawKey"])
         self.assertIsNotNone(payload["nextCursor"])
 

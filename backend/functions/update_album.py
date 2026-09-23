@@ -180,7 +180,7 @@ def _continue_visibility(album_id, context, album=None, event=None):
             return json_response(200, {"complete": True})
         target = visibility_change.advance(table, album, context)
         if target is None:
-            return json_response(202, {"albumId": album_id, "pending": True}, cache_control="private, no-store")
+            return json_response(202, {"albumId": album_id, "pending": True, "retryAfter": 15}, cache_control="private, no-store")
         # Index publication must succeed before exposing the final album row.
         if target.get("type", "photo") == "photo":
             metadata = load_preview_metadata(target, strict=True)

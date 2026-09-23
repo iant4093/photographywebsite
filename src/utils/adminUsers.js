@@ -51,8 +51,8 @@ export async function listUsers(services, token, options = {}) {
 }
 
 export function deleteUser(services, token, email, options = {}) {
-    const { apiFetch, authHeaders } = services
-    return apiFetch(`/users/${encodeURIComponent(email)}`, {
+    const { albumMutation, authHeaders } = services
+    return albumMutation(`/users/${encodeURIComponent(email)}`, {
         method: 'DELETE',
         headers: authHeaders(token),
         signal: options.signal,

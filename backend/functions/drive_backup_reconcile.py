@@ -3,15 +3,33 @@ import os
 import posixpath
 import tempfile
 import uuid
+import time
+from urllib.parse import urlsplit
 
 from boto3.dynamodb.types import TypeDeserializer
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 
 import drive_backup_jobs as jobs
 import google_drive_sync as provider
 from media_access import media_id_for_key, validate_album_media_key
 
 MEDIA_ID = 'ianPhotographyMediaId'
+
+
+class BackupContinuation(jobs.DriveBackupBusy, RuntimeError):
+    """Planned work-budget exhaustion, not a failed backup."""
+
+
+def _upload_uri(value):
+    if not isinstance(value, str) or len(value) > 8192:
+        return None
+    parsed = urlsplit(value)
+    if (parsed.scheme != 'https' or parsed.hostname != 'www.googleapis.com'
+            or parsed.port not in {None, 443} or parsed.username or parsed.password
+            or not parsed.path.startswith('/upload/drive/')):
+        raise RuntimeError('Invalid backup upload session')
+    return value
 
 
 def live_album(album_id):
@@ -90,10 +108,17 @@ def upload(service, album, key, folder_id, context):
     if int(head.get('ContentLength', 0)) > 5 * 1024 * 1024 * 1024:
         raise RuntimeError('Original exceeds Drive worker temporary storage')
     path = None
+    state = jobs.state_table()
+    identity = {'albumId': album['albumId'], 'entry': 'upload#' + media_id_for_key(key)}
+    source = {name: head.get(name, '') for name in ('ETag', 'VersionId', 'ContentLength')}
+    saved = state.get_item(Key=identity, ConsistentRead=True).get('Item', {}) if state is not None else {}
     try:
         with tempfile.NamedTemporaryFile(prefix='drive-', delete=False) as handle:
             path = handle.name
         provider.s3.download_file(os.environ['IMAGES_BUCKET'], key, path)
+        current_head = provider.s3.head_object(Bucket=os.environ['IMAGES_BUCKET'], Key=key)
+        if source != {name: current_head.get(name, '') for name in source}:
+            raise BackupContinuation('Backup source changed during download')
         latest = live_album(album['albumId'])
         if not latest or key not in current_keys(latest):
             return None
@@ -101,11 +126,46 @@ def upload(service, album, key, folder_id, context):
             body={'name': posixpath.basename(key), 'parents': [folder_id], 'appProperties': {provider.APP_ALBUM_ID_KEY: album['albumId'], MEDIA_ID: media_id_for_key(key)}},
             media_body=MediaFileUpload(path, mimetype=head.get('ContentType', 'application/octet-stream'), chunksize=5 * 1024 * 1024, resumable=True), fields='id',
         )
+        persisted_uri = None
+        if saved.get('source') == source and saved.get('folderId') == folder_id and int(saved.get('expiresAt', 0)) > int(time.time()):
+            uri = _upload_uri(saved.get('uploadUri'))
+            if uri:
+                request.resumable_uri = uri
+                persisted_uri = uri
+                # Ask Drive for its authoritative byte offset, including the
+                # case where the last chunk succeeded but its reply was lost.
+                request._in_error_state = True
+
+        def checkpoint(complete=False):
+            nonlocal persisted_uri
+            if state is None:
+                return
+            uri = None if complete else _upload_uri(request.resumable_uri)
+            if uri and uri == persisted_uri:
+                return  # Drive owns the byte offset; one receipt per session.
+            if complete or uri:
+                state.put_item(Item={**identity, 'source': source, 'folderId': folder_id,
+                    'expiresAt': int(time.time()) + (60 if complete else 86400),
+                    **({'uploadUri': uri} if uri else {})})
+                persisted_uri = uri
+
         result = None
         while result is None:
-            if context and context.get_remaining_time_in_millis() < 20000:
-                raise RuntimeError('Backup needs another processing attempt')
-            _, result = request.next_chunk(num_retries=3)
+            if context and context.get_remaining_time_in_millis() < 60000:
+                checkpoint()
+                raise BackupContinuation('Backup needs another processing attempt')
+            try:
+                _, result = request.next_chunk(num_retries=3)
+            except HttpError as error:
+                if error.resp.status in {404, 410} and saved.get('uploadUri'):
+                    checkpoint(complete=True)
+                    raise BackupContinuation('Backup upload session expired') from None
+                checkpoint()
+                raise
+            except Exception:
+                checkpoint()
+                raise
+            checkpoint(complete=result is not None)
         return result['id']
     finally:
         if path and os.path.exists(path):
@@ -130,7 +190,7 @@ def reconcile(job, context=None):
         managed.setdefault(media_id, []).append(item['id'])
     for key in sorted(current_keys(album)):
         if context and context.get_remaining_time_in_millis() < 60000:
-            raise RuntimeError('Backup needs another processing attempt')
+            raise BackupContinuation('Backup needs another processing attempt')
         latest = live_album(album['albumId'])
         if not latest:
             return True

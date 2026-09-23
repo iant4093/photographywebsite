@@ -88,7 +88,7 @@ class RecoveryFollowupTests(unittest.TestCase):
 
     def test_normalized_index_lag_uses_complete_manifest_page(self):
         self.put({**RECORD, 'mediaStoreVersion': 1})
-        with patch.object(get_album_media, 'albums_table', self.table), patch.object(get_album_media, 'require_admin', return_value=None), patch.object(get_album_media, 'verify_front_door_request', return_value=None), patch.object(get_album_media, 'serialize_album_detail', return_value={'albumId': ALBUM}), patch.object(get_album_media, 'serialize_images', side_effect=lambda value, **_: value['images']), patch.object(get_album_media, 'query_album_media', return_value=([], None)):
+        with patch.object(get_album_media, 'albums_table', self.table), patch.object(get_album_media, 'require_admin', return_value=None), patch.object(get_album_media, 'verify_front_door_request', return_value=None), patch.object(get_album_media, 'serialize_album_detail', return_value={'albumId': ALBUM}), patch.object(get_album_media, 'serialize_images', side_effect=lambda value, **_: value['images']), patch.object(album_media_store, 'query_album_media', return_value=([], None)):
             result = get_album_media.handler({'pathParameters': {'albumId': ALBUM}}, CONTEXT)
         self.assertEqual(json.loads(result['body'])['items'], RECORD['images'])
 

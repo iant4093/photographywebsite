@@ -1992,6 +1992,9 @@ Resources:
       ReservedConcurrentExecutions: 2
       Environment:
         Variables:
+          TAGGING_WORKER_FUNCTION_NAME: !Ref TagMediaObjectFunction
+          MEDIA_DELETION_WORKER_FUNCTION_NAME: !Ref DeleteImagesFunction
+          DELETION_WORKER_FUNCTION_NAME: !Ref DeleteAlbumFunction
           VISIBILITY_WORKER_FUNCTION_NAME: !Ref UpdateAlbumFunction
           UPLOAD_WORKER_FUNCTION_NAME: !Ref AddImagesFunction
           THUMBNAIL_WORKER_FUNCTION_NAME: !Ref UpdateImageFunction
@@ -2001,6 +2004,9 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource:
+                - !GetAtt TagMediaObjectFunction.Arn
+                - !GetAtt DeleteImagesFunction.Arn
+                - !GetAtt DeleteAlbumFunction.Arn
                 - !GetAtt UpdateAlbumFunction.Arn
                 - !GetAtt AddImagesFunction.Arn
                 - !GetAtt UpdateImageFunction.Arn
@@ -2966,6 +2972,13 @@ Resources:
       Policies:
         - Statement:
             - Effect: Allow
+              Action: [mediaconvert:GetJob, mediaconvert:CancelJob]
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:jobs/*'
+            - Effect: Allow
+              Action: mediaconvert:SearchJobs
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:queues/Default'
+        - Statement:
+            - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
@@ -3015,7 +3028,7 @@ Resources:
                 - !Sub '${ImagesBucket.Arn}/temp-zips/*'
                 - !Sub '${ImagesBucket.Arn}/album-zips/*'
             - Effect: Allow
-              Action: cloudfront:CreateInvalidation
+              Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
       Events:
         DeleteAlbum:
@@ -3508,6 +3521,13 @@ Resources:
       Policies:
         - Statement:
             - Effect: Allow
+              Action: [mediaconvert:GetJob, mediaconvert:CancelJob]
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:jobs/*'
+            - Effect: Allow
+              Action: mediaconvert:SearchJobs
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:queues/Default'
+        - Statement:
+            - Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
@@ -3548,7 +3568,7 @@ Resources:
                 - s3:DeleteObjectVersion
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
-              Action: cloudfront:CreateInvalidation
+              Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
       Events:
         DeleteImages:
@@ -3571,6 +3591,7 @@ Resources:
         TargetArn: !GetAtt AsyncFailureQueue.Arn
       Environment:
         Variables:
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           ALBUMS_TABLE: !Ref AlbumsTable
           # Avoid a SAM-generated S3 notification cycle; the physical name is deterministic.
           IMAGES_BUCKET: !Sub 'goldenhour-images-${AWS::AccountId}-${Stage}'
@@ -3586,7 +3607,7 @@ Resources:
               Resource: !Sub 'arn:${AWS::Partition}:s3:::goldenhour-images-${AWS::AccountId}-${Stage}/albums/*'
             - Effect: Allow
               Action: sqs:SendMessage
-              Resource: !GetAtt AsyncFailureQueue.Arn
+              Resource: [!GetAtt AsyncFailureQueue.Arn, !GetAtt CacheInvalidationQueue.Arn]
       Events:
         CreatedAlbumObject:
           Type: S3
@@ -3774,7 +3795,7 @@ Resources:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
-              Action: cloudfront:CreateInvalidation
+              Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
         - Statement:
             - Effect: Allow
@@ -4283,6 +4304,13 @@ Resources:
       Policies:
         - Statement:
             - Effect: Allow
+              Action: [mediaconvert:GetJob, mediaconvert:CancelJob]
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:jobs/*'
+            - Effect: Allow
+              Action: mediaconvert:SearchJobs
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:queues/Default'
+        - Statement:
+            - Effect: Allow
               Action: dynamodb:UpdateItem
               Resource: !GetAtt DriveBackupStateTable.Arn
             - Effect: Allow
@@ -4297,7 +4325,7 @@ Resources:
                 - !GetAtt CacheInvalidationQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
-              Action: cloudfront:CreateInvalidation
+              Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:

@@ -18,7 +18,14 @@ export function cognitoOperation(user, start, { signal, assertCurrent = () => {}
             if (!active) return false
             try { assertCurrent(); return true } catch (error) { finish(error); return false }
         }
-        const done = (error, value) => { if (current()) finish(error, value) }
+        const done = (error, value) => {
+            if (!current()) return
+            // The SDK restores/refreshes onto `this`. Keep only its session
+            // state after a successful, still-current operation; never copy
+            // the temporary transport or storage guards to the shared user.
+            if (!error && Object.hasOwn(scoped, 'signInUserSession')) user.signInUserSession = scoped.signInUserSession
+            finish(error, value)
+        }
         const cancel = () => finish(new DOMException('Account request cancelled.', 'AbortError'))
         if (signal?.aborted) { cancel(); return }
         signal?.addEventListener('abort', cancel, { once: true })

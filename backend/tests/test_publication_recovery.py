@@ -16,6 +16,7 @@ from moto import mock_aws
 
 import add_images, album_media_store, cache_invalidation_worker, delete_images, delete_album
 import deletion_helpers, media_access, media_mutation, owner_helpers, tag_media_object, update_album, update_image
+import cleanup_work
 import upload_followup, user_email_update, visibility_change, zip_archive_refresh
 
 ALBUM = "11111111-1111-4111-8111-111111111111"
@@ -53,6 +54,10 @@ class PublicationRecoveryTests(unittest.TestCase):
                     self.stack.enter_context(patch.object(module, name, return_value=None))
         self.stack.enter_context(patch.object(add_images, "_extract_exif"))
         self.queue = self.stack.enter_context(patch.object(visibility_change, "_queue_client"))
+        self.stack.enter_context(patch.object(cleanup_work, "_queue_client", self.queue))
+        self.stack.enter_context(patch.object(tag_media_object, "_queue_client", self.queue))
+        self.stack.enter_context(patch.object(cleanup_work, "prepare_media_revocation", return_value={"id": "synthetic"}))
+        self.stack.enter_context(patch.object(cleanup_work, "advance_media_revocation", return_value=True))
         self.stack.enter_context(patch.dict(os.environ, {"CACHE_INVALIDATION_QUEUE_URL": "queue"}))
         self.stack.enter_context(patch.object(visibility_change, "advance_media_revocation", return_value=True))
         self.stack.enter_context(patch.object(visibility_change, "prepare_media_revocation", return_value={"id": "synthetic"}))
@@ -126,8 +131,8 @@ class PublicationRecoveryTests(unittest.TestCase):
     def test_tag_event_cannot_overlap_privacy_change_or_republish_private_objects(self):
         self.object(RAW, "public")
         with media_mutation.album_lease(self.table, ALBUM, CONTEXT):
-            with self.assertRaises(media_mutation.MediaMutationBusy):
-                Context().run(tag_media_object.handler, self.s3_event(RAW), CONTEXT)
+            self.assertEqual(Context().run(tag_media_object.handler, self.s3_event(RAW), CONTEXT), {"tagged": 0})
+            self.queue.return_value.send_message.assert_called()
             self.table.update_item(Key={"albumId": ALBUM}, UpdateExpression="SET visibility = :value", ExpressionAttributeValues={":value": "private"})
             media_access.tag_keys_visibility([RAW], "private")
         tag_media_object.handler(self.s3_event(RAW), CONTEXT)
@@ -187,8 +192,7 @@ class PublicationRecoveryTests(unittest.TestCase):
             self.assertEqual(update_album.handler(self.event(body), CONTEXT)["statusCode"], 500)
         self.assertEqual(self.album()["status"], "updating")
         self.assertEqual(update_album.handler(self.event({"title": "other"}), CONTEXT)["statusCode"], 409)
-        with self.assertRaises(media_mutation.MediaMutationBusy):
-            tag_media_object.handler(self.s3_event(RAW), CONTEXT)
+        self.assertEqual(tag_media_object.handler(self.s3_event(RAW), CONTEXT), {"tagged": 0})
         response = update_album.handler(self.event(body), CONTEXT)
         self.assertEqual(response["statusCode"], 200, response)
         self.assertEqual(self.tag(RAW), "private")

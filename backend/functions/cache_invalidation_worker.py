@@ -19,6 +19,9 @@ WORKERS = {"album-visibility": "VISIBILITY_WORKER_FUNCTION_NAME",
            "album-media-sync": "UPLOAD_WORKER_FUNCTION_NAME",
            "album-video-jobs": "UPLOAD_WORKER_FUNCTION_NAME",
            "album-thumbnail-cleanup": "THUMBNAIL_WORKER_FUNCTION_NAME",
+           "album-object-tagging": "TAGGING_WORKER_FUNCTION_NAME",
+           "album-media-deletion": "MEDIA_DELETION_WORKER_FUNCTION_NAME",
+           "album-deletion": "DELETION_WORKER_FUNCTION_NAME",
            "album-drive-backup": "DRIVE_WORKER_FUNCTION_NAME"}
 
 
@@ -40,8 +43,12 @@ def _continue_album_work(body):
         if response.get("StatusCode") != 202:
             raise RuntimeError("Backup continuation was not accepted")
         return
-    response = client.invoke(FunctionName=function, InvocationType="RequestResponse",
-                             Payload=json.dumps({"source": body["kind"], "albumId": validate_uuid(body["albumId"])}))
+    envelope = {"source": body["kind"], "albumId": validate_uuid(body["albumId"])}
+    if body["kind"] == "album-object-tagging":
+        if not isinstance(body.get("key"), str) or len(body["key"]) > 1024:
+            raise ValueError("Invalid tagging key")
+        envelope.update(key=body["key"], firstAttemptAt=int(body["firstAttemptAt"]), attempt=int(body["attempt"]))
+    response = client.invoke(FunctionName=function, InvocationType="RequestResponse", Payload=json.dumps(envelope))
     payload = response["Payload"]
     try:
         raw = payload.read(65537)
@@ -104,7 +111,7 @@ def handler(event, _context):
     remaining = getattr(_context, "get_remaining_time_in_millis", None)
     grouped = {}
     for identifier, body in work_records:
-        identity = (body["kind"], body["albumId"], body.get("jobEntry"))
+        identity = (body["kind"], body["albumId"], body.get("jobEntry"), body.get("key"))
         group = grouped.setdefault(identity, {"body": body, "ids": []})
         group["ids"].append(identifier)
 

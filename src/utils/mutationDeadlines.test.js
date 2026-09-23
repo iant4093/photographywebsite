@@ -43,7 +43,7 @@ describe('automatic save continuation', () => {
   it('continues pending work and explicit contention until the original save completes', async () => {
     const request = vi.fn().mockResolvedValueOnce({ pending: true }).mockRejectedValueOnce({ code: 'MEDIA_BUSY' }).mockResolvedValue({ complete: true })
     const result = completeAlbumMutation(request, undefined, { delayMs: 10 })
-    await vi.advanceTimersByTimeAsync(20)
+    await vi.advanceTimersByTimeAsync(30)
     await expect(result).resolves.toEqual({ complete: true })
     expect(request).toHaveBeenCalledTimes(3)
   })
@@ -51,6 +51,31 @@ describe('automatic save continuation', () => {
     const request = vi.fn().mockRejectedValue(new Error('network failure'))
     await expect(completeAlbumMutation(request)).rejects.toThrow('network failure')
     expect(request).toHaveBeenCalledTimes(1)
+  })
+  it('honors server delays and backs off subsequent browser polls', async () => {
+    const request = vi.fn().mockResolvedValueOnce({ pending: true, retryAfter: 15 })
+      .mockRejectedValueOnce({ code: 'MEDIA_BUSY', retryAfterMs: 20_000 }).mockResolvedValue({ complete: true })
+    const result = completeAlbumMutation(request)
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(request).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(request).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(19_999)
+    expect(request).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(result).resolves.toEqual({ complete: true })
+  })
+  it('accepts deletion completed by the worker only after an explicit pending receipt', async () => {
+    const missing = { status: 404, code: 'HTTP_404' }
+    const request = vi.fn().mockResolvedValueOnce({ pending: true }).mockRejectedValue(missing)
+    const result = completeAlbumMutation(request, undefined, { missingAfterPending: true })
+    await vi.advanceTimersByTimeAsync(1000)
+    await expect(result).resolves.toEqual({ complete: true })
+    await expect(completeAlbumMutation(request, undefined, { missingAfterPending: true })).rejects.toBe(missing)
+    const edit = completeAlbumMutation(vi.fn().mockResolvedValueOnce({ pending: true }).mockRejectedValue(missing))
+    const rejected = expect(edit).rejects.toBe(missing)
+    await vi.advanceTimersByTimeAsync(1000)
+    await rejected
   })
   it('bounds repeated contention and stops after cancellation', async () => {
     const request = vi.fn().mockResolvedValue({ pending: true })

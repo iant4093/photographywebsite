@@ -99,7 +99,8 @@ class RecoverableDeletion(unittest.TestCase):
         self.assertEqual(self.delete()['statusCode'], 200)
         self.assertNotIn('pendingMediaDeletion', self.saved)
         self.assertEqual(self.table.update_item.call_count, 2)
-        self.assertEqual(self.table.update_item.call_args.kwargs['UpdateExpression'], 'REMOVE pendingMediaDeletion')
+        self.assertEqual(self.table.update_item.call_args.kwargs['UpdateExpression'], 'SET lastMediaDeletion = :completed REMOVE pendingMediaDeletion')
+        self.assertEqual(self.table.update_item.call_args.kwargs['ExpressionAttributeValues'][':completed']['deletedCount'], 1)
 
     def test_different_deletion_cannot_overwrite_unfinished_cleanup(self):
         self.erase.side_effect = RuntimeError('storage unavailable')

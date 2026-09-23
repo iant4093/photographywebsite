@@ -4,6 +4,7 @@ import os
 import logging
 import re
 import uuid
+import cleanup_work
 from visibility_change import enqueue as enqueue_album_work
 
 import boto3
@@ -46,7 +47,9 @@ from front_door import verify_front_door_request
 def _finish_thumbnail_cleanup(album):
     pending = album.get("pendingThumbnailCleanup")
     if not pending:
-        return
+        return True
+    cleanup_work.schedule(album["albumId"], pending,
+        lambda: cleanup_work.save_receipt(table, album, "pendingThumbnailCleanup"), "album-thumbnail-cleanup")
     references = {album.get("coverImageUrl"), album.get("coverThumbKey")}
     for image in album.get("images", []):
         if isinstance(image, dict):
@@ -55,14 +58,15 @@ def _finish_thumbnail_cleanup(album):
     if keys:
         preflight_deletion(keys=keys, max_versions=100)
         delete_keys_all_versions(keys)
-        if pending.get("wasPublic") and not invalidate_album_media(album, reason="thumbnail-replaced", strict=True):
-            raise RuntimeError("Thumbnail cache invalidation is not configured")
+        if pending.get("wasPublic") and not cleanup_work.revoke(table, album, "pendingThumbnailCleanup"):
+            return False
     table.update_item(
         Key={"albumId": album["albumId"]}, UpdateExpression="REMOVE pendingThumbnailCleanup",
         ConditionExpression="attribute_exists(albumId) AND pendingThumbnailCleanup.id = :id",
         ExpressionAttributeValues={":id": pending["id"]},
     )
     album.pop("pendingThumbnailCleanup", None)
+    return True
 
 
 def handler(event, context):
@@ -72,7 +76,8 @@ def handler(event, context):
             with album_lease(table, album_id, context):
                 album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
                 if album:
-                    _finish_thumbnail_cleanup(album)
+                    if not _finish_thumbnail_cleanup(album):
+                        return json_response(202, {"pending": True, "retryAfter": 15})
         except MediaAlbumMissing:
             pass
         return json_response(200, {"complete": True})
@@ -98,8 +103,8 @@ def handler(event, context):
             if album.get("pendingMediaDeletion"):
                 return error_response(409, "Media deletion is still being completed. Please retry shortly.", code="deletion_pending")
             if mutation_protocol_enabled() and album.get("pendingThumbnailCleanup"):
-                enqueue_album_work(album_id, "album-thumbnail-cleanup")
-                _finish_thumbnail_cleanup(album)
+                if not _finish_thumbnail_cleanup(album):
+                    return json_response(202, {"pending": True, "retryAfter": 15})
             raw_key = validate_album_media_key(raw_key, album=album)
             images = album.get("images", []) if isinstance(album.get("images", []), list) else []
             target_index = next(
@@ -222,8 +227,6 @@ def handler(event, context):
                 updated_image["blurhash"] = values[":blurhash"]
             if mutation_protocol_enabled():
                 updated_images = [updated_image if index == target_index else image for index, image in enumerate(images)]
-                if obsolete_thumb:
-                    enqueue_album_work(album_id, "album-thumbnail-cleanup")
                 if ":thumbKey" in values:
                     tag_keys_visibility([values[":thumbKey"]], album["visibility"])
                 # Full secondary-store repair belongs to the existing upload
@@ -232,8 +235,9 @@ def handler(event, context):
                     lambda: update_album_media(album_id, media_id_for_key(raw_key), updated_image))
                 if not synchronized:
                     enqueue_album_work(album_id, "album-media-sync")
-                _finish_thumbnail_cleanup({**album, "images": updated_images,
-                    **({"coverThumbKey": values[":thumbKey"]} if is_cover and ":thumbKey" in values else {})})
+                if not _finish_thumbnail_cleanup({**album, "images": updated_images,
+                    **({"coverThumbKey": values[":thumbKey"]} if is_cover and ":thumbKey" in values else {})}):
+                    return json_response(202, {"pending": True, "retryAfter": 15})
             serialized = serialize_images(
                 {**album, "images": [updated_image]},
                 include_internal=True,

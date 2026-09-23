@@ -606,7 +606,7 @@ describe('mutation continuation boundary', () => {
             .mockResolvedValueOnce(jsonResponse({ albumId: 'album', visibility: 'public' }))
         vi.stubGlobal('fetch', request)
         const result = updateAlbum('token', 'album', { visibility: 'public' })
-        await vi.advanceTimersByTimeAsync(2000)
+        await vi.advanceTimersByTimeAsync(3000)
         await expect(result).resolves.toMatchObject({ albumId: 'album' })
         expect(request).toHaveBeenCalledTimes(3)
     })

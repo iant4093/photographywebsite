@@ -3,11 +3,15 @@
 import os
 import logging
 import uuid
+import hashlib
+import json
 from visibility_change import enqueue as enqueue_album_work
 
 import boto3
 from media_mutation import album_lease, enabled as mutation_protocol_enabled, MediaMutationBusy, MediaAlbumMissing
 import drive_backup_jobs
+import cleanup_work
+import video_cleanup
 
 from audit_helpers import actor_context, emit_audit_event
 from album_media_store import deactivate_album_media, delete_album_media, mutation_expression
@@ -69,10 +73,24 @@ def _cover_fields(image):
     return _raw_key(image), image.get("thumbKey", ""), image.get("blurhash", "")
 
 
+def _request_hash(keys):
+    return hashlib.sha256(json.dumps(sorted(keys), separators=(",", ":")).encode()).hexdigest()
+
+
 from front_door import verify_front_door_request
 
 
 def handler(event, context):
+    if isinstance(event, dict) and set(event) == {"source", "albumId"} and event.get("source") == "album-media-deletion":
+        try:
+            album_id = validate_uuid(event["albumId"])
+            with album_lease(table, album_id, context):
+                album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+                if album and album.get("pendingMediaDeletion"):
+                    return _complete_deletion(album, album["pendingMediaDeletion"], None, context)
+        except MediaAlbumMissing:
+            pass
+        return json_response(200, {"complete": True})
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
         return front_door_denied
@@ -130,6 +148,9 @@ def handler(event, context):
                     retained.append(image)
 
             if not removed:
+                completed = album.get("lastMediaDeletion") or {}
+                if completed.get("requestHash") == _request_hash(requested):
+                    return _deletion_response(album, completed["deletedCount"], 0)
                 _audit(event, context, "denied", "media_not_found")
                 return error_response(404, "Requested media was not found in this album", code="not_found")
             if requested - {_raw_key(image) for image in removed}:
@@ -161,6 +182,7 @@ def handler(event, context):
                 "mediaIds": sorted(removed_media_ids),
                 "indexKeys": {media_id: index_entry_keys(preview_metadata.get(media_id, {})) for media_id in removed_media_ids},
                 "wasPublic": album.get("visibility") == "public",
+                "videoCleanup": video_cleanup.prepare(album, removed),
             }
             updated_album = {**album, "images": retained, "imageCount": len(retained),
                              "coverImageUrl": cover_raw, "coverThumbKey": cover_thumb,
@@ -224,11 +246,20 @@ def _complete_deletion(album, pending, event, context):
     # Validate the durable server-written scope again before destructive work.
     keys = [validate_album_media_key(key, album=album) for key in pending["keys"]]
     prefixes = [validate_album_media_key(key, album=album).rstrip("/") + "/" for key in pending["prefixes"]]
+    if mutation_protocol_enabled():
+        save = lambda: cleanup_work.save_receipt(table, album, "pendingMediaDeletion")
+        cleanup_work.schedule(album_id, pending, save, "album-media-deletion", 30)
+        if not video_cleanup.settle(album, pending, save, context):
+            return json_response(202, {"pending": True, "retryAfter": 30})
     deleted_versions = delete_keys_all_versions(keys)
     for prefix in prefixes:
         deleted_versions += delete_prefix_all_versions(prefix)
     if pending["wasPublic"]:
-        invalidate_album_media(album, reason="album-media-deleted", strict=True)
+        if mutation_protocol_enabled():
+            if not cleanup_work.revoke(table, album, "pendingMediaDeletion"):
+                return json_response(202, {"pending": True, "retryAfter": 15})
+        else:
+            invalidate_album_media(album, reason="album-media-deleted", strict=True)
     delete_preview_metadata(album_id, removed_media_ids, pending["indexKeys"])
     if mutation_protocol_enabled() and album.get("mediaStoreDirty"):
         delete_album_media(album_id, removed_media_ids)
@@ -246,20 +277,25 @@ def _complete_deletion(album, pending, event, context):
             request_random_photo_pool_refresh()
     try:
         table.update_item(
-            Key={"albumId": album_id}, UpdateExpression="REMOVE pendingMediaDeletion",
+            Key={"albumId": album_id}, UpdateExpression="SET lastMediaDeletion = :completed REMOVE pendingMediaDeletion",
             ConditionExpression="pendingMediaDeletion.id = :id",
-            ExpressionAttributeValues={":id": pending["id"]},
+            ExpressionAttributeValues={":id": pending["id"], ":completed": {
+                "requestHash": _request_hash(pending["requested"]), "deletedCount": len(removed_media_ids)}},
         )
     except table.meta.client.exceptions.ConditionalCheckFailedException:
         # A concurrent retry already completed this exact idempotent cleanup,
         # or the entire album was deleted. Never recreate its record.
         pass
+    _audit(event, context, "success", "media_deleted", deleted_count=len(removed_media_ids),
+           deleted_version_count=deleted_versions)
+    return _deletion_response(album, len(removed_media_ids), deleted_versions)
+
+
+def _deletion_response(album, deleted_count, deleted_versions):
     try:
         response_album = serialize_album_summary(album, include_admin=True)
     except ValidationError:
         response_album = {key: album.get(key) for key in (
             "albumId", "imageCount", "coverImageUrl", "coverThumbKey", "coverBlurhash")}
-    _audit(event, context, "success", "media_deleted", deleted_count=len(removed_media_ids),
-           deleted_version_count=deleted_versions)
-    return json_response(200, {"message": "Media deleted", "deletedCount": len(removed_media_ids),
+    return json_response(200, {"message": "Media deleted", "deletedCount": deleted_count,
                                "deletedObjectVersions": deleted_versions, "album": response_album})
