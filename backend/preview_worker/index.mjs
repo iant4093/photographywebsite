@@ -662,15 +662,13 @@ async function processJob(jobValue) {
             if (!isPreviousPreviewContract(existingMetadata, previousKeys)) {
                 throw previewStageFailure('existing_preview_invalid')
             }
-            await atPreviewStage(
-                'metadata_pending_failed',
-                async () => upgradePreviousReadyMetadataPending(
-                    resolved,
-                    mediaId,
-                    jobId,
-                    previousKeys,
-                ),
-            )
+            await withMediaLease(documentClient, requiredEnvironment('ALBUMS_TABLE'), job.albumId, async () => {
+                resolved = resolveManifestImage(await albumById(job.albumId), job)
+                await atPreviewStage(
+                    'metadata_pending_failed',
+                    async () => upgradePreviousReadyMetadataPending(resolved, mediaId, jobId, previousKeys),
+                )
+            })
             upgradedPreviousContract = true
         }
     }
@@ -713,7 +711,10 @@ async function processJob(jobValue) {
         if (ready) return ready
     }
 
-    await atPreviewStage('metadata_pending_failed', async () => recordPendingMetadata(resolved, jobId))
+    await withMediaLease(documentClient, requiredEnvironment('ALBUMS_TABLE'), job.albumId, async () => {
+        resolved = resolveManifestImage(await albumById(job.albumId), job)
+        await atPreviewStage('metadata_pending_failed', async () => recordPendingMetadata(resolved, jobId))
+    })
     const { bytes: sourceBytes, head } = await atPreviewStage(
         'source_read_failed',
         async () => readObjectBounded(job.rawKey, MAX_SOURCE_BYTES),
@@ -728,20 +729,20 @@ async function processJob(jobValue) {
         'source_transform_failed',
         async () => extractExploreMetadata(sourceBytes, resolved.image),
     )
-    for (const width of PREVIEW_WIDTHS) {
-        checkWorkerTime()
-        await atPreviewStage(
-            'preview_object_write_failed',
-            async () => ensurePreviewObject(
-                resolved.previewKeys[String(width)],
-                outputs[String(width)],
-                sourceDigest,
-            ),
-        )
-    }
-
     return withMediaLease(documentClient, requiredEnvironment('ALBUMS_TABLE'), job.albumId, async () => {
         resolved = resolveManifestImage(await albumById(job.albumId), job)
+        // Decoding is expensive and does not need the lease. Every persistent
+        // write does: deletion must either precede all writes or sweep them.
+        const currentHead = await s3.send(new HeadObjectCommand({ Bucket: requiredEnvironment('IMAGES_BUCKET'), Key: job.rawKey }))
+        if (currentHead.ETag !== head.ETag || currentHead.VersionId !== head.VersionId) {
+            throw previewStageFailure('source_read_failed')
+        }
+        for (const width of PREVIEW_WIDTHS) {
+            checkWorkerTime()
+            await atPreviewStage('preview_object_write_failed', async () => ensurePreviewObject(
+                resolved.previewKeys[String(width)], outputs[String(width)], sourceDigest,
+            ))
+        }
         // Preview metadata is registered as pending before object creation, so a
         // visibility mutation can discover these deterministic keys. Re-read after
         // each tag pass until album visibility is stable; update_album performs a

@@ -176,6 +176,7 @@ def handler(event, context):
             preflight_deletion(keys=exact_keys, prefixes=hls_prefixes)
             pending = {
                 "id": uuid.uuid4().hex,
+                "audit": cleanup_work.audit_context(event),
                 "requested": sorted(requested),
                 "keys": sorted(exact_keys),
                 "prefixes": sorted(hls_prefixes),
@@ -275,6 +276,9 @@ def _complete_deletion(album, pending, event, context):
         request_public_api_invalidation(album_id=album_id, catalog=True, reason="album-media-deleted")
         if album.get("type", "photo") == "photo":
             request_random_photo_pool_refresh()
+    if mutation_protocol_enabled():
+        cleanup_work.complete_audit(pending, save, "media", {
+            "deleted_count": len(removed_media_ids), "deleted_version_count": deleted_versions})
     try:
         table.update_item(
             Key={"albumId": album_id}, UpdateExpression="SET lastMediaDeletion = :completed REMOVE pendingMediaDeletion",
@@ -286,8 +290,9 @@ def _complete_deletion(album, pending, event, context):
         # A concurrent retry already completed this exact idempotent cleanup,
         # or the entire album was deleted. Never recreate its record.
         pass
-    _audit(event, context, "success", "media_deleted", deleted_count=len(removed_media_ids),
-           deleted_version_count=deleted_versions)
+    if not mutation_protocol_enabled():
+        _audit(event, context, "success", "media_deleted", deleted_count=len(removed_media_ids),
+               deleted_version_count=deleted_versions)
     return _deletion_response(album, len(removed_media_ids), deleted_versions)
 
 

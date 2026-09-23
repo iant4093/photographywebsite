@@ -1995,6 +1995,7 @@ Resources:
           TAGGING_WORKER_FUNCTION_NAME: !Ref TagMediaObjectFunction
           MEDIA_DELETION_WORKER_FUNCTION_NAME: !Ref DeleteImagesFunction
           DELETION_WORKER_FUNCTION_NAME: !Ref DeleteAlbumFunction
+          USER_DELETION_WORKER_FUNCTION_NAME: !Ref DeleteUserFunction
           VISIBILITY_WORKER_FUNCTION_NAME: !Ref UpdateAlbumFunction
           UPLOAD_WORKER_FUNCTION_NAME: !Ref AddImagesFunction
           THUMBNAIL_WORKER_FUNCTION_NAME: !Ref UpdateImageFunction
@@ -2007,6 +2008,7 @@ Resources:
                 - !GetAtt TagMediaObjectFunction.Arn
                 - !GetAtt DeleteImagesFunction.Arn
                 - !GetAtt DeleteAlbumFunction.Arn
+                - !GetAtt DeleteUserFunction.Arn
                 - !GetAtt UpdateAlbumFunction.Arn
                 - !GetAtt AddImagesFunction.Arn
                 - !GetAtt UpdateImageFunction.Arn
@@ -2690,6 +2692,7 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
                 - dynamodb:Query
+                - dynamodb:ConditionCheckItem
               Resource: !GetAtt DriveBackupStateTable.Arn
         - Statement:
             - Effect: Allow
@@ -2747,6 +2750,13 @@ Resources:
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:ConditionCheckItem
+              Resource: !GetAtt AlbumsTable.Arn
+              Condition:
+                ForAllValues:StringLike:
+                  dynamodb:LeadingKeys: ['__USER_DELETION__*']
         - Statement:
             - Effect: Allow
               Action: mediaconvert:SearchJobs
@@ -2868,6 +2878,13 @@ Resources:
           FRONTEND_URL: !Ref FrontendUrl
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:ConditionCheckItem
+              Resource: !GetAtt AlbumsTable.Arn
+              Condition:
+                ForAllValues:StringLike:
+                  dynamodb:LeadingKeys: ['__USER_DELETION__*']
         - Statement:
             - Effect: Allow
               Action:

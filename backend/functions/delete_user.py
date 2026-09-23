@@ -3,6 +3,9 @@
 import os
 
 import boto3
+import user_deletion
+import ownership_guard
+from media_mutation import enabled as mutation_protocol_enabled, MediaMutationBusy
 
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import AuthError, auth_error_response, require_admin
@@ -12,7 +15,7 @@ from drive_backup_jobs import DriveBackupBusy
 from media_access import album_media_prefixes
 from owner_helpers import assert_admin_target_mutable, albums_owned_by, cognito_identity, table
 from response_helpers import error_response, internal_error, json_response
-from validation_helpers import ValidationError, validate_email, validate_uuid
+from validation_helpers import ValidationError, validate_email, validate_uuid, parse_json_body
 
 
 cognito = boto3.client("cognito-idp")
@@ -44,6 +47,61 @@ from front_door import verify_front_door_request
 
 
 def handler(event, context):
+    if isinstance(event, dict) and set(event) == {"source", "subject"} and event.get("source") == "user-deletion":
+        return _durable_handler(event, context, internal=True)
+    denied = verify_front_door_request(event, context)
+    if denied:
+        return denied
+    denied = require_admin(event)
+    if denied:
+        return denied
+    if not mutation_protocol_enabled():
+        return _legacy_handler(event, context)
+    return _durable_handler(event, context)
+
+
+def _durable_handler(event, context, internal=False):
+    try:
+        if internal:
+            subject = validate_uuid(event['subject'])
+        else:
+            email = validate_email(((event or {}).get('pathParameters') or {}).get('email'))
+            body = parse_json_body(event, max_bytes=4096) if event.get('body') else {}
+            expected = validate_uuid(body['userId']) if body.get('userId') else None
+            try:
+                username, subject, _ = cognito_identity(cognito, USER_POOL_ID, email)
+            except cognito.exceptions.UserNotFoundException:
+                if not expected or not table.get_item(Key=ownership_guard.key(expected), ConsistentRead=True).get('Item', {}).get('deletionId'):
+                    raise
+                subject = expected
+            else:
+                subject = validate_uuid(subject)
+                if expected and expected != subject:
+                    return error_response(409, 'The account changed. Reload the user list and retry.', code='conflict')
+                assert_admin_target_mutable(event, cognito, USER_POOL_ID, username, subject)
+                user_deletion.begin(table, subject, username, email, event)
+        complete = user_deletion.advance(table, cognito, USER_POOL_ID, subject, context)
+        if not complete:
+            return json_response(202, {'pending':True, 'retryAfter':30})
+        record = table.get_item(Key=ownership_guard.key(subject), ConsistentRead=True).get('Item', {}).get('payload', {})
+        return json_response(200, {'message':'User and owned albums deleted', 'albumsDeleted':record.get('deletedAlbums', 0),
+            'deletedObjectVersions':record.get('deletedVersions', 0), 'complete':True})
+    except MediaMutationBusy as error:
+        return error_response(409, str(error), code='media_busy')
+    except AuthError as error:
+        _audit(event, context, 'denied', 'protected_admin_target')
+        return auth_error_response(error)
+    except DeletionTooLargeError:
+        return error_response(409, 'User data is too large for synchronous deletion; use the maintenance deletion workflow', code='deletion_too_large')
+    except ValidationError as error:
+        return error_response(400, str(error), code='invalid_request')
+    except cognito.exceptions.UserNotFoundException:
+        return error_response(404, 'User not found', code='not_found')
+    except Exception as error:
+        return internal_error(context, error, 'delete_user')
+
+
+def _legacy_handler(event, context):
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
         return front_door_denied

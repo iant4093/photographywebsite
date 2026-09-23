@@ -19,6 +19,7 @@ const PUBLIC_CATALOG_TTL_MS = 5 * 60_000
 const ADMIN_CATALOG_TTL_MS = 60_000
 const PUBLIC_ALBUM_TTL_MS = 5 * 60_000
 const PUBLIC_ALBUM_CACHE_LIMIT = 5
+const CATALOG_CACHE_LIMIT = 128
 const catalogCache = new Map()
 const catalogRequests = new Map()
 const publicAlbumCache = new Map()
@@ -293,7 +294,15 @@ function invalidateAlbumCatalog({ album, deletedAlbumId } = {}) {
     }
 }
 
+function pruneCatalogCache() {
+    for (const [key, entry] of catalogCache) {
+        if (entry.expiresAt <= Date.now()) catalogCache.delete(key)
+    }
+    while (catalogCache.size > CATALOG_CACHE_LIMIT) catalogCache.delete(catalogCache.keys().next().value)
+}
+
 export function readCachedAlbumsPage(params = {}, options = {}) {
+    pruneCatalogCache()
     const normalized = normalizeCatalogParams(params)
     if (options.authenticated && !options.token) return null
     const prefix = options.authenticated
@@ -304,6 +313,7 @@ export function readCachedAlbumsPage(params = {}, options = {}) {
 }
 
 export function fetchAlbumsPage(params = {}, options = {}) {
+    pruneCatalogCache()
     if (options.signal?.aborted) {
         return Promise.reject(options.signal.reason || new DOMException('Request aborted', 'AbortError'))
     }
@@ -313,6 +323,8 @@ export function fetchAlbumsPage(params = {}, options = {}) {
     const key = `${isPublic ? 'public' : `auth:${catalogAuthScope(options.token)}`}:${catalogKey(normalized)}`
     const cached = catalogCache.get(key)
     if (!options.force && cached?.expiresAt > Date.now()) {
+        catalogCache.delete(key)
+        catalogCache.set(key, cached)
         return Promise.resolve(cached.value)
     }
 
@@ -353,10 +365,13 @@ export function fetchAlbumsPage(params = {}, options = {}) {
             })
         }
         page.items = page.items.map(annotateMediaExpiry)
-        catalogCache.set(key, {
-            value: page,
-            expiresAt: Date.now() + (isPublic ? PUBLIC_CATALOG_TTL_MS : ADMIN_CATALOG_TTL_MS),
-        })
+        if (catalogRequests.get(key) === record) {
+            catalogCache.set(key, {
+                value: page,
+                expiresAt: Date.now() + (isPublic ? PUBLIC_CATALOG_TTL_MS : ADMIN_CATALOG_TTL_MS),
+            })
+            pruneCatalogCache()
+        }
         return page
     }).finally(() => {
         if (catalogRequests.get(key) === record) catalogRequests.delete(key)
@@ -495,7 +510,7 @@ export function fetchAlbum(albumId, token = null, options = {}) {
         if (generation !== cacheGeneration || controller.signal.aborted) {
             throw new DOMException('Request aborted', 'AbortError')
         }
-        setCachedPublicAlbum(key, data)
+        if (publicAlbumRequests.get(key) === record) setCachedPublicAlbum(key, data)
         return data
     }).finally(() => {
         if (publicAlbumRequests.get(key) === record) publicAlbumRequests.delete(key)
@@ -536,28 +551,11 @@ export async function fetchAlbumForViewing(albumId, getIdToken, options = {}) {
 }
 
 export function fetchAlbumMediaPage(token, albumId, params = {}, options = {}) {
-    const queryParams = new URLSearchParams()
-    if (params.limit) queryParams.set('limit', String(params.limit))
-    if (params.cursor) queryParams.set('cursor', String(params.cursor))
-    const query = queryParams.toString()
-    return apiFetch(
-        `/admin/albums/${encodeURIComponent(albumId)}/media${query ? `?${query}` : ''}`,
-        {
-            headers: authHeaders(token),
-            signal: options.signal,
-        },
-    ).then(async (payload) => {
-        if (!params.cursor && payload?.pendingDeletionKeys?.length) {
-            await (await import('./deletionRecovery')).recoverDeletion(token, albumId, payload.pendingDeletionKeys, options)
-        }
-        return {
-            album: payload?.album || null,
-            items: Array.isArray(payload?.items)
-                ? payload.items.map(annotateMediaExpiry)
-                : [],
-            nextCursor: isSafeCursor(payload?.nextCursor) ? payload.nextCursor : null,
-        }
-    })
+    const session = authGeneration
+    return import('./deletionRecovery').then(({ fetchMediaPage }) => fetchMediaPage(
+        { apiFetch, authHeaders, annotateMediaExpiry, isSafeCursor }, token, albumId, params,
+        { ...options, session, isCurrent: () => session === authGeneration },
+    ))
 }
 
 export function prefetchPublicAlbum(albumId) {

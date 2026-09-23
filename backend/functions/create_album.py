@@ -13,6 +13,7 @@ import secrets
 import uuid
 import upload_followup
 import video_jobs
+import ownership_guard
 from visibility_change import enqueue as enqueue_album_work
 
 import boto3
@@ -274,7 +275,7 @@ def handler(event, context):
         ensure_album_item_budget(item)
 
         try:
-            table.put_item(Item=item, ConditionExpression="attribute_not_exists(albumId)")
+            ownership_guard.write(table, "Put", item.get("ownerSub"), Item=item, ConditionExpression="attribute_not_exists(albumId)")
         except ClientError as error:
             if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
                 raise

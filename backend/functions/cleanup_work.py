@@ -4,6 +4,31 @@ import os
 import time
 
 from cache_invalidation import _queue_client, prepare_media_revocation, advance_media_revocation
+from audit_helpers import actor_context, emit_audit_event
+
+
+def audit_context(event):
+    actor, auth = actor_context(event) if event is not None else ("service", "service")
+    return {"actor": actor, "auth": auth}
+
+
+def complete_audit(pending, save, resource, details):
+    # All required cleanup is committed before the completion event. The
+    # hidden receipt survives logging failure; duplicate emissions share the
+    # same operation correlation ID if its final removal is interrupted.
+    if not pending.get("cleanupComplete"):
+        pending.update(cleanupComplete=True, auditDetails=details)
+        save()
+    actor = pending.get("audit", {"actor": "service", "auth": "service"})
+    emitted = emit_audit_event(
+        event_name=f"admin.{resource}_deleted", outcome="success", action={
+            "album": "album.delete", "media": "album.media.delete", "user": "user.delete"}[resource],
+        resource_type=resource, reason_code=f"{resource}_deleted",
+        event={"requestContext": {"requestId": pending["id"]}},
+        actor_type=actor["actor"], auth_method=actor["auth"], details=pending["auditDetails"],
+    )
+    if not emitted:
+        raise RuntimeError("Deletion audit completion needs another attempt")
 
 
 def schedule(album_id, pending, save, kind, delay=15):

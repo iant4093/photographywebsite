@@ -232,6 +232,8 @@ function ManageAlbums() {
     const [categoryFilter, setCategoryFilter] = useNavigationState('categoryFilter', '')
     const [collapsedCategories, setCollapsedCategories] = useNavigationState('collapsedCategories', () => new Set())
     const mediaRequest = useRef(0)
+    const mediaController = useRef(null)
+    useEffect(() => () => mediaController.current?.abort(), [])
     const [savingOrder, setSavingOrder] = useState(false)
     const [savingAlbumIds, setSavingAlbumIds] = useState(() => new Set())
     const albumCardRefs = useRef(new Map())
@@ -400,6 +402,7 @@ function ManageAlbums() {
         if (previousCatalogScope.current === key) return
         previousCatalogScope.current = key
         mediaRequest.current += 1
+        mediaController.current?.abort()
         const timer = window.setTimeout(() => {
             setExpandedAlbumId(null)
             setAlbumImages([])
@@ -414,6 +417,8 @@ function ManageAlbums() {
 
     function enterArrangeMode() {
         if (loadingMore || catalogError) return
+        mediaRequest.current += 1
+        mediaController.current?.abort()
         setExpandedAlbumId(null)
         setAlbumImages([])
         setMediaNextCursor(null)
@@ -424,6 +429,7 @@ function ManageAlbums() {
 
     async function toggleAlbumImages(album) {
         const request = ++mediaRequest.current
+        mediaController.current?.abort()
         if (expandedAlbumId === album.albumId) {
             // Collapse
             setExpandedAlbumId(null)
@@ -434,6 +440,8 @@ function ManageAlbums() {
             return
         }
         setExpandedAlbumId(album.albumId)
+        const controller = new AbortController()
+        mediaController.current = controller
         setAddingFiles([])
         setAddingVideoFiles([])
         setMediaNextCursor(null)
@@ -444,6 +452,12 @@ function ManageAlbums() {
                 token,
                 album.albumId,
                 { limit: ADMIN_MEDIA_PAGE_SIZE },
+                {
+                    signal: controller.signal,
+                    onDeletionRecovered: updated => {
+                        if (request === mediaRequest.current && updated) patchAlbum(album.albumId, updated)
+                    },
+                },
             )
             if (request !== mediaRequest.current) return
             setAlbumImages(page.items)

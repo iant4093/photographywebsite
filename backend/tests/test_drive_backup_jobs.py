@@ -53,14 +53,16 @@ class DurableJobsTests(unittest.TestCase):
         table.update_item.assert_not_called()
 
     def test_retry_keeps_failed_removal_intent_and_does_not_increment_job_count(self):
-        state = Mock()
+        state = Mock(); state.name = 'state'
         state.query.return_value = {'Items': [JOB, {**JOB, 'entry': 'job#done', 'status': 'done'}]}
         with patch.object(jobs, 'state_table', return_value=state), patch.object(jobs, 'transaction') as transact:
             self.assertTrue(jobs.enqueue_retry(ALBUM))
-        delivery = state.put_item.call_args.kwargs['Item']
+        changes = transact.call_args.args[0]
+        delivery = decode(changes[-1]['Put']['Item'])
         self.assertEqual(delivery['jobEntry'], JOB['entry'])
         self.assertEqual(delivery['recordType'], 'delivery')
-        transact.assert_not_called()
+        self.assertNotIn('pendingJobs', str(changes))
+        self.assertIn('attemptStartedAt', changes[1]['Update']['UpdateExpression'])
 
     def test_fresh_retry_checks_album_still_exists_in_transaction(self):
         state = Mock(); state.name = 'state'; state.query.return_value = {'Items': []}
@@ -267,10 +269,10 @@ class AdditionalBackupBehaviorTests(unittest.TestCase):
     def test_paginated_folder_inventory_and_error_state(self):
         service = Mock(); service.files().list.return_value.execute.side_effect = [{'files': [{'id': 'a'}], 'nextPageToken': 'more'}, {'files': [{'id': 'b'}]}]
         self.assertEqual([item['id'] for item in worker.children(service, 'folder')], ['a', 'b'])
-        state = Mock()
-        with patch.object(jobs, 'state_table', return_value=state): jobs.fail(JOB)
-        self.assertEqual(state.update_item.call_count, 2)
-        self.assertNotIn('private provider', str(state.update_item.call_args))
+        state = Mock(); state.name = 'state'
+        with patch.object(jobs, 'state_table', return_value=state), patch.object(jobs, 'transaction') as transact: jobs.fail(JOB)
+        self.assertEqual(len(transact.call_args.args[0]), 2)
+        self.assertNotIn('private provider', str(transact.call_args))
 
     def test_status_retry_validation_and_busy_state(self):
         import json

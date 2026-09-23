@@ -15,6 +15,7 @@ from validation_helpers import ValidationError, validate_uuid
 
 logger = logging.getLogger("photography_api.cache_invalidation_worker")
 WORKERS = {"album-visibility": "VISIBILITY_WORKER_FUNCTION_NAME",
+           "user-deletion": "USER_DELETION_WORKER_FUNCTION_NAME",
            "album-upload-followup": "UPLOAD_WORKER_FUNCTION_NAME",
            "album-media-sync": "UPLOAD_WORKER_FUNCTION_NAME",
            "album-video-jobs": "UPLOAD_WORKER_FUNCTION_NAME",
@@ -44,6 +45,8 @@ def _continue_album_work(body):
             raise RuntimeError("Backup continuation was not accepted")
         return
     envelope = {"source": body["kind"], "albumId": validate_uuid(body["albumId"])}
+    if body["kind"] == "user-deletion":
+        envelope["subject"] = envelope.pop("albumId")
     if body["kind"] == "album-object-tagging":
         if not isinstance(body.get("key"), str) or len(body["key"]) > 1024:
             raise ValueError("Invalid tagging key")

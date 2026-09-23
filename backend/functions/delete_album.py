@@ -57,7 +57,7 @@ class DeletionPending(Exception):
     pass
 
 
-def delete_album_record(album, context=None):
+def delete_album_record(album, context=None, *, event=None, allow_pending=False, audit=None):
     """Claim a durable cleanup operation; keep its manifest until every step succeeds."""
     album_id = validate_uuid(album.get("albumId"))
     preview_metadata = load_preview_metadata(album, strict=True)
@@ -68,7 +68,7 @@ def delete_album_record(album, context=None):
         raise DeletionConflict("Album deletion state is invalid")
     pending_cleanup = album.get("pendingAlbumDeletion")
     if mutation_protocol_enabled() and not pending_cleanup:
-        pending_cleanup = {"id": operation,
+        pending_cleanup = {"id": operation, "audit": audit or cleanup_work.audit_context(event),
             "videoCleanup": video_cleanup.prepare(album, album.get("images", []))
                 + (album.get("pendingMediaDeletion") or {}).get("videoCleanup", [])}
         try:
@@ -89,9 +89,9 @@ def delete_album_record(album, context=None):
     if album.get("status") == "deleting":
         conditions += ["#status = :deleting", "deletionId = :operation"]
     else:
-        if album.get("status", "active") != "active":
+        if album.get("status", "active") not in ({"active", "pending"} if allow_pending else {"active"}):
             raise DeletionConflict("Album is not active")
-        values[":active"] = "active"
+        values[":active"] = album.get("status", "active")
         conditions.append("(attribute_not_exists(#status) OR #status = :active)")
     # Compare every field controlling the cleanup scope and account ownership.
     for index, field in enumerate(("images", "visibility", "legacyS3Prefix", "ownerSub", "ownerEmail", "pendingMediaDeletion", "videoJobs", "backupToGoogleDrive", "driveFolderId", "type")):
@@ -142,6 +142,8 @@ def delete_album_record(album, context=None):
         delete_album_media(album_id)
         if retaining:
             drive_backup_jobs.end_retention(album_id, True)
+        if mutation_protocol_enabled():
+            cleanup_work.complete_audit(pending_cleanup, save, "album", {"deleted_version_count": deleted_versions})
         table.delete_item(
             Key={"albumId": album_id},
             ConditionExpression="#status = :deleting AND deletionId = :operation AND deletionLeaseOwner = :owner",
@@ -193,8 +195,9 @@ def handler(event, context):
             return error_response(404, "Album not found", code="not_found")
 
         album["albumId"] = album_id
-        deleted_versions = delete_album_record(album, context)
-        _audit(event, context, "success", "album_deleted", deleted_version_count=deleted_versions)
+        deleted_versions = delete_album_record(album, context, event=event)
+        if not mutation_protocol_enabled():
+            _audit(event, context, "success", "album_deleted", deleted_version_count=deleted_versions)
         return json_response(
             200,
             {"message": "Album deleted", "deletedObjectVersions": deleted_versions},

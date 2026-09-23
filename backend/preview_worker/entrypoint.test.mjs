@@ -121,3 +121,56 @@ test('a busy publication never starts work and failed work releases only its own
     await assert.rejects(withMediaLease({ send: async () => { calls++; if (calls === 2) throw new Error('release unavailable') } }, 'albums', 'album', async () => { throw new Error('operation failed') }), /operation failed/)
     assert.equal(calls, 2)
 })
+
+test('actual preview decoding cannot recreate files or metadata after deletion', async t => {
+    const { default: sharp } = await import('sharp')
+    const { S3Client } = await import('@aws-sdk/client-s3')
+    const { DynamoDBDocumentClient } = await import('@aws-sdk/lib-dynamodb')
+    const source = await sharp({ create: { width: 1920, height: 1280, channels: 3, background: '#335566' } }).jpeg().toBuffer()
+    const albumId = '11111111-1111-4111-8111-111111111111'
+    const rawKey = `albums/${albumId}/original/photo.jpg`
+    const env = { ...process.env }
+    Object.assign(process.env, { AWS_REGION: 'us-west-2', ALBUMS_TABLE: 'test-albums', PREVIEW_METADATA_TABLE: 'test-previews', IMAGES_BUCKET: 'test-images', MEDIA_MUTATION_PROTOCOL: '1' })
+    t.after(() => { for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key]; Object.assign(process.env, env) })
+    const { handler } = await import('./index.mjs')
+    for (const race of ['before-metadata', 'source-buffered', 'source-replaced']) {
+        await t.test(race, async child => {
+            let deleted = false, leased = false, metadata = null, writes = 0, heads = 0
+            const album = { albumId, status: 'active', type: 'photo', visibility: 'public', images: [{ rawKey }] }
+            child.mock.method(S3Client.prototype, 'send', async command => {
+                if (command.constructor.name === 'HeadObjectCommand') return {
+                    ContentLength: source.length, ContentType: 'image/jpeg', ETag: ++heads > 1 && race === 'source-replaced' ? 'new' : 'original',
+                }
+                if (command.constructor.name === 'GetObjectCommand') return { ETag: 'original', Body: { transformToByteArray: async () => {
+                    if (race === 'source-buffered') { deleted = true; metadata = null }
+                    return source
+                } } }
+                if (command.constructor.name === 'PutObjectCommand') { writes++; assert.ok(leased) }
+                throw new Error(`Unexpected object operation ${command.constructor.name}`)
+            })
+            child.mock.method(DynamoDBDocumentClient.prototype, 'send', async command => {
+                const input = command.input
+                if (command.constructor.name === 'GetCommand') {
+                    if (input.TableName !== 'test-albums') return { Item: metadata }
+                    const item = deleted ? undefined : album
+                    if (race === 'before-metadata') deleted = true
+                    return { Item: item }
+                }
+                if (command.constructor.name === 'PutCommand') { assert.ok(leased); assert.ok(!deleted); metadata = input.Item; return {} }
+                if (command.constructor.name === 'UpdateCommand') {
+                    if (deleted) throw Object.assign(new Error('Deleted'), { name: 'ConditionalCheckFailedException' })
+                    leased = input.UpdateExpression.startsWith('SET mediaLeaseOwner')
+                    return {}
+                }
+                throw new Error('Unexpected database operation')
+            })
+            const event = { Records: [{ messageId: 'preview', body: JSON.stringify({ albumId, rawKey, previewVersion: 3 }) }] }
+            assert.deepEqual((await handler(event)).batchItemFailures, [{ itemIdentifier: 'preview' }])
+            assert.equal(writes, 0)
+            if (deleted) {
+                assert.equal(metadata, null)
+                assert.deepEqual((await handler(event)).batchItemFailures, [])
+            }
+        })
+    }
+})

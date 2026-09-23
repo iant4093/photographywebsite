@@ -166,7 +166,7 @@ describe('DeleteUser and EditUser', () => {
     fireEvent.change(screen.getByPlaceholderText('Type confirm...'), { target: { value: 'confirm' } })
     fireEvent.click(screen.getByRole('button', { name: 'Delete Permanently' }))
     expect(await screen.findByText(/deleted along with 2 album/)).toBeInTheDocument()
-    expect(api.deleteUser).toHaveBeenCalledWith('token', 'viewer@example.com')
+    expect(api.deleteUser).toHaveBeenCalledWith('token', 'viewer@example.com', { userId: undefined })
 
     api.deleteUser.mockRejectedValueOnce({})
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])

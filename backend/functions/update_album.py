@@ -331,9 +331,11 @@ def handler(event, context):
                 update_parts.append("REMOVE " + ", ".join(removals))
 
             backup_change = bool({"title", "category"}.intersection(changed_fields))
-            commit = drive_backup_jobs.update_album if backup_change else lambda _table, _album, **kwargs: _table.update_item(**kwargs)
+            from ownership_guard import write as guarded_write
+            commit = drive_backup_jobs.update_album if backup_change else lambda _table, _album, owner_target=None, **kwargs: guarded_write(_table, 'Update', owner_target, **kwargs)
             response = commit(
                 table, album,
+                owner_target=updated.get("ownerSub") if updated.get("ownerSub") != album.get("ownerSub") else None,
                 Key={"albumId": album_id},
                 UpdateExpression=" ".join(update_parts),
                 ConditionExpression=condition,

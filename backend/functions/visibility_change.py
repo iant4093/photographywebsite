@@ -11,6 +11,7 @@ from cache_invalidation import _queue_client, prepare_media_revocation, advance_
 from dynamodb_helpers import ensure_album_item_budget
 from media_access import album_media_prefixes, bucket_name, get_s3_client, retag_album_objects
 from media_mutation import MediaMutationBusy
+import ownership_guard
 
 BATCH_SIZE = 64
 MAX_BATCHES = 8
@@ -41,17 +42,28 @@ def begin(table, album, updated, body, mutable_fields):
         "phase": "objects", "prefix": 0,
     }
     candidate = {**album, "status": "updating", "pendingVisibilityChange": pending}
+    owner_target = updated.get("ownerSub") if updated.get("ownerSub") != album.get("ownerSub") else None
+    # An accepted private-owner assignment is discoverable immediately, even
+    # while its media tags are still transitioning. Deletion can wait for it.
+    ownership = {field: updated[field] for field in ("ownerSub", "ownerEmail") if owner_target and field in updated}
+    candidate.update(ownership)
     ensure_album_item_budget(candidate)
-    table.update_item(
+    names = {"#status": "status", "#visibility": "visibility"}
+    values = {":updating": "updating", ":pending": pending, ":active": "active",
+              ":visibility": album["visibility"], ":images": album.get("images", [])}
+    assignment = ""
+    for index, (field, value) in enumerate(ownership.items()):
+        names[f"#owner{index}"] = field
+        values[f":owner{index}"] = value
+        assignment += f", #owner{index} = :owner{index}"
+    ownership_guard.write(table, "Update", owner_target,
         Key={"albumId": album["albumId"]},
-        UpdateExpression="SET #status = :updating, pendingVisibilityChange = :pending",
+        UpdateExpression="SET #status = :updating, pendingVisibilityChange = :pending" + assignment,
         ConditionExpression=("attribute_exists(albumId) AND attribute_not_exists(pendingVisibilityChange) "
                              "AND attribute_not_exists(pendingMediaDeletion) "
                              "AND (attribute_not_exists(#status) OR #status = :active) "
                              "AND #visibility = :visibility AND (attribute_not_exists(images) OR images = :images)"),
-        ExpressionAttributeNames={"#status": "status", "#visibility": "visibility"},
-        ExpressionAttributeValues={":updating": "updating", ":pending": pending, ":active": "active",
-                                   ":visibility": album["visibility"], ":images": album.get("images", [])},
+        ExpressionAttributeNames=names, ExpressionAttributeValues=values,
     )
     # Queue before doing provider work: a browser disconnect or Lambda timeout
     # cannot erase the durable intent. If dispatch fails, repeating Save repairs it.

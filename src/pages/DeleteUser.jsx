@@ -44,7 +44,7 @@ function DeleteUser() {
         setError('')
         try {
             const token = await getIdToken()
-            const result = await deleteUser(token, selectedUser.email)
+            const result = await deleteUser(token, selectedUser.email, { userId: selectedUser.sub })
             setSuccess(`User ${selectedUser.email} deleted along with ${result.albumsDeleted} album(s).`)
             setSelectedUser(null)
             setConfirmText('')

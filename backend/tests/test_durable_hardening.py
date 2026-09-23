@@ -198,11 +198,35 @@ class DurableHardeningTests(unittest.TestCase):
             self.assertNotIn("pendingMediaDeletion", self.album())
 
     def test_cascade_never_deletes_account_until_album_cleanup_finishes(self):
-        current = {**RECORD, "ownerSub": "subject"}
-        with patch.object(delete_user, "verify_front_door_request", return_value=None), patch.object(delete_user, "require_admin", return_value=None), patch.object(delete_user, "cognito_identity", return_value=("username", "subject", {})), patch.object(delete_user, "assert_admin_target_mutable"), patch.object(delete_user, "albums_owned_by", return_value=[current]), patch.object(delete_user, "preflight_deletion"), patch.object(delete_user.table, "get_item", return_value={"Item": current}), patch.object(delete_user, "delete_album_record", side_effect=delete_album.DeletionPending()), patch.object(delete_user.cognito, "admin_delete_user") as erase:
+        with patch.object(delete_user, "verify_front_door_request", return_value=None), patch.object(delete_user, "require_admin", return_value=None), patch.object(delete_user, "cognito_identity", return_value=("username", fixture.SUB, {})), patch.object(delete_user, "assert_admin_target_mutable"), patch.object(delete_user.user_deletion, "begin"), patch.object(delete_user.user_deletion, "advance", return_value=False), patch.object(delete_user.cognito, "admin_delete_user") as erase:
             response = delete_user.handler({"pathParameters": {"email": "owner@example.test"}}, CONTEXT)
         self.assertEqual(response["statusCode"], 202)
         erase.assert_not_called()
+
+    def check_background_audit(self, module, kind, body):
+        event = self.event(body)
+        event['requestContext'] = {'authorizer': {'jwt': {'claims': {'cognito:groups': ['Admins']}}}}
+        with patch.object(cleanup_work, 'advance_media_revocation', side_effect=[False, True, True]), \
+             patch.object(cleanup_work, 'emit_audit_event', side_effect=[False, True]) as emit:
+            self.assertEqual(module.handler(event, CONTEXT)['statusCode'], 202)
+            internal = {'source':kind, 'albumId':ALBUM}
+            # Logging failure cannot discard the durable completion receipt.
+            with self.assertRaises(RuntimeError): module.handler(internal, CONTEXT)
+            field = 'pendingMediaDeletion' if module is delete_images else 'pendingAlbumDeletion'
+            self.assertTrue(self.album()[field]['cleanupComplete'])
+            self.assertNotIn('claims', str(self.album()[field]))
+            self.assertEqual(module.handler(internal, CONTEXT)['statusCode'], 200)
+        self.assertEqual(emit.call_count, 2)
+        for call in emit.call_args_list:
+            self.assertEqual(call.kwargs['actor_type'], 'admin')
+            self.assertEqual(call.kwargs['auth_method'], 'jwt')
+        self.assertEqual(emit.call_args_list[0].kwargs['event'], emit.call_args_list[1].kwargs['event'])
+
+    def test_background_album_audit_preserves_actor_and_survives_emission_failure(self):
+        self.check_background_audit(delete_album, 'album-deletion', {})
+
+    def test_background_media_audit_preserves_actor_and_survives_emission_failure(self):
+        self.check_background_audit(delete_images, 'album-media-deletion', {'keys':[RAW]})
 
     def test_oversized_cleanup_receipt_is_rejected_before_claiming_or_deleting_album(self):
         with patch.object(delete_album, "ensure_album_item_budget", side_effect=ValidationError("too large")), patch.object(delete_album, "delete_prefix_all_versions") as erase:

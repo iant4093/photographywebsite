@@ -52,7 +52,7 @@ describe('request and browser failure recovery', () => {
         vi.stubGlobal('fetch', fetch)
         const page = await fetchAlbumMediaPage('token', 'a')
         expect(page.items).toEqual([])
-        expect(fetch).toHaveBeenCalledTimes(2)
+        await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
         expect(fetch.mock.calls[1][0]).toContain('/albums/a/delete-images')
         expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ keys: ['old.jpg'] })
     })

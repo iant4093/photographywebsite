@@ -230,7 +230,7 @@ def process(album_id, entry, context=None):
             jobs.complete(job, retained=True)
             return
         candidate = uuid.uuid4().hex
-        if not jobs.claim(album_id, candidate):
+        if not jobs.claim(album_id, candidate, job=job):
             raise jobs.DriveBackupBusy('Backup is busy')
         owner = candidate
         retained = reconcile(job, context)

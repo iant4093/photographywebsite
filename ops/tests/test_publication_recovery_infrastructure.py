@@ -60,11 +60,25 @@ class PublicationRecoveryInfrastructureTests(unittest.TestCase):
     def test_new_continuations_reuse_existing_handlers_with_exact_queue_wiring(self):
         for variable, function in (("TAGGING_WORKER_FUNCTION_NAME", "TagMediaObjectFunction"),
                                    ("MEDIA_DELETION_WORKER_FUNCTION_NAME", "DeleteImagesFunction"),
-                                   ("DELETION_WORKER_FUNCTION_NAME", "DeleteAlbumFunction")):
+                                   ("DELETION_WORKER_FUNCTION_NAME", "DeleteAlbumFunction"),
+                                   ("USER_DELETION_WORKER_FUNCTION_NAME", "DeleteUserFunction")):
             self.assertEqual(self.resources["CacheInvalidationWorkerFunction"]["Properties"]["Environment"]["Variables"][variable], {"Ref": function})
             self.assertEqual(self.allowed("CacheInvalidationWorkerFunction", {"Fn::GetAtt": [function, "Arn"]}), {"lambda:InvokeFunction"})
             self.assertEqual(self.resources[function]["Properties"]["Environment"]["Variables"]["CACHE_INVALIDATION_QUEUE_URL"], {"Ref": "CacheInvalidationQueue"})
             self.assertEqual(self.allowed(function, {"Fn::GetAtt": ["CacheInvalidationQueue", "Arn"]}), {"sqs:SendMessage"})
+
+    def test_owner_assignment_condition_permission_is_limited_to_existing_account_fences(self):
+        for function in ("CreateAlbumFunction", "UpdateAlbumFunction"):
+            statements = [statement for policy in self.resources[function]["Properties"]["Policies"]
+                          if isinstance(policy, dict) for statement in policy.get("Statement", [])
+                          if "dynamodb:ConditionCheckItem" in sequence(statement.get("Action"))]
+            self.assertEqual(len(statements), 1)
+            self.assertEqual(statements[0]["Resource"], {"Fn::GetAtt":["AlbumsTable", "Arn"]})
+            self.assertEqual(statements[0]["Condition"], {"ForAllValues:StringLike":{"dynamodb:LeadingKeys":["__USER_DELETION__*"]}})
+
+    def test_backup_attempt_claim_checks_only_its_existing_state_table(self):
+        self.assertIn("dynamodb:ConditionCheckItem", self.allowed("GoogleDriveBackupFunction", {"Fn::GetAtt":["DriveBackupStateTable", "Arn"]}))
+        self.assertNotIn("dynamodb:ConditionCheckItem", self.allowed("GoogleDriveBackupFunction", "*"))
 
     def test_video_deletion_can_only_inspect_and_cancel_existing_account_jobs(self):
         for function in ("DeleteAlbumFunction", "DeleteImagesFunction", "DeleteUserFunction"):

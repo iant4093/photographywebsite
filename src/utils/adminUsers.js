@@ -55,8 +55,9 @@ export function deleteUser(services, token, email, options = {}) {
     return albumMutation(`/users/${encodeURIComponent(email)}`, {
         method: 'DELETE',
         headers: authHeaders(token),
+        ...(options.userId ? { body: JSON.stringify({ userId: options.userId }) } : {}),
         signal: options.signal,
-    }, { timeoutMs: 60_000 })
+    }, { timeoutMs: 60_000, missingAfterPending: true })
 }
 
 export function editUser(services, token, email, data, options = {}) {
