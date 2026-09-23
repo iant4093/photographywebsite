@@ -80,7 +80,7 @@ def _sync_drive_folder(album):
 
 
 def _audit(event, context, outcome, reason_code, *, previous_visibility=None, visibility=None):
-    actor_type, auth_method = actor_context(event)
+    actor_type, auth_method = actor_context(event) if event is not None else ("service", "service")
     details = {}
     valid = {"public", "private", "unlisted"}
     if previous_visibility is not None:
@@ -173,7 +173,7 @@ def _reconcile_album_qr(updated):
 from front_door import verify_front_door_request
 
 
-def _continue_visibility(album_id, context, album=None):
+def _continue_visibility(album_id, context, album=None, event=None):
     with album_lease(table, album_id, context, transition=True):
         album = album or table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
         if not album or not album.get("pendingVisibilityChange"):
@@ -187,6 +187,8 @@ def _continue_visibility(album_id, context, album=None):
             if metadata:
                 sync_album_index(dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]), target, metadata)
         committed = visibility_change.commit(table, album, target)
+        _audit(event, context, "success", "album_updated",
+               previous_visibility=album["visibility"], visibility=committed["visibility"])
         request_public_api_invalidation(album_id=album_id, catalog=True, reason="album-updated")
         if committed.get("type", "photo") == "photo":
             request_random_photo_pool_refresh()
@@ -225,7 +227,7 @@ def handler(event, context):
                 if album["pendingVisibilityChange"].get("requestHash") != visibility_change.request_hash(body):
                     raise MediaMutationBusy("The previous privacy change is still being completed.")
                 visibility_change.enqueue(album_id)
-                return _continue_visibility(album_id, context, album)
+                return _continue_visibility(album_id, context, album, event)
             if not album or album.get("status", "active") != "active":
                 _audit(event, context, "denied", "album_not_found")
                 return error_response(404, "Album not found", code="not_found")
@@ -259,7 +261,7 @@ def handler(event, context):
                 for field in fields - MUTABLE_FIELDS:
                     updated.pop(field, None)
                 pending = visibility_change.begin(table, album, updated, body, fields)
-                return _continue_visibility(album_id, context, pending)
+                return _continue_visibility(album_id, context, pending, event)
             old_qr_key = validated_album_qr_key(album)
             new_qr_key = validated_album_qr_key(updated)
 

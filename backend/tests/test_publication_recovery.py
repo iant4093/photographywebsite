@@ -139,6 +139,7 @@ class PublicationRecoveryTests(unittest.TestCase):
         response = update_album.handler(self.event(body), CONTEXT)
         self.assertEqual(response["statusCode"], 200, response)
         self.assertEqual(self.album()["visibility"], "private")
+        update_album._audit.assert_called_with(self.event(body), CONTEXT, "success", "album_updated", previous_visibility="public", visibility="private")
         self.assertEqual(self.album()["status"], "active")
         self.assertNotIn("pendingVisibilityChange", self.album())
         self.assertEqual(self.tag(RAW), "private")
