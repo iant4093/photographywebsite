@@ -3069,7 +3069,7 @@ Resources:
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
-              Action: dynamodb:BatchWriteItem
+              Action: [dynamodb:Query, dynamodb:BatchWriteItem]
               Resource: !GetAtt AlbumMediaTable.Arn
             - Effect: Allow
               Action: dynamodb:BatchGetItem
