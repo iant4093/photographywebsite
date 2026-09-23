@@ -99,3 +99,17 @@ class RecoveryOperationsTests(unittest.TestCase):
             result = reconstruct(backup, [{'albumId':ALBUM, **pending}])
             self.assertEqual([row['albumId'] for row in result['candidates']], ['unaffected'])
             self.assertEqual(result['quarantine'], [backup[0]])
+
+    def test_undated_legacy_work_is_reviewed_without_inventing_its_original_age(self):
+        item=self.receipt();del item['pendingAlbumDeletion']['continuationStartedAt']
+        plan=describe(item,90000)[0]
+        self.assertEqual(plan['reason'],'missing_timestamp');self.assertIsNone(plan['ageSeconds'])
+        table=Mock();table.get_item.return_value={'Item':item};queue=Mock()
+        repair(table,queue,'queue',ALBUM,'operation',fingerprint(item),apply=True,now=90000)
+        saved=table.update_item.call_args.kwargs['ExpressionAttributeValues'][':next']
+        self.assertEqual(saved['continuationStartedAt'],90000)
+        self.assertTrue(saved['originalContinuationTimestampMissing'])
+        self.assertNotIn('originalContinuationStartedAt',saved)
+        self.assertEqual(saved['repairCount'],1)
+        item['pendingAlbumDeletion']['repairCount']=3
+        with self.assertRaisesRegex(ValueError,'budget'):repair(table,queue,'queue',ALBUM,'operation',fingerprint(item),apply=True,now=90000)

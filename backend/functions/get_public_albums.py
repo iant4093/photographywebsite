@@ -3,12 +3,14 @@
 import logging
 import os
 from decimal import Decimal
+from urllib.parse import urlencode
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
-from cursor_helpers import catalog_index_unavailable, decode_cursor, encode_cursor, validate_catalog_cursor
+from cursor_helpers import catalog_index_unavailable, validate_catalog_cursor
+from public_catalog_cursor import decode_public_cursor, encode_public_cursor, RestartCatalog
 from gallery_order import apply_gallery_order, load_gallery_settings
 from media_access import serialize_album_summary
 from response_helpers import error_response, internal_error, json_response
@@ -190,7 +192,21 @@ def handler(event, context):
         album_type = validate_album_type(params.get("type"), default=None) if params.get("type") else None
         limit = validate_limit(params.get("limit"), default=100, maximum=100)
         scope = f"public:{album_type or '*'}"
-        start_key = decode_cursor(params.get("cursor"), scope)
+        cursor = params.get('cursor')
+        try:
+            start_key = decode_public_cursor(cursor, scope)
+        except RestartCatalog:
+            # A signed first-page marker shares one cache entry but cannot hit
+            # a pre-upgrade cached page carrying the same unsigned cursor.
+            cursor, start_key = encode_public_cursor(None, scope, restart=True), None
+        canonical = {}
+        if album_type: canonical['type'] = album_type
+        if params.get('limit') not in (None, ''): canonical['limit'] = str(limit)
+        if cursor: canonical['cursor'] = cursor
+        query = urlencode(canonical)
+        if params != canonical or ('rawQueryString' in (event or {}) and event['rawQueryString'] != query):
+            return json_response(307, {'message':'Continue with the canonical public catalog'},
+                headers={'Location':'/api/public/albums' + ('?' + query if query else '')})
         records, last_key = _fetch_page(
             album_type=album_type,
             limit=limit,
@@ -219,7 +235,7 @@ def handler(event, context):
 
         return json_response(
             200,
-            {"items": items, "nextCursor": encode_cursor(last_key, scope)},
+            {"items": items, "nextCursor": encode_public_cursor(last_key, scope)},
             cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=60",
         )
     except ValidationError as error:

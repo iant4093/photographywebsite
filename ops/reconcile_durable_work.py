@@ -31,10 +31,13 @@ def describe(item, now):
         if not isinstance(pending, dict) or pending.get('phase') in {'complete','rejected'}:
             continue
         started = int(pending.get('continuationStartedAt', 0))
-        if started and now-started >= 86400:
+        reason = ('missing_timestamp' if not started else 'expired' if now-started >= 86400
+                  else 'never_dispatched' if not pending.get('scheduledUntil') and now-started >= 60 else None)
+        if reason:
             result.append({'key':key, 'field':field, 'kind':kind,
                 'operation':pending.get('id') or pending.get('operation'), 'snapshot':fingerprint(item),
-                'ageSeconds':now-started, 'repairCount':int(pending.get('repairCount', 0))})
+                'reason':reason, 'ageSeconds':now-started if started else None,
+                'repairCount':int(pending.get('repairCount', 0))})
     return result
 
 
@@ -45,7 +48,7 @@ def repair(table, sqs, queue_url, key, operation, expected, *, cognito=None, poo
         raise ValueError('The receipt changed; generate a fresh dry-run plan')
     candidates = [plan for plan in describe(item, now) if plan['operation'] == operation]
     if len(candidates) != 1:
-        raise ValueError('Exactly one aged operation must match')
+        raise ValueError('Exactly one recoverable operation must match')
     plan = candidates[0]
     if any(int(item.get(name, 0)) >= now for name in LEASES):
         raise ValueError('A worker still holds a lease')
@@ -98,9 +101,15 @@ def repair(table, sqs, queue_url, key, operation, expected, *, cognito=None, poo
     if not apply:
         return plan
     repaired = deepcopy(pending)
-    repaired.update(continuationStartedAt=now, scheduledUntil=now+30,
+    # An unexpired, never-dispatched intent keeps its original deadline. An
+    # explicitly reviewed expired/undated repair gets one counted new window.
+    started = pending.get('continuationStartedAt')
+    repaired.update(continuationStartedAt=started if plan['reason'] == 'never_dispatched' else now, scheduledUntil=now+30,
                     repairCount=int(pending.get('repairCount', 0))+1, lastRepairAt=now)
-    repaired.setdefault('originalContinuationStartedAt', pending['continuationStartedAt'])
+    if started:
+        repaired.setdefault('originalContinuationStartedAt', started)
+    else:
+        repaired['originalContinuationTimestampMissing'] = True
     # Enqueue first, then CAS the exact reviewed receipt and every live field.
     # Failed CAS leaves the original bounded operation unchanged. A duplicate
     # delivery has no destructive authority beyond the current saved receipt.

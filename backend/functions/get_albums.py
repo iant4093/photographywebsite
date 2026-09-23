@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 
 from album_access import decode_cursor, encode_cursor
 from cursor_helpers import catalog_index_unavailable, validate_catalog_cursor
+from public_catalog_cursor import decode_public_cursor, RestartCatalog
 from auth_helpers import AuthError, auth_error_response, get_verified_claims, is_admin
 from gallery_order import apply_gallery_order, load_gallery_settings
 from media_access import serialize_album_summary
@@ -309,9 +310,12 @@ def handler(event, context):
         else:
             raise AuthError("Forbidden", 403)
 
-        start_key = decode_cursor(params.get("cursor"), scope)
         if claims is None:
-            validate_catalog_cursor(start_key, visibility='public')
+            cursor = params.get('cursor')
+            try:
+                decode_public_cursor(cursor, scope)
+            except RestartCatalog:
+                pass  # The canonical endpoint supplies a cache-safe restart.
             compatibility_array = (
                 not any(name in params for name in ('limit', 'cursor', 'type', 'ownerEmail', 'ownerSub'))
                 and requested_visibility in {None, '', 'public'}
@@ -319,11 +323,13 @@ def handler(event, context):
             if compatibility_array:
                 return json_response(200, _legacy_public_items(limit),
                     cache_control='public, max-age=60, s-maxage=300')
-            query = {'limit':str(limit)}
+            query = {}
             if album_type: query['type'] = album_type
-            if params.get('cursor'): query['cursor'] = params['cursor']
+            query['limit'] = str(limit)
+            if cursor: query['cursor'] = cursor
             return json_response(307, {'message':'Use the public catalog'},
                 headers={'Location':'/api/public/albums?' + urlencode(query)})
+        start_key = decode_cursor(params.get("cursor"), scope)
         public_summary_only = visibility == "public" and not admin_owner_email and not admin_owner_sub
         records, last_key = _fetch_page(
             visibility=visibility,

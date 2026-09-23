@@ -13,6 +13,7 @@ from test_support import response_body
 import get_public_album
 import get_public_albums
 import cursor_helpers
+import public_catalog_cursor
 from media_access import PREVIEW_VERSION, expected_preview_keys, media_id_for_key
 
 
@@ -38,6 +39,7 @@ def public_album(**overrides):
 
 class PublicCatalogListTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(public_catalog_cursor, '_keys', return_value=[b'test-public-cursor-key']))
         self.gallery_order = patch.object(
             get_public_albums, "load_gallery_settings", return_value={}
         )

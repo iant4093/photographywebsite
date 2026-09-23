@@ -58,8 +58,9 @@ function UserDashboard() {
             const data = await fetchAlbumsFiltered(
                 { visibility: 'private' },
                 token,
-                { signal }
+                { signal, force: background }
             )
+            if (signal?.aborted) return []
             const owner = userEmail.trim().toLowerCase()
             const ownedAlbums = data.filter(
                 album => !album.ownerEmail
@@ -70,6 +71,7 @@ function UserDashboard() {
             setMediaError('')
             return ownedAlbums
         } catch (error) {
+            if (signal?.aborted) return []
             if (error?.name !== 'AbortError') {
                 if (background) setMediaError('Album covers expired and could not be refreshed. Check your connection and try again.')
                 else {
@@ -96,7 +98,7 @@ function UserDashboard() {
     useEffect(() => () => zipControllerRef.current?.abort(), [])
 
     const refreshAlbumCovers = useCallback(
-        () => loadAlbums({ background: true }),
+        (_reason, { signal } = {}) => loadAlbums({ signal, background: true }),
         [loadAlbums],
     )
     const requestCoverRefresh = useMediaExpiryRefresh(albums, refreshAlbumCovers)
@@ -118,11 +120,11 @@ function UserDashboard() {
         }
     }, [location.key, userEmail, resetLightbox])
 
-    const loadSelectedImages = useCallback(async (album, { background = false, reuseOriginals = true } = {}) => {
+    const loadSelectedImages = useCallback(async (album, { background = false, reuseOriginals = true, signal: refreshSignal } = {}) => {
         if (!album) return []
         const scope = selectedImageScopeRef.current
         if (!scope || scope.albumId !== album.albumId || scope.controller.signal.aborted) return []
-        const { signal } = scope.controller
+        const signal = refreshSignal ? AbortSignal.any([refreshSignal, scope.controller.signal]) : scope.controller.signal
         if (!background) setLoadingImages(true)
         try {
             const token = await getIdToken()
@@ -149,7 +151,7 @@ function UserDashboard() {
     }, [getIdToken])
 
     const refreshSelectedMedia = useCallback(
-        reason => selectedAlbum ? loadSelectedImages(selectedAlbum, { background: true, reuseOriginals: reason !== 'media-error' }) : Promise.resolve(),
+        (reason, { signal } = {}) => selectedAlbum ? loadSelectedImages(selectedAlbum, { signal, background: true, reuseOriginals: reason !== 'media-error' }) : Promise.resolve(),
         [loadSelectedImages, selectedAlbum],
     )
     const requestSelectedRefresh = useMediaExpiryRefresh(images, refreshSelectedMedia)

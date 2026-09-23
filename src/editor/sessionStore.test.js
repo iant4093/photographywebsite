@@ -47,7 +47,7 @@ describe('editor session storage', () => {
     it('rejects late state writes and cleanup from a different tab or source', async () => {
         const a = await saveEditorSource(new File(['a'], 'a.jpg'))
         const b = await saveEditorSource(new File(['b'], 'b.jpg'))
-        await expect(saveEditorState({ exposure: 2 }, b)).resolves.toBe(true)
+        await expect(saveEditorState({ exposure: 2 }, b)).resolves.toBe(1)
         await expect(saveEditorState({ exposure: 8 }, a)).resolves.toBe(false)
         await clearEditorSession(a)
         const session = await loadEditorSession()

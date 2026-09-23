@@ -22,17 +22,25 @@ function openDatabase() {
     })
 }
 
-async function runTransaction(mode, operation) {
+async function runTransaction(mode, operation, signal) {
+    signal?.throwIfAborted()
     const database = await openDatabase()
     try {
+        signal?.throwIfAborted()
         return await new Promise((resolve, reject) => {
             const transaction = database.transaction(STORE_NAME, mode)
             const store = transaction.objectStore(STORE_NAME)
+            const abort = () => transaction.abort()
+            const finish = (callback, value) => {
+                signal?.removeEventListener('abort', abort)
+                callback(value)
+            }
+            signal?.addEventListener('abort', abort, { once: true })
             let result
-            try { result = operation(store) } catch (error) { reject(error); return }
-            transaction.oncomplete = () => resolve(result)
-            transaction.onerror = () => reject(transaction.error || new Error('The local editor session could not be saved.'))
-            transaction.onabort = () => reject(transaction.error || new Error('The local editor session save was cancelled.'))
+            try { result = operation(store); Promise.resolve(result).catch(() => {}) } catch (error) { transaction.abort(); finish(reject, error); return }
+            transaction.oncomplete = () => finish(resolve, result)
+            transaction.onerror = () => finish(reject, transaction.error || new Error('The local editor session could not be saved.'))
+            transaction.onabort = () => finish(reject, signal?.reason || transaction.error || new Error('The local editor session save was cancelled.'))
         })
     } finally {
         database.close()
@@ -46,7 +54,7 @@ function requestResult(request) {
     })
 }
 
-export async function saveEditorSource(file) {
+export async function saveEditorSource(file, { signal } = {}) {
     if (!(file instanceof Blob)) throw new Error('Only a local image file can be saved for recovery.')
     const sourceId = crypto.randomUUID()
     await runTransaction('readwrite', (store) => {
@@ -61,20 +69,30 @@ export async function saveEditorSource(file) {
         }, SOURCE_KEY)
         // State from a previously opened photo must never be applied to this source.
         store.delete(STATE_KEY)
-    })
+    }, signal)
     return sourceId
 }
 
-export async function saveEditorState(state, sourceId) {
+export async function saveEditorState(state, sourceId, { expectedRevision = 0, signal } = {}) {
     return runTransaction('readwrite', store => new Promise((resolve, reject) => {
         const request = store.get(SOURCE_KEY)
         request.onerror = () => reject(request.error)
         request.onsuccess = () => {
             if (!sourceId || request.result?.sourceId !== sourceId) { resolve(false); return }
-            store.put({ schema: SESSION_SCHEMA, sourceId, state, savedAt: Date.now() }, STATE_KEY)
-            resolve(true)
+            const current = store.get(STATE_KEY)
+            current.onerror = () => reject(current.error)
+            current.onsuccess = () => {
+                const saved = current.result?.sourceId === sourceId ? current.result : null
+                const revision = saved?.revision || 0
+                // A recovered tab's unchanged autosave must not claim a new
+                // revision or invalidate the actively edited tab's snapshot.
+                if (saved && JSON.stringify(saved.state) === JSON.stringify(state)) { resolve(revision); return }
+                if (revision !== expectedRevision) { resolve(false); return }
+                store.put({ schema: SESSION_SCHEMA, sourceId, state, revision: revision + 1, savedAt: Date.now() }, STATE_KEY)
+                resolve(revision + 1)
+            }
         }
-    }))
+    }), signal)
 }
 
 export async function loadEditorSession() {
@@ -94,6 +112,7 @@ export async function loadEditorSession() {
         return {
             file,
             sourceId: source.sourceId,
+            revision: state?.sourceId === source.sourceId ? state?.revision || 0 : 0,
             state: source.sourceId && state?.sourceId === source.sourceId && state?.schema === SESSION_SCHEMA && state.state && typeof state.state === 'object'
                 ? state.state
                 : null,
@@ -104,13 +123,17 @@ export async function loadEditorSession() {
     }
 }
 
-export async function clearEditorSession(sourceId) {
+export async function clearEditorSession(sourceId, expectedRevision) {
     await runTransaction('readwrite', store => {
         const request = store.get(SOURCE_KEY)
         request.onsuccess = () => {
             if (sourceId !== undefined && request.result?.sourceId !== sourceId) return
-            store.delete(SOURCE_KEY)
-            store.delete(STATE_KEY)
+            const state = store.get(STATE_KEY)
+            state.onsuccess = () => {
+                if (expectedRevision !== undefined && (state.result?.revision || 0) !== expectedRevision) return
+                store.delete(SOURCE_KEY)
+                store.delete(STATE_KEY)
+            }
         }
     })
 }

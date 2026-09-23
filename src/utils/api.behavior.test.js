@@ -64,6 +64,30 @@ describe('public API client behavior', () => {
     await expect(api.fetchAlbumsFiltered({ type: 'photo' }, 'token')).rejects.toMatchObject({ code: 'REPEATED_CURSOR' })
   })
 
+  it('merges restarted public pagination without duplicate albums', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'one' }], nextCursor: 'old' }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'one' }], nextCursor: 'signed' }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'two' }], nextCursor: null })))
+    await expect(api.fetchAlbums()).resolves.toEqual([{ albumId: 'one' }, { albumId: 'two' }])
+  })
+
+  it('restarts a retired anonymous cursor only once and never retries private authorization', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'Invalid cursor' }, { status: 400 }))
+      .mockResolvedValueOnce(jsonResponse({ items: [{ albumId: 'fresh' }], nextCursor: 'signed' }))
+    vi.stubGlobal('fetch', request)
+    await expect(api.fetchAlbumsPage({ type: 'photo', cursor: 'retired' })).resolves.toMatchObject({ items: [{ albumId: 'fresh' }] })
+    expect(request.mock.calls[1][0]).not.toContain('cursor=')
+    api.clearApiCache()
+    request.mockReset().mockResolvedValue(jsonResponse({ error: 'Invalid cursor' }, { status: 400 }))
+    await expect(api.fetchAlbumsPage({ cursor: 'retired' })).rejects.toMatchObject({ status: 400 })
+    expect(request).toHaveBeenCalledTimes(2)
+    request.mockClear()
+    await expect(api.fetchAlbumsPage({ cursor: 'retired' }, { token: 'private' })).rejects.toMatchObject({ status: 400 })
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects malformed request and response cursors before unsafe pagination', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ items: [], nextCursor: 123 })))
     expect(() => api.fetchAlbumsPage({ cursor: 'x'.repeat(4097) })).toThrow(/cursor was invalid/i)

@@ -197,6 +197,17 @@ class CompleteChallengeExpandedTests(unittest.TestCase):
         self.assertNotIn("secret", response["body"])
 
 
+    def test_expected_mfa_errors_are_actionable_denials_without_provider_details(self):
+        for name in ('CodeMismatchException', 'ExpiredCodeException'):
+            with patch.object(complete_challenge, 'verify_turnstile', return_value=True), patch.object(complete_challenge, 'check_rate_limit', return_value=True), patch.object(complete_challenge.cognito, 'admin_respond_to_auth_challenge', side_effect=provider_exception(complete_challenge.cognito, name)), patch.object(complete_challenge, 'emit_audit_event') as audit:
+                response = complete_challenge.handler(self.event(challengeName='SOFTWARE_TOKEN_MFA', code='123456'), CONTEXT)
+            self.assertEqual(response['statusCode'], 400)
+            self.assertIn('fresh code', response['body'])
+            self.assertNotIn('provider detail', response['body'])
+            self.assertEqual(audit.call_args.kwargs['outcome'], 'denied')
+            self.assertEqual(audit.call_args.kwargs['reason_code'], 'challenge_rejected')
+
+
 class ContactExpandedTests(unittest.TestCase):
     def event(self):
         return public_event(

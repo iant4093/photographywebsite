@@ -54,7 +54,8 @@ export default function VideoGallery() {
                 // Public albums do not require a user token.
             }
 
-            const data = await fetchAlbum(albumId, token, { signal })
+            const data = await fetchAlbum(albumId, token, { signal, force: background })
+            if (signal?.aborted) return undefined
             const fetchedAlbum = data.album || data
             const fetchedImages = data.images || []
             setAlbum(fetchedAlbum)
@@ -71,6 +72,7 @@ export default function VideoGallery() {
             }
             return data
         } catch (err) {
+            if (signal?.aborted) return undefined
             if (err?.name !== 'AbortError') {
                 console.error("Failed to load video album:", err)
                 const message = background
@@ -102,7 +104,7 @@ export default function VideoGallery() {
     useEffect(() => () => zipControllerRef.current?.abort(), [])
 
     const refreshMedia = useCallback(
-        () => loadAlbum({ background: true }),
+        (_reason, { signal } = {}) => loadAlbum({ signal, background: true }),
         [loadAlbum],
     )
     const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)

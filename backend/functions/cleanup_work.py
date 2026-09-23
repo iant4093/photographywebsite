@@ -33,7 +33,11 @@ def complete_audit(pending, save, resource, details):
 
 def schedule(album_id, pending, save, kind, delay=15):
     now = int(time.time())
-    pending.setdefault("continuationStartedAt", now)
+    if "continuationStartedAt" not in pending:
+        pending["continuationStartedAt"] = now
+        # Persist intent even if the first send fails. Never claim an unsent
+        # continuation, and never let an ordinary retry restart its age budget.
+        save()
     if now - int(pending["continuationStartedAt"]) >= 86400:
         raise RuntimeError("Cleanup requires administrator reconciliation")
     if int(pending.get("scheduledUntil", 0)) > now:

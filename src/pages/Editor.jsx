@@ -27,6 +27,18 @@ const PREVIEW_SETTLE_DELAY_MS = 140
 // worker produce the exact 2400px frame without blocking or risking a stale canvas.
 const MAX_STABLE_GPU_SETTLED_EDGE = 2048
 
+function persistSessionState(session, state) {
+    const pending = session.pending.catch(() => {}).then(async () => {
+        const revision = await saveEditorState(state, session.sourceId, {
+            expectedRevision: session.revision, signal: session.controller.signal,
+        })
+        if (revision !== false) session.revision = revision
+        return revision !== false
+    })
+    session.pending = pending
+    return pending
+}
+
 const RANGE_GROUPS = [
     { title: 'Light', controls: [
         ['exposure', 'Exposure', -5, 5, 0.05], ['contrast', 'Contrast', -100, 100, 1],
@@ -242,6 +254,7 @@ export default function Editor() {
     const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 })
     const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 })
     const sessionSourceId = useRef(null)
+    const sessionWriteRef = useRef(null)
     const [sessionSourceReady, setSessionSourceReady] = useState(false)
     const [sessionStatus, setSessionStatus] = useState('No saved session')
     const [previewQuality, setPreviewQuality] = useState(storedPreviewQuality)
@@ -262,6 +275,7 @@ export default function Editor() {
         return () => {
             if (decodeControllerRef.current) ++decodeGeneration.current
             decodeControllerRef.current?.abort()
+            sessionWriteRef.current?.controller.abort()
             previewQueue.pending = null
             previewQueue.controller?.abort()
             workerRef.current?.terminate()
@@ -648,7 +662,7 @@ export default function Editor() {
         }
     }, [drainPreviewQueue, fastPreview, preview])
 
-    const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false, recoveredSourceId = null } = {}) => {
+    const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false, recoveredSourceId = null, recoveredRevision = 0 } = {}) => {
         if (!file) return
         if (!file.type.startsWith('image/') && !isRawFile(file)) {
             setError('Choose a supported photo or camera RAW file.')
@@ -656,10 +670,13 @@ export default function Editor() {
         }
         if (fromRecovery && openGenerationRef.current > 0) return
         const generation = ++openGenerationRef.current
-        if (fromRecovery) sessionSourceId.current = recoveredSourceId
+        sessionSourceId.current = fromRecovery ? recoveredSourceId : null
         decodeControllerRef.current?.abort()
+        sessionWriteRef.current?.controller.abort()
         const decodeController = new AbortController()
         decodeControllerRef.current = decodeController
+        const session = { sourceId: recoveredSourceId, revision: recoveredRevision, controller: decodeController, pending: Promise.resolve() }
+        sessionWriteRef.current = session
         setError('')
         setStatus(isRawFile(file) ? 'Preparing RAW file' : 'Reading photo')
         setSessionSourceReady(false)
@@ -704,16 +721,21 @@ export default function Editor() {
             setExportOptions(restoreExportOptions(restoredState?.exportOptions))
             setStatus(`${decoded.width} × ${decoded.height}${decoded.metadata.raw ? ' RAW' : ''} ${fromRecovery ? 'recovered' : 'loaded'} locally`)
             if (fromRecovery) {
-                sessionSourceId.current = recoveredSourceId || await saveEditorSource(file)
+                sessionSourceId.current = recoveredSourceId || await saveEditorSource(file, { signal: decodeController.signal })
+                session.sourceId = sessionSourceId.current
                 if (generation !== openGenerationRef.current) return
                 setSessionSourceReady(true)
                 setSessionStatus('Recovered locally')
             } else {
                 try {
-                    const sourceId = await saveEditorSource(file)
-                    if (generation !== openGenerationRef.current) return
+                    const sourceId = await saveEditorSource(file, { signal: decodeController.signal })
+                    if (generation !== openGenerationRef.current) {
+                        await clearEditorSession(sourceId, 0)
+                        return
+                    }
                     sessionSourceId.current = sourceId
-                    await saveEditorState({
+                    session.sourceId = sourceId
+                    const saved = await persistSessionState(session, {
                         adjustments: nextAdjustments,
                         geometry: nextGeometry,
                         history: [],
@@ -724,10 +746,10 @@ export default function Editor() {
                         comparePosition: 50,
                         zoom: 'fit',
                         pan: { x: 0, y: 0 },
-                    }, sourceId)
+                    })
                     if (generation !== openGenerationRef.current) return
                     setSessionSourceReady(true)
-                    setSessionStatus('Saved locally')
+                    setSessionStatus(saved ? 'Saved locally' : 'Newer work is saved in another tab')
                 } catch {
                     if (generation === openGenerationRef.current) {
                         await clearEditorSession(sessionSourceId.current).catch(() => {})
@@ -756,7 +778,7 @@ export default function Editor() {
         let active = true
         restorePromiseRef.current
             .then((session) => {
-                if (active && session) void openFile(session.file, { restoredState: session.state, recoveredSourceId: session.sourceId, fromRecovery: true })
+                if (active && session) void openFile(session.file, { restoredState: session.state, recoveredSourceId: session.sourceId, recoveredRevision: session.revision, fromRecovery: true })
             })
             .catch(() => {
                 if (active) setSessionStatus('Local recovery unavailable')
@@ -779,11 +801,12 @@ export default function Editor() {
             pan,
         }
         const sourceId = sessionSourceId.current
-        const saveState = () => saveEditorState(recoverableState, sourceId)
+        const session = sessionWriteRef.current
+        const saveState = () => persistSessionState(session, recoverableState)
         let idleWork
         const timer = window.setTimeout(() => {
             idleWork = scheduleIdleWork(() => {
-                saveState().then(saved => { if (sessionSourceId.current === sourceId) setSessionStatus(saved === false ? 'Another photo is saved in a different tab' : 'Saved locally') })
+                saveState().then(saved => { if (sessionSourceId.current === sourceId) setSessionStatus(saved === false ? 'Newer work is saved in another tab' : 'Saved locally') })
                     .catch(() => { if (sessionSourceId.current === sourceId) setSessionStatus('Local recovery unavailable') })
             }, 1200)
         }, 550)
@@ -880,6 +903,8 @@ export default function Editor() {
     const closePhoto = async () => {
         const generation = ++openGenerationRef.current
         const sourceId = sessionSourceId.current
+        const session = sessionWriteRef.current
+        session?.controller.abort()
         sessionSourceId.current = null
         decodeControllerRef.current?.abort()
         ++renderIdRef.current
@@ -925,7 +950,8 @@ export default function Editor() {
         setSessionSourceReady(false)
         if (fileInputRef.current) fileInputRef.current.value = ''
         try {
-            await clearEditorSession(sourceId ?? null)
+            await session?.pending.catch(() => {})
+            await clearEditorSession(sourceId ?? null, session?.revision)
             if (openGenerationRef.current === generation) setSessionStatus('No saved session')
         } catch {
             if (openGenerationRef.current === generation) setSessionStatus('Local recovery unavailable')

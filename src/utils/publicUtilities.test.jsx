@@ -140,7 +140,7 @@ describe('useMediaExpiryRefresh', () => {
       { expiresAt: expiry },
     ], refresh))
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
-    expect(refresh).toHaveBeenCalledWith('expiry')
+    expect(refresh).toHaveBeenCalledWith('expiry', { signal: expect.any(AbortSignal) })
     await expect(result.current('expiry')).resolves.toBe(false)
     expect(refresh).toHaveBeenCalledTimes(1)
   })
@@ -165,7 +165,7 @@ describe('useMediaExpiryRefresh', () => {
     const failing = vi.fn().mockRejectedValue(new Error('refresh failed'))
     rerender({ callback: failing })
     await expect(result.current('manual-error')).resolves.toBe(false)
-    expect(failing).toHaveBeenCalledWith('manual-error')
+    expect(failing).toHaveBeenCalledWith('manual-error', { signal: expect.any(AbortSignal) })
   })
 
   it('does not schedule refresh without expiry', () => {

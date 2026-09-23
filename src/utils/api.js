@@ -1,4 +1,4 @@
-import { isSafeCursor, normalizePage } from './apiResponse'
+import { isSafeCursor, mergeUniqueById, normalizePage } from './apiResponse'
 import {
     invalidateCatalogSnapshots,
     recordPublicCatalogDeletion,
@@ -348,10 +348,18 @@ export function fetchAlbumsPage(params = {}, options = {}) {
     const record = { controller, subscribers: 0, promise: null }
     const generation = cacheGeneration
     const catalogPath = isPublic ? '/public/albums' : '/albums'
-    record.promise = apiFetch(`${catalogPath}${query ? `?${query}` : ''}`, {
+    const requestOptions = {
         headers: authHeaders(options.token),
         signal: controller.signal,
         ...(options.force ? { cache: 'no-store' } : {}),
+    }
+    record.promise = apiFetch(`${catalogPath}${query ? `?${query}` : ''}`, requestOptions).catch(error => {
+        // A key rotation may retire a cursor held by an older open tab. Restart
+        // once; callers merge by album ID and retain their automatic pagination.
+        if (!isPublic || !normalized.cursor || error.status !== 400) throw error
+        const restart = new URLSearchParams(query)
+        restart.delete('cursor')
+        return apiFetch(`${catalogPath}?${restart}`, requestOptions)
     }).then((payload) => {
         if (generation !== cacheGeneration || controller.signal.aborted) {
             throw new DOMException('Request aborted', 'AbortError')
@@ -396,7 +404,7 @@ export async function fetchAllAlbums(params = {}, options = {}) {
         }
         if (cursor) seenCursors.add(cursor)
     } while (cursor)
-    return allItems
+    return mergeUniqueById([], allItems)
 }
 
 export function fetchAlbums(options = {}) {

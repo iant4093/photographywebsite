@@ -149,7 +149,7 @@ describe('Photo Editor page', () => {
         mocks.drawGeometryAtSize.mockClear()
         mocks.loadEditorSession.mockReset().mockResolvedValue(null)
         mocks.saveEditorSource.mockReset().mockResolvedValue('source-a')
-        mocks.saveEditorState.mockReset().mockResolvedValue()
+        mocks.saveEditorState.mockReset().mockResolvedValue(1)
         mocks.clearEditorSession.mockReset().mockResolvedValue()
         mocks.workerMessages.length = 0
         mocks.workerFailures = 0
@@ -210,7 +210,7 @@ describe('Photo Editor page', () => {
 
         expect(await screen.findByText('mountain')).toBeInTheDocument()
         expect(mocks.decodeStandardFile).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) })
-        expect(mocks.saveEditorSource).toHaveBeenCalledWith(file)
+        expect(mocks.saveEditorSource).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) })
         expect((await screen.findAllByText(/working preview/)).length).toBeGreaterThan(0)
         expect(screen.getByText(/Canon EOS R7/)).toBeInTheDocument()
 
@@ -227,7 +227,7 @@ describe('Photo Editor page', () => {
         expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(1.2)
         await waitFor(() => expect(mocks.saveEditorState).toHaveBeenCalledWith(expect.objectContaining({
             adjustments: expect.objectContaining({ exposure: 1.2 }),
-        }), 'source-a'), { timeout: 1200 })
+        }), 'source-a', expect.objectContaining({ signal: expect.any(AbortSignal) })), { timeout: 1200 })
         expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
         await user.click(screen.getByRole('button', { name: 'Undo' }))
         expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(0)
@@ -513,7 +513,7 @@ describe('Photo Editor page', () => {
         expect(mocks.saveEditorSource).not.toHaveBeenCalled()
 
         await user.click(screen.getByRole('button', { name: 'Close photo' }))
-        await waitFor(() => expect(mocks.clearEditorSession).toHaveBeenCalledWith('source-a'))
+        await waitFor(() => expect(mocks.clearEditorSession).toHaveBeenCalledWith('source-a', expect.any(Number)))
         expect(screen.getByText('No photo open')).toBeInTheDocument()
         expect(screen.getByText('No saved session')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Drop a photo or RAW file here/ })).toBeInTheDocument()
@@ -528,7 +528,7 @@ describe('Photo Editor page', () => {
         await screen.findByText('first')
         await screen.findByText('Saved locally')
         await user.click(screen.getByRole('button', { name: 'Close photo' }))
-        expect(mocks.clearEditorSession).toHaveBeenCalledWith('source-a')
+        expect(mocks.clearEditorSession).toHaveBeenCalledWith('source-a', expect.any(Number))
         await user.upload(container.querySelector('input[type="file"]'), new File(['jpeg'], 'second.jpg', { type: 'image/jpeg' }))
         await screen.findByText('second')
         await screen.findByText('Saved locally')

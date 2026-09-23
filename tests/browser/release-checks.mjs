@@ -45,6 +45,21 @@ async function contextFor(width, authenticated = false) {
     })
     return context
 }
+async function openEditor(page) {
+ await page.goto(origin+'/editor'); await page.getByRole('heading',{name:'Photo Editor',exact:true}).waitFor()
+}
+async function png(page) {
+ return Buffer.from(await page.evaluate(async()=>{ const c=document.createElement('canvas');c.width=120;c.height=80;c.getContext('2d').fillRect(0,0,120,80);return Array.from(new Uint8Array(await (await new Promise(resolve=>c.toBlob(resolve,'image/png'))).arrayBuffer())) }))
+}
+async function saved(page) {
+ return page.evaluate(()=>new Promise((resolve,reject)=>{
+  const open=indexedDB.open('ian-truong-photo-editor',1);open.onerror=()=>reject(open.error)
+  open.onsuccess=()=>{ const db=open.result,tx=db.transaction('session'),store=tx.objectStore('session'); let source,state
+   store.get('source').onsuccess=e=>{source=e.target.result};store.get('state').onsuccess=e=>{state=e.target.result}
+   tx.oncomplete=()=>{db.close();resolve({name:source?.name,sourceId:source?.sourceId,exposure:state?.state.adjustments.exposure})}
+  }
+ }))
+}
 try {
     for (const width of [1440,390]) {
         for (const mode of ['edit','delete']) {
@@ -198,13 +213,60 @@ try {
         const retry=page.getByRole('link',{name:'Retry opening this page',exact:true})
         await retry.waitFor()
         assert.equal(navigations,1)
-        assert.ok(await page.getByText(/website is taking longer/).isVisible())
+        assert.ok(await page.getByText(/If the website does not open/).isVisible())
         block=false
         await retry.click()
         await page.getByRole('heading',{name:'Photo Editor',exact:true}).waitFor()
         assert.equal(await page.locator('#startup-fallback').count(),0)
         assert.equal(navigations,2)
         outcomes.push({width,check:'initial module failure and explicit recovery',passed:true})
+        await context.close()
+    }
+ for (const width of [1440,390]) {
+  const context=await contextFor(width),a=await context.newPage();await openEditor(a)
+  const bytes=await png(a);await a.locator('input[type=file]').setInputFiles({name:'same-photo.png',mimeType:'image/png',buffer:bytes});await a.getByText('Saved locally',{exact:true}).waitFor()
+  const b=await context.newPage();await openEditor(b);await b.getByText('Recovered locally',{exact:true}).waitFor();await b.waitForTimeout(1800)
+  await a.getByRole('spinbutton',{name:'Exposure value',exact:true}).fill('2');await a.evaluate(()=>window.dispatchEvent(new Event('pagehide')));await a.waitForTimeout(1600)
+  const afterA=await saved(a);assert.equal(afterA.exposure,2)
+  await b.evaluate(()=>window.dispatchEvent(new Event('pagehide')));await b.waitForTimeout(150)
+  const afterB=await saved(b);assert.equal(afterB.exposure,2);assert.equal(afterB.sourceId,afterA.sourceId)
+  const c=await context.newPage();await openEditor(c);await c.getByText('Recovered locally',{exact:true}).waitFor()
+  const recovered=await c.getByRole('spinbutton',{name:'Exposure value',exact:true}).inputValue();assert.equal(recovered,'2')
+  outcomes.push({width,check:'stale same-photo tab cannot overwrite newer edit',editedExposure:afterA.exposure,storedAfterStaleFlush:afterB.exposure,recoveredExposure:recovered,passed:true})
+  await context.close()
+ }
+ {
+  const context=await contextFor(1440),page=await context.newPage();await openEditor(page);await page.waitForTimeout(300)
+  const bytes=await png(page)
+  await page.evaluate(()=>{
+   const original=indexedDB.open.bind(indexedDB);let delayNext=true
+   indexedDB.open=(...args)=>{
+    const request=original(...args);if(!delayNext)return request;delayNext=false
+    return new Proxy(request,{get(target,key){return Reflect.get(target,key,target)},set(target,key,value){
+     if(key==='onsuccess'){target.onsuccess=event=>{window.releaseDeferredEditorOpen=()=>value.call(target,event)};return true}
+     return Reflect.set(target,key,value,target)
+    }})
+   }
+  })
+  await page.locator('input[type=file]').setInputFiles({name:'closed-photo.png',mimeType:'image/png',buffer:bytes})
+  await page.getByRole('button',{name:'Close photo',exact:true}).waitFor()
+  await page.waitForFunction(()=>typeof window.releaseDeferredEditorOpen==='function')
+  await page.getByRole('button',{name:'Close photo',exact:true}).click();await page.getByText('No saved session',{exact:true}).waitFor()
+  const afterClose=await saved(page);assert.equal(afterClose.name,undefined)
+  await page.evaluate(()=>window.releaseDeferredEditorOpen());await page.waitForTimeout(250)
+  const afterLateSave=await saved(page);assert.equal(afterLateSave.name,undefined)
+  await page.reload();await page.getByText('No saved session',{exact:true}).waitFor()
+  outcomes.push({check:'close cancels initial recovery save',afterCloseHasSource:Boolean(afterClose.name),afterLateSaveName:afterLateSave.name,recoveredAfterReload:false,passed:true})
+  await context.close()
+ }
+    for (const width of [1440,390]) {
+        const context=await contextFor(width),page=await context.newPage()
+        await page.route('**/theme-init.js',route=>route.abort())
+        await page.route('**/assets/app-*.js',route=>route.abort())
+        await page.goto(origin)
+        await page.getByRole('link',{name:'Retry opening this page',exact:true}).waitFor()
+        assert.equal(await page.locator('#startup-fallback').isVisible(),true)
+        outcomes.push({width,check:'static recovery survives both script failures',passed:true})
         await context.close()
     }
     console.log(JSON.stringify(outcomes,null,2))

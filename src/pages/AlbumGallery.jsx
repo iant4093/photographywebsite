@@ -152,7 +152,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
     }, [album, albumId])
 
     const refreshMedia = useCallback(
-        reason => loadAlbum({ background: true, reuseOriginals: reason !== 'media-error' }),
+        (reason, { signal } = {}) => loadAlbum({ signal, background: true, reuseOriginals: reason !== 'media-error' }),
         [loadAlbum],
     )
     const requestMediaRefresh = useMediaExpiryRefresh(images, refreshMedia)

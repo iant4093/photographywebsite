@@ -111,3 +111,26 @@ class AccountContinuationBoundariesTests(unittest.TestCase):
             self.assertEqual(self.table.get_item(Key=ownership_guard.key(SUB))['Item']['payload']['phase'], 'complete')
             self.assertEqual(self.dispatch('user-deletion', delete_user, client)['batchItemFailures'], [])
         client.admin_delete_user.assert_called_once()
+
+    def test_failed_first_send_is_visible_and_reviewed_repair_preserves_original_deadline(self):
+        import sys
+        from pathlib import Path
+        self.enterContext(patch.object(sys, 'path', [str(Path(__file__).resolve().parents[2]), *sys.path]))
+        from ops.reconcile_durable_work import describe, fingerprint, repair
+        client,clock=self.email_fixture()
+        self.queue.return_value.send_message.side_effect=RuntimeError('synthetic queue outage')
+        with self.assertRaises(RuntimeError):self.update(client)
+        row=self.table.get_item(Key=user_email_update._key('UPDATE',SUB))['Item']
+        self.assertEqual(row['payload']['continuationStartedAt'],1000)
+        self.assertNotIn('scheduledUntil',row['payload'])
+        self.assertNotIn('identityLeaseUntil',self.table.get_item(Key=ownership_guard.key(SUB))['Item'])
+        self.assertEqual(describe(row,1030),[])
+        self.assertEqual(describe(row,1061)[0]['reason'],'never_dispatched')
+        self.queue.return_value.send_message.side_effect=None
+        clock.return_value=1061
+        result=repair(self.table,self.queue.return_value,'queue',row['albumId'],row['payload']['operation'],fingerprint(row),cognito=client,pool='pool',apply=True,now=1061)
+        self.assertTrue(result['applied'])
+        self.assertEqual(self.receipt()['continuationStartedAt'],1000)
+        user_email_update.resume(self.table,client,'pool',SUB,CONTEXT)
+        self.assertEqual(self.receipt()['phase'],'complete')
+        client.admin_update_user_attributes.assert_called_once()

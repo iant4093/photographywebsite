@@ -113,6 +113,9 @@ def handler(event, context):
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_challenge", None)
         return error_response(400, str(error), code="invalid_challenge")
+    except (cognito.exceptions.CodeMismatchException, cognito.exceptions.ExpiredCodeException):
+        _audit(event, context, "denied", "challenge_rejected", None)
+        return error_response(400, "The code is incorrect or expired. Enter a fresh code and try again.", code="invalid_challenge")
     except (cognito.exceptions.NotAuthorizedException, cognito.exceptions.UserNotFoundException):
         _audit(event, context, "denied", "challenge_rejected", None)
         return error_response(401, "Challenge could not be completed", code="invalid_challenge")
