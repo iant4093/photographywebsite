@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   fetchSharedAlbum: vi.fn(),
@@ -74,6 +74,8 @@ const photoData = {
 }
 
 describe('SharedAlbum access and gallery', () => {
+  afterEach(() => clearCatalogSnapshots())
+
   it('opens shared favorites in their own deck and downloads the correct non-favorite', async () => {
     api.fetchSharedAlbum.mockResolvedValue({ ...photoData, images: [
       { ...photoData.images[0], isFavorite: true }, photoData.images[1],
