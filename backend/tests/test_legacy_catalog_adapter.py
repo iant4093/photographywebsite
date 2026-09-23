@@ -76,7 +76,7 @@ class LegacyCatalogAdapterTests(unittest.TestCase):
         self.assertEqual(self.connection.close.call_count, 7)
 
     def test_only_configured_https_origin_is_accepted(self):
-        for origin in ('http://portfolio.test', 'https://name:password@portfolio.test', 'https://portfolio.test:80',
+        for origin in ('http://portfolio.test', 'https://username:password@host.com', 'https://portfolio.test:80',
                        'https://portfolio.test/redirect', 'https://portfolio.test?url=other', 'https://portfolio.test#fragment'):
             with patch.dict(os.environ, {'FRONTEND_URL':origin}):
                 self.assertEqual(self.request()['statusCode'], 500)

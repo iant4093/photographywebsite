@@ -1936,6 +1936,31 @@ class GitHistoryCredentialScanTests(unittest.TestCase):
                 ("credentialed_url",),
             )
 
+    def test_catalog_url_exception_is_bound_to_reviewed_historical_bytes_and_path(self):
+        path = git_history_credential_scan.CATALOG_URL_FIXTURE_PATH
+        current = (Path(__file__).resolve().parents[2] / path).read_bytes()
+        reviewed = current.replace(
+            credentialed_url("https", "username", "password", "host.com"),
+            credentialed_url("https", "name", "password", "portfolio.test"),
+        )
+        for fixture_path, payload, findings in (
+            (path, reviewed, ()),
+            ("different.py", reviewed, ("credentialed_url",)),
+            (path, reviewed + b"\n# changed", ("credentialed_url",)),
+            (path, reviewed + b"\n" + b"ghp_" + b"A" * 36, ("credentialed_url", "github_token")),
+        ):
+            with self.subTest(path=fixture_path, findings=findings), tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                self.git(repo, "init", "-q")
+                self.git(repo, "config", "user.name", "CI Test")
+                self.git(repo, "config", "user.email", "ci@example.invalid")
+                fixture = repo / fixture_path
+                fixture.parent.mkdir(parents=True, exist_ok=True)
+                fixture.write_bytes(payload)
+                self.git(repo, "add", fixture_path)
+                self.git(repo, "commit", "-qm", "URL fixture")
+                self.assertEqual(git_history_credential_scan.scan_history(repo).finding_kinds, findings)
+
 
 class PublicPostureSmokeTests(unittest.TestCase):
     SHA = "a" * 40

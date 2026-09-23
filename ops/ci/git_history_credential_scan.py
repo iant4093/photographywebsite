@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import subprocess
@@ -34,6 +35,10 @@ SCANNER_SELF_TEST_CREDENTIALS = frozenset(
         (b"deploy", b"supersecret123", b"10.0.0.5"),
     }
 )
+# Commit 6137885's catalog negative test contains a fabricated user-info URL.
+# Match the exact historical file bytes and path, never an entire test directory.
+CATALOG_URL_FIXTURE_PATH = 'backend/tests/test_legacy_catalog_adapter.py'
+CATALOG_URL_FIXTURE_SHA256 = '47555648f00bc62ec82f9a2ce79d283413ed7075612f7734cd8e9896ee5e924e'
 
 
 @dataclass(frozen=True)
@@ -190,8 +195,10 @@ def scan_history(repo: Path) -> HistoryScanReport:
             ):
                 finding_kinds.add("aws_access_key_id")
             for kind in artifact_scan._high_confidence_token_kinds(payload):
-                if kind == "credentialed_url" and _is_exact_scanner_self_test(
-                    paths, payload
+                if kind == "credentialed_url" and (
+                    _is_exact_scanner_self_test(paths, payload)
+                    or (paths == {CATALOG_URL_FIXTURE_PATH}
+                        and hashlib.sha256(payload).hexdigest() == CATALOG_URL_FIXTURE_SHA256)
                 ):
                     continue
                 finding_kinds.add(kind)
