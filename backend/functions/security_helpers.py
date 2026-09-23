@@ -117,30 +117,47 @@ def check_rate_limit(identifier, action, max_requests, window_seconds, *, fail_c
             return False
         key = {"identifier": identifier_hash}
         table = _get_rate_table()
-        try:
-            response = table.update_item(
-                Key=key,
-                UpdateExpression="SET #count = :one, #ttl = :expiry",
-                ConditionExpression="attribute_not_exists(#ttl) OR #ttl <= :now",
-                ExpressionAttributeNames={"#count": "count", "#ttl": "ttl"},
-                ExpressionAttributeValues={":one": 1, ":expiry": expiry, ":now": current_time},
-                ReturnValues="ALL_NEW",
-            )
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
-                raise
-            response = table.update_item(
-                Key=key,
-                UpdateExpression="ADD #count :one",
-                ExpressionAttributeNames={"#count": "count"},
-                ExpressionAttributeValues={":one": 1},
-                ReturnValues="ALL_NEW",
-            )
-        attributes = response.get("Attributes", {})
-        count = int(attributes.get("count", max_requests + 1))
-        if count > max_requests and "count" in attributes:
-            _remember_denial(cache_key, attributes, current_time, window_seconds)
-        return count <= max_requests
+        for _ in range(3):
+            try:
+                response = table.update_item(
+                    Key=key,
+                    UpdateExpression="ADD #count :one",
+                    ConditionExpression="#ttl > :now AND #count >= :zero AND #count < :limit",
+                    ExpressionAttributeNames={"#count": "count", "#ttl": "ttl"},
+                    ExpressionAttributeValues={":one": 1, ":zero": 0, ":now": current_time, ":limit": max_requests},
+                    ReturnValues="ALL_NEW",
+                    ReturnValuesOnConditionCheckFailure="ALL_OLD",
+                )
+                attributes = response.get("Attributes", {})
+                return 1 <= int(attributes.get("count", 0)) <= max_requests
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
+                previous = error.response.get("Item", {})
+                # Botocore exceptions retain the low-level DynamoDB wire shape.
+                if previous and isinstance(previous.get("ttl"), dict):
+                    from boto3.dynamodb.types import TypeDeserializer
+                    decoder = TypeDeserializer()
+                    previous = {name: decoder.deserialize(value) for name, value in previous.items()}
+                if previous and int(previous.get("ttl", 0)) > current_time:
+                    if int(previous.get("count", -1)) >= max_requests:
+                        _remember_denial(cache_key, previous, current_time, window_seconds)
+                    return False
+            try:
+                response = table.update_item(
+                    Key=key,
+                    UpdateExpression="SET #count = :one, #ttl = :expiry",
+                    ConditionExpression="attribute_not_exists(#ttl) OR #ttl <= :now",
+                    ExpressionAttributeNames={"#count": "count", "#ttl": "ttl"},
+                    ExpressionAttributeValues={":one": 1, ":expiry": expiry, ":now": current_time},
+                    ReturnValues="ALL_NEW",
+                )
+                return response.get("Attributes", {}).get("count") == 1
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
+                # Another request reset the window; compete for its remaining quota.
+        return False
     except Exception:
         return not fail_closed
 

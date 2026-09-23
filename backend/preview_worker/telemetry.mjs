@@ -1,4 +1,4 @@
-import { safePreviewFailureReason } from './contract.mjs'
+import { ObsoletePreviewJob, safePreviewFailureReason } from './contract.mjs'
 
 export const PREVIEW_OBJECT_FAILURE_CATEGORIES = Object.freeze([
     'none',
@@ -106,7 +106,7 @@ export async function atPreviewStage(reasonCode, operation) {
     try {
         return await operation()
     } catch (error) {
-        if (error instanceof PreviewStageError) throw error
+        if (error instanceof PreviewStageError || error instanceof ObsoletePreviewJob) throw error
         throw previewStageFailure(reasonCode)
     }
 }

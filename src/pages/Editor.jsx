@@ -215,6 +215,7 @@ export default function Editor() {
     const suppressImageClickRef = useRef(false)
     const liveEditStartRef = useRef(null)
     const openGenerationRef = useRef(0)
+    const decodeControllerRef = useRef(null)
     const restorePromiseRef = useRef(null)
     const [source, setSource] = useState(null)
     const [preview, setPreview] = useState(null)
@@ -255,8 +256,11 @@ export default function Editor() {
 
     useEffect(() => {
         const previewQueue = previewRenderRef.current
+        const decodeGeneration = openGenerationRef
         restartPreviewWorker()
         return () => {
+            if (decodeControllerRef.current) ++decodeGeneration.current
+            decodeControllerRef.current?.abort()
             previewQueue.pending = null
             previewQueue.controller?.abort()
             workerRef.current?.terminate()
@@ -651,6 +655,9 @@ export default function Editor() {
         }
         if (fromRecovery && openGenerationRef.current > 0) return
         const generation = ++openGenerationRef.current
+        decodeControllerRef.current?.abort()
+        const decodeController = new AbortController()
+        decodeControllerRef.current = decodeController
         setError('')
         setStatus(isRawFile(file) ? 'Preparing RAW file' : 'Reading photo')
         setSessionSourceReady(false)
@@ -662,8 +669,8 @@ export default function Editor() {
         restartPreviewWorker()
         try {
             const decoded = isRawFile(file)
-                ? await decodeRawFile(file, setStatus)
-                : await decodeStandardFile(file)
+                ? await decodeRawFile(file, message => { if (generation === openGenerationRef.current) setStatus(message) }, { signal: decodeController.signal })
+                : await decodeStandardFile(file, { signal: decodeController.signal })
             if (generation !== openGenerationRef.current) return
             const nextAdjustments = restoredState ? sanitizeAdjustments(restoredState.adjustments) : freshAdjustments()
             const nextGeometry = restoredState ? sanitizeGeometry(restoredState.geometry) : freshGeometry()
@@ -734,6 +741,7 @@ export default function Editor() {
             setSessionStatus('No saved session')
             if (fromRecovery) await clearEditorSession().catch(() => {})
         } finally {
+            if (decodeControllerRef.current === decodeController) decodeControllerRef.current = null
             if (generation === openGenerationRef.current) setIsProcessing(previewRenderRef.current.busy)
         }
     }, [previewQuality, restartPreviewWorker])
@@ -865,6 +873,7 @@ export default function Editor() {
 
     const closePhoto = async () => {
         ++openGenerationRef.current
+        decodeControllerRef.current?.abort()
         ++renderIdRef.current
         previewRenderRef.current.pending = null
         previewRenderRef.current.controller?.abort()

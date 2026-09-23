@@ -101,3 +101,35 @@ describe('measured signed uploads', () => {
         expect(requests).toHaveLength(0)
     })
 })
+
+describe('uploads without a visible progress meter', () => {
+    beforeEach(() => { requests = []; vi.stubGlobal('XMLHttpRequest', TestXHR); vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+    it('bounds a stalled hero/thumbnail transfer and preserves the signed ETag response', async () => {
+        const file = new File(['photo'], 'hero.jpg', { type: 'image/jpeg' })
+        const result = uploadFileToS3('https://upload.test', file, {}, { retries: 0, stallTimeoutMs: 1000 })
+        const rejected = expect(result).rejects.toMatchObject({ code: 'UPLOAD_NETWORK_ERROR' })
+        await vi.dynamicImportSettled()
+        await vi.advanceTimersByTimeAsync(1000)
+        await rejected
+        expect(requests[0].abort).toHaveBeenCalledOnce()
+        const retry = uploadFileToS3('https://upload.test', file)
+        await vi.dynamicImportSettled()
+        requests[1].onload()
+        expect((await retry).headers.get('etag')).toBe('"example"')
+        expect(vi.getTimerCount()).toBe(0)
+    })
+    it('allows a slow transfer while bytes advance, then bounds waiting for its receipt', async () => {
+        const result = uploadFileToS3('https://upload.test', new Blob(['12345']), {}, { retries: 0, stallTimeoutMs: 1000 })
+        const rejected = expect(result).rejects.toMatchObject({ code: 'UPLOAD_NETWORK_ERROR' })
+        await vi.dynamicImportSettled()
+        for (let loaded = 1; loaded <= 5; loaded++) {
+            await vi.advanceTimersByTimeAsync(900)
+            requests[0].upload.onprogress({ loaded })
+            expect(requests[0].abort).not.toHaveBeenCalled()
+        }
+        requests[0].upload.onload()
+        await vi.advanceTimersByTimeAsync(1000)
+        await rejected
+    })
+})

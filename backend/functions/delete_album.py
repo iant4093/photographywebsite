@@ -2,6 +2,10 @@
 
 import os
 import logging
+import time
+import uuid
+
+from botocore.exceptions import ClientError
 
 import boto3
 import drive_backup_jobs
@@ -41,6 +45,96 @@ def _audit(event, context, outcome, reason_code, *, deleted_version_count=None):
 from front_door import verify_front_door_request
 
 
+class DeletionConflict(Exception):
+    pass
+
+
+def delete_album_record(album, context=None):
+    """Claim a durable cleanup operation; keep its manifest until every step succeeds."""
+    album_id = validate_uuid(album.get("albumId"))
+    preview_metadata = load_preview_metadata(album, strict=True)
+    prefixes = (*album_media_prefixes(album), f"temp-zips/{album_id}/", f"album-zips/{album_id}/")
+    preflight_deletion(prefixes=prefixes)
+    operation = album.get("deletionId") if album.get("status") == "deleting" else uuid.uuid4().hex
+    if not isinstance(operation, str) or not operation:
+        raise DeletionConflict("Album deletion state is invalid")
+    owner = uuid.uuid4().hex
+    now = int(time.time())
+    remaining = getattr(context, "get_remaining_time_in_millis", None)
+    lease_seconds = max(60, int(remaining() / 1000) + 10) if callable(remaining) else 910
+    names = {"#status": "status"}
+    values = {":deleting": "deleting", ":operation": operation, ":owner": owner,
+              ":until": now + lease_seconds, ":now": now}
+    conditions = ["attribute_exists(albumId)", "(attribute_not_exists(deletionLeaseUntil) OR deletionLeaseUntil < :now)"]
+    if album.get("status") == "deleting":
+        conditions += ["#status = :deleting", "deletionId = :operation"]
+    else:
+        if album.get("status", "active") != "active":
+            raise DeletionConflict("Album is not active")
+        values[":active"] = "active"
+        conditions.append("(attribute_not_exists(#status) OR #status = :active)")
+    # Compare every field controlling the cleanup scope and account ownership.
+    for index, field in enumerate(("images", "visibility", "legacyS3Prefix", "ownerSub", "ownerEmail", "pendingMediaDeletion", "backupToGoogleDrive", "driveFolderId", "type")):
+        name = f"#snapshot{index}"
+        names[name] = field
+        if field in album:
+            value = f":snapshot{index}"
+            values[value] = album[field]
+            conditions.append(f"{name} = {value}")
+        else:
+            conditions.append(f"attribute_not_exists({name})")
+    try:
+        table.update_item(
+            Key={"albumId": album_id},
+            UpdateExpression="SET #status = :deleting, deletionId = :operation, deletionLeaseOwner = :owner, deletionLeaseUntil = :until",
+            ConditionExpression=" AND ".join(conditions),
+            ExpressionAttributeNames=names, ExpressionAttributeValues=values,
+        )
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise DeletionConflict("Album changed or cleanup is already running. Please retry shortly.") from None
+        raise
+    completed = False
+    try:
+        retaining = drive_backup_jobs.begin_retention(album)
+        deleted_versions = sum(delete_prefix_all_versions(prefix) for prefix in prefixes)
+        if album.get("visibility") == "public":
+            invalidate_album_media(album, reason="album-deleted", strict=True)
+        pending = album.get("pendingMediaDeletion") or {}
+        metadata_keys = {media_id: index_entry_keys(metadata) for media_id, metadata in preview_metadata.items()}
+        metadata_keys.update(pending.get("indexKeys", {}))
+        delete_preview_metadata(album_id, set(preview_metadata) | set(pending.get("mediaIds", [])), metadata_keys)
+        # Required cleanup precedes the final authorization-row deletion, so a
+        # provider failure retains everything needed for a safe retry.
+        delete_album_media(album_id)
+        if retaining:
+            drive_backup_jobs.end_retention(album_id, True)
+        table.delete_item(
+            Key={"albumId": album_id},
+            ConditionExpression="#status = :deleting AND deletionId = :operation AND deletionLeaseOwner = :owner",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":deleting": "deleting", ":operation": operation, ":owner": owner},
+        )
+        completed = True
+        return deleted_versions
+    finally:
+        if not completed:
+            try:
+                table.update_item(
+                    Key={"albumId": album_id},
+                    UpdateExpression="REMOVE deletionLeaseOwner, deletionLeaseUntil",
+                    ConditionExpression="deletionId = :operation AND deletionLeaseOwner = :owner",
+                    ExpressionAttributeValues={":operation": operation, ":owner": owner},
+                )
+            except Exception as error:
+                # An interrupted owner expires naturally; never erase its marker.
+                logger.error("album_deletion_release_failed error_type=%s", type(error).__name__)
+        if album.get("visibility") == "public":
+            request_public_api_invalidation(album_id=album_id, catalog=True, reason="album-deleted")
+            if album.get("type", "photo") == "photo":
+                request_random_photo_pool_refresh()
+
+
 def handler(event, context):
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
@@ -48,8 +142,6 @@ def handler(event, context):
     denied = require_admin(event)
     if denied:
         return denied
-    retaining = False
-    deleted = False
     album_id = None
     try:
         album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
@@ -59,50 +151,14 @@ def handler(event, context):
             return error_response(404, "Album not found", code="not_found")
 
         album["albumId"] = album_id
-        # Strictly resolve external derivative state before the first mutation.
-        # A metadata outage must not leave an anonymously readable derivative
-        # behind while its album is deleted.
-        preview_metadata = load_preview_metadata(album, strict=True)
-        prefixes = (*album_media_prefixes(album), f"temp-zips/{album_id}/", f"album-zips/{album_id}/")
-        preflight_deletion(prefixes=prefixes)
-        retaining = drive_backup_jobs.begin_retention(album)
-        deleted_versions = 0
-        for prefix in prefixes:
-            deleted_versions += delete_prefix_all_versions(prefix)
-        if album.get("visibility") == "public":
-            # Purge after origin deletion so a cache miss cannot refill with
-            # the old media. Keep the album record until the purge is accepted
-            # so a provider failure can be retried with the same namespaces.
-            invalidate_album_media(album, reason="album-deleted", strict=True)
-        delete_preview_metadata(
-            album_id,
-            preview_metadata.keys(),
-            {media_id: index_entry_keys(metadata) for media_id, metadata in preview_metadata.items()},
-        )
-        table.delete_item(
-            Key={"albumId": album_id},
-            ConditionExpression="attribute_exists(albumId)",
-        )
-        deleted = True
-        try:
-            delete_album_media(album_id)
-        except Exception as error:
-            # The album authorization record is gone, so orphaned normalized
-            # rows are inaccessible and can be retried by maintenance safely.
-            logger.error("album_media_cleanup_failed error_type=%s", type(error).__name__)
-        if album.get("visibility") == "public":
-            request_public_api_invalidation(
-                album_id=album_id,
-                catalog=True,
-                reason="album-deleted",
-            )
-            if album.get("type", "photo") == "photo":
-                request_random_photo_pool_refresh()
+        deleted_versions = delete_album_record(album, context)
         _audit(event, context, "success", "album_deleted", deleted_version_count=deleted_versions)
         return json_response(
             200,
             {"message": "Album deleted", "deletedObjectVersions": deleted_versions},
         )
+    except DeletionConflict as error:
+        return error_response(409, str(error), code="deletion_pending")
     except DeletionTooLargeError:
         _audit(event, context, "denied", "deletion_too_large")
         return error_response(
@@ -121,7 +177,3 @@ def handler(event, context):
     except Exception as error:
         _audit(event, context, "failure", "unexpected_error")
         return internal_error(context, error, "delete_album")
-
-    finally:
-        if retaining:
-            drive_backup_jobs.end_retention(album_id, deleted)

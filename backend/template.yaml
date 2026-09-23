@@ -2958,6 +2958,7 @@ Resources:
               Action:
                 - dynamodb:GetItem
                 - dynamodb:DeleteItem
+                - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action:
@@ -4241,10 +4242,34 @@ Resources:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
           ALBUMS_TABLE: !Ref AlbumsTable
+          DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           IMAGES_BUCKET: !Ref ImagesBucket
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
           ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt DriveBackupStateTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:BatchWriteItem, dynamodb:Query]
+              Resource: !GetAtt AlbumMediaTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:BatchGetItem, dynamodb:BatchWriteItem]
+              Resource: !GetAtt PreviewMetadataTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource:
+                - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt RandomPhotoRefreshQueue.Arn
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
@@ -4253,6 +4278,7 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:Scan
                 - dynamodb:DeleteItem
+                - dynamodb:UpdateItem
               Resource:
                 - !GetAtt AlbumsTable.Arn
                 - !Sub '${AlbumsTable.Arn}/index/OwnerSubCreatedAtIndex'

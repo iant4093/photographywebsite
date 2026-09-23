@@ -415,8 +415,9 @@ class DeleteUserExpandedTests(unittest.TestCase):
         with patch.object(delete_user, "require_admin", return_value=denied):
             self.assertIs(delete_user.handler(self.event(), CONTEXT), denied)
 
-        albums = [{"albumId": ALBUM_ID}, {"albumId": SECOND_ALBUM_ID}]
+        albums = [{"albumId": ALBUM_ID, "ownerSub": "subject"}, {"albumId": SECOND_ALBUM_ID, "ownerSub": "subject"}]
         table = Mock()
+        table.get_item.side_effect = [{"Item": album} for album in albums]
         with patch.object(delete_user, "require_admin", return_value=None), patch.object(
             delete_user, "cognito_identity", return_value=("username", "subject", {})
         ), patch.object(delete_user, "assert_admin_target_mutable"), patch.object(
@@ -426,7 +427,7 @@ class DeleteUserExpandedTests(unittest.TestCase):
             "album_media_prefixes",
             side_effect=lambda album: (f"albums/{album['albumId']}/",),
         ), patch.object(delete_user, "preflight_deletion") as preflight, patch.object(
-            delete_user, "delete_prefix_all_versions", return_value=2
+            delete_user, "delete_album_record", return_value=6
         ) as delete_prefix, patch.object(delete_user, "table", table), patch.object(
             delete_user.cognito, "admin_delete_user"
         ) as delete_identity:
@@ -435,8 +436,8 @@ class DeleteUserExpandedTests(unittest.TestCase):
         self.assertEqual(body["albumsDeleted"], 2)
         self.assertEqual(body["deletedObjectVersions"], 12)
         self.assertEqual(len(preflight.call_args.kwargs["prefixes"]), 6)
-        self.assertEqual(delete_prefix.call_count, 6)
-        self.assertEqual(table.delete_item.call_count, 2)
+        self.assertEqual(delete_prefix.call_count, 2)
+        self.assertEqual(table.get_item.call_count, 2)
         delete_identity.assert_called_once_with(UserPoolId=delete_user.USER_POOL_ID, Username="username")
 
     def test_guarded_error_paths_do_not_delete_identity(self):

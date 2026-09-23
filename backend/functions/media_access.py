@@ -10,6 +10,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
+from aws_request_config import request_config
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -52,7 +53,7 @@ def get_s3_client():
 def get_dynamodb_resource():
     global _dynamodb
     if _dynamodb is None:
-        _dynamodb = boto3.resource("dynamodb")
+        _dynamodb = boto3.resource("dynamodb", config=request_config())
     return _dynamodb
 
 

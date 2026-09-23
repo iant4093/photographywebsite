@@ -124,7 +124,7 @@ class MediaRevocationTests(unittest.TestCase):
         response = self.delete(delete_album)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response_body(response)["deletedObjectVersions"], 4)
-        self.assertEqual(self.order, ["delete", "delete", "delete", "delete", "purge", "commit"])
+        self.assertEqual(self.order, ["commit", "delete", "delete", "delete", "delete", "purge", "commit"])
         self.assert_purge_paths()
 
     def test_media_deletion_purges_originals_thumbnails_and_hls_after_origin_removal(self):
@@ -140,7 +140,7 @@ class MediaRevocationTests(unittest.TestCase):
         )
         self.assertEqual(self.delete(delete_album)["statusCode"], 500)
         self.table.delete_item.assert_not_called()
-        self.assertNotIn("commit", self.order)
+        self.assertIn("commit", self.order)  # Durable marker survives failed cleanup.
 
     def test_failed_media_deletion_purge_preserves_manifest_for_retry(self):
         self.cloudfront.create_invalidation.side_effect = ClientError(

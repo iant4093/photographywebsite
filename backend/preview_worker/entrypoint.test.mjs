@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { dirname } from 'node:path'
 import test from 'node:test'
+import { withWorkerBudget, hasWorkerTime, runWorkerJob } from './runtime-budget.mjs'
+import { ObsoletePreviewJob } from './contract.mjs'
 import { fileURLToPath } from 'node:url'
 
 
@@ -34,6 +36,7 @@ test('a malformed queue body retries only that record and does not block valid j
         processJob: async job => { completed.push(job.id); return { status: 'completed' } },
         processHeroJob: async job => { completed.push(job.id); return { status: 'completed' } },
         safePreviewFailureTelemetry: () => ({}),
+        withWorkerBudget, hasWorkerTime, runWorkerJob, ObsoletePreviewJob,
     })
     vm.runInContext(handlerSource, context)
     const result = await context.handler({ Records: [
@@ -43,4 +46,51 @@ test('a malformed queue body retries only that record and does not block valid j
     ] })
     assert.deepEqual(completed, ['photo', 'cover'])
     assert.deepEqual(JSON.parse(JSON.stringify(result)), { batchItemFailures: [{ itemIdentifier: 'bad' }] })
+})
+
+test('obsolete records are acknowledged, provider failures retry, and low remaining time defers work', async () => {
+    const { readFileSync } = await import('node:fs')
+    const vm = await import('node:vm')
+    const source = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8')
+    const handlerSource = source.slice(source.indexOf('function eventJobs(event)')).replace('export async function handler', 'async function handler')
+    const attempted = []
+    const context = vm.createContext({
+        console: { log() {}, error() {} }, withWorkerBudget, hasWorkerTime, runWorkerJob, ObsoletePreviewJob,
+        processJob: async job => { attempted.push(job.id); if (job.id === 'gone') throw new ObsoletePreviewJob(); throw new Error('provider unavailable') },
+        processHeroJob: async () => ({ status: 'completed' }), safePreviewFailureTelemetry: () => ({}),
+    })
+    vm.runInContext(handlerSource, context)
+    const Records = ['gone', 'retry'].map(id => ({ messageId: id, body: JSON.stringify({ id }) }))
+    const result = await context.handler({ Records })
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { batchItemFailures: [{ itemIdentifier: 'retry' }] })
+    assert.deepEqual(attempted, ['gone', 'retry'])
+    attempted.length = 0
+    const deferred = await context.handler({ Records }, { get_remaining_time_in_millis: () => 5000 })
+    assert.deepEqual(attempted, [])
+    assert.deepEqual(JSON.parse(JSON.stringify(deferred)), { batchItemFailures: Records.map(record => ({ itemIdentifier: record.messageId })) })
+    assert.deepEqual(JSON.parse(JSON.stringify(await context.handler({ id: 'gone' }))), { status: 'obsolete' })
+})
+
+test('bounded clients forward a shared deadline and reject work after it expires', async () => {
+    const { boundedClient, checkWorkerTime, workerClientConfig } = await import('./runtime-budget.mjs')
+    assert.equal(workerClientConfig.maxAttempts, 2)
+    assert.equal(workerClientConfig.requestHandler.throwOnRequestTimeout, true)
+    let calls = 0
+    const client = boundedClient({ send: async (_command, options) => { calls++; return { signal: options.abortSignal } } })
+    await withWorkerBudget({ get_remaining_time_in_millis: () => 3010 }, async () => {
+        const result = await client.send({})
+        assert.ok(result.signal instanceof AbortSignal)
+        await new Promise(resolve => setTimeout(resolve, 20))
+        assert.equal(result.signal.aborted, true)
+        assert.throws(checkWorkerTime, /deadline/)
+        await assert.rejects(client.send({}), /deadline/)
+    })
+    assert.equal(calls, 1)
+    assert.equal(hasWorkerTime(), true)
+})
+
+test('a noncooperative transform returns at the job deadline', async () => {
+    await withWorkerBudget({ get_remaining_time_in_millis: () => 3010 }, async () => {
+        await assert.rejects(runWorkerJob(() => new Promise(() => {})), /deadline/)
+    })
 })

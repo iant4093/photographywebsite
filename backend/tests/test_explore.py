@@ -560,6 +560,7 @@ class ExploreApiTests(unittest.TestCase):
             KeyConditionExpression="albumId = :partition",
             ExpressionAttributeValues={":partition": {"S": partition}},
             Select="COUNT",
+            Limit=1000,
         )
 
 

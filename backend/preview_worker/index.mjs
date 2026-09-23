@@ -1,3 +1,4 @@
+import { boundedClient, checkWorkerTime, hasWorkerTime, runWorkerJob, withWorkerBudget, workerClientConfig } from './runtime-budget.mjs'
 import { createHash } from 'node:crypto'
 import exifr from 'exifr'
 import sharp from 'sharp'
@@ -36,6 +37,7 @@ import {
     previousPreviewKeysFor,
     previewJobId,
     resolveManifestImage,
+    ObsoletePreviewJob,
 } from './contract.mjs'
 import {
     EXPLORE_VERSION,
@@ -72,11 +74,11 @@ import {
 
 const { parse: parseExif } = exifr
 
-const s3 = new S3Client({})
-const cloudfront = new CloudFrontClient({})
-const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+const s3 = boundedClient(new S3Client(workerClientConfig))
+const cloudfront = boundedClient(new CloudFrontClient(workerClientConfig))
+const documentClient = boundedClient(DynamoDBDocumentClient.from(new DynamoDBClient(workerClientConfig), {
     marshallOptions: { removeUndefinedValues: true },
-})
+}))
 const MAX_SOURCE_BYTES = parsePositiveLimit(process.env.MAX_PREVIEW_SOURCE_BYTES, 100 * 1024 * 1024, 250 * 1024 * 1024)
 const MAX_OUTPUT_BYTES = parsePositiveLimit(process.env.MAX_PREVIEW_OUTPUT_BYTES, 20 * 1024 * 1024, 50 * 1024 * 1024)
 
@@ -100,7 +102,7 @@ async function albumById(albumId) {
         Key: { albumId },
         ConsistentRead: true,
     }))
-    if (!response.Item) throw new Error('Album not found')
+    if (!response.Item) throw new ObsoletePreviewJob()
     return response.Item
 }
 
@@ -715,12 +717,14 @@ async function processJob(jobValue) {
         throw previewStageFailure('source_type_invalid')
     }
     const sourceDigest = createHash('sha256').update(sourceBytes).digest('hex')
+    checkWorkerTime()
     const outputs = await atPreviewStage('source_transform_failed', async () => generateOutputs(sourceBytes))
     const exploreMetadata = await atPreviewStage(
         'source_transform_failed',
         async () => extractExploreMetadata(sourceBytes, resolved.image),
     )
     for (const width of PREVIEW_WIDTHS) {
+        checkWorkerTime()
         await atPreviewStage(
             'preview_object_write_failed',
             async () => ensurePreviewObject(
@@ -783,32 +787,46 @@ function eventJobs(event) {
     return [{ id: null, job: event }]
 }
 
-export async function handler(event) {
+export async function handler(event, context) {
+    return withWorkerBudget(context, () => processEvent(event))
+}
+
+async function processEvent(event) {
     if (event?.kind === 'hero') {
-        const result = await processHeroJob(event)
+        const result = await runWorkerJob(() => processHeroJob(event))
         console.log(JSON.stringify({ event: 'hero_derivatives_completed', status: result.status }))
         return result
     }
     const jobs = eventJobs(event)
     if (jobs.length === 1 && !jobs[0].id) {
-        const result = await processJob(jobs[0].job)
+        let result
+        try { result = await runWorkerJob(() => processJob(jobs[0].job)) }
+        catch (error) { if (!(error instanceof ObsoletePreviewJob)) throw error; result = { status: 'obsolete' } }
         console.log(JSON.stringify({ event: 'preview_job_completed', status: result.status, requestId: 'direct' }))
         return result
     }
 
     const failures = []
     for (const entry of jobs) {
+        if (!hasWorkerTime(10000)) {
+            failures.push({ itemIdentifier: entry.id })
+            continue
+        }
         let job
         try {
             job = JSON.parse(entry.body)
             const isHero = job?.kind === 'hero'
-            const result = isHero ? await processHeroJob(job) : await processJob(job)
+            const result = await runWorkerJob(() => isHero ? processHeroJob(job) : processJob(job))
             console.log(JSON.stringify({
                 event: isHero ? 'hero_derivatives_completed' : 'preview_job_completed',
                 status: result.status,
                 requestId: entry.id,
             }))
         } catch (error) {
+            if (error instanceof ObsoletePreviewJob) {
+                console.log(JSON.stringify({ event: 'preview_job_completed', status: 'obsolete', requestId: entry.id }))
+                continue
+            }
             const telemetry = safePreviewFailureTelemetry(error)
             console.error(JSON.stringify({
                 event: job?.kind === 'hero' ? 'hero_derivatives_failed' : 'preview_job_failed',

@@ -340,7 +340,10 @@ class MediaAccessBranchTests(unittest.TestCase):
             self.assertIs(media_access.get_dynamodb_resource(), dynamo)
             self.assertIs(media_access.get_dynamodb_resource(), dynamo)
         client.assert_called_once()
-        resource.assert_called_once_with("dynamodb")
+        self.assertEqual(resource.call_args.args, ("dynamodb",))
+        config = resource.call_args.kwargs["config"]
+        self.assertEqual((config.connect_timeout, config.read_timeout), (2, 3))
+        self.assertEqual(config.retries["total_max_attempts"], 2)
         with patch.dict(os.environ, {"IMAGES_BUCKET": ""}):
             with self.assertRaises(RuntimeError):
                 media_access.bucket_name()

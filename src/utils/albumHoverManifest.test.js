@@ -128,3 +128,38 @@ describe('immutable album hover manifests', () => {
         await expect(shared).resolves.toMatchObject({ version })
     })
 })
+
+describe('hover request resource bounds', () => {
+    afterEach(() => { clearAlbumHoverManifestCache(); vi.useRealTimers(); vi.unstubAllGlobals() })
+    it('keeps a shared transfer alive for another consumer, aborts the last, and permits a fresh retry', async () => {
+        vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+        const first = new AbortController(), second = new AbortController()
+        const a = expect(fetchAlbumHoverManifest(album, { signal: first.signal })).rejects.toMatchObject({ name: 'AbortError' })
+        const b = expect(fetchAlbumHoverManifest(album, { signal: second.signal })).rejects.toMatchObject({ name: 'AbortError' })
+        const networkSignal = fetch.mock.calls[0][1].signal
+        first.abort(); await a
+        expect(networkSignal.aborted).toBe(false)
+        second.abort(); await b
+        expect(networkSignal.aborted).toBe(true)
+        fetch.mockResolvedValue(response())
+        await expect(fetchAlbumHoverManifest(album)).resolves.toMatchObject({ albumId })
+        expect(fetch).toHaveBeenCalledTimes(2)
+    })
+    it('evicts an unanswered transfer at its deadline even if fetch ignores abort', async () => {
+        vi.useFakeTimers()
+        vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+        const rejected = expect(fetchAlbumHoverManifest(album)).rejects.toMatchObject({ name: 'AbortError' })
+        await vi.advanceTimersByTimeAsync(10000)
+        await rejected
+        expect(fetch.mock.calls[0][1].signal.aborted).toBe(true)
+        fetch.mockResolvedValue(response())
+        await expect(fetchAlbumHoverManifest(album)).resolves.toMatchObject({ albumId })
+    })
+    it('cancels an oversized chunked body before consuming the entire response', async () => {
+        const cancel = vi.fn()
+        const body = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(32769)) }, cancel })
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { headers: { 'content-type': 'application/json' } })))
+        await expect(fetchAlbumHoverManifest(album)).rejects.toThrow(/size/)
+        expect(cancel).toHaveBeenCalledOnce()
+    })
+})

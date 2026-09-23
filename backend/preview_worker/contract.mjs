@@ -83,11 +83,16 @@ function allowedPrefixes(album) {
     return prefixes
 }
 
+export class ObsoletePreviewJob extends Error {
+    constructor() { super('Preview job is no longer needed'); this.name = 'ObsoletePreviewJob' }
+}
+
 export function resolveManifestImage(album, jobValue) {
     const job = parseJob(jobValue)
     if (!album || typeof album !== 'object' || normalizeAlbumId(album.albumId) !== job.albumId) {
         throw new Error('Preview job does not match album')
     }
+    if (album.status === 'deleting') throw new ObsoletePreviewJob()
     if (album.status && album.status !== 'active') throw new Error('Album is not active')
     if (album.type && album.type !== 'photo') throw new Error('Album is not a photo album')
     if (!ALLOWED_VISIBILITIES.has(album.visibility)) throw new Error('Album visibility is invalid')
@@ -99,7 +104,7 @@ export function resolveManifestImage(album, jobValue) {
         if (!image || typeof image !== 'object') return false
         return (image.rawKey || image.key) === job.rawKey
     })
-    if (index < 0) throw new Error('Media is no longer in the album manifest')
+    if (index < 0) throw new ObsoletePreviewJob()
     return {
         job,
         index,

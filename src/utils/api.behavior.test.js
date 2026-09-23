@@ -1,3 +1,4 @@
+import { uploadXHR } from '../test/uploadXHR'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from './api'
@@ -386,7 +387,7 @@ describe('public API client behavior', () => {
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce(new Response('', { status: 503 }))
       .mockResolvedValueOnce(new Response('', { status: 200 }))
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('XMLHttpRequest', uploadXHR(fetchMock))
     const request = api.uploadFileToS3('https://upload.test', file, {}, { retries: 2 })
     await vi.dynamicImportSettled()
     await vi.advanceTimersByTimeAsync(400)
@@ -394,15 +395,15 @@ describe('public API client behavior', () => {
     await expect(request).resolves.toBeInstanceOf(Response)
     expect(fetchMock.mock.calls[0][1].headers).toEqual({ 'Content-Type': 'image/jpeg' })
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 400 })))
+    vi.stubGlobal('XMLHttpRequest', uploadXHR(vi.fn().mockResolvedValue(new Response('', { status: 400 }))))
     await expect(api.uploadFileToS3('https://upload.test', file, { 'x-amz-tagging': 'x' }, { retries: 0 }))
       .rejects.toMatchObject({ code: 'UPLOAD_FAILED', status: 400 })
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    vi.stubGlobal('XMLHttpRequest', uploadXHR(vi.fn().mockRejectedValue(new Error('offline'))))
     await expect(api.uploadFileToS3('https://upload.test', file, {}, { retries: 0 }))
       .rejects.toMatchObject({ code: 'UPLOAD_NETWORK_ERROR' })
     const aborted = new DOMException('aborted', 'AbortError')
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(aborted))
-    await expect(api.uploadFileToS3('https://upload.test', file)).rejects.toBe(aborted)
+    vi.stubGlobal('XMLHttpRequest', uploadXHR(vi.fn().mockRejectedValue(aborted)))
+    await expect(api.uploadFileToS3('https://upload.test', file)).rejects.toMatchObject({ name: 'AbortError' })
   })
   it('isolates authenticated catalogs by account while retaining same-account refresh caching', async () => {
     const token = (sub, suffix) => `header.${btoa(JSON.stringify({ iss: 'pool', aud: 'client', sub }))}.${suffix}`

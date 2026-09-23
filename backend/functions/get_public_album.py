@@ -15,6 +15,8 @@ import boto3
 from aws_request_config import request_config
 from boto3.dynamodb.conditions import Attr, Key
 
+from explore_budget import ExploreBudget, ExploreUnavailable, current_budget, read as budgeted_read
+
 from cursor_helpers import decode_cursor, encode_cursor
 from explore_index import (
     EXPOSURE_DEFINITIONS,
@@ -136,7 +138,7 @@ def _explore_index_ready():
     with _index_readiness_lock:
         if now < _index_readiness["expires_at"]:
             return _index_readiness["ready"]
-        item = _preview_table().get_item(
+        item = budgeted_read(_preview_table().get_item,
             Key={"albumId": SYSTEM_PARTITION, "mediaId": READY_SORT_KEY},
             ConsistentRead=False,
             ProjectionExpression="recordType,indexVersion",
@@ -157,7 +159,7 @@ def _exposure_index_ready():
     with _exposure_index_readiness_lock:
         if now < _exposure_index_readiness["expires_at"]:
             return _exposure_index_readiness["ready"]
-        item = _preview_table().get_item(
+        item = budgeted_read(_preview_table().get_item,
             Key={"albumId": SYSTEM_PARTITION, "mediaId": EXPOSURE_READY_SORT_KEY},
             ConsistentRead=False,
             ProjectionExpression="recordType,indexVersion",
@@ -176,7 +178,7 @@ def _temporal_index_ready():
     with _temporal_index_readiness_lock:
         if now < _temporal_index_readiness["expires_at"]:
             return _temporal_index_readiness["ready"]
-        item = _preview_table().get_item(
+        item = budgeted_read(_preview_table().get_item,
             Key={"albumId": SYSTEM_PARTITION, "mediaId": TEMPORAL_READY_SORT_KEY},
             ConsistentRead=False,
             ProjectionExpression="recordType,indexVersion,temporalVersion",
@@ -261,7 +263,7 @@ def _batch_albums(album_ids):
             }
         }
         for _attempt in range(3):
-            response = dynamodb.batch_get_item(RequestItems=request)
+            response = budgeted_read(dynamodb.batch_get_item, RequestItems=request)
             for item in response.get("Responses", {}).get(table.name, []):
                 if isinstance(item, dict) and isinstance(item.get("albumId"), str):
                     records[item["albumId"]] = item
@@ -296,7 +298,7 @@ def _batch_preview_metadata(references):
             }
         }
         for _attempt in range(3):
-            response = dynamodb.batch_get_item(RequestItems=request)
+            response = budgeted_read(dynamodb.batch_get_item, RequestItems=request)
             for item in response.get("Responses", {}).get(_preview_table().name, []):
                 if isinstance(item, dict):
                     identity = (item.get("albumId"), item.get("mediaId"))
@@ -355,6 +357,8 @@ def _explore_json_response(status_code, body, **kwargs):
             verified[identity] = (album, image)
         for identity, (album, _image) in verified.items():
             before_by_identity[identity] = original_comparison_hint(album)
+    except ExploreUnavailable:
+        raise
     except Exception as error:
         logger.error("explore_original_read_failed error_type=%s", type(error).__name__)
         before_by_identity = {
@@ -491,7 +495,7 @@ def _all_public_explore_items():
             }
             if cursor:
                 arguments["ExclusiveStartKey"] = cursor
-            response = _preview_table().scan(**arguments)
+            response = budgeted_read(_preview_table().scan, _scan=True, **arguments)
             candidates.extend(
                 item for item in response.get("Items", []) if isinstance(item, dict)
             )
@@ -605,12 +609,13 @@ def _index_partition_count(partition):
             "KeyConditionExpression": "albumId = :partition",
             "ExpressionAttributeValues": {":partition": {"S": partition}},
             "Select": "COUNT",
+            "Limit": EXPLORE_SCAN_LIMIT,
         }
         if cursor:
             arguments["ExclusiveStartKey"] = cursor
         # The low-level client is thread-safe; boto3 Resource objects are not
         # shared across the parallel count workers.
-        response = dynamodb_client.query(**arguments)
+        response = budgeted_read(dynamodb_client.query, **arguments)
         count += int(response.get("Count") or 0)
         cursor = response.get("LastEvaluatedKey")
         if not cursor:
@@ -624,12 +629,13 @@ def _index_lens_definitions():
     for _page in range(EXPLORE_MAX_SCAN_PAGES):
         arguments = {
             "KeyConditionExpression": Key("albumId").eq(FACETS_PARTITION),
+            "Limit": EXPLORE_SCAN_LIMIT,
             "ProjectionExpression": "mediaId,recordType,indexVersion,facetPartition,#name",
             "ExpressionAttributeNames": {"#name": "name"},
         }
         if cursor:
             arguments["ExclusiveStartKey"] = cursor
-        response = _preview_table().query(**arguments)
+        response = budgeted_read(_preview_table().query, **arguments)
         for item in response.get("Items", []):
             if not isinstance(item, dict):
                 continue
@@ -655,9 +661,16 @@ def _parallel_partition_counts(partitions):
     unique = sorted(set(partitions))
     if not unique:
         return {}
+    budget = current_budget.get()
+    def count(partition):
+        token = current_budget.set(budget)
+        try:
+            return _index_partition_count(partition)
+        finally:
+            current_budget.reset(token)
     workers = min(8, len(unique))
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="explore-count") as executor:
-        return dict(zip(unique, executor.map(_index_partition_count, unique), strict=True))
+        return dict(zip(unique, executor.map(count, unique), strict=True))
 
 
 def _index_query_page(partition, *, seed, phase, after, limit):
@@ -668,7 +681,7 @@ def _index_query_page(partition, *, seed, phase, after, limit):
         condition &= Key("mediaId").between(after + "\x00", seed)
     else:
         condition &= Key("mediaId").lt(seed)
-    return _preview_table().query(
+    return budgeted_read(_preview_table().query,
         KeyConditionExpression=condition,
         ProjectionExpression="mediaId,recordType,indexVersion,sourceAlbumId,sourceMediaId",
         Limit=limit,
@@ -968,7 +981,7 @@ def _scan_explore_media_response(event, params):
         }
         if scan_cursor:
             arguments["ExclusiveStartKey"] = scan_cursor
-        response = _preview_table().scan(**arguments)
+        response = budgeted_read(_preview_table().scan, _scan=True, **arguments)
         candidates.extend(item for item in response.get("Items", []) if isinstance(item, dict))
         scan_cursor = response.get("LastEvaluatedKey")
         scan_pages += 1
@@ -1008,13 +1021,14 @@ def _lens_options_response(params):
     candidates = []
     for _page in range(EXPLORE_MAX_SCAN_PAGES):
         arguments = {
+            "Limit": EXPLORE_SCAN_LIMIT,
             "ProjectionExpression": "albumId,mediaId,#status,exploreVersion,lens,lensKey",
             "ExpressionAttributeNames": {"#status": "status"},
             "FilterExpression": Attr("status").eq("ready") & Attr("exploreVersion").eq(EXPLORE_VERSION),
         }
         if cursor:
             arguments["ExclusiveStartKey"] = cursor
-        response = _preview_table().scan(**arguments)
+        response = budgeted_read(_preview_table().scan, _scan=True, **arguments)
         candidates.extend(item for item in response.get("Items", []) if isinstance(item, dict))
         cursor = response.get("LastEvaluatedKey")
         if not cursor:
@@ -1049,13 +1063,14 @@ def _color_options_response(params):
     candidates = []
     for _page in range(EXPLORE_MAX_SCAN_PAGES):
         arguments = {
+            "Limit": EXPLORE_SCAN_LIMIT,
             "ProjectionExpression": "albumId,mediaId,#status,exploreVersion,colorFamilies",
             "ExpressionAttributeNames": {"#status": "status"},
             "FilterExpression": Attr("status").eq("ready") & Attr("exploreVersion").eq(EXPLORE_VERSION),
         }
         if cursor:
             arguments["ExclusiveStartKey"] = cursor
-        response = _preview_table().scan(**arguments)
+        response = budgeted_read(_preview_table().scan, _scan=True, **arguments)
         candidates.extend(item for item in response.get("Items", []) if isinstance(item, dict))
         cursor = response.get("LastEvaluatedKey")
         if not cursor:
@@ -1083,7 +1098,20 @@ def _color_options_response(params):
     )
 
 
-def _explore_response(event):
+def _explore_response(event, context=None):
+    budget = ExploreBudget(context)
+    token = current_budget.set(budget)
+    try:
+        result = _explore_response_inner(event)
+        budget.check()
+        return result
+    except ExploreUnavailable:
+        return error_response(503, "Explore is temporarily unavailable. Please retry shortly.", code="explore_unavailable")
+    finally:
+        current_budget.reset(token)
+
+
+def _explore_response_inner(event):
     params = (event or {}).get("queryStringParameters") or {}
     if not isinstance(params, dict):
         raise ValidationError("Invalid explore parameters")
@@ -1751,7 +1779,7 @@ def handler(event, context):
             return internal_error(context, error, "get_random_photos")
     if route_key == "GET /public/explore" or raw_path.endswith("/public/explore"):
         try:
-            return _explore_response(event)
+            return _explore_response(event, context)
         except ValidationError as error:
             return error_response(400, str(error), code="invalid_request")
         except Exception as error:

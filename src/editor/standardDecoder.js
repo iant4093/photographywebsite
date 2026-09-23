@@ -1,16 +1,21 @@
-export async function decodeStandardFile(file) {
-    const [bitmap, exifr] = await Promise.all([
-        createImageBitmap(file, { imageOrientation: 'from-image' }),
-        import('exifr'),
-    ])
+import { decodeBudget, validateDimensions } from './decodeSafety'
+
+export async function decodeStandardFile(file, options = {}) {
+    const budget = decodeBudget(file, options)
+    let bitmap
     try {
+        budget.signal.throwIfAborted()
+        const bitmapPromise = budget.wait(createImageBitmap(file, { imageOrientation: 'from-image' }), value => value.close())
+        bitmap = await bitmapPromise
+        validateDimensions(bitmap.width, bitmap.height)
+        const exifr = await budget.wait(import('exifr'))
         const canvas = document.createElement('canvas')
         canvas.width = bitmap.width
         canvas.height = bitmap.height
         const context = canvas.getContext('2d', { willReadFrequently: true, alpha: false })
         context.drawImage(bitmap, 0, 0)
         const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
-        const exif = await exifr.parse(file, { tiff: true, exif: true }).catch(() => null)
+        const exif = await budget.wait(exifr.parse(file, { tiff: true, exif: true }).catch(() => null))
         return {
             pixels,
             width: canvas.width,
@@ -27,11 +32,13 @@ export async function decodeStandardFile(file) {
             },
         }
     } finally {
-        bitmap.close()
+        bitmap?.close()
+        budget.close()
     }
 }
 
 export function makePreviewSource(source, maxEdge = 1800) {
+    validateDimensions(source.width, source.height)
     const scale = Math.min(1, maxEdge / Math.max(source.width, source.height))
     if (scale === 1) return { ...source, pixels: new Uint8ClampedArray(source.pixels) }
     const input = document.createElement('canvas')

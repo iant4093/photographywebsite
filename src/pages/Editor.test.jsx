@@ -178,6 +178,27 @@ describe('Photo Editor page', () => {
         })
     })
 
+    it('cancels superseded and unmounted decodes without saving abandoned photos', async () => {
+        const signals = []
+        mocks.decodeStandardFile.mockImplementation((_file, { signal }) => new Promise((_, reject) => {
+            signals.push(signal)
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }))
+        const user = userEvent.setup()
+        const { container, unmount } = render(<Editor />)
+        const input = container.querySelector('input[type="file"]')
+        await user.upload(input, new File(['one'], 'one.jpg', { type: 'image/jpeg' }))
+        await user.upload(input, new File(['two'], 'two.jpg', { type: 'image/jpeg' }))
+        expect(signals).toHaveLength(2)
+        expect(signals[0].aborted).toBe(true)
+        expect(signals[1].aborted).toBe(false)
+        unmount()
+        expect(signals[1].aborted).toBe(true)
+        await Promise.resolve()
+        expect(mocks.saveEditorSource).not.toHaveBeenCalled()
+        expect(mocks.clearEditorSession).not.toHaveBeenCalled()
+    })
+
     it('opens a standard image, edits, compares, navigates history, and exports', async () => {
         const user = userEvent.setup()
         const { container } = render(<Editor />)
@@ -188,7 +209,7 @@ describe('Photo Editor page', () => {
         await user.upload(container.querySelector('input[type="file"]'), file)
 
         expect(await screen.findByText('mountain')).toBeInTheDocument()
-        expect(mocks.decodeStandardFile).toHaveBeenCalledWith(file)
+        expect(mocks.decodeStandardFile).toHaveBeenCalledWith(file, { signal: expect.any(AbortSignal) })
         expect(mocks.saveEditorSource).toHaveBeenCalledWith(file)
         expect((await screen.findAllByText(/working preview/)).length).toBeGreaterThan(0)
         expect(screen.getByText(/Canon EOS R7/)).toBeInTheDocument()
@@ -233,7 +254,7 @@ describe('Photo Editor page', () => {
         const raw = new File(['raw'], 'camera.CR3', { type: 'application/octet-stream' })
         await user.upload(container.querySelector('input[type="file"]'), raw)
         expect(await screen.findByText('camera')).toBeInTheDocument()
-        expect(mocks.decodeRawFile).toHaveBeenCalledWith(raw, expect.any(Function))
+        expect(mocks.decodeRawFile).toHaveBeenCalledWith(raw, expect.any(Function), { signal: expect.any(AbortSignal) })
 
         const geometrySummary = screen.getByText('Crop & geometry')
         await user.click(geometrySummary)

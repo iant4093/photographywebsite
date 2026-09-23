@@ -2,7 +2,7 @@ import { ApiError, wait, responseRetryDelay, MAX_AUTOMATIC_RETRY_DELAY_MS } from
 
 // fetch does not expose upload progress. Use XHR for transfers that display it,
 // keeping the same signed PUT, headers, response and cancellation semantics.
-export function uploadWithProgress(url, file, headers, { signal, onProgress, stallTimeoutMs = 120_000 }) {
+export function uploadWithProgress(url, file, headers, { signal, onProgress = () => {}, stallTimeoutMs = 120_000 }) {
     return new Promise((resolve, reject) => {
         if (signal?.aborted) {
             reject(new DOMException('Request aborted', 'AbortError'))
@@ -33,7 +33,8 @@ export function uploadWithProgress(url, file, headers, { signal, onProgress, sta
                 const separator = line.indexOf(':')
                 if (separator > 0) responseHeaders.append(line.slice(0, separator), line.slice(separator + 1).trim())
             }
-            resolve(new Response(xhr.responseText || null, { status: xhr.status, headers: responseHeaders }))
+            try { resolve(new Response(xhr.responseText || null, { status: xhr.status, headers: responseHeaders })) }
+            catch (error) { reject(error) }
         }
         xhr.onerror = xhr.ontimeout = () => {
             cleanup()
@@ -68,16 +69,9 @@ export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, o
     for (let attempt = 0; attempt <= retries; attempt += 1) {
         let response
         try {
-            // Visitors never need the XHR progress transport. Load it only
-            // when an upload actually requests progress reporting.
-            response = options.onProgress
-                ? await uploadWithProgress(presignedUrl, file, uploadHeaders, options)
-                : await fetch(presignedUrl, {
-                    method: 'PUT',
-                    headers: uploadHeaders,
-                    body: file,
-                    signal: options.signal,
-                })
+            // Track bytes internally even when the current control has no
+            // progress display. Every signed upload gets the same stall guard.
+            response = await uploadWithProgress(presignedUrl, file, uploadHeaders, options)
         } catch (error) {
             if (error?.name === 'AbortError') throw error
             if (attempt < retries) {

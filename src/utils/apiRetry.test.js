@@ -1,3 +1,4 @@
+import { uploadXHR } from '../test/uploadXHR'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch, uploadFileToS3 } from './api'
 
@@ -60,6 +61,7 @@ describe('server-directed request retries', () => {
 
     it('also honors a storage upload cooldown without duplicating successful uploads', async () => {
         const fetch = replies(503, { 'Retry-After': '3' })
+        vi.stubGlobal('XMLHttpRequest', uploadXHR(fetch))
         const result = uploadFileToS3('https://upload.example/photo', new File(['photo'], 'photo.jpg'))
         await vi.dynamicImportSettled()
         await vi.advanceTimersByTimeAsync(2999)

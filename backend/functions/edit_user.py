@@ -3,6 +3,7 @@
 import os
 
 import boto3
+from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import AuthError, auth_error_response, require_admin
@@ -67,11 +68,23 @@ def handler(event, context):
             )
         updated = 0
         for album in albums_owned_by(subject, old_email):
-            table.update_item(
-                Key={"albumId": album["albumId"]},
-                UpdateExpression="SET ownerEmail = :newEmail, ownerSub = :ownerSub",
-                ExpressionAttributeValues={":newEmail": new_email, ":ownerSub": subject},
-            )
+            try:
+                table.update_item(
+                    Key={"albumId": album["albumId"]},
+                    UpdateExpression="SET ownerEmail = :newEmail, ownerSub = :ownerSub",
+                    ConditionExpression=(
+                        "attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) "
+                        "AND (ownerSub = :ownerSub OR (attribute_not_exists(ownerSub) AND ownerEmail = :oldEmail))"
+                    ),
+                    ExpressionAttributeNames={"#status": "status"},
+                    ExpressionAttributeValues={":newEmail": new_email, ":ownerSub": subject,
+                                               ":oldEmail": old_email, ":active": "active"},
+                )
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
+                # A removed, deleting or transferred album no longer belongs to this update.
+                continue
             updated += 1
         _audit(event, context, "success", "user_updated", album_count=updated)
         return json_response(200, {"message": "User email updated", "albumsUpdated": updated})

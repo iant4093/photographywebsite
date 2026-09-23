@@ -1,3 +1,5 @@
+import { decodeBudget, validateDimensions } from './decodeSafety'
+import { rawWorkerClient } from './rawWorkerClient'
 import rawWorkerUrl from 'rawconvert-wasm/dist/worker.js?url'
 import rawCoreUrl from './vendor/rawconvert-core.js?url'
 import rawWasmUrl from './vendor/rawconvert-core.wasm?url'
@@ -9,27 +11,29 @@ export function isRawFile(file) {
     return RAW_EXTENSIONS.has(extension)
 }
 
-export async function decodeRawFile(file, onProgress = () => {}) {
-    onProgress('Loading RAW decoder')
-    const [{ RawConvertWorker }, bytes, exifr] = await Promise.all([
-        import('rawconvert-wasm/dist/worker-client.js'),
-        file.arrayBuffer(),
-        import('exifr'),
-    ])
-    const decoder = await RawConvertWorker.init({ workerUrl: rawWorkerUrl, coreUrl: rawCoreUrl, wasmUrl: rawWasmUrl })
+export async function decodeRawFile(file, onProgress = () => {}, options = {}) {
+    const budget = decodeBudget(file, options)
+    let decoder
     try {
+        budget.signal.throwIfAborted()
+        onProgress('Loading RAW decoder')
+        const [bytes, exifr] = await budget.wait(Promise.all([file.arrayBuffer(), import('exifr')]))
+        decoder = rawWorkerClient(rawWorkerUrl, budget.signal)
+        await decoder.send({ type: 'init', coreUrl: rawCoreUrl, wasmUrl: rawWasmUrl })
         onProgress('Reading RAW data')
-        const metadata = await decoder.load(bytes, file.name)
+        const metadata = await decoder.send({ type: 'load', data: bytes, filename: file.name }, [bytes])
+        validateDimensions(metadata.width, metadata.height)
         onProgress('Developing RAW image')
-        const decoded = await decoder.process({
+        const decoded = await decoder.send({ type: 'process', options: {
             colorSpace: 'srgb',
             interpolation: 'ahd',
             outputBps: 8,
             halfSize: false,
             cameraWhiteBalance: true,
             highlightMode: 2,
-        })
-        if (!decoded?.data || !decoded.width || !decoded.height) throw new Error('The RAW file did not produce a usable image.')
+        } })
+        const count = validateDimensions(decoded?.width, decoded?.height)
+        if (!(decoded.data instanceof Uint8Array) || decoded.colors !== 3 || decoded.bitsPerSample !== 8 || decoded.data.length !== count * 3) throw new Error('The RAW file did not produce a usable image.')
         const source = decoded.data
         const rgba = new Uint8ClampedArray(decoded.width * decoded.height * 4)
         for (let sourceIndex = 0, targetIndex = 0; targetIndex < rgba.length; sourceIndex += 3, targetIndex += 4) {
@@ -38,7 +42,7 @@ export async function decodeRawFile(file, onProgress = () => {}) {
             rgba[targetIndex + 2] = source[sourceIndex + 2]
             rgba[targetIndex + 3] = 255
         }
-        const exif = await exifr.parse(file, { tiff: true, exif: true }).catch(() => null)
+        const exif = await budget.wait(exifr.parse(file, { tiff: true, exif: true }).catch(() => null))
         return {
             pixels: rgba,
             width: decoded.width,
@@ -55,6 +59,7 @@ export async function decodeRawFile(file, onProgress = () => {}) {
             },
         }
     } finally {
-        decoder.dispose()
+        decoder?.dispose()
+        budget.close()
     }
 }

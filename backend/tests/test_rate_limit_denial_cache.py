@@ -24,12 +24,17 @@ class RateTable:
             key = request["Key"]["identifier"]
             values = request["ExpressionAttributeValues"]
             row = self.rows.get(key)
-            if "ConditionExpression" in request:
-                if row and row["ttl"] > values[":now"]:
-                    raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
-                row = self.rows[key] = {"count": 1, "ttl": values[":expiry"]}
-            else:
+            increment = request["UpdateExpression"].startswith("ADD")
+            accepted = (row and row["ttl"] > values[":now"] and 0 <= row["count"] < values[":limit"]) if increment else (not row or row["ttl"] <= values[":now"])
+            if not accepted:
+                error = {"Error": {"Code": "ConditionalCheckFailedException"}}
+                if row and request.get("ReturnValuesOnConditionCheckFailure") == "ALL_OLD":
+                    error["Item"] = {key: {"N": str(value)} for key, value in row.items()}
+                raise ClientError(error, "UpdateItem")
+            if increment:
                 row["count"] += 1
+            else:
+                row = self.rows[key] = {"count": 1, "ttl": values[":expiry"]}
             return {"Attributes": dict(row)}
 
 
@@ -55,16 +60,17 @@ class RateLimitDenialCacheTests(unittest.TestCase):
         self.assertEqual(self.table.calls, calls)
         self.assertEqual(self.get_table.call_count, lookups)
         self.assertTrue(self.check(now=160))
-        self.assertEqual(self.table.calls, calls + 1)
+        self.assertEqual(self.table.calls, calls + 2)
 
     def test_success_is_never_cached_and_cold_instances_share_database_limit(self):
         self.assertTrue(self.check(limit=2))
         self.assertTrue(self.check(limit=2))
         self.assertFalse(self.check(limit=2))
-        self.assertEqual(self.table.calls, 5)
+        self.assertEqual(self.table.calls, 4)
         security_helpers._denied_requests.clear()  # Another Lambda has no local decision.
         self.assertFalse(self.check(limit=2))
-        self.assertEqual(self.table.calls, 7)
+        self.assertEqual(self.table.calls, 5)
+        self.assertEqual(next(iter(self.table.rows.values())), {"count": 2, "ttl": 160})
 
     def test_identifier_action_policy_table_and_secret_are_isolated(self):
         self.assertTrue(self.check())

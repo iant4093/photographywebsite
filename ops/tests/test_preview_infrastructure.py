@@ -121,6 +121,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "CreateAlbumFunction",
             "UpdateAlbumFunction",
             "DeleteAlbumFunction",
+            "DeleteUserFunction",
             "AddImagesFunction",
             "DeleteImagesFunction",
         ):
@@ -143,6 +144,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "CreateAlbumFunction",
             "UpdateAlbumFunction",
             "DeleteAlbumFunction",
+            "DeleteUserFunction",
             "AddImagesFunction",
             "PreviewWorkerFunction",
             "RandomPhotoPoolBuilderFunction",

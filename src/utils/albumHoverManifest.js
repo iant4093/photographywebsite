@@ -7,22 +7,24 @@ const IMAGE_PATH_PATTERN = new RegExp(`^/public-previews/(${UUID_PATTERN})/v3/[0
 const manifestCache = new Map()
 const pendingRequests = new Map()
 
-function withAbort(promise, signal) {
-    if (!signal) return promise
-    if (signal.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'))
+const MANIFEST_TIMEOUT_MS = 10_000
+
+function subscribe(entry, signal) {
+    if (signal?.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'))
+    entry.consumers += 1
     return new Promise((resolve, reject) => {
-        const abort = () => reject(new DOMException('Request aborted', 'AbortError'))
-        signal.addEventListener('abort', abort, { once: true })
-        promise.then(
-            value => {
-                signal.removeEventListener('abort', abort)
-                resolve(value)
-            },
-            error => {
-                signal.removeEventListener('abort', abort)
-                reject(error)
-            },
-        )
+        let finished = false
+        const finish = (callback, value) => {
+            if (finished) return
+            finished = true
+            signal?.removeEventListener('abort', abort)
+            entry.consumers -= 1
+            if (!entry.settled && entry.consumers === 0) entry.cancel()
+            callback(value)
+        }
+        const abort = () => finish(reject, new DOMException('Request aborted', 'AbortError'))
+        signal?.addEventListener('abort', abort, { once: true })
+        entry.promise.then(value => finish(resolve, value), error => finish(reject, error))
     })
 }
 
@@ -117,19 +119,44 @@ function validateManifest(payload, identity) {
     }
 }
 
-async function requestManifest(identity) {
+async function requestManifest(identity, signal) {
     const response = await fetch(identity.url, {
         credentials: 'omit',
         headers: { Accept: 'application/json' },
         mode: 'cors',
         cache: 'force-cache',
+        signal,
     })
     if (!response.ok) throw new Error('Album hover manifest was unavailable')
     const contentType = response.headers.get('content-type') || ''
     if (!contentType.toLowerCase().includes('application/json')) {
         throw new Error('Album hover manifest content type was invalid')
     }
-    const text = await response.text()
+    if (Number(response.headers.get('content-length')) > MANIFEST_MAX_BYTES) {
+        void response.body?.cancel().catch(() => {})
+        throw new Error('Album hover manifest size was invalid')
+    }
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('Album hover manifest body was unavailable')
+    const chunks = []
+    let length = 0
+    try {
+        while (true) {
+            signal.throwIfAborted()
+            const { done, value } = await reader.read()
+            if (done) break
+            length += value.byteLength
+            if (length > MANIFEST_MAX_BYTES) throw new Error('Album hover manifest size was invalid')
+            chunks.push(value)
+        }
+    } catch (error) {
+        void reader.cancel().catch(() => {})
+        throw error
+    } finally { reader.releaseLock() }
+    const bytes = new Uint8Array(length)
+    let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
     if (!text || text.length > MANIFEST_MAX_BYTES) {
         throw new Error('Album hover manifest size was invalid')
     }
@@ -137,6 +164,7 @@ async function requestManifest(identity) {
 }
 
 export function fetchAlbumHoverManifest(album, options = {}) {
+    if (options.signal?.aborted) return Promise.reject(new DOMException('Request aborted', 'AbortError'))
     if (album?.hoverPreviewStatus === 'unavailable') {
         return Promise.resolve({ schemaVersion: 1, images: [] })
     }
@@ -152,24 +180,40 @@ export function fetchAlbumHoverManifest(album, options = {}) {
     if (cached) {
         manifestCache.delete(identity.url)
         manifestCache.set(identity.url, cached)
-        return withAbort(Promise.resolve(cached), options.signal)
+        return Promise.resolve(cached)
     }
-    let request = pendingRequests.get(identity.url)
-    if (!request) {
-        request = requestManifest(identity).then(value => {
+    let entry = pendingRequests.get(identity.url)
+    if (!entry) {
+        const controller = new AbortController()
+        entry = { consumers: 0, settled: false }
+        const evict = () => {
+            if (pendingRequests.get(identity.url) === entry) pendingRequests.delete(identity.url)
+        }
+        entry.cancel = () => { evict(); controller.abort() }
+        const timer = setTimeout(entry.cancel, MANIFEST_TIMEOUT_MS)
+        // Reject independently of fetch's cooperation, and never cache a late
+        // result from an abandoned request over a newer request for this URL.
+        const interrupted = new Promise((_, reject) => {
+            controller.signal.addEventListener('abort', () => reject(new DOMException('Hover request interrupted', 'AbortError')), { once: true })
+        })
+        entry.promise = Promise.race([requestManifest(identity, controller.signal), interrupted]).then(value => {
+            controller.signal.throwIfAborted()
             manifestCache.set(identity.url, value)
-            while (manifestCache.size > MANIFEST_CACHE_LIMIT) {
-                manifestCache.delete(manifestCache.keys().next().value)
-            }
+            while (manifestCache.size > MANIFEST_CACHE_LIMIT) manifestCache.delete(manifestCache.keys().next().value)
             return value
-        }).finally(() => pendingRequests.delete(identity.url))
-        request.catch(() => {})
-        pendingRequests.set(identity.url, request)
+        }).finally(() => {
+            entry.settled = true
+            clearTimeout(timer)
+            evict()
+        })
+        entry.promise.catch(() => {})
+        pendingRequests.set(identity.url, entry)
     }
-    return withAbort(request, options.signal)
+    return subscribe(entry, options.signal)
 }
 
 export function clearAlbumHoverManifestCache() {
     manifestCache.clear()
+    for (const entry of pendingRequests.values()) entry.cancel()
     pendingRequests.clear()
 }

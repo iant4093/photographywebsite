@@ -156,8 +156,8 @@ class AbuseProtectionTests(unittest.TestCase):
     def test_rate_limit_resets_then_atomically_increments(self):
         table = Mock()
         table.update_item.side_effect = [
-            {"Attributes": {"count": 1}},
             ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"),
+            {"Attributes": {"count": 1}},
             {"Attributes": {"count": 2}},
         ]
         with patch.object(security_helpers, "_get_rate_table", return_value=table):

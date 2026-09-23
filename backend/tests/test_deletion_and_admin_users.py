@@ -78,7 +78,7 @@ class DeleteAlbumTests(unittest.TestCase):
         record = {"albumId": ALBUM_ID, "s3Prefix": "albums/other-user/"}
         with patch.object(delete_album, "require_admin", return_value=None), patch.object(
             delete_album.table, "get_item", return_value={"Item": record}
-        ), patch.object(delete_album.table, "delete_item"), patch.object(
+        ), patch.object(delete_album.table, "update_item"), patch.object(delete_album.table, "delete_item"), patch.object(
             delete_album, "preflight_deletion", return_value=0
         ), patch.object(
             delete_album, "delete_prefix_all_versions", return_value=0
@@ -95,7 +95,7 @@ class DeleteAlbumTests(unittest.TestCase):
         record = {"albumId": ALBUM_ID, "s3Prefix": "albums/untrusted/", "legacyS3Prefix": legacy}
         with patch.object(delete_album, "require_admin", return_value=None), patch.object(
             delete_album.table, "get_item", return_value={"Item": record}
-        ), patch.object(delete_album.table, "delete_item"), patch.object(
+        ), patch.object(delete_album.table, "update_item"), patch.object(delete_album.table, "delete_item"), patch.object(
             delete_album, "preflight_deletion", return_value=0
         ) as preflight, patch.object(
             delete_album, "delete_prefix_all_versions", return_value=0

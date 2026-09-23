@@ -85,7 +85,7 @@ def handler(event, context):
             for key in validate_list(body.get("keys"), "keys", maximum=250, required=True)
         }
         album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
-        if not album:
+        if not album or album.get("status", "active") != "active":
             _audit(event, context, "denied", "album_not_found")
             return error_response(404, "Album not found", code="not_found")
 
@@ -170,9 +170,10 @@ def handler(event, context):
                 "SET images = :images, imageCount = :count, coverImageUrl = :cover, "
                 "coverThumbKey = :coverThumb, coverBlurhash = :coverBlurhash, pendingMediaDeletion = :pending"
             ),
-            ConditionExpression="attribute_exists(albumId) AND images = :previous_images AND attribute_not_exists(pendingMediaDeletion) AND (attribute_not_exists(#visibility) OR #visibility = :visibility) AND (attribute_not_exists(coverImageUrl) OR coverImageUrl = :previous_cover) AND (attribute_not_exists(coverThumbKey) OR coverThumbKey = :previous_thumb)",
-            ExpressionAttributeNames={"#visibility": "visibility"},
+            ConditionExpression="attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) AND images = :previous_images AND attribute_not_exists(pendingMediaDeletion) AND (attribute_not_exists(#visibility) OR #visibility = :visibility) AND (attribute_not_exists(coverImageUrl) OR coverImageUrl = :previous_cover) AND (attribute_not_exists(coverThumbKey) OR coverThumbKey = :previous_thumb)",
+            ExpressionAttributeNames={"#visibility": "visibility", "#status": "status"},
             ExpressionAttributeValues={
+                ":active": "active",
                 ":pending": pending,
                 ":visibility": album.get("visibility", "private"),
                 ":previous_cover": album.get("coverImageUrl", ""),

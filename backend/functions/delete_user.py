@@ -6,7 +6,9 @@ import boto3
 
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import AuthError, auth_error_response, require_admin
-from deletion_helpers import DeletionTooLargeError, delete_prefix_all_versions, preflight_deletion
+from deletion_helpers import DeletionTooLargeError, preflight_deletion
+from delete_album import DeletionConflict, delete_album_record
+from drive_backup_jobs import DriveBackupBusy
 from media_access import album_media_prefixes
 from owner_helpers import assert_admin_target_mutable, albums_owned_by, cognito_identity, table
 from response_helpers import error_response, internal_error, json_response
@@ -69,11 +71,13 @@ def handler(event, context):
         preflight_deletion(prefixes=deletion_targets)
         deleted_versions = 0
         deleted_albums = 0
-        for album, prefixes in validated_albums:
-            album_id = album["albumId"]
-            for prefix in prefixes:
-                deleted_versions += delete_prefix_all_versions(prefix)
-            table.delete_item(Key={"albumId": album_id})
+        for album, _prefixes in validated_albums:
+            # The owner index can be stale; never erase a transferred album.
+            current = table.get_item(Key={"albumId": album["albumId"]}, ConsistentRead=True).get("Item")
+            if not current or not (current.get("ownerSub") == subject or
+                                   ("ownerSub" not in current and current.get("ownerEmail") == email)):
+                continue
+            deleted_versions += delete_album_record(current, context)
             deleted_albums += 1
 
         # Delete Cognito last. A partial S3/Dynamo failure leaves the identity in
@@ -98,6 +102,8 @@ def handler(event, context):
     except AuthError as error:
         _audit(event, context, "denied", "protected_admin_target")
         return auth_error_response(error)
+    except (DeletionConflict, DriveBackupBusy) as error:
+        return error_response(409, str(error), code="deletion_pending")
     except DeletionTooLargeError:
         _audit(event, context, "denied", "deletion_too_large")
         return error_response(
