@@ -61,6 +61,7 @@ describe('server-directed request retries', () => {
     it('also honors a storage upload cooldown without duplicating successful uploads', async () => {
         const fetch = replies(503, { 'Retry-After': '3' })
         const result = uploadFileToS3('https://upload.example/photo', new File(['photo'], 'photo.jpg'))
+        await vi.dynamicImportSettled()
         await vi.advanceTimersByTimeAsync(2999)
         expect(fetch).toHaveBeenCalledTimes(1)
         await vi.advanceTimersByTimeAsync(1)

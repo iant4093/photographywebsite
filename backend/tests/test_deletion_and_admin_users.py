@@ -126,7 +126,7 @@ class DeleteImagesTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         delete.assert_not_called()
 
-    def test_success_updates_manifest_count_after_s3_delete(self):
+    def test_success_commits_manifest_before_s3_delete(self):
         first = f"albums/{ALBUM_ID}/original/one.jpg"
         second = f"albums/{ALBUM_ID}/original/two.jpg"
         record = {"albumId": ALBUM_ID, "images": [{"rawKey": first}, {"rawKey": second}]}
@@ -140,7 +140,7 @@ class DeleteImagesTests(unittest.TestCase):
         ) as update:
             response = delete_images.handler(event, None)
         self.assertEqual(response["statusCode"], 200)
-        values = update.call_args.kwargs["ExpressionAttributeValues"]
+        values = update.call_args_list[0].kwargs["ExpressionAttributeValues"]
         self.assertEqual(values[":count"], 1)
         self.assertEqual(values[":images"], [{"rawKey": second}])
 
@@ -169,7 +169,7 @@ class DeleteImagesTests(unittest.TestCase):
         ) as update:
             response = delete_images.handler(event, None)
         self.assertEqual(response["statusCode"], 200)
-        values = update.call_args.kwargs["ExpressionAttributeValues"]
+        values = update.call_args_list[0].kwargs["ExpressionAttributeValues"]
         self.assertEqual(values[":cover"], second)
         self.assertEqual(values[":coverThumb"], second_thumb)
         self.assertEqual(values[":coverBlurhash"], "new")

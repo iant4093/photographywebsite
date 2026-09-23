@@ -777,7 +777,7 @@ function eventJobs(event) {
     if (Array.isArray(event?.Records)) {
         return event.Records.map((record) => ({
             id: record.messageId,
-            job: JSON.parse(record.body),
+            body: record.body,
         }))
     }
     return [{ id: null, job: event }]
@@ -798,9 +798,11 @@ export async function handler(event) {
 
     const failures = []
     for (const entry of jobs) {
+        let job
         try {
-            const isHero = entry.job?.kind === 'hero'
-            const result = isHero ? await processHeroJob(entry.job) : await processJob(entry.job)
+            job = JSON.parse(entry.body)
+            const isHero = job?.kind === 'hero'
+            const result = isHero ? await processHeroJob(job) : await processJob(job)
             console.log(JSON.stringify({
                 event: isHero ? 'hero_derivatives_completed' : 'preview_job_completed',
                 status: result.status,
@@ -809,7 +811,7 @@ export async function handler(event) {
         } catch (error) {
             const telemetry = safePreviewFailureTelemetry(error)
             console.error(JSON.stringify({
-                event: entry.job?.kind === 'hero' ? 'hero_derivatives_failed' : 'preview_job_failed',
+                event: job?.kind === 'hero' ? 'hero_derivatives_failed' : 'preview_job_failed',
                 errorType: 'PreviewStageError',
                 ...telemetry,
             }))

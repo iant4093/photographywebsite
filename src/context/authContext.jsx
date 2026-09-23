@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clearApiCache } from '../utils/api'
 import { clearCatalogSnapshots } from '../utils/catalogState'
 import { AuthContext } from './auth'
+import { persistentStorage, tabStorage, rawStorage } from '../utils/browserStorage'
 
 const POOL_DATA = {
     UserPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID || '',
@@ -23,7 +24,7 @@ let loadedUserPool
 
 function cognitoStorageKeys(storage) {
     if (!storage) return []
-    return Object.keys(storage).filter((key) => key.startsWith(storagePrefix))
+    return storage.keys().filter((key) => key.startsWith(storagePrefix))
 }
 
 function clearCognitoCredentials(storage) {
@@ -32,13 +33,13 @@ function clearCognitoCredentials(storage) {
 
 function migrateTabSessionToPersistentStorage() {
     if (typeof window === 'undefined') return
-    const sessionKeys = cognitoStorageKeys(window.sessionStorage)
+    const sessionKeys = cognitoStorageKeys(tabStorage)
     sessionKeys.forEach((key) => {
-        if (window.localStorage.getItem(key) === null) {
-            window.localStorage.setItem(key, window.sessionStorage.getItem(key))
+        if (persistentStorage.getItem(key) === null) {
+            persistentStorage.setItem(key, tabStorage.getItem(key))
         }
     })
-    clearCognitoCredentials(window.sessionStorage)
+    clearCognitoCredentials(tabStorage)
 }
 
 function loadCognitoModule() {
@@ -52,7 +53,7 @@ async function getUserPool() {
     if (!isCognitoConfigured || typeof window === 'undefined') return null
     if (!userPoolPromise) {
         userPoolPromise = loadCognitoModule().then(({ CognitoUserPool }) => {
-            loadedUserPool = new CognitoUserPool({ ...POOL_DATA, Storage: window.localStorage })
+            loadedUserPool = new CognitoUserPool({ ...POOL_DATA, Storage: persistentStorage })
             return loadedUserPool
         })
     }
@@ -61,12 +62,12 @@ async function getUserPool() {
 
 function hasPersistentCredentials() {
     if (typeof window === 'undefined') return false
-    return cognitoStorageKeys(window.localStorage).length > 0
+    return cognitoStorageKeys(persistentStorage).length > 0
 }
 
 function hasRestorableCredentials() {
     if (typeof window === 'undefined') return false
-    return hasPersistentCredentials() || cognitoStorageKeys(window.sessionStorage).length > 0
+    return hasPersistentCredentials() || cognitoStorageKeys(tabStorage).length > 0
 }
 
 function decodeJwt(token) {
@@ -82,9 +83,9 @@ function decodeJwt(token) {
 
 function persistentIdentity() {
     if (typeof window === 'undefined') return ''
-    const username = window.localStorage.getItem(`${storagePrefix}.LastAuthUser`)
+    const username = persistentStorage.getItem(`${storagePrefix}.LastAuthUser`)
     if (!username) return ''
-    const token = window.localStorage.getItem(`${storagePrefix}.${username}.idToken`)
+    const token = persistentStorage.getItem(`${storagePrefix}.${username}.idToken`)
     if (!token) return ''
     const claims = decodeJwt(token)
     return JSON.stringify([username, claims.iss, claims.sub])
@@ -93,8 +94,7 @@ function persistentIdentity() {
 function publishSessionChange() {
     // Only a notification nonce is shared; credentials stay in Cognito storage.
     const nonce = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
-    window.localStorage.setItem(sessionChangeKey, nonce)
-    return nonce
+    try { persistentStorage.setItem(sessionChangeKey, nonce); return nonce } catch { return null }
 }
 
 
@@ -131,10 +131,10 @@ export function AuthProvider({ children }) {
     const [adminMfaStatus, setAdminMfaStatus] = useState('not-required')
     const sessionGeneration = useRef(0)
     const sessionIdentity = useRef('')
-    const sessionNonce = useRef(window.localStorage.getItem(sessionChangeKey))
+    const sessionNonce = useRef(persistentStorage.getItem(sessionChangeKey))
 
     const assertCurrentSession = useCallback((generation) => {
-        if (generation !== sessionGeneration.current || sessionNonce.current !== window.localStorage.getItem(sessionChangeKey)) {
+        if (generation !== sessionGeneration.current || sessionNonce.current !== persistentStorage.getItem(sessionChangeKey)) {
             throw new Error('Your session changed. Please try again.')
         }
     }, [])
@@ -161,14 +161,14 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         let active = true
-        migrateTabSessionToPersistentStorage()
+        try { migrateTabSessionToPersistentStorage() } catch { /* Public browsing does not require storage. */ }
         sessionIdentity.current = persistentIdentity()
-        sessionNonce.current = window.localStorage.getItem(sessionChangeKey)
+        sessionNonce.current = persistentStorage.getItem(sessionChangeKey)
 
         const restore = async (generation) => {
             const identity = sessionIdentity.current
             const current = () => active && generation === sessionGeneration.current
-                && identity === persistentIdentity() && sessionNonce.current === window.localStorage.getItem(sessionChangeKey)
+                && identity === persistentIdentity() && sessionNonce.current === persistentStorage.getItem(sessionChangeKey)
             try {
                 if (!isCognitoConfigured || !hasPersistentCredentials()) return
                 const pool = await getUserPool()
@@ -196,15 +196,15 @@ export function AuthProvider({ children }) {
         }
 
         const synchronize = (event) => {
-            if (event.storageArea !== window.localStorage) return
+            if (event.storageArea !== rawStorage('localStorage')) return
             if (event.key !== null && event.key !== sessionChangeKey && !event.key.startsWith(`${storagePrefix}.`)) return
             const nextIdentity = persistentIdentity()
-            const nextNonce = window.localStorage.getItem(sessionChangeKey)
+            const nextNonce = persistentStorage.getItem(sessionChangeKey)
             if (event.key !== null && nextIdentity === sessionIdentity.current && nextNonce === sessionNonce.current) return
             sessionIdentity.current = nextIdentity
             sessionNonce.current = nextNonce
             const generation = clearSessionState()
-            clearCognitoCredentials(window.sessionStorage)
+            clearCognitoCredentials(tabStorage)
             if (nextIdentity) {
                 setLoading(true)
                 void restore(generation)
@@ -259,8 +259,8 @@ export function AuthProvider({ children }) {
         const result = await completeMfaSetup(user, code, () => assertCurrentSession(generation))
         assertCurrentSession(generation)
         clearSessionState()
-        clearCognitoCredentials(window.localStorage)
-        clearCognitoCredentials(window.sessionStorage)
+        clearCognitoCredentials(persistentStorage)
+        clearCognitoCredentials(tabStorage)
         sessionIdentity.current = ''
         sessionNonce.current = publishSessionChange()
         return result
@@ -282,7 +282,7 @@ export function AuthProvider({ children }) {
         const cognitoUser = new cognito.CognitoUser({
             Username: email,
             Pool: pool,
-            Storage: window.localStorage,
+            Storage: persistentStorage,
         })
 
         clearApiCache({ sessionChanged: true })
@@ -335,8 +335,8 @@ export function AuthProvider({ children }) {
         const currentUser = user || loadedUserPool?.getCurrentUser()
         currentUser?.signOut()
         clearSessionState()
-        clearCognitoCredentials(window.localStorage)
-        clearCognitoCredentials(window.sessionStorage)
+        clearCognitoCredentials(persistentStorage)
+        clearCognitoCredentials(tabStorage)
         sessionIdentity.current = ''
         sessionNonce.current = publishSessionChange()
     }, [clearSessionState, user])

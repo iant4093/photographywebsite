@@ -707,7 +707,7 @@ class DeleteHandlerBranchTests(unittest.TestCase):
         )
         response, table = self._delete_images([RAW_KEY], record)
         self.assertEqual(response_body(response)["deletedObjectVersions"], 5)
-        self.assertEqual(table.update_item.call_args.kwargs["ExpressionAttributeValues"][":cover"], RAW_KEY_2)
+        self.assertEqual(table.update_item.call_args_list[0].kwargs["ExpressionAttributeValues"][":cover"], RAW_KEY_2)
 
     def test_delete_images_too_large_validation_and_unexpected(self):
         self.assertEqual(

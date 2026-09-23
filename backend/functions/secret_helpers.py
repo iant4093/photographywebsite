@@ -4,6 +4,7 @@ import json
 import os
 
 import boto3
+from aws_request_config import request_config
 
 
 _cache = {}
@@ -13,7 +14,7 @@ _client = None
 def _ssm_client():
     global _client
     if _client is None:
-        _client = boto3.client("ssm")
+        _client = boto3.client("ssm", config=request_config(attempts=1))
     return _client
 
 

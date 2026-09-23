@@ -186,11 +186,11 @@ class FeaturedApiTests(unittest.TestCase):
                 self.assertEqual(body["totalPhotos"], count)
                 self.assertEqual(len(body["images"]), count)
 
-    def test_pool_read_failure_uses_favorite_only_fallback(self):
+    def test_pool_read_failure_does_not_expand_database_work(self):
         with patch.object(api, "load_featured_references", side_effect=RuntimeError("offline")), patch.object(
             api, "_random_photo_albums", return_value=[album()]
         ):
-            self.assertEqual(response_body(self.request())["totalPhotos"], 12)
+            self.assertEqual(self.request()["statusCode"], 503)
 
     def test_invalid_queries_fail_before_reading(self):
         for params in ({"favorite": "true"}, {"category": "Hikes"}, {"mode": "all"},

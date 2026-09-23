@@ -72,7 +72,7 @@ def _audit(event, context, operation, outcome, reason_code, hero_type="photo"):
         context=context,
         actor_type=actor_type,
         auth_method=auth_method,
-        details={"heroType": hero_type},
+        details={"hero_type": hero_type},
     )
 
 

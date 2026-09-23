@@ -11,7 +11,7 @@ import { clearExploreClientState } from './exploreState'
 // remains available for local/staged rollback while the migration is canaried.
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const DEFAULT_TIMEOUT_MS = 15_000
-const MAX_AUTOMATIC_RETRY_DELAY_MS = 60_000
+export const MAX_AUTOMATIC_RETRY_DELAY_MS = 60_000
 const PUBLIC_CATALOG_TTL_MS = 5 * 60_000
 // Authenticated catalogs are cached only in this JavaScript process. The auth
 // provider clears the cache on sign-out, and API responses remain `no-store` so
@@ -72,10 +72,6 @@ function userMessageForStatus(status, fallback) {
 
 function combineSignals(...signals) {
     const activeSignals = signals.filter(Boolean)
-    if (activeSignals.length === 0) return undefined
-    if (activeSignals.length === 1) return activeSignals[0]
-    if (typeof AbortSignal.any === 'function') return AbortSignal.any(activeSignals)
-
     const controller = new AbortController()
     const abort = () => controller.abort()
     for (const signal of activeSignals) {
@@ -85,10 +81,13 @@ function combineSignals(...signals) {
         }
         signal.addEventListener('abort', abort, { once: true })
     }
-    return controller.signal
+    return {
+        signal: controller.signal,
+        dispose: () => activeSignals.forEach(signal => signal.removeEventListener('abort', abort)),
+    }
 }
 
-function wait(delayMs, signal) {
+export function wait(delayMs, signal) {
     return new Promise((resolve, reject) => {
         if (signal?.aborted) {
             reject(new DOMException('Request aborted', 'AbortError'))
@@ -108,7 +107,7 @@ function wait(delayMs, signal) {
     })
 }
 
-function responseRetryDelay(response, attempt, baseMs = 250, jitterMs = 150) {
+export function responseRetryDelay(response, attempt, baseMs = 250, jitterMs = 150) {
     const backoff = (response.status === 429 ? Math.max(baseMs, 1000) : baseMs) * (2 ** attempt)
     return Math.max(backoff, retryAfterMilliseconds(response.headers?.get('retry-after')))
         + Math.random() * jitterMs
@@ -140,7 +139,7 @@ export async function apiFetch(path, options = {}, config = {}) {
         const timeout = timeoutMs > 0
             ? window.setTimeout(() => timeoutController.abort(), timeoutMs)
             : null
-        const signal = combineSignals(options.signal, timeoutController.signal)
+        const { signal, dispose } = combineSignals(options.signal, timeoutController.signal)
 
         try {
             const hasBody = options.body !== undefined && options.body !== null
@@ -173,16 +172,15 @@ export async function apiFetch(path, options = {}, config = {}) {
                     retryAfterMs: retryAfterMilliseconds(response.headers.get('retry-after')),
                 })
             }
-            if (response.status === 204) return null
-            return response.json().then((payload) => {
-                if (options.headers?.Authorization && session !== authGeneration) {
-                    throw new DOMException('Session changed', 'AbortError')
-                }
-                return payload
-            })
+            // Keep cancellation and the deadline alive until the body finishes.
+            const payload = response.status === 204 ? null : await response.json()
+            if (options.headers?.Authorization && session !== authGeneration) {
+                throw new DOMException('Session changed', 'AbortError')
+            }
+            return payload
         } catch (error) {
             if (error?.name === 'AbortError') {
-                if (options.signal?.aborted) throw error
+                if (options.signal?.aborted || (options.headers?.Authorization && session !== authGeneration)) throw error
                 throw new ApiError('The request timed out. Please check your connection and try again.', {
                     code: 'TIMEOUT',
                 })
@@ -197,6 +195,7 @@ export async function apiFetch(path, options = {}, config = {}) {
                 code: 'NETWORK_ERROR',
             })
         } finally {
+            dispose()
             if (timeout !== null) window.clearTimeout(timeout)
         }
     }
@@ -546,13 +545,18 @@ export function fetchAlbumMediaPage(token, albumId, params = {}, options = {}) {
             headers: authHeaders(token),
             signal: options.signal,
         },
-    ).then((payload) => ({
-        album: payload?.album || null,
-        items: Array.isArray(payload?.items)
-            ? payload.items.map(annotateMediaExpiry)
-            : [],
-        nextCursor: isSafeCursor(payload?.nextCursor) ? payload.nextCursor : null,
-    }))
+    ).then(async (payload) => {
+        if (!params.cursor && payload?.pendingDeletionKeys?.length) {
+            await (await import('./deletionRecovery')).recoverDeletion(token, albumId, payload.pendingDeletionKeys, options)
+        }
+        return {
+            album: payload?.album || null,
+            items: Array.isArray(payload?.items)
+                ? payload.items.map(annotateMediaExpiry)
+                : [],
+            nextCursor: isSafeCursor(payload?.nextCursor) ? payload.nextCursor : null,
+        }
+    })
 }
 
 export function prefetchPublicAlbum(albumId) {
@@ -692,52 +696,8 @@ export function completeHeroUpload(token, etag, options = {}) {
     })
 }
 
-export async function uploadFileToS3(presignedUrl, file, requiredHeaders = {}, options = {}) {
-    const uploadHeaders = Object.keys(requiredHeaders).length > 0
-        ? requiredHeaders
-        : { 'Content-Type': file.type }
-    const retries = Math.max(0, Math.min(options.retries ?? 1, 2))
-
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-        let response
-        try {
-            // Visitors never need the XHR progress transport. Load it only
-            // when an upload actually requests progress reporting.
-            response = options.onProgress
-                ? await (await import('./uploadTransport')).uploadWithProgress(presignedUrl, file, uploadHeaders, options)
-                : await fetch(presignedUrl, {
-                    method: 'PUT',
-                    headers: uploadHeaders,
-                    body: file,
-                    signal: options.signal,
-                })
-        } catch (error) {
-            if (error?.name === 'AbortError') throw error
-            if (attempt < retries) {
-                await wait(400 * (2 ** attempt) + Math.random() * 200, options.signal)
-                continue
-            }
-            throw new ApiError('The upload was interrupted. Please try again.', { code: 'UPLOAD_NETWORK_ERROR' })
-        }
-
-        const retryable = [408, 425, 429, 500, 502, 503, 504].includes(response.status)
-        if (retryable && attempt < retries) {
-            const delay = responseRetryDelay(response, attempt, 400, 200)
-            if (delay <= MAX_AUTOMATIC_RETRY_DELAY_MS) {
-                await response.text().catch(() => '')
-                await wait(delay, options.signal)
-                continue
-            }
-        }
-        if (!response.ok) throw new ApiError('The upload could not be completed. Please try again.', {
-            status: response.status,
-            code: 'UPLOAD_FAILED',
-        })
-        options.onProgress?.({ loaded: file.size, total: file.size })
-        return response
-    }
-
-    throw new ApiError('The upload could not be completed. Please try again.', { code: 'UPLOAD_FAILED' })
+export async function uploadFileToS3(...args) {
+    return (await import('./uploadTransport')).uploadFileToS3(...args)
 }
 
 export async function createAlbum(token, albumData, options = {}) {

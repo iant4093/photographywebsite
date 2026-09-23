@@ -193,7 +193,7 @@ describe('pollZipJob', () => {
             .rejects.toMatchObject({ name: 'AbortError' })
     })
 
-    it('bounds server retry hints and falls back to the final configured interval', async () => {
+    it('honors server retry hints and falls back to the final configured interval', async () => {
         const request = vi.fn()
             .mockResolvedValueOnce({ status: 'processing', retryAfterSeconds: 1 })
             .mockResolvedValueOnce({ status: 'processing', retryAfterSeconds: 100 })
@@ -202,7 +202,7 @@ describe('pollZipJob', () => {
             .mockResolvedValueOnce({ status: 'ready', url: 'ready' })
         const sleep = vi.fn().mockResolvedValue()
         await pollZipJob({ jobKey: 'bounds', request, storage: memoryStorage(), sleep, intervals: [7, 9] })
-        expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([1_000, 60_000, 9, 9])
+        expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([1_000, 100_000, 9, 9])
     })
 
     it('uses the default abortable browser sleep and tolerates broken storage', async () => {

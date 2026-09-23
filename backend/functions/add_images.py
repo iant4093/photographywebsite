@@ -59,6 +59,8 @@ def handler(event, context):
         if not album or album.get("status", "active") != "active":
             _audit(event, context, "denied", "album_not_found")
             return error_response(404, "Album not found", code="not_found")
+        if album.get("pendingMediaDeletion"):
+            return error_response(409, "Media deletion is still being completed. Please retry shortly.", code="deletion_pending")
         album_type = album.get("type", "photo")
         images = _normalize_images(body.get("images"), album_id, album_type, album=album)
 
@@ -89,7 +91,7 @@ def handler(event, context):
                     "SET images = list_append(if_not_exists(images, :empty), :images), "
                     "imageCount = if_not_exists(imageCount, :existing_count) + :added"
                 ),
-                ConditionExpression="attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) AND (attribute_not_exists(images) OR images = :previous_images)",
+                ConditionExpression="attribute_exists(albumId) AND attribute_not_exists(pendingMediaDeletion) AND (attribute_not_exists(#status) OR #status = :active) AND (attribute_not_exists(images) OR images = :previous_images)",
                 ExpressionAttributeNames={"#status": "status"},
                 ExpressionAttributeValues={
                     ":empty": [],

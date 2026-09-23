@@ -435,7 +435,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
         def serialize(album, **_kwargs):
             return [{"mediaId": album["images"][0]["rawKey"], "url": "https://media.example.test/photo.jpg"}]
 
-        with patch.object(get_public_album, "_random_photo_albums", return_value=albums), patch.object(
+        with patch.object(get_public_album, "load_pool_references", return_value=None), patch.object(get_public_album, "_preview_table"), patch.object(get_public_album, "_random_photo_albums", return_value=albums), patch.object(
             get_public_album, "serialize_images", side_effect=serialize
         ), patch.object(
             get_public_album,
@@ -588,7 +588,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
 
     def test_random_photos_can_be_scoped_to_one_category(self):
         album = public_album(category="Birding")
-        with patch.object(
+        with patch.object(get_public_album, "load_pool_references", return_value=None), patch.object(get_public_album, "_preview_table"), patch.object(
             get_public_album, "_random_photo_albums", return_value=[album]
         ) as load_albums, patch.object(
             get_public_album,

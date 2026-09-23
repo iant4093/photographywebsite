@@ -188,6 +188,8 @@ def handler(event, context):
         if not album or album.get("status", "active") != "active":
             _audit(event, context, "denied", "album_not_found")
             return error_response(404, "Album not found", code="not_found")
+        if album.get("pendingMediaDeletion"):
+            return error_response(409, "Media deletion is still being completed. Please retry shortly.", code="deletion_pending")
         updated = _updated_album(album, body)
         _reconcile_album_qr(updated)
         old_visibility = album.get("visibility")
@@ -247,7 +249,7 @@ def handler(event, context):
                 updated.pop(field, None)
 
         condition = (
-            "attribute_exists(albumId) AND (attribute_not_exists(#status) OR #status = :active) "
+            "attribute_exists(albumId) AND attribute_not_exists(pendingMediaDeletion) AND (attribute_not_exists(#status) OR #status = :active) "
             "AND #visibility = :previous_visibility"
         )
         expression_names = {"#status": "status", "#visibility": "visibility"}
@@ -255,6 +257,9 @@ def handler(event, context):
             ":active": "active",
             ":previous_visibility": old_visibility,
         }
+        if {"coverImageUrl", "coverThumbKey", "coverBlurhash"}.intersection(changed_fields):
+            condition += " AND (attribute_not_exists(images) OR images = :previous_images)"
+            expression_values[":previous_images"] = album.get("images", [])
         assignments = []
         removals = []
         mutation_fields = set(changed_fields)

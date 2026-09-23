@@ -1,3 +1,4 @@
+import { persistentStorage } from '../utils/browserStorage'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -128,7 +129,7 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out'))
     expect(localStorage.getItem(clientStorageKey)).toBe('open-tab-session')
     expect(sessionStorage.getItem(clientStorageKey)).toBeNull()
-    expect(cognito.pools.at(-1).options.Storage).toBe(localStorage)
+    expect(cognito.pools.at(-1).options.Storage).toBe(persistentStorage)
   })
 
   it('restores a valid browser session and ignores invalid/unavailable users', async () => {
@@ -187,7 +188,7 @@ describe('AuthProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'login' }))
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('viewer@example.com|viewer|signed'))
     expect(cognito.users.at(-1).setSignInUserSession).toHaveBeenCalled()
-    expect(cognito.users.at(-1).options.Storage).toBe(localStorage)
+    expect(cognito.users.at(-1).options.Storage).toBe(persistentStorage)
     fireEvent.click(screen.getByRole('button', { name: 'login' }))
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|signed'))
   })

@@ -17,6 +17,7 @@ import { prefetchPhoto } from '../utils/photoPrefetch'
 const PHOTO_CROSSFADE_MS = 360
 const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
 const ORIGINAL_REFRESH_SLOW_INTERVAL_MS = 60_000
+const ORIGINAL_REFRESH_LIFETIME_MS = 15 * 60_000
 
 function freshComparison(id) {
     return { id, requested: false, returningToEdit: false, attempt: 0, loadedKey: null, failedKey: null }
@@ -66,9 +67,9 @@ function runOriginalRefresh(requestRef, callback, event, image, isCurrent, conte
         return promise
     }
     let result
-    try { result = callback(event, image, context) } catch { /* Keep the edit available. */ }
+    try { result = callback(event, image, context) } catch (error) { result = { retryAfterMs: error?.retryAfterMs } }
     const request = { key, promise: null, queued: null }
-    request.promise = Promise.resolve(result).catch(() => {}).finally(() => {
+    request.promise = Promise.resolve(result).catch(error => ({ retryAfterMs: error?.retryAfterMs })).finally(() => {
         if (requestRef.current !== request) return
         requestRef.current = null
         const queued = request.queued
@@ -208,18 +209,23 @@ function PhotoLightbox({
         let inFlight = false
         let attempts = 0
         let timer = null
+        const deadline = Date.now() + ORIGINAL_REFRESH_LIFETIME_MS
+        let notBefore = 0
         const schedule = () => {
             if (cancelled || inFlight || document.visibilityState === 'hidden') return
-            timer = window.setTimeout(poll, attempts < 3 ? ORIGINAL_REFRESH_INTERVAL_MS : ORIGINAL_REFRESH_SLOW_INTERVAL_MS)
+            const delay = Math.max(notBefore - Date.now(), attempts < 3 ? ORIGINAL_REFRESH_INTERVAL_MS : ORIGINAL_REFRESH_SLOW_INTERVAL_MS)
+            if (Date.now() + delay >= deadline) return
+            timer = window.setTimeout(poll, delay)
         }
         const poll = async () => {
             timer = null
-            if (cancelled || document.visibilityState === 'hidden') return
+            if (cancelled || document.visibilityState === 'hidden' || Date.now() >= deadline) return
             inFlight = true
             attempts += 1
             try {
                 const { callback, image } = originalRefreshRef.current
-                await runOriginalRefresh(originalRequestRef, callback, undefined, image, () => !cancelled && document.visibilityState !== 'hidden')
+                const result = await runOriginalRefresh(originalRequestRef, callback, undefined, image, () => !cancelled && document.visibilityState !== 'hidden')
+                if (Number.isFinite(result?.retryAfterMs)) notBefore = Date.now() + Math.max(0, result.retryAfterMs)
             } catch { /* Leave the selected edit available; the next check is bounded. */ }
             inFlight = false
             schedule()

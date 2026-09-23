@@ -238,7 +238,8 @@ class SecretHelperBranchTests(unittest.TestCase):
         with patch.object(secret_helpers.boto3, "client", return_value=fake) as factory:
             self.assertIs(secret_helpers._ssm_client(), fake)
             self.assertIs(secret_helpers._ssm_client(), fake)
-        factory.assert_called_once_with("ssm")
+        self.assertEqual(factory.call_args.args, ("ssm",))
+        self.assertEqual(factory.call_args.kwargs["config"].retries["total_max_attempts"], 1)
 
     def test_raw_json_and_empty_secret_paths(self):
         fake = Mock()
@@ -289,7 +290,8 @@ class SecurityHelperBranchTests(unittest.TestCase):
         ) as factory:
             self.assertIs(security_helpers._get_rate_table(), table)
             self.assertIs(security_helpers._get_rate_table(), table)
-        factory.assert_called_once_with("dynamodb")
+        self.assertEqual(factory.call_args.args, ("dynamodb",))
+        self.assertEqual(factory.call_args.kwargs["config"].read_timeout, 3)
 
     def test_rate_limit_input_and_provider_error_paths(self):
         for args in ((None, 1, 1), ("x" * 65, 1, 1), ("ok", "x", 1), ("ok", 1, 0)):

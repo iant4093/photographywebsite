@@ -388,6 +388,7 @@ describe('public API client behavior', () => {
       .mockResolvedValueOnce(new Response('', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     const request = api.uploadFileToS3('https://upload.test', file, {}, { retries: 2 })
+    await vi.dynamicImportSettled()
     await vi.advanceTimersByTimeAsync(400)
     await vi.advanceTimersByTimeAsync(800)
     await expect(request).resolves.toBeInstanceOf(Response)

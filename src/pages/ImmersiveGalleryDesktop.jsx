@@ -1,3 +1,4 @@
+import { persistentStorage, tabStorage } from '../utils/browserStorage'
 /* eslint-disable react-hooks/immutability -- Three.js cameras are intentionally mutable scene objects. */
 import { addAfterEffect, Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
 import { decode as decodeBlurhash } from 'blurhash'
@@ -818,7 +819,7 @@ function preferredMuseumInspectionCoverWidth(touchMode = usesTouchControls()) {
 
 function safeSessionPosition(layout) {
     try {
-        const value = JSON.parse(sessionStorage.getItem(SESSION_KEY))
+        const value = JSON.parse(tabStorage.getItem(SESSION_KEY))
         if (
             Number.isFinite(value?.x)
             && Number.isFinite(value?.z)
@@ -4500,8 +4501,8 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
     }, [])
 
     useEffect(() => {
-        const returningFromAlbum = sessionStorage.getItem(RETURN_KEY) === 'true'
-        sessionStorage.removeItem(RETURN_KEY)
+        const returningFromAlbum = tabStorage.getItem(RETURN_KEY) === 'true'
+        tabStorage.removeItem(RETURN_KEY)
         const restored = returningFromAlbum
             ? safeSessionPosition(layout)
             : { x: layout.spawn[0], z: layout.spawn[2] }
@@ -4788,7 +4789,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         }
         if (state.clock.elapsedTime - lastSavedAt.current > 0.8) {
             lastSavedAt.current = state.clock.elapsedTime
-            sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+            tabStorage.setItem(SESSION_KEY, JSON.stringify({
                 x: camera.position.x,
                 z: camera.position.z,
             }))
@@ -4920,7 +4921,7 @@ function SceneWarmup({ layout, initialRoomIds, onReady, onProgress, onRendererSt
             .filter(Boolean)
         const initialRooms = (nearbyInitialRooms.length ? nearbyInitialRooms : layout.rooms)
             .slice(0, 2)
-        const entry = sessionStorage.getItem(RETURN_KEY) === 'true'
+        const entry = tabStorage.getItem(RETURN_KEY) === 'true'
             ? safeSessionPosition(layout)
             : { x: camera.position.x, z: camera.position.z }
         const warmAlbums = [...new Map(
@@ -5662,11 +5663,11 @@ export default function ImmersiveGalleryDesktop() {
         devicePixelRatio: window.devicePixelRatio,
         deviceMemory: navigator.deviceMemory,
     }).initialDpr)
-    const [preferences, setPreferences] = useState(() => readMuseumPreferences(localStorage, PREFERENCES_KEY))
+    const [preferences, setPreferences] = useState(() => readMuseumPreferences(persistentStorage, PREFERENCES_KEY))
     const reducedMotion = useReducedMotionPreference()
     const [motionOverride, setMotionOverride] = useState(() => {
         try {
-            return localStorage.getItem(MOTION_OVERRIDE_KEY) === 'true'
+            return persistentStorage.getItem(MOTION_OVERRIDE_KEY) === 'true'
         } catch {
             return false
         }
@@ -5695,7 +5696,7 @@ export default function ImmersiveGalleryDesktop() {
     const handleUnlock = useCallback(() => setLocked(false), [setLocked])
 
     useEffect(() => {
-        persistMuseumPreferences(localStorage, PREFERENCES_KEY, preferences)
+        persistMuseumPreferences(persistentStorage, PREFERENCES_KEY, preferences)
     }, [preferences])
 
     useEffect(() => {
@@ -5711,7 +5712,7 @@ export default function ImmersiveGalleryDesktop() {
             // last saved position when the Canvas is rebuilt after a driver
             // reset. Without it, recovery teleported the camera to the lobby
             // while room residency still described the old location.
-            sessionStorage.setItem(RETURN_KEY, 'true')
+            tabStorage.setItem(RETURN_KEY, 'true')
             pauseGallery()
             setSceneReady(false)
             setSceneVeilVisible(true)
@@ -5776,7 +5777,7 @@ export default function ImmersiveGalleryDesktop() {
     const initialActiveRoomIds = useMemo(
         () => initialMuseumRoomIds(
             layout,
-            sessionStorage.getItem(RETURN_KEY) === 'true'
+            tabStorage.getItem(RETURN_KEY) === 'true'
                 ? safeSessionPosition(layout)
                 : { x: layout.spawn[0], z: layout.spawn[2] },
             touchMode ? 15 : 20,
@@ -5811,7 +5812,7 @@ export default function ImmersiveGalleryDesktop() {
             const override = Number(value) > 0
             setMotionOverride(override)
             try {
-                localStorage.setItem(MOTION_OVERRIDE_KEY, override ? 'true' : 'false')
+                persistentStorage.setItem(MOTION_OVERRIDE_KEY, override ? 'true' : 'false')
             } catch {
                 // Storage can be denied in private browsing; the live setting
                 // still applies for this gallery session.

@@ -16,6 +16,7 @@ import threading
 import time
 
 import boto3
+from aws_request_config import request_config
 
 
 logger = logging.getLogger("photography_api.front_door")
@@ -47,7 +48,7 @@ def _cache_ttl_seconds():
 def _client():
     global _ssm_client
     if _ssm_client is None:
-        _ssm_client = boto3.client("ssm")
+        _ssm_client = boto3.client("ssm", config=request_config(attempts=1))
     return _ssm_client
 
 

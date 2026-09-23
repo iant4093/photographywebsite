@@ -131,7 +131,7 @@ class MediaRevocationTests(unittest.TestCase):
         response = self.delete(delete_images)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response_body(response)["deletedCount"], 1)
-        self.assertEqual(self.order, ["delete", "delete", "purge", "commit"])
+        self.assertEqual(self.order, ["commit", "delete", "delete", "purge", "commit"])
         self.assert_purge_paths()
 
     def test_failed_album_deletion_purge_preserves_record_for_retry(self):
@@ -147,8 +147,10 @@ class MediaRevocationTests(unittest.TestCase):
             {"Error": {"Code": "AccessDenied"}}, "CreateInvalidation"
         )
         self.assertEqual(self.delete(delete_images)["statusCode"], 500)
-        self.table.update_item.assert_not_called()
-        self.assertNotIn("commit", self.order)
+        self.table.update_item.assert_called_once()
+        values = self.table.update_item.call_args.kwargs["ExpressionAttributeValues"]
+        self.assertEqual(values[":images"], [])
+        self.assertEqual(values[":pending"]["requested"], [RAW_KEY])
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
+from aws_request_config import request_config
 from boto3.dynamodb.conditions import Attr, Key
 
 from cursor_helpers import decode_cursor, encode_cursor
@@ -55,10 +56,10 @@ from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, require_string, validate_uuid
 
 
-dynamodb = boto3.resource("dynamodb")
-dynamodb_client = boto3.client("dynamodb")
+dynamodb = boto3.resource("dynamodb", config=request_config())
+dynamodb_client = boto3.client("dynamodb", config=request_config())
 table = dynamodb.Table(os.environ["ALBUMS_TABLE"])
-s3 = boto3.client("s3")
+s3 = boto3.client("s3", config=request_config())
 
 logger = logging.getLogger("photography_api.public_album")
 SITE_ORIGIN = "https://iantruongphotography.com"
@@ -85,6 +86,14 @@ _DESCRIPTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 RANDOM_PHOTO_LIMIT = 80
+FALLBACK_MAX_PAGES = 8
+FALLBACK_PAGE_SIZE = 50
+FALLBACK_SECONDS = 5
+
+
+class PhotoFeedUnavailable(Exception):
+    """Do not amplify a provider outage or return a misleading partial feed."""
+
 EXPLORE_VERSION = 2
 EXPLORE_DEFAULT_LIMIT = 24
 EXPLORE_MAX_LIMIT = 48
@@ -1153,6 +1162,8 @@ def _explore_response(event):
 
 
 def _legacy_images(album):
+    if album.get("pendingMediaDeletion"):
+        return []
     images = []
     seen = set()
     remaining = 1000
@@ -1189,7 +1200,10 @@ def _legacy_images(album):
 def _random_photo_albums(category=None):
     albums = []
     cursor = None
-    while True:
+    started = time.monotonic()
+    for _page in range(FALLBACK_MAX_PAGES):
+        if time.monotonic() - started >= FALLBACK_SECONDS:
+            raise PhotoFeedUnavailable()
         filter_expression = (
             (Attr("status").not_exists() | Attr("status").eq("active"))
             & (Attr("type").not_exists() | Attr("type").eq("photo"))
@@ -1197,6 +1211,7 @@ def _random_photo_albums(category=None):
         if category:
             filter_expression = filter_expression & Attr("category").eq(category)
         query = {
+            "Limit": FALLBACK_PAGE_SIZE,
             "IndexName": os.environ["VISIBILITY_CREATED_AT_INDEX"],
             "KeyConditionExpression": Key("visibility").eq("public"),
             "FilterExpression": filter_expression,
@@ -1209,6 +1224,7 @@ def _random_photo_albums(category=None):
         cursor = response.get("LastEvaluatedKey")
         if not cursor:
             return albums
+    raise PhotoFeedUnavailable()
 
 
 def _random_photo_category(event):
@@ -1227,7 +1243,15 @@ def _random_photo_category(event):
 def _scan_random_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
     sample = []
     total_photos = 0
+    started = time.monotonic()
+    legacy_reads = 0
     for album in _random_photo_albums(category):
+        if time.monotonic() - started >= FALLBACK_SECONDS or total_photos >= 10000:
+            raise PhotoFeedUnavailable()
+        if not album.get("images"):
+            legacy_reads += 1
+            if legacy_reads > 4:
+                raise PhotoFeedUnavailable()
         media = album.get("images") or _legacy_images(album)
         for image in media:
             if not isinstance(image, dict) or not isinstance(image.get("rawKey"), str):
@@ -1252,7 +1276,7 @@ def _materialized_random_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
             "random_photo_pool_read_failed error_type=%s",
             type(error).__name__,
         )
-        return None
+        raise PhotoFeedUnavailable() from error
     if pool is None:
         return None
 
@@ -1354,9 +1378,12 @@ def _random_photos_response(event):
 def _scan_featured_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
     sample = []
     total_photos = 0
+    started = time.monotonic()
     # Apply the same normalized category semantics as the materialized decks,
     # including albums without a category in the Uncategorized section.
     for album in _random_photo_albums():
+        if time.monotonic() - started >= FALLBACK_SECONDS or total_photos >= 10000:
+            raise PhotoFeedUnavailable()
         if not _active_public_photo_album(album):
             continue
         if category and normalized_category(album.get("category")) != normalized_category(category):
@@ -1382,7 +1409,7 @@ def _materialized_featured_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
             "featured_photo_pool_read_failed error_type=%s",
             type(error).__name__,
         )
-        return None
+        raise PhotoFeedUnavailable() from error
     if pool is None:
         return None
 
@@ -1707,6 +1734,8 @@ def handler(event, context):
     if route_key == "GET /public/featured-photos" or raw_path.endswith("/public/featured-photos"):
         try:
             return _featured_photos_response(event)
+        except PhotoFeedUnavailable:
+            return error_response(503, "Photos are temporarily unavailable. Please try again shortly.", code="feed_unavailable")
         except ValidationError as error:
             return error_response(400, str(error), code="invalid_request")
         except Exception as error:
@@ -1714,6 +1743,8 @@ def handler(event, context):
     if route_key == "GET /public/random-photos" or raw_path.endswith("/public/random-photos"):
         try:
             return _random_photos_response(event)
+        except PhotoFeedUnavailable:
+            return error_response(503, "Photos are temporarily unavailable. Please try again shortly.", code="feed_unavailable")
         except ValidationError as error:
             return error_response(400, str(error), code="invalid_request")
         except Exception as error:

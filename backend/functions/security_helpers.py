@@ -12,6 +12,7 @@ from collections import OrderedDict
 from threading import Lock
 
 import boto3
+from aws_request_config import request_config
 from botocore.exceptions import ClientError
 
 from secret_helpers import resolve_secret
@@ -57,7 +58,7 @@ def _get_rate_table():
         table_name = os.environ.get("RATE_LIMIT_TABLE", "").strip()
         if not table_name:
             raise RuntimeError("Rate-limit table is not configured")
-        _rate_table = boto3.resource("dynamodb").Table(table_name)
+        _rate_table = boto3.resource("dynamodb", config=request_config()).Table(table_name)
     return _rate_table
 
 

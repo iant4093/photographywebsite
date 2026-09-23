@@ -52,12 +52,14 @@ _DETAIL_TYPES = {
     "visibility": str,
     "previous_visibility": str,
     "zip_state": str,
+    "hero_type": str,
 }
 _DETAIL_ENUMS = {
     "challenge_type": frozenset({"new_password_required", "software_token_mfa", "other"}),
     "visibility": frozenset({"public", "private", "unlisted", "unknown"}),
     "previous_visibility": frozenset({"public", "private", "unlisted", "unknown"}),
-    "zip_state": frozenset({"ready", "processing"}),
+    "zip_state": frozenset({"ready", "processing", "failed"}),
+    "hero_type": frozenset({"photo", "video"}),
 }
 _FORBIDDEN_FRAGMENTS = (
     "authorization",

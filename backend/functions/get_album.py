@@ -33,6 +33,8 @@ def _audit(event, context, outcome, reason_code, *, actor_type=None, auth_method
 
 
 def _legacy_images(album):
+    if album.get("pendingMediaDeletion"):
+        return []
     images = []
     paginator = s3.get_paginator("list_objects_v2")
     remaining = 1000

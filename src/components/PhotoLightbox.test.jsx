@@ -814,6 +814,28 @@ describe('PhotoLightbox', () => {
     await act(async () => {})
   })
 
+  it('honors original-refresh cooldowns and stops a permanently pending comparison', async () => {
+    vi.useFakeTimers()
+    try {
+      const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce({ retryAfterMs: 300_000 })
+      const { unmount } = render(<PhotoLightbox images={[landscape]} index={0} ariaLabel="Viewer" onClose={vi.fn()} onBeforeRefresh={onBeforeRefresh} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+      await act(async () => { await vi.advanceTimersByTimeAsync(299_999) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(3)
+      await act(async () => { await vi.advanceTimersByTimeAsync(20 * 60_000) })
+      const calls = onBeforeRefresh.mock.calls.length
+      await act(async () => { await vi.advanceTimersByTimeAsync(60 * 60_000) })
+      expect(onBeforeRefresh).toHaveBeenCalledTimes(calls)
+      unmount()
+    } finally { vi.useRealTimers() }
+  })
+
   it('polls a selected pending original at a bounded rate and stops once its descriptor is ready', async () => {
     vi.useFakeTimers()
     try {

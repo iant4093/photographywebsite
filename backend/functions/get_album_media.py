@@ -35,6 +35,10 @@ def handler(event, context):
 
         if album.get("mediaStoreVersion") == MEDIA_STORE_VERSION:
             items, next_key = query_album_media(album_id, limit, cursor)
+            pending = album.get("pendingMediaDeletion") or {}
+            removed = set(pending.get("requested", []))
+            if removed:
+                items = [item for item in items if (item.get("rawKey") or item.get("key")) not in removed]
         else:
             images = album.get("images", []) if isinstance(album.get("images"), list) else []
             offset = int((cursor or {}).get("offset", "0"))
@@ -54,6 +58,8 @@ def handler(event, context):
                 "album": album_detail,
                 "items": serialize_images(media_album, include_internal=True),
                 "nextCursor": encode_cursor(next_key, scope),
+                **({"pendingDeletionKeys": album["pendingMediaDeletion"]["requested"]}
+                   if album.get("pendingMediaDeletion") else {}),
             },
             cache_control="private, no-store",
         )

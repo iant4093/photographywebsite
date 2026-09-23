@@ -59,6 +59,8 @@ def handler(event, context):
         if not album:
             _audit(event, context, "denied", "album_not_found")
             return error_response(404, "Album not found", code="not_found")
+        if album.get("pendingMediaDeletion"):
+            return error_response(409, "Media deletion is still being completed. Please retry shortly.", code="deletion_pending")
         raw_key = validate_album_media_key(raw_key, album=album)
         images = album.get("images", []) if isinstance(album.get("images", []), list) else []
         target_index = next(
@@ -137,7 +139,7 @@ def handler(event, context):
             UpdateExpression="SET " + ", ".join(update_parts),
             # Refuse to attach descriptions/captions to a different image if
             # another administrator removed or reordered the manifest meanwhile.
-            ConditionExpression=f"attribute_exists(albumId) AND images[{target_index}].#expectedMediaKey = :expectedKey",
+            ConditionExpression=f"attribute_exists(albumId) AND attribute_not_exists(pendingMediaDeletion) AND images[{target_index}].#expectedMediaKey = :expectedKey",
             ExpressionAttributeNames={"#expectedMediaKey": "rawKey" if images[target_index].get("rawKey") else "key"},
             ExpressionAttributeValues={**values, ":expectedKey": raw_key},
         )

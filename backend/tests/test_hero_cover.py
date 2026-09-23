@@ -90,7 +90,7 @@ class HeroUploadValidationTests(unittest.TestCase):
         self.assertNotIn("camera-original", json.dumps(params))
         self.assertEqual(audit.call_args.kwargs["event_name"], "admin.hero_upload_authorized")
         self.assertEqual(audit.call_args.kwargs["outcome"], "success")
-        self.assertEqual(audit.call_args.kwargs["details"], {"heroType": "photo"})
+        self.assertEqual(audit.call_args.kwargs["details"], {"hero_type": "photo"})
 
     def test_video_upload_authorization_uses_the_isolated_video_pending_key(self):
         request = event("upload-url", {

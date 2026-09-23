@@ -84,7 +84,7 @@ function responseDelay(response, attempt, intervals) {
     const backoff = intervals[Math.min(attempt, intervals.length - 1)]
     const suggestedSeconds = Number(response?.retryAfterSeconds)
     if (Number.isFinite(suggestedSeconds) && suggestedSeconds > 0) {
-        return Math.min(Math.max(suggestedSeconds * 1000, 1_000, backoff), 60_000)
+        return Math.max(suggestedSeconds * 1000, 1_000, backoff)
     }
     return backoff
 }
@@ -115,9 +115,9 @@ export async function pollZipJob({
         } catch (error) {
             if (error?.name === 'AbortError') throw error
             if (error?.status === 429) {
-                const delay = Math.min(Math.max(error.retryAfterMs || 30_000, 10_000), 60_000)
+                const delay = Math.max(Number.isFinite(error.retryAfterMs) ? error.retryAfterMs : 30_000, 10_000)
                 onStatus('rate_limited')
-                await sleep(delay, signal)
+                await sleep(Math.min(delay, Math.max(0, startedAt + maxDurationMs - now())), signal)
                 continue
             }
             forget(selectedStorage, storageKey)
@@ -144,7 +144,7 @@ export async function pollZipJob({
 
         remember(selectedStorage, storageKey, startedAt, 'processing')
         onStatus('processing')
-        await sleep(responseDelay(response, attempt, intervals), signal)
+        await sleep(Math.min(responseDelay(response, attempt, intervals), Math.max(0, startedAt + maxDurationMs - now())), signal)
         attempt += 1
     }
 

@@ -2,17 +2,19 @@ export const THEME_STORAGE_KEY = 'ian-photography-theme'
 
 export const normalizeTheme = (value) => (value === 'dark' ? 'dark' : 'light')
 
-export function readStoredTheme(storage = typeof window !== 'undefined' ? window.localStorage : null) {
+export function readStoredTheme(storage) {
   try {
+    storage ??= typeof window !== 'undefined' ? window.localStorage : null
     return normalizeTheme(storage?.getItem(THEME_STORAGE_KEY))
   } catch {
     return 'light'
   }
 }
 
-export function storeTheme(theme, storage = typeof window !== 'undefined' ? window.localStorage : null) {
+export function storeTheme(theme, storage) {
   const normalized = normalizeTheme(theme)
   try {
+    storage ??= typeof window !== 'undefined' ? window.localStorage : null
     storage?.setItem(THEME_STORAGE_KEY, normalized)
   } catch {
     // The theme still works for this session when storage is unavailable.

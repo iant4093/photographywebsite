@@ -3,6 +3,7 @@
 import os
 
 import boto3
+from aws_request_config import request_config
 
 from audit_helpers import emit_audit_event
 from response_helpers import error_response, internal_error, json_response
@@ -10,7 +11,7 @@ from security_helpers import check_rate_limit, is_rate_limit_denied, verify_turn
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_email
 
 
-cognito = boto3.client("cognito-idp")
+cognito = boto3.client("cognito-idp", config=request_config(attempts=1))
 USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 CLIENT_ID = os.environ["COGNITO_CLIENT_ID"]
 
