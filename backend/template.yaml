@@ -2210,6 +2210,7 @@ Resources:
       ReservedConcurrentExecutions: 20
       Environment:
         Variables:
+          FRONTEND_URL: !Ref FrontendUrl
           ALBUMS_TABLE: !Ref AlbumsTable
           GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
           IMAGES_BUCKET: !Ref ImagesBucket

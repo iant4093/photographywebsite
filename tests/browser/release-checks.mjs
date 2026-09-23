@@ -154,10 +154,58 @@ try {
                 }
             }))
             assert.deepEqual(saved,{name:'b.png',bound:true,exposure:0})
+            await a.getByRole('button',{name:'Close photo',exact:true}).click()
+            await a.getByText('No saved session',{exact:true}).waitFor()
+            await b.reload()
+            await b.getByText('Recovered locally',{exact:true}).waitFor()
+            assert.equal(await b.getByText('b',{exact:true}).count(),1)
+            assert.equal(await b.getByRole('spinbutton',{name:'Exposure value',exact:true}).inputValue(),'0')
             assert.deepEqual(errors,[])
             outcomes.push({width,check:'real two-tab editor recovery binding',passed:true})
             await context.close()
         }
+    }
+    for (const viewport of [{width:640,height:360},{width:360,height:320},{width:320,height:256},{width:640,height:360,textScale:2}]) {
+        const context=await contextFor(viewport.width,true), page=await context.newPage()
+        await page.setViewportSize({width:viewport.width,height:viewport.height})
+        await page.goto(origin+'/admin/users/delete')
+        if (viewport.textScale) await page.evaluate(scale=>{document.documentElement.style.fontSize=`${scale*100}%`},viewport.textScale)
+        await page.getByRole('button',{name:'Delete',exact:true}).first().click()
+        const dialog=page.getByRole('dialog'), panel=dialog.locator(':scope > div')
+        await dialog.waitFor()
+        await page.waitForTimeout(400)
+        const bounds=await panel.boundingBox()
+        assert.ok(bounds.y>=0 && bounds.y+bounds.height<=viewport.height)
+        await dialog.locator('input').fill('confirm')
+        const button=dialog.getByRole('button',{name:'Delete Permanently'})
+        await button.scrollIntoViewIfNeeded()
+        const target=await button.boundingBox()
+        assert.ok(target.y>=0 && target.y+target.height<=viewport.height)
+        await button.focus()
+        await page.keyboard.press('Tab')
+        assert.equal(await dialog.evaluate(node=>node.contains(document.activeElement)),true)
+        await page.keyboard.press('Escape')
+        await dialog.waitFor({state:'hidden'})
+        outcomes.push({...viewport,check:'short dialog scroll and keyboard containment',passed:true})
+        await context.close()
+    }
+    for (const width of [1440,390]) {
+        const context=await contextFor(width), page=await context.newPage()
+        let block=true, navigations=0
+        page.on('request',request=>{if(request.isNavigationRequest() && request.frame()===page.mainFrame()) navigations++})
+        await page.route('**/assets/app-*.js',route=>block?route.abort():route.continue())
+        await page.goto(origin+'/editor')
+        const retry=page.getByRole('link',{name:'Retry opening this page',exact:true})
+        await retry.waitFor()
+        assert.equal(navigations,1)
+        assert.ok(await page.getByText(/website is taking longer/).isVisible())
+        block=false
+        await retry.click()
+        await page.getByRole('heading',{name:'Photo Editor',exact:true}).waitFor()
+        assert.equal(await page.locator('#startup-fallback').count(),0)
+        assert.equal(navigations,2)
+        outcomes.push({width,check:'initial module failure and explicit recovery',passed:true})
+        await context.close()
     }
     console.log(JSON.stringify(outcomes,null,2))
 } finally { await browser.close(); await new Promise(resolve=>server.close(resolve)) }

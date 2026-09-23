@@ -45,6 +45,20 @@ def _finish(table, key, subject, pending):
     return updated
 
 
+def _reject(table, key, subject, pending):
+    # Keep the operation and its original retry clock, but no personal data or
+    # scan state. This runs under the identity lease, including legacy receipts.
+    terminal = {name: pending[name] for name in (
+        'operation', 'id', 'subject', 'continuationStartedAt', 'scheduledUntil'
+    ) if name in pending}
+    terminal['phase'] = 'rejected'
+    table.update_item(Key=key, UpdateExpression='SET payload = :pending',
+        ConditionExpression='payload.operation = :op',
+        ExpressionAttributeValues={':pending':terminal, ':op':pending['operation']})
+    _unfence(table, subject, pending['operation'])
+    return 0
+
+
 def update(table, cognito, pool, old_email, new_email, body, event, context):
     user_id = body.get('userId')
     if user_id is not None:
@@ -72,6 +86,8 @@ def resume(table, cognito, pool, subject, context):
     if pending.get('phase') == 'complete' and pending.get('auditComplete'):
         _unfence(table, subject, pending['operation'])
         return int(pending.get('updated', 0))
+    if pending.get('phase') == 'rejected':
+        return _advance(table, cognito, pool, subject, pending['operation'], context)
     if not pending.get('oldEmail') or not pending.get('newEmail'):
         # A preceding release's receipt requires its original authenticated retry.
         raise MediaMutationBusy('Retry the original account update to resume it.')
@@ -83,6 +99,8 @@ def _advance(table, cognito, pool, subject, operation, context, request=None, ev
         key = _key('UPDATE', subject)
         pending = table.get_item(Key=key, ConsistentRead=True).get('Item', {}).get('payload', {})
         same = pending.get('operation') == operation
+        if request is None and same and pending.get('phase') == 'rejected':
+            return _reject(table, key, subject, pending)
         if pending and pending.get('phase') not in {'complete', 'rejected'} and not same:
             raise MediaMutationBusy('The previous account update is still being completed.')
         identity = request or pending
@@ -100,9 +118,15 @@ def _advance(table, cognito, pool, subject, operation, context, request=None, ev
         if same and pending.get('phase') == 'complete':
             return _finish(table, key, subject, pending)
         if not same or pending.get('phase') == 'rejected':
+            # An explicit retry may retry a rejected request, but cannot reset
+            # its age bound. Correcting the address creates a new operation.
+            clock = {name:pending[name] for name in ('continuationStartedAt', 'scheduledUntil')
+                     if same and name in pending}
             pending = {'operation':operation, 'id':operation, 'subject':subject,
                 'username':username, 'oldEmail':old_email, 'newEmail':new_email,
-                'phase':'pin', 'position':0, 'updated':0, 'audit':cleanup_work.audit_context(event)}
+                'phase':'pin', 'position':0, 'updated':0, 'audit':cleanup_work.audit_context(event), **clock}
+            if clock and cleanup_work.time.time() - int(clock.get('continuationStartedAt', 0)) >= 86400:
+                raise MediaMutationBusy('This request expired. Reload the user list and review the change.')
         if pending['phase'] == 'pending':
             # Upgrade a legacy receipt using a fresh consistent scan. Pinning is
             # idempotent, including when Cognito already accepted the change.
@@ -178,7 +202,7 @@ def _advance(table, cognito, pool, subject, operation, context, request=None, ev
                         if error.response['Error']['Code'] in {'AliasExistsException', 'UsernameExistsException', 'InvalidParameterException'}:
                             _, sub, fresh = cognito_identity(cognito, pool, username)
                             if sub == subject and str(fresh.get('email', '')).lower() == old_email:
-                                pending['phase'] = 'rejected'; save(); _unfence(table, subject, operation)
+                                _reject(table, key, subject, pending)
                         raise
                 pending.update(phase='sync', position=0)
                 save()

@@ -17,7 +17,7 @@ it.each(['/', '/videos/', '/album/example', '/search', '/explore/immersive-galle
         head: { appendChild: link => links.push(link) },
     }
     runInNewContext(readFileSync('public/theme-init.js', 'utf8'), {
-        document, window: { location: { pathname }, localStorage: { getItem: () => 'light' } },
+        document, window: { setTimeout: () => {}, addEventListener: () => {}, location: { pathname }, localStorage: { getItem: () => 'light' } },
     })
     if (pathname === '/' || pathname === '/videos/') {
         expect(links).toHaveLength(1)
@@ -46,4 +46,32 @@ it('warms only valid direct public album routes', () => {
     warmDirectAlbum(`/video/${id}/`)
     for (const route of ['/admin', '/album/bad', `/sharedalbum/${id}`, `/album/${id}/edit`]) warmDirectAlbum(route)
     expect(prefetchPublicAlbum.mock.calls).toEqual([[id], [id]])
+})
+
+it('offers a manual startup retry after module failure or delay, and leaves a mounted app alone', () => {
+    const retry = { hidden: true }
+    let mounted = false, onError, onTimeout
+    const document = {
+        documentElement: { dataset: {}, style: {} }, readyState: 'complete',
+        querySelector: () => null,
+        getElementById: () => mounted ? null : retry,
+    }
+    const window = {
+        location: { pathname: '/editor' }, localStorage: { getItem: () => 'light' },
+        setTimeout: callback => { onTimeout = callback },
+        addEventListener: (name, callback) => { if (name === 'error') onError = callback },
+    }
+    runInNewContext(readFileSync('public/theme-init.js', 'utf8'), { document, window })
+    onError({ target: { type: 'image' } })
+    expect(retry.hidden).toBe(true)
+    onError({ target: { type: 'module' } })
+    expect(retry.hidden).toBe(false)
+    retry.hidden = true
+    onTimeout()
+    expect(retry.hidden).toBe(false)
+    mounted = true
+    retry.hidden = true
+    onError({ target: window })
+    onTimeout()
+    expect(retry.hidden).toBe(true)
 })

@@ -32,10 +32,11 @@ class SiteHealthTests(unittest.TestCase):
         alarms = [{"name": "API Server Error", "description": "Website API", "state": "OK", "updatedAt": "2026-08-27T00:00:00Z"}]
         with patch.object(get_site_health, "verify_front_door_request", return_value=None), patch.object(get_site_health, "require_admin", return_value=None), patch.object(
             get_site_health, "_public_check", side_effect=checks
-        ), patch.object(get_site_health, "_stack_check", return_value=stack), patch.object(
+        ) as public_check, patch.object(get_site_health, "_stack_check", return_value=stack), patch.object(
             get_site_health, "_alarms", return_value=(alarms, None)
         ), patch.object(get_site_health, "emit_audit_event") as audit:
             response = get_site_health.handler(ADMIN_EVENT, CONTEXT)
+            public_check.assert_any_call("api", "Public album API", "/api/public/albums?type=photo&limit=1")
         body = response_body(response)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response["headers"]["Cache-Control"], "no-store")

@@ -20,6 +20,21 @@
   }
 }())
 
+// React replaces the fallback on mount. Never reload a running app.
+;(function watchStartup() {
+  function unavailable() {
+    var retry = document.getElementById('startup-retry')
+    if (retry) retry.hidden = false
+  }
+  window.setTimeout(unavailable, 15000)
+  window.addEventListener('error', function (event) {
+    if (event.target === window || event.target?.type === 'module') {
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', unavailable, { once: true })
+      else unavailable()
+    }
+  }, true)
+}())
+
 // Discover the actual route's hero before the application bundle arrives.
 // This shares the existing early script request and works with the strict CSP.
 ;(function preloadRouteHero() {

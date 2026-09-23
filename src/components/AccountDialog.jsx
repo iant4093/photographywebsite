@@ -34,5 +34,5 @@ export default function AccountDialog({ label, onClose, children }) {
             if (previous?.isConnected) previous.focus()
         }
     }, [])
-    return <div ref={dialog} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} className="fixed inset-0 z-[100] bg-charcoal/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">{children}</div>
+    return <div ref={dialog} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} className="account-dialog fixed inset-0 z-[100] bg-charcoal/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">{children}</div>
 }

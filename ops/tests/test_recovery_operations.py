@@ -81,3 +81,21 @@ class RecoveryOperationsTests(unittest.TestCase):
         albums.get_item.return_value={}
         with self.assertRaisesRegex(ValueError,'deletion receipt'): inspect(albums,comparisons,s3,'bucket',ALBUM,media_id,90000)
         s3.delete_objects.assert_not_called()
+
+    def test_current_pending_deletion_suppresses_media_from_older_clean_backup(self):
+        raw = f'albums/{ALBUM}/removed.jpg'
+        backup = [{'albumId':ALBUM, 'visibility':'public', 'images':[{'rawKey':raw}, {'rawKey':'retained'}], 'shareCode':'old', 'isShared':True}]
+        current = [{'albumId':ALBUM, 'images':[], 'pendingMediaDeletion':{'mediaIds':[hashlib.sha256(raw.encode()).hexdigest()[:24]]}}]
+        restored = reconstruct(backup, current)['candidates'][0]
+        self.assertEqual(restored['images'], [{'rawKey':'retained'}])
+        self.assertEqual(restored['imageCount'], 1)
+        self.assertEqual(restored['visibility'], 'private'); self.assertFalse(restored['isShared'])
+        self.assertNotIn('shareCode', restored)
+        self.assertEqual(len(backup[0]['images']), 2)
+
+    def test_current_unresolved_work_is_quarantined_even_when_backup_is_clean(self):
+        for pending in ({'pendingMediaDeletion':{'id':'missing-scope'}}, {'pendingVisibilityChange':{}}, {'status':'updating'}):
+            backup = [{'albumId':ALBUM, 'images':[]}, {'albumId':'unaffected', 'images':[]}]
+            result = reconstruct(backup, [{'albumId':ALBUM, **pending}])
+            self.assertEqual([row['albumId'] for row in result['candidates']], ['unaffected'])
+            self.assertEqual(result['quarantine'], [backup[0]])

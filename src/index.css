@@ -1,6 +1,12 @@
 /* Tailwind v4 base import */
 @import "tailwindcss";
 
+.account-dialog > div {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 @font-face {
   font-family: 'Inter';
   font-style: normal;

@@ -878,7 +878,9 @@ export default function Editor() {
     }
 
     const closePhoto = async () => {
-        ++openGenerationRef.current
+        const generation = ++openGenerationRef.current
+        const sourceId = sessionSourceId.current
+        sessionSourceId.current = null
         decodeControllerRef.current?.abort()
         ++renderIdRef.current
         previewRenderRef.current.pending = null
@@ -923,10 +925,10 @@ export default function Editor() {
         setSessionSourceReady(false)
         if (fileInputRef.current) fileInputRef.current.value = ''
         try {
-            await clearEditorSession()
-            setSessionStatus('No saved session')
+            await clearEditorSession(sourceId ?? null)
+            if (openGenerationRef.current === generation) setSessionStatus('No saved session')
         } catch {
-            setSessionStatus('Local recovery unavailable')
+            if (openGenerationRef.current === generation) setSessionStatus('Local recovery unavailable')
         }
     }
 

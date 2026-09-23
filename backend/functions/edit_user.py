@@ -43,7 +43,9 @@ def handler(event, context):
             updated = user_email_update.resume(table, cognito, USER_POOL_ID, validate_uuid(event['subject']), context)
             return json_response(202 if updated is None else 200, {'pending':updated is None})
         except MediaMutationBusy:
-            return json_response(202, {'pending':True})
+            # No replacement is guaranteed before the identity lease is held.
+            # A non-success response preserves this delivery in the SQS worker.
+            return error_response(409, 'Account update is busy', code='media_busy')
         except Exception as error:
             return internal_error(context, error, 'edit_user_continuation')
     front_door_denied = verify_front_door_request(event, context)

@@ -162,7 +162,7 @@ def handler(event, context):
     query = urlencode({"type": "photo", "limit": 1})
     checks = [
         _public_check("website", "Public website", "/", method="HEAD"),
-        _public_check("api", "Public album API", f"/api/albums?{query}"),
+        _public_check("api", "Public album API", f"/api/public/albums?{query}"),
         _stack_check(),
     ]
     alarms, alarm_error = _alarms()

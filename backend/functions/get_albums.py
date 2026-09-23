@@ -3,7 +3,10 @@
 import logging
 import os
 import hashlib
+import http.client
+import json
 from decimal import Decimal
+from urllib.parse import urlencode, urlsplit
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -223,6 +226,30 @@ def _hydrate_public_summary_fields(records):
 from front_door import verify_front_door_request
 
 
+def _legacy_public_items(limit):
+    """Bounded array adapter through the existing public CDN, with no DB fallback."""
+    origin = urlsplit(os.environ['FRONTEND_URL'])
+    if (origin.scheme != 'https' or not origin.hostname or origin.username or origin.password
+            or origin.port not in {None, 443} or origin.path not in {'', '/'} or origin.query or origin.fragment):
+        raise ValueError('Invalid configured frontend origin')
+    connection = http.client.HTTPSConnection(origin.hostname, 443, timeout=4)
+    try:
+        connection.request('GET', '/api/public/albums?' + urlencode({'limit':limit}),
+            headers={'Accept':'application/json', 'User-Agent':'IanTruongPhotography-CatalogCompatibility/1.0'})
+        response = connection.getresponse()
+        if response.status != 200:
+            raise RuntimeError('Public catalog unavailable')
+        data = response.read(1024 * 1024 + 1)
+        if len(data) > 1024 * 1024:
+            raise ValueError('Public catalog response too large')
+        body = json.loads(data)
+        if not isinstance(body, dict) or not isinstance(body.get('items'), list) or len(body['items']) > limit:
+            raise ValueError('Invalid public catalog response')
+        return body['items']
+    finally:
+        connection.close()
+
+
 def handler(event, context):
     denied = verify_front_door_request(event, context)
     if denied:
@@ -283,6 +310,20 @@ def handler(event, context):
             raise AuthError("Forbidden", 403)
 
         start_key = decode_cursor(params.get("cursor"), scope)
+        if claims is None:
+            validate_catalog_cursor(start_key, visibility='public')
+            compatibility_array = (
+                not any(name in params for name in ('limit', 'cursor', 'type', 'ownerEmail', 'ownerSub'))
+                and requested_visibility in {None, '', 'public'}
+            )
+            if compatibility_array:
+                return json_response(200, _legacy_public_items(limit),
+                    cache_control='public, max-age=60, s-maxage=300')
+            query = {'limit':str(limit)}
+            if album_type: query['type'] = album_type
+            if params.get('cursor'): query['cursor'] = params['cursor']
+            return json_response(307, {'message':'Use the public catalog'},
+                headers={'Location':'/api/public/albums?' + urlencode(query)})
         public_summary_only = visibility == "public" and not admin_owner_email and not admin_owner_sub
         records, last_key = _fetch_page(
             visibility=visibility,
@@ -323,20 +364,10 @@ def handler(event, context):
             except ValidationError:
                 continue
 
-        # Compatibility bridge for the current public homepage. Updated clients
-        # request type/limit/cursor and receive the paginated object.
-        compatibility_array = (
-            claims is None
-            and not any(name in params for name in ("limit", "cursor", "type", "ownerEmail", "ownerSub"))
-            and requested_visibility in {None, "", "public"}
-        )
-        cache_control = "public, max-age=60, s-maxage=300" if visibility == "public" and not admin else "no-store"
-        if compatibility_array:
-            return json_response(200, items, cache_control=cache_control)
         return json_response(
             200,
             {"items": items, "nextCursor": encode_cursor(last_key, scope)},
-            cache_control=cache_control,
+            cache_control="no-store",
         )
     except AuthError as error:
         return auth_error_response(error)

@@ -43,7 +43,14 @@
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <section id="startup-fallback" class="mx-auto max-w-xl p-8" aria-live="polite">
+      <h1>Ian Truong Photography</h1>
+      <p>Opening the website…</p>
+      <p id="startup-retry" hidden>The website is taking longer to open. Check your connection and try again. <a href="">Retry opening this page</a></p>
+      <noscript><p>Enable JavaScript to view the galleries, then reload this page.</p></noscript>
+    </section>
+  </div>
   <script type="module" src="/src/main.jsx"></script>
 </body>
 

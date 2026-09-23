@@ -66,7 +66,7 @@ def advance(table, cognito, pool, subject, context):
             ExpressionAttributeValues={':id':record['deletionId'], ':owner':owner, ':until':now+duration, ':now':now})
     except ClientError as error:
         if error.response['Error']['Code'] == 'ConditionalCheckFailedException':
-            return False
+            raise MediaMutationBusy('Account cleanup is busy. Please retry shortly.') from None
         raise
 
     def save():

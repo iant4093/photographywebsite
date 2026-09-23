@@ -204,7 +204,7 @@ class CatalogTests(unittest.TestCase):
             captured.update(kwargs)
             return [projected], None
 
-        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
+        with patch.object(get_albums, "get_verified_claims", return_value=claims()), patch.object(
             get_albums, "_fetch_page", side_effect=fetch
         ):
             response = get_albums.handler({"queryStringParameters": {"limit": "10", "type": "photo"}}, None)
@@ -228,7 +228,7 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(captured["public_summary_only"])
 
     def test_public_photo_response_includes_configured_gallery_order(self):
-        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
+        with patch.object(get_albums, "get_verified_claims", return_value=claims()), patch.object(
             get_albums, "_fetch_page", return_value=([album()], None)
         ), patch.object(
             get_albums,
@@ -260,22 +260,12 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(set(built.attribute_value_placeholders.values()), {"video"})
 
     def test_anonymous_private_query_is_forced_public(self):
-        captured = {}
-
-        def fetch(**kwargs):
-            captured.update(kwargs)
-            return [album("public")], None
-
         event = {"queryStringParameters": {"visibility": "private", "limit": "10"}}
-        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
-            get_albums, "_fetch_page", side_effect=fetch
-        ):
+        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(get_albums, "_fetch_page") as fetch:
             response = get_albums.handler(event, None)
-        self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(captured["visibility"], "public")
-        item = response_body(response)["items"][0]
-        self.assertNotIn("ownerEmail", item)
-        self.assertNotIn("shareCode", item)
+        self.assertEqual(response["statusCode"], 307)
+        self.assertEqual(response["headers"]["Location"], "/api/public/albums?limit=10")
+        fetch.assert_not_called()
 
     def test_non_admin_owner_email_filter_is_forbidden(self):
         event = {
@@ -351,7 +341,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_pending_and_malformed_records_are_not_listed(self):
         records = [album(status="pending"), album(visibility="unknown")]
-        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
+        with patch.object(get_albums, "get_verified_claims", return_value=claims()), patch.object(
             get_albums, "_fetch_page", return_value=(records, None)
         ):
             response = get_albums.handler({"queryStringParameters": {"limit": "10"}}, None)
@@ -359,7 +349,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_legacy_anonymous_shape_is_safe_array(self):
         with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
-            get_albums, "_fetch_page", return_value=([album()], None)
+            get_albums, "_legacy_public_items", return_value=[{"albumId": ALBUM_ID}]
         ):
             response = get_albums.handler({"queryStringParameters": {}}, None)
         self.assertIsInstance(response_body(response), list)

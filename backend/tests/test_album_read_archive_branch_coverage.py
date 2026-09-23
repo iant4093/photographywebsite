@@ -256,7 +256,7 @@ class GetAlbumsBranchTests(unittest.TestCase):
             self.assertEqual(get_albums.handler(request(query={}), None)["statusCode"], 500)
         with patch.object(get_albums, "get_verified_claims", return_value=None):
             self.assertEqual(get_albums.handler(request(query={"limit": "bad"}), None)["statusCode"], 400)
-        with patch.object(get_albums, "get_verified_claims", return_value=None), patch.object(
+        with patch.object(get_albums, "get_verified_claims", return_value=claims()), patch.object(
             get_albums, "_fetch_page", return_value=([album()], None)
         ), patch.object(get_albums, "serialize_album_summary", side_effect=get_albums.ValidationError("bad")):
             self.assertEqual(response_body(get_albums.handler(request(query={"limit": "5"}), None))["items"], [])

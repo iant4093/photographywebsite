@@ -10,6 +10,7 @@ def reconstruct(backup, current_records):
     erased_albums = set()
     erased_subjects = set()
     erased_media = {}
+    unfinished_albums = set()
     for row in current_records:
         key = row.get('albumId', '')
         if key.startswith('__MEDIA_DELETION__'):
@@ -22,6 +23,17 @@ def reconstruct(backup, current_records):
             if not subject: raise ValueError('Unresolved deletion fence requires manual review')
             erased_subjects.add(subject)
         if row.get('status') == 'deleting': erased_albums.add(key)
+        pending_media = row.get('pendingMediaDeletion')
+        if 'pendingMediaDeletion' in row:
+            media_ids = pending_media.get('mediaIds') if isinstance(pending_media, dict) else None
+            if not isinstance(media_ids, list) or not media_ids:
+                unfinished_albums.add(key)
+            else:
+                erased_media.setdefault(key, set()).update(media_ids)
+        if row.get('status', 'active') not in {'active', 'internal'} or any(
+            name.startswith('pending') and name != 'pendingMediaDeletion' for name in row
+        ):
+            unfinished_albums.add(key)
     restored, quarantined = [], []
     for row in backup:
         key = row.get('albumId', '')
@@ -29,7 +41,7 @@ def reconstruct(backup, current_records):
             continue
         # Email-only owners cannot be safely matched to removed identities.
         # Internal receipts and interrupted work are never auto-reactivated.
-        if key.startswith('__') or row.get('ownerEmail') and not row.get('ownerSub') or row.get('status', 'active') != 'active' or any(k.startswith('pending') for k in row):
+        if key in unfinished_albums or key.startswith('__') or row.get('ownerEmail') and not row.get('ownerSub') or row.get('status', 'active') != 'active' or any(k.startswith('pending') for k in row):
             quarantined.append(row)
             continue
         candidate = deepcopy(row)
