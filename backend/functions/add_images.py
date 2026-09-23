@@ -5,6 +5,7 @@ import logging
 import os
 import uuid
 import upload_followup
+import video_jobs
 from visibility_change import enqueue as enqueue_album_work
 
 import boto3
@@ -52,13 +53,15 @@ from front_door import verify_front_door_request
 def _resume_followup(album_id, context):
     with album_lease(table, album_id, context):
         album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+        if album and album.get("createdBySub"):
+            raise MediaMutationBusy("Album creation is still completing")
         if album:
-            upload_followup.complete(table, album)
+            upload_followup.complete(table, album, context)
     return json_response(200, {"complete": True})
 
 
 def handler(event, context):
-    if isinstance(event, dict) and set(event) == {"source", "albumId"} and event.get("source") in {"album-upload-followup", "album-media-sync"}:
+    if isinstance(event, dict) and set(event) == {"source", "albumId"} and event.get("source") in {"album-upload-followup", "album-media-sync", "album-video-jobs"}:
         try:
             return _resume_followup(validate_uuid(event["albumId"]), context)
         except MediaAlbumMissing:
@@ -77,11 +80,13 @@ def handler(event, context):
             if not album or album.get("status", "active") != "active":
                 _audit(event, context, "denied", "album_not_found")
                 return error_response(404, "Album not found", code="not_found")
+            if album.get("createdBySub"):
+                raise MediaMutationBusy("Album creation is still completing")
             if album.get("pendingMediaDeletion"):
                 return error_response(409, "Media deletion is still being completed. Please retry shortly.", code="deletion_pending")
             if mutation_protocol_enabled() and album.get("pendingMediaUpload"):
                 enqueue_album_work(album_id, "album-upload-followup")
-                upload_followup.complete(table, album)
+                upload_followup.complete(table, album, context)
             album_type = album.get("type", "photo")
             images = _normalize_images(body.get("images"), album_id, album_type, album=album)
 
@@ -102,7 +107,7 @@ def handler(event, context):
             if fresh_images:
                 if album_type == "photo":
                     _extract_exif(fresh_images)
-                else:
+                elif not mutation_protocol_enabled():
                     _start_video_jobs(fresh_images)
 
                 values = {
@@ -116,6 +121,10 @@ def handler(event, context):
                         "keys": [image["rawKey"] for image in fresh_images], "done": []}
                     values[":pending_upload"] = candidate["pendingMediaUpload"]
                     expression += ", pendingMediaUpload = :pending_upload"
+                    if album_type == "video":
+                        candidate["videoJobs"] = video_jobs.prepare(album, fresh_images)
+                        values[":video_jobs"] = candidate["videoJobs"]
+                        expression += ", videoJobs = :video_jobs"
                 expression = mutation_expression(expression, album, values)
                 ensure_album_item_budget(candidate)
                 drive_backup_jobs.update_album(
@@ -140,7 +149,7 @@ def handler(event, context):
                         logger.error("album_media_append_failed error_type=%s", type(error).__name__)
                         deactivate_album_media(table, album_id)
             if mutation_protocol_enabled():
-                upload_followup.complete(table, candidate)
+                upload_followup.complete(table, candidate, context)
                 if not fresh_images:
                     # Repair an interrupted pre-upgrade save using only the
                     # canonical stored references, never a retried thumbnail.

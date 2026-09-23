@@ -39,13 +39,14 @@ function renderThumbnailCanvas(source, sourceWidth, sourceHeight) {
 
 function blurhashFromCanvas(canvas) {
     const hashCanvas = document.createElement('canvas')
-    hashCanvas.width = BLURHASH_SIZE
-    hashCanvas.height = Math.max(1, Math.round(BLURHASH_SIZE * (canvas.height / canvas.width)))
+    const scale = Math.min(1, BLURHASH_SIZE / Math.max(canvas.width, canvas.height))
+    hashCanvas.width = Math.max(1, Math.round(canvas.width * scale))
+    hashCanvas.height = Math.max(1, Math.round(canvas.height * scale))
     const hashContext = canvasContext(hashCanvas)
     hashContext.drawImage(canvas, 0, 0, hashCanvas.width, hashCanvas.height)
     const imageData = hashContext.getImageData(0, 0, hashCanvas.width, hashCanvas.height)
-    const componentX = 4
-    const componentY = Math.max(1, Math.min(4, Math.round(componentX * (canvas.height / canvas.width))))
+    const componentX = Math.min(4, hashCanvas.width)
+    const componentY = Math.min(hashCanvas.height, Math.max(1, Math.min(4, Math.round(componentX * (canvas.height / canvas.width)))))
     return encode(imageData.data, imageData.width, imageData.height, componentX, componentY)
 }
 

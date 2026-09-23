@@ -1995,6 +1995,7 @@ Resources:
           VISIBILITY_WORKER_FUNCTION_NAME: !Ref UpdateAlbumFunction
           UPLOAD_WORKER_FUNCTION_NAME: !Ref AddImagesFunction
           THUMBNAIL_WORKER_FUNCTION_NAME: !Ref UpdateImageFunction
+          DRIVE_WORKER_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
         - Statement:
             - Effect: Allow
@@ -2003,6 +2004,7 @@ Resources:
                 - !GetAtt UpdateAlbumFunction.Arn
                 - !GetAtt AddImagesFunction.Arn
                 - !GetAtt UpdateImageFunction.Arn
+                - !GetAtt GoogleDriveBackupFunction.Arn
         - SQSPollerPolicy:
             QueueName: !GetAtt CacheInvalidationQueue.QueueName
         - Statement:
@@ -2651,6 +2653,7 @@ Resources:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           IMAGES_BUCKET: !Ref ImagesBucket
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
           GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
@@ -2691,7 +2694,7 @@ Resources:
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action: sqs:SendMessage
-              Resource: !GetAtt AsyncFailureQueue.Arn
+              Resource: [!GetAtt AsyncFailureQueue.Arn, !GetAtt CacheInvalidationQueue.Arn]
         - !If
           - HasGoogleOAuthSecret
           - Statement:
@@ -2738,6 +2741,10 @@ Resources:
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: mediaconvert:SearchJobs
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:queues/Default'
         - Statement:
             - Effect: Allow
               Action:
@@ -2895,7 +2902,7 @@ Resources:
                 - s3:PutObjectTagging
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
-              Action: cloudfront:CreateInvalidation
+              Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
             - Effect: Allow
               Action: lambda:InvokeFunction
@@ -3042,6 +3049,10 @@ Resources:
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: mediaconvert:SearchJobs
+              Resource: !Sub 'arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:queues/Default'
         - Statement:
             - Effect: Allow
               Action:

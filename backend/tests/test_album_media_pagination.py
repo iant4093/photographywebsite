@@ -94,9 +94,9 @@ class AlbumMediaPaginationTests(unittest.TestCase):
             "serialize_images",
             side_effect=lambda value, **_kwargs: value["images"],
         ):
-            payload = response_body(get_album_media.handler(self.event({"limit": "10"}), None))
+            payload = response_body(get_album_media.handler(self.event({"limit": "1"}), None))
 
-        query.assert_called_once_with(ALBUM_ID, 10, None)
+        query.assert_called_once_with(ALBUM_ID, 1, None)
         self.assertEqual(payload["items"][0]["rawKey"], album["images"][0]["rawKey"])
         self.assertIsNotNone(payload["nextCursor"])
 

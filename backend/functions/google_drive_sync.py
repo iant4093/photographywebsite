@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import posixpath
 import tempfile
 
@@ -287,6 +288,11 @@ def handler(event, context):
         return legacy_handler(event, context)
     try:
         import drive_backup_reconcile
+        if isinstance(event, dict) and set(event) == {'source', 'albumId', 'jobEntry'} and event.get('source') == 'album-drive-backup':
+            if not isinstance(event['jobEntry'], str) or not re.fullmatch(r'job#[a-f0-9]{32}', event['jobEntry']):
+                raise ValueError('Invalid backup job')
+            drive_backup_reconcile.process(validate_uuid(event['albumId']), event['jobEntry'], context)
+            return {'status': 'processed'}
         if 'Records' in (event or {}):
             return drive_backup_reconcile.handler(event, context)
         # Old async invocations drain into the durable path during rollout.

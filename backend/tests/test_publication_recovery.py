@@ -54,7 +54,8 @@ class PublicationRecoveryTests(unittest.TestCase):
         self.stack.enter_context(patch.object(add_images, "_extract_exif"))
         self.queue = self.stack.enter_context(patch.object(visibility_change, "_queue_client"))
         self.stack.enter_context(patch.dict(os.environ, {"CACHE_INVALIDATION_QUEUE_URL": "queue"}))
-        self.stack.enter_context(patch.object(visibility_change, "invalidate_album_media", return_value=True))
+        self.stack.enter_context(patch.object(visibility_change, "advance_media_revocation", return_value=True))
+        self.stack.enter_context(patch.object(visibility_change, "prepare_media_revocation", return_value={"id": "synthetic"}))
         self.stack.enter_context(patch.object(update_image, "invalidate_album_media", return_value=True))
         for module in (add_images, update_image, update_album, upload_followup):
             for name in ("request_public_api_invalidation", "request_random_photo_pool_refresh", "request_hover_preview_refresh", "_sync_drive_folder"):
@@ -182,7 +183,7 @@ class PublicationRecoveryTests(unittest.TestCase):
     def test_privacy_provider_or_invalidation_failure_retains_progress_and_blocks_other_writers(self):
         self.object(RAW, "public")
         body = {"visibility": "private", "ownerEmail": "customer@example.test", "ownerSub": SUB}
-        with patch.object(visibility_change, "invalidate_album_media", side_effect=RuntimeError("outage")):
+        with patch.object(visibility_change, "advance_media_revocation", side_effect=RuntimeError("outage")):
             self.assertEqual(update_album.handler(self.event(body), CONTEXT)["statusCode"], 500)
         self.assertEqual(self.album()["status"], "updating")
         self.assertEqual(update_album.handler(self.event({"title": "other"}), CONTEXT)["statusCode"], 409)

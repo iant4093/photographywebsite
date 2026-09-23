@@ -4,6 +4,7 @@ import os
 
 import boto3
 import drive_backup_jobs
+import video_jobs
 from album_media_store import finish_media_sync
 from cache_invalidation import request_public_api_invalidation
 from media_access import album_known_keys, tag_keys_visibility
@@ -12,7 +13,7 @@ from preview_jobs import enqueue_preview_jobs
 from random_pool_refresh import request_random_photo_pool_refresh
 
 
-def complete(table, album):
+def complete(table, album, context=None):
     album_id = album["albumId"]
     if album.get("mediaStoreDirty"):
         if not finish_media_sync(table, album, album.get("images", []), lambda: False):
@@ -21,6 +22,7 @@ def complete(table, album):
         album["mediaStoreVersion"] = 1
     pending = album.get("pendingMediaUpload")
     if not pending:
+        video_jobs.resume(table, album, context)
         return
     requested = set(pending["keys"])
     images = [image for image in album.get("images", []) if isinstance(image, dict)
@@ -70,3 +72,5 @@ def complete(table, album):
         ExpressionAttributeValues={":id": pending["id"]},
     )
     album.pop("pendingMediaUpload", None)
+
+    video_jobs.resume(table, album, context)

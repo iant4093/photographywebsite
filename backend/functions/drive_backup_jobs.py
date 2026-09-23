@@ -5,6 +5,7 @@ The table stream delivers job inserts; completed jobs expire, failed jobs stay
 available for admin retry. No media bytes or credentials are stored here.
 """
 import os
+import json
 import time
 import uuid
 
@@ -201,3 +202,28 @@ def end_retention(album_id, deleted):
                           ExpressionAttributeValues={':yes': True, ':retained': 'retained'})
     else:
         table.update_item(Key={'albumId': album_id, 'entry': 'state'}, UpdateExpression='REMOVE retiring')
+
+
+def defer(job):
+    """Keep the exact intent and retry temporary contention without a hot loop."""
+    from cache_invalidation import _queue_client
+    now = int(time.time())
+    if now - int(job.get('createdAt', now)) >= 86400:
+        fail(job)
+        raise DriveBackupBusy('Backup needs an administrator retry')
+    if int(job.get('deferredUntil', 0)) > now:
+        return
+    queue = os.environ.get('CACHE_INVALIDATION_QUEUE_URL', '').strip()
+    if not queue:
+        raise DriveBackupBusy('Backup continuation queue is unavailable')
+    count = min(4, int(job.get('deferrals', 0)))
+    delay = min(300, 30 * (2 ** count))
+    # Dispatch first: a lost metadata write can only duplicate a safe delivery,
+    # never record a retry that was not actually scheduled.
+    _queue_client().send_message(QueueUrl=queue, DelaySeconds=delay, MessageBody=json.dumps({
+        'version': 1, 'kind': 'album-drive-backup', 'albumId': job['albumId'], 'jobEntry': job['entry']}))
+    state_table().update_item(Key={'albumId': job['albumId'], 'entry': job['entry']},
+        UpdateExpression='SET deferredUntil = :until, deferrals = :count',
+        ConditionExpression='attribute_exists(albumId) AND #status <> :done',
+        ExpressionAttributeNames={'#status': 'status'},
+        ExpressionAttributeValues={':until': now + delay, ':count': count + 1, ':done': 'done'})

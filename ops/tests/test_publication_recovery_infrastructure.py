@@ -55,3 +55,19 @@ class PublicationRecoveryInfrastructureTests(unittest.TestCase):
     def test_thumbnail_cleanup_can_revoke_existing_distribution_cache(self):
         self.assertEqual(self.allowed("UpdateImageFunction", {"Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}"}),
                          {"cloudfront:CreateInvalidation"})
+
+    def test_visibility_completion_can_only_read_its_existing_distribution_purge(self):
+        self.assertEqual(self.allowed("UpdateAlbumFunction", {"Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}"}),
+                         {"cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"})
+
+    def test_video_reconciliation_only_searches_the_existing_default_queue(self):
+        resource = {"Fn::Sub": "arn:${AWS::Partition}:mediaconvert:${AWS::Region}:${AWS::AccountId}:queues/Default"}
+        for function in ("CreateAlbumFunction", "AddImagesFunction"):
+            self.assertEqual(self.allowed(function, resource), {"mediaconvert:SearchJobs"})
+            self.assertNotIn("mediaconvert:SearchJobs", self.allowed(function, "*"))
+
+    def test_backup_deferral_reuses_existing_queue_and_worker_with_exact_wiring(self):
+        self.assertEqual(self.allowed("CacheInvalidationWorkerFunction", {"Fn::GetAtt": ["GoogleDriveBackupFunction", "Arn"]}), {"lambda:InvokeFunction"})
+        self.assertEqual(self.resources["CacheInvalidationWorkerFunction"]["Properties"]["Environment"]["Variables"]["DRIVE_WORKER_FUNCTION_NAME"], {"Ref": "GoogleDriveBackupFunction"})
+        self.assertEqual(self.allowed("GoogleDriveBackupFunction", {"Fn::GetAtt": ["CacheInvalidationQueue", "Arn"]}), {"sqs:SendMessage"})
+        self.assertEqual(self.resources["GoogleDriveBackupFunction"]["Properties"]["Environment"]["Variables"]["CACHE_INVALIDATION_QUEUE_URL"], {"Ref": "CacheInvalidationQueue"})

@@ -173,3 +173,19 @@ describe('adaptive transfer concurrency', () => {
         expect(controller.limit).toBe(2)
     })
 })
+
+it('cancels a stalled token refresh and allows retry before the old callback arrives', async () => {
+    const options = setup()
+    let oldToken
+    options.getIdToken.mockImplementationOnce(() => new Promise(resolve => { oldToken = resolve }))
+    const first = options.session.run(options).catch(error => error)
+    await vi.advanceTimersByTimeAsync(5)
+    options.session.cancel()
+    expect((await first).name).toBe('AbortError')
+    expect(api.requestUploadUrls).not.toHaveBeenCalled()
+    expect((await finish(options.session.run(options))).value).toHaveLength(1)
+    oldToken('stale-token')
+    await vi.runAllTimersAsync()
+    expect(api.requestUploadUrls).toHaveBeenCalledOnce()
+    expect(api.requestUploadUrls.mock.calls[0][0]).toBe('fresh-token')
+})

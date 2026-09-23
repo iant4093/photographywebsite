@@ -98,25 +98,8 @@ function publishSessionChange() {
 }
 
 
-function getFreshUserData(cognitoUser) {
-    return new Promise((resolve, reject) => {
-        cognitoUser.getUserData((error, data) => {
-            if (error) reject(error)
-            else resolve(data || {})
-        }, { bypassCache: true })
-    })
-}
-
-function ensureValidSession(cognitoUser) {
-    return new Promise((resolve, reject) => {
-        cognitoUser.getSession((error, session) => {
-            if (error || !session?.isValid()) {
-                reject(new Error('Your session has expired. Please sign in again.'))
-                return
-            }
-            resolve(session)
-        })
-    })
+async function accountRead(user, method, assertCurrent) {
+    return (await import('../utils/cognitoOperation')).readAccount(user, method, assertCurrent)
 }
 
 function hasSoftwareTokenMfa(data) {
@@ -177,14 +160,14 @@ export function AuthProvider({ children }) {
                 if (!current()) return
                 const cognitoUser = pool?.getCurrentUser()
                 if (!cognitoUser) return
-                const session = await ensureValidSession(cognitoUser)
+                const session = await accountRead(cognitoUser, 'getSession', () => assertCurrentSession(generation))
                 if (!current()) return
                 setUser(cognitoUser)
                 const { admin } = extractUserInfo(session)
                 setAdminMfaStatus(admin ? 'checking' : 'not-required')
                 if (admin) {
                     try {
-                        const data = await getFreshUserData(cognitoUser)
+                        const data = await accountRead(cognitoUser, 'getUserData', () => assertCurrentSession(generation))
                         if (current()) setAdminMfaStatus(hasSoftwareTokenMfa(data) ? 'enabled' : 'required')
                     } catch {
                         if (current()) setAdminMfaStatus('error')
@@ -220,7 +203,7 @@ export function AuthProvider({ children }) {
             sessionGeneration.current += 1
             window.removeEventListener('storage', synchronize)
         }
-    }, [clearSessionState, extractUserInfo])
+    }, [assertCurrentSession, clearSessionState, extractUserInfo])
 
     const refreshAdminMfaStatus = useCallback(async () => {
         const generation = sessionGeneration.current
@@ -233,9 +216,9 @@ export function AuthProvider({ children }) {
         assertCurrentSession(generation)
         setAdminMfaStatus('checking')
         try {
-            await ensureValidSession(user)
+            await accountRead(user, 'getSession', () => assertCurrentSession(generation))
             assertCurrentSession(generation)
-            const data = await getFreshUserData(user)
+            const data = await accountRead(user, 'getUserData', () => assertCurrentSession(generation))
             assertCurrentSession(generation)
             const status = hasSoftwareTokenMfa(data) ? 'enabled' : 'required'
             setAdminMfaStatus(status)
@@ -299,7 +282,7 @@ export function AuthProvider({ children }) {
         setUser(cognitoUser)
         if (admin) {
             try {
-                const data = await getFreshUserData(cognitoUser)
+                const data = await accountRead(cognitoUser, 'getUserData', () => assertCurrentSession(generation))
                 assertCurrentSession(generation)
                 setAdminMfaStatus(hasSoftwareTokenMfa(data) ? 'enabled' : 'required')
             } catch {
@@ -374,7 +357,7 @@ export function AuthProvider({ children }) {
         if (user?.getUsername && cognitoUser.getUsername() !== user.getUsername()) {
             throw new Error('Your session changed. Please try again.')
         }
-        const session = await ensureValidSession(cognitoUser)
+        const session = await accountRead(cognitoUser, 'getSession', () => assertCurrentSession(generation))
         assertCurrentSession(generation)
         if (identity !== persistentIdentity()) throw new Error('Your session changed. Please try again.')
         return session.getIdToken().getJwtToken()

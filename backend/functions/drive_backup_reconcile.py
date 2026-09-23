@@ -16,6 +16,8 @@ MEDIA_ID = 'ianPhotographyMediaId'
 
 def live_album(album_id):
     album = provider.table.get_item(Key={'albumId': album_id}, ConsistentRead=True).get('Item')
+    if album and album.get('status') in {'updating', 'pending'}:
+        raise jobs.DriveBackupBusy('Album publication is temporarily busy')
     return album if album and album.get('status', 'active') == 'active' else None
 
 
@@ -161,21 +163,26 @@ def process(album_id, entry, context=None):
     job = table.get_item(Key={'albumId': album_id, 'entry': entry}, ConsistentRead=True).get('Item')
     if not job or job.get('status') == 'done':
         return
-    state = table.get_item(Key={'albumId': album_id, 'entry': 'state'}, ConsistentRead=True).get('Item', {})
-    if state.get('retained') or not live_album(album_id):
-        jobs.complete(job, retained=True)
-        return
-    owner = uuid.uuid4().hex
-    if not jobs.claim(album_id, owner):
-        raise RuntimeError('Backup is busy')
+    owner = None
     try:
+        state = table.get_item(Key={'albumId': album_id, 'entry': 'state'}, ConsistentRead=True).get('Item', {})
+        if state.get('retained') or not live_album(album_id):
+            jobs.complete(job, retained=True)
+            return
+        candidate = uuid.uuid4().hex
+        if not jobs.claim(album_id, candidate):
+            raise jobs.DriveBackupBusy('Backup is busy')
+        owner = candidate
         retained = reconcile(job, context)
         jobs.complete(job, retained=retained)
+    except jobs.DriveBackupBusy:
+        jobs.defer(job)
     except Exception:
         jobs.fail(job)
         raise
     finally:
-        jobs.release(album_id, owner)
+        if owner:
+            jobs.release(album_id, owner)
 
 
 def handler(event, context=None):

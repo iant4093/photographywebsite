@@ -41,7 +41,7 @@ def update(table, cognito, pool, old_email, new_email, body, event, context):
     existing = table.get_item(Key=key, ConsistentRead=True).get("Item", {})
     previous = existing.get("payload", {})
     same_operation = previous.get("operation") == operation
-    if previous and previous.get("phase") != "complete" and not same_operation:
+    if previous and previous.get("phase") not in {"complete", "rejected"} and not same_operation:
         raise MediaMutationBusy("The previous account update is still being completed. Retry that update first.")
     current_email = str(attrs.get("email", "")).strip().lower()
     if current_email != old_email and not (same_operation and current_email == new_email):
@@ -49,7 +49,7 @@ def update(table, cognito, pool, old_email, new_email, body, event, context):
     if same_operation and previous.get("phase") == "complete":
         return int(previous.get("updated", 0))
 
-    payload = deepcopy(previous) if same_operation else {
+    payload = deepcopy(previous) if same_operation and previous.get("phase") != "rejected" else {
         "operation": operation, "username": username, "subject": subject,
         "phase": "pending",
         # Preserve the legacy records through owner-index propagation delays.
@@ -63,10 +63,10 @@ def update(table, cognito, pool, old_email, new_email, body, event, context):
     try:
         table.update_item(
             Key=key, UpdateExpression="SET #status = :internal, payload = :payload, leaseOwner = :owner, leaseUntil = :until",
-            ConditionExpression="(attribute_not_exists(leaseUntil) OR leaseUntil < :now) AND (attribute_not_exists(payload) OR payload.operation = :operation OR payload.phase = :complete)",
+            ConditionExpression="(attribute_not_exists(leaseUntil) OR leaseUntil < :now) AND (attribute_not_exists(payload) OR payload.operation = :operation OR payload.phase = :complete OR payload.phase = :rejected)",
             ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues={":internal": "internal", ":payload": payload, ":owner": owner,
-                                       ":until": now + duration, ":now": now, ":operation": operation, ":complete": "complete"},
+                                       ":until": now + duration, ":now": now, ":operation": operation, ":complete": "complete", ":rejected": "rejected"},
         )
     except ClientError as error:
         if _conditional_failure(error):
@@ -97,9 +97,23 @@ def update(table, cognito, pool, old_email, new_email, body, event, context):
                 if not _conditional_failure(error):
                     raise
         if current_email != new_email:
-            cognito.admin_update_user_attributes(UserPoolId=pool, Username=username, UserAttributes=[
-                {"Name": "email", "Value": new_email}, {"Name": "email_verified", "Value": "true"},
-            ])
+            try:
+                cognito.admin_update_user_attributes(UserPoolId=pool, Username=username, UserAttributes=[
+                    {"Name": "email", "Value": new_email}, {"Name": "email_verified", "Value": "true"},
+                ])
+            except ClientError as error:
+                # Only definite provider rejections are reusable. Timeouts and
+                # partial successes must retain their original recovery intent.
+                if error.response.get("Error", {}).get("Code") in {"AliasExistsException", "UsernameExistsException", "InvalidParameterException"}:
+                    _, current_subject, current_attrs = cognito_identity(cognito, pool, username)
+                    if current_subject == subject and str(current_attrs.get("email", "")).strip().lower() == old_email:
+                        payload["phase"] = "rejected"
+                        table.update_item(
+                            Key=key, UpdateExpression="SET payload = :payload",
+                            ConditionExpression="leaseOwner = :owner AND payload.operation = :operation",
+                            ExpressionAttributeValues={":owner": owner, ":operation": operation, ":payload": payload},
+                        )
+                raise
         updated = 0
         for album_id in payload["albumIds"]:
             try:

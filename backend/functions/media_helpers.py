@@ -3,6 +3,7 @@ import logging
 import urllib.parse
 import uuid
 import boto3
+from botocore.config import Config
 import exifread
 from decimal import Decimal
 
@@ -20,12 +21,12 @@ def get_s3_client():
 def get_mediaconvert_client():
     global mediaconvert
     if not mediaconvert:
-        mediaconvert = boto3.client('mediaconvert', region_name=os.environ['AWS_REGION'])
+        mediaconvert = boto3.client('mediaconvert', region_name=os.environ['AWS_REGION'], config=Config(connect_timeout=3, read_timeout=8, retries={'total_max_attempts': 1}))
         try:
             endpoints = mediaconvert.describe_endpoints(MaxResults=1)
             mediaconvert = boto3.client('mediaconvert',
                                      region_name=os.environ['AWS_REGION'],
-                                     endpoint_url=endpoints['Endpoints'][0]['Url'])
+                                     endpoint_url=endpoints['Endpoints'][0]['Url'], config=Config(connect_timeout=3, read_timeout=8, retries={'total_max_attempts': 1}))
         except Exception as error:
             logger.error("mediaconvert_endpoint_lookup_failed error_type=%s", type(error).__name__)
     return mediaconvert
@@ -144,7 +145,7 @@ def _hls_output(name_modifier, width, height, max_bitrate):
     }
 
 
-def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
+def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_token=None):
     """
     Submit two HLS renditions so the player can adapt to connection speed.
     """
@@ -191,7 +192,8 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix):
         response = mc_client.create_job(
             Role=role_arn,
             Settings=job_settings,
-            Queue="Default"
+            Queue="Default",
+            **({"ClientRequestToken": request_token, "UserMetadata": {"dispatchToken": request_token}} if request_token else {}),
         )
         return response['Job']['Id']
     except Exception as error:

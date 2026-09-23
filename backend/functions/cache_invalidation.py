@@ -177,3 +177,35 @@ def reset_cache_invalidation_client_for_tests():
     global _cloudfront, _sqs
     _cloudfront = None
     _sqs = None
+
+
+def prepare_media_revocation(album, operation_id):
+    """Persist this receipt before submission so a lost response is idempotent."""
+    distribution = os.environ.get("IMAGES_DISTRIBUTION_ID", "").strip()
+    if not distribution:
+        raise RuntimeError("Privacy cache invalidation is not configured")
+    album_id = validate_uuid(album["albumId"])
+    return {"distribution": distribution, "caller": f"media-revocation-{album_id}-{operation_id}",
+            "paths": sorted({f"/{prefix}*" for prefix in album_media_prefixes(album)} | {f"/public-previews/{album_id}/*"})}
+
+
+def advance_media_revocation(receipt):
+    """Check once; the existing queue owns waiting, never a sleeping Lambda."""
+    if receipt.get("complete"):
+        return True
+    now = int(time.time())
+    if int(receipt.get("checkAfter", 0)) > now:
+        return False
+    client = _client()
+    if receipt.get("id"):
+        response = client.get_invalidation(DistributionId=receipt["distribution"], Id=receipt["id"])
+    else:
+        response = client.create_invalidation(DistributionId=receipt["distribution"], InvalidationBatch={
+            "CallerReference": receipt["caller"], "Paths": {"Quantity": len(receipt["paths"]), "Items": receipt["paths"]}})
+    invalidation = response.get("Invalidation", {})
+    if not isinstance(invalidation.get("Id"), str) or not invalidation["Id"]:
+        raise RuntimeError("Invalid privacy invalidation response")
+    receipt["id"] = invalidation["Id"]
+    receipt["complete"] = invalidation.get("Status") == "Completed"
+    receipt["checkAfter"] = now + 15
+    return receipt["complete"]

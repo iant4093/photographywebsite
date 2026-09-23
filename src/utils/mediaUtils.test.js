@@ -47,6 +47,20 @@ describe('client media processing', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(createdUrl)
   })
 
+  it.each([[1, 32000], [32000, 1], [1, 1], [1200, 2400], [800, 800]])('bounds placeholder work for %s by %s without changing source dimensions', async (width, height) => {
+    const { getImageData } = installCanvas()
+    class ImageStub {
+      set src(value) { this.width = width; this.height = height; if (value) queueMicrotask(() => this.onload?.()) }
+    }
+    vi.stubGlobal('Image', ImageStub)
+    const result = await processImage(new File(['raw'], 'portrait.jpg', { type: 'image/jpeg' }))
+    expect(result).toMatchObject({ width, height })
+    const [, , sampledWidth, sampledHeight] = getImageData.mock.calls[0]
+    expect(sampledWidth).toBeLessThanOrEqual(32)
+    expect(sampledHeight).toBeLessThanOrEqual(32)
+    expect(sampledWidth * sampledHeight).toBeLessThanOrEqual(1024)
+  })
+
   it('rejects image decode, invalid dimensions, missing canvas, and failed JPEG encoding', async () => {
     class BadImage {
       set src(value) { if (value) queueMicrotask(() => this.onerror?.()) }

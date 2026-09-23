@@ -10,9 +10,13 @@ import logging
 import os
 import re
 import secrets
+import uuid
+import upload_followup
+import video_jobs
+from visibility_change import enqueue as enqueue_album_work
 
 import boto3
-from media_mutation import album_lease, MediaMutationBusy, MediaAlbumMissing
+from media_mutation import album_lease, enabled as mutation_protocol_enabled, MediaMutationBusy, MediaAlbumMissing
 import drive_backup_jobs
 from botocore.exceptions import ClientError
 
@@ -182,6 +186,16 @@ def _start_video_jobs(images):
 from front_door import verify_front_door_request
 
 
+def _complete_followup(album, context):
+    try:
+        enqueue_album_work(album["albumId"], "album-upload-followup")
+        upload_followup.complete(table, album, context)
+    except Exception as error:
+        # A committed upload remains usable. The queued delivery and durable
+        # stage receipt repair secondary work without another album or upload.
+        logger.error("album_followup_pending error_type=%s", type(error).__name__)
+
+
 def handler(event, context):
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
@@ -251,6 +265,12 @@ def handler(event, context):
         if is_shared:
             item["shareCode"] = secrets.token_urlsafe(24)
 
+        if mutation_protocol_enabled():
+            item["pendingMediaUpload"] = {"id": uuid.uuid4().hex, "keys": [image["rawKey"] for image in images], "done": []}
+            if os.environ.get("ALBUM_MEDIA_TABLE"):
+                item["mediaStoreDirty"] = True
+            if album_type == "video":
+                item["videoJobs"] = video_jobs.prepare(item, images)
         ensure_album_item_budget(item)
 
         try:
@@ -268,6 +288,14 @@ def handler(event, context):
             if matching_retry and existing.get("status") == "active" and not existing.get("createdBySub"):
                 # A lost HTTP response must not create another album, rerun
                 # media jobs, or resend a private-album notification.
+                if mutation_protocol_enabled() and (existing.get("pendingMediaUpload") or existing.get("videoJobs")):
+                    with album_lease(table, album_id, context):
+                        # A manifest can change between the conflict read and
+                        # acquiring the lease. Never repair from that snapshot.
+                        existing = table.get_item(Key={"albumId": album_id}, ConsistentRead=True)["Item"]
+                        if existing.get("uploadRequestHash") != upload_request_hash or existing.get("uploadActorSub") != claims["sub"]:
+                            return error_response(409, "Album changed. Reload and retry.", code="conflict")
+                        _complete_followup(existing, context)
                 _audit(event, context, "success", "album_created", media_count=len(existing.get("images", [])),
                        visibility=existing.get("visibility"))
                 return json_response(201, serialize_album_summary(existing, include_admin=True))
@@ -283,7 +311,7 @@ def handler(event, context):
             images = item.get("images", [])
 
         with album_lease(table, album_id, context, creating=True):
-            if album_type == "video" and not any(image.get("mediaConvertJobId") for image in images):
+            if album_type == "video" and not mutation_protocol_enabled() and not any(image.get("mediaConvertJobId") for image in images):
                 _start_video_jobs(images)
                 table.update_item(
                     Key={"albumId": album_id},
@@ -307,6 +335,10 @@ def handler(event, context):
                 )
                 item["status"] = "active"
             tag_album_visibility(item, visibility, include_derivatives=False)
+            if mutation_protocol_enabled():
+                # Dispatch before commit: a crash just after saving an active
+                # album cannot lose the durable after-commit continuation.
+                enqueue_album_work(album_id, "album-upload-followup")
             drive_backup_jobs.update_album(
                 table, item,
                 Key={"albumId": album_id},
@@ -318,24 +350,27 @@ def handler(event, context):
             item["status"] = "active"
             item.pop("createdBySub", None)
 
-            # Populate the normalized media store only after the legacy manifest is
-            # committed and visible. The version marker is the read cutover: if the
-            # secondary write fails, readers continue using the complete manifest.
-            try:
-                if replace_album_media(album_id, images):
-                    activate_album_media(table, album_id, images)
-                    item["mediaStoreVersion"] = 1
-            except Exception as error:
-                logger.error("album_media_normalization_failed error_type=%s", type(error).__name__)
-
-            if album_type == "photo":
-                request_original_comparisons(album_id, images)
+            if mutation_protocol_enabled():
+                _complete_followup(item, context)
+            else:
+                # Populate the normalized media store only after the legacy manifest is
+                # committed and visible. The version marker is the read cutover: if the
+                # secondary write fails, readers continue using the complete manifest.
                 try:
-                    enqueue_preview_jobs(album_id, images)
+                    if replace_album_media(album_id, images):
+                        activate_album_media(table, album_id, images)
+                        item["mediaStoreVersion"] = 1
                 except Exception as error:
-                    # V1 JPEG thumbnails remain authoritative until asynchronous
-                    # Responsive preview generation succeeds, so queue outages cannot break upload.
-                    logger.error("preview_dispatch_failed error_type=%s", type(error).__name__)
+                    logger.error("album_media_normalization_failed error_type=%s", type(error).__name__)
+
+                if album_type == "photo":
+                    request_original_comparisons(album_id, images)
+                    try:
+                        enqueue_preview_jobs(album_id, images)
+                    except Exception as error:
+                        # V1 JPEG thumbnails remain authoritative until asynchronous
+                        # Responsive preview generation succeeds, so queue outages cannot break upload.
+                        logger.error("preview_dispatch_failed error_type=%s", type(error).__name__)
 
             if visibility == "private" and owner_email:
                 portal_url = html.escape(os.environ.get("FRONTEND_URL", "https://iantruongphotography.com"), quote=True)
@@ -383,7 +418,7 @@ def handler(event, context):
                         context=context, actor_type="service", auth_method="service",
                     )
 
-            if visibility == "public":
+            if visibility == "public" and not mutation_protocol_enabled():
                 request_public_api_invalidation(catalog=True, reason="album-created")
                 if album_type == "photo":
                     request_random_photo_pool_refresh()

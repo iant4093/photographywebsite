@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
@@ -16,7 +17,9 @@ logger = logging.getLogger("photography_api.cache_invalidation_worker")
 WORKERS = {"album-visibility": "VISIBILITY_WORKER_FUNCTION_NAME",
            "album-upload-followup": "UPLOAD_WORKER_FUNCTION_NAME",
            "album-media-sync": "UPLOAD_WORKER_FUNCTION_NAME",
-           "album-thumbnail-cleanup": "THUMBNAIL_WORKER_FUNCTION_NAME"}
+           "album-video-jobs": "UPLOAD_WORKER_FUNCTION_NAME",
+           "album-thumbnail-cleanup": "THUMBNAIL_WORKER_FUNCTION_NAME",
+           "album-drive-backup": "DRIVE_WORKER_FUNCTION_NAME"}
 
 
 def _continue_album_work(body):
@@ -25,6 +28,18 @@ def _continue_album_work(body):
         raise RuntimeError("Album continuation worker is not configured")
     client = boto3.session.Session().client("lambda", config=Config(connect_timeout=2, read_timeout=20,
                                                 retries={"mode": "standard", "total_max_attempts": 1}))
+    if body["kind"] == "album-drive-backup":
+        entry = body.get("jobEntry", "")
+        if not isinstance(entry, str) or not re.fullmatch(r"job#[a-f0-9]{32}", entry):
+            raise ValueError("Invalid backup job")
+        response = client.invoke(FunctionName=function, InvocationType="Event", Payload=json.dumps({
+            "source": "album-drive-backup", "albumId": validate_uuid(body["albumId"]), "jobEntry": entry}))
+        payload = response.get("Payload")
+        if payload is not None:
+            payload.close()
+        if response.get("StatusCode") != 202:
+            raise RuntimeError("Backup continuation was not accepted")
+        return
     response = client.invoke(FunctionName=function, InvocationType="RequestResponse",
                              Payload=json.dumps({"source": body["kind"], "albumId": validate_uuid(body["albumId"])}))
     payload = response["Payload"]
@@ -89,7 +104,7 @@ def handler(event, _context):
     remaining = getattr(_context, "get_remaining_time_in_millis", None)
     grouped = {}
     for identifier, body in work_records:
-        identity = (body["kind"], body["albumId"])
+        identity = (body["kind"], body["albumId"], body.get("jobEntry"))
         group = grouped.setdefault(identity, {"body": body, "ids": []})
         group["ids"].append(identifier)
 

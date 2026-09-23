@@ -65,7 +65,13 @@ export function createMediaUploadSession({ albumId, s3Prefix, entries, video = f
                 const parts = queue.flatMap(entry => entry.parts)
                 try {
                     // getSession refreshes an expired Cognito token here.
-                    const token = await getIdToken()
+                    const token = await new Promise((resolve, reject) => {
+                        const cancel = () => reject(signal.reason || new DOMException('Upload cancelled.', 'AbortError'))
+                        if (signal.aborted) { cancel(); return }
+                        signal.addEventListener('abort', cancel, { once: true })
+                        Promise.resolve().then(getIdToken).then(resolve, reject)
+                            .finally(() => signal.removeEventListener('abort', cancel))
+                    })
                     signal.throwIfAborted()
                     const { uploads } = await requestUploadUrls(token, albumId, parts.map(part => ({
                         filename: part.filename, contentType: part.kind === 'thumbnail' ? 'image/jpeg' : part.file.type,

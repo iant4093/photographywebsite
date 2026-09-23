@@ -226,7 +226,6 @@ def handler(event, context):
             if album and album.get("pendingVisibilityChange"):
                 if album["pendingVisibilityChange"].get("requestHash") != visibility_change.request_hash(body):
                     raise MediaMutationBusy("The previous privacy change is still being completed.")
-                visibility_change.enqueue(album_id)
                 return _continue_visibility(album_id, context, album, event)
             if not album or album.get("status", "active") != "active":
                 _audit(event, context, "denied", "album_not_found")

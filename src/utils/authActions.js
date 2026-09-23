@@ -1,3 +1,5 @@
+import { cognitoOperation } from './cognitoOperation'
+
 // Loaded when signing in or configuring MFA, alongside the lazy Cognito SDK.
 function safeLoginError(status) {
     if (status === 429) return 'Too many login attempts. Please wait and try again.'
@@ -62,56 +64,49 @@ export async function requestAuthentication(kind, input, { timeoutMs = 20_000 } 
 }
 
 async function validateSession(user, assertCurrent) {
-    await new Promise((resolve, reject) => {
-        user.getSession((error, session) => {
-            if (error || !session?.isValid()) reject(new Error('Your session has expired. Please sign in again.'))
-            else resolve()
-        })
-    })
+    const session = await cognitoOperation(user, (scoped, done) => scoped.getSession(done), { assertCurrent })
+    if (!session?.isValid()) throw new Error('Your session has expired. Please sign in again.')
     assertCurrent()
 }
 
 export async function beginMfaSetup(user, assertCurrent) {
     await validateSession(user, assertCurrent)
-    const secret = await new Promise((resolve, reject) => {
-        user.associateSoftwareToken({
-            associateSecretCode: resolve,
-            onFailure: () => reject(new Error('Authenticator setup could not be started. Please try again.')),
-        })
-    })
-    assertCurrent()
-    return secret
+    // Check the provider after a prior ambiguous setup before replacing it.
+    const data = await cognitoOperation(user, (scoped, done) => scoped.getUserData(done, { bypassCache: true }), { assertCurrent })
+    if ((data?.UserMFASettingList || []).includes('SOFTWARE_TOKEN_MFA')) {
+        throw new Error('Two-factor authentication is already enabled. Sign in again to continue.')
+    }
+    return cognitoOperation(user, (scoped, done) => scoped.associateSoftwareToken({
+        associateSecretCode: secret => done(null, secret),
+        onFailure: () => done(new Error('Authenticator setup could not be started. Please try again.')),
+    }), { assertCurrent })
 }
 
 export async function completeMfaSetup(user, code, assertCurrent) {
     if (!/^[0-9]{6}$/.test(code || '')) throw new Error('Enter the 6-digit code from your authenticator app.')
     await validateSession(user, assertCurrent)
-    await new Promise((resolve, reject) => {
-        user.verifySoftwareToken(code, 'Ian Truong Photography admin', {
-            onSuccess: resolve,
-            onFailure: () => reject(new Error('That verification code was not accepted. Try a fresh code.')),
-        })
-    })
-    assertCurrent()
-    await new Promise((resolve, reject) => {
-        user.setUserMfaPreference(null, { Enabled: true, PreferredMfa: true }, (error) => {
-            if (error) reject(new Error('Two-factor authentication could not be activated. Please try again.'))
-            else resolve()
-        })
-    })
-    assertCurrent()
+    const data = await cognitoOperation(user, (scoped, done) => scoped.getUserData(done, { bypassCache: true }), { assertCurrent })
+    if (!(data?.UserMFASettingList || []).includes('SOFTWARE_TOKEN_MFA')) {
+        await cognitoOperation(user, (scoped, done) => scoped.verifySoftwareToken(code, 'Ian Truong Photography admin', {
+            onSuccess: value => done(null, value),
+            onFailure: () => done(new Error('That verification code was not accepted. Try a fresh code.')),
+        }), { assertCurrent })
+        await cognitoOperation(user, (scoped, done) => scoped.setUserMfaPreference(null,
+            { Enabled: true, PreferredMfa: true }, error => done(error
+                ? new Error('Two-factor authentication could not be activated. Please try again.') : null)), { assertCurrent })
+    }
     let globallySignedOut = true
-    await new Promise((resolve) => {
-        user.globalSignOut({
-            onSuccess: resolve,
-            onFailure: () => {
-                globallySignedOut = false
-                // Do not let a late failure clear a different browser session.
-                try { assertCurrent(); user.signOut() } catch { /* Session already changed. */ }
-                resolve()
-            },
-        })
-    })
+    try {
+        await cognitoOperation(user, (scoped, done) => scoped.globalSignOut({
+            onSuccess: value => done(null, value),
+            onFailure: error => done(error || new Error('Sign out failed')),
+        }), { assertCurrent })
+    } catch {
+        globallySignedOut = false
+        // A timeout is also ambiguous; always fence local credential cleanup.
+        assertCurrent()
+        user.signOut()
+    }
     assertCurrent()
     return { globallySignedOut }
 }

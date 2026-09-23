@@ -6,7 +6,7 @@ import time
 import uuid
 import drive_backup_jobs
 
-from cache_invalidation import _queue_client, invalidate_album_media
+from cache_invalidation import _queue_client, prepare_media_revocation, advance_media_revocation
 from dynamodb_helpers import ensure_album_item_budget
 from media_access import album_media_prefixes, bucket_name, get_s3_client, retag_album_objects
 from media_mutation import MediaMutationBusy
@@ -19,12 +19,13 @@ def request_hash(body):
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def enqueue(album_id, kind="album-visibility"):
+def enqueue(album_id, kind="album-visibility", *, delay=0):
     queue = os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip()
     if not queue:
         raise RuntimeError("Privacy continuation queue is not configured")
     _queue_client().send_message(
         QueueUrl=queue,
+        **({"DelaySeconds": min(900, max(0, int(delay)))} if delay else {}),
         MessageBody=json.dumps({"version": 1, "kind": kind, "albumId": album_id}, separators=(",", ":")),
     )
 
@@ -117,14 +118,19 @@ def advance(table, album, context=None):
                 pending["prefix"] = index + 1
             save_progress(table, album)
             continue
-        if pending["phase"] == "purge":
-            # Preserve the old hover/QR namespace until every object was retagged.
-            if not invalidate_album_media(album, reason="album-visibility-transition", strict=True):
-                raise RuntimeError("Privacy cache invalidation is not configured")
-            pending["phase"] = "commit"
+        if pending["phase"] in {"purge", "commit"}:
+            # Older in-flight transitions can already be at commit without a
+            # tracked purge. Revoke again once using a stable provider token.
+            if not pending.get("invalidation"):
+                pending["invalidation"] = prepare_media_revocation(album, pending["id"])
+                save_progress(table, album)
+            complete = advance_media_revocation(pending["invalidation"])
+            pending["phase"] = "commit" if complete else "purge"
             save_progress(table, album)
-        if pending["phase"] == "commit":
-            return target
+            if complete:
+                return target
+            enqueue(album["albumId"], delay=15)
+            return None
         if pending["phase"] not in {"objects", "purge", "commit"}:
             raise MediaMutationBusy("Album privacy progress is invalid")
     enqueue(album["albumId"])
