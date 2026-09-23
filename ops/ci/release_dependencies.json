@@ -2,6 +2,7 @@
   "version": 1,
   "rules": [
     {"logicalId": "AddImagesFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["AddImagesFunctionRole.Arn"]},
+    {"logicalId": "CacheInvalidationWorkerFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["CacheInvalidationWorkerFunctionRole.Arn"]},
     {"logicalId": "CreateAlbumFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["CreateAlbumFunctionRole.Arn"]},
     {"logicalId": "CreateZipFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["CreateZipFunctionRole.Arn"]},
     {"logicalId": "CompleteChallengeFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["CompleteChallengeFunctionRole.Arn"]},

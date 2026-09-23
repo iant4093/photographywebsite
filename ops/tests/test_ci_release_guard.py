@@ -322,6 +322,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "CreateAlbumFunctionRole",
                 "GoogleDriveBackupFunctionRole",
                 "AddImagesFunctionRole",
+                "CacheInvalidationWorkerFunctionRole",
                 "DeleteAlbumFunctionRole",
                 "DeleteImagesFunctionRole",
                 "UpdateAlbumFunctionRole",
@@ -339,6 +340,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "GetPublicAlbumsFunctionRole",
                 "HeroCoverFunctionRole",
                 "PreviewWorkerFunctionRole",
+                "TagMediaObjectFunctionRole",
                 "PreparePrintFunctionRole",
                 "RefreshGoogleDriveUsageFunctionRole",
                 "RandomPhotoPoolBuilderFunctionRole",
@@ -559,6 +561,61 @@ class ReleaseIntentTests(unittest.TestCase):
             with self.subTest(item=item), self.assertRaises(release_guard.GateError):
                 release_guard.gate_change_set(
                     [{"Changes": [item]}], release_intent=intent,
+                )
+
+    def test_media_recovery_intent_allows_only_reviewed_existing_resource_properties(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        dependencies = release_guard.load_release_dependencies(json.loads(
+            (ROOT / "ops/ci/release_dependencies.json").read_text(encoding="utf-8")
+        ))
+        mapping = change(
+            logical_id="CacheInvalidationWorkerFunctionCacheInvalidationRequests",
+            resource_type="AWS::Lambda::EventSourceMapping",
+            property_name="FunctionResponseTypes",
+        )
+        roles = [change(
+            logical_id=logical_id,
+            resource_type="AWS::IAM::Role",
+            property_name="Policies",
+        ) for logical_id in ("CacheInvalidationWorkerFunctionRole", "TagMediaObjectFunctionRole")]
+        function = change(logical_id="CacheInvalidationWorkerFunction", property_name="Role")
+        function["ResourceChange"]["Details"][0].update({
+            "Evaluation": "Dynamic",
+            "ChangeSource": "ResourceAttribute",
+            "CausingEntity": "CacheInvalidationWorkerFunctionRole.Arn",
+        })
+        self.assertEqual(release_guard.gate_change_set(
+            [{"Changes": [mapping, *roles, function]}],
+            release_intent=intent, release_dependencies=dependencies,
+        ), {"Add": 0, "Modify": 4, "Total": 4})
+
+        rejected = []
+        for original, forbidden in [(mapping, "BatchSize"), (mapping, "Enabled"),
+                                    *[(role, "AssumeRolePolicyDocument") for role in roles]]:
+            item = copy.deepcopy(original)
+            item["ResourceChange"]["Details"][0]["Target"]["Name"] = forbidden
+            rejected.append(item)
+        for original in (mapping, *roles):
+            item = copy.deepcopy(original)
+            item["ResourceChange"]["Details"] = []
+            rejected.append(item)
+            item = copy.deepcopy(original)
+            item["ResourceChange"]["Replacement"] = "True"
+            rejected.append(item)
+        unrelated = copy.deepcopy(mapping)
+        unrelated["ResourceChange"]["LogicalResourceId"] = "OtherQueueMapping"
+        rejected.append(unrelated)
+        for changes in ({"Evaluation": "Static"}, {"CausingEntity": "OtherRole.Arn"}):
+            item = copy.deepcopy(function)
+            item["ResourceChange"]["Details"][0].update(changes)
+            rejected.append(item)
+        for item in rejected:
+            with self.subTest(item=item), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set(
+                    [{"Changes": [item]}], release_intent=intent,
+                    release_dependencies=dependencies,
                 )
 
     def test_exact_add_intent_can_introduce_but_never_modify_a_protected_resource(self):
