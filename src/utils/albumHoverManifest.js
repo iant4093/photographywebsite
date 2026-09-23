@@ -203,6 +203,9 @@ export function fetchAlbumHoverManifest(album, options = {}) {
             return value
         }).finally(() => {
             entry.settled = true
+            // Header/parse failures can finish before the response body. Stop
+            // that transfer as well as explicitly abandoned consumer requests.
+            controller.abort()
             clearTimeout(timer)
             evict()
         })

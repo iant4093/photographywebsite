@@ -155,6 +155,13 @@ describe('hover request resource bounds', () => {
         fetch.mockResolvedValue(response())
         await expect(fetchAlbumHoverManifest(album)).resolves.toMatchObject({ albumId })
     })
+    it('aborts a rejected response even when its unconsumed body never finishes', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream(), { headers: { 'content-type': 'text/plain' } })))
+        await expect(fetchAlbumHoverManifest(album)).rejects.toThrow(/content type/)
+        expect(fetch.mock.calls[0][1].signal.aborted).toBe(true)
+        fetch.mockResolvedValue(response())
+        await expect(fetchAlbumHoverManifest(album)).resolves.toMatchObject({ albumId })
+    })
     it('cancels an oversized chunked body before consuming the entire response', async () => {
         const cancel = vi.fn()
         const body = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(32769)) }, cancel })
