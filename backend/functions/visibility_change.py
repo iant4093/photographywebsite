@@ -153,6 +153,11 @@ def commit(table, album, target):
     commit_write = (lambda **kwargs: drive_backup_jobs.update_album(table, album, **kwargs)) if any(
         target.get(field) != album.get(field) for field in ("title", "category")
     ) else table.update_item
+    if album.get("pendingMediaUpload") or album.get("videoJobs") or album.get("mediaStoreDirty"):
+        # Long privacy transitions can outlast a different queue delivery's
+        # retry budget. Redispatch its durable work before exposing active
+        # state, so a crash after this commit cannot strand those receipts.
+        enqueue(album["albumId"], "album-upload-followup", delay=15)
     commit_write(
         Key={"albumId": album["albumId"]},
         UpdateExpression="SET " + ", ".join(sets) + " REMOVE " + ", ".join(removes),

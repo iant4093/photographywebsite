@@ -207,3 +207,12 @@ class RecoveryFollowupTests(unittest.TestCase):
         self.assertEqual(client.invoke.call_count, 2)
         self.assertEqual({json.loads(call.kwargs['Payload'])['jobEntry'] for call in client.invoke.call_args_list}, set(entries))
         self.assertTrue(all(call.kwargs['InvocationType'] == 'Event' for call in client.invoke.call_args_list))
+
+    def test_privacy_completion_redispatches_interrupted_media_followup_before_commit(self):
+        self.put({**RECORD, 'pendingMediaUpload': {'id': 'upload', 'keys': [], 'done': []}})
+        result = update_album.handler(self.event({'visibility': 'unlisted'}), CONTEXT)
+        self.assertEqual(result['statusCode'], 200)
+        messages = [json.loads(call.kwargs['MessageBody']) for call in self.queue.return_value.send_message.call_args_list]
+        self.assertTrue(any(message.get('kind') == 'album-upload-followup' for message in messages))
+        self.assertEqual(self.album()['status'], 'active')
+        self.assertIn('pendingMediaUpload', self.album())
