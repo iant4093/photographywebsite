@@ -1,7 +1,10 @@
 import { Component } from 'react'
 
 export default class RecoveryBoundary extends Component {
-    state = { failed: false }
+    state = { failed: false, resetKey: this.props.resetKey }
+    static getDerivedStateFromProps({ resetKey }, state) {
+        return resetKey !== state.resetKey ? { failed: false, resetKey } : null
+    }
     static getDerivedStateFromError() { return { failed: true } }
     render() {
         if (!this.state.failed) return this.props.children

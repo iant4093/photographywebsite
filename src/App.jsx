@@ -98,7 +98,7 @@ function App() {
                 />
             )}
             <main id="main-content" tabIndex={-1} className="flex-1">
-                <RecoveryBoundary key={location.key}>
+                <RecoveryBoundary resetKey={location.pathname}>
                 <Suspense fallback={<PageLoading />}>
                     <Routes location={location}>
                         <Route path="/" element={<Home />} />
