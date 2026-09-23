@@ -183,6 +183,42 @@ def activate_album_media(albums_table, album_id, images):
     )
 
 
+def finish_media_sync(albums_table, album, images, operation):
+    """Called after an atomic fallback to the authoritative album manifest."""
+    if not (album.get("mediaStoreVersion") == MEDIA_STORE_VERSION or album.get("mediaStoreDirty")):
+        return True
+    try:
+        synchronized = (replace_album_media(album["albumId"], images)
+                        if album.get("mediaStoreDirty") else operation())
+        if not synchronized:
+            return False
+        albums_table.update_item(
+            Key={"albumId": album["albumId"]},
+            UpdateExpression="SET mediaStoreVersion = :version REMOVE mediaStoreDirty",
+            ConditionExpression="attribute_exists(albumId) AND images = :images AND attribute_not_exists(pendingVisibilityChange) AND (attribute_not_exists(#status) OR #status = :active)",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":version": MEDIA_STORE_VERSION, ":images": images, ":active": "active"},
+        )
+        return True
+    except Exception as error:
+        # The committed write already disabled normalized reads. A failed repair
+        # cannot leave readers on stale data, and the durable dirty bit survives.
+        logger.error("album_media_sync_pending error_type=%s", type(error).__name__)
+        return False
+
+
+def mutation_expression(expression, album, values):
+    """Make read fallback atomic with any authoritative manifest mutation."""
+    from media_mutation import enabled
+    if not enabled() or not (album.get("mediaStoreVersion") == MEDIA_STORE_VERSION or album.get("mediaStoreDirty")):
+        return expression
+    values[":media_dirty"] = True
+    if " REMOVE " in expression:
+        sets, removes = expression.split(" REMOVE ", 1)
+        return sets + ", mediaStoreDirty = :media_dirty REMOVE " + removes + ", mediaStoreVersion"
+    return expression + ", mediaStoreDirty = :media_dirty REMOVE mediaStoreVersion"
+
+
 def deactivate_album_media(albums_table, album_id):
     try:
         albums_table.update_item(

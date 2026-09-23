@@ -94,3 +94,30 @@ test('a noncooperative transform returns at the job deadline', async () => {
         await assert.rejects(runWorkerJob(() => new Promise(() => {})), /deadline/)
     })
 })
+
+test('publication holds an owner-specific lease beyond the actual Lambda deadline', async () => {
+    const { withMediaLease } = await import('./media-lease.mjs')
+    const writes = []
+    const client = { send: async command => { writes.push(command.input) } }
+    await withWorkerBudget({ getRemainingTimeInMillis: () => 120000 }, async () => {
+        await withMediaLease(client, 'albums', 'album', async () => {
+            assert.equal(writes.length, 1)
+            const until = writes[0].ExpressionAttributeValues[':until']
+            assert.ok(until >= Math.floor(Date.now() / 1000) + 179)
+            assert.match(writes[0].ConditionExpression, /attribute_exists\(albumId\)/)
+            assert.match(writes[0].ConditionExpression, /mediaLeaseUntil < :now/)
+        })
+    })
+    assert.equal(writes.length, 2)
+    assert.equal(writes[0].ExpressionAttributeValues[':owner'], writes[1].ExpressionAttributeValues[':owner'])
+})
+
+test('a busy publication never starts work and failed work releases only its own lease', async () => {
+    const { withMediaLease } = await import('./media-lease.mjs')
+    let ran = false
+    await assert.rejects(withMediaLease({ send: async () => { throw new Error('busy') } }, 'albums', 'album', async () => { ran = true }), /busy/)
+    assert.equal(ran, false)
+    let calls = 0
+    await assert.rejects(withMediaLease({ send: async () => { calls++; if (calls === 2) throw new Error('release unavailable') } }, 'albums', 'album', async () => { throw new Error('operation failed') }), /operation failed/)
+    assert.equal(calls, 2)
+})

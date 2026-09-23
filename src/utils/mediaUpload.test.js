@@ -120,6 +120,22 @@ describe('bounded, resumable media uploads', () => {
         expect(options.session.matches([{ ...options.files[0], time: 2 }])).toBe(false)
     })
 
+    it('forwards cancellation into preparation so a stalled decoder releases the session', async () => {
+        const options = setup()
+        let preparationSignal
+        options.prepare.mockImplementation((_entry, _index, _total, { signal }) => new Promise((_resolve, reject) => {
+            preparationSignal = signal
+            signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true })
+        }))
+        const result = options.session.run(options).catch(error => error)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(preparationSignal).toBeInstanceOf(AbortSignal)
+        options.session.cancel()
+        expect((await result).name).toBe('AbortError')
+        expect(preparationSignal.aborted).toBe(true)
+        expect(api.uploadFileToS3).not.toHaveBeenCalled()
+    })
+
     it('cancels before authorization and refuses overlapping runs', async () => {
         const options = setup()
         const first = options.session.run(options).catch(error => error)

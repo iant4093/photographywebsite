@@ -5,3 +5,4 @@ coverage==7.10.7
 cfn-lint==1.53.1
 pip-audit==2.9.0
 zizmor==1.28.0
+moto[dynamodb,s3]==5.2.3

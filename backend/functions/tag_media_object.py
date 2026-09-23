@@ -7,6 +7,7 @@ import uuid
 import boto3
 
 from media_access import PENDING_VISIBILITY, tag_keys_visibility
+from media_mutation import album_lease, object_is_committed, MediaAlbumMissing, enabled
 from validation_helpers import ALLOWED_VISIBILITIES
 
 
@@ -35,9 +36,18 @@ def handler(event, context):
         album_id = _album_id_from_key(key)
         if not album_id:
             continue
-        album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
-        visibility = PENDING_VISIBILITY
-        if album and album.get("status", "active") == "active" and album.get("visibility") in ALLOWED_VISIBILITIES:
-            visibility = album["visibility"]
-        tagged += tag_keys_visibility([key], visibility)
+        try:
+            with album_lease(table, album_id, context):
+                album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+                visibility = PENDING_VISIBILITY
+                if (album and album.get("status", "active") == "active"
+                        and album.get("visibility") in ALLOWED_VISIBILITIES
+                        and (not enabled() or object_is_committed(album, key))):
+                    visibility = album["visibility"]
+                tagged += tag_keys_visibility([key], visibility)
+        except MediaAlbumMissing:
+            # Initial uploads already carry pending, service outputs are denied
+            # without a public tag. Do not race a new album's first publication
+            # by writing a pending tag after observing a missing row.
+            continue
     return {"tagged": tagged}

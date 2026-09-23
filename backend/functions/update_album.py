@@ -5,7 +5,9 @@ import os
 import secrets
 
 import boto3
+from media_mutation import album_lease, enabled as mutation_protocol_enabled, MediaMutationBusy, MediaAlbumMissing
 import drive_backup_jobs
+import visibility_change
 from botocore.exceptions import ClientError
 
 from audit_helpers import actor_context, emit_audit_event
@@ -171,7 +173,40 @@ def _reconcile_album_qr(updated):
 from front_door import verify_front_door_request
 
 
+def _continue_visibility(album_id, context, album=None):
+    with album_lease(table, album_id, context, transition=True):
+        album = album or table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+        if not album or not album.get("pendingVisibilityChange"):
+            return json_response(200, {"complete": True})
+        target = visibility_change.advance(table, album, context)
+        if target is None:
+            return json_response(202, {"albumId": album_id, "pending": True}, cache_control="private, no-store")
+        # Index publication must succeed before exposing the final album row.
+        if target.get("type", "photo") == "photo":
+            metadata = load_preview_metadata(target, strict=True)
+            if metadata:
+                sync_album_index(dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]), target, metadata)
+        committed = visibility_change.commit(table, album, target)
+        request_public_api_invalidation(album_id=album_id, catalog=True, reason="album-updated")
+        if committed.get("type", "photo") == "photo":
+            request_random_photo_pool_refresh()
+            request_hover_preview_refresh(album_id)
+        if not drive_backup_jobs.state_table():
+            try:
+                _sync_drive_folder(committed)
+            except Exception:
+                pass  # Existing legacy Drive reconciliation remains best-effort.
+        return json_response(200, serialize_album_summary(committed, include_admin=True))
+
+
 def handler(event, context):
+    # API Gateway wraps caller JSON in body; it cannot create this top-level
+    # internal envelope. Only the existing queue worker's IAM role can invoke it.
+    if isinstance(event, dict) and set(event) == {"source", "albumId"} and event.get("source") == "album-visibility":
+        try:
+            return _continue_visibility(validate_uuid(event["albumId"]), context)
+        except MediaAlbumMissing:
+            return json_response(200, {"complete": True})
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
         return front_door_denied
@@ -180,26 +215,186 @@ def handler(event, context):
         return denied
     try:
         album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
-        body = parse_json_body(event)
-        if not body:
-            _audit(event, context, "denied", "empty_update")
-            return error_response(400, "No fields to update", code="invalid_album")
-        album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
-        if not album or album.get("status", "active") != "active":
-            _audit(event, context, "denied", "album_not_found")
-            return error_response(404, "Album not found", code="not_found")
-        if album.get("pendingMediaDeletion"):
-            return error_response(409, "Media deletion is still being completed. Please retry shortly.", code="deletion_pending")
-        updated = _updated_album(album, body)
-        _reconcile_album_qr(updated)
-        old_visibility = album.get("visibility")
-        new_visibility = updated["visibility"]
-        changed_fields = {
-            field
-            for field in MUTABLE_FIELDS
-            if album.get(field, _MISSING) != updated.get(field, _MISSING)
-        }
-        if not changed_fields:
+        with album_lease(table, album_id, context, transition=True):
+            body = parse_json_body(event)
+            if not body:
+                _audit(event, context, "denied", "empty_update")
+                return error_response(400, "No fields to update", code="invalid_album")
+            album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+            if album and album.get("pendingVisibilityChange"):
+                if album["pendingVisibilityChange"].get("requestHash") != visibility_change.request_hash(body):
+                    raise MediaMutationBusy("The previous privacy change is still being completed.")
+                visibility_change.enqueue(album_id)
+                return _continue_visibility(album_id, context, album)
+            if not album or album.get("status", "active") != "active":
+                _audit(event, context, "denied", "album_not_found")
+                return error_response(404, "Album not found", code="not_found")
+            if album.get("pendingMediaDeletion"):
+                return error_response(409, "Media deletion is still being completed. Please retry shortly.", code="deletion_pending")
+            updated = _updated_album(album, body)
+            _reconcile_album_qr(updated)
+            old_visibility = album.get("visibility")
+            new_visibility = updated["visibility"]
+            changed_fields = {
+                field
+                for field in MUTABLE_FIELDS
+                if album.get(field, _MISSING) != updated.get(field, _MISSING)
+            }
+            if not changed_fields:
+                _audit(
+                    event,
+                    context,
+                    "success",
+                    "album_updated",
+                    previous_visibility=old_visibility,
+                    visibility=new_visibility,
+                )
+                return json_response(200, serialize_album_summary(album, include_admin=True))
+
+            visibility_changed = old_visibility != new_visibility
+            if visibility_changed and mutation_protocol_enabled():
+                # A hover manifest made for the old visibility must not be
+                # advertised again when the transition becomes active.
+                fields = set(MUTABLE_FIELDS) | {"hoverPreviewStatus", "hoverPreviewVersion", "hoverPreviewManifestKey"}
+                for field in fields - MUTABLE_FIELDS:
+                    updated.pop(field, None)
+                pending = visibility_change.begin(table, album, updated, body, fields)
+                return _continue_visibility(album_id, context, pending)
+            old_qr_key = validated_album_qr_key(album)
+            new_qr_key = validated_album_qr_key(updated)
+
+            # Restrictive transitions tag first; release-to-public transitions update
+            # authorization metadata first. Both orders fail safe (unavailable rather
+            # than anonymously exposed) if the second operation fails.
+            if visibility_changed and old_visibility == "public" and new_visibility != "public":
+                if old_qr_key and old_qr_key != new_qr_key:
+                    tag_keys_visibility([old_qr_key], new_visibility)
+                tag_album_visibility(updated, new_visibility, include_derivatives=True)
+                # Submit the edge purge before committing a restrictive transition.
+                # A purge failure therefore leaves media unavailable, not silently
+                # less private than the requested album state.
+                invalidate_album_media(
+                    album,
+                    reason="album-visibility-restricted",
+                    strict=True,
+                )
+
+            # A cover or visibility transition invalidates the old frame set. Clear
+            # its catalog pointer in the same conditional write so a newly fetched
+            # catalog can never advertise a stale manifest while the targeted
+            # builder is catching up. Restrictive transitions above still see the
+            # old pointer and tag that object before it is detached.
+            hover_pointer_fields = {
+                "hoverPreviewStatus",
+                "hoverPreviewVersion",
+                "hoverPreviewManifestKey",
+            }
+            invalidate_hover_pointer = (
+                updated.get("type", "photo") == "photo"
+                and {"visibility", "coverImageUrl", "coverThumbKey"}.intersection(changed_fields)
+            )
+            if invalidate_hover_pointer:
+                for field in hover_pointer_fields:
+                    updated.pop(field, None)
+
+            condition = (
+                "attribute_exists(albumId) AND attribute_not_exists(pendingMediaDeletion) AND (attribute_not_exists(#status) OR #status = :active) "
+                "AND #visibility = :previous_visibility"
+            )
+            expression_names = {"#status": "status", "#visibility": "visibility"}
+            expression_values = {
+                ":active": "active",
+                ":previous_visibility": old_visibility,
+            }
+            if {"coverImageUrl", "coverThumbKey", "coverBlurhash"}.intersection(changed_fields):
+                condition += " AND (attribute_not_exists(images) OR images = :previous_images)"
+                expression_values[":previous_images"] = album.get("images", [])
+            assignments = []
+            removals = []
+            mutation_fields = set(changed_fields)
+            if invalidate_hover_pointer:
+                mutation_fields.update(hover_pointer_fields)
+            for index, field in enumerate(sorted(mutation_fields)):
+                name = f"#field{index}"
+                expression_names[name] = field
+                if field in updated:
+                    value = f":value{index}"
+                    assignments.append(f"{name} = {value}")
+                    expression_values[value] = updated[field]
+                else:
+                    removals.append(name)
+            update_parts = []
+            if assignments:
+                update_parts.append("SET " + ", ".join(assignments))
+            if removals:
+                update_parts.append("REMOVE " + ", ".join(removals))
+
+            backup_change = bool({"title", "category"}.intersection(changed_fields))
+            commit = drive_backup_jobs.update_album if backup_change else lambda _table, _album, **kwargs: _table.update_item(**kwargs)
+            response = commit(
+                table, album,
+                Key={"albumId": album_id},
+                UpdateExpression=" ".join(update_parts),
+                ConditionExpression=condition,
+                ExpressionAttributeNames=expression_names,
+                ExpressionAttributeValues=expression_values,
+                ReturnValues="ALL_NEW",
+            )
+            committed = response.get("Attributes") or updated
+
+            if visibility_changed:
+                if not (old_visibility == "public" and new_visibility != "public"):
+                    tag_album_visibility(committed, new_visibility, include_derivatives=True)
+                # A second metadata-table join closes the race with a preview worker
+                # that registered derivatives while this visibility change was in
+                # flight. The worker also re-reads visibility after tagging.
+                tag_preview_visibility(committed, new_visibility)
+            if visibility_changed and committed.get("type", "photo") == "photo":
+                metadata_by_id = load_preview_metadata(committed, strict=True)
+                if metadata_by_id:
+                    sync_album_index(
+                        dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]),
+                        committed,
+                        metadata_by_id,
+                    )
+            if visibility_changed and old_visibility != "public" and new_visibility == "public":
+                # Clear any cached denial produced while the source was protected.
+                invalidate_album_media(committed, reason="album-visibility-public")
+            if old_visibility == "public" or new_visibility == "public":
+                request_public_api_invalidation(
+                    album_id=album_id,
+                    catalog=True,
+                    reason="album-updated",
+                )
+            if (
+                committed.get("type", "photo") == "photo"
+                and ("visibility" in changed_fields or "category" in changed_fields)
+                and (old_visibility == "public" or new_visibility == "public")
+            ):
+                request_random_photo_pool_refresh()
+            if (
+                committed.get("type", "photo") == "photo"
+                and {"visibility", "coverImageUrl", "coverThumbKey"}.intersection(changed_fields)
+                and (old_visibility == "public" or new_visibility == "public")
+            ):
+                request_hover_preview_refresh(album_id)
+            if not drive_backup_jobs.state_table() and (album.get("title") != committed.get("title") or album.get("category") != committed.get("category")):
+                try:
+                    _sync_drive_folder(committed)
+                except Exception:
+                    # Metadata is already committed. Keep edits idempotent and let
+                    # the next upload or edit reconcile the Drive folder again.
+                    emit_audit_event(
+                        event_name="provider.drive_backup",
+                        outcome="failure",
+                        action="provider.backup.dispatch",
+                        resource_type="provider",
+                        reason_code="dispatch_failed",
+                        event=event,
+                        context=context,
+                        actor_type="service",
+                        auth_method="service",
+                    )
             _audit(
                 event,
                 context,
@@ -208,153 +403,11 @@ def handler(event, context):
                 previous_visibility=old_visibility,
                 visibility=new_visibility,
             )
-            return json_response(200, serialize_album_summary(album, include_admin=True))
-
-        visibility_changed = old_visibility != new_visibility
-        old_qr_key = validated_album_qr_key(album)
-        new_qr_key = validated_album_qr_key(updated)
-
-        # Restrictive transitions tag first; release-to-public transitions update
-        # authorization metadata first. Both orders fail safe (unavailable rather
-        # than anonymously exposed) if the second operation fails.
-        if visibility_changed and old_visibility == "public" and new_visibility != "public":
-            if old_qr_key and old_qr_key != new_qr_key:
-                tag_keys_visibility([old_qr_key], new_visibility)
-            tag_album_visibility(updated, new_visibility, include_derivatives=True)
-            # Submit the edge purge before committing a restrictive transition.
-            # A purge failure therefore leaves media unavailable, not silently
-            # less private than the requested album state.
-            invalidate_album_media(
-                album,
-                reason="album-visibility-restricted",
-                strict=True,
-            )
-
-        # A cover or visibility transition invalidates the old frame set. Clear
-        # its catalog pointer in the same conditional write so a newly fetched
-        # catalog can never advertise a stale manifest while the targeted
-        # builder is catching up. Restrictive transitions above still see the
-        # old pointer and tag that object before it is detached.
-        hover_pointer_fields = {
-            "hoverPreviewStatus",
-            "hoverPreviewVersion",
-            "hoverPreviewManifestKey",
-        }
-        invalidate_hover_pointer = (
-            updated.get("type", "photo") == "photo"
-            and {"visibility", "coverImageUrl", "coverThumbKey"}.intersection(changed_fields)
-        )
-        if invalidate_hover_pointer:
-            for field in hover_pointer_fields:
-                updated.pop(field, None)
-
-        condition = (
-            "attribute_exists(albumId) AND attribute_not_exists(pendingMediaDeletion) AND (attribute_not_exists(#status) OR #status = :active) "
-            "AND #visibility = :previous_visibility"
-        )
-        expression_names = {"#status": "status", "#visibility": "visibility"}
-        expression_values = {
-            ":active": "active",
-            ":previous_visibility": old_visibility,
-        }
-        if {"coverImageUrl", "coverThumbKey", "coverBlurhash"}.intersection(changed_fields):
-            condition += " AND (attribute_not_exists(images) OR images = :previous_images)"
-            expression_values[":previous_images"] = album.get("images", [])
-        assignments = []
-        removals = []
-        mutation_fields = set(changed_fields)
-        if invalidate_hover_pointer:
-            mutation_fields.update(hover_pointer_fields)
-        for index, field in enumerate(sorted(mutation_fields)):
-            name = f"#field{index}"
-            expression_names[name] = field
-            if field in updated:
-                value = f":value{index}"
-                assignments.append(f"{name} = {value}")
-                expression_values[value] = updated[field]
-            else:
-                removals.append(name)
-        update_parts = []
-        if assignments:
-            update_parts.append("SET " + ", ".join(assignments))
-        if removals:
-            update_parts.append("REMOVE " + ", ".join(removals))
-
-        backup_change = bool({"title", "category"}.intersection(changed_fields))
-        commit = drive_backup_jobs.update_album if backup_change else lambda _table, _album, **kwargs: _table.update_item(**kwargs)
-        response = commit(
-            table, album,
-            Key={"albumId": album_id},
-            UpdateExpression=" ".join(update_parts),
-            ConditionExpression=condition,
-            ExpressionAttributeNames=expression_names,
-            ExpressionAttributeValues=expression_values,
-            ReturnValues="ALL_NEW",
-        )
-        committed = response.get("Attributes") or updated
-
-        if visibility_changed:
-            if not (old_visibility == "public" and new_visibility != "public"):
-                tag_album_visibility(committed, new_visibility, include_derivatives=True)
-            # A second metadata-table join closes the race with a preview worker
-            # that registered derivatives while this visibility change was in
-            # flight. The worker also re-reads visibility after tagging.
-            tag_preview_visibility(committed, new_visibility)
-        if visibility_changed and committed.get("type", "photo") == "photo":
-            metadata_by_id = load_preview_metadata(committed, strict=True)
-            if metadata_by_id:
-                sync_album_index(
-                    dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]),
-                    committed,
-                    metadata_by_id,
-                )
-        if visibility_changed and old_visibility != "public" and new_visibility == "public":
-            # Clear any cached denial produced while the source was protected.
-            invalidate_album_media(committed, reason="album-visibility-public")
-        if old_visibility == "public" or new_visibility == "public":
-            request_public_api_invalidation(
-                album_id=album_id,
-                catalog=True,
-                reason="album-updated",
-            )
-        if (
-            committed.get("type", "photo") == "photo"
-            and ("visibility" in changed_fields or "category" in changed_fields)
-            and (old_visibility == "public" or new_visibility == "public")
-        ):
-            request_random_photo_pool_refresh()
-        if (
-            committed.get("type", "photo") == "photo"
-            and {"visibility", "coverImageUrl", "coverThumbKey"}.intersection(changed_fields)
-            and (old_visibility == "public" or new_visibility == "public")
-        ):
-            request_hover_preview_refresh(album_id)
-        if not drive_backup_jobs.state_table() and (album.get("title") != committed.get("title") or album.get("category") != committed.get("category")):
-            try:
-                _sync_drive_folder(committed)
-            except Exception:
-                # Metadata is already committed. Keep edits idempotent and let
-                # the next upload or edit reconcile the Drive folder again.
-                emit_audit_event(
-                    event_name="provider.drive_backup",
-                    outcome="failure",
-                    action="provider.backup.dispatch",
-                    resource_type="provider",
-                    reason_code="dispatch_failed",
-                    event=event,
-                    context=context,
-                    actor_type="service",
-                    auth_method="service",
-                )
-        _audit(
-            event,
-            context,
-            "success",
-            "album_updated",
-            previous_visibility=old_visibility,
-            visibility=new_visibility,
-        )
-        return json_response(200, serialize_album_summary(committed, include_admin=True))
+            return json_response(200, serialize_album_summary(committed, include_admin=True))
+    except MediaAlbumMissing:
+        return error_response(404, "Album not found", code="not_found")
+    except MediaMutationBusy as error:
+        return error_response(409, str(error), code="media_busy")
     except drive_backup_jobs.DriveBackupBusy as error:
         return error_response(409, str(error), code="backup_busy")
     except ValidationError as error:

@@ -51,7 +51,7 @@ function EditUser() {
         setError('')
         try {
             const token = await getIdToken()
-            await editUser(token, editingUser.email, { email: newEmail })
+            await editUser(token, editingUser.email, { email: newEmail, userId: editingUser.sub })
             setSuccess(`User updated successfully! ${newEmail !== editingUser.email ? 'Albums have been migrated to the new email.' : ''}`)
             setEditingUser(null)
             loadUsers()

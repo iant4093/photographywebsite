@@ -1,3 +1,4 @@
+import { withMediaLease } from './media-lease.mjs'
 import { boundedClient, checkWorkerTime, hasWorkerTime, runWorkerJob, withWorkerBudget, workerClientConfig } from './runtime-budget.mjs'
 import { createHash } from 'node:crypto'
 import exifr from 'exifr'
@@ -674,38 +675,42 @@ async function processJob(jobValue) {
         }
     }
     if (existingMetadata?.status === 'ready' && !upgradedPreviousContract) {
-        const accepted = await atPreviewStage('existing_preview_invalid', async () => {
-            return validateReadyOrMarkPending({
-                metadata: existingMetadata,
-                expectedKeys: resolved.previewKeys,
-                validateObject: validateStoredPreview,
-                tagObject: setVisibilityTag,
-                visibility: resolved.visibility,
-                markPending: () => markReadyMetadataPending(resolved, mediaId, jobId),
+        const ready = await withMediaLease(documentClient, requiredEnvironment('ALBUMS_TABLE'), job.albumId, async () => {
+            resolved = resolveManifestImage(await albumById(job.albumId), job)
+            const accepted = await atPreviewStage('existing_preview_invalid', async () => {
+                return validateReadyOrMarkPending({
+                    metadata: existingMetadata,
+                    expectedKeys: resolved.previewKeys,
+                    validateObject: validateStoredPreview,
+                    tagObject: setVisibilityTag,
+                    visibility: resolved.visibility,
+                    markPending: () => markReadyMetadataPending(resolved, mediaId, jobId),
+                })
             })
+            if (accepted) {
+                const completedMetadata = await atPreviewStage(
+                    'metadata_commit_failed',
+                    async () => ensureExploreMetadata(resolved, existingMetadata),
+                )
+                resolved = await atPreviewStage(
+                    'visibility_tag_failed',
+                    async () => tagUntilVisibilityStable(job, resolved.previewKeys),
+                )
+                await atPreviewStage(
+                    'metadata_commit_failed',
+                    async () => syncExploreIndex(
+                        documentClient,
+                        requiredEnvironment('PREVIEW_METADATA_TABLE'),
+                        existingMetadata,
+                        completedMetadata,
+                        resolved.visibility,
+                        input => new BatchWriteCommand(input),
+                    ),
+                )
+                return { status: 'already-complete' }
+            }
         })
-        if (accepted) {
-            const completedMetadata = await atPreviewStage(
-                'metadata_commit_failed',
-                async () => ensureExploreMetadata(resolved, existingMetadata),
-            )
-            resolved = await atPreviewStage(
-                'visibility_tag_failed',
-                async () => tagUntilVisibilityStable(job, resolved.previewKeys),
-            )
-            await atPreviewStage(
-                'metadata_commit_failed',
-                async () => syncExploreIndex(
-                    documentClient,
-                    requiredEnvironment('PREVIEW_METADATA_TABLE'),
-                    existingMetadata,
-                    completedMetadata,
-                    resolved.visibility,
-                    input => new BatchWriteCommand(input),
-                ),
-            )
-            return { status: 'already-complete' }
-        }
+        if (ready) return ready
     }
 
     await atPreviewStage('metadata_pending_failed', async () => recordPendingMetadata(resolved, jobId))
@@ -735,46 +740,49 @@ async function processJob(jobValue) {
         )
     }
 
-    // Preview metadata is registered as pending before object creation, so a
-    // visibility mutation can discover these deterministic keys. Re-read after
-    // each tag pass until album visibility is stable; update_album performs a
-    // second preview-only tag pass after its album write for convergence.
-    resolved = await atPreviewStage(
-        'visibility_tag_failed',
-        async () => tagUntilVisibilityStable(job, resolved.previewKeys),
-    )
-    await atPreviewStage(
-        'metadata_commit_failed',
-        async () => commitPreviewMetadata(
-            resolved,
-            mediaId,
-            jobId,
-            sourceDigest,
-            outputs,
-            exploreMetadata,
-        ),
-    )
-    resolved = await atPreviewStage(
-        'visibility_tag_failed',
-        async () => tagUntilVisibilityStable(job, resolved.previewKeys),
-    )
-    await atPreviewStage(
-        'metadata_commit_failed',
-        async () => syncExploreIndex(
-            documentClient,
-            requiredEnvironment('PREVIEW_METADATA_TABLE'),
-            existingMetadata,
-            {
-                albumId: resolved.job.albumId,
+    return withMediaLease(documentClient, requiredEnvironment('ALBUMS_TABLE'), job.albumId, async () => {
+        resolved = resolveManifestImage(await albumById(job.albumId), job)
+        // Preview metadata is registered as pending before object creation, so a
+        // visibility mutation can discover these deterministic keys. Re-read after
+        // each tag pass until album visibility is stable; update_album performs a
+        // second preview-only tag pass after its album write for convergence.
+        resolved = await atPreviewStage(
+            'visibility_tag_failed',
+            async () => tagUntilVisibilityStable(job, resolved.previewKeys),
+        )
+        await atPreviewStage(
+            'metadata_commit_failed',
+            async () => commitPreviewMetadata(
+                resolved,
                 mediaId,
-                status: 'ready',
-                ...exploreMetadata,
-            },
-            resolved.visibility,
-            input => new BatchWriteCommand(input),
-        ),
-    )
-    return { status: 'completed' }
+                jobId,
+                sourceDigest,
+                outputs,
+                exploreMetadata,
+            ),
+        )
+        resolved = await atPreviewStage(
+            'visibility_tag_failed',
+            async () => tagUntilVisibilityStable(job, resolved.previewKeys),
+        )
+        await atPreviewStage(
+            'metadata_commit_failed',
+            async () => syncExploreIndex(
+                documentClient,
+                requiredEnvironment('PREVIEW_METADATA_TABLE'),
+                existingMetadata,
+                {
+                    albumId: resolved.job.albumId,
+                    mediaId,
+                    status: 'ready',
+                    ...exploreMetadata,
+                },
+                resolved.visibility,
+                input => new BatchWriteCommand(input),
+            ),
+        )
+        return { status: 'completed' }
+    })
 }
 
 function eventJobs(event) {

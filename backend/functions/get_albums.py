@@ -307,7 +307,7 @@ def handler(event, context):
         items = []
         for record in records:
             # Malformed visibility records fail closed and disappear from lists.
-            if record.get("status", "active") not in ({"active", "deleting"} if admin else {"active"}):
+            if record.get("status", "active") not in ({"active", "deleting", "updating"} if admin else {"active"}):
                 continue
             if not admin_all and record.get("visibility") != visibility:
                 continue

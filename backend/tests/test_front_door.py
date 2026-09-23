@@ -181,12 +181,33 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                     and node.name == "handler"
                 )
-                first = handler.body[0]
+                body = handler.body
+                if module_name in {"update_album", "add_images", "update_image"}:
+                    # These existing Lambdas also receive exact IAM-only work
+                    # envelopes. HTTP wrappers must never match that branch.
+                    self.assertIsInstance(body[0], ast.If)
+                    condition = ast.unparse(body[0].test)
+                    self.assertIn("set(event) == {'source', 'albumId'}", condition)
+                    self.assertIn("isinstance(event, dict)", condition)
+                    body = body[1:]
+                first = body[0]
                 self.assertIsInstance(first, ast.Assign)
                 self.assertIsInstance(first.value, ast.Call)
                 self.assertIsInstance(first.value.func, ast.Name)
                 self.assertEqual(first.value.func.id, "verify_front_door_request")
-                self.assertIsInstance(handler.body[1], ast.If)
+                self.assertIsInstance(body[1], ast.If)
+
+    def test_http_payload_cannot_forge_internal_album_work(self):
+        import add_images, update_image, update_album
+        for module, kind in ((add_images, "album-upload-followup"), (update_image, "album-thumbnail-cleanup"), (update_album, "album-visibility")):
+            envelope = {"source": kind, "albumId": "11111111-1111-4111-8111-111111111111"}
+            for event in ({"body": json.dumps(envelope), "requestContext": {"http": {"method": "POST"}}},
+                          {**envelope, "requestContext": {}}, {**envelope, "body": "{}"}):
+                denied = {"statusCode": 403}
+                with self.subTest(module=module.__name__, event=event), patch.object(module, "verify_front_door_request", return_value=denied), patch.object(module, "table") as table:
+                    self.assertIs(module.handler(event, None), denied)
+                    table.get_item.assert_not_called()
+                    table.update_item.assert_not_called()
 
     def test_each_http_function_has_exact_secret_read_policy(self) -> None:
         handlers = _http_handlers()

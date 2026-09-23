@@ -60,6 +60,13 @@ def handler(event, context):
     failures = []
     seen = set()
     for record in event["Records"]:
+        images = record.get("dynamodb", {})
+        if "OldImage" in images and "NewImage" in images:
+            bookkeeping = {"mediaLeaseOwner", "mediaLeaseUntil", "pendingMediaUpload", "pendingVisibilityChange",
+                           "pendingThumbnailCleanup", "mediaStoreVersion", "mediaStoreDirty"}
+            if ({key: value for key, value in images["OldImage"].items() if key not in bookkeeping}
+                    == {key: value for key, value in images["NewImage"].items() if key not in bookkeeping}):
+                continue
         sequence = record.get("dynamodb", {}).get("SequenceNumber")
         try:
             album_id = validate_uuid(record.get("dynamodb", {}).get("Keys", {}).get("albumId", {}).get("S"))

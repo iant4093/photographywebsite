@@ -96,7 +96,7 @@ export function createMediaUploadSession({ albumId, s3Prefix, entries, video = f
                 else await new Promise(resolve => preparationWaiters.push(resolve))
                 try {
                     signal.throwIfAborted()
-                    return await prepare(state.file, state.time, state.index)
+                    return await prepare(state.file, state.time, state.index, { signal })
                 } finally {
                     if (preparationWaiters.length) preparationWaiters.shift()()
                     else preparing -= 1

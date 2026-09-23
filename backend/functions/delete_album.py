@@ -66,6 +66,7 @@ def delete_album_record(album, context=None):
     values = {":deleting": "deleting", ":operation": operation, ":owner": owner,
               ":until": now + lease_seconds, ":now": now}
     conditions = ["attribute_exists(albumId)", "(attribute_not_exists(deletionLeaseUntil) OR deletionLeaseUntil < :now)"]
+    conditions.append("(attribute_not_exists(mediaLeaseUntil) OR mediaLeaseUntil < :now)")
     if album.get("status") == "deleting":
         conditions += ["#status = :deleting", "deletionId = :operation"]
     else:

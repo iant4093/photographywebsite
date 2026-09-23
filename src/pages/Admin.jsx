@@ -91,7 +91,7 @@ function Upload() {
             }
             const session = uploadSession.current
             const { albumId, s3Prefix } = session
-            const finalImages = await session.run({ getIdToken, prepare: file => processImage(file), transfer })
+            const finalImages = await session.run({ getIdToken, prepare: (file, _time, _index, options) => processImage(file, options), transfer })
             const coverThumbUrlPublic = finalImages[0].thumbKey
             const coverBlurhash = finalImages[0].blurhash
             const coverImageUrlPublic = finalImages[0].rawKey

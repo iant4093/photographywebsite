@@ -10,6 +10,8 @@ from auth_helpers import AuthError, auth_error_response, require_admin
 from owner_helpers import assert_admin_target_mutable, albums_owned_by, cognito_identity, table
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, parse_json_body, validate_email
+from media_mutation import enabled as mutation_protocol_enabled, MediaMutationBusy
+import user_email_update
 
 
 cognito = boto3.client("cognito-idp")
@@ -53,6 +55,10 @@ def handler(event, context):
                 code="password_not_allowed",
             )
         new_email = validate_email(body.get("email"))
+        if mutation_protocol_enabled():
+            updated = user_email_update.update(table, cognito, USER_POOL_ID, old_email, new_email, body, event, context)
+            _audit(event, context, "success", "user_updated", album_count=updated)
+            return json_response(200, {"message": "User email updated", "albumsUpdated": updated})
         username, subject, _ = cognito_identity(cognito, USER_POOL_ID, old_email)
         if not subject:
             raise RuntimeError("Cognito user has no stable subject")
@@ -88,6 +94,8 @@ def handler(event, context):
             updated += 1
         _audit(event, context, "success", "user_updated", album_count=updated)
         return json_response(200, {"message": "User email updated", "albumsUpdated": updated})
+    except MediaMutationBusy as error:
+        return error_response(409, str(error), code="media_busy")
     except AuthError as error:
         _audit(event, context, "denied", "protected_admin_target")
         return auth_error_response(error)

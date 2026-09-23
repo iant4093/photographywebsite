@@ -9,6 +9,9 @@ if str(FUNCTIONS_DIR) not in sys.path:
     sys.path.insert(0, str(FUNCTIONS_DIR))
 
 DEFAULT_ENV = {
+    # Legacy handler unit cases isolate their pre-existing operation contracts.
+    # Protocol integration tests explicitly enable the deployed lease workflow.
+    "MEDIA_MUTATION_PROTOCOL": "0",
     "AWS_ACCESS_KEY_ID": "testing",
     "AWS_SECRET_ACCESS_KEY": "testing",
     "AWS_SESSION_TOKEN": "testing",

@@ -1990,7 +1990,19 @@ Resources:
       Handler: cache_invalidation_worker.handler
       Timeout: 30
       ReservedConcurrentExecutions: 2
+      Environment:
+        Variables:
+          VISIBILITY_WORKER_FUNCTION_NAME: !Ref UpdateAlbumFunction
+          UPLOAD_WORKER_FUNCTION_NAME: !Ref AddImagesFunction
+          THUMBNAIL_WORKER_FUNCTION_NAME: !Ref UpdateImageFunction
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !GetAtt UpdateAlbumFunction.Arn
+                - !GetAtt AddImagesFunction.Arn
+                - !GetAtt UpdateImageFunction.Arn
         - SQSPollerPolicy:
             QueueName: !GetAtt CacheInvalidationQueue.QueueName
         - Statement:
@@ -2003,6 +2015,7 @@ Resources:
           Properties:
             Queue: !GetAtt CacheInvalidationQueue.Arn
             BatchSize: 10
+            FunctionResponseTypes: [ReportBatchItemFailures]
             MaximumBatchingWindowInSeconds: 10
 
   HoverPreviewManifestBuilderFunction:
@@ -3131,7 +3144,7 @@ Resources:
             QueueName: !GetAtt PreviewQueue.QueueName
         - Statement:
             - Effect: Allow
-              Action: dynamodb:GetItem
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action:
@@ -3553,7 +3566,7 @@ Resources:
       Policies:
         - Statement:
             - Effect: Allow
-              Action: dynamodb:GetItem
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action:
@@ -3744,9 +3757,14 @@ Resources:
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           IMAGES_BUCKET: !Ref ImagesBucket
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
         - Statement:
             - Effect: Allow
               Action:

@@ -609,10 +609,12 @@ class MediaAccessBranchTests(unittest.TestCase):
             self.assertEqual(media_access.tag_preview_visibility(self.album, "private"), 1)
             self.assertEqual(media_access.tag_album_visibility(self.album, "private", include_derivatives=False), 1)
         self.assertEqual(tag.call_count, 2)
+        empty_s3 = Mock()
+        empty_s3.get_paginator.return_value.paginate.return_value = [{"Contents": []}]
         with patch.object(media_access, "album_known_keys", return_value=[]), patch.object(
             media_access, "tag_keys_visibility", return_value=0
         ), patch.object(media_access, "_hls_prefixes", return_value=["one/", "two/"]), patch.object(
-            media_access, "get_s3_client", return_value=Mock()
+            media_access, "get_s3_client", return_value=empty_s3
         ):
             self.assertEqual(
                 media_access.tag_album_visibility(self.album, "public", include_derivatives=True, max_derivatives=0),

@@ -11,6 +11,7 @@ const cognito = vi.hoisted(() => ({
   userData: { UserMFASettingList: [] },
   secret: 'ABCDEF234567',
   userDataError: null,
+  userDataHandler: null,
   associateError: null,
   verifyError: null,
   preferenceError: null,
@@ -39,7 +40,7 @@ vi.mock('amazon-cognito-identity-js', () => {
       this.options = options
       this.setSignInUserSession = vi.fn((session) => { this.session = session })
       this.getSession = vi.fn((callback) => callback(null, this.session))
-      this.getUserData = vi.fn((callback) => callback(cognito.userDataError, cognito.userData))
+      this.getUserData = vi.fn((callback) => cognito.userDataHandler ? cognito.userDataHandler(callback) : callback(cognito.userDataError, cognito.userData))
       this.associateSoftwareToken = vi.fn((callbacks) => (
         cognito.associateError ? callbacks.onFailure(cognito.associateError) : callbacks.associateSecretCode(cognito.secret)
       ))
@@ -81,14 +82,14 @@ function response(body, status = 200, brokenJson = false) {
   }
 }
 
-function Harness() {
+function Harness({ signal }) {
   const auth = useAuth()
   const [result, setResult] = useState('')
   const invoke = (promise) => promise.then((value) => setResult(typeof value === 'string' ? value : value?.challengeName || 'ok')).catch((error) => setResult(`${error.code || ''}:${error.message}`))
   return <div>
     <span data-testid="state">{auth.loading ? 'loading' : 'ready'}|{auth.userEmail}|{auth.isAdmin ? 'admin' : 'viewer'}|{auth.user ? 'signed' : 'out'}|{auth.adminMfaStatus}</span>
     <span data-testid="result">{result}</span>
-    <button onClick={() => invoke(auth.login('viewer@example.com', 'Password1!', 'turn'))}>login</button>
+    <button onClick={() => invoke(auth.login('viewer@example.com', 'Password1!', 'turn', signal))}>login</button>
     <button onClick={() => invoke(auth.completeNewPassword({ email: 'viewer@example.com', newPassword: 'NewPassword1!', challengeSession: 'session', turnstileToken: 'turn' }))}>new-password</button>
     <button onClick={() => invoke(auth.completeMfa({ email: 'viewer@example.com', code: '123456', challengeSession: 'session', turnstileToken: 'turn' }))}>mfa</button>
     <button onClick={() => invoke(auth.beginAdminMfaSetup())}>begin-mfa-setup</button>
@@ -99,8 +100,8 @@ function Harness() {
   </div>
 }
 
-function mount() {
-  return render(<AuthProvider><Harness /></AuthProvider>)
+function mount(signal) {
+  return render(<AuthProvider><Harness signal={signal} /></AuthProvider>)
 }
 
 const clientStorageKey = `CognitoIdentityServiceProvider.${import.meta.env.VITE_COGNITO_CLIENT_ID}.viewer`
@@ -115,6 +116,7 @@ describe('AuthProvider', () => {
     cognito.sessions.length = 0
     cognito.userData = { UserMFASettingList: [] }
     cognito.secret = 'ABCDEF234567'
+    cognito.userDataHandler = null
     cognito.userDataError = null
     cognito.associateError = null
     cognito.verifyError = null
@@ -220,6 +222,21 @@ describe('AuthProvider', () => {
       await waitFor(() => expect(screen.getByTestId('result')).toHaveTextContent(expected))
     }
     expect(screen.getByTestId('state')).toHaveTextContent('mfa@example.com|admin|signed')
+  })
+
+  it('finishes admin MFA state when a successful redirect unmounts the login form', async () => {
+    let finish
+    cognito.userDataHandler = callback => { finish = callback }
+    fetch.mockResolvedValueOnce(response({ AuthenticationResult: {
+      IdToken: jwt({ email: 'admin@example.com', 'cognito:groups': ['Admins'] }), AccessToken: 'access', RefreshToken: 'refresh',
+    } }))
+    const controller = new AbortController()
+    mount(controller.signal)
+    fireEvent.click(screen.getByRole('button', { name: 'login' }))
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('admin|signed|checking'))
+    await act(async () => { controller.abort(); finish(null, { UserMFASettingList: ['SOFTWARE_TOKEN_MFA'] }) })
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('admin|signed|enabled'))
+    expect(screen.getByTestId('result')).toHaveTextContent('ok')
   })
 
   it('requires and completes authenticator enrollment for an admin account', async () => {
@@ -371,7 +388,7 @@ describe('AuthProvider', () => {
     await act(async () => finish(response({ AuthenticationResult: { IdToken: jwt({ email: 'old@example.com' }), AccessToken: 'a', RefreshToken: 'r' } })))
     expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
     expect(cognito.users).toHaveLength(0)
-    expect(screen.getByTestId('result')).toHaveTextContent('session changed')
+    expect(screen.getByTestId('result')).toHaveTextContent('Sign in cancelled')
   })
 
   it('rejects a login response if another tab changed the session before its storage event arrived', async () => {

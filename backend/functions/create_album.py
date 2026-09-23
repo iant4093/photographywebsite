@@ -12,6 +12,7 @@ import re
 import secrets
 
 import boto3
+from media_mutation import album_lease, MediaMutationBusy, MediaAlbumMissing
 import drive_backup_jobs
 from botocore.exceptions import ClientError
 
@@ -281,112 +282,115 @@ def handler(event, context):
             item = existing
             images = item.get("images", [])
 
-        if album_type == "video" and not any(image.get("mediaConvertJobId") for image in images):
-            _start_video_jobs(images)
-            table.update_item(
-                Key={"albumId": album_id},
-                UpdateExpression="SET images = :images, imageCount = :count",
-                ExpressionAttributeValues={":images": images, ":count": len(images)},
-            )
-            item["images"] = images
+        with album_lease(table, album_id, context, creating=True):
+            if album_type == "video" and not any(image.get("mediaConvertJobId") for image in images):
+                _start_video_jobs(images)
+                table.update_item(
+                    Key={"albumId": album_id},
+                    UpdateExpression="SET images = :images, imageCount = :count",
+                    ExpressionAttributeValues={":images": images, ":count": len(images)},
+                )
+                item["images"] = images
 
-        _ensure_album_qr(item, claims["sub"])
+            _ensure_album_qr(item, claims["sub"])
 
-        # Releasing media to anonymous CDN access happens only after an active
-        # album record exists. Restrictive visibilities are tagged first. Both
-        # orders fail unavailable rather than accidentally public.
-        if visibility == "public" and item.get("status") == "pending":
-            table.update_item(
+            # Releasing media to anonymous CDN access happens only after an active
+            # album record exists. Restrictive visibilities are tagged first. Both
+            # orders fail unavailable rather than accidentally public.
+            if visibility == "public" and item.get("status") == "pending":
+                table.update_item(
+                    Key={"albumId": album_id},
+                    UpdateExpression="SET #status = :active",
+                    ConditionExpression="#status = :pending AND createdBySub = :creator",
+                    ExpressionAttributeNames={"#status": "status"},
+                    ExpressionAttributeValues={":active": "active", ":pending": "pending", ":creator": claims["sub"]},
+                )
+                item["status"] = "active"
+            tag_album_visibility(item, visibility, include_derivatives=False)
+            drive_backup_jobs.update_album(
+                table, item,
                 Key={"albumId": album_id},
-                UpdateExpression="SET #status = :active",
-                ConditionExpression="#status = :pending AND createdBySub = :creator",
+                UpdateExpression="SET #status = :active REMOVE createdBySub",
+                ConditionExpression="createdBySub = :creator AND (#status = :pending OR #status = :active)",
                 ExpressionAttributeNames={"#status": "status"},
                 ExpressionAttributeValues={":active": "active", ":pending": "pending", ":creator": claims["sub"]},
             )
             item["status"] = "active"
-        tag_album_visibility(item, visibility, include_derivatives=False)
-        drive_backup_jobs.update_album(
-            table, item,
-            Key={"albumId": album_id},
-            UpdateExpression="SET #status = :active REMOVE createdBySub",
-            ConditionExpression="createdBySub = :creator AND (#status = :pending OR #status = :active)",
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={":active": "active", ":pending": "pending", ":creator": claims["sub"]},
-        )
-        item["status"] = "active"
-        item.pop("createdBySub", None)
+            item.pop("createdBySub", None)
 
-        # Populate the normalized media store only after the legacy manifest is
-        # committed and visible. The version marker is the read cutover: if the
-        # secondary write fails, readers continue using the complete manifest.
-        try:
-            if replace_album_media(album_id, images):
-                activate_album_media(table, album_id, images)
-                item["mediaStoreVersion"] = 1
-        except Exception as error:
-            logger.error("album_media_normalization_failed error_type=%s", type(error).__name__)
-
-        if album_type == "photo":
-            request_original_comparisons(album_id, images)
+            # Populate the normalized media store only after the legacy manifest is
+            # committed and visible. The version marker is the read cutover: if the
+            # secondary write fails, readers continue using the complete manifest.
             try:
-                enqueue_preview_jobs(album_id, images)
+                if replace_album_media(album_id, images):
+                    activate_album_media(table, album_id, images)
+                    item["mediaStoreVersion"] = 1
             except Exception as error:
-                # V1 JPEG thumbnails remain authoritative until asynchronous
-                # Responsive preview generation succeeds, so queue outages cannot break upload.
-                logger.error("preview_dispatch_failed error_type=%s", type(error).__name__)
+                logger.error("album_media_normalization_failed error_type=%s", type(error).__name__)
 
-        if visibility == "private" and owner_email:
-            portal_url = html.escape(os.environ.get("FRONTEND_URL", "https://iantruongphotography.com"), quote=True)
-            safe_title = html.escape(title, quote=True)
-            try:
-                send_email(
-                    owner_email,
-                    f"Your New Photos Are Ready: {title.replace(chr(13), ' ').replace(chr(10), ' ')}",
-                    (
-                        '<div style="font-family:sans-serif;max-width:600px;margin:auto">'
-                        '<h2 style="color:#4a4a4a">Your gallery is ready!</h2>'
-                        f"<p>A new private album is ready: <strong>{safe_title}</strong>.</p>"
-                        f'<p><a href="{portal_url}/login">View Album</a></p></div>'
-                    ),
-                )
-            except Exception as error:
-                # The album is already committed. Do not turn an auxiliary
-                # notification outage into an unsafe, non-idempotent retry.
-                logger.error("album_notification_failed error_type=%s", type(error).__name__)
-                emit_audit_event(
-                    event_name="provider.email", outcome="failure", action="provider.email.dispatch",
-                    resource_type="provider", reason_code="album_notification_failed", event=event,
-                    context=context, actor_type="service", auth_method="service",
-                )
-
-        if backup_to_drive and not drive_backup_jobs.state_table() and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
-            payload = {
-                "albumId": album_id,
-                "albumType": album_type,
-                "albumTitle": title,
-                "bucket": os.environ["IMAGES_BUCKET"],
-                "keys": [image["rawKey"] for image in images],
-            }
-            try:
-                boto3.client("lambda").invoke(
-                    FunctionName=os.environ["GOOGLE_DRIVE_SYNC_FUNCTION_NAME"],
-                    InvocationType="Event",
-                    Payload=json.dumps(payload),
-                )
-            except Exception as error:
-                logger.error("drive_backup_dispatch_failed error_type=%s", type(error).__name__)
-                emit_audit_event(
-                    event_name="provider.drive_backup", outcome="failure", action="provider.backup.dispatch",
-                    resource_type="provider", reason_code="dispatch_failed", event=event,
-                    context=context, actor_type="service", auth_method="service",
-                )
-
-        if visibility == "public":
-            request_public_api_invalidation(catalog=True, reason="album-created")
             if album_type == "photo":
-                request_random_photo_pool_refresh()
-        _audit(event, context, "success", "album_created", media_count=len(images), visibility=visibility)
-        return json_response(201, serialize_album_summary(item, include_admin=True))
+                request_original_comparisons(album_id, images)
+                try:
+                    enqueue_preview_jobs(album_id, images)
+                except Exception as error:
+                    # V1 JPEG thumbnails remain authoritative until asynchronous
+                    # Responsive preview generation succeeds, so queue outages cannot break upload.
+                    logger.error("preview_dispatch_failed error_type=%s", type(error).__name__)
+
+            if visibility == "private" and owner_email:
+                portal_url = html.escape(os.environ.get("FRONTEND_URL", "https://iantruongphotography.com"), quote=True)
+                safe_title = html.escape(title, quote=True)
+                try:
+                    send_email(
+                        owner_email,
+                        f"Your New Photos Are Ready: {title.replace(chr(13), ' ').replace(chr(10), ' ')}",
+                        (
+                            '<div style="font-family:sans-serif;max-width:600px;margin:auto">'
+                            '<h2 style="color:#4a4a4a">Your gallery is ready!</h2>'
+                            f"<p>A new private album is ready: <strong>{safe_title}</strong>.</p>"
+                            f'<p><a href="{portal_url}/login">View Album</a></p></div>'
+                        ),
+                    )
+                except Exception as error:
+                    # The album is already committed. Do not turn an auxiliary
+                    # notification outage into an unsafe, non-idempotent retry.
+                    logger.error("album_notification_failed error_type=%s", type(error).__name__)
+                    emit_audit_event(
+                        event_name="provider.email", outcome="failure", action="provider.email.dispatch",
+                        resource_type="provider", reason_code="album_notification_failed", event=event,
+                        context=context, actor_type="service", auth_method="service",
+                    )
+
+            if backup_to_drive and not drive_backup_jobs.state_table() and os.environ.get("GOOGLE_DRIVE_SYNC_FUNCTION_NAME"):
+                payload = {
+                    "albumId": album_id,
+                    "albumType": album_type,
+                    "albumTitle": title,
+                    "bucket": os.environ["IMAGES_BUCKET"],
+                    "keys": [image["rawKey"] for image in images],
+                }
+                try:
+                    boto3.client("lambda").invoke(
+                        FunctionName=os.environ["GOOGLE_DRIVE_SYNC_FUNCTION_NAME"],
+                        InvocationType="Event",
+                        Payload=json.dumps(payload),
+                    )
+                except Exception as error:
+                    logger.error("drive_backup_dispatch_failed error_type=%s", type(error).__name__)
+                    emit_audit_event(
+                        event_name="provider.drive_backup", outcome="failure", action="provider.backup.dispatch",
+                        resource_type="provider", reason_code="dispatch_failed", event=event,
+                        context=context, actor_type="service", auth_method="service",
+                    )
+
+            if visibility == "public":
+                request_public_api_invalidation(catalog=True, reason="album-created")
+                if album_type == "photo":
+                    request_random_photo_pool_refresh()
+            _audit(event, context, "success", "album_created", media_count=len(images), visibility=visibility)
+            return json_response(201, serialize_album_summary(item, include_admin=True))
+    except (MediaMutationBusy, MediaAlbumMissing) as error:
+        return error_response(409, str(error), code="media_busy")
     except drive_backup_jobs.DriveBackupBusy as error:
         return error_response(409, str(error), code="backup_busy")
     except ValidationError as error:

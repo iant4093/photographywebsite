@@ -612,7 +612,7 @@ def validated_album_qr_key(album):
         return ""
 
 
-def _merge_visibility_tag(key, visibility):
+def _merge_visibility_tag(key, visibility, *, preserve_pending=False):
     if visibility not in ALLOWED_TAG_VALUES:
         raise ValidationError("Invalid media visibility tag")
     key = normalize_object_key(key)
@@ -626,6 +626,8 @@ def _merge_visibility_tag(key, visibility):
             return False
         raise
     tags = {item.get("Key"): item.get("Value") for item in existing if item.get("Key")}
+    if preserve_pending and tags.get(VISIBILITY_TAG_KEY) not in ALLOWED_VISIBILITIES:
+        visibility = PENDING_VISIBILITY
     tags[VISIBILITY_TAG_KEY] = visibility
     tag_set = [{"Key": tag_key, "Value": value} for tag_key, value in sorted(tags.items())]
     s3.put_object_tagging(Bucket=bucket_name(), Key=key, Tagging={"TagSet": tag_set})
@@ -656,6 +658,19 @@ def tag_keys_visibility(keys, visibility):
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="media-tag") as executor:
         results = list(executor.map(lambda key: _merge_visibility_tag(key, visibility), normalized_keys))
     return sum(bool(result) for result in results)
+
+
+def retag_album_objects(album, keys, visibility):
+    """Restrict the complete namespace without publishing abandoned uploads."""
+    from media_mutation import object_is_committed
+    def retag(key):
+        committed = object_is_committed(album, key)
+        return _merge_visibility_tag(
+            key, visibility if committed or visibility != "public" else PENDING_VISIBILITY,
+            preserve_pending=not committed,
+        )
+    with ThreadPoolExecutor(max_workers=min(12, max(1, len(keys))), thread_name_prefix="privacy-tag") as executor:
+        return sum(bool(result) for result in executor.map(retag, keys))
 
 
 def album_known_keys(album):
@@ -710,13 +725,11 @@ def tag_album_visibility(album, visibility, *, include_derivatives=False, max_de
     remaining = max_derivatives
     derivative_keys = []
     for prefix in _hls_prefixes(album):
-        if remaining <= 0:
-            break
         paginator = s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket_name(), Prefix=prefix, PaginationConfig={"MaxItems": remaining}):
+        for page in paginator.paginate(Bucket=bucket_name(), Prefix=prefix, PaginationConfig={"MaxItems": remaining + 1}):
             page_keys = [item["Key"] for item in page.get("Contents", []) if item.get("Key")]
+            if len(page_keys) > remaining:
+                raise RuntimeError("Album visibility requires resumable processing")
             derivative_keys.extend(page_keys)
             remaining -= len(page_keys)
-            if remaining <= 0:
-                break
     return tagged + tag_keys_visibility(derivative_keys, visibility)

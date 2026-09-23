@@ -7,7 +7,7 @@ export const workerClientConfig = {
 }
 
 export function withWorkerBudget(context, operation) {
-    const remaining = context?.get_remaining_time_in_millis?.() ?? 180000
+    const remaining = context?.getRemainingTimeInMillis?.() ?? context?.get_remaining_time_in_millis?.() ?? 180000
     const controller = new AbortController()
     const duration = Math.max(1, remaining - 3000)
     const timer = setTimeout(() => controller.abort(new Error('Preview processing deadline reached')), duration)
@@ -15,6 +15,11 @@ export function withWorkerBudget(context, operation) {
         try { return await operation() }
         finally { clearTimeout(timer) }
     })
+}
+
+export function workerTimeRemaining() {
+    const current = budget.getStore()
+    return current ? Math.max(0, current.deadline - performance.now() + 3000) : 180000
 }
 
 export function hasWorkerTime(minimumMs = 0) {

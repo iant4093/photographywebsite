@@ -130,6 +130,7 @@ export function AuthProvider({ children }) {
     const [userEmail, setUserEmail] = useState('')
     const [adminMfaStatus, setAdminMfaStatus] = useState('not-required')
     const sessionGeneration = useRef(0)
+    const authenticationRequest = useRef(null)
     const sessionIdentity = useRef('')
     const sessionNonce = useRef(persistentStorage.getItem(sessionChangeKey))
 
@@ -140,6 +141,7 @@ export function AuthProvider({ children }) {
     }, [])
 
     const clearSessionState = useCallback(() => {
+        authenticationRequest.current?.abort()
         sessionGeneration.current += 1
         setUser(null)
         setIsAdmin(false)
@@ -214,6 +216,7 @@ export function AuthProvider({ children }) {
         void restore(sessionGeneration.current)
         return () => {
             active = false
+            authenticationRequest.current?.abort()
             sessionGeneration.current += 1
             window.removeEventListener('storage', synchronize)
         }
@@ -266,7 +269,7 @@ export function AuthProvider({ children }) {
         return result
     }, [assertCurrentSession, clearSessionState, isAdmin, user])
 
-    const establishSession = useCallback(async (email, authResult, generation) => {
+    const establishSession = useCallback(async (email, authResult, generation, committed) => {
         const [pool, cognito] = await Promise.all([getUserPool(), loadCognitoModule()])
         assertCurrentSession(generation)
         if (!pool) throw new Error('Authentication is not configured.')
@@ -288,6 +291,7 @@ export function AuthProvider({ children }) {
         clearApiCache({ sessionChanged: true })
         clearCatalogSnapshots()
         cognitoUser.setSignInUserSession(session)
+        committed()
         sessionIdentity.current = persistentIdentity()
         sessionNonce.current = publishSessionChange()
         const { admin } = extractUserInfo(session)
@@ -308,25 +312,43 @@ export function AuthProvider({ children }) {
     }, [assertCurrentSession, extractUserInfo])
 
     const authenticate = useCallback(async (kind, input) => {
-        const generation = ++sessionGeneration.current
-        setLoading(false)
-        if (!isCognitoConfigured) throw new Error('Authentication is not configured.')
-        const { requestAuthentication } = await import('../utils/authActions')
-        assertCurrentSession(generation)
-        const data = await requestAuthentication(kind, input)
-        assertCurrentSession(generation)
-        if (data.ChallengeName) {
-            return {
-                challengeName: data.ChallengeName,
-                challengeSession: data.Session,
-                challengeParameters: data.ChallengeParameters || {},
-            }
+        authenticationRequest.current?.abort()
+        const controller = new AbortController()
+        authenticationRequest.current = controller
+        const cancel = () => {
+            controller.abort()
+            if (authenticationRequest.current === controller) sessionGeneration.current += 1
         }
-        return establishSession(input.email, data.AuthenticationResult, generation)
+        if (input.signal?.aborted) cancel()
+        else input.signal?.addEventListener('abort', cancel, { once: true })
+        const generation = ++sessionGeneration.current
+        try {
+            setLoading(false)
+            if (!isCognitoConfigured) throw new Error('Authentication is not configured.')
+            const { requestAuthentication } = await import('../utils/authActions')
+            assertCurrentSession(generation)
+            const data = await requestAuthentication(kind, { ...input, signal: controller.signal })
+            assertCurrentSession(generation)
+            if (data.ChallengeName) {
+                return {
+                    challengeName: data.ChallengeName,
+                    challengeSession: data.Session,
+                    challengeParameters: data.ChallengeParameters || {},
+                }
+            }
+            return await establishSession(input.email, data.AuthenticationResult, generation, () => {
+                // A successful redirect unmounts the login form while the admin
+                // MFA lookup may still be running. That is a committed session.
+                input.signal?.removeEventListener('abort', cancel)
+            })
+        } finally {
+            input.signal?.removeEventListener('abort', cancel)
+            if (authenticationRequest.current === controller) authenticationRequest.current = null
+        }
     }, [assertCurrentSession, establishSession])
 
-    const login = useCallback((email, password, turnstileToken) => (
-        authenticate('login', { email, password, turnstileToken })
+    const login = useCallback((email, password, turnstileToken, signal) => (
+        authenticate('login', { email, password, turnstileToken, signal })
     ), [authenticate])
     const completeNewPassword = useCallback((input) => authenticate('password', input), [authenticate])
     const completeMfa = useCallback((input) => authenticate('mfa', input), [authenticate])

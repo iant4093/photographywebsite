@@ -20,6 +20,8 @@ function Login() {
     const [error, setError] = useState('')
     const [submitting, setSubmitting] = useState(false)
     const [turnstileToken, setTurnstileToken] = useState(null)
+    const authenticationRequest = useRef(null)
+    useEffect(() => () => authenticationRequest.current?.abort(), [])
 
     // Redirect if already logged in — admin goes to /admin, user goes to /dashboard
     useEffect(() => {
@@ -58,6 +60,9 @@ function Login() {
         }
 
         setSubmitting(true)
+        authenticationRequest.current?.abort()
+        const controller = new AbortController()
+        authenticationRequest.current = controller
 
         try {
             if (challenge?.challengeName === 'NEW_PASSWORD_REQUIRED') {
@@ -66,6 +71,7 @@ function Login() {
                     newPassword,
                     challengeSession: challenge.challengeSession,
                     turnstileToken,
+                    signal: controller.signal,
                 })
                 if (result?.challengeName) {
                     setChallenge(result)
@@ -80,9 +86,10 @@ function Login() {
                     code: mfaCode,
                     challengeSession: challenge.challengeSession,
                     turnstileToken,
+                    signal: controller.signal,
                 })
             } else {
-                const result = await login(email, password, turnstileToken)
+                const result = await login(email, password, turnstileToken, controller.signal)
                 if (result?.challengeName) {
                     setChallenge(result)
                     setPassword('')

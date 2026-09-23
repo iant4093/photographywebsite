@@ -120,7 +120,8 @@ async function readErrorMessage(response) {
         if (!contentType.includes('application/json')) return null
         const body = await response.json()
         const candidate = body?.message || body?.error
-        return typeof candidate === 'string' && candidate.length <= 200 ? candidate : null
+        return { message: typeof candidate === 'string' && candidate.length <= 200 ? candidate : null,
+            busy: body?.code === 'media_busy' }
     } catch {
         return null
     }
@@ -166,9 +167,9 @@ export async function apiFetch(path, options = {}, config = {}) {
                     }
                 }
                 const safeDetail = await readErrorMessage(response)
-                throw new ApiError(userMessageForStatus(response.status, safeDetail), {
+                throw new ApiError(userMessageForStatus(response.status, safeDetail?.message), {
                     status: response.status,
-                    code: `HTTP_${response.status}`,
+                    code: response.status === 409 && safeDetail?.busy ? 'MEDIA_BUSY' : `HTTP_${response.status}`,
                     retryAfterMs: retryAfterMilliseconds(response.headers.get('retry-after')),
                 })
             }
@@ -700,8 +701,17 @@ export async function uploadFileToS3(...args) {
     return (await import('./uploadTransport')).uploadFileToS3(...args)
 }
 
+async function albumMutation(path, options, config) {
+    const session = authGeneration
+    const { completeAlbumMutation } = await import('./albumMutation')
+    return completeAlbumMutation(() => {
+        if (session !== authGeneration) throw new DOMException('Session changed', 'AbortError')
+        return apiFetch(path, options, config)
+    }, options.signal)
+}
+
 export async function createAlbum(token, albumData, options = {}) {
-    const album = await apiFetch('/albums', {
+    const album = await albumMutation('/albums', {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify(albumData),
@@ -712,12 +722,12 @@ export async function createAlbum(token, albumData, options = {}) {
 }
 
 export async function updateAlbum(token, albumId, data, options = {}) {
-    const album = await apiFetch(`/albums/${encodeURIComponent(albumId)}`, {
+    const album = await albumMutation(`/albums/${encodeURIComponent(albumId)}`, {
         method: 'PUT',
         headers: authHeaders(token),
         body: JSON.stringify(data),
         signal: options.signal,
-    })
+    }, { timeoutMs: 60_000 })
     invalidateAlbumCatalog({ album })
     return album
 }
@@ -736,7 +746,7 @@ export async function updateGalleryOrder(token, ordering, options = {}) {
 }
 
 export async function addImagesToAlbum(token, albumId, images, options = {}) {
-    const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
+    const result = await albumMutation(`/albums/${encodeURIComponent(albumId)}/images`, {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify({ images }),
@@ -757,7 +767,7 @@ export async function deleteAlbum(token, albumId, options = {}) {
 }
 
 export async function deleteImages(token, albumId, keys, options = {}) {
-    const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}/delete-images`, {
+    const result = await albumMutation(`/albums/${encodeURIComponent(albumId)}/delete-images`, {
         method: 'POST',
         headers: authHeaders(token),
         body: JSON.stringify({ keys }),
@@ -768,7 +778,7 @@ export async function deleteImages(token, albumId, keys, options = {}) {
 }
 
 export async function updateImageThumbnail(token, albumId, rawKey, data, options = {}) {
-    const result = await apiFetch(`/albums/${encodeURIComponent(albumId)}/images`, {
+    const result = await albumMutation(`/albums/${encodeURIComponent(albumId)}/images`, {
         method: 'PATCH',
         headers: authHeaders(token),
         body: JSON.stringify({ rawKey, ...data }),
@@ -778,70 +788,16 @@ export async function updateImageThumbnail(token, albumId, rawKey, data, options
     return result
 }
 
-export function createUser(token, email, options = {}) {
-    return apiFetch('/users', {
-        method: 'POST',
-        headers: authHeaders(token),
-        body: JSON.stringify({ email }),
-        signal: options.signal,
-    })
+async function adminUserAction(name, args) {
+    const actions = await import('./adminUsers')
+    return actions[name]({ apiFetch, authHeaders, albumMutation, ApiError }, ...args)
 }
 
-export async function listUsersPage(token, params = {}, options = {}) {
-    const queryParams = new URLSearchParams()
-    if (params.limit) queryParams.set('limit', String(params.limit))
-    if (params.cursor) queryParams.set('paginationToken', String(params.cursor))
-    if (params.search) queryParams.set('search', String(params.search))
-    const query = queryParams.toString()
-    const payload = await apiFetch(`/users${query ? `?${query}` : ''}`, {
-        headers: authHeaders(token),
-        signal: options.signal,
-    })
-    if (Array.isArray(payload)) return { users: payload, nextCursor: null }
-    return {
-        users: Array.isArray(payload?.users) ? payload.users : [],
-        nextCursor: payload?.paginationToken || payload?.nextCursor || null,
-    }
-}
-
-export async function listUsers(token, options = {}) {
-    const users = []
-    const seenCursors = new Set()
-    let cursor = null
-    do {
-        const page = await listUsersPage(token, {
-            cursor,
-            limit: options.limit,
-            search: options.search,
-        }, options)
-        users.push(...page.users)
-        cursor = page.nextCursor
-        if (cursor && seenCursors.has(cursor)) {
-            throw new ApiError('The service returned an invalid pagination sequence.', {
-                code: 'REPEATED_CURSOR',
-            })
-        }
-        if (cursor) seenCursors.add(cursor)
-    } while (cursor)
-    return users
-}
-
-export function deleteUser(token, email, options = {}) {
-    return apiFetch(`/users/${encodeURIComponent(email)}`, {
-        method: 'DELETE',
-        headers: authHeaders(token),
-        signal: options.signal,
-    }, { timeoutMs: 60_000 })
-}
-
-export function editUser(token, email, data, options = {}) {
-    return apiFetch(`/users/${encodeURIComponent(email)}`, {
-        method: 'PUT',
-        headers: authHeaders(token),
-        body: JSON.stringify(data),
-        signal: options.signal,
-    })
-}
+export function createUser(...args) { return adminUserAction('createUser', args) }
+export function listUsersPage(...args) { return adminUserAction('listUsersPage', args) }
+export function listUsers(...args) { return adminUserAction('listUsers', args) }
+export function deleteUser(...args) { return adminUserAction('deleteUser', args) }
+export function editUser(...args) { return adminUserAction('editUser', args) }
 
 export function fetchCostReport(token, options = {}) {
     return apiFetch('/admin/costs', {

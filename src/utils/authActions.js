@@ -6,17 +6,39 @@ function safeLoginError(status) {
     return 'Sign in is temporarily unavailable. Please try again.'
 }
 
-export async function requestAuthentication(kind, input) {
+export async function requestAuthentication(kind, input, { timeoutMs = 20_000 } = {}) {
     const { email, turnstileToken, challengeSession } = input
     const login = kind === 'login'
     const body = login ? { email, password: input.password, turnstileToken }
         : kind === 'password' ? { email, newPassword: input.newPassword, session: challengeSession, turnstileToken }
             : { email, challengeName: 'SOFTWARE_TOKEN_MFA', code: input.code, session: challengeSession, turnstileToken }
     const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
-    const response = await fetch(`${apiBase}/login${login ? '' : '/challenge'}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    const controller = new AbortController()
+    const cancel = () => controller.abort(new DOMException('Sign in cancelled.', 'AbortError'))
+    if (input.signal?.aborted) cancel()
+    else input.signal?.addEventListener('abort', cancel, { once: true })
+    const timer = setTimeout(() => controller.abort(new Error(safeLoginError(503))), timeoutMs)
+    // Keep the deadline around body consumption as well as receiving headers.
+    const wait = promise => new Promise((resolve, reject) => {
+        const stop = () => reject(controller.signal.reason)
+        if (controller.signal.aborted) stop()
+        else controller.signal.addEventListener('abort', stop, { once: true })
+        Promise.resolve(promise).then(resolve, reject).finally(() => controller.signal.removeEventListener('abort', stop))
     })
-    const data = await response.json().catch(() => ({}))
+    let response, data
+    try {
+        controller.signal.throwIfAborted()
+        response = await wait(fetch(`${apiBase}/login${login ? '' : '/challenge'}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            signal: controller.signal,
+        }))
+        data = await wait(response.json().catch(() => ({})))
+        controller.signal.throwIfAborted()
+    } finally {
+        clearTimeout(timer)
+        input.signal?.removeEventListener('abort', cancel)
+        controller.abort()
+    }
     if (!response.ok) {
         if (login) {
             const error = new Error(safeLoginError(response.status))

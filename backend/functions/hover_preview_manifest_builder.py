@@ -11,6 +11,7 @@ import os
 import urllib.parse
 
 import boto3
+from media_mutation import album_lease, MediaAlbumMissing
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
@@ -298,6 +299,14 @@ def _commit_unavailable(album):
 
 
 def rebuild_album_manifest(album_id):
+    try:
+        with album_lease(albums_table, validate_uuid(album_id)):
+            return _rebuild_album_manifest(album_id)
+    except MediaAlbumMissing:
+        return {"albumId": album_id, "status": "ignored"}
+
+
+def _rebuild_album_manifest(album_id):
     album_id = validate_uuid(album_id)
     album = _load_album(album_id)
     if not album or not _active_public_photo(album):

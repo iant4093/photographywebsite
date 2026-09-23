@@ -1,4 +1,5 @@
 import { encode } from 'blurhash'
+import { validateDimensions } from '../editor/decodeSafety'
 
 const THUMBNAIL_MAX_SIZE = 800
 const THUMBNAIL_MIME_TYPE = 'image/jpeg'
@@ -28,6 +29,7 @@ function canvasContext(canvas) {
 
 function renderThumbnailCanvas(source, sourceWidth, sourceHeight) {
     const { width, height } = scaledDimensions(sourceWidth, sourceHeight)
+    validateDimensions(sourceWidth, sourceHeight)
     const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
@@ -70,33 +72,47 @@ async function renderThumbnail(source, sourceWidth, sourceHeight, { tolerateBlur
 
 // Generate the legacy 800px JPEG fallback and blurhash. Responsive WebP
 // previews are produced server-side so upload compatibility remains unchanged.
-export async function processImage(file) {
+export async function processImage(file, { signal, timeoutMs = 30_000 } = {}) {
     return new Promise((resolve, reject) => {
+        if (signal?.aborted) { reject(new DOMException('Photo preparation cancelled.', 'AbortError')); return }
         const image = new Image()
         const objectUrl = URL.createObjectURL(file)
-        const cleanup = () => URL.revokeObjectURL(objectUrl)
+        let settled = false
+        const finish = (error, value) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            signal?.removeEventListener('abort', cancel)
+            image.onload = null
+            image.onerror = null
+            image.src = ''
+            URL.revokeObjectURL(objectUrl)
+            if (error) reject(error)
+            else resolve(value)
+        }
+        const cancel = () => finish(new DOMException('Photo preparation cancelled.', 'AbortError'))
+        const timer = setTimeout(() => finish(new Error('Photo preparation timed out. Please try again.')), timeoutMs)
+        signal?.addEventListener('abort', cancel, { once: true })
 
         image.onload = async () => {
+            if (settled) return
             try {
-                const result = await renderThumbnail(image, image.width, image.height)
-                resolve({ ...result, width: image.width, height: image.height })
+                const { width, height } = image
+                const result = await renderThumbnail(image, width, height)
+                finish(null, { ...result, width, height })
             } catch (error) {
-                reject(error)
-            } finally {
-                cleanup()
+                finish(error)
             }
         }
-        image.onerror = () => {
-            cleanup()
-            reject(new Error('Failed to load image for processing'))
-        }
+        image.onerror = () => finish(new Error('Failed to load image for processing'))
         image.src = objectUrl
     })
 }
 
 // Generate a legacy video poster and blurhash from a selected frame.
-export async function processVideo(file, time) {
+export async function processVideo(file, time, { signal } = {}) {
     return new Promise((resolve, reject) => {
+        if (signal?.aborted) { reject(new DOMException('Video preparation cancelled.', 'AbortError')); return }
         const video = document.createElement('video')
         video.muted = true
         video.playsInline = true
@@ -115,12 +131,15 @@ export async function processVideo(file, time) {
         const objectUrl = URL.createObjectURL(file)
         let initialized = false
         let settled = false
+        let seekTimer
         const decodeTimeout = window.setTimeout(() => {
             fail(new Error(VIDEO_DECODE_ERROR_MESSAGE))
         }, VIDEO_DECODE_TIMEOUT_MS)
 
         const cleanup = () => {
             window.clearTimeout(decodeTimeout)
+            clearTimeout(seekTimer)
+            signal?.removeEventListener('abort', cancel)
             video.oncanplay = null
             video.onseeked = null
             video.onerror = null
@@ -133,6 +152,8 @@ export async function processVideo(file, time) {
             cleanup()
             reject(error instanceof Error ? error : new Error('Video processing failed'))
         }
+        const cancel = () => fail(new DOMException('Video preparation cancelled.', 'AbortError'))
+        signal?.addEventListener('abort', cancel, { once: true })
 
         video.oncanplay = () => {
             if (initialized) return
@@ -143,12 +164,14 @@ export async function processVideo(file, time) {
         video.onseeked = () => {
             // A short delay after seeked is more reliable than
             // requestVideoFrameCallback for off-screen video elements.
-            setTimeout(async () => {
+            clearTimeout(seekTimer)
+            seekTimer = setTimeout(async () => {
                 if (settled) return
                 try {
                     const sourceWidth = video.videoWidth
                     const sourceHeight = video.videoHeight
                     const result = await renderThumbnail(video, sourceWidth, sourceHeight)
+                    if (settled) return
                     settled = true
                     cleanup()
                     resolve({ ...result, width: sourceWidth, height: sourceHeight })

@@ -31,10 +31,11 @@ describe('client media processing', () => {
     const { drawImage } = installCanvas()
     class ImageStub {
       set src(value) {
+        if (!value) return
         this.width = 1600
         this.height = 1200
         expect(value).toBe(createdUrl)
-        queueMicrotask(() => this.onload())
+        queueMicrotask(() => this.onload?.())
       }
     }
     vi.stubGlobal('Image', ImageStub)
@@ -48,14 +49,14 @@ describe('client media processing', () => {
 
   it('rejects image decode, invalid dimensions, missing canvas, and failed JPEG encoding', async () => {
     class BadImage {
-      set src(_value) { queueMicrotask(() => this.onerror()) }
+      set src(value) { if (value) queueMicrotask(() => this.onerror?.()) }
     }
     vi.stubGlobal('Image', BadImage)
     await expect(processImage(new Blob())).rejects.toThrow('Failed to load image')
 
     installCanvas()
     class EmptyImage {
-      set src(_value) { this.width = 0; this.height = 10; queueMicrotask(() => this.onload()) }
+      set src(value) { this.width = 0; this.height = 10; if (value) queueMicrotask(() => this.onload?.()) }
     }
     vi.stubGlobal('Image', EmptyImage)
     await expect(processImage(new Blob())).rejects.toThrow('no usable dimensions')
@@ -63,7 +64,7 @@ describe('client media processing', () => {
     vi.restoreAllMocks()
     installCanvas({ context: false })
     class ValidImage {
-      set src(_value) { this.width = 10; this.height = 10; queueMicrotask(() => this.onload()) }
+      set src(value) { this.width = 10; this.height = 10; if (value) queueMicrotask(() => this.onload?.()) }
     }
     vi.stubGlobal('Image', ValidImage)
     await expect(processImage(new Blob())).rejects.toThrow('Canvas rendering is unavailable')
@@ -158,5 +159,46 @@ describe('client media processing', () => {
     const video = { videoWidth: 640, videoHeight: 360 }
     await expect(extractFrameFromVideoElement(video)).resolves.toMatchObject({ blurhash: null })
     expect(console.warn).toHaveBeenCalled()
+  })
+})
+
+describe('photo preparation lifetime', () => {
+  let image
+  beforeEach(() => {
+    vi.useFakeTimers()
+    URL.createObjectURL = vi.fn(() => 'blob:deadline')
+    URL.revokeObjectURL = vi.fn()
+    vi.stubGlobal('Image', class { constructor() { image = this; this.width = 100; this.height = 100 } })
+  })
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+  it('times out a decoder that never responds and releases its URL', async () => {
+    const result = processImage(new Blob(), { timeoutMs: 20 })
+    const rejected = expect(result).rejects.toThrow('timed out')
+    await vi.advanceTimersByTimeAsync(20); await rejected
+    expect(image.onload).toBeNull()
+    expect(image.src).toBe('')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:deadline')
+  })
+  it('cancels a stalled JPEG encoder and ignores its eventual callback', async () => {
+    installCanvas()
+    let encodeDone
+    HTMLCanvasElement.prototype.toBlob.mockImplementation(callback => { encodeDone = callback })
+    const controller = new AbortController()
+    const result = processImage(new Blob(), { signal: controller.signal })
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' })
+    image.onload(); controller.abort(); await rejected
+    encodeDone(new Blob(['late']))
+    await Promise.resolve()
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('does not allocate for a cancelled input and rejects excessive decoded dimensions', async () => {
+    const controller = new AbortController(); controller.abort()
+    await expect(processImage(new Blob(), { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+    const result = processImage(new Blob()); image.width = 1000000
+    const rejected = expect(result).rejects.toThrow()
+    await image.onload(); await rejected
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
 })

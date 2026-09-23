@@ -722,7 +722,8 @@ function ManageAlbums() {
             const session = uploadSession.current
             const finalItems = await session.run({
                 getIdToken, transfer,
-                prepare: isVideo ? (file, time) => processVideo(file, time) : file => processImage(file),
+                prepare: isVideo ? (file, time, _index, options) => processVideo(file, time, options)
+                    : (file, _time, _index, options) => processImage(file, options),
             })
             transfer.finalize()
             const result = await addImagesToAlbum(await getIdToken(), expandedAlbumId, finalItems)
