@@ -3,6 +3,7 @@
 ## Dependency changes
 
 Review dependency PRs weekly, with at most two open updates per main ecosystem.
+Version-update PRs wait seven days after publication to reduce supply-chain risk.
 Only development-tool patch releases are grouped. Runtime, image decoder, auth,
 major-version and workflow changes get individual review. Dependabot opens PRs;
 it does not merge or deploy. Preserve exact lockfiles, pinned action SHAs, artifact
