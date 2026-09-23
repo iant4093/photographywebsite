@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -219,6 +219,24 @@ describe('ManageAlbums', () => {
       expect.any(Object),
     )
     expect(api.fetchAlbumMediaPage).not.toHaveBeenCalled()
+  })
+
+  it('cancels the closed media panel and ignores its late recovery result', async () => {
+    let finish
+    api.fetchAlbumMediaPage.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    await waitFor(() => expect(api.fetchAlbumMediaPage).toHaveBeenCalledTimes(1))
+    const options = api.fetchAlbumMediaPage.mock.calls[0][3]
+    fireEvent.click(screen.getByRole('button', { name: 'Close album media' }))
+    expect(options.signal.aborted).toBe(true)
+    await act(async () => {
+      options.onDeletionRecovered({ title: 'Late obsolete title' })
+      finish({ items: [], nextCursor: null })
+    })
+    expect(screen.queryByText('Late obsolete title')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Close album media' })).not.toBeInTheDocument()
   })
 
   it('supports metadata editing, cancellation, delete confirmation, and load failures', async () => {

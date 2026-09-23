@@ -1099,7 +1099,7 @@ function ManageAlbums() {
                                                         <h3 className="font-serif text-xl font-semibold text-charcoal">
                                                             {typeFilter === 'video' ? 'Video' : 'Photos'} in "{album.title}"
                                                         </h3>
-                                                        <button onClick={() => { setExpandedAlbumId(null); setAlbumImages([]); setMediaNextCursor(null) }} className="text-warm-gray hover:text-charcoal cursor-pointer">
+                                                        <button aria-label="Close album media" onClick={() => { mediaRequest.current += 1; mediaController.current?.abort(); setExpandedAlbumId(null); setAlbumImages([]); setMediaNextCursor(null) }} className="text-warm-gray hover:text-charcoal cursor-pointer">
                                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                                             </svg>
