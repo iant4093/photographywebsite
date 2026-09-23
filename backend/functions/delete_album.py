@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 import boto3
 import drive_backup_jobs
 import cleanup_work
+import comparison_cleanup
 import video_cleanup
 from media_mutation import enabled as mutation_protocol_enabled
 
@@ -57,18 +58,18 @@ class DeletionPending(Exception):
     pass
 
 
-def delete_album_record(album, context=None, *, event=None, allow_pending=False, audit=None):
+def delete_album_record(album, context=None, *, event=None, allow_pending=False, audit=None, operation_id=None):
     """Claim a durable cleanup operation; keep its manifest until every step succeeds."""
     album_id = validate_uuid(album.get("albumId"))
     preview_metadata = load_preview_metadata(album, strict=True)
     prefixes = (*album_media_prefixes(album), f"temp-zips/{album_id}/", f"album-zips/{album_id}/")
     preflight_deletion(prefixes=prefixes)
-    operation = album.get("deletionId") if album.get("status") == "deleting" else uuid.uuid4().hex
+    operation = album.get("deletionId") if album.get("status") == "deleting" else operation_id or uuid.uuid4().hex
     if not isinstance(operation, str) or not operation:
         raise DeletionConflict("Album deletion state is invalid")
     pending_cleanup = album.get("pendingAlbumDeletion")
     if mutation_protocol_enabled() and not pending_cleanup:
-        pending_cleanup = {"id": operation, "audit": audit or cleanup_work.audit_context(event),
+        pending_cleanup = {"id": operation, "countExact": True, "audit": audit or cleanup_work.audit_context(event),
             "videoCleanup": video_cleanup.prepare(album, album.get("images", []))
                 + (album.get("pendingMediaDeletion") or {}).get("videoCleanup", [])}
         try:
@@ -126,7 +127,14 @@ def delete_album_record(album, context=None, *, event=None, allow_pending=False,
             if not video_cleanup.settle(album, pending_cleanup, save, context):
                 raise DeletionPending()
         retaining = drive_backup_jobs.begin_retention(album)
-        deleted_versions = sum(delete_prefix_all_versions(prefix) for prefix in prefixes)
+        if mutation_protocol_enabled():
+            for index, prefix in enumerate(prefixes):
+                cleanup_work.counted_step(pending_cleanup, save, f'prefix:{index}', lambda prefix=prefix: delete_prefix_all_versions(prefix))
+            deleted_versions = int(pending_cleanup.get('deletedVersions', 0))
+            if not comparison_cleanup.clean(album_id):
+                raise DeletionPending()
+        else:
+            deleted_versions = sum(delete_prefix_all_versions(prefix) for prefix in prefixes)
         if album.get("visibility") == "public":
             if mutation_protocol_enabled():
                 if not cleanup_work.revoke(table, album, "pendingAlbumDeletion"):
@@ -143,7 +151,14 @@ def delete_album_record(album, context=None, *, event=None, allow_pending=False,
         if retaining:
             drive_backup_jobs.end_retention(album_id, True)
         if mutation_protocol_enabled():
-            cleanup_work.complete_audit(pending_cleanup, save, "album", {"deleted_version_count": deleted_versions})
+            cleanup_work.complete_audit(pending_cleanup, save, "album", {"deleted_version_count": deleted_versions,
+                "count_accuracy": "exact" if pending_cleanup.get('countExact', False) else "lower_bound"})
+            # Minimal suppression/count receipt survives removal of the album.
+            table.update_item(Key=cleanup_work.completion_key(album_id),
+                UpdateExpression='SET #status = :internal, payload = :value',
+                ExpressionAttributeNames={'#status':'status'}, ExpressionAttributeValues={':internal':'internal', ':value':{
+                    'id':operation, 'albumId':album_id, 'deletedVersions':deleted_versions,
+                    'countExact':pending_cleanup.get('countExact', False), 'completedAt':int(time.time())}})
         table.delete_item(
             Key={"albumId": album_id},
             ConditionExpression="#status = :deleting AND deletionId = :operation AND deletionLeaseOwner = :owner",
@@ -200,7 +215,8 @@ def handler(event, context):
             _audit(event, context, "success", "album_deleted", deleted_version_count=deleted_versions)
         return json_response(
             200,
-            {"message": "Album deleted", "deletedObjectVersions": deleted_versions},
+            {"message": "Album deleted", "deletedObjectVersions": deleted_versions,
+             "deletedObjectVersionsExact": (album.get("pendingAlbumDeletion") or {}).get("countExact", False)},
         )
     except DeletionPending:
         return json_response(202, {"pending": True, "retryAfter": 30})

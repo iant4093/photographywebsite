@@ -30,14 +30,14 @@ def begin(table, subject, username, email, event):
     operation = uuid.uuid4().hex
     pending = {'id':operation, 'subject':subject, 'username':username, 'email':email,
         'phase':'scan', 'albumIds':[], 'position':0, 'versionCount':0, 'prefixCount':0,
-        'deletedAlbums':0, 'deletedVersions':0, 'audit':cleanup_work.audit_context(event),
+        'deletedAlbums':0, 'deletedVersions':0, 'countExact':True, 'audit':cleanup_work.audit_context(event),
         # Let any invocations of a preceding release finish before relying on
         # the ownership fence during a rolling backend deployment.
         'notBefore':now+60}
     try:
         table.update_item(Key=receipt_key,
             UpdateExpression='SET #status = :internal, deletionId = :id, payload = :pending',
-            ConditionExpression='attribute_not_exists(deletionId) AND (attribute_not_exists(identityLeaseUntil) OR identityLeaseUntil < :now)',
+            ConditionExpression='attribute_not_exists(deletionId) AND attribute_not_exists(emailOperation) AND (attribute_not_exists(identityLeaseUntil) OR identityLeaseUntil < :now)',
             ExpressionAttributeNames={'#status':'status'},
             ExpressionAttributeValues={':internal':'internal', ':id':operation, ':pending':pending, ':now':now})
     except ClientError as error:
@@ -136,14 +136,23 @@ def advance(table, cognito, pool, subject, context):
                             enqueue(album_id, 'album-visibility', delay=15)
                             return False
                         pending['inProgressAlbum'] = album_id
+                        pending.setdefault('inProgressOperation', album.get('deletionId') or uuid.uuid4().hex)
                         save()
                         try:
-                            pending['deletedVersions'] += delete_album_record(album, context, allow_pending=True, audit=pending['audit'])
+                            delete_album_record(album, context, allow_pending=True, audit=pending['audit'], operation_id=pending['inProgressOperation'])
                         except (DeletionPending, DeletionConflict, DriveBackupBusy):
                             return False
                         pending['deletedAlbums'] += 1
                 elif phase == 'delete' and not album and pending.get('inProgressAlbum') == album_id:
                     pending['deletedAlbums'] += 1
+                if phase == 'delete' and pending.get('inProgressAlbum') == album_id:
+                    receipt = table.get_item(Key=cleanup_work.completion_key(album_id), ConsistentRead=True).get('Item', {}).get('payload', {})
+                    if receipt.get('id') == pending.get('inProgressOperation'):
+                        pending['deletedVersions'] += int(receipt.get('deletedVersions', 0))
+                        pending['countExact'] = pending.get('countExact', False) and receipt.get('countExact', False)
+                    else:
+                        pending['countExact'] = False
+                pending.pop('inProgressOperation', None)
                 pending.pop('inProgressAlbum', None)
                 pending['position'] = position+1
                 save()
@@ -154,7 +163,8 @@ def advance(table, cognito, pool, subject, context):
                 except cognito.exceptions.UserNotFoundException:
                     pass
                 cleanup_work.complete_audit(pending, save, 'user', {'album_count':int(pending['deletedAlbums']),
-                    'deleted_version_count':int(pending['deletedVersions'])})
+                    'deleted_version_count':int(pending['deletedVersions']),
+                    'count_accuracy':'exact' if pending.get('countExact', False) else 'lower_bound'})
                 pending['phase'] = 'complete'
                 # Keep the subject fence permanently, without retaining the
                 # deleted user's email or provider username after completion.

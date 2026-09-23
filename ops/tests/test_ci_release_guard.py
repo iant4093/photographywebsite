@@ -331,6 +331,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 "CreateZipFunctionRole",
                 "WorkerZipFunctionRole",
                 "DeleteUserFunctionRole",
+                "EditUserFunctionRole",
+                "OriginalComparisonWorkerFunctionRole",
                 "GetAlbumsFunctionRole",
                 "GetAlbumFunctionRole",
                 "GetDownloadUrlFunctionRole",
@@ -909,6 +911,10 @@ class ReleaseDependencyTests(unittest.TestCase):
                     (("Details", 0, "Target", "Attribute"), "Metadata"),
                     (("Replacement",), "True"),
                 ]
+                if logical_id == "OriginalComparisonWorkerFunctionRole":
+                    # This release explicitly reviews a Policies-only change to
+                    # serialize comparison publication with album cleanup.
+                    rejected = rejected[3:]
                 for path, value in rejected:
                     altered = copy.deepcopy(item)
                     target = altered["ResourceChange"]

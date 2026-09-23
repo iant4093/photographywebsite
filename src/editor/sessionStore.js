@@ -48,8 +48,10 @@ function requestResult(request) {
 
 export async function saveEditorSource(file) {
     if (!(file instanceof Blob)) throw new Error('Only a local image file can be saved for recovery.')
+    const sourceId = crypto.randomUUID()
     await runTransaction('readwrite', (store) => {
         store.put({
+            sourceId,
             schema: SESSION_SCHEMA,
             blob: file,
             name: file.name || 'photo',
@@ -60,14 +62,19 @@ export async function saveEditorSource(file) {
         // State from a previously opened photo must never be applied to this source.
         store.delete(STATE_KEY)
     })
+    return sourceId
 }
 
-export async function saveEditorState(state) {
-    await runTransaction('readwrite', (store) => store.put({
-        schema: SESSION_SCHEMA,
-        state,
-        savedAt: Date.now(),
-    }, STATE_KEY))
+export async function saveEditorState(state, sourceId) {
+    return runTransaction('readwrite', store => new Promise((resolve, reject) => {
+        const request = store.get(SOURCE_KEY)
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => {
+            if (!sourceId || request.result?.sourceId !== sourceId) { resolve(false); return }
+            store.put({ schema: SESSION_SCHEMA, sourceId, state, savedAt: Date.now() }, STATE_KEY)
+            resolve(true)
+        }
+    }))
 }
 
 export async function loadEditorSession() {
@@ -86,19 +93,24 @@ export async function loadEditorSession() {
         })
         return {
             file,
-            state: state?.schema === SESSION_SCHEMA && state.state && typeof state.state === 'object'
+            sourceId: source.sourceId,
+            state: source.sourceId && state?.sourceId === source.sourceId && state?.schema === SESSION_SCHEMA && state.state && typeof state.state === 'object'
                 ? state.state
                 : null,
-            savedAt: Math.max(source.savedAt || 0, state?.savedAt || 0),
+            savedAt: Math.max(source.savedAt || 0, state?.sourceId === source.sourceId ? state?.savedAt || 0 : 0),
         }
     } finally {
         database.close()
     }
 }
 
-export async function clearEditorSession() {
-    await runTransaction('readwrite', (store) => {
-        store.delete(SOURCE_KEY)
-        store.delete(STATE_KEY)
+export async function clearEditorSession(sourceId) {
+    await runTransaction('readwrite', store => {
+        const request = store.get(SOURCE_KEY)
+        request.onsuccess = () => {
+            if (sourceId !== undefined && request.result?.sourceId !== sourceId) return
+            store.delete(SOURCE_KEY)
+            store.delete(STATE_KEY)
+        }
     })
 }

@@ -203,6 +203,16 @@ class OriginalWorkerTests(OfflineTestCase):
         self.assertEqual({call[0] for call in self.s3.method_calls}, {"get_object", "head_object", "put_object"})
         self.assertEqual({call[0] for call in self.drive.method_calls}, {"file", "download"})
 
+    def test_deletion_during_decode_cannot_recreate_generated_outputs(self):
+        self.album_table.get_item.side_effect = [
+            {'Item':copy.deepcopy(ALBUM)}, {'Item':copy.deepcopy(ALBUM)},
+            {'Item':{**ALBUM, 'images':[]}},
+        ]
+        with self.assertRaisesRegex(ValueError, 'no longer active'):
+            worker.process_job(self.job)
+        self.s3.put_object.assert_not_called()
+        self.publish.assert_not_called()
+
     def test_existing_derivative_conditional_write_is_reused_without_overwrite(self):
         self.s3.put_object.side_effect = error("PreconditionFailed", "PutObject")
         self.assertEqual(worker.process_job(self.job), "ready")

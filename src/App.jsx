@@ -1,11 +1,13 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import lazy from './utils/lazyRetry'
+import RecoveryBoundary from './components/RecoveryBoundary'
+import { Suspense, useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
-import BackToTop from './components/BackToTop'
+const BackToTop = lazy(() => import('./components/BackToTop'))
 import DocumentMetadata from './components/DocumentMetadata'
-import AnalyticsTracker from './components/AnalyticsTracker'
+const AnalyticsTracker = lazy(() => import('./components/AnalyticsTracker'))
 import Home from './pages/Home'
 import RouteScrollRestoration from './components/RouteScrollRestoration'
 import AlbumLoadingSkeleton from './components/AlbumLoadingSkeleton'
@@ -85,8 +87,8 @@ function App() {
         <div data-theme={theme} className={`linen-site ${isAdminRoute ? 'linen-admin' : ''} ${isImmersiveRoute ? 'linen-immersive' : ''} min-h-screen flex flex-col bg-cream`}>
             <RouteScrollRestoration />
             <DocumentMetadata />
-            <AnalyticsTracker />
-            <Suspense fallback={null}><CameraCursor enabled={!isImmersiveRoute} routeKey={location.pathname} /></Suspense>
+            <RecoveryBoundary optional><Suspense fallback={null}><AnalyticsTracker /></Suspense></RecoveryBoundary>
+            <RecoveryBoundary optional><Suspense fallback={null}><CameraCursor enabled={!isImmersiveRoute} routeKey={location.pathname} /></Suspense></RecoveryBoundary>
             {!isImmersiveRoute && <a className="linen-skip-link" href="#main-content">Skip to main content</a>}
             {!isImmersiveRoute && (
                 <Navbar
@@ -96,6 +98,7 @@ function App() {
                 />
             )}
             <main id="main-content" tabIndex={-1} className="flex-1">
+                <RecoveryBoundary key={location.key}>
                 <Suspense fallback={<PageLoading />}>
                     <Routes location={location}>
                         <Route path="/" element={<Home />} />
@@ -137,11 +140,12 @@ function App() {
                         <Route path="*" element={<NotFound />} />
                     </Routes>
                 </Suspense>
+                </RecoveryBoundary>
             </main>
-            {!isImmersiveRoute && <BackToTop />}
+            {!isImmersiveRoute && <RecoveryBoundary optional><Suspense fallback={null}><BackToTop /></Suspense></RecoveryBoundary>}
             {!isImmersiveRoute && <Footer />}
-            <Suspense fallback={null}><MistyEcho key={location.pathname} /></Suspense>
-            {!isImmersiveRoute && <Suspense fallback={null}><MotionExperience /></Suspense>}
+            <RecoveryBoundary optional><Suspense fallback={null}><MistyEcho key={location.pathname} /></Suspense></RecoveryBoundary>
+            {!isImmersiveRoute && <RecoveryBoundary optional><Suspense fallback={null}><MotionExperience /></Suspense></RecoveryBoundary>}
         </div>
     )
 }

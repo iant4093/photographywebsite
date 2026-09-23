@@ -373,7 +373,7 @@ Resources:
             QueueName: !GetAtt OriginalComparisonQueue.QueueName
         - Statement:
             - Effect: Allow
-              Action: [dynamodb:GetItem, dynamodb:ConditionCheckItem]
+              Action: [dynamodb:GetItem, dynamodb:ConditionCheckItem, dynamodb:UpdateItem]
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
@@ -1996,6 +1996,7 @@ Resources:
           MEDIA_DELETION_WORKER_FUNCTION_NAME: !Ref DeleteImagesFunction
           DELETION_WORKER_FUNCTION_NAME: !Ref DeleteAlbumFunction
           USER_DELETION_WORKER_FUNCTION_NAME: !Ref DeleteUserFunction
+          USER_EMAIL_WORKER_FUNCTION_NAME: !Ref EditUserFunction
           VISIBILITY_WORKER_FUNCTION_NAME: !Ref UpdateAlbumFunction
           UPLOAD_WORKER_FUNCTION_NAME: !Ref AddImagesFunction
           THUMBNAIL_WORKER_FUNCTION_NAME: !Ref UpdateImageFunction
@@ -2009,6 +2010,7 @@ Resources:
                 - !GetAtt DeleteImagesFunction.Arn
                 - !GetAtt DeleteAlbumFunction.Arn
                 - !GetAtt DeleteUserFunction.Arn
+                - !GetAtt EditUserFunction.Arn
                 - !GetAtt UpdateAlbumFunction.Arn
                 - !GetAtt AddImagesFunction.Arn
                 - !GetAtt UpdateImageFunction.Arn
@@ -2979,6 +2981,8 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          ORIGINAL_COMPARISON_TABLE: !Ref OriginalComparisonTable
+          ORIGINAL_PREVIEW_BUCKET: !Ref OriginalPreviewBucket
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
@@ -2987,6 +2991,19 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:DeleteItem]
+              Resource: !GetAtt OriginalComparisonTable.Arn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt OriginalPreviewBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: before/*
+            - Effect: Allow
+              Action: s3:DeleteObject
+              Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - Statement:
             - Effect: Allow
               Action: [mediaconvert:GetJob, mediaconvert:CancelJob]
@@ -3528,6 +3545,8 @@ Resources:
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
+          ORIGINAL_COMPARISON_TABLE: !Ref OriginalComparisonTable
+          ORIGINAL_PREVIEW_BUCKET: !Ref OriginalPreviewBucket
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
@@ -3536,6 +3555,19 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:DeleteItem]
+              Resource: !GetAtt OriginalComparisonTable.Arn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt OriginalPreviewBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: before/*
+            - Effect: Allow
+              Action: s3:DeleteObject
+              Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - Statement:
             - Effect: Allow
               Action: [mediaconvert:GetJob, mediaconvert:CancelJob]
@@ -4309,6 +4341,8 @@ Resources:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
           ALBUMS_TABLE: !Ref AlbumsTable
+          ORIGINAL_COMPARISON_TABLE: !Ref OriginalComparisonTable
+          ORIGINAL_PREVIEW_BUCKET: !Ref OriginalPreviewBucket
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
@@ -4319,6 +4353,19 @@ Resources:
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
           ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:DeleteItem]
+              Resource: !GetAtt OriginalComparisonTable.Arn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt OriginalPreviewBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: before/*
+            - Effect: Allow
+              Action: s3:DeleteObject
+              Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - Statement:
             - Effect: Allow
               Action: [mediaconvert:GetJob, mediaconvert:CancelJob]
@@ -4399,9 +4446,14 @@ Resources:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
           ALBUMS_TABLE: !Ref AlbumsTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
           ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt CacheInvalidationQueue.Arn
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow

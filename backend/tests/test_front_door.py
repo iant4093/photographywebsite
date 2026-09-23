@@ -182,12 +182,12 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
                     and node.name == "handler"
                 )
                 body = handler.body
-                if module_name in {"update_album", "add_images", "update_image", "delete_album", "delete_images", "delete_user"}:
+                if module_name in {"update_album", "add_images", "update_image", "delete_album", "delete_images", "delete_user", "edit_user"}:
                     # These existing Lambdas also receive exact IAM-only work
                     # envelopes. HTTP wrappers must never match that branch.
                     self.assertIsInstance(body[0], ast.If)
                     condition = ast.unparse(body[0].test)
-                    self.assertIn("set(event) == {'source', 'subject'}" if module_name == "delete_user" else "set(event) == {'source', 'albumId'}", condition)
+                    self.assertIn("set(event) == {'source', 'subject'}" if module_name in {"delete_user", "edit_user"} else "set(event) == {'source', 'albumId'}", condition)
                     self.assertIn("isinstance(event, dict)", condition)
                     body = body[1:]
                 first = body[0]
@@ -198,9 +198,9 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
                 self.assertIsInstance(body[1], ast.If)
 
     def test_http_payload_cannot_forge_internal_album_work(self):
-        import add_images, update_image, update_album, delete_album, delete_images, delete_user
-        for module, kind in ((delete_user, "user-deletion"), (delete_album, "album-deletion"), (delete_images, "album-media-deletion"), (add_images, "album-upload-followup"), (update_image, "album-thumbnail-cleanup"), (update_album, "album-visibility")):
-            envelope = {"source": kind, "subject" if kind == "user-deletion" else "albumId": "11111111-1111-4111-8111-111111111111"}
+        import add_images, update_image, update_album, delete_album, delete_images, delete_user, edit_user
+        for module, kind in ((edit_user, "user-email-update"), (delete_user, "user-deletion"), (delete_album, "album-deletion"), (delete_images, "album-media-deletion"), (add_images, "album-upload-followup"), (update_image, "album-thumbnail-cleanup"), (update_album, "album-visibility")):
+            envelope = {"source": kind, "subject" if kind in {"user-deletion", "user-email-update"} else "albumId": "11111111-1111-4111-8111-111111111111"}
             for event in ({"body": json.dumps(envelope), "requestContext": {"http": {"method": "POST"}}},
                           {**envelope, "requestContext": {}}, {**envelope, "body": "{}"}):
                 denied = {"statusCode": 403}

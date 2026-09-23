@@ -47,15 +47,29 @@ self.addEventListener('activate', event => {
 
 async function networkFirst(request) {
   const cache = await openCache(SHELL_CACHE)
-  try {
-    const response = await fetch(request)
-    if (response.ok && (response.headers.get('content-type') || '').includes('text/html')) {
-      await remember(cache, request, response, SHELL_LIMIT)
+  const fallback = async () => (await matchCache(cache, request)) || (await matchCache(cache, '/index.html'))
+  let timer
+  const network = (async () => {
+    try {
+      const response = await fetch(request)
+      if ([500, 502, 503, 504].includes(response.status)) return (await fallback()) || response
+      if (response.ok && (response.headers.get('content-type') || '').includes('text/html')) {
+        await remember(cache, request, response, SHELL_LIMIT)
+      }
+      return response
+    } catch (error) {
+      return (await fallback()) || Promise.reject(error)
     }
-    return response
-  } catch (error) {
-    return (await matchCache(cache, request)) || (await matchCache(cache, '/index.html')) || Promise.reject(error)
-  }
+  })()
+  try {
+    return await Promise.race([network, new Promise(resolve => {
+      timer = setTimeout(async () => {
+        const cached = await fallback()
+        // A first visit still needs the network; never synthesize success.
+        if (cached) resolve(cached)
+      }, 4000)
+    })])
+  } finally { clearTimeout(timer) }
 }
 
 async function cacheFirstAsset(request) {

@@ -1,14 +1,17 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useAccountDirectory from '../hooks/useAccountDirectory'
+import useDialogOperation from '../hooks/useDialogOperation'
+import AccountDialog from '../components/AccountDialog'
 import { Link } from 'react-router'
 import { useAuth } from '../context/auth'
-import { listUsers, editUser } from '../utils/api'
+import { editUser } from '../utils/api'
 
 // Edit User page — list users with search and change email
 function EditUser() {
     const { getIdToken } = useAuth()
 
-    const [users, setUsers] = useState([])
-    const [loading, setLoading] = useState(true)
+    const { users, loading, listError, loadUsers } = useAccountDirectory(getIdToken)
+    const operation = useDialogOperation()
     const [search, setSearch] = useState('')
 
     // Editing state
@@ -18,48 +21,37 @@ function EditUser() {
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
 
-    const loadUsers = useCallback(async () => {
-        try {
-            const token = await getIdToken()
-            const data = await listUsers(token)
-            setUsers(data.filter((u) => u.email !== 'iant4093@gmail.com'))
-        } catch (err) {
-            console.error('Failed to load users:', err)
-        } finally {
-            setLoading(false)
-        }
-    }, [getIdToken])
-
-    // Load users on mount
-    useEffect(() => {
-        const timeout = window.setTimeout(loadUsers, 0)
-        return () => window.clearTimeout(timeout)
-    }, [loadUsers])
-
     // Start editing a user
     function startEdit(user) {
+        operation.cancel()
+        setSaving(false)
         setEditingUser(user)
         setNewEmail(user.email)
         setError('')
         setSuccess('')
     }
 
+    function closeDialog() { operation.cancel(); setEditingUser(null); setSaving(false); setError('') }
+
     // Save edits
     async function handleSave() {
-        if (!newEmail) return
+        if (!newEmail || saving) return
+        const request = operation.begin()
         setSaving(true)
         setError('')
         try {
             const token = await getIdToken()
-            await editUser(token, editingUser.email, { email: newEmail, userId: editingUser.sub })
+            if (!request.current()) return
+            await editUser(token, editingUser.email, { email: newEmail, userId: editingUser.sub }, { signal: request.signal })
+            if (!request.current()) return
             setSuccess(`User updated successfully! ${newEmail !== editingUser.email ? 'Albums have been migrated to the new email.' : ''}`)
             setEditingUser(null)
             loadUsers()
-            setTimeout(() => setSuccess(''), 5000)
         } catch (err) {
+            if (!request.current()) return
             setError(err.message || 'Failed to update user.')
         } finally {
-            setSaving(false)
+            if (request.current()) setSaving(false)
         }
     }
 
@@ -91,13 +83,13 @@ function EditUser() {
                 {success && (
                     <div className="mb-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm animate-fade-in">{success}</div>
                 )}
-                {error && (
+                {error && !editingUser && (
                     <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm animate-fade-in">{error}</div>
                 )}
 
                 {/* Edit modal */}
                 {editingUser && (
-                    <div className="fixed inset-0 z-[100] bg-charcoal/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+                    <AccountDialog label="Edit User" onClose={closeDialog}>
                         <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-warm-xl animate-scale-in">
                             <h3 className="font-serif text-xl font-semibold text-charcoal mb-1">
                                 Edit User
@@ -108,8 +100,9 @@ function EditUser() {
 
                             {/* New email */}
                             <div className="mb-5">
-                                <label className="block text-sm font-medium text-charcoal mb-2">Email</label>
+                                <label htmlFor="edit-account-email" className="block text-sm font-medium text-charcoal mb-2">Email</label>
                                 <input
+                                    id="edit-account-email"
                                     type="email"
                                     value={newEmail}
                                     onChange={(e) => setNewEmail(e.target.value)}
@@ -123,9 +116,11 @@ function EditUser() {
                                 )}
                             </div>
 
+                            {error && <p role="alert">{error}</p>}
+                            {saving && <p role="status">Closing this dialog does not cancel an accepted update.</p>}
                             <div className="flex gap-3 mt-8">
                                 <button
-                                    onClick={() => setEditingUser(null)}
+                                    onClick={closeDialog}
                                     className="flex-1 py-3 rounded-xl bg-cream text-warm-gray font-medium hover:bg-cream-dark transition-colors cursor-pointer"
                                 >
                                     Cancel
@@ -146,7 +141,7 @@ function EditUser() {
                                 </button>
                             </div>
                         </div>
-                    </div>
+                    </AccountDialog>
                 )}
 
                 {/* Search */}
@@ -160,19 +155,21 @@ function EditUser() {
                     />
                 </div>
 
+                {loading && <p role="status" className="text-sm text-warm-gray mb-4">Loading all accounts… Search results are still updating.</p>}
+                {listError && <div role="alert" className="mb-4 text-red-700">{listError} <button onClick={loadUsers} className="underline">Retry</button></div>}
                 {/* Users list */}
-                {loading ? (
+                {loading && users.length === 0 ? (
                     <div className="flex justify-center py-20">
                         <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
                     </div>
                 ) : filteredUsers.length === 0 ? (
                     <div className="text-center py-12 text-warm-gray">
-                        <p>No users found.</p>
+                        <p>{listError ? 'Accounts could not be fully loaded.' : loading ? 'Searching all accounts…' : 'No users found.'}</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
                         {filteredUsers.map((user) => (
-                            <div key={user.email} className="bg-white rounded-xl p-5 shadow-warm-sm border border-warm-border flex items-center justify-between">
+                            <div key={user.sub || user.email} className="bg-white rounded-xl p-5 shadow-warm-sm border border-warm-border flex items-center justify-between">
                                 <div>
                                     <p className="font-medium text-charcoal">{user.email}</p>
                                     <p className="text-xs text-warm-gray mt-0.5">

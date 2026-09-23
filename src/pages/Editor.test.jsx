@@ -148,7 +148,7 @@ describe('Photo Editor page', () => {
         mocks.drawGeometry.mockClear()
         mocks.drawGeometryAtSize.mockClear()
         mocks.loadEditorSession.mockReset().mockResolvedValue(null)
-        mocks.saveEditorSource.mockReset().mockResolvedValue()
+        mocks.saveEditorSource.mockReset().mockResolvedValue('source-a')
         mocks.saveEditorState.mockReset().mockResolvedValue()
         mocks.clearEditorSession.mockReset().mockResolvedValue()
         mocks.workerMessages.length = 0
@@ -227,7 +227,7 @@ describe('Photo Editor page', () => {
         expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(1.2)
         await waitFor(() => expect(mocks.saveEditorState).toHaveBeenCalledWith(expect.objectContaining({
             adjustments: expect.objectContaining({ exposure: 1.2 }),
-        })), { timeout: 1200 })
+        }), 'source-a'), { timeout: 1200 })
         expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
         await user.click(screen.getByRole('button', { name: 'Undo' }))
         expect(screen.getByRole('spinbutton', { name: 'Exposure value' })).toHaveValue(0)
@@ -481,6 +481,7 @@ describe('Photo Editor page', () => {
     it('restores the local source and editor state, then explicitly clears it', async () => {
         const recoveredFile = new File(['jpeg'], 'recovered.jpg', { type: 'image/jpeg' })
         mocks.loadEditorSession.mockResolvedValueOnce({
+            sourceId: 'source-a',
             file: recoveredFile,
             state: {
                 adjustments: { exposure: 1.35, temperature: 14 },

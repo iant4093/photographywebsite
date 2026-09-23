@@ -187,7 +187,7 @@ class OriginalInfrastructureTests(unittest.TestCase):
             if resource["Type"] == "AWS::Serverless::Function"
             and "ORIGINAL_COMPARISON_TABLE" in resource["Properties"].get("Environment", {}).get("Variables", {})
         }
-        self.assertEqual(consumers, API_READERS | BACKGROUND_FUNCTIONS)
+        self.assertEqual(consumers, API_READERS | BACKGROUND_FUNCTIONS | {"DeleteAlbumFunction", "DeleteImagesFunction", "DeleteUserFunction"})
         for logical_id in API_READERS:
             with self.subTest(function=logical_id):
                 function = self.function(logical_id)
@@ -203,6 +203,19 @@ class OriginalInfrastructureTests(unittest.TestCase):
                 table = [entry for entry in permissions if entry["Resource"] == {"Fn::GetAtt": ["OriginalComparisonTable", "Arn"]}]
                 expected = {"dynamodb:BatchGetItem"} | ({"dynamodb:UpdateItem"} if logical_id in UPLOAD_COMPLETERS else set())
                 self.assertEqual({action for entry in table for action in sequence(entry["Action"])}, expected)
+
+    def test_cleanup_roles_only_delete_generated_comparison_namespace(self):
+        for logical_id in ("DeleteAlbumFunction", "DeleteImagesFunction", "DeleteUserFunction"):
+            permissions = self.allowed(logical_id)
+            original = [entry for entry in permissions if "OriginalPreviewBucket" in json.dumps(entry["Resource"])]
+            self.assertEqual({action for entry in original for action in sequence(entry["Action"])}, {"s3:ListBucket", "s3:DeleteObject"})
+            deletion = next(entry for entry in original if entry["Action"] == "s3:DeleteObject")
+            self.assertEqual(deletion["Resource"], {"Fn::Sub":"${OriginalPreviewBucket.Arn}/before/*"})
+            listing = next(entry for entry in original if entry["Action"] == "s3:ListBucket")
+            self.assertEqual(listing["Condition"], {"StringLike":{"s3:prefix":"before/*"}})
+            self.assertNotIn("GOOGLE_OAUTH_PARAMETER", self.function(logical_id)["Environment"]["Variables"])
+        worker = self.allowed("OriginalComparisonWorkerFunction")
+        self.assertTrue(any("dynamodb:UpdateItem" in sequence(entry["Action"]) and entry["Resource"] == {"Fn::GetAtt":["AlbumsTable","Arn"]} for entry in worker))
 
     def test_only_committed_upload_handlers_and_reconciler_enqueue_comparisons(self):
         queue_consumers = {

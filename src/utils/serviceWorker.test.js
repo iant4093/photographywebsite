@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { URL as NodeURL } from 'node:url'
 import vm from 'node:vm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 const source = fs.readFileSync(new NodeURL('../../public/service-worker.js', import.meta.url), 'utf8')
 function worker({ unavailable = false, full = false } = {}) {
     const entries = new Map()
@@ -14,7 +14,7 @@ function worker({ unavailable = false, full = false } = {}) {
         async keys() { return [...entries.keys()].map(url => new Request(url)) },
     }
     let response = { ok: true, type: 'basic', headers: new Headers({ 'content-type': 'text/html' }), clone() { return this } }
-    const context = vm.createContext({ URL, Request, Promise, Set,
+    const context = vm.createContext({ URL, Request, Promise, Set, setTimeout, clearTimeout,
         self: { location: { href: 'https://site.test/service-worker.js?v=test', origin: 'https://site.test' }, addEventListener(name, handler) { handlers[name] = handler } },
         caches: { async open() { if (unavailable) throw new Error('blocked'); return cache } },
         fetch: async () => response,
@@ -34,6 +34,20 @@ describe('optional bounded offline caching', () => {
         for (let index = 0; index < 65; index++) await w.context.networkFirst(new Request(`https://site.test/?q=${index}`))
         expect(w.entries.size).toBe(40)
         expect(w.entries.has('https://site.test/?q=64')).toBe(true)
+    })
+    it('uses the cached shell on transient server errors and stalled requests', async () => {
+        vi.useFakeTimers()
+        try {
+            const w = worker()
+            const cached = w.response
+            w.entries.set('https://site.test/index.html', cached)
+            w.setResponse({ ...cached, ok: false, status: 503 })
+            expect(await w.context.networkFirst(new Request('https://site.test/contact'))).toBe(cached)
+            w.context.fetch = () => new Promise(() => {})
+            const pending = w.context.networkFirst(new Request('https://site.test/contact'))
+            await vi.advanceTimersByTimeAsync(4000)
+            expect(await pending).toBe(cached)
+        } finally { vi.useRealTimers() }
     })
     it('never intercepts API navigation or authorization-bearing requests', () => {
         const w = worker()

@@ -16,7 +16,8 @@
     "verify:ci": "npm run lint && npm run test:coverage && npm run build",
     "preview": "vite preview",
     "build:raw-decoder": "python3 scripts/build-raw-decoder.py",
-    "test:raw-decoder": "node scripts/test-raw-decoder.mjs"
+    "test:raw-decoder": "node scripts/test-raw-decoder.mjs",
+    "test:browser": "node tests/browser/release-checks.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
@@ -56,6 +57,7 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^16.5.0",
     "jsdom": "26.1.0",
+    "playwright": "1.63.0",
     "vite": "^7.3.6",
     "vitest": "4.1.11"
   }

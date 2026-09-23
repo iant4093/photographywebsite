@@ -43,6 +43,7 @@ RESOURCE_TYPES = frozenset({
 # Details are aggregate/enumerated operational facts only. Never add identifiers,
 # user input, paths, object keys, URLs, provider errors, or request data here.
 _DETAIL_TYPES = {
+    "count_accuracy": str,
     "album_count": int,
     "deleted_count": int,
     "deleted_version_count": int,
@@ -55,6 +56,7 @@ _DETAIL_TYPES = {
     "hero_type": str,
 }
 _DETAIL_ENUMS = {
+    "count_accuracy": {"exact", "lower_bound"},
     "challenge_type": frozenset({"new_password_required", "software_token_mfa", "other"}),
     "visibility": frozenset({"public", "private", "unlisted", "unknown"}),
     "previous_visibility": frozenset({"public", "private", "unlisted", "unknown"}),

@@ -13,6 +13,7 @@ from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 from PIL import Image, ImageCms, ImageOps
 
+from media_mutation import album_lease
 from media_access import media_id_for_key, validate_album_media_key
 from original_comparison_store import (
     UNMATCHED_RETRY_SECONDS, comparison_table, failure_retry, image_revision,
@@ -133,7 +134,7 @@ def publish(album, image, record, owner):
     ])
 
 
-def process_job(job):
+def process_job(job, context=None):
     album_id = validate_uuid(job.get("albumId"))
     albums = boto3.resource("dynamodb").Table(os.environ["ALBUMS_TABLE"])
     album = albums.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
@@ -150,14 +151,18 @@ def process_job(job):
     owner = uuid.uuid4().hex
     now = int(time.time())
     try:
-        response = table.update_item(
-            Key=key, UpdateExpression=("SET leaseOwner = :owner, leaseUntil = :until, "
-                                       "rawKey = :raw, #status = if_not_exists(#status, :pending)"),
-            ConditionExpression="attribute_not_exists(leaseUntil) OR leaseUntil < :now",
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={":owner": owner, ":until": now + 360, ":now": now,
-                                       ":raw": raw_key, ":pending": "pending"}, ReturnValues="ALL_NEW",
-        )
+        with album_lease(albums, album_id, context):
+            current_album = albums.get_item(Key={"albumId":album_id}, ConsistentRead=True).get("Item", {})
+            if current_album.get("status", "active") != "active" or image not in current_album.get("images", []):
+                return "skipped"
+            response = table.update_item(
+                Key=key, UpdateExpression=("SET leaseOwner = :owner, leaseUntil = :until, "
+                                           "rawKey = :raw, #status = if_not_exists(#status, :pending)"),
+                ConditionExpression="attribute_not_exists(leaseUntil) OR leaseUntil < :now",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={":owner": owner, ":until": now + 360, ":now": now,
+                                           ":raw": raw_key, ":pending": "pending"}, ReturnValues="ALL_NEW",
+            )
     except ClientError as error:
         if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
             return "busy"
@@ -214,26 +219,30 @@ def process_job(job):
         verify_live_source(drive, source)
         original = drive.download(source["id"], MAX_SOURCE_BYTES, expected_md5=checksum)
         width, height, outputs = generate_previews(original)
-        previews = {}
-        for target, payload in outputs.items():
-            output_key = f"before/{album_id}/{media_id}/{checksum}/w{target}.webp"
-            # Never overwrite an existing derivative. A source replacement gets
-            # a different checksum namespace. No existing website originals touched.
-            try:
-                s3.put_object(Bucket=os.environ["ORIGINAL_PREVIEW_BUCKET"], Key=output_key,
-                              Body=payload, ContentType="image/webp", CacheControl="private, max-age=1800",
-                              ServerSideEncryption="AES256", IfNoneMatch="*")
-            except ClientError as error:
-                if error.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
-                    raise
-            previews[target] = output_key
-        current = s3.head_object(Bucket=os.environ["IMAGES_BUCKET"], Key=raw_key)
-        if current.get("ETag") != record["websiteEtag"]:
-            raise ValueError("Edited photo changed during comparison processing")
-        record.update(status="ready", sourceFileId=source["id"], sourceChecksum=checksum,
-                      sourceRevision=str(source.get("version", "")), matchMethod=match.get("method", "filename_time_camera"),
-                      width=width, height=height, previews=previews)
-        publish(album, image, record, owner)
+        with album_lease(albums, album_id, context):
+            current_album = albums.get_item(Key={"albumId":album_id}, ConsistentRead=True).get("Item", {})
+            if current_album.get("status", "active") != "active" or image not in current_album.get("images", []):
+                raise ValueError("Comparison source is no longer active")
+            previews = {}
+            for target, payload in outputs.items():
+                output_key = f"before/{album_id}/{media_id}/{checksum}/w{target}.webp"
+                # Never overwrite an existing derivative. A source replacement gets
+                # a different checksum namespace. No existing website originals touched.
+                try:
+                    s3.put_object(Bucket=os.environ["ORIGINAL_PREVIEW_BUCKET"], Key=output_key,
+                                  Body=payload, ContentType="image/webp", CacheControl="private, max-age=1800",
+                                  ServerSideEncryption="AES256", IfNoneMatch="*")
+                except ClientError as error:
+                    if error.response.get("Error", {}).get("Code") not in {"PreconditionFailed", "412"}:
+                        raise
+                previews[target] = output_key
+            current = s3.head_object(Bucket=os.environ["IMAGES_BUCKET"], Key=raw_key)
+            if current.get("ETag") != record["websiteEtag"]:
+                raise ValueError("Edited photo changed during comparison processing")
+            record.update(status="ready", sourceFileId=source["id"], sourceChecksum=checksum,
+                          sourceRevision=str(source.get("version", "")), matchMethod=match.get("method", "filename_time_camera"),
+                          width=width, height=height, previews=previews)
+            publish(album, image, record, owner)
         return "ready"
     except Exception:
         # Preserve a retryable failure instead of misreporting a provider outage
@@ -257,7 +266,7 @@ def handler(event, context):
     failures = []
     for message in event.get("Records", []):
         try:
-            status = process_job(json.loads(message["body"]))
+            status = process_job(json.loads(message["body"]), context)
             logger.info("original_comparison_completed status=%s", status)
             if status == "deferred_failure":
                 # Preserve SQS redrive/DLQ alerting for persistent failures.

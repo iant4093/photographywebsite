@@ -241,6 +241,7 @@ export default function Editor() {
     const [pan, setPan] = useState({ x: 0, y: 0 })
     const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 })
     const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 })
+    const sessionSourceId = useRef(null)
     const [sessionSourceReady, setSessionSourceReady] = useState(false)
     const [sessionStatus, setSessionStatus] = useState('No saved session')
     const [previewQuality, setPreviewQuality] = useState(storedPreviewQuality)
@@ -647,7 +648,7 @@ export default function Editor() {
         }
     }, [drainPreviewQueue, fastPreview, preview])
 
-    const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false } = {}) => {
+    const openFile = useCallback(async (file, { restoredState = null, fromRecovery = false, recoveredSourceId = null } = {}) => {
         if (!file) return
         if (!file.type.startsWith('image/') && !isRawFile(file)) {
             setError('Choose a supported photo or camera RAW file.')
@@ -655,6 +656,7 @@ export default function Editor() {
         }
         if (fromRecovery && openGenerationRef.current > 0) return
         const generation = ++openGenerationRef.current
+        if (fromRecovery) sessionSourceId.current = recoveredSourceId
         decodeControllerRef.current?.abort()
         const decodeController = new AbortController()
         decodeControllerRef.current = decodeController
@@ -702,12 +704,15 @@ export default function Editor() {
             setExportOptions(restoreExportOptions(restoredState?.exportOptions))
             setStatus(`${decoded.width} × ${decoded.height}${decoded.metadata.raw ? ' RAW' : ''} ${fromRecovery ? 'recovered' : 'loaded'} locally`)
             if (fromRecovery) {
+                sessionSourceId.current = recoveredSourceId || await saveEditorSource(file)
+                if (generation !== openGenerationRef.current) return
                 setSessionSourceReady(true)
                 setSessionStatus('Recovered locally')
             } else {
                 try {
-                    await saveEditorSource(file)
+                    const sourceId = await saveEditorSource(file)
                     if (generation !== openGenerationRef.current) return
+                    sessionSourceId.current = sourceId
                     await saveEditorState({
                         adjustments: nextAdjustments,
                         geometry: nextGeometry,
@@ -719,13 +724,13 @@ export default function Editor() {
                         comparePosition: 50,
                         zoom: 'fit',
                         pan: { x: 0, y: 0 },
-                    })
+                    }, sourceId)
                     if (generation !== openGenerationRef.current) return
                     setSessionSourceReady(true)
                     setSessionStatus('Saved locally')
                 } catch {
                     if (generation === openGenerationRef.current) {
-                        await clearEditorSession().catch(() => {})
+                        await clearEditorSession(sessionSourceId.current).catch(() => {})
                         setSessionStatus('Local recovery unavailable')
                     }
                 }
@@ -739,7 +744,7 @@ export default function Editor() {
             setStatus('Choose another photo')
             setSessionSourceReady(false)
             setSessionStatus('No saved session')
-            if (fromRecovery) await clearEditorSession().catch(() => {})
+            if (fromRecovery) await clearEditorSession(sessionSourceId.current).catch(() => {})
         } finally {
             if (decodeControllerRef.current === decodeController) decodeControllerRef.current = null
             if (generation === openGenerationRef.current) setIsProcessing(previewRenderRef.current.busy)
@@ -751,7 +756,7 @@ export default function Editor() {
         let active = true
         restorePromiseRef.current
             .then((session) => {
-                if (active && session) void openFile(session.file, { restoredState: session.state, fromRecovery: true })
+                if (active && session) void openFile(session.file, { restoredState: session.state, recoveredSourceId: session.sourceId, fromRecovery: true })
             })
             .catch(() => {
                 if (active) setSessionStatus('Local recovery unavailable')
@@ -773,15 +778,16 @@ export default function Editor() {
             zoom,
             pan,
         }
-        const saveState = () => saveEditorState(recoverableState)
+        const sourceId = sessionSourceId.current
+        const saveState = () => saveEditorState(recoverableState, sourceId)
         let idleWork
         const timer = window.setTimeout(() => {
             idleWork = scheduleIdleWork(() => {
-                saveState().then(() => setSessionStatus('Saved locally'))
-                    .catch(() => setSessionStatus('Local recovery unavailable'))
+                saveState().then(saved => { if (sessionSourceId.current === sourceId) setSessionStatus(saved === false ? 'Another photo is saved in a different tab' : 'Saved locally') })
+                    .catch(() => { if (sessionSourceId.current === sourceId) setSessionStatus('Local recovery unavailable') })
             }, 1200)
         }, 550)
-        const flushSession = () => { void saveState() }
+        const flushSession = () => { void saveState().catch(() => {}) }
         window.addEventListener('pagehide', flushSession)
         return () => {
             window.clearTimeout(timer)

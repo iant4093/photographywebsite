@@ -80,6 +80,12 @@ jobs:
           VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA' }}
           VITE_RELEASE_SHA: ${{ github.sha }}
         run: npm run build
+      - name: Install browser for deterministic release journeys
+        run: npx playwright install --with-deps chromium
+      - name: Exercise built frontend browser recovery and administration
+        env:
+          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID || 'example-client-id' }}
+        run: npm run test:browser
       - name: Create exact frontend artifact
         run: |
           mkdir -p release-frontend

@@ -53,7 +53,7 @@ class RecoveryFollowupTests(unittest.TestCase):
     def test_corrected_email_after_definitive_rejection_is_allowed(self):
         client = Mock(); client.exceptions = boto3.client('cognito-idp').exceptions
         client.admin_update_user_attributes.side_effect = [client.exceptions.AliasExistsException({'Error': {'Code': 'AliasExistsException'}}, 'AdminUpdateUserAttributes'), None]
-        with patch.object(user_email_update, 'cognito_identity', return_value=('name', SUB, {'email': 'old@example.test'})), patch.object(user_email_update, 'assert_admin_target_mutable'), patch.object(user_email_update, 'albums_owned_by', return_value=[]):
+        with patch.object(user_email_update, 'cognito_identity', return_value=('name', SUB, {'email': 'old@example.test'})), patch.object(user_email_update, 'assert_admin_target_mutable'):
             with self.assertRaises(client.exceptions.AliasExistsException):
                 user_email_update.update(self.table, client, 'pool', 'old@example.test', 'taken@example.test', {}, {}, CONTEXT)
             self.assertEqual(user_email_update.update(self.table, client, 'pool', 'old@example.test', 'available@example.test', {}, {}, CONTEXT), 0)
@@ -62,7 +62,7 @@ class RecoveryFollowupTests(unittest.TestCase):
     def test_uncertain_email_change_still_blocks_different_operation(self):
         client = Mock(); client.exceptions = boto3.client('cognito-idp').exceptions
         client.admin_update_user_attributes.side_effect = RuntimeError('timeout')
-        with patch.object(user_email_update, 'cognito_identity', return_value=('name', SUB, {'email': 'old@example.test'})), patch.object(user_email_update, 'assert_admin_target_mutable'), patch.object(user_email_update, 'albums_owned_by', return_value=[]):
+        with patch.object(user_email_update, 'cognito_identity', return_value=('name', SUB, {'email': 'old@example.test'})), patch.object(user_email_update, 'assert_admin_target_mutable'):
             with self.assertRaises(RuntimeError): user_email_update.update(self.table, client, 'pool', 'old@example.test', 'new@example.test', {}, {}, CONTEXT)
             with self.assertRaises(user_email_update.MediaMutationBusy): user_email_update.update(self.table, client, 'pool', 'old@example.test', 'different@example.test', {}, {}, CONTEXT)
         client.admin_update_user_attributes.assert_called_once()

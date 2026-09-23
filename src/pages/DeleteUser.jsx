@@ -1,14 +1,17 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import useAccountDirectory from '../hooks/useAccountDirectory'
+import useDialogOperation from '../hooks/useDialogOperation'
+import AccountDialog from '../components/AccountDialog'
 import { Link } from 'react-router'
 import { useAuth } from '../context/auth'
-import { listUsers, deleteUser } from '../utils/api'
+import { deleteUser } from '../utils/api'
 
 // Delete User page — select a user, type "confirm" to delete them + all their data
 function DeleteUser() {
     const { getIdToken } = useAuth()
 
-    const [users, setUsers] = useState([])
-    const [loading, setLoading] = useState(true)
+    const { users, loading, listError, loadUsers } = useAccountDirectory(getIdToken)
+    const operation = useDialogOperation()
     const [search, setSearch] = useState('')
 
     // Selected user for deletion
@@ -18,41 +21,29 @@ function DeleteUser() {
     const [error, setError] = useState('')
     const [success, setSuccess] = useState('')
 
-    const loadUsers = useCallback(async () => {
-        try {
-            const token = await getIdToken()
-            const data = await listUsers(token)
-            // Filter out admin users
-            setUsers(data.filter((u) => u.email !== 'iant4093@gmail.com'))
-        } catch (err) {
-            console.error('Failed to load users:', err)
-        } finally {
-            setLoading(false)
-        }
-    }, [getIdToken])
-
-    // Load users on mount
-    useEffect(() => {
-        const timeout = window.setTimeout(loadUsers, 0)
-        return () => window.clearTimeout(timeout)
-    }, [loadUsers])
+    function closeDialog() { operation.cancel(); setSelectedUser(null); setConfirmText(''); setDeleting(false); setError('') }
+    function startDelete(user) { operation.cancel(); setSelectedUser(user); setConfirmText(''); setDeleting(false); setError(''); setSuccess('') }
 
     // Handle deletion
     async function handleDelete() {
-        if (confirmText !== 'confirm') return
+        if (confirmText !== 'confirm' || deleting) return
+        const request = operation.begin()
         setDeleting(true)
         setError('')
         try {
             const token = await getIdToken()
-            const result = await deleteUser(token, selectedUser.email, { userId: selectedUser.sub })
+            if (!request.current()) return
+            const result = await deleteUser(token, selectedUser.email, { userId: selectedUser.sub, signal: request.signal })
+            if (!request.current()) return
             setSuccess(`User ${selectedUser.email} deleted along with ${result.albumsDeleted} album(s).`)
             setSelectedUser(null)
             setConfirmText('')
             loadUsers()
         } catch (err) {
+            if (!request.current()) return
             setError(err.message || 'Failed to delete user.')
         } finally {
-            setDeleting(false)
+            if (request.current()) setDeleting(false)
         }
     }
 
@@ -83,13 +74,13 @@ function DeleteUser() {
                 {success && (
                     <div className="mb-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm animate-fade-in">{success}</div>
                 )}
-                {error && (
+                {error && !selectedUser && (
                     <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm animate-fade-in">{error}</div>
                 )}
 
                 {/* Confirmation modal overlay */}
                 {selectedUser && (
-                    <div className="fixed inset-0 z-[100] bg-charcoal/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+                    <AccountDialog label="Delete User" onClose={closeDialog}>
                         <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-warm-xl animate-scale-in">
                             {/* Warning */}
                             <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-white mx-auto mb-5">
@@ -106,22 +97,24 @@ function DeleteUser() {
                             </p>
 
                             <div className="mb-6">
-                                <label className="block text-sm font-medium text-charcoal mb-2">
+                                <label htmlFor="delete-account-confirm" className="block text-sm font-medium text-charcoal mb-2">
                                     Type <span className="font-mono bg-red-50 text-red-600 px-2 py-0.5 rounded">confirm</span> to proceed
                                 </label>
                                 <input
+                                    id="delete-account-confirm"
                                     type="text"
                                     value={confirmText}
                                     onChange={(e) => setConfirmText(e.target.value)}
                                     placeholder="Type confirm..."
                                     className="w-full px-4 py-3 rounded-xl border border-red-200 bg-red-50/30 text-charcoal placeholder-warm-gray/50 focus:outline-none focus:ring-2 focus:ring-red-400/40 focus:border-red-400 transition-all duration-200"
-                                    autoFocus
                                 />
                             </div>
 
+                            {error && <p role="alert">{error}</p>}
+                            {deleting && <p role="status">Closing this dialog does not cancel an accepted deletion.</p>}
                             <div className="flex gap-3">
                                 <button
-                                    onClick={() => { setSelectedUser(null); setConfirmText('') }}
+                                    onClick={closeDialog}
                                     className="flex-1 py-3 rounded-xl bg-cream text-warm-gray font-medium hover:bg-cream-dark transition-colors cursor-pointer"
                                 >
                                     Cancel
@@ -142,7 +135,7 @@ function DeleteUser() {
                                 </button>
                             </div>
                         </div>
-                    </div>
+                    </AccountDialog>
                 )}
 
                 {/* Search */}
@@ -156,19 +149,21 @@ function DeleteUser() {
                     />
                 </div>
 
+                {loading && <p role="status" className="text-sm text-warm-gray mb-4">Loading all accounts… Search results are still updating.</p>}
+                {listError && <div role="alert" className="mb-4 text-red-700">{listError} <button onClick={loadUsers} className="underline">Retry</button></div>}
                 {/* Users list */}
-                {loading ? (
+                {loading && users.length === 0 ? (
                     <div className="flex justify-center py-20">
                         <div className="w-10 h-10 border-3 border-amber border-t-transparent rounded-full animate-spin" />
                     </div>
                 ) : filteredUsers.length === 0 ? (
                     <div className="text-center py-12 text-warm-gray">
-                        <p>No users found.</p>
+                        <p>{listError ? 'Accounts could not be fully loaded.' : loading ? 'Searching all accounts…' : 'No users found.'}</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
                         {filteredUsers.map((user) => (
-                            <div key={user.email} className="bg-white rounded-xl p-5 shadow-warm-sm border border-warm-border flex items-center justify-between">
+                            <div key={user.sub || user.email} className="bg-white rounded-xl p-5 shadow-warm-sm border border-warm-border flex items-center justify-between">
                                 <div>
                                     <p className="font-medium text-charcoal">{user.email}</p>
                                     <p className="text-xs text-warm-gray mt-0.5">
@@ -176,7 +171,7 @@ function DeleteUser() {
                                     </p>
                                 </div>
                                 <button
-                                    onClick={() => setSelectedUser(user)}
+                                    onClick={() => startDelete(user)}
                                     className="px-4 py-2 rounded-lg bg-red-50 text-red-600 text-sm font-medium cursor-pointer hover:bg-red-100 transition-colors"
                                 >
                                     Delete

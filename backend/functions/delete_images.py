@@ -11,6 +11,7 @@ import boto3
 from media_mutation import album_lease, enabled as mutation_protocol_enabled, MediaMutationBusy, MediaAlbumMissing
 import drive_backup_jobs
 import cleanup_work
+import comparison_cleanup
 import video_cleanup
 
 from audit_helpers import actor_context, emit_audit_event
@@ -150,7 +151,7 @@ def handler(event, context):
             if not removed:
                 completed = album.get("lastMediaDeletion") or {}
                 if completed.get("requestHash") == _request_hash(requested):
-                    return _deletion_response(album, completed["deletedCount"], 0)
+                    return _deletion_response(album, completed["deletedCount"], completed.get("deletedVersions", 0), completed.get("countExact", False))
                 _audit(event, context, "denied", "media_not_found")
                 return error_response(404, "Requested media was not found in this album", code="not_found")
             if requested - {_raw_key(image) for image in removed}:
@@ -175,7 +176,7 @@ def handler(event, context):
             # references to files that this request already deleted.
             preflight_deletion(keys=exact_keys, prefixes=hls_prefixes)
             pending = {
-                "id": uuid.uuid4().hex,
+                "id": uuid.uuid4().hex, "countExact": True,
                 "audit": cleanup_work.audit_context(event),
                 "requested": sorted(requested),
                 "keys": sorted(exact_keys),
@@ -252,9 +253,17 @@ def _complete_deletion(album, pending, event, context):
         cleanup_work.schedule(album_id, pending, save, "album-media-deletion", 30)
         if not video_cleanup.settle(album, pending, save, context):
             return json_response(202, {"pending": True, "retryAfter": 30})
-    deleted_versions = delete_keys_all_versions(keys)
-    for prefix in prefixes:
-        deleted_versions += delete_prefix_all_versions(prefix)
+    if mutation_protocol_enabled():
+        cleanup_work.counted_step(pending, save, 'keys', lambda: delete_keys_all_versions(keys))
+        for index, prefix in enumerate(prefixes):
+            cleanup_work.counted_step(pending, save, f'prefix:{index}', lambda prefix=prefix: delete_prefix_all_versions(prefix))
+        deleted_versions = int(pending.get('deletedVersions', 0))
+        if not comparison_cleanup.clean(album_id, removed_media_ids, pending, save):
+            return json_response(202, {'pending':True, 'retryAfter':30})
+    else:
+        deleted_versions = delete_keys_all_versions(keys)
+        for prefix in prefixes:
+            deleted_versions += delete_prefix_all_versions(prefix)
     if pending["wasPublic"]:
         if mutation_protocol_enabled():
             if not cleanup_work.revoke(table, album, "pendingMediaDeletion"):
@@ -278,13 +287,20 @@ def _complete_deletion(album, pending, event, context):
             request_random_photo_pool_refresh()
     if mutation_protocol_enabled():
         cleanup_work.complete_audit(pending, save, "media", {
-            "deleted_count": len(removed_media_ids), "deleted_version_count": deleted_versions})
+            "deleted_count": len(removed_media_ids), "deleted_version_count": deleted_versions,
+            "count_accuracy": "exact" if pending.get("countExact", False) else "lower_bound"})
+    if mutation_protocol_enabled():
+        table.update_item(Key={'albumId':'__MEDIA_DELETION__'+pending['id']},
+            UpdateExpression='SET #status = :internal, payload = :value',
+            ExpressionAttributeNames={'#status':'status'}, ExpressionAttributeValues={':internal':'internal', ':value':{
+                'albumId':album_id, 'mediaIds':sorted(removed_media_ids), 'id':pending['id']}})
     try:
         table.update_item(
             Key={"albumId": album_id}, UpdateExpression="SET lastMediaDeletion = :completed REMOVE pendingMediaDeletion",
             ConditionExpression="pendingMediaDeletion.id = :id",
             ExpressionAttributeValues={":id": pending["id"], ":completed": {
-                "requestHash": _request_hash(pending["requested"]), "deletedCount": len(removed_media_ids)}},
+                "requestHash": _request_hash(pending["requested"]), "deletedCount": len(removed_media_ids), "deletedVersions":deleted_versions,
+                "countExact":pending.get("countExact", False)}},
         )
     except table.meta.client.exceptions.ConditionalCheckFailedException:
         # A concurrent retry already completed this exact idempotent cleanup,
@@ -293,14 +309,14 @@ def _complete_deletion(album, pending, event, context):
     if not mutation_protocol_enabled():
         _audit(event, context, "success", "media_deleted", deleted_count=len(removed_media_ids),
                deleted_version_count=deleted_versions)
-    return _deletion_response(album, len(removed_media_ids), deleted_versions)
+    return _deletion_response(album, len(removed_media_ids), deleted_versions, pending.get("countExact", False))
 
 
-def _deletion_response(album, deleted_count, deleted_versions):
+def _deletion_response(album, deleted_count, deleted_versions, exact=False):
     try:
         response_album = serialize_album_summary(album, include_admin=True)
     except ValidationError:
         response_album = {key: album.get(key) for key in (
             "albumId", "imageCount", "coverImageUrl", "coverThumbKey", "coverBlurhash")}
     return json_response(200, {"message": "Media deleted", "deletedCount": deleted_count,
-                               "deletedObjectVersions": deleted_versions, "album": response_album})
+                               "deletedObjectVersions": deleted_versions, "deletedObjectVersionsExact":exact, "album": response_album})

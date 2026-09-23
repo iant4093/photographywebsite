@@ -85,7 +85,7 @@ def _durable_handler(event, context, internal=False):
             return json_response(202, {'pending':True, 'retryAfter':30})
         record = table.get_item(Key=ownership_guard.key(subject), ConsistentRead=True).get('Item', {}).get('payload', {})
         return json_response(200, {'message':'User and owned albums deleted', 'albumsDeleted':record.get('deletedAlbums', 0),
-            'deletedObjectVersions':record.get('deletedVersions', 0), 'complete':True})
+            'deletedObjectVersions':record.get('deletedVersions', 0), 'deletedObjectVersionsExact':record.get('countExact', False), 'complete':True})
     except MediaMutationBusy as error:
         return error_response(409, str(error), code='media_busy')
     except AuthError as error:

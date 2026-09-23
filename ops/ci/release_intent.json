@@ -238,6 +238,8 @@
     {"logicalId": "PreviewJobCompletedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
     {"logicalId": "LoginDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
     {"logicalId": "ApiAuthorizationDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
-    {"logicalId": "FrontDoorDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false}
+    {"logicalId": "FrontDoorDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
+    {"logicalId": "EditUserFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "OriginalComparisonWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true}
   ]
 }

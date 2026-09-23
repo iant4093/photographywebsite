@@ -21,8 +21,8 @@ describe('editor session storage', () => {
             zoom: 125,
         }
 
-        await saveEditorSource(file)
-        await saveEditorState(state)
+        const sourceId = await saveEditorSource(file)
+        await saveEditorState(state, sourceId)
         const restored = await loadEditorSession()
 
         expect(restored.file).toBeInstanceOf(File)
@@ -35,13 +35,24 @@ describe('editor session storage', () => {
     })
 
     it('never carries state from the previous photo to a replacement source', async () => {
-        await saveEditorSource(new File(['first'], 'first.jpg', { type: 'image/jpeg' }))
-        await saveEditorState({ adjustments: { exposure: 4 } })
+        const sourceId = await saveEditorSource(new File(['first'], 'first.jpg', { type: 'image/jpeg' }))
+        await saveEditorState({ adjustments: { exposure: 4 } }, sourceId)
         await saveEditorSource(new File(['second'], 'second.png', { type: 'image/png' }))
 
         const restored = await loadEditorSession()
         expect(restored.file.name).toBe('second.png')
         expect(restored.state).toBeNull()
+    })
+
+    it('rejects late state writes and cleanup from a different tab or source', async () => {
+        const a = await saveEditorSource(new File(['a'], 'a.jpg'))
+        const b = await saveEditorSource(new File(['b'], 'b.jpg'))
+        await expect(saveEditorState({ exposure: 2 }, b)).resolves.toBe(true)
+        await expect(saveEditorState({ exposure: 8 }, a)).resolves.toBe(false)
+        await clearEditorSession(a)
+        const session = await loadEditorSession()
+        expect(session.file.name).toBe('b.jpg')
+        expect(session.state).toEqual({ exposure: 2 })
     })
 
     it('clears both the source and state records', async () => {

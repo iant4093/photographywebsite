@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  createUser: vi.fn(), sendContactMessage: vi.fn(), listUsers: vi.fn(),
+  createUser: vi.fn(), sendContactMessage: vi.fn(), listUsersPage: vi.fn(),
   deleteUser: vi.fn(), editUser: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({
@@ -141,11 +141,11 @@ describe('DeleteUser and EditUser', () => {
     vi.clearAllMocks()
     vi.useFakeTimers({ shouldAdvanceTime: true })
     auth.getIdToken.mockResolvedValue('token')
-    api.listUsers.mockResolvedValue([
+    api.listUsersPage.mockResolvedValue({ users: [
       { email: 'iant4093@gmail.com' },
       { email: 'viewer@example.com', status: '', createdAt: null },
       { email: 'other@example.com', status: 'CONFIRMED', createdAt: '2026-01-01' },
-    ])
+    ], nextCursor: null })
     api.deleteUser.mockResolvedValue({ albumsDeleted: 2 })
     api.editUser.mockResolvedValue({})
   })
@@ -166,7 +166,7 @@ describe('DeleteUser and EditUser', () => {
     fireEvent.change(screen.getByPlaceholderText('Type confirm...'), { target: { value: 'confirm' } })
     fireEvent.click(screen.getByRole('button', { name: 'Delete Permanently' }))
     expect(await screen.findByText(/deleted along with 2 album/)).toBeInTheDocument()
-    expect(api.deleteUser).toHaveBeenCalledWith('token', 'viewer@example.com', { userId: undefined })
+    expect(api.deleteUser).toHaveBeenCalledWith('token', 'viewer@example.com', expect.objectContaining({ userId: undefined, signal: expect.any(AbortSignal) }))
 
     api.deleteUser.mockRejectedValueOnce({})
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
@@ -191,7 +191,7 @@ describe('DeleteUser and EditUser', () => {
     expect(screen.getByText(/migrate all albums/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
     expect(await screen.findByText(/Albums have been migrated/)).toBeInTheDocument()
-    expect(api.editUser).toHaveBeenCalledWith('token', 'viewer@example.com', { email: 'new@example.com' })
+    expect(api.editUser).toHaveBeenCalledWith('token', 'viewer@example.com', { email: 'new@example.com', userId: undefined }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     await act(async () => vi.advanceTimersByTimeAsync(5_000))
 
     api.editUser.mockRejectedValueOnce(new Error('Edit failed'))
@@ -203,14 +203,14 @@ describe('DeleteUser and EditUser', () => {
 
   it('survives a user-list failure and clears loading', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    api.listUsers.mockRejectedValue(new Error('list failed'))
+    api.listUsersPage.mockRejectedValue(new Error('list failed'))
     const first = routed(<DeleteUser />)
     await act(async () => vi.runOnlyPendingTimersAsync())
-    expect(await screen.findByText('No users found.')).toBeInTheDocument()
+    expect(await screen.findByText('Accounts could not be fully loaded.')).toBeInTheDocument()
     first.unmount()
     routed(<EditUser />)
     await act(async () => vi.runOnlyPendingTimersAsync())
-    expect(await screen.findByText('No users found.')).toBeInTheDocument()
+    expect(await screen.findByText('Accounts could not be fully loaded.')).toBeInTheDocument()
     vi.useRealTimers()
   })
 })

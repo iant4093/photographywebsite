@@ -1,3 +1,4 @@
+import RecoveryBoundary from './components/RecoveryBoundary'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
@@ -24,10 +25,12 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 // Mount the app with BrowserRouter and AuthProvider wrapping the root
 createRoot(document.getElementById('root')).render(
   <StrictMode>
+    <RecoveryBoundary>
     <BrowserRouter>
       <AuthProvider>
         <App />
       </AuthProvider>
     </BrowserRouter>
+    </RecoveryBoundary>
   </StrictMode>,
 )

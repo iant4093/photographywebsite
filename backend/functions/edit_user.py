@@ -9,7 +9,7 @@ from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import AuthError, auth_error_response, require_admin
 from owner_helpers import assert_admin_target_mutable, albums_owned_by, cognito_identity, table
 from response_helpers import error_response, internal_error, json_response
-from validation_helpers import ValidationError, parse_json_body, validate_email
+from validation_helpers import ValidationError, parse_json_body, validate_email, validate_uuid
 from media_mutation import enabled as mutation_protocol_enabled, MediaMutationBusy
 import user_email_update
 
@@ -38,6 +38,14 @@ from front_door import verify_front_door_request
 
 
 def handler(event, context):
+    if isinstance(event, dict) and set(event) == {'source', 'subject'} and event.get('source') == 'user-email-update':
+        try:
+            updated = user_email_update.resume(table, cognito, USER_POOL_ID, validate_uuid(event['subject']), context)
+            return json_response(202 if updated is None else 200, {'pending':updated is None})
+        except MediaMutationBusy:
+            return json_response(202, {'pending':True})
+        except Exception as error:
+            return internal_error(context, error, 'edit_user_continuation')
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
         return front_door_denied
@@ -57,7 +65,8 @@ def handler(event, context):
         new_email = validate_email(body.get("email"))
         if mutation_protocol_enabled():
             updated = user_email_update.update(table, cognito, USER_POOL_ID, old_email, new_email, body, event, context)
-            _audit(event, context, "success", "user_updated", album_count=updated)
+            if updated is None:
+                return json_response(202, {"pending":True, "retryAfter":30})
             return json_response(200, {"message": "User email updated", "albumsUpdated": updated})
         username, subject, _ = cognito_identity(cognito, USER_POOL_ID, old_email)
         if not subject:

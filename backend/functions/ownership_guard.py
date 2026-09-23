@@ -21,7 +21,7 @@ def encode(values):
 
 def condition(table, subject):
     return {'ConditionCheck': {'TableName': table.name, 'Key': encode(key(subject)),
-        'ConditionExpression': 'attribute_not_exists(deletionId) AND (attribute_not_exists(identityLeaseUntil) OR identityLeaseUntil < :now)',
+        'ConditionExpression': 'attribute_not_exists(deletionId) AND attribute_not_exists(emailOperation) AND (attribute_not_exists(identityLeaseUntil) OR identityLeaseUntil < :now)',
         'ExpressionAttributeValues': encode({':now': int(time.time())})}}
 
 
@@ -49,7 +49,7 @@ def write(table, operation, subject=None, **kwargs):
 
 
 @contextmanager
-def identity_lease(table, subject, context):
+def identity_lease(table, subject, context, email_operation=None):
     owner = uuid.uuid4().hex
     now = int(time.time())
     remaining = getattr(context, 'get_remaining_time_in_millis', None)
@@ -57,9 +57,9 @@ def identity_lease(table, subject, context):
     try:
         table.update_item(Key=key(subject),
             UpdateExpression='SET #status = :internal, identityLeaseOwner = :owner, identityLeaseUntil = :until',
-            ConditionExpression='attribute_not_exists(deletionId) AND (attribute_not_exists(identityLeaseUntil) OR identityLeaseUntil < :now)',
+            ConditionExpression='attribute_not_exists(deletionId) AND (attribute_not_exists(emailOperation) OR emailOperation = :emailOp) AND (attribute_not_exists(identityLeaseUntil) OR identityLeaseUntil < :now)',
             ExpressionAttributeNames={'#status':'status'},
-            ExpressionAttributeValues={':internal':'internal', ':owner':owner, ':until':now+duration, ':now':now})
+            ExpressionAttributeValues={':internal':'internal', ':owner':owner, ':until':now+duration, ':now':now, ':emailOp':email_operation or 'none'})
     except ClientError as error:
         if error.response['Error']['Code'] != 'ConditionalCheckFailedException':
             raise

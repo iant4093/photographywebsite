@@ -16,7 +16,7 @@ def complete_audit(pending, save, resource, details):
     # All required cleanup is committed before the completion event. The
     # hidden receipt survives logging failure; duplicate emissions share the
     # same operation correlation ID if its final removal is interrupted.
-    if not pending.get("cleanupComplete"):
+    if not pending.get("cleanupComplete") or pending.get("auditDetails") != details:
         pending.update(cleanupComplete=True, auditDetails=details)
         save()
     actor = pending.get("audit", {"actor": "service", "auth": "service"})
@@ -68,3 +68,28 @@ def revoke(table, album, field):
     complete = advance_media_revocation(pending["invalidation"])
     save_receipt(table, album, field)
     return complete
+
+
+def counted_step(pending, save, step, action):
+    """Persist confirmed counts; an interrupted provider reply is a lower bound.
+
+    Saving intent before the provider call prevents a retry from pretending a
+    partial/lost reply was an exact count. Actions enumerate remaining versions
+    again, so late uploads during a CDN wait are also drained.
+    """
+    done = pending.setdefault('countedSteps', [])
+    if pending.get('countInFlight'):
+        pending['countExact'] = False
+    pending.setdefault('countExact', False)
+    pending['countInFlight'] = step
+    save()
+    count = action()
+    pending['deletedVersions'] = int(pending.get('deletedVersions', 0)) + count
+    if step not in done:
+        done.append(step)
+    pending.pop('countInFlight', None)
+    save()
+
+
+def completion_key(album_id):
+    return {'albumId':'__ALBUM_DELETION__' + album_id}

@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      test-tooling-patches:
+        dependency-type: development
+        update-types: [patch]
+  - package-ecosystem: npm
+    directory: /backend/preview_worker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
