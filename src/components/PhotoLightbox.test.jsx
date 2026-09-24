@@ -241,6 +241,36 @@ describe('PhotoLightbox', () => {
     }
   })
 
+  it('keeps the full fade when navigating quickly between cached photos', () => {
+    vi.useFakeTimers()
+    const props = { images: [landscape, portrait], ariaLabel: 'Viewer', onClose: vi.fn(), onNext: vi.fn() }
+    const { rerender, unmount } = render(<PhotoLightbox {...props} index={0} />)
+    try {
+      fireEvent.load(screen.getByAltText(/^Photograph \d/))
+      fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+      rerender(<PhotoLightbox {...props} index={1} />)
+      fireEvent.load(screen.getByAltText(/^Photograph \d/))
+      expect(screen.getByRole('dialog')).not.toHaveClass('linen-photo-rapid', 'linen-photo-cached')
+      act(() => vi.advanceTimersByTime(180))
+      expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+      rerender(<PhotoLightbox {...props} index={0} />)
+      const cachedPhoto = screen.getByAltText(/^Photograph \d/)
+      const measure = vi.spyOn(cachedPhoto, 'getBoundingClientRect')
+      fireEvent.load(cachedPhoto)
+      expect(measure).toHaveBeenCalled()
+      expect(screen.getByRole('dialog')).not.toHaveClass('linen-photo-rapid', 'linen-photo-cached')
+      act(() => vi.advanceTimersByTime(180))
+      expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(200))
+      expect(document.querySelector('.linen-lightbox-photo-outgoing')).toBeNull()
+    } finally {
+      unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps up with rapid navigation instead of resurrecting the first photo behind each selection', () => {
     vi.useFakeTimers()
     const photos = Array.from({ length: 5 }, (_, index) => ({ ...landscape, id: `photo-${index}`, url: `https://media.test/${index}.jpg` }))
