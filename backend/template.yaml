@@ -3555,6 +3555,7 @@ Resources:
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
       Policies:
         - Statement:

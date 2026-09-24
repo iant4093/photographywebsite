@@ -255,9 +255,12 @@ class PreviewWorkerTests(unittest.TestCase):
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):
     def test_public_media_write_responses_have_cdn_configuration(self) -> None:
-        # Both handlers serialize public media after the write. A missing CDN
-        # domain turns a successful save into a misleading 500 for photos and videos.
-        for logical_id in ("UpdateImageFunction", "AddImagesFunction"):
+        # These handlers serialize public media after writing. A missing CDN
+        # domain turns a successful mutation into a misleading 500.
+        for logical_id in (
+            "CreateAlbumFunction", "AddImagesFunction", "DeleteImagesFunction",
+            "UpdateAlbumFunction", "UpdateImageFunction",
+        ):
             with self.subTest(function=logical_id):
                 block = resource_block(logical_id)
                 self.assertIn("CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName", block)
