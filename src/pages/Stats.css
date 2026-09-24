@@ -193,7 +193,7 @@
 }
 
 .photo-stats-timeline-track {
-    --timeline-card-height: 12.75rem;
+    --timeline-card-height: 13.25rem;
     --timeline-card-width: clamp(13.5rem, 21vw, 18rem);
     --timeline-group-card-gap: clamp(0.75rem, 1.4vw, 1.1rem);
     position: relative;
@@ -297,7 +297,8 @@
     width: var(--timeline-card-width);
     height: var(--timeline-card-height);
     flex: none;
-    grid-template-rows: 8rem auto auto;
+    grid-template-rows: 8rem max-content max-content;
+    align-content: start;
     padding: 0.55rem;
     border: 1px solid var(--color-warm-border);
     color: var(--color-charcoal);
@@ -381,7 +382,8 @@
     font-family: var(--font-serif);
     font-size: 1.25rem;
     font-weight: 400;
-    line-height: 1.15;
+    line-height: 1.3;
+    padding-bottom: 0.1em;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -792,14 +794,14 @@
     }
     .photo-stats-timeline-controls button { width: 2.55rem; height: 2.55rem; }
     .photo-stats-timeline-track {
-        --timeline-card-height: 10.75rem;
+        --timeline-card-height: 11.25rem;
         --timeline-card-width: min(72vw, 14.5rem);
         height: 26rem;
     }
     .photo-stats-timeline-ruler { height: 5.4rem; }
     .photo-stats-timeline-year { height: 3.2rem; }
     .photo-stats-timeline-month { height: 2.2rem; }
-    .photo-stats-timeline-card { grid-template-rows: 6.1rem auto auto; }
+    .photo-stats-timeline-card { grid-template-rows: 6.1rem max-content max-content; }
     .photo-stats-timeline-card strong { font-size: 1.08rem; }
     .photo-stats-timeline-node time { font-size: 0.54rem; }
     .photo-stats-section-heading { grid-template-columns: 1.7rem minmax(0, 1fr); }
