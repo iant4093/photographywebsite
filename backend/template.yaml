@@ -3658,6 +3658,12 @@ Resources:
                 - s3:PutObjectTagging
               Resource: !Sub 'arn:${AWS::Partition}:s3:::goldenhour-images-${AWS::AccountId}-${Stage}/albums/*'
             - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !Sub 'arn:${AWS::Partition}:s3:::goldenhour-images-${AWS::AccountId}-${Stage}'
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
               Action: sqs:SendMessage
               Resource: [!GetAtt AsyncFailureQueue.Arn, !GetAtt CacheInvalidationQueue.Arn]
       Events:

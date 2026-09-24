@@ -34,6 +34,15 @@ def resource_block(logical_id: str) -> str:
 
 
 class TemplateValidationTests(unittest.TestCase):
+    def test_tagging_worker_can_distinguish_deleted_album_objects(self) -> None:
+        policy = resource_block("TagMediaObjectFunction")
+        self.assertIn("Action: s3:ListBucket", policy)
+        self.assertIn(
+            "Resource: !Sub 'arn:${AWS::Partition}:s3:::goldenhour-images-${AWS::AccountId}-${Stage}'",
+            policy,
+        )
+        self.assertIn("s3:prefix: albums/*", policy)
+
     def test_current_brand_replaces_retired_public_and_in_place_aws_labels(self) -> None:
         public_sources = (
             (ROOT / "index.html").read_text(encoding="utf-8"),
