@@ -254,11 +254,13 @@ class PreviewWorkerTests(unittest.TestCase):
 
 
 class PreviewDeliveryAndOperationsTests(unittest.TestCase):
-    def test_media_update_response_has_its_public_cdn_configuration(self) -> None:
-        # Favorites are saved before the updated photo is serialized. Without
-        # this setting, a successful public write becomes a misleading 500.
-        block = resource_block("UpdateImageFunction")
-        self.assertIn("CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName", block)
+    def test_public_media_write_responses_have_cdn_configuration(self) -> None:
+        # Both handlers serialize public media after the write. A missing CDN
+        # domain turns a successful save into a misleading 500 for photos and videos.
+        for logical_id in ("UpdateImageFunction", "AddImagesFunction"):
+            with self.subTest(function=logical_id):
+                block = resource_block(logical_id)
+                self.assertIn("CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName", block)
 
     def test_protected_preview_delivery_rechecks_visibility_while_public_aliases_are_cached(self) -> None:
         policy = resource_block("ImagesBucketPolicy")

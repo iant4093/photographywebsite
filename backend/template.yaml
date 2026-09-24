@@ -3094,6 +3094,7 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           PREVIEW_QUEUE_URL: !Ref PreviewQueue
           IMAGES_BUCKET: !Ref ImagesBucket
+          CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
       Policies:
