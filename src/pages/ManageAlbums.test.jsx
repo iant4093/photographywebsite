@@ -12,7 +12,15 @@ const media = vi.hoisted(() => ({ processImage: vi.fn(), processVideo: vi.fn(), 
 vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/mediaUtils', () => media)
-vi.mock('../utils/mediaUrls', () => ({ mediaDisplayUrl: (item) => item.url || item.rawKey, mediaThumbnailUrl: (item) => item.thumbnailUrl || item.thumbKey, uploadOriginalFilename: name => name }))
+vi.mock('../utils/mediaUrls', () => ({
+  mediaDisplayUrl: (item) => item?.url || item?.rawKey,
+  mediaThumbnailUrl: (item) => item?.thumbnailUrl || item?.thumbKey,
+  mediaId: (item) => item?.id || item?.rawKey,
+  mediaPreviewSrcSet: () => '',
+  mediaBeforeDisplayUrl: () => '',
+  mediaBeforeSrcSet: () => '',
+  uploadOriginalFilename: name => name,
+}))
 vi.mock('../utils/concurrency', () => ({ mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)) }))
 
 import ManageAlbums from './ManageAlbums'
@@ -29,6 +37,67 @@ function mounted(entry = '/admin/albums') {
 }
 
 describe('ManageAlbums', () => {
+  it('opens an admin photo viewer with zoom, camera settings, and only admin actions', async () => {
+    const item = {
+      id: 'photo-one', rawKey: 'albums/photo/raw.jpg', thumbnailUrl: 'https://cdn.test/thumb.jpg',
+      url: 'https://cdn.test/raw.jpg', width: 1600, height: 1000,
+      exif: { model: 'Canon EOS R7', lens: 'Sigma 18-50mm', focalRatio: 'f/4', shutterSpeed: '1/250s', iso: 'ISO 100' },
+    }
+    api.fetchAlbumMediaPage.mockResolvedValue({ album: albums[0], items: [item], nextCursor: null })
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    const tile = await screen.findByRole('group', { name: 'Item 1 controls' })
+    fireEvent.click(tile.querySelector('img'))
+
+    const dialog = screen.getByRole('dialog', { name: 'Manage photo viewer' })
+    expect(dialog).toHaveTextContent('Canon EOS R7')
+    expect(dialog).toHaveTextContent('Sigma 18-50mm')
+    expect(dialog).toHaveTextContent('f/4')
+    expect(dialog).toHaveTextContent('1/250s')
+    expect(dialog).toHaveTextContent('ISO 100')
+    expect(within(dialog).getAllByRole('button', { name: /Set as album cover|Favorite photo|Delete photo/ })).toHaveLength(3)
+    expect(within(dialog).queryByRole('button', { name: /Download|Share|Print|Show original/ })).toBeNull()
+    const photo = within(dialog).getByRole('img', { name: /^Photograph/ })
+    expect(photo).toHaveAttribute('src', item.url)
+    fireEvent.load(photo)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom in on photo' }))
+    expect(within(dialog).getByRole('button', { name: 'Zoom out of photo' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(dialog.querySelector('.linen-lightbox-content'))
+    expect(screen.queryByRole('dialog', { name: 'Manage photo viewer' })).toBeNull()
+  })
+
+  it('saves admin actions in the viewer and advances after deletion', async () => {
+    const items = ['one', 'two', 'three'].map((name) => ({
+      id: name, rawKey: `albums/photo/${name}.jpg`, url: `https://cdn.test/${name}.jpg`,
+      thumbnailUrl: `https://cdn.test/${name}-thumb.jpg`,
+    }))
+    api.fetchAlbumMediaPage.mockResolvedValue({ album: albums[0], items, nextCursor: null })
+    api.updateImageThumbnail.mockResolvedValue({ item: { ...items[1], isFavorite: true } })
+    api.deleteImages.mockResolvedValue({ album: { ...albums[0], imageCount: 2 } })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mounted()
+    await screen.findByText('Summer')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Photos' })[0])
+    fireEvent.click((await screen.findByRole('group', { name: 'Item 2 controls' })).querySelector('img'))
+    let dialog = screen.getByRole('dialog', { name: 'Manage photo viewer' })
+    expect(within(dialog).getByRole('img', { name: /^Photograph/ })).toHaveAttribute('src', items[1].url)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Favorite photo' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Unfavorite photo' })).toHaveAttribute('aria-pressed', 'true'))
+    expect(within(screen.getByRole('group', { name: 'Item 2 controls', hidden: true })).getByRole('button', { name: 'Unfavorite photo', hidden: true })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Set as album cover' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Set as album cover' })).toHaveAttribute('aria-pressed', 'true'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete photo' }))
+    await waitFor(() => expect(api.deleteImages).toHaveBeenCalledWith('admin-token', 'photo', [items[1].rawKey]))
+    dialog = screen.getByRole('dialog', { name: 'Manage photo viewer' })
+    await waitFor(() => expect(within(dialog).getByRole('img', { name: /^Photograph/ })).toHaveAttribute('src', items[2].url))
+    expect(within(dialog).getByRole('status')).toHaveTextContent('Photo deleted and album cover refreshed.')
+    expect(within(dialog).getByText('2 / 2')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Item 3 controls' })).toBeNull()
+  })
+
   it('toggles a persistent favorite heart and keeps the saved state after a failed update', async () => {
     const item = { id: 'photo-one', rawKey: 'albums/photo/raw.jpg', thumbnailUrl: 'https://cdn.test/thumb.jpg' }
     api.fetchAlbumMediaPage.mockResolvedValue({ album: albums[0], items: [item], nextCursor: null })

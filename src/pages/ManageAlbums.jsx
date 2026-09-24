@@ -7,6 +7,7 @@ import UploadProgress from '../components/UploadProgress'
 import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
 import AdminToasts from '../components/AdminToasts'
+import PhotoLightbox from '../components/PhotoLightbox'
 import { useAdminToasts } from '../hooks/useAdminToasts'
 import useAdminAlbumCatalog from '../hooks/useAdminAlbumCatalog'
 import useDriveBackupStatus from '../hooks/useDriveBackupStatus'
@@ -50,6 +51,10 @@ function isCurrentAlbumCover(album, image) {
 function managementMediaKey(image) {
     const value = image?.rawKey || image?.key
     return typeof value === 'string' && value.trim() ? value : ''
+}
+
+function photoSelectionKey(image, index) {
+    return managementMediaKey(image) || image?.id || `photo-${index}`
 }
 
 const ADMIN_ALBUM_PAGE_SIZE = 100
@@ -207,6 +212,9 @@ function ManageAlbums() {
     // Album detail view (images) — tracks which albumId is expanded
     const [expandedAlbumId, setExpandedAlbumId] = useState(null)
     const [albumImages, setAlbumImages] = useState([])
+    const [lightboxImageKey, setLightboxImageKey] = useState(null)
+    const [lightboxNotice, setLightboxNotice] = useState(null)
+    const [deletingImageKey, setDeletingImageKey] = useState(null)
     const [savingFavorites, setSavingFavorites] = useState(() => new Set())
     const favoriteRequests = useRef(new Set())
     const [loadingImages, setLoadingImages] = useState(false)
@@ -237,6 +245,12 @@ function ManageAlbums() {
     const [savingOrder, setSavingOrder] = useState(false)
     const [savingAlbumIds, setSavingAlbumIds] = useState(() => new Set())
     const albumCardRefs = useRef(new Map())
+
+    useEffect(() => {
+        if (!lightboxNotice) return undefined
+        const timer = window.setTimeout(() => setLightboxNotice(null), 4000)
+        return () => window.clearTimeout(timer)
+    }, [lightboxNotice])
 
     // Load a small initial directory page. Search requests below query Cognito
     // directly so this page does not need to download every account up front.
@@ -406,6 +420,7 @@ function ManageAlbums() {
         const timer = window.setTimeout(() => {
             setExpandedAlbumId(null)
             setAlbumImages([])
+            setLightboxImageKey(null)
             setMediaNextCursor(null)
             setEditingAlbum(null)
             setViewMode('manage')
@@ -421,6 +436,7 @@ function ManageAlbums() {
         mediaController.current?.abort()
         setExpandedAlbumId(null)
         setAlbumImages([])
+        setLightboxImageKey(null)
         setMediaNextCursor(null)
         setCategoryFilter('')
         setCollapsedCategories(new Set(sortedCategories))
@@ -434,12 +450,14 @@ function ManageAlbums() {
             // Collapse
             setExpandedAlbumId(null)
             setAlbumImages([])
+            setLightboxImageKey(null)
             setMediaNextCursor(null)
             setAddingFiles([])
             setAddingVideoFiles([])
             return
         }
         setExpandedAlbumId(album.albumId)
+        setLightboxImageKey(null)
         const controller = new AbortController()
         mediaController.current = controller
         setAddingFiles([])
@@ -568,10 +586,13 @@ function ManageAlbums() {
 
 
     // Remove specific image
-    async function handleRemoveImage(img) {
+    async function handleRemoveImage(img, fromLightbox = false) {
+        if (deletingImageKey) return
         const key = managementMediaKey(img)
         if (!key) {
-            setActionError('This item is missing its management key. Refresh the album and try again.')
+            const message = 'This item is missing its management key. Refresh the album and try again.'
+            setActionError(message)
+            if (fromLightbox) setLightboxNotice({ message, kind: 'error' })
             return
         }
         const expandedAlbum = albums.find((album) => album.albumId === expandedAlbumId)
@@ -581,9 +602,20 @@ function ManageAlbums() {
             : 'Remove this item?'
         if (!confirm(message)) return
         setActionError('')
+        setDeletingImageKey(key)
         try {
             const token = await getIdToken()
             const result = await deleteImages(token, expandedAlbumId, [key])
+            if (fromLightbox) {
+                const index = albumImages.findIndex((item) => managementMediaKey(item) === key)
+                const remaining = albumImages.filter((item) => managementMediaKey(item) !== key)
+                const nextIndex = Math.min(Math.max(index, 0), remaining.length - 1)
+                setLightboxImageKey((current) => {
+                    if (current !== key) return current
+                    return remaining.length ? photoSelectionKey(remaining[nextIndex], nextIndex) : null
+                })
+                setLightboxNotice({ message: deletingCover ? 'Photo deleted and album cover refreshed.' : 'Photo deleted.', kind: 'success' })
+            }
             setAlbumImages((current) => current.filter((item) => managementMediaKey(item) !== key))
             patchAlbum(expandedAlbumId, result.album || {
                 imageCount: Math.max(0, Number(expandedAlbum?.imageCount || albumImages.length) - 1),
@@ -593,14 +625,23 @@ function ManageAlbums() {
 
         } catch (err) {
             setActionError(err.message)
+            if (fromLightbox) setLightboxNotice({ message: err.message || 'Photo could not be deleted.', kind: 'error' })
+        } finally {
+            setDeletingImageKey(null)
         }
     }
 
-    async function handleToggleFavorite(img) {
+    async function handleToggleFavorite(img, fromLightbox = false) {
         const rawKey = managementMediaKey(img)
         const albumId = expandedAlbumId
         const requestScope = mediaRequest.current
-        if (!rawKey || favoriteRequests.current.has(rawKey)) return
+        if (!rawKey) {
+            const message = 'This item is missing its management key. Refresh the album and try again.'
+            setActionError(message)
+            if (fromLightbox) setLightboxNotice({ message, kind: 'error' })
+            return
+        }
+        if (favoriteRequests.current.has(rawKey)) return
         favoriteRequests.current.add(rawKey)
         setSavingFavorites(new Set(favoriteRequests.current))
         try {
@@ -612,8 +653,10 @@ function ManageAlbums() {
                     ? { ...item, ...result.item, isFavorite } : item))
             }
             setActionSuccess(isFavorite ? 'Photo added to featured photos.' : 'Photo removed from featured photos.')
+            if (fromLightbox) setLightboxNotice({ message: isFavorite ? 'Photo added to featured photos.' : 'Photo removed from featured photos.', kind: 'success' })
         } catch (err) {
             setActionError(err.message || 'The favorite could not be saved. Please try again.')
+            if (fromLightbox) setLightboxNotice({ message: err.message || 'The favorite could not be saved.', kind: 'error' })
         } finally {
             favoriteRequests.current.delete(rawKey)
             setSavingFavorites(new Set(favoriteRequests.current))
@@ -621,10 +664,12 @@ function ManageAlbums() {
     }
 
     // Set an image as the album cover
-    async function handleSetCover(img) {
+    async function handleSetCover(img, fromLightbox = false) {
         const imgKey = managementMediaKey(img)
         if (!imgKey) {
-            setActionError('This item is missing its management key. Refresh the album and try again.')
+            const message = 'This item is missing its management key. Refresh the album and try again.'
+            setActionError(message)
+            if (fromLightbox) setLightboxNotice({ message, kind: 'error' })
             return
         }
         setActionError('')
@@ -640,9 +685,11 @@ function ManageAlbums() {
             const updated = await updateAlbum(token, expandedAlbumId, updates)
             patchAlbum(expandedAlbumId, { ...updates, ...(updated || {}) })
             setActionSuccess('Cover image updated!')
+            if (fromLightbox) setLightboxNotice({ message: 'Cover image updated!', kind: 'success' })
 
         } catch (err) {
             setActionError(err.message)
+            if (fromLightbox) setLightboxNotice({ message: err.message || 'Cover could not be updated.', kind: 'error' })
         } finally {
             setAlbumSaving(expandedAlbumId, false)
         }
@@ -799,6 +846,17 @@ function ManageAlbums() {
         return { groupedAlbums: grouped, sortedCategories: sorted };
     }, [albums]);
 
+    const lightboxIndex = lightboxImageKey === null ? -1 : albumImages.findIndex((image, index) => photoSelectionKey(image, index) === lightboxImageKey)
+    const lightboxImage = lightboxIndex >= 0 ? albumImages[lightboxIndex] : null
+    const lightboxAlbum = albums.find((album) => album.albumId === expandedAlbumId)
+    const showPhotoLightbox = typeFilter === 'photo' && expandedAlbumId && lightboxImage
+    const navigateLightbox = (direction) => {
+        if (!albumImages.length || lightboxIndex < 0 || deletingImageKey) return
+        const nextIndex = (lightboxIndex + direction + albumImages.length) % albumImages.length
+        setLightboxImageKey(photoSelectionKey(albumImages[nextIndex], nextIndex))
+        setLightboxNotice(null)
+    }
+
     return (
         <div aria-busy={loading || loadingMore} className="max-w-5xl mx-auto px-6 py-12 pt-[88px] md:pt-[104px]">
             <div className="animate-slide-up">
@@ -818,6 +876,27 @@ function ManageAlbums() {
                 </div>
 
                 <AdminToasts toasts={toasts} dismiss={dismiss} />
+
+                {showPhotoLightbox && (
+                    <PhotoLightbox
+                        images={albumImages}
+                        index={lightboxIndex}
+                        ariaLabel="Manage photo viewer"
+                        onClose={() => { setLightboxImageKey(null); setLightboxNotice(null) }}
+                        onNext={() => navigateLightbox(1)}
+                        onPrevious={() => navigateLightbox(-1)}
+                        adminControls={{
+                            isCover: isCurrentAlbumCover(lightboxAlbum, lightboxImage),
+                            savingCover: savingAlbumIds.has(expandedAlbumId),
+                            savingFavorite: savingFavorites.has(managementMediaKey(lightboxImage)),
+                            deleting: Boolean(deletingImageKey),
+                            notice: lightboxNotice,
+                            onSetCover: (image) => handleSetCover(image, true),
+                            onToggleFavorite: (image) => handleToggleFavorite(image, true),
+                            onDelete: (image) => handleRemoveImage(image, true),
+                        }}
+                    />
+                )}
 
                 {/* Scope selector */}
                 <div className="bg-white rounded-2xl p-6 shadow-warm border border-warm-border mb-8">
@@ -1099,7 +1178,7 @@ function ManageAlbums() {
                                                         <h3 className="font-serif text-xl font-semibold text-charcoal">
                                                             {typeFilter === 'video' ? 'Video' : 'Photos'} in "{album.title}"
                                                         </h3>
-                                                        <button aria-label="Close album media" onClick={() => { mediaRequest.current += 1; mediaController.current?.abort(); setExpandedAlbumId(null); setAlbumImages([]); setMediaNextCursor(null) }} className="text-warm-gray hover:text-charcoal cursor-pointer">
+                                                        <button aria-label="Close album media" onClick={() => { mediaRequest.current += 1; mediaController.current?.abort(); setExpandedAlbumId(null); setAlbumImages([]); setLightboxImageKey(null); setMediaNextCursor(null) }} className="text-warm-gray hover:text-charcoal cursor-pointer">
                                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                                             </svg>
@@ -1163,7 +1242,23 @@ function ManageAlbums() {
                                                                     const isEditingThisThumb = editingThumbKey === imgKey
 
                                                                     return (
-                                                                        <div key={imgKey} tabIndex={0} role="group" aria-label={`Item ${idx + 1} controls`} className="admin-media-tile group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30">
+                                                                        <div
+                                                                            key={imgKey}
+                                                                            tabIndex={0}
+                                                                            role="group"
+                                                                            aria-label={`Item ${idx + 1} controls`}
+                                                                            aria-description={typeFilter === 'photo' ? 'Click the photo or press Enter to view it larger.' : undefined}
+                                                                            onClick={(event) => {
+                                                                                if (typeFilter === 'photo' && !event.target.closest('button')) setLightboxImageKey(photoSelectionKey(img, idx))
+                                                                            }}
+                                                                            onKeyDown={(event) => {
+                                                                                if (typeFilter === 'photo' && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                                                                                    event.preventDefault()
+                                                                                    setLightboxImageKey(photoSelectionKey(img, idx))
+                                                                                }
+                                                                            }}
+                                                                            className={`admin-media-tile group relative rounded-xl overflow-hidden aspect-square bg-cream border border-warm-border/30 ${typeFilter === 'photo' ? 'cursor-zoom-in' : ''}`}
+                                                                        >
                                                                             <img
                                                                                 src={thumbUrl}
                                                                                 alt=""

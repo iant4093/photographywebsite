@@ -150,6 +150,42 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
   position: relative;
 }
 
+.linen-admin-lightbox-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.linen-admin-lightbox-action svg { width: 1.25rem; height: 1.25rem; }
+.linen-admin-lightbox-action:hover,
+.linen-admin-lightbox-action:focus-visible { background: rgba(255, 255, 255, 0.2); border-color: white; }
+.linen-admin-lightbox-action[aria-pressed="true"] { background: rgba(255, 255, 255, 0.25); border-color: white; }
+.linen-admin-lightbox-favorite[aria-pressed="true"] { color: #fff; background: #be123c; border-color: #fb7185; }
+.linen-admin-lightbox-delete:hover,
+.linen-admin-lightbox-delete:focus-visible { background: #b91c1c; border-color: #fca5a5; }
+.linen-admin-lightbox-action:disabled { opacity: 0.55; cursor: wait; }
+
+.linen-admin-lightbox-notice {
+  padding: 0.55rem 1rem;
+  border: 1px solid #86efac;
+  border-radius: 0.65rem;
+  background: #f0fdf4;
+  color: #14532d;
+  font-size: 0.875rem;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+}
+.linen-admin-lightbox-notice.is-error { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+
 .linen-photo-lightbox .linen-lightbox-edited,
 .linen-photo-lightbox .linen-lightbox-original {
   transition: visibility 0s linear;
@@ -459,6 +495,32 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
     align-items: center;
     gap: 1rem;
   }
+
+  .linen-admin-photo-lightbox .linen-lightbox-actions {
+    flex-wrap: wrap;
+  }
+
+  .linen-admin-photo-lightbox .linen-admin-lightbox-notice {
+    flex-basis: 100%;
+    text-align: center;
+  }
+
+  .linen-admin-photo-lightbox .linen-lightbox-action-buttons {
+    flex: 1 1 auto;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .linen-admin-photo-lightbox .linen-lightbox-actions .linen-admin-lightbox-action {
+    width: auto;
+    height: 2.75rem;
+    padding-inline: 0.65rem;
+  }
+
+  .linen-admin-photo-lightbox .linen-lightbox-actions .linen-admin-lightbox-action > span {
+    display: inline;
+    font-size: 0.7rem;
+  }
 }
 
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 1024px) {
@@ -538,6 +600,15 @@ html[data-lightbox-scroll-lock] .linen-back-to-top {
     right: 0;
     left: auto;
     transform: none;
+  }
+
+  .linen-admin-photo-lightbox .linen-lightbox-action-buttons {
+    width: 100%;
+  }
+
+  .linen-admin-photo-lightbox .linen-lightbox-actions .linen-admin-lightbox-action {
+    flex: 1 1 100%;
+    width: 100%;
   }
 }
 

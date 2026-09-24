@@ -99,6 +99,7 @@ function PhotoLightbox({
     loading = false,
     loadingMessage = 'Finding random photos…',
     emptyMessage = '',
+    adminControls,
 }) {
     const { containerRef, sizesFor, bounds } = useContainedImageSizes()
     const [printing, setPrinting] = useState(false)
@@ -249,6 +250,7 @@ function PhotoLightbox({
     const isLegacyOrDemo = typeof activeImage === 'string'
     const hasOriginalComparison = Boolean(before && ['unresolved', 'ready', 'pending', 'unavailable', 'failed'].includes(before.status))
     const hasPhotoMetadata = !isLegacyOrDemo && Boolean(activeImage?.exif)
+    const adminMode = Boolean(adminControls)
     const handleFullImageLoad = (event) => {
         const url = event.currentTarget.currentSrc || event.currentTarget.src
         const cached = isImageReady(url)
@@ -357,9 +359,9 @@ function PhotoLightbox({
         <AccessibleLightbox
             ariaLabel={ariaLabel}
             onClose={onClose}
-            onNext={images.length > 1 ? () => navigatePhoto(onNext) : undefined}
-            onPrevious={images.length > 1 ? () => navigatePhoto(onPrevious) : undefined}
-            className={`linen-responsive-lightbox linen-photo-lightbox ${transitionMs === 0 ? 'linen-photo-rapid' : transitionMs === 140 ? 'linen-photo-cached' : ''} fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0`}
+            onNext={images.length > 1 && !adminControls?.deleting ? () => navigatePhoto(onNext) : undefined}
+            onPrevious={images.length > 1 && !adminControls?.deleting ? () => navigatePhoto(onPrevious) : undefined}
+            className={`linen-responsive-lightbox linen-photo-lightbox ${adminMode ? 'linen-admin-photo-lightbox' : ''} ${transitionMs === 0 ? 'linen-photo-rapid' : transitionMs === 140 ? 'linen-photo-cached' : ''} fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0`}
         >
             <button
                 type="button"
@@ -478,6 +480,7 @@ function PhotoLightbox({
                             <button
                                 type="button"
                                 onClick={(event) => { event.stopPropagation(); navigatePhoto(onPrevious) }}
+                                disabled={adminControls?.deleting}
                                 className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                 aria-label="Previous photo"
                                 data-camera-cursor="previous"
@@ -511,6 +514,7 @@ function PhotoLightbox({
                             <button
                                 type="button"
                                 onClick={(event) => { event.stopPropagation(); navigatePhoto(onNext) }}
+                                disabled={adminControls?.deleting}
                                 className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
                                 aria-label="Next photo"
                                 data-camera-cursor="next"
@@ -525,8 +529,28 @@ function PhotoLightbox({
 
                 {activeImage && (
                     <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
+                        {adminMode && adminControls.notice && (
+                            <div className={`linen-admin-lightbox-notice ${adminControls.notice.kind === 'error' ? 'is-error' : ''}`} role={adminControls.notice.kind === 'error' ? 'alert' : 'status'}>
+                                {adminControls.notice.message}
+                            </div>
+                        )}
                         <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
-                            {hasOriginalComparison && (
+                            {adminMode ? (
+                                <>
+                                    <button type="button" onClick={() => adminControls.onSetCover(activeImage)} disabled={adminControls.savingCover || adminControls.deleting} aria-pressed={adminControls.isCover} className="linen-admin-lightbox-action" aria-label="Set as album cover">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16 2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
+                                        <span>{adminControls.isCover ? 'Album cover' : 'Make cover'}</span>
+                                    </button>
+                                    <button type="button" onClick={() => adminControls.onToggleFavorite(activeImage)} disabled={adminControls.savingFavorite || adminControls.deleting} aria-pressed={activeImage.isFavorite === true} className="linen-admin-lightbox-action linen-admin-lightbox-favorite" aria-label={activeImage.isFavorite === true ? 'Unfavorite photo' : 'Favorite photo'}>
+                                        <svg viewBox="0 0 24 24" fill={activeImage.isFavorite === true ? 'currentColor' : 'none'} stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z" /></svg>
+                                        <span>{activeImage.isFavorite === true ? 'Favorited' : 'Favorite'}</span>
+                                    </button>
+                                    <button type="button" onClick={() => adminControls.onDelete(activeImage)} disabled={adminControls.deleting} className="linen-admin-lightbox-action linen-admin-lightbox-delete" aria-label="Delete photo">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" d="M4 7h16m-10 4v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+                                        <span>{adminControls.deleting ? 'Deleting…' : 'Delete'}</span>
+                                    </button>
+                                </>
+                            ) : hasOriginalComparison && (
                                 <button
                                     type="button"
                                     onClick={handleBeforeToggle}
@@ -552,7 +576,7 @@ function PhotoLightbox({
                                     </span>
                                 </button>
                             )}
-                            {canShare && (
+                            {!adminMode && canShare && (
                                 <LightboxShareButton
                                     media={activeImage}
                                     index={index}
@@ -561,7 +585,7 @@ function PhotoLightbox({
                                     shareUrl={shareUrl}
                                 />
                             )}
-                            {onDownload && (
+                            {!adminMode && onDownload && (
                                 <button
                                     type="button"
                                     onClick={(event) => onDownload(event, activeImage, index)}
@@ -575,7 +599,7 @@ function PhotoLightbox({
                                     <span>Download</span>
                                 </button>
                             )}
-                            {onPrint && (
+                            {!adminMode && onPrint && (
                                 <button
                                     type="button"
                                     onClick={handlePrint}
@@ -590,10 +614,10 @@ function PhotoLightbox({
                                 </button>
                             )}
                         </div>
-                        {hasOriginalComparison && (beforeHasError || beforeUnavailable) && (
+                        {!adminMode && hasOriginalComparison && (beforeHasError || beforeUnavailable) && (
                             <span className="linen-lightbox-before-tooltip" aria-hidden="true">{beforeMessage}</span>
                         )}
-                        {hasOriginalComparison && (
+                        {!adminMode && hasOriginalComparison && (
                             <span className="linen-lightbox-before-status" role="status" aria-live="polite" aria-atomic="true">
                                 {showingBefore ? 'Before — Camera JPG' : 'After — Edited'}{beforeMessage ? `. ${beforeMessage}` : ''}
                             </span>
