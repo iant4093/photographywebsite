@@ -1,6 +1,6 @@
 // A save can continue in the existing worker while privacy tags are reconciled.
 // Keep the current Save interaction and retry only explicit, safe continuations.
-export async function completeAlbumMutation(request, signal, { timeoutMs = 600_000, delayMs = 1000, missingAfterPending = false } = {}) {
+export async function completeAlbumMutation(request, signal, { timeoutMs = 600_000, delayMs = 1000, missingAfterPending = false, onPending } = {}) {
     const deadline = Date.now() + timeoutMs
     let attempts = 0
     let pending = false
@@ -10,6 +10,7 @@ export async function completeAlbumMutation(request, signal, { timeoutMs = 600_0
         try {
             const result = await request()
             if (result?.pending !== true) return result
+            if (!pending) onPending?.(result)
             pending = true
             retryAfter = Number(result.retryAfter) * 1000 || 0
         } catch (error) {

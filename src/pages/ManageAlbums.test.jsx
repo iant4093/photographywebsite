@@ -90,7 +90,7 @@ describe('ManageAlbums', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Set as album cover' }))
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Set as album cover' })).toHaveAttribute('aria-pressed', 'true'))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete photo' }))
-    await waitFor(() => expect(api.deleteImages).toHaveBeenCalledWith('admin-token', 'photo', [items[1].rawKey]))
+    await waitFor(() => expect(api.deleteImages).toHaveBeenCalledWith('admin-token', 'photo', [items[1].rawKey], { onPending: expect.any(Function) }))
     dialog = screen.getByRole('dialog', { name: 'Manage photo viewer' })
     await waitFor(() => expect(within(dialog).getByRole('img', { name: /^Photograph/ })).toHaveAttribute('src', items[2].url))
     expect(within(dialog).getByRole('status')).toHaveTextContent('Photo deleted and album cover refreshed.')
@@ -383,9 +383,35 @@ describe('ManageAlbums', () => {
     expect(api.fetchAlbumsFilteredPage).toHaveBeenCalledTimes(1)
     fireEvent.click(await screen.findByTitle('Remove'))
     await waitFor(() => expect(api.deleteImages).toHaveBeenCalledWith(
-      'admin-token', 'photo', [mediaItem.rawKey],
+      'admin-token', 'photo', [mediaItem.rawKey], { onPending: expect.any(Function) },
     ))
     expect(confirm).toHaveBeenCalled()
+  })
+
+  it.each([
+    ['photo', '/admin/albums', 'Photos', albums[0]],
+    ['video', '/admin/albums?type=video', 'Video', albums[3]],
+  ])('removes a %s tile and confirms a durable pending deletion before cleanup finishes', async (_type, route, button, album) => {
+    const items = ['one', 'two'].map((name) => ({
+      rawKey: `albums/${album.albumId}/${name}.jpg`, thumbnailUrl: `https://cdn.test/${name}.jpg`,
+    }))
+    api.fetchAlbumMediaPage.mockResolvedValue({ album: { ...album, imageCount: 2 }, items, nextCursor: null })
+    let finishCleanup
+    api.deleteImages.mockImplementation((_token, _albumId, _keys, { onPending }) => {
+      onPending()
+      return new Promise((resolve) => { finishCleanup = resolve })
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mounted(route)
+    await screen.findByText(album.title)
+    fireEvent.click(screen.getAllByRole('button', { name: button })[0])
+    fireEvent.click((await screen.findByRole('group', { name: 'Item 1 controls' })).querySelector('button[title="Remove"]'))
+
+    await screen.findByText('Item removed from the album. File cleanup is finishing.')
+    expect(screen.getByRole('group', { name: 'Item 1 controls' }).querySelector('img')).toHaveAttribute('src', items[1].thumbnailUrl)
+    expect(screen.queryByRole('group', { name: 'Item 2 controls' })).toBeNull()
+    await act(async () => finishCleanup({ album: { ...album, imageCount: 1 } }))
+    expect(await screen.findByText('Item removed!')).toBeInTheDocument()
   })
 
   it('blocks media mutations when a management key is absent', async () => {

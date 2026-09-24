@@ -713,7 +713,7 @@ async function albumMutation(path, options, config) {
     return completeAlbumMutation(() => {
         if (session !== authGeneration) throw new DOMException('Session changed', 'AbortError')
         return apiFetch(path, options, config)
-    }, options.signal, { missingAfterPending: config?.missingAfterPending })
+    }, options.signal, { missingAfterPending: config?.missingAfterPending, onPending: config?.onPending })
 }
 
 export async function createAlbum(token, albumData, options = {}) {
@@ -778,7 +778,7 @@ export async function deleteImages(token, albumId, keys, options = {}) {
         headers: authHeaders(token),
         body: JSON.stringify({ keys }),
         signal: options.signal,
-    }, { timeoutMs: 60_000, missingAfterPending: true })
+    }, { timeoutMs: 60_000, missingAfterPending: true, onPending: options.onPending })
     invalidateAlbumCatalog()
     return result
 }

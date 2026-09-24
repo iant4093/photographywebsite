@@ -47,6 +47,16 @@ describe('automatic save continuation', () => {
     await expect(result).resolves.toEqual({ complete: true })
     expect(request).toHaveBeenCalledTimes(3)
   })
+  it('reports a durable pending result once while cleanup polls continue', async () => {
+    const onPending = vi.fn()
+    const request = vi.fn().mockResolvedValueOnce({ pending: true })
+      .mockResolvedValueOnce({ pending: true }).mockResolvedValue({ complete: true })
+    const result = completeAlbumMutation(request, undefined, { delayMs: 10, onPending })
+    await vi.advanceTimersByTimeAsync(30)
+    await expect(result).resolves.toEqual({ complete: true })
+    expect(onPending).toHaveBeenCalledTimes(1)
+    expect(onPending).toHaveBeenCalledWith({ pending: true })
+  })
   it('does not replay uncertain errors', async () => {
     const request = vi.fn().mockRejectedValue(new Error('network failure'))
     await expect(completeAlbumMutation(request)).rejects.toThrow('network failure')

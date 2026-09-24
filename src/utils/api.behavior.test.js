@@ -228,6 +228,22 @@ describe('public API client behavior', () => {
     await expect(api.deleteAlbum('token', 'a')).resolves.toBeNull()
   })
 
+  it('passes a durable media deletion receipt to the manager before cleanup completes', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ pending: true, retryAfter: 30 }, { status: 202 }))
+      .mockResolvedValueOnce(jsonResponse({ deletedCount: 1, album: { albumId: 'album', imageCount: 1 } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onPending = vi.fn()
+    const request = api.deleteImages('token', 'album', ['albums/album/one.jpg'], { onPending })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(onPending).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(30_000)
+    await expect(request).resolves.toMatchObject({ deletedCount: 1 })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('invalidates complete snapshots and overlays successful album writes immediately', async () => {
     const stale = {
       albumId: 'old', type: 'photo', visibility: 'public', title: 'Old', createdAt: '2025-01-01',

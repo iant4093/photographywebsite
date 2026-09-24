@@ -601,11 +601,13 @@ function ManageAlbums() {
             ? 'This is the current album cover. Removing it will automatically use another remaining item as the cover, or clear the cover if the album becomes empty. Continue?'
             : 'Remove this item?'
         if (!confirm(message)) return
-        setActionError('')
-        setDeletingImageKey(key)
-        try {
-            const token = await getIdToken()
-            const result = await deleteImages(token, expandedAlbumId, [key])
+        const albumId = expandedAlbumId
+        const requestScope = mediaRequest.current
+        let removalShown = false
+        let cleanupPending = false
+        const showRemoved = (albumPatch, pending = false) => {
+            if (removalShown || requestScope !== mediaRequest.current) return
+            removalShown = true
             if (fromLightbox) {
                 const index = albumImages.findIndex((item) => managementMediaKey(item) === key)
                 const remaining = albumImages.filter((item) => managementMediaKey(item) !== key)
@@ -614,20 +616,39 @@ function ManageAlbums() {
                     if (current !== key) return current
                     return remaining.length ? photoSelectionKey(remaining[nextIndex], nextIndex) : null
                 })
-                setLightboxNotice({ message: deletingCover ? 'Photo deleted and album cover refreshed.' : 'Photo deleted.', kind: 'success' })
+                setLightboxNotice({ message: pending ? 'Photo removed from the album. File cleanup is finishing.'
+                    : deletingCover ? 'Photo deleted and album cover refreshed.' : 'Photo deleted.', kind: 'success' })
             }
             setAlbumImages((current) => current.filter((item) => managementMediaKey(item) !== key))
-            patchAlbum(expandedAlbumId, result.album || {
+            patchAlbum(albumId, albumPatch || {
                 imageCount: Math.max(0, Number(expandedAlbum?.imageCount || albumImages.length) - 1),
             })
+        }
+        setActionError('')
+        setDeletingImageKey(key)
+        try {
+            const token = await getIdToken()
+            const result = await deleteImages(token, albumId, [key], {
+                onPending: () => {
+                    cleanupPending = true
+                    showRemoved(null, true)
+                    setDeletingImageKey((current) => current === key ? null : current)
+                    setActionSuccess('Item removed from the album. File cleanup is finishing.')
+                },
+            })
+            showRemoved(result?.album)
+            if (cleanupPending && result?.album && requestScope === mediaRequest.current) patchAlbum(albumId, result.album)
             refreshBackupStatus()
             setActionSuccess(deletingCover ? 'Item removed and album cover refreshed!' : 'Item removed!')
 
         } catch (err) {
-            setActionError(err.message)
-            if (fromLightbox) setLightboxNotice({ message: err.message || 'Photo could not be deleted.', kind: 'error' })
+            const message = cleanupPending
+                ? 'Item removed from the album, but file cleanup could not be confirmed. Refresh the album shortly.'
+                : err.message || 'Item could not be removed.'
+            setActionError(message)
+            if (fromLightbox) setLightboxNotice({ message, kind: 'error' })
         } finally {
-            setDeletingImageKey(null)
+            setDeletingImageKey((current) => current === key ? null : current)
         }
     }
 
