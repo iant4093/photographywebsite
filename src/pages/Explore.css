@@ -196,12 +196,35 @@
   inset: 12%;
   border: 1px solid var(--color-warm-border);
   border-radius: 50%;
+  transition: transform 380ms ease, background-color 380ms ease, box-shadow 380ms ease;
 }
 
 .linen-site .explore-module-lens::after { inset: 25%; }
 .linen-site .explore-module-lens i:nth-child(1) { inset: 36%; background: rgba(66, 111, 156, 0.22); }
 .linen-site .explore-module-lens i:nth-child(2) { inset: 44%; background: rgba(181, 110, 61, 0.3); }
 .linen-site .explore-module-lens i:nth-child(3) { inset: 49%; background: var(--color-charcoal); }
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens::before {
+  transform: scale(1.08);
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens::after {
+  transform: scale(0.88);
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens i:nth-child(1) {
+  transform: scale(1.12);
+  background: rgba(66, 111, 156, 0.34);
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens i:nth-child(2) {
+  transform: scale(0.86);
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-lens i:nth-child(3) {
+  transform: scale(1.35);
+  box-shadow: 0 0 1.2rem rgba(66, 111, 156, 0.4);
+}
 
 .linen-site .explore-module-exposure {
   display: grid;
@@ -278,6 +301,7 @@
   color: var(--color-amber-dark);
   font: 400 clamp(3rem, 7vw, 6rem)/0.9 var(--font-serif);
   text-align: center;
+  transition: transform 320ms ease;
 }
 
 .linen-site .explore-module-game i {
@@ -285,6 +309,30 @@
   border: 1px solid var(--color-warm-border);
   font: normal 0.65rem/1 var(--font-sans);
   text-align: center;
+  transition: transform 320ms ease, border-color 320ms ease, background-color 320ms ease;
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-game > span {
+  transform: translateY(-0.35rem) rotate(-7deg) scale(1.08);
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-game i {
+  border-color: var(--color-amber-dark);
+  background: rgba(181, 110, 61, 0.12);
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-game i:nth-of-type(1) {
+  transform: translateY(-0.25rem) rotate(-3deg);
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-game i:nth-of-type(2) {
+  transform: translateY(-0.55rem);
+  transition-delay: 60ms;
+}
+
+.linen-site .explore-module-card:is(:hover, :focus-visible) .explore-module-game i:nth-of-type(3) {
+  transform: translateY(-0.25rem) rotate(3deg);
+  transition-delay: 120ms;
 }
 
 .linen-site .explore-back {
@@ -1059,7 +1107,12 @@
   .linen-site .explore-lens-options button,
   .linen-site .explore-temporal-options button,
   .linen-site .explore-module-time i,
-  .linen-site .explore-module-season i {
+  .linen-site .explore-module-season i,
+  .linen-site .explore-module-lens::before,
+  .linen-site .explore-module-lens::after,
+  .linen-site .explore-module-lens i,
+  .linen-site .explore-module-game > span,
+  .linen-site .explore-module-game i {
     transform: none !important;
     transition: none;
   }
