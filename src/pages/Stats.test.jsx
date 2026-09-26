@@ -2,8 +2,16 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const api = vi.hoisted(() => ({ fetchAlbums: vi.fn(), fetchPhotographyStats: vi.fn() }))
+const api = vi.hoisted(() => ({ fetchAlbums: vi.fn(), fetchPhotographyStats: vi.fn(), prefetchPublicAlbum: vi.fn() }))
+const photoPreview = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), fetchManifest: vi.fn() }))
+const videoPreview = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn() }))
+const previewPolicy = vi.hoisted(() => ({ canRun: vi.fn() }))
 vi.mock('../utils/api', () => api)
+vi.mock('../utils/albumHoverPreview', () => ({ start: photoPreview.start }))
+vi.mock('../utils/albumHoverManifest', () => ({ fetchAlbumHoverManifest: photoPreview.fetchManifest }))
+vi.mock('../utils/albumVideoHoverPreview', () => ({ start: videoPreview.start }))
+vi.mock('../utils/albumPreviewPolicy', () => ({ canRunAlbumPreview: previewPolicy.canRun }))
+vi.mock('../utils/mobileAlbumPreview', () => ({ registerMobileAlbumPreview: () => () => {} }))
 
 import Stats from './Stats'
 
@@ -59,8 +67,77 @@ describe('photography statistics page', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         api.fetchAlbums.mockResolvedValue(timelineAlbums)
+        api.prefetchPublicAlbum.mockResolvedValue({ images: [] })
+        photoPreview.start.mockReturnValue({ stop: photoPreview.stop })
+        videoPreview.start.mockReturnValue({ stop: videoPreview.stop })
+        previewPolicy.canRun.mockReturnValue(true)
     })
     afterEach(() => vi.restoreAllMocks())
+
+    it('starts the homepage photo sequence on hover and restores the cover on leave', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        renderStats()
+        const card = await screen.findByRole('link', { name: 'View Same Day Photo Album' })
+        const image = card.querySelector('.photo-stats-timeline-image')
+
+        fireEvent.mouseEnter(card)
+        await waitFor(() => expect(photoPreview.start).toHaveBeenCalledOnce())
+        expect(photoPreview.start).toHaveBeenCalledWith(expect.objectContaining({
+            container: image,
+            coverImageUrl: 'https://media.test/same-day.jpg',
+            trigger: 'hover',
+            responsive: false,
+            loadManifest: expect.any(Function),
+            loadDetail: expect.any(Function),
+        }))
+        const options = photoPreview.start.mock.calls[0][0]
+        await options.loadManifest()
+        await options.loadDetail()
+        expect(photoPreview.fetchManifest).toHaveBeenCalledWith(timelineAlbums[2])
+        expect(api.prefetchPublicAlbum).toHaveBeenCalledWith('same-day-photo')
+
+        fireEvent.mouseLeave(card)
+        expect(photoPreview.stop).toHaveBeenCalledOnce()
+    })
+
+    it('cancels a photo preview when the pointer leaves before its code loads', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        renderStats()
+        const card = await screen.findByRole('link', { name: 'View Older Photo Album' })
+        fireEvent.mouseEnter(card)
+        fireEvent.mouseLeave(card)
+        await act(async () => { await vi.dynamicImportSettled() })
+        expect(photoPreview.start).not.toHaveBeenCalled()
+    })
+
+    it('uses the video catalog autoplay controller and opens a single video directly', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        api.fetchAlbums.mockResolvedValue(timelineAlbums.map((album) => (
+            album.albumId === 'newer-video' ? { ...album, imageCount: 1 } : album
+        )))
+        renderStats()
+        const card = await screen.findByRole('link', { name: 'View Newer Video Album' })
+        expect(card).toHaveAttribute('href', '/video/newer-video?play=1')
+
+        fireEvent.mouseEnter(card)
+        expect(videoPreview.start).toHaveBeenCalledWith(expect.objectContaining({
+            container: card.querySelector('.photo-stats-timeline-image'),
+            album: expect.objectContaining({ albumId: 'newer-video' }),
+            trigger: 'hover',
+            loadDetail: expect.any(Function),
+        }))
+        fireEvent.mouseLeave(card)
+        expect(videoPreview.stop).toHaveBeenCalledOnce()
+    })
+
+    it('respects the shared motion and data-saving preview policy', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        previewPolicy.canRun.mockReturnValue(false)
+        renderStats()
+        const card = await screen.findByRole('link', { name: 'View Newer Video Album' })
+        fireEvent.mouseEnter(card)
+        expect(videoPreview.start).not.toHaveBeenCalled()
+    })
 
     it('renders the available aggregate archive, timeline, category, and EXIF data', async () => {
         api.fetchPhotographyStats.mockResolvedValue(report)

@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { fetchAlbums, fetchPhotographyStats } from '../utils/api'
+import { fetchAlbums, fetchPhotographyStats, prefetchPublicAlbum } from '../utils/api'
 import { formatBytes } from '../utils/formatBytes'
 import { albumCoverUrl } from '../utils/mediaUrls'
+import { canRunAlbumPreview } from '../utils/albumPreviewPolicy'
+import { registerMobileAlbumPreview } from '../utils/mobileAlbumPreview'
+import { start as startVideoHoverPreview } from '../utils/albumVideoHoverPreview'
 import ProgressiveImage from '../components/ProgressiveImage'
 import './Stats.css'
 
@@ -98,6 +101,7 @@ function albumTimestamp(album) {
 }
 
 function albumRoute(album) {
+    if (album?.type === 'video' && album.imageCount === 1) return `/video/${album.albumId}?play=1`
     return `/${album?.type === 'video' ? 'video' : 'album'}/${album?.albumId}`
 }
 
@@ -222,17 +226,64 @@ function buildTimelineLayout(groups) {
 function TimelineCard({ album, index, position }) {
     const cover = album.coverThumbnailUrl || albumCoverUrl(album)
     const [imageFailed, setImageFailed] = useState(false)
+    const imageContainer = useRef(null)
+    const hoverController = useRef(null)
+    const stopPreview = useCallback(() => {
+        hoverController.current?.stop?.()
+        hoverController.current = null
+    }, [])
+    const startPreview = useCallback((trigger = 'hover') => {
+        if (!canRunAlbumPreview(trigger)) return
+        stopPreview()
+        const loadDetail = () => prefetchPublicAlbum(album.albumId)
+        if (album.type === 'video') {
+            hoverController.current = startVideoHoverPreview({
+                container: imageContainer.current,
+                album,
+                trigger,
+                loadDetail,
+            })
+            return
+        }
+        const pending = {}
+        hoverController.current = pending
+        void Promise.all([
+            import('../utils/albumHoverPreview'),
+            import('../utils/albumHoverManifest'),
+        ]).then(([{ start }, { fetchAlbumHoverManifest }]) => {
+            if (hoverController.current !== pending) return
+            hoverController.current = start({
+                container: imageContainer.current,
+                coverImageUrl: album.coverImageUrl || cover,
+                loadManifest: () => fetchAlbumHoverManifest(album),
+                loadDetail,
+                trigger,
+                responsive: false,
+            })
+        }).catch(() => {
+            if (hoverController.current === pending) hoverController.current = null
+        })
+    }, [album, cover, stopPreview])
+
+    useEffect(() => stopPreview, [stopPreview, album.albumId])
+    useEffect(() => registerMobileAlbumPreview(imageContainer.current, {
+        start: () => startPreview('focus'),
+        stop: stopPreview,
+    }), [startPreview, stopPreview])
+
     return (
         <Link
             className="photo-stats-timeline-card"
             data-timeline-position={position}
             to={albumRoute(album)}
             aria-label={`View ${album.title}`}
+            onMouseEnter={() => startPreview()}
+            onMouseLeave={stopPreview}
         >
             <span className="photo-stats-timeline-index" aria-hidden="true">
                 {String(index + 1).padStart(2, '0')}
             </span>
-            <span className="photo-stats-timeline-image">
+            <span ref={imageContainer} className="photo-stats-timeline-image">
                 {cover && !imageFailed ? (
                     <ProgressiveImage
                         src={cover}
