@@ -72,9 +72,9 @@ describe('App routing shell', () => {
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
   })
 
-  it('renders the eager home route and persistent shell', () => {
+  it('renders the home route and persistent shell after startup', async () => {
     const { container } = render(<MemoryRouter><App /></MemoryRouter>)
-    expect(screen.getByRole('heading', { name: 'Home route' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Home route' })).toBeInTheDocument()
     expect(screen.getByText('Footer')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content')
     expect(container.querySelector('main')).toHaveAttribute('id', 'main-content')

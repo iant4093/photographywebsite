@@ -11,7 +11,6 @@ const AnalyticsTracker = lazy(() => import('./components/AnalyticsTracker'))
 import Home from './pages/Home'
 import RouteScrollRestoration from './components/RouteScrollRestoration'
 import AlbumLoadingSkeleton from './components/AlbumLoadingSkeleton'
-import InitialLoadGate from './components/InitialLoadGate'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 
@@ -52,6 +51,7 @@ const NotFound = lazy(() => import('./pages/NotFound'))
 const VideoGallery = lazy(loadVideoGalleryRoute)
 const Videos = lazy(() => import('./pages/Videos'))
 const SectionAlbums = lazy(() => import('./pages/SectionAlbums'))
+const InitialLoadGate = lazy(() => import('./components/InitialLoadGate'))
 
 if (typeof window !== 'undefined') window.history.scrollRestoration = 'manual'
 
