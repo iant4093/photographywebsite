@@ -55,7 +55,6 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   transform: translateY(calc(-100% - 1rem));
-  transition: transform 180ms ease;
 }
 
 .linen-site .linen-skip-link:focus {

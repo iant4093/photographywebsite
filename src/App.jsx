@@ -11,6 +11,7 @@ const AnalyticsTracker = lazy(() => import('./components/AnalyticsTracker'))
 import Home from './pages/Home'
 import RouteScrollRestoration from './components/RouteScrollRestoration'
 import AlbumLoadingSkeleton from './components/AlbumLoadingSkeleton'
+import InitialLoadGate from './components/InitialLoadGate'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
 
@@ -139,6 +140,7 @@ function App() {
                         <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
                         <Route path="*" element={<NotFound />} />
                     </Routes>
+                    <InitialLoadGate />
                 </Suspense>
                 </RecoveryBoundary>
             </main>

@@ -13,6 +13,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Ian Photography" />
   <script src="/theme-init.js" data-media-origin="https://%VITE_CLOUDFRONT_DOMAIN%"></script>
+  <link rel="stylesheet" href="/initial-load.css" />
   <meta name="description"
     content="Ian Truong Photography — a portfolio of wildlife, portraits, sports, travel, and landscapes." />
   <link rel="canonical" href="https://iantruongphotography.com/" />
@@ -43,6 +44,14 @@
 </head>
 
 <body>
+  <div id="initial-loader" class="initial-loader" role="status" aria-label="Loading Ian Truong Photography">
+    <div class="initial-loader__content">
+      <div class="initial-loader__mark" aria-hidden="true">IT</div>
+      <p class="initial-loader__name">Ian Truong</p>
+      <p class="initial-loader__subtitle">Photography</p>
+      <div class="initial-loader__track" aria-hidden="true"><span></span></div>
+    </div>
+  </div>
   <div id="root">
     <section id="startup-fallback" class="mx-auto max-w-xl p-8" aria-live="polite">
       <h1>Ian Truong Photography</h1>
