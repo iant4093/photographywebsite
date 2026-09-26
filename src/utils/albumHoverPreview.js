@@ -98,7 +98,7 @@ function stylePreviewImage(image) {
     })
 }
 
-export function start({ container, coverImageUrl, loadManifest, loadDetail, trigger = 'hover', responsive = false }) {
+export function start({ container, coverImageUrl, loadManifest, loadDetail, trigger = 'hover', responsive = false, delayMs = ALBUM_HOVER_DELAY_MS }) {
     if (!canRunAlbumPreview(trigger)) return { stop() {} }
     const mobile = trigger === 'focus'
 
@@ -231,7 +231,7 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
         }
 
         await showNextFrame()
-    }, mobile ? 0 : ALBUM_HOVER_DELAY_MS)
+    }, mobile ? 0 : delayMs)
 
     // Also bound stalled downloads/decodes that never resolve.
     if (mobile) later(stop, 12000)

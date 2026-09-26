@@ -6,6 +6,7 @@ export const VIDEO_HOVER_DELAY_MS = 350
 export const VIDEO_HOVER_DURATION_MS = 4000
 export const VIDEO_HOVER_FADE_MS = 260
 export const VIDEO_HOVER_MAX_PLAY_ATTEMPTS = 4
+export const VIDEO_HOVER_STARTUP_TIMEOUT_MS = 12000
 
 let hlsModulePromise = null
 
@@ -185,7 +186,11 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
             // Rapid hover changes can interrupt startup more than once. Retry
             // when media becomes ready, with a bounded backoff as a fallback.
             // Policy denials and real stream failures still stop the preview.
-            if (error?.name === 'AbortError' && playAttempts < VIDEO_HOVER_MAX_PLAY_ATTEMPTS) {
+            if (error?.name === 'NotSupportedError' && video?.readyState < 2) {
+                // A cold HLS source can reject play before its first segment is
+                // attached. Wait for canplay rather than ending this hover.
+                started = false
+            } else if (error?.name === 'AbortError' && playAttempts < VIDEO_HOVER_MAX_PLAY_ATTEMPTS) {
                 started = false
                 retryPlayback()
             } else {
@@ -195,6 +200,7 @@ export function start({ container, album, loadDetail, onPlaybackStart, onPlaybac
     }
 
     const loadPreview = async () => {
+        later(() => { if (!playing) fail() }, VIDEO_HOVER_STARTUP_TIMEOUT_MS)
         let selected = selectAlbumCoverVideo(null, album)
         if (!selected) {
             let detail

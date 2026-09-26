@@ -23,6 +23,7 @@ import {
     VIDEO_HOVER_DELAY_MS,
     VIDEO_HOVER_DURATION_MS,
     VIDEO_HOVER_MAX_PLAY_ATTEMPTS,
+    VIDEO_HOVER_STARTUP_TIMEOUT_MS,
     selectAlbumCoverVideo,
     start,
 } from './albumVideoHoverPreview'
@@ -866,6 +867,42 @@ describe('video album hover previews', () => {
         await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS + 500)
         expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce()
         expect(container.querySelector('video')).toBeNull()
+    })
+
+    it('waits for a cold HLS source to become playable after an early rejection', async () => {
+        HTMLMediaElement.prototype.play.mockRejectedValueOnce(new DOMException('Source is loading', 'NotSupportedError'))
+        const container = document.createElement('div')
+        const onPlaybackStart = vi.fn()
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+            onPlaybackStart,
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        const video = container.querySelector('video')
+        expect(video).not.toBeNull()
+        expect(onPlaybackStart).not.toHaveBeenCalled()
+
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 3 })
+        video.dispatchEvent(new Event('canplay'))
+        await Promise.resolve()
+        expect(video.play).toHaveBeenCalledTimes(2)
+        expect(onPlaybackStart).toHaveBeenCalledOnce()
+        controller.stop()
+    })
+
+    it('releases a stalled stream without requiring pointer movement', async () => {
+        HTMLMediaElement.prototype.play.mockImplementationOnce(() => new Promise(() => {}))
+        const container = document.createElement('div')
+        const controller = start({
+            container,
+            album: { coverHlsUrl: 'https://media.test/hls/cover.m3u8' },
+        })
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_DELAY_MS)
+        expect(container.querySelector('video')).not.toBeNull()
+        await vi.advanceTimersByTimeAsync(VIDEO_HOVER_STARTUP_TIMEOUT_MS)
+        expect(container.querySelector('video')).toBeNull()
+        controller.stop()
     })
 
     it('cancels a pending play retry when the pointer leaves', async () => {

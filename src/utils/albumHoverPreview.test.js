@@ -94,6 +94,19 @@ describe('album hover preview selection', () => {
         }
     })
 
+    it('lets timeline cards start after their shorter hover animation', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query.includes('hover: hover') }))
+        const loadManifest = vi.fn().mockResolvedValue({ schemaVersion: 1, images: [] })
+        const controller = start({ container: document.createElement('div'), loadManifest, delayMs: 350 })
+        try {
+            await vi.advanceTimersByTimeAsync(349)
+            expect(loadManifest).not.toHaveBeenCalled()
+            await vi.advanceTimersByTimeAsync(1)
+            expect(loadManifest).toHaveBeenCalledOnce()
+        } finally { controller.stop(); vi.useRealTimers() }
+    })
+
     it('uses only landscape images with complete 640px previews, excludes the cover, removes duplicates, and caps the sequence', () => {
         const cover = 'https://media.example.test/full/cover.jpg?version=1'
         const images = [

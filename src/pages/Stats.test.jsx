@@ -4,12 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({ fetchAlbums: vi.fn(), fetchPhotographyStats: vi.fn(), prefetchPublicAlbum: vi.fn() }))
 const photoPreview = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), fetchManifest: vi.fn() }))
-const videoPreview = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn() }))
+const videoPreview = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), warm: vi.fn() }))
 const previewPolicy = vi.hoisted(() => ({ canRun: vi.fn() }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/albumHoverPreview', () => ({ start: photoPreview.start }))
 vi.mock('../utils/albumHoverManifest', () => ({ fetchAlbumHoverManifest: photoPreview.fetchManifest }))
-vi.mock('../utils/albumVideoHoverPreview', () => ({ start: videoPreview.start }))
+vi.mock('../utils/albumVideoHoverPreview', () => ({ start: videoPreview.start, warmVideoHoverRuntime: videoPreview.warm }))
 vi.mock('../utils/albumPreviewPolicy', () => ({ canRunAlbumPreview: previewPolicy.canRun }))
 vi.mock('../utils/mobileAlbumPreview', () => ({ registerMobileAlbumPreview: () => () => {} }))
 
@@ -68,11 +68,15 @@ describe('photography statistics page', () => {
         vi.clearAllMocks()
         api.fetchAlbums.mockResolvedValue(timelineAlbums)
         api.prefetchPublicAlbum.mockResolvedValue({ images: [] })
+        photoPreview.fetchManifest.mockResolvedValue(null)
         photoPreview.start.mockReturnValue({ stop: photoPreview.stop })
         videoPreview.start.mockReturnValue({ stop: videoPreview.stop })
         previewPolicy.canRun.mockReturnValue(true)
     })
-    afterEach(() => vi.restoreAllMocks())
+    afterEach(() => {
+        vi.useRealTimers()
+        vi.restoreAllMocks()
+    })
 
     it('starts the homepage photo sequence on hover and restores the cover on leave', async () => {
         api.fetchPhotographyStats.mockResolvedValue(report)
@@ -82,11 +86,13 @@ describe('photography statistics page', () => {
 
         fireEvent.mouseEnter(card)
         await waitFor(() => expect(photoPreview.start).toHaveBeenCalledOnce())
+        expect(photoPreview.fetchManifest).toHaveBeenCalledWith(timelineAlbums[2])
         expect(photoPreview.start).toHaveBeenCalledWith(expect.objectContaining({
             container: image,
             coverImageUrl: 'https://media.test/same-day.jpg',
             trigger: 'hover',
             responsive: false,
+            delayMs: 350,
             loadManifest: expect.any(Function),
             loadDetail: expect.any(Function),
         }))
@@ -100,14 +106,15 @@ describe('photography statistics page', () => {
         expect(photoPreview.stop).toHaveBeenCalledOnce()
     })
 
-    it('cancels a photo preview when the pointer leaves before its code loads', async () => {
+    it('cancels a photo preview while its manifest is still loading', async () => {
         api.fetchPhotographyStats.mockResolvedValue(report)
+        photoPreview.fetchManifest.mockReturnValue(new Promise(() => {}))
         renderStats()
         const card = await screen.findByRole('link', { name: 'View Older Photo Album' })
         fireEvent.mouseEnter(card)
         fireEvent.mouseLeave(card)
-        await act(async () => { await vi.dynamicImportSettled() })
-        expect(photoPreview.start).not.toHaveBeenCalled()
+        expect(photoPreview.start).toHaveBeenCalledOnce()
+        expect(photoPreview.stop).toHaveBeenCalledOnce()
     })
 
     it('uses the video catalog autoplay controller and opens a single video directly', async () => {
@@ -120,14 +127,51 @@ describe('photography statistics page', () => {
         expect(card).toHaveAttribute('href', '/video/newer-video?play=1')
 
         fireEvent.mouseEnter(card)
+        expect(api.prefetchPublicAlbum).toHaveBeenCalledWith('newer-video')
+        expect(videoPreview.warm).toHaveBeenCalledOnce()
         expect(videoPreview.start).toHaveBeenCalledWith(expect.objectContaining({
             container: card.querySelector('.photo-stats-timeline-image'),
             album: expect.objectContaining({ albumId: 'newer-video' }),
             trigger: 'hover',
             loadDetail: expect.any(Function),
         }))
+        await videoPreview.start.mock.calls[0][0].loadDetail()
+        expect(api.prefetchPublicAlbum).toHaveBeenCalledTimes(1)
         fireEvent.mouseLeave(card)
         expect(videoPreview.stop).toHaveBeenCalledOnce()
+    })
+
+    it('retries a transient video detail miss during the same hover', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        api.prefetchPublicAlbum.mockResolvedValueOnce(null).mockResolvedValueOnce({ images: [{ hlsUrl: 'https://media.test/preview.m3u8' }] })
+        renderStats()
+        const card = await screen.findByRole('link', { name: 'View Newer Video Album' })
+        fireEvent.mouseEnter(card)
+
+        const detail = await videoPreview.start.mock.calls[0][0].loadDetail()
+        expect(detail.images[0].hlsUrl).toBe('https://media.test/preview.m3u8')
+        expect(api.prefetchPublicAlbum).toHaveBeenCalledTimes(2)
+    })
+
+    it('restarts the hovered preview after timeline scrolling settles', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        renderStats()
+        const card = await screen.findByRole('link', { name: 'View Same Day Photo Album' })
+        vi.spyOn(card, 'matches').mockImplementation((selector) => selector === ':hover')
+        vi.useFakeTimers()
+
+        fireEvent.mouseEnter(card)
+        fireEvent.scroll(card.closest('.photo-stats-timeline-scroll'))
+        expect(photoPreview.stop).toHaveBeenCalledOnce()
+        act(() => vi.advanceTimersByTime(179))
+        expect(photoPreview.start).toHaveBeenCalledOnce()
+        act(() => vi.advanceTimersByTime(1))
+        expect(photoPreview.start).toHaveBeenCalledTimes(2)
+
+        fireEvent.mouseLeave(card)
+        fireEvent.scroll(card.closest('.photo-stats-timeline-scroll'))
+        act(() => vi.advanceTimersByTime(200))
+        expect(photoPreview.start).toHaveBeenCalledTimes(2)
     })
 
     it('respects the shared motion and data-saving preview policy', async () => {
