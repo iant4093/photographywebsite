@@ -495,3 +495,164 @@ describe('public API client behavior', () => {
   })
 
 })
+
+describe('updateAlbum timeout reconciliation', () => {
+  const ALBUM_ID = '0f8fad5b-d9cb-469f-a165-70867728950e'
+  const committed = {
+    albumId: ALBUM_ID, type: 'photo', visibility: 'public', title: 'Trip', createdAt: '2026-01-01',
+  }
+  const hangUntilAborted = (init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+  })
+  // PUT and the authenticated detail poll share one fetch; route them by method.
+  const routeFetch = ({ put, get = () => jsonResponse({ album: { ...committed, visibility: 'private' }, images: [] }) }) => (
+    vi.fn((_url, init) => (init.method === 'PUT' ? put(init) : get(init)))
+  )
+  const polls = () => fetch.mock.calls.filter(([, init]) => init.method !== 'PUT')
+
+  beforeEach(async () => {
+    api.clearApiCache()
+    clearCatalogSnapshots()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    // Load the lazy mutation helper before fake timers own the clock.
+    await import('./albumMutation')
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    api.clearApiCache()
+    clearCatalogSnapshots()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('returns the PUT response without polling when the request succeeds', async () => {
+    vi.stubGlobal('fetch', routeFetch({ put: () => jsonResponse(committed) }))
+    await expect(api.updateAlbum('token', ALBUM_ID, { visibility: 'public' })).resolves.toEqual(committed)
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ visibility: 'public' }) })
+  })
+
+  it('resolves with the committed album after a client timeout and invalidates the catalog', async () => {
+    const stale = { albumId: 'old', type: 'photo', visibility: 'public', title: 'Old', createdAt: '2025-01-01' }
+    setCatalogSnapshot('public-photos', { items: [stale], nextCursor: null })
+    let putSignal
+    vi.stubGlobal('fetch', routeFetch({
+      put: (init) => { putSignal = init.signal; return hangUntilAborted(init) },
+      get: () => jsonResponse({ album: committed, images: [] }),
+    }))
+    const request = api.updateAlbum('token', ALBUM_ID, { visibility: 'public', title: ' Trip ' })
+    const settled = expect(request).resolves.toEqual(committed)
+    // The PUT deadline is the 30 s edge limit rather than the 15 s default.
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(putSignal.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(putSignal.aborted).toBe(true)
+    expect(polls()).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(api.UPDATE_RECONCILE_INTERVAL_MS)
+    await settled
+    expect(polls()).toHaveLength(1)
+    expect(polls()[0][0]).toMatch(new RegExp(`/albums/${ALBUM_ID}$`))
+    expect(polls()[0][1]).toMatchObject({ cache: 'no-store', headers: { Authorization: 'Bearer token' } })
+    expect(getCatalogSnapshot('public-photos')).toBeNull()
+    expect(reconcilePublicCatalogItems([stale], 'photo').map(album => album.albumId)).toEqual([ALBUM_ID, 'old'])
+  })
+
+  it('rethrows the original timeout once the polling budget is exhausted', async () => {
+    const snapshot = { items: [{ albumId: 'old' }], nextCursor: null }
+    setCatalogSnapshot('public-photos', snapshot)
+    vi.stubGlobal('fetch', routeFetch({ put: hangUntilAborted }))
+    const request = api.updateAlbum('token', ALBUM_ID, { visibility: 'public' })
+    const settled = expect(request).rejects.toMatchObject({ name: 'ApiError', code: 'TIMEOUT' })
+    await vi.advanceTimersByTimeAsync(30_000 + api.UPDATE_RECONCILE_ATTEMPTS * api.UPDATE_RECONCILE_INTERVAL_MS)
+    await settled
+    expect(polls()).toHaveLength(api.UPDATE_RECONCILE_ATTEMPTS)
+    expect(getCatalogSnapshot('public-photos')).toMatchObject(snapshot)
+  })
+
+  it('reconciles a 504 and keeps polling past failed reads', async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 500 }))
+      .mockResolvedValueOnce(new Response('', { status: 500 }))
+      // A flat (legacy) detail shape is accepted as well as { album, images }.
+      .mockResolvedValueOnce(jsonResponse(committed))
+    vi.stubGlobal('fetch', routeFetch({ put: async () => new Response('', { status: 504 }), get }))
+    const request = api.updateAlbum('token', ALBUM_ID, { visibility: 'public' })
+    const settled = expect(request).resolves.toEqual(committed)
+    // First poll: a 500, its one GET retry (250 ms), another 500. Second poll succeeds.
+    await vi.advanceTimersByTimeAsync(2 * api.UPDATE_RECONCILE_INTERVAL_MS + 250)
+    await settled
+    expect(fetch.mock.calls.filter(([, init]) => init.method === 'PUT')).toHaveLength(1)
+    expect(get).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([
+    [400, { error: 'Invalid album' }],
+    [409, { error: 'Album changed', code: 'conflict' }],
+  ])('does not reconcile a definitive %i response', async (status, body) => {
+    vi.stubGlobal('fetch', routeFetch({ put: async () => jsonResponse(body, { status }) }))
+    await expect(api.updateAlbum('token', ALBUM_ID, { visibility: 'public' })).rejects.toMatchObject({ status })
+    await vi.advanceTimersByTimeAsync(api.UPDATE_RECONCILE_ATTEMPTS * api.UPDATE_RECONCILE_INTERVAL_MS)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it.each(['between reads', 'during a read'])('rejects with the abort when the caller cancels %s', async (phase) => {
+    vi.stubGlobal('fetch', routeFetch({
+      put: async () => new Response('', { status: 502 }),
+      ...(phase === 'during a read' ? { get: hangUntilAborted } : {}),
+    }))
+    const controller = new AbortController()
+    const request = api.updateAlbum('token', ALBUM_ID, { visibility: 'public' }, { signal: controller.signal })
+    const settled = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(api.UPDATE_RECONCILE_INTERVAL_MS)
+    expect(polls()).toHaveLength(1)
+    controller.abort()
+    await settled
+    await vi.advanceTimersByTimeAsync(api.UPDATE_RECONCILE_ATTEMPTS * api.UPDATE_RECONCILE_INTERVAL_MS)
+    expect(polls()).toHaveLength(1)
+  })
+
+  it('stops polling when the signed-in session changes', async () => {
+    vi.stubGlobal('fetch', routeFetch({ put: async () => new Response('', { status: 503 }) }))
+    const request = api.updateAlbum('token', ALBUM_ID, { visibility: 'public' })
+    const settled = expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(0)
+    api.clearApiCache({ sessionChanged: true })
+    await vi.advanceTimersByTimeAsync(api.UPDATE_RECONCILE_INTERVAL_MS)
+    await settled
+    expect(polls()).toHaveLength(0)
+  })
+})
+
+describe('albumReflectsUpdate', () => {
+  const album = {
+    albumId: 'a', visibility: 'unlisted', title: 'Trip', description: '', category: 'Uncategorized',
+    isShared: true, shareCode: 'server-code', createdAt: '2026-01-01T12:00:00.000Z',
+    coverImageUrl: 'https://media.test/albums/a/original/cover%20one.jpg?X-Amz-Signature=x',
+  }
+
+  it('matches only the fields the caller sent, after server-side normalization', () => {
+    expect(api.albumReflectsUpdate(album, { visibility: 'unlisted' })).toBe(true)
+    expect(api.albumReflectsUpdate(album, { title: '  Trip ', description: '', category: '  ' })).toBe(true)
+    expect(api.albumReflectsUpdate(album, { isShared: true, createdAt: '2026-01-01T12:00:00.000Z' })).toBe(true)
+    expect(api.albumReflectsUpdate(album, { coverImageUrl: 'albums/a/original/cover one.jpg' })).toBe(true)
+  })
+
+  it('skips fields the response does not echo or the server generates', () => {
+    expect(api.albumReflectsUpdate(album, { visibility: 'unlisted', coverThumbKey: 'albums/a/thumb.jpg', shareCode: 'other' })).toBe(true)
+    expect(api.albumReflectsUpdate(album, { coverThumbKey: 'albums/a/thumb.jpg', coverBlurhash: 'x' })).toBe(false)
+    expect(api.albumReflectsUpdate(album, {})).toBe(false)
+  })
+
+  it('rejects mismatches and unusable inputs', () => {
+    expect(api.albumReflectsUpdate(album, { visibility: 'public' })).toBe(false)
+    expect(api.albumReflectsUpdate(album, { visibility: 'unlisted', title: 'Other' })).toBe(false)
+    expect(api.albumReflectsUpdate(album, { isShared: false })).toBe(false)
+    expect(api.albumReflectsUpdate(album, { coverImageUrl: 'albums/a/original/other.jpg' })).toBe(false)
+    expect(api.albumReflectsUpdate({ ...album, coverImageUrl: 'not a url' }, { coverImageUrl: 'albums/a/cover.jpg' })).toBe(false)
+    expect(api.albumReflectsUpdate({ ...album, coverImageUrl: '' }, { coverImageUrl: '' })).toBe(true)
+    expect(api.albumReflectsUpdate({ ...album, coverImageUrl: 'https://media.test/x.jpg' }, { coverImageUrl: '' })).toBe(false)
+    expect(api.albumReflectsUpdate(null, { visibility: 'public' })).toBe(false)
+    expect(api.albumReflectsUpdate(album, null)).toBe(false)
+  })
+})

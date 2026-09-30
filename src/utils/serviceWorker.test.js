@@ -64,4 +64,29 @@ describe('optional bounded offline caching', () => {
         }
         expect(w.entries.size).toBe(0)
     })
+    it('caches only successful responses whose content type is HTML', async () => {
+        const w = worker()
+        const cases = [
+            ['https://site.test/gallery', { ok: true, type: 'text/html; charset=utf-8' }],
+            ['https://site.test/json', { ok: true, type: 'application/json; charset=utf-8' }],
+            ['https://site.test/embedded', { ok: true, type: 'application/json; profile="text/html"' }],
+            ['https://site.test/missing', { ok: false, status: 404, type: 'text/html' }],
+        ]
+        for (const [url, { ok, status = 200, type }] of cases) {
+            w.setResponse({ ...w.response, ok, status, headers: new Headers({ 'content-type': type }) })
+            await w.context.networkFirst(new Request(url))
+        }
+        expect([...w.entries.keys()]).toEqual(['https://site.test/gallery'])
+    })
+    it('handles HTML navigations but leaves every /api request to the network', () => {
+        const w = worker()
+        const handled = []
+        const dispatch = request => w.handlers.fetch({ request, respondWith: () => handled.push(request.url) })
+        dispatch({ method: 'GET', mode: 'navigate', url: 'https://site.test/album/one', headers: new Headers() })
+        for (const url of ['https://site.test/api', 'https://site.test/api/public/albums', 'https://site.test/api/albums/one']) {
+            dispatch({ method: 'GET', mode: 'navigate', url, headers: new Headers() })
+            dispatch({ method: 'GET', mode: 'cors', url, headers: new Headers() })
+        }
+        expect(handled).toEqual(['https://site.test/album/one'])
+    })
 })

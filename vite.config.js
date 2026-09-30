@@ -8,6 +8,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const mediaDomain = env.VITE_CLOUDFRONT_DOMAIN || 'd1twwtwfz1yeo4.cloudfront.net'
   const mediaOrigin = `https://${mediaDomain}`
+  // /api writes go to live data, so the dev server proxies it to production
+  // only on explicit opt-in. Without it, dev /api requests fail by design.
+  const apiProxy = env.VITE_DEV_PROXY_PROD === '1'
+    ? { '/api': { target: 'https://iantruongphotography.com', changeOrigin: true } }
+    : {}
 
   return {
     plugins: [react(), tailwindcss(), thirdPartyLicenses()],
@@ -19,10 +24,8 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        '/api': {
-          target: 'https://iantruongphotography.com',
-          changeOrigin: true,
-        },
+        ...apiProxy,
+        // Read-only media CDN paths stay proxied for local UI work.
         '/public-previews': {
           target: mediaOrigin,
           changeOrigin: true,
