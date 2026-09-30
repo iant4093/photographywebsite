@@ -4,6 +4,13 @@ API Gateway-authenticated routes provide verified claims in requestContext. Rout
 that deliberately allow anonymous access call the same helper, which verifies an
 optional Bearer token against the Cognito JWKS before treating the caller as
 authenticated.
+
+Administrator routes additionally require the ``admin_mfa`` ID-token claim to
+equal ``enabled``. The Cognito pre-token-generation trigger
+(``pre_token_generation.py``) stamps that claim for Admins-group users from
+their current Cognito MFA settings, so an administrator without TOTP can still
+sign in (and enroll) but cannot use any admin or write API until the next token
+issued after enrollment. A missing or any other value fails closed.
 """
 
 import json
@@ -12,6 +19,11 @@ import time
 from typing import Any
 
 from audit_helpers import actor_context, emit_audit_event
+
+# Set only by the pre-token-generation trigger; Cognito signs it into the ID
+# token, so callers cannot forge it without also forging the token.
+ADMIN_MFA_CLAIM = "admin_mfa"
+
 
 class AuthError(Exception):
     """An authentication/authorization error safe to map to an HTTP response."""
@@ -170,6 +182,11 @@ def is_admin(claims):
     return "Admins" in parse_groups((claims or {}).get("cognito:groups"))
 
 
+def has_admin_mfa(claims) -> bool:
+    """Return True only when the token proves TOTP was enrolled at issue time."""
+    return (claims or {}).get(ADMIN_MFA_CLAIM) == "enabled"
+
+
 def auth_error_response(error):
     return {
         "statusCode": getattr(error, "status_code", 401),
@@ -179,7 +196,7 @@ def auth_error_response(error):
 
 
 def require_admin(event):
-    """Return None only for an exactly matched Admins group claim."""
+    """Return None only for an exact Admins group claim with admin MFA enabled."""
     try:
         claims = get_verified_claims(event, required=True)
     except AuthError as error:
@@ -207,6 +224,23 @@ def require_admin(event):
             auth_method=auth_method,
         )
         return auth_error_response(AuthError("Forbidden — admin access required", 403))
+    # Checked after the group so audit reason codes distinguish non-admins from
+    # administrators who still need to enroll TOTP (or whose status is unknown).
+    if not has_admin_mfa(claims):
+        actor_type, auth_method = actor_context(event)
+        emit_audit_event(
+            event_name="authorization.admin_access",
+            outcome="denied",
+            action="authorization.admin.require",
+            resource_type="authorization",
+            reason_code="admin_mfa_required",
+            event=event,
+            actor_type=actor_type,
+            auth_method=auth_method,
+        )
+        return auth_error_response(
+            AuthError("Forbidden — administrator two-factor authentication is required", 403)
+        )
     return None
 
 

@@ -67,6 +67,87 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIsNone(auth_helpers.require_admin(gateway_event(claims(groups=["Admins"]))))
 
 
+class AdminMfaClaimTests(unittest.TestCase):
+    """The pre-token trigger's admin_mfa claim gates every admin route."""
+
+    @staticmethod
+    def _bearer_event():
+        return {"headers": {"authorization": "Bearer token"}, "requestContext": {"http": {"sourceIp": "192.0.2.8"}}}
+
+    def _require_admin_via_bearer(self, decoded):
+        fake_jwt = SimpleNamespace(
+            decode=Mock(return_value=decoded),
+            get_unverified_header=Mock(return_value={"alg": "RS256", "kid": "test-key"}),
+        )
+        signing = SimpleNamespace(key="public-key")
+        with patch.dict("sys.modules", {"jwt": fake_jwt}), patch.object(
+            auth_helpers, "_get_jwks_client", return_value=Mock(get_signing_key_from_jwt=Mock(return_value=signing))
+        ), patch.object(auth_helpers, "emit_audit_event") as audit:
+            response = auth_helpers.require_admin(self._bearer_event())
+        return response, audit
+
+    def test_has_admin_mfa_accepts_only_the_exact_enabled_value(self):
+        self.assertTrue(auth_helpers.has_admin_mfa({"admin_mfa": "enabled"}))
+        for value in (None, "", "missing", "unverified", "ENABLED", " enabled", True, ["enabled"]):
+            with self.subTest(value=value):
+                self.assertFalse(auth_helpers.has_admin_mfa({"admin_mfa": value}))
+        self.assertFalse(auth_helpers.has_admin_mfa({}))
+        self.assertFalse(auth_helpers.has_admin_mfa(None))
+        self.assertEqual(auth_helpers.ADMIN_MFA_CLAIM, "admin_mfa")
+
+    def test_gateway_admin_with_enabled_mfa_is_allowed_without_denial_audit(self):
+        with patch.object(auth_helpers, "emit_audit_event") as audit:
+            self.assertIsNone(
+                auth_helpers.require_admin(gateway_event(claims(groups=["Admins"], admin_mfa="enabled")))
+            )
+        audit.assert_not_called()
+
+    def test_gateway_admin_without_enabled_mfa_is_denied_and_audited(self):
+        for status in (None, "missing", "unverified"):
+            with self.subTest(status=status), patch.object(auth_helpers, "emit_audit_event") as audit:
+                event = gateway_event(claims(groups=["Admins"], admin_mfa=status))
+                response = auth_helpers.require_admin(event)
+                self.assertEqual(response["statusCode"], 403)
+                self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+                self.assertIn("two-factor authentication", response_body(response)["error"])
+                audit.assert_called_once()
+                kwargs = audit.call_args.kwargs
+                self.assertEqual(kwargs["event_name"], "authorization.admin_access")
+                self.assertEqual(kwargs["outcome"], "denied")
+                self.assertEqual(kwargs["reason_code"], "admin_mfa_required")
+                self.assertEqual((kwargs["actor_type"], kwargs["auth_method"]), ("admin", "jwt"))
+                self.assertIs(kwargs["event"], event)
+
+    def test_non_admin_is_denied_for_group_even_with_an_enabled_claim(self):
+        forged = {**claims(groups=["Editors"]), "admin_mfa": "enabled"}
+        for token_claims in (claims(groups="SuperAdmins"), claims(), forged):
+            with self.subTest(claims=token_claims), patch.object(auth_helpers, "emit_audit_event") as audit:
+                response = auth_helpers.require_admin(gateway_event(token_claims))
+                self.assertEqual(response["statusCode"], 403)
+                self.assertEqual(response_body(response)["error"], "Forbidden — admin access required")
+                self.assertEqual(audit.call_args.kwargs["reason_code"], "admin_group_required")
+
+    def test_self_verified_bearer_admin_requires_enabled_mfa(self):
+        response, audit = self._require_admin_via_bearer(claims(groups=["Admins"], admin_mfa="enabled"))
+        self.assertIsNone(response)
+        audit.assert_not_called()
+
+        for status in (None, "missing"):
+            with self.subTest(status=status):
+                response, audit = self._require_admin_via_bearer(claims(groups=["Admins"], admin_mfa=status))
+                self.assertEqual(response["statusCode"], 403)
+                self.assertEqual(audit.call_args.kwargs["reason_code"], "admin_mfa_required")
+
+    def test_admin_classification_and_album_scoping_ignore_mfa_status(self):
+        # is_admin feeds read scoping and actor classification; only the
+        # admin-route gate depends on the MFA claim.
+        without_mfa = claims(subject="admin", groups=["Admins"], admin_mfa=None)
+        self.assertNotIn("admin_mfa", without_mfa)
+        self.assertTrue(auth_helpers.is_admin(without_mfa))
+        album = {"albumId": "a", "status": "active", "visibility": "private", "ownerSub": "owner"}
+        self.assertEqual(album_access.authorize_album(album, claims=without_mfa), "admin")
+
+
 class AlbumAccessTests(unittest.TestCase):
     def setUp(self):
         self.base = {"albumId": "a", "status": "active", "visibility": "public"}

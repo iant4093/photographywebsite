@@ -110,6 +110,33 @@ display the full raw message in shared screenshots or incident tickets.
 - Preserve CORS, JWT issuer/audience, private-media deny, and throttling while
   investigating. Roll back a bad release instead of broadening access.
 
+### Administrator MFA enforcement
+
+Admin TOTP is enforced by the API, not only by the React route guard. The
+Cognito pre-token-generation trigger (`PreTokenGenerationFunction`) stamps an
+`admin_mfa` claim into every ID token issued to an exact `Admins` member, at
+sign-in and at each refresh: `enabled` when TOTP is configured, `missing` when
+it is not, and `unverified` when the Cognito lookup failed. Ordinary users are
+returned untouched with no Cognito call. `require_admin` accepts only
+`enabled`; anything else, including an absent claim, returns 403 and audits
+`authorization.admin_access` denied with reason `admin_mfa_required` (distinct
+from `admin_group_required` for non-admins).
+
+- The trigger fails open for login: an administrator without TOTP can still
+  sign in and reach `/admin/security` to enroll, but every `/admin/*` and write
+  API returns 403 until a token issued after enrollment is in use. Refresh
+  tokens last 7 days; ID tokens last one hour.
+- After this first deploys, existing admin sessions lack the claim and get 403
+  until their ID token refreshes (at most one hour) or they sign in again.
+- After enrolling TOTP, sign out and back in (or wait for the next refresh) to
+  obtain an `enabled` token.
+- A surge of `admin_mfa_required` with `admin_mfa_lookup_failed
+  error_type=...` warnings from the trigger means the lookup is failing
+  (`unverified`); check Cognito throttling and the trigger role, not the admin.
+- Never detach the trigger (remove `LambdaConfig`) without reverting the
+  `require_admin` check in the same release; an absent claim locks out every
+  administrator by design.
+
 ## Deployment and rollback checks
 
 Before execution:

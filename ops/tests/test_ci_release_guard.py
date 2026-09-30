@@ -505,6 +505,9 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("OriginalIndexRefreshFunctionRefreshOriginalIndex", "AWS::Events::Rule"),
                 ("OriginalIndexRefreshFunctionRefreshOriginalIndexPermission", "AWS::Lambda::Permission"),
                 ("OriginalComparisonWorkerFunctionOriginalComparisonJobs", "AWS::Lambda::EventSourceMapping"),
+                ("PreTokenGenerationFunction", "AWS::Lambda::Function"),
+                ("PreTokenGenerationFunctionRole", "AWS::IAM::Role"),
+                ("PreTokenGenerationInvokePermission", "AWS::Lambda::Permission"),
             },
         )
         for rule in document["rules"]:
@@ -563,6 +566,95 @@ class ReleaseIntentTests(unittest.TestCase):
             with self.subTest(item=item), self.assertRaises(release_guard.GateError):
                 release_guard.gate_change_set(
                     [{"Changes": [item]}], release_intent=intent,
+                )
+
+    def test_admin_mfa_trigger_release_is_bounded_to_reviewed_cognito_properties(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        dependencies = release_guard.load_release_dependencies(json.loads(
+            (ROOT / "ops/ci/release_dependencies.json").read_text(encoding="utf-8")
+        ))
+        additions = []
+        for logical_id, resource_type in (
+            ("PreTokenGenerationFunction", "AWS::Lambda::Function"),
+            ("PreTokenGenerationFunctionRole", "AWS::IAM::Role"),
+            ("PreTokenGenerationInvokePermission", "AWS::Lambda::Permission"),
+        ):
+            item = change(
+                action="Add", logical_id=logical_id,
+                resource_type=resource_type, replacement=None,
+            )
+            item["ResourceChange"]["Details"] = []
+            additions.append(item)
+        # The pool and client are protected: only attaching the trigger and
+        # shortening refresh-token validity are approved, never a replacement.
+        pool = change(
+            logical_id="UserPool", resource_type="AWS::Cognito::UserPool",
+            property_name="LambdaConfig",
+        )
+        client = change(
+            logical_id="UserPoolClient", resource_type="AWS::Cognito::UserPoolClient",
+            property_name="RefreshTokenValidity",
+        )
+        self.assertEqual(release_guard.gate_change_set(
+            [{"Changes": additions + [pool, client]}],
+            release_intent=intent, release_dependencies=dependencies,
+        ), {"Add": 3, "Modify": 2, "Total": 5})
+
+        # Later releases update the trigger's code/environment; CloudFormation
+        # then conservatively re-evaluates the pool's LambdaConfig reference.
+        cascade = copy.deepcopy(pool)
+        cascade["ResourceChange"]["Details"][0].update({
+            "Evaluation": "Dynamic",
+            "ChangeSource": "ResourceAttribute",
+            "CausingEntity": "PreTokenGenerationFunction.Arn",
+        })
+        role = change(logical_id="PreTokenGenerationFunction", property_name="Role")
+        role["ResourceChange"]["Details"][0].update({
+            "Evaluation": "Dynamic",
+            "ChangeSource": "ResourceAttribute",
+            "CausingEntity": "PreTokenGenerationFunctionRole.Arn",
+        })
+        self.assertEqual(release_guard.gate_change_set(
+            [{"Changes": [
+                cascade, role,
+                change(logical_id="PreTokenGenerationFunction", property_name="Code"),
+            ]}],
+            release_intent=intent, release_dependencies=dependencies,
+        ), {"Add": 0, "Modify": 3, "Total": 3})
+
+        rejected = []
+        for original, forbidden in (
+            (pool, "MfaConfiguration"),
+            (pool, "Policies"),
+            (pool, "AdminCreateUserConfig"),
+            (client, "ExplicitAuthFlows"),
+            (client, "AccessTokenValidity"),
+            (client, "IdTokenValidity"),
+        ):
+            item = copy.deepcopy(original)
+            item["ResourceChange"]["Details"][0]["Target"]["Name"] = forbidden
+            rejected.append(item)
+        for original in (pool, client):
+            replaced = copy.deepcopy(original)
+            replaced["ResourceChange"]["Replacement"] = "True"
+            rejected.append(replaced)
+        foreign_cause = copy.deepcopy(cascade)
+        foreign_cause["ResourceChange"]["Details"][0]["Target"]["Name"] = "Policies"
+        rejected.append(foreign_cause)
+        modified_permission = copy.deepcopy(additions[2])
+        modified_permission["ResourceChange"]["Action"] = "Modify"
+        rejected.append(modified_permission)
+        rejected.append(change(
+            logical_id="PreTokenGenerationFunctionRole", resource_type="AWS::IAM::Role",
+            property_name="Policies",
+        ))
+        for item in rejected:
+            with self.subTest(item=item), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set(
+                    [{"Changes": [item]}],
+                    release_intent=intent, release_dependencies=dependencies,
                 )
 
     def test_media_recovery_intent_allows_only_reviewed_existing_resource_properties(self):
