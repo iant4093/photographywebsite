@@ -576,10 +576,27 @@ def api_origin_request_policy_config(settings: dict[str, Any], *, public: bool) 
             "QueryStringBehavior": "whitelist",
             "QueryStrings": {"Quantity": len(query_items), "Items": query_items},
         }
+    cookies_config: dict[str, Any] = {"CookieBehavior": "none"}
+    comment = "Same-origin API forwarding; never forwards viewer cookies or host"
+    cookie_items = [] if public else settings.get("private_forward_cookies", [])
+    if cookie_items:
+        # AWS Cookies.html: when cookies are not forwarded, CloudFront "removes
+        # Set-Cookie headers from responses before returning responses to your
+        # viewers". The private API issues the private-media signed cookies, so
+        # it must allowlist at least one cookie. CloudFront-Key-Pair-Id is scoped
+        # to /private-media/albums/<id>, so browsers never actually send it to
+        # /api and the origin still receives no viewer cookie. /api/* keeps the
+        # CachingDisabled policy, so nothing is ever cached per cookie. The
+        # public policy stays "none": public responses never set cookies.
+        cookies_config = {
+            "CookieBehavior": "whitelist",
+            "Cookies": {"Quantity": len(cookie_items), "Items": cookie_items},
+        }
+        comment = "Same-origin API forwarding; one allowlisted cookie so Set-Cookie survives; never host"
     return {
         "Name": settings["public_origin_request_policy_name"] if public else settings["private_origin_request_policy_name"],
-        "Comment": "Same-origin API forwarding; never forwards viewer cookies or host",
-        "CookiesConfig": {"CookieBehavior": "none"},
+        "Comment": comment,
+        "CookiesConfig": cookies_config,
         "HeadersConfig": {
             "HeaderBehavior": "whitelist",
             "Headers": {"Quantity": len(headers), "Items": headers},

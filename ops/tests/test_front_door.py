@@ -92,7 +92,18 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         public = cloudfront_frontend.api_origin_request_policy_config(SETTINGS, public=True)
         private = cloudfront_frontend.api_origin_request_policy_config(SETTINGS, public=False)
         self.assertEqual(public["CookiesConfig"], {"CookieBehavior": "none"})
-        self.assertEqual(private["CookiesConfig"], {"CookieBehavior": "none"})
+        # One path-scoped cookie is allowlisted only so CloudFront passes the
+        # API's private-media Set-Cookie headers through to the browser.
+        self.assertEqual(
+            private["CookiesConfig"],
+            {
+                "CookieBehavior": "whitelist",
+                "Cookies": {"Quantity": 1, "Items": ["CloudFront-Key-Pair-Id"]},
+            },
+        )
+        self.assertEqual(private["Name"], "IanTruong-API-Private-Origin-v1")
+        self.assertNotIn("never forwards viewer cookies", private["Comment"])
+        self.assertIn("never forwards viewer cookies", public["Comment"])
         public_headers = public["HeadersConfig"]["Headers"]["Items"]
         private_headers = private["HeadersConfig"]["Headers"]["Items"]
         for forbidden in ("Authorization", "Cookie", "Host", "X-Origin-Verify"):

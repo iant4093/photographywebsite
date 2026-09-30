@@ -193,3 +193,76 @@ describe('ProgressiveImage responsive fallback', () => {
         expect(screen.getByRole('img', { name: 'Second' })).toHaveAttribute('src', '/second.jpg')
     })
 })
+
+describe('ProgressiveImage signed-cookie retry', () => {
+    afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+    const privateSrc = () => `${window.location.origin}/private-media/albums/a1/thumbnails/photo.jpg`
+    const image = () => screen.getByRole('img', { name: 'Private' })
+
+    it('retries a failed private-media image with a cache-busting query and reveals it on success', () => {
+        vi.useFakeTimers()
+        const onError = vi.fn()
+        render(<ProgressiveImage eager src={privateSrc()} alt="Private" onError={onError} />)
+        fireEvent.error(image())
+        // The first failure asks the page to refresh metadata (and cookies).
+        expect(onError).toHaveBeenCalledOnce()
+        expect(image()).toHaveClass('opacity-0')
+        act(() => vi.advanceTimersByTime(1499))
+        expect(image()).toHaveAttribute('src', privateSrc())
+        act(() => vi.advanceTimersByTime(1))
+        expect(image()).toHaveAttribute('src', `${privateSrc()}?r=1`)
+        fireEvent.load(image())
+        expect(image()).toHaveClass('opacity-100')
+        expect(onError).toHaveBeenCalledOnce()
+    })
+
+    it('demotes a responsive private image to src, then stops after three retries', () => {
+        vi.useFakeTimers()
+        const onError = vi.fn()
+        const src = `${privateSrc()}?v=2`
+        render(<ProgressiveImage eager src={src} srcSet={`${privateSrc()}-640.webp 640w`} sizes="100vw" alt="Private" onError={onError} />)
+        fireEvent.error(image())
+        expect(image()).not.toHaveAttribute('srcset')
+        expect(onError).not.toHaveBeenCalled()
+        fireEvent.error(image())
+        for (const [attempt, delay] of [[1, 1500], [2, 4000], [3, 8000]]) {
+            act(() => vi.advanceTimersByTime(delay))
+            expect(image()).toHaveAttribute('src', `${src}&r=${attempt}`)
+            expect(image()).not.toHaveAttribute('srcset')
+            fireEvent.error(image())
+        }
+        act(() => vi.advanceTimersByTime(60_000))
+        expect(image()).toHaveAttribute('src', `${src}&r=3`)
+        expect(image()).toHaveClass('opacity-100')
+        expect(onError).toHaveBeenCalledOnce()
+    })
+
+    it('does not retry public media URLs, which get a fresh URL on refresh', () => {
+        vi.useFakeTimers()
+        const onError = vi.fn()
+        const src = 'https://bucket.s3.us-west-2.amazonaws.com/albums/a1/photo.jpg?X-Amz-Signature=x'
+        render(<ProgressiveImage eager src={src} alt="Private" onError={onError} />)
+        fireEvent.error(image())
+        act(() => vi.advanceTimersByTime(60_000))
+        expect(image()).toHaveAttribute('src', src)
+        expect(onError).toHaveBeenCalledOnce()
+    })
+
+    it('cancels a pending retry on unmount and when the source changes', () => {
+        vi.useFakeTimers()
+        const clear = vi.spyOn(window, 'clearTimeout')
+        const view = render(<ProgressiveImage eager src={privateSrc()} alt="Private" />)
+        fireEvent.error(image())
+        const other = `${window.location.origin}/private-media/albums/a1/thumbnails/other.jpg`
+        view.rerender(<ProgressiveImage eager src={other} alt="Private" />)
+        act(() => vi.advanceTimersByTime(60_000))
+        expect(image()).toHaveAttribute('src', other)
+        fireEvent.error(image())
+        const pending = vi.getTimerCount()
+        expect(pending).toBeGreaterThan(0)
+        clear.mockClear()
+        view.unmount()
+        expect(clear).toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+    })
+})
