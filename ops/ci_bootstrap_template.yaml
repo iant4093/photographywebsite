@@ -1091,8 +1091,6 @@ Resources:
               - cloudfront:CreateResponseHeadersPolicy
               - cloudfront:DeleteCachePolicy
               - cloudfront:DeleteFunction
-              - cloudfront:DeleteKeyGroup
-              - cloudfront:DeletePublicKey
               - cloudfront:DeleteOriginAccessControl
               - cloudfront:DeleteResponseHeadersPolicy
               - cloudfront:DescribeFunction
@@ -1100,9 +1098,7 @@ Resources:
               - cloudfront:GetDistribution
               - cloudfront:GetDistributionConfig
               - cloudfront:GetFunction
-              - cloudfront:GetKeyGroup
               - cloudfront:GetOriginAccessControl
-              - cloudfront:GetPublicKey
               - cloudfront:GetResponseHeadersPolicy
               - cloudfront:ListTagsForResource
               - cloudfront:TagResource
@@ -1110,19 +1106,14 @@ Resources:
               - cloudfront:UpdateCachePolicy
               - cloudfront:UpdateDistribution
               - cloudfront:UpdateFunction
-              - cloudfront:UpdateKeyGroup
               - cloudfront:UpdateOriginAccessControl
-              - cloudfront:UpdatePublicKey
               - cloudfront:UpdateResponseHeadersPolicy
               - cloudfront:PublishFunction
             Resource:
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:cache-policy/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/*'
-              # Signed-cookie key material for private media delivery (ops/PRIVATE_MEDIA.md).
-              - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:key-group/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*'
-              - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:public-key/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:response-headers-policy/*'
           - Sid: CreateCloudFrontResources
             Effect: Allow
@@ -1141,6 +1132,21 @@ Resources:
               - cloudfront:ListOriginAccessControls
               - cloudfront:ListPublicKeys
               - cloudfront:ListResponseHeadersPolicies
+            Resource: '*'
+          # Signed-cookie key material for private media delivery
+          # (ops/PRIVATE_MEDIA.md). Key-group and public-key APIs do not support
+          # resource-level permissions, so drift detection and lifecycle reads
+          # fail with a key-group/* or public-key/* scoped grant; '*' is the only
+          # form IAM evaluates for these actions.
+          - Sid: ManageCloudFrontKeyMaterial
+            Effect: Allow
+            Action:
+              - cloudfront:GetKeyGroup
+              - cloudfront:GetPublicKey
+              - cloudfront:UpdateKeyGroup
+              - cloudfront:UpdatePublicKey
+              - cloudfront:DeleteKeyGroup
+              - cloudfront:DeletePublicKey
             Resource: '*'
   CloudFormationExecutionEncryptionAndObservabilityPolicy:
     Type: AWS::IAM::ManagedPolicy

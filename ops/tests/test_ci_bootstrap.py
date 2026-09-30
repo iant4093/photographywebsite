@@ -699,21 +699,12 @@ fi
             "cloudfront:PublishFunction",
             "cloudfront:UpdateOriginAccessControl",
             "cloudfront:UpdateResponseHeadersPolicy",
-            # Signed-cookie key material for private media delivery.
-            "cloudfront:GetKeyGroup",
-            "cloudfront:UpdateKeyGroup",
-            "cloudfront:DeleteKeyGroup",
-            "cloudfront:GetPublicKey",
-            "cloudfront:UpdatePublicKey",
-            "cloudfront:DeletePublicKey",
         ):
             self.assertIn(action, managed)
         for resource_family in (
             "distribution/*",
             "cache-policy/*",
             "function/*",
-            "key-group/*",
-            "public-key/*",
             "origin-access-control/*",
             "response-headers-policy/*",
         ):
@@ -743,6 +734,23 @@ fi
 
         protection = statement_block(execution, "ProtectRetainedApplicationData")
         self.assertIn("cloudfront:DeleteDistribution", protection)
+
+        # Key-group and public-key actions have no resource-level ARN support,
+        # so they live in their own star-resource statement rather than a
+        # misleading key-group/* grant that IAM would never match.
+        key_material = statement_block(execution, "ManageCloudFrontKeyMaterial")
+        for action in (
+            "cloudfront:GetKeyGroup",
+            "cloudfront:GetPublicKey",
+            "cloudfront:UpdateKeyGroup",
+            "cloudfront:UpdatePublicKey",
+            "cloudfront:DeleteKeyGroup",
+            "cloudfront:DeletePublicKey",
+        ):
+            self.assertIn(action, key_material)
+        self.assertIn("Resource: '*'", key_material)
+        self.assertNotIn("key-group/*", managed)
+        self.assertNotIn("public-key/*", managed)
 
     def test_event_source_mapping_tag_lifecycle_is_scoped_to_regional_account_arns(self):
         execution = execution_permissions()
@@ -880,6 +888,8 @@ fi
             "RequestExactRegionalApiCertificate",
             "CreateTaggedUserPool",
             "CreateCloudFrontResources",
+            # Key-group/public-key actions have no resource-level support.
+            "ManageCloudFrontKeyMaterial",
             "CreateTaggedApplicationKey",
             "GeneratePrintSessionSecretValue",
             "EstablishApiGatewayAccessLogResourcePolicies",
