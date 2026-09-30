@@ -1201,7 +1201,7 @@ class MigrationAndPackagingTests(unittest.TestCase):
         self.assertIn('cp "functions/$$source" "$(ARTIFACTS_DIR)/"', MAKEFILE)
         self.assertNotIn("cp functions/*.json", MAKEFILE)
         for dependency in (
-            "PyJWT==2.14.0",
+            "PyJWT==2.15.0",
             "cryptography==50.0.0",
             "resend==2.34.0",
             "ExifRead==3.5.1",
