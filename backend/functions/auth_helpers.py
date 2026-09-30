@@ -5,12 +5,14 @@ that deliberately allow anonymous access call the same helper, which verifies an
 optional Bearer token against the Cognito JWKS before treating the caller as
 authenticated.
 
-Administrator routes additionally require the ``admin_mfa`` ID-token claim to
-equal ``enabled``. The Cognito pre-token-generation trigger
+Administrator privilege additionally requires the ``admin_mfa`` ID-token claim
+to equal ``enabled``. The Cognito pre-token-generation trigger
 (``pre_token_generation.py``) stamps that claim for Admins-group users from
 their current Cognito MFA settings, so an administrator without TOTP can still
-sign in (and enroll) but cannot use any admin or write API until the next token
-issued after enrollment. A missing or any other value fails closed.
+sign in (and enroll) but is treated as an ordinary user everywhere -- admin
+routes deny, album reads fall back to owner/share checks, and catalog scope
+falls back to public/owner -- until a token issued after enrollment is used. A
+missing or any other value fails closed.
 """
 
 import json
@@ -178,13 +180,24 @@ def get_verified_claims(event, required=True):
         raise AuthError() from None
 
 
-def is_admin(claims):
-    return "Admins" in parse_groups((claims or {}).get("cognito:groups"))
-
-
 def has_admin_mfa(claims) -> bool:
     """Return True only when the token proves TOTP was enrolled at issue time."""
     return (claims or {}).get(ADMIN_MFA_CLAIM) == "enabled"
+
+
+def is_admin_group(claims):
+    """Group membership only; never sufficient for admin privilege on its own."""
+    return "Admins" in parse_groups((claims or {}).get("cognito:groups"))
+
+
+def is_admin(claims):
+    """Return True only for an Admins member whose token proves TOTP enrollment.
+
+    Every privilege decision (admin routes, private-album reads, catalog scope,
+    and the matching audit actor labels) uses this, so an un-enrolled admin is
+    indistinguishable from an ordinary user rather than partially privileged.
+    """
+    return is_admin_group(claims) and has_admin_mfa(claims)
 
 
 def auth_error_response(error):
@@ -211,7 +224,7 @@ def require_admin(event):
             auth_method="none",
         )
         return auth_error_response(error)
-    if not is_admin(claims):
+    if not is_admin_group(claims):
         actor_type, auth_method = actor_context(event)
         emit_audit_event(
             event_name="authorization.admin_access",
@@ -226,7 +239,7 @@ def require_admin(event):
         return auth_error_response(AuthError("Forbidden — admin access required", 403))
     # Checked after the group so audit reason codes distinguish non-admins from
     # administrators who still need to enroll TOTP (or whose status is unknown).
-    if not has_admin_mfa(claims):
+    if not is_admin(claims):
         actor_type, auth_method = actor_context(event)
         emit_audit_event(
             event_name="authorization.admin_access",

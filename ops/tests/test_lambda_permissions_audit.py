@@ -44,6 +44,18 @@ class DailyLambdaAuditTests(unittest.TestCase):
         self.assertFalse(self.audit.policy_safe({}))
         self.assertTrue(self.audit.policy_safe({'Statement': self.policy('123456789012')['Statement'][0]}))
 
+    def test_accepts_cognito_trigger_permission_with_region_scoped_pool_pattern(self):
+        # Shape AWS::Lambda::Permission produces for PreTokenGenerationInvokePermission:
+        # a fixed service principal bounded by an account/Region pool pattern.
+        policy = self.policy(
+            {'Service': 'cognito-idp.amazonaws.com'},
+            {'ArnLike': {'AWS:SourceArn': 'arn:aws:cognito-idp:us-west-2:123456789012:userpool/us-west-2_*'}},
+            Action='lambda:InvokeFunction',
+        )
+        self.assertTrue(self.audit.policy_safe(policy))
+        # The wildcard is tolerated only in the condition, never as the principal.
+        self.assertFalse(self.audit.policy_safe(self.policy({'Service': 'cognito-idp.*'})))
+
     def client(self):
         client = Mock()
         client.exceptions.ResourceNotFoundException = type('NoPolicy', (Exception,), {})

@@ -117,25 +117,38 @@ Cognito pre-token-generation trigger (`PreTokenGenerationFunction`) stamps an
 `admin_mfa` claim into every ID token issued to an exact `Admins` member, at
 sign-in and at each refresh: `enabled` when TOTP is configured, `missing` when
 it is not, and `unverified` when the Cognito lookup failed. Ordinary users are
-returned untouched with no Cognito call. `require_admin` accepts only
-`enabled`; anything else, including an absent claim, returns 403 and audits
+returned untouched with no Cognito call.
+
+Admin privilege (`auth_helpers.is_admin`) requires both the group and
+`admin_mfa=enabled`; group membership alone (`is_admin_group`) grants nothing.
+An administrator without an `enabled` token is treated exactly like an ordinary
+user everywhere: `require_admin` returns 403 and audits
 `authorization.admin_access` denied with reason `admin_mfa_required` (distinct
-from `admin_group_required` for non-admins).
+from `admin_group_required` for non-admins), private-album reads fall back to
+owner/share checks, catalog `visibility=all`/owner filters return 403, and
+album, ZIP, download, and print access records label the actor `user`. The
+shared `actor_context` classifier still reports group membership (`admin`), so
+an `admin_mfa_required` denial shows which role was refused.
 
 - The trigger fails open for login: an administrator without TOTP can still
-  sign in and reach `/admin/security` to enroll, but every `/admin/*` and write
-  API returns 403 until a token issued after enrollment is in use. Refresh
-  tokens last 7 days; ID tokens last one hour.
-- After this first deploys, existing admin sessions lack the claim and get 403
-  until their ID token refreshes (at most one hour) or they sign in again.
-- After enrolling TOTP, sign out and back in (or wait for the next refresh) to
-  obtain an `enabled` token.
+  sign in and reach `/admin/security` to enroll, but has no admin privilege
+  until a token issued after enrollment is in use. Refresh tokens last 7 days;
+  ID tokens last one hour.
+- Enrolling TOTP signs the session out globally, so the next sign-in carries an
+  `enabled` token.
+- After this first deploys, existing admin sessions lack the claim and have no
+  admin privilege until their ID token refreshes (at most one hour) or they sign
+  in again.
+- The stack creates `PreTokenGenerationInvokePermission` before the pool's
+  `LambdaConfig` references the trigger (`UserPool` `DependsOn` it, and the
+  permission's `SourceArn` is the account/Region pool pattern rather than the
+  pool ARN), so Cognito never invokes the trigger without permission.
 - A surge of `admin_mfa_required` with `admin_mfa_lookup_failed
   error_type=...` warnings from the trigger means the lookup is failing
   (`unverified`); check Cognito throttling and the trigger role, not the admin.
 - Never detach the trigger (remove `LambdaConfig`) without reverting the
-  `require_admin` check in the same release; an absent claim locks out every
-  administrator by design.
+  `is_admin` MFA requirement in the same release; an absent claim removes every
+  administrator's privilege by design.
 
 ## Deployment and rollback checks
 

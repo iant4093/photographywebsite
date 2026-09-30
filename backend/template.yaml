@@ -1572,6 +1572,9 @@ Resources:
   # Cognito: proxy-only password authentication, 7-day refresh support, optional TOTP MFA.
   UserPool:
     Type: AWS::Cognito::UserPool
+    # Create the invoke permission before attaching the trigger so there is no
+    # deploy window in which Cognito calls a function it may not yet invoke.
+    DependsOn: PreTokenGenerationInvokePermission
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -1579,8 +1582,9 @@ Resources:
       DeletionProtection: ACTIVE
       # Every ID token issued to an Admins-group member (sign-in and refresh)
       # carries admin_mfa=enabled|missing|unverified from the trigger below.
-      # require_admin accepts only "enabled", so admin MFA is enforced by the
-      # API rather than only by the React route guard. The trigger fails open
+      # Admin privilege (auth_helpers.is_admin) requires "enabled", so admin MFA
+      # is enforced by the API rather than only by the React route guard; an
+      # un-enrolled admin is an ordinary user everywhere. The trigger fails open
       # for login (lookup errors become "unverified", never a rejected sign-in)
       # so an administrator can always reach /admin/security to enroll TOTP.
       LambdaConfig:
@@ -4527,13 +4531,16 @@ Resources:
               Action: cognito-idp:AdminGetUser
               Resource: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${AWS::Region}_*'
 
+  # SourceArn uses the same account- and Region-scoped pool pattern as the IAM
+  # policy (Lambda evaluates it with ArnLike) rather than !GetAtt UserPool.Arn,
+  # so the pool can depend on this permission without a cycle.
   PreTokenGenerationInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref PreTokenGenerationFunction
       Principal: cognito-idp.amazonaws.com
-      SourceArn: !GetAtt UserPool.Arn
+      SourceArn: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${AWS::Region}_*'
 
   AuditDeniedMetricFilter:
     Type: AWS::Logs::MetricFilter

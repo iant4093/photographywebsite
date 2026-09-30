@@ -11,9 +11,10 @@ sign-in or a refresh. For members of the exact ``Admins`` group it adds an
 The two failure directions are deliberately different. This trigger fails
 open for *login*: raising here would make Cognito reject every administrator
 sign-in and refresh, including the one needed to reach the enrollment page.
-``auth_helpers.require_admin`` fails closed for the *admin API*: only the exact
+``auth_helpers.is_admin`` fails closed for *admin privilege*: only the exact
 value ``enabled`` is accepted, so ``missing``, ``unverified``, or an absent
-claim (for example if this trigger is ever detached) all deny admin routes.
+claim (for example if this trigger is ever detached) all leave the caller an
+ordinary user, denied by every admin route and admin read scope.
 
 Ordinary client users return immediately, with no Cognito API call, so the
 trigger adds no latency or provider dependency to their sign-in path.

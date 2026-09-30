@@ -993,6 +993,28 @@ class IdentityAndSecretTests(unittest.TestCase):
         self.assertNotIn("ALLOW_USER_PASSWORD_AUTH", client)
         self.assertNotIn("ALLOW_USER_SRP_AUTH", client)
 
+    def test_admin_mfa_trigger_is_permitted_before_the_pool_attaches_it(self) -> None:
+        pool = resource_block("UserPool")
+        permission = resource_block("PreTokenGenerationInvokePermission")
+        trigger = resource_block("PreTokenGenerationFunction")
+        pool_pattern = (
+            "!Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:"
+            "${AWS::AccountId}:userpool/${AWS::Region}_*'"
+        )
+        self.assertIn("PreTokenGeneration: !GetAtt PreTokenGenerationFunction.Arn", pool)
+        self.assertIn("DependsOn: PreTokenGenerationInvokePermission", pool)
+        self.assertIn("Principal: cognito-idp.amazonaws.com", permission)
+        self.assertIn(f"SourceArn: {pool_pattern}", permission)
+        self.assertIn(f"Resource: {pool_pattern}", trigger)
+        self.assertIn("Action: cognito-idp:AdminGetUser", trigger)
+        # Any pool reference from the permission or trigger would be circular.
+        for block in (permission, trigger):
+            code = "\n".join(
+                line for line in block.splitlines() if not line.lstrip().startswith("#")
+            )
+            self.assertNotIn("UserPool", code)
+        self.assertIn("RefreshTokenValidity: 7", resource_block("UserPoolClient"))
+
     def test_login_permissions_are_split_by_operation(self) -> None:
         login = resource_block("LoginFunction")
         challenge = resource_block("CompleteChallengeFunction")
