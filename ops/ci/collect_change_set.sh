@@ -12,12 +12,23 @@ set -euo pipefail
 : "${RELEASE_DEPENDENCIES_PATH:=ops/ci/release_dependencies.json}"
 : "${PARAMETER_ADDITIONS_PATH:=ops/ci/release_parameter_additions.json}"
 
-status="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
-  --query Status --output text)"
-execution_status="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
-  --query ExecutionStatus --output text)"
+# The create-complete waiter returns on Status alone; ExecutionStatus can lag
+# AVAILABLE by tens of seconds on a large change set. Sample both in a single
+# call and allow a bounded settle window before failing closed.
+status=""
+execution_status=""
+for _attempt in $(seq 1 20); do
+  IFS=$'\t' read -r status execution_status < <(aws cloudformation describe-change-set \
+    --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+    --query '[Status, ExecutionStatus]' --output text)
+  if [[ "$status" == "CREATE_COMPLETE" && "$execution_status" == "AVAILABLE" ]]; then
+    break
+  fi
+  if [[ "$status" == "FAILED" || "$status" == "DELETE_"* || "$execution_status" == "EXECUTE_"* || "$execution_status" == "OBSOLETE" ]]; then
+    break
+  fi
+  sleep 6
+done
 actual_name="$(aws cloudformation describe-change-set \
   --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query ChangeSetName --output text)"
