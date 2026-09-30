@@ -12,6 +12,8 @@
     {"logicalId": "DeleteUserFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["DeleteUserFunctionRole.Arn"]},
     {"logicalId": "CreateUserFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["CreateUserFunctionRole.Arn"]},
     {"logicalId": "EditUserFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["EditUserFunctionRole.Arn"]},
+    {"logicalId": "PreTokenGenerationFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["PreTokenGenerationFunctionRole.Arn"]},
+    {"logicalId": "UserPool", "resourceType": "AWS::Cognito::UserPool", "propertyPath": "LambdaConfig", "causingEntities": ["PreTokenGenerationFunction.Arn"]},
     {"logicalId": "GetAdminAlbumMediaFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["GetAdminAlbumMediaFunctionRole.Arn"]},
     {"logicalId": "GetAlbumFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["GetAlbumFunctionRole.Arn"]},
     {"logicalId": "GetAlbumsFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["GetAlbumsFunctionRole.Arn"]},

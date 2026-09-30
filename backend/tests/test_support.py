@@ -47,7 +47,29 @@ def response_body(response):
     return json.loads(response["body"])
 
 
-def claims(*, subject="user-sub", email="user@example.com", groups=None, expires=4_102_444_800):
+def _has_exact_admin_group(groups):
+    if isinstance(groups, str):
+        groups = groups.strip("[]").replace('"', "").split(",")
+    if not isinstance(groups, (list, tuple, set)):
+        return False
+    return "Admins" in {str(group).strip() for group in groups}
+
+
+def claims(
+    *,
+    subject="user-sub",
+    email="user@example.com",
+    groups=None,
+    expires=4_102_444_800,
+    admin_mfa="enabled",
+):
+    """Build verified ID-token claims shaped like Cognito's.
+
+    Mirrors production: the pre-token-generation trigger stamps ``admin_mfa``
+    only for exact Admins-group members, so non-admin claims never carry it.
+    Pass ``admin_mfa=None`` (or another status) to model an admin who has not
+    enrolled TOTP or whose status could not be verified.
+    """
     result = {
         "iss": "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_testpool",
         "aud": "test-client-id",
@@ -58,6 +80,8 @@ def claims(*, subject="user-sub", email="user@example.com", groups=None, expires
     }
     if groups is not None:
         result["cognito:groups"] = groups
+        if admin_mfa is not None and _has_exact_admin_group(groups):
+            result["admin_mfa"] = admin_mfa
     return result
 
 

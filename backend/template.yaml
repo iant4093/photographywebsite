@@ -1569,14 +1569,26 @@ Resources:
         - Key: Stage
           Value: !Ref Stage
 
-  # Cognito: proxy-only password authentication, refresh support, optional TOTP MFA.
+  # Cognito: proxy-only password authentication, 7-day refresh support, optional TOTP MFA.
   UserPool:
     Type: AWS::Cognito::UserPool
+    # Create the invoke permission before attaching the trigger so there is no
+    # deploy window in which Cognito calls a function it may not yet invoke.
+    DependsOn: PreTokenGenerationInvokePermission
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
       UserPoolName: !Sub 'IanTruongPhotography-Users-${Stage}'
       DeletionProtection: ACTIVE
+      # Every ID token issued to an Admins-group member (sign-in and refresh)
+      # carries admin_mfa=enabled|missing|unverified from the trigger below.
+      # Admin privilege (auth_helpers.is_admin) requires "enabled", so admin MFA
+      # is enforced by the API rather than only by the React route guard; an
+      # un-enrolled admin is an ordinary user everywhere. The trigger fails open
+      # for login (lookup errors become "unverified", never a rejected sign-in)
+      # so an administrator can always reach /admin/security to enroll TOTP.
+      LambdaConfig:
+        PreTokenGeneration: !GetAtt PreTokenGenerationFunction.Arn
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
       AccountRecoverySetting:
@@ -1619,7 +1631,9 @@ Resources:
       AuthSessionValidity: 3
       AccessTokenValidity: 1
       IdTokenValidity: 1
-      RefreshTokenValidity: 30
+      # A week bounds how long a stolen refresh token (or a revoked admin's
+      # session) stays useful while keeping sign-ins infrequent for clients.
+      RefreshTokenValidity: 7
       TokenValidityUnits:
         AccessToken: hours
         IdToken: hours
@@ -4487,6 +4501,46 @@ Resources:
             ApiId: !Ref Api
             Path: /users/{email}
             Method: PUT
+
+  # Cognito-invoked only (no API route, so no front-door policy). It reads the
+  # signing-in administrator's MFA settings; ordinary users never reach the
+  # Cognito call. The pool ARN is matched by pattern because !Ref UserPool here
+  # would be circular (the pool references this function), and the Globals
+  # Cognito identifiers are blanked for the same reason: the trigger receives
+  # the pool ID in its event and never needs them.
+  PreTokenGenerationFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: pre_token_generation.handler
+      # Cognito waits at most five seconds for a synchronous trigger.
+      Timeout: 5
+      MemorySize: 256
+      # A throttled trigger fails the sign-in or refresh it serves, so keep this
+      # above the combined Login/CompleteChallenge concurrency (5 + 5) with
+      # headroom for browser refreshes while still bounding invocation cost.
+      ReservedConcurrentExecutions: 20
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: ''
+          COGNITO_CLIENT_ID: ''
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: cognito-idp:AdminGetUser
+              Resource: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${AWS::Region}_*'
+
+  # SourceArn uses the same account- and Region-scoped pool pattern as the IAM
+  # policy (Lambda evaluates it with ArnLike) rather than !GetAtt UserPool.Arn,
+  # so the pool can depend on this permission without a cycle.
+  PreTokenGenerationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PreTokenGenerationFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${AWS::Region}_*'
 
   AuditDeniedMetricFilter:
     Type: AWS::Logs::MetricFilter
