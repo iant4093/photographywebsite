@@ -468,6 +468,87 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(desired["CacheBehaviors"]["Quantity"], 3)
         self.assertIn("update submitted", output)
 
+    def test_main_front_door_edge_caches_social_documents_with_public_policy(self):
+        baseline = {
+            **self.baseline,
+            "api_origin_domain": "origin-api.example.test",
+            "api_front_door": {
+                "origin_id": "api-origin",
+                "origin_domain": "origin-api.example.test",
+                "verification_header": "X-Origin-Verify",
+                "public_path_pattern": "/api/public/*",
+                "stats_path_pattern": "/api/public/stats",
+                "private_path_pattern": "/api/*",
+                "social_path_patterns": ["album/*", "video/*"],
+                "public_query_strings": ["cursor"],
+                "public_forward_headers": ["Origin"],
+                "private_forward_headers": ["Authorization"],
+                "public_cache_policy_name": "public",
+                "stats_cache_policy_name": "stats",
+                "public_origin_request_policy_name": "public-origin",
+                "private_origin_request_policy_name": "private-origin",
+                "response_policy_name": "api-response",
+            },
+        }
+        stack_values = {
+            "ImagesCloudFront": "MEDIA", "Api": "API", "ImagesBucket": "BUCKET", "OriginalPreviewBucket": "ORIGINAL",
+        }
+        arguments = [
+            "--stack-name", "stack", "--apply", "--expected-etag", "etag", "--expected-account-id", "123",
+            "--include-api-front-door", "--api-certificate-arn", "arn:cert", "--origin-parameter-name", "/origin",
+            "--web-acl-arn", "arn:waf",
+        ]
+        with patch.object(sys, "argv", [cloudfront_frontend.__file__, *arguments]), patch.object(
+            cloudfront_frontend, "discover_distribution_by_alias", return_value={"Id": "FRONT"}
+        ), patch.object(
+            cloudfront_frontend, "stack_resource", side_effect=lambda stack, logical_id, *unused: stack_values[logical_id]
+        ), patch.object(
+            cloudfront_frontend, "aws_json", side_effect=lambda args, profile=None: self.fake_aws(args, profile=profile)
+        ), patch.object(cloudfront_frontend, "validate_cache_policy_ids"), patch.object(
+            cloudfront_frontend, "validate_front_door_resources"
+        ), patch.object(cloudfront_frontend, "validate_front_door_apply_guards"), patch.object(
+            cloudfront_frontend,
+            "ensure_cache_policy",
+            side_effect=[("public-cache", "unchanged"), ("stats-cache", "unchanged")],
+        ), patch.object(
+            cloudfront_frontend,
+            "ensure_origin_request_policy",
+            side_effect=[("public-origin", "unchanged"), ("private-origin", "unchanged")],
+        ), patch.object(
+            cloudfront_frontend,
+            "ensure_response_policy",
+            side_effect=[
+                ("api-response", "unchanged"), ("html-id", "unchanged"),
+                ("static-id", "unchanged"), ("immutable-id", "unchanged"),
+            ],
+        ), patch.object(
+            cloudfront_frontend, "ensure_www_redirect_function", return_value=("arn:function/redirect", "unchanged")
+        ), patch.object(
+            cloudfront_frontend, "ensure_edge_function", return_value=("arn:function/social", "unchanged")
+        ), patch.object(
+            cloudfront_frontend, "load_origin_verification_value", return_value="verify"
+        ), patch.object(cloudfront_frontend, "aws_with_json_file") as update, patch.object(
+            cloudfront_frontend.Path, "read_text", return_value=json.dumps(baseline)
+        ), patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(cloudfront_frontend.main(), 0)
+
+        behaviors = {item["PathPattern"]: item for item in update.call_args.args[1]["CacheBehaviors"]["Items"]}
+        for pattern in ("album/*", "video/*"):
+            social = behaviors[pattern]
+            # The HTML document is anonymous and keyed only by URL, so the origin's
+            # s-maxage is honored instead of invoking the renderer on every visit.
+            self.assertEqual(social["CachePolicyId"], "public-cache")
+            self.assertEqual(social["OriginRequestPolicyId"], "public-origin")
+            self.assertEqual(social["ResponseHeadersPolicyId"], "html-id")
+            self.assertEqual(social["ViewerProtocolPolicy"], "redirect-to-https")
+            self.assertEqual(
+                social["FunctionAssociations"]["Items"],
+                [{"EventType": "viewer-request", "FunctionARN": "arn:function/social"}],
+            )
+        self.assertEqual(behaviors["/api/*"]["CachePolicyId"], "html-cache")
+        self.assertEqual(behaviors["/api/public/*"]["CachePolicyId"], "public-cache")
+        self.assertEqual(behaviors["/api/public/stats"]["CachePolicyId"], "stats-cache")
+
 
 class MigrationHelperTests(unittest.TestCase):
     def test_json_file_optional_calls_and_origin_parsing(self):

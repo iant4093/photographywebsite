@@ -1265,11 +1265,15 @@ def main() -> int:
         ]
         assert social_router_arn
         for pattern in api_settings.get("social_path_patterns", []):
+            # The router rewrites each album/video URL to one anonymous public
+            # document, so it shares the public catalog cache policy (no
+            # cookies or headers in the key). The origin's s-maxage bounds edge
+            # reuse while the HTML response policy still sends viewers no-cache.
             social_behavior = api_cache_behavior(
                 default,
                 settings=api_settings,
                 path_pattern=pattern,
-                cache_policy_id=baseline["cache_policies"]["html"],
+                cache_policy_id=public_api_cache_id,
                 origin_request_policy_id=public_api_origin_request_id,
                 response_policy_id=html_id,
                 public=True,
@@ -1279,7 +1283,8 @@ def main() -> int:
             api_behaviors.append(social_behavior)
     # CloudFront selects the first matching ordered behavior, so the exact
     # daily stats path precedes the five-minute public wildcard, and both
-    # precede the cache-disabled catch-all API path.
+    # precede the cache-disabled catch-all API path. The album/video social
+    # document behaviors cache for up to 60 s, per the origin's s-maxage.
     managed = api_behaviors + print_behaviors + immutable + static
     if request_router_enabled:
         for behavior in preserved:

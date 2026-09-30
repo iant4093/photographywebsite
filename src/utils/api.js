@@ -727,13 +727,88 @@ export async function createAlbum(token, albumData, options = {}) {
     return album
 }
 
+// A visibility change retags every S3 object before the PUT responds, so it can
+// outlast the 30 s API Gateway/CloudFront limit while the Lambda (60 s) still
+// commits. Polling for the committed state turns that into a success instead of
+// a timeout followed by a conflicting retry. 10 x 3 s covers the Lambda's
+// remaining budget after the 30 s edge cut-off.
+export const UPDATE_RECONCILE_ATTEMPTS = 10
+export const UPDATE_RECONCILE_INTERVAL_MS = 3000
+const UPDATE_REQUEST_TIMEOUT_MS = 30_000
+const RECONCILABLE_UPDATE_STATUSES = new Set([502, 503, 504])
+// Caller-controlled fields that can prove a commit. shareCode is server-generated,
+// and a field the album detail does not echo (e.g. coverThumbKey) is skipped.
+const RECONCILED_ALBUM_FIELDS = [
+    'visibility', 'title', 'description', 'category', 'isShared', 'coverImageUrl', 'coverThumbKey', 'createdAt',
+]
+
+function coverMatches(actual, expected) {
+    if (actual === expected) return true
+    if (!expected) return false
+    // The request sends an object key; the response serializes it as a CDN or
+    // presigned URL whose path ends with that (URL-encoded) key.
+    try {
+        return decodeURIComponent(new URL(actual).pathname).endsWith(`/${expected}`)
+    } catch {
+        return false
+    }
+}
+
+function albumFieldMatches(field, actual, expected) {
+    if (typeof expected !== 'string' || typeof actual !== 'string') return actual === expected
+    if (field === 'coverImageUrl') return coverMatches(actual, expected.trim())
+    // The backend strips submitted strings and stores an empty category as the default.
+    const normalized = expected.trim()
+    return actual === (field === 'category' && !normalized ? 'Uncategorized' : normalized)
+}
+
+export function albumReflectsUpdate(album, data) {
+    if (!album || typeof album !== 'object' || !data || typeof data !== 'object') return false
+    const comparable = RECONCILED_ALBUM_FIELDS.filter(field => (
+        Object.hasOwn(data, field) && Object.hasOwn(album, field)
+    ))
+    // With nothing observable to compare, a timeout cannot be proven committed.
+    return comparable.length > 0
+        && comparable.every(field => albumFieldMatches(field, album[field], data[field]))
+}
+
+function isReconcilableUpdateError(error) {
+    return error instanceof ApiError
+        && (error.code === 'TIMEOUT' || RECONCILABLE_UPDATE_STATUSES.has(error.status))
+}
+
+async function reconcileAlbumUpdate(token, albumId, data, signal, session, originalError) {
+    for (let attempt = 0; attempt < UPDATE_RECONCILE_ATTEMPTS; attempt += 1) {
+        await wait(UPDATE_RECONCILE_INTERVAL_MS, signal)
+        if (session !== authGeneration) throw new DOMException('Session changed', 'AbortError')
+        let detail
+        try {
+            detail = await fetchAlbum(albumId, token, { force: true, signal })
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error
+            // A slow or failing read says nothing about the write; keep polling.
+            continue
+        }
+        const album = detail?.album && typeof detail.album === 'object' ? detail.album : detail
+        if (albumReflectsUpdate(album, data)) return album
+    }
+    throw originalError
+}
+
 export async function updateAlbum(token, albumId, data, options = {}) {
-    const album = await albumMutation(`/albums/${encodeURIComponent(albumId)}`, {
-        method: 'PUT',
-        headers: authHeaders(token),
-        body: JSON.stringify(data),
-        signal: options.signal,
-    }, { timeoutMs: 60_000 })
+    const session = authGeneration
+    let album
+    try {
+        album = await albumMutation(`/albums/${encodeURIComponent(albumId)}`, {
+            method: 'PUT',
+            headers: authHeaders(token),
+            body: JSON.stringify(data),
+            signal: options.signal,
+        }, { timeoutMs: UPDATE_REQUEST_TIMEOUT_MS, retries: 0 })
+    } catch (error) {
+        if (!isReconcilableUpdateError(error)) throw error
+        album = await reconcileAlbumUpdate(token, albumId, data, options.signal, session, error)
+    }
     invalidateAlbumCatalog({ album })
     return album
 }

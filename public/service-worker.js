@@ -53,7 +53,10 @@ async function networkFirst(request) {
     try {
       const response = await fetch(request)
       if ([500, 502, 503, 504].includes(response.status)) return (await fallback()) || response
-      if (response.ok && (response.headers.get('content-type') || '').includes('text/html')) {
+      // Only an HTML document may become an offline shell. A navigation that
+      // lands on JSON (or any other body) must not be served back as a page.
+      const contentType = (response.headers.get('content-type') || '').trim().toLowerCase()
+      if (response.ok && contentType.startsWith('text/html')) {
         await remember(cache, request, response, SHELL_LIMIT)
       }
       return response
@@ -86,6 +89,9 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+  // API responses are `no-store` and may be private. Leave them to the network
+  // entirely, including a navigation to an API URL, so JSON never reaches the
+  // shell cache or its offline fallback.
   if (url.pathname === '/api' || url.pathname.startsWith('/api/') || request.headers.has('authorization')) return
 
   if (request.mode === 'navigate') {
