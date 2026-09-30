@@ -10,8 +10,13 @@ export default defineConfig(({ mode }) => {
   const mediaOrigin = `https://${mediaDomain}`
   // /api writes go to live data, so the dev server proxies it to production
   // only on explicit opt-in. Without it, dev /api requests fail by design.
+  // Signed-cookie /private-media rides the same opt-in: its cookies are only
+  // issued by production API responses, which reach the browser via this proxy.
   const apiProxy = env.VITE_DEV_PROXY_PROD === '1'
-    ? { '/api': { target: 'https://iantruongphotography.com', changeOrigin: true } }
+    ? {
+        '/api': { target: 'https://iantruongphotography.com', changeOrigin: true },
+        '/private-media': { target: 'https://iantruongphotography.com', changeOrigin: true },
+      }
     : {}
 
   return {

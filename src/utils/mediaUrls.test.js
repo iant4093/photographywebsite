@@ -230,6 +230,32 @@ describe('media URL compatibility', () => {
         ] })).toBe('')
     })
 
+    it('accepts same-origin signed-cookie /private-media URLs wherever presigned URLs are accepted', async () => {
+        const albumId = '423e4567-e89b-42d3-a456-426614174000'
+        const base = `https://iantruongphotography.com/private-media/albums/${albumId}`
+        const expiresAt = '2026-07-20T12:10:00Z'
+        const media = {
+            id: 'media-private',
+            url: `${base}/original/photo.jpg`,
+            thumbnailUrl: `${base}/thumbnails/photo.jpg`,
+            hlsUrl: `${base}/hls/master.m3u8`,
+            previewSrcSet: [640, 960, 1440, 1920].map(width => ({ width, url: `${base}/preview/v3/photo-w${width}.webp` })),
+            expiresAt,
+        }
+        expect(mediaDisplayUrl(media)).toBe(media.url)
+        expect(mediaThumbnailUrl(media)).toBe(media.thumbnailUrl)
+        expect(mediaHlsUrl(media)).toBe(media.hlsUrl)
+        expect(mediaPreviewCandidates(media).map(({ url }) => url)).toEqual(media.previewSrcSet.map(({ url }) => url))
+        expect(mediaPreviewSrcSet(media)).toContain(`${base}/preview/v3/photo-w1920.webp 1920w`)
+        expect(mediaFileName({ id: media.url })).toBe('photo.jpg')
+        // Cookie URLs carry no signature, so refresh timing comes only from the
+        // explicit metadata the API already sends for protected media.
+        expect(signedUrlExpiresAt(media.url)).toBeNull()
+        expect(mediaExpiresAt(media)).toBe(Date.parse(expiresAt))
+        // Public preview derivation stays limited to media CDN covers.
+        await expect(albumCoverPreviewSrcSet({ albumId, coverImageUrl: media.url })).resolves.toBe('')
+    })
+
     it('refreshes protected media before the earliest preview candidate expires', () => {
         const early = 'https://bucket.example/640.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=300'
         const late = 'https://bucket.example/1920.webp?X-Amz-Date=20260720T120000Z&X-Amz-Expires=600'

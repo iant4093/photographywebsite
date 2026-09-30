@@ -404,26 +404,40 @@ class CloudFrontMainTests(unittest.TestCase):
             }
         raise AssertionError(arguments)
 
-    def run_main(self, *arguments, config=None, certificate_good=True, apply_update=None):
+    def run_main(
+        self, *arguments, config=None, certificate_good=True, apply_update=None,
+        stack_extra=None, aws_extra=None, response_policies=None,
+    ):
         stack_values = {
             "ImagesCloudFront": "MEDIA",
             "Api": "API",
             "ImagesBucket": "BUCKET",
             "OriginalPreviewBucket": "ORIGINAL-BUCKET",
+            **(stack_extra or {}),
         }
-        fake_aws = lambda args, profile=None: self.fake_aws(
-            args, profile=profile, config=config, certificate_good=certificate_good
-        )
+
+        def fake_aws(args, profile=None):
+            handled = aws_extra(args) if aws_extra else None
+            if handled is not None:
+                return handled
+            return self.fake_aws(args, profile=profile, config=config, certificate_good=certificate_good)
+
+        def fake_stack_resource(stack, logical_id, *unused):
+            if logical_id not in stack_values:
+                raise RuntimeError(f"Stack resource {logical_id} has no physical ID")
+            return stack_values[logical_id]
         with patch.object(sys, "argv", [cloudfront_frontend.__file__, "--stack-name", "stack", *arguments]), patch.object(
             cloudfront_frontend.argparse.ArgumentParser, "parse_args", wraps=None
         ) if False else patch.object(
             cloudfront_frontend, "discover_distribution_by_alias", return_value={"Id": "FRONT"}
-        ), patch.object(cloudfront_frontend, "stack_resource", side_effect=lambda stack, logical_id, *unused: stack_values[logical_id]), patch.object(
+        ), patch.object(cloudfront_frontend, "stack_resource", side_effect=fake_stack_resource), patch.object(
             cloudfront_frontend, "aws_json", side_effect=fake_aws
         ), patch.object(cloudfront_frontend, "validate_cache_policy_ids"), patch.object(
             cloudfront_frontend,
             "ensure_response_policy",
-            side_effect=[("html-id", "unchanged"), ("static-id", "unchanged"), ("immutable-id", "unchanged")],
+            side_effect=response_policies or [
+                ("html-id", "unchanged"), ("static-id", "unchanged"), ("immutable-id", "unchanged"),
+            ],
         ), patch.object(cloudfront_frontend, "ensure_www_redirect_function", return_value=("arn:function/redirect", "published")), patch.object(
             cloudfront_frontend, "aws_with_json_file", side_effect=apply_update
         ) as update, patch.object(
@@ -548,6 +562,355 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(behaviors["/api/*"]["CachePolicyId"], "html-cache")
         self.assertEqual(behaviors["/api/public/*"]["CachePolicyId"], "public-cache")
         self.assertEqual(behaviors["/api/public/stats"]["CachePolicyId"], "stats-cache")
+
+    PRIVATE_MEDIA_STACK = {
+        "PrivateMediaKeyGroup": "KEY-GROUP",
+        "PrivateMediaCachePolicy": "MEDIA-CACHE",
+        "PrivateMediaResponseHeadersPolicy": "MEDIA-HEADERS",
+        "PrivateMediaOriginAccessControl": "MEDIA-OAC",
+    }
+    REWRITE_ARN = "arn:aws:cloudfront::123:function/ian-website-private-media-rewrite"
+    APPLY = ("--apply", "--expected-etag", "etag", "--expected-account-id", "123")
+
+    def private_media_aws(self, *, oac_type="s3", rewrite_arn=REWRITE_ARN):
+        def handle(arguments):
+            if arguments[:2] == ["cloudformation", "describe-stacks"]:
+                outputs = [{"OutputKey": "OtherOutput", "OutputValue": "ignored"}]
+                if rewrite_arn:
+                    outputs.append({"OutputKey": "PrivateMediaRewriteFunctionArn", "OutputValue": rewrite_arn})
+                return {"Stacks": [{"Outputs": outputs}]}
+            if arguments[:2] == ["s3api", "get-bucket-location"]:
+                self.assertEqual(arguments[-1], "BUCKET")
+                return {"LocationConstraint": "us-west-2"}
+            if arguments[:2] == ["cloudfront", "get-origin-access-control"]:
+                self.assertEqual(arguments[-1], "MEDIA-OAC")
+                return {
+                    "OriginAccessControl": {
+                        "OriginAccessControlConfig": {"OriginAccessControlOriginType": oac_type}
+                    }
+                }
+            return None
+
+        return handle
+
+    def test_main_private_media_binds_signed_cookie_behavior_with_rewrite_only(self):
+        config = {
+            **self.config,
+            "Origins": {
+                "Items": [
+                    *self.config["Origins"]["Items"],
+                    {
+                        "Id": "ian-photography-private-media-v1",
+                        "DomainName": "BUCKET.s3.us-west-2.amazonaws.com",
+                        "S3OriginConfig": {"OriginAccessIdentity": ""},
+                        "OriginAccessControlId": "MEDIA-OAC",
+                    },
+                ]
+            },
+            "CacheBehaviors": {
+                "Items": [
+                    *self.config["CacheBehaviors"]["Items"],
+                    # A re-apply finds its own rewrite association already in
+                    # place; the foreign-function guard must accept it.
+                    {
+                        "PathPattern": "private-media/*",
+                        "FunctionAssociations": {
+                            "Items": [{"EventType": "viewer-request", "FunctionARN": self.REWRITE_ARN}]
+                        },
+                    },
+                ]
+            },
+        }
+        result, output, update = self.run_main(
+            *self.APPLY, "--include-www", "--include-private-media",
+            config=config, stack_extra=self.PRIVATE_MEDIA_STACK, aws_extra=self.private_media_aws(),
+        )
+        self.assertEqual(result, 0)
+        summary = json.loads(output[: output.index("CloudFront update submitted")])
+        self.assertEqual(
+            summary["privateMedia"],
+            {
+                "enabled": True,
+                "originDomain": "BUCKET.s3.us-west-2.amazonaws.com",
+                "keyGroupIdPresent": True,
+                "missing": [],
+            },
+        )
+        self.assertNotIn("KEY-GROUP", output)
+
+        desired = update.call_args.args[1]
+        media_origins = [
+            origin for origin in desired["Origins"]["Items"]
+            if origin["Id"] == "ian-photography-private-media-v1"
+        ]
+        self.assertEqual(
+            media_origins,
+            [{
+                "Id": "ian-photography-private-media-v1",
+                "DomainName": "BUCKET.s3.us-west-2.amazonaws.com",
+                "OriginPath": "",
+                "CustomHeaders": {"Quantity": 0},
+                "S3OriginConfig": {"OriginAccessIdentity": ""},
+                "OriginAccessControlId": "MEDIA-OAC",
+                "ConnectionAttempts": 3,
+                "ConnectionTimeout": 10,
+                "OriginShield": {"Enabled": False},
+            }],
+        )
+        self.assertEqual(desired["Origins"]["Quantity"], 2)
+
+        items = desired["CacheBehaviors"]["Items"]
+        patterns = [item["PathPattern"] for item in items]
+        self.assertEqual(patterns, ["private-media/*", "assets/*", "images/*", "preserve/*"])
+        media = items[0]
+        self.assertEqual(media["TargetOriginId"], "ian-photography-private-media-v1")
+        self.assertEqual(media["ViewerProtocolPolicy"], "https-only")
+        self.assertEqual(media["AllowedMethods"]["Items"], ["GET", "HEAD", "OPTIONS"])
+        self.assertEqual(media["AllowedMethods"]["CachedMethods"]["Items"], ["GET", "HEAD"])
+        self.assertIs(media["Compress"], False)
+        self.assertEqual(media["CachePolicyId"], "MEDIA-CACHE")
+        self.assertEqual(media["ResponseHeadersPolicyId"], "MEDIA-HEADERS")
+        self.assertNotIn("OriginRequestPolicyId", media)
+        self.assertNotIn("ForwardedValues", media)
+        self.assertEqual(media["TrustedKeyGroups"], {"Enabled": True, "Quantity": 1, "Items": ["KEY-GROUP"]})
+        self.assertEqual(media["TrustedSigners"], {"Enabled": False, "Quantity": 0})
+        # The default carries the www redirect; the media behavior must hold
+        # only its rewrite function because CloudFront allows one per event.
+        self.assertEqual(
+            desired["DefaultCacheBehavior"]["FunctionAssociations"]["Items"],
+            [{"EventType": "viewer-request", "FunctionARN": "arn:function/redirect"}],
+        )
+        self.assertEqual(
+            media["FunctionAssociations"],
+            {"Quantity": 1, "Items": [{"EventType": "viewer-request", "FunctionARN": self.REWRITE_ARN}]},
+        )
+        self.assertEqual(
+            items[-1]["FunctionAssociations"]["Items"],
+            [{"EventType": "viewer-request", "FunctionARN": "arn:function/redirect"}],
+        )
+
+    def test_main_private_media_follows_api_behaviors_and_precedes_static(self):
+        baseline = {
+            **self.baseline,
+            "api_origin_domain": "origin-api.example.test",
+            "api_front_door": {
+                "origin_id": "api-origin", "origin_domain": "origin-api.example.test",
+                "verification_header": "X-Origin-Verify", "public_path_pattern": "/api/public/*",
+                "stats_path_pattern": "/api/public/stats", "private_path_pattern": "/api/*",
+                "social_path_patterns": ["album/*"], "public_query_strings": ["cursor"],
+                "public_forward_headers": ["Origin"], "private_forward_headers": ["Authorization"],
+                "public_cache_policy_name": "public", "stats_cache_policy_name": "stats",
+                "public_origin_request_policy_name": "public-origin",
+                "private_origin_request_policy_name": "private-origin", "response_policy_name": "api-response",
+            },
+        }
+        self.baseline = baseline
+        with patch.object(cloudfront_frontend, "validate_front_door_resources"), patch.object(
+            cloudfront_frontend, "validate_front_door_apply_guards"
+        ), patch.object(
+            cloudfront_frontend, "ensure_cache_policy",
+            side_effect=[("public-cache", "unchanged"), ("stats-cache", "unchanged")],
+        ), patch.object(
+            cloudfront_frontend, "ensure_origin_request_policy",
+            side_effect=[("public-origin", "unchanged"), ("private-origin", "unchanged")],
+        ), patch.object(
+            cloudfront_frontend, "ensure_edge_function", return_value=("arn:function/social", "unchanged")
+        ), patch.object(
+            cloudfront_frontend, "load_origin_verification_value", return_value="verify"
+        ):
+            result, _, update = self.run_main(
+                *self.APPLY, "--include-api-front-door", "--api-certificate-arn", "arn:cert",
+                "--origin-parameter-name", "/origin", "--web-acl-arn", "arn:waf", "--include-private-media",
+                stack_extra=self.PRIVATE_MEDIA_STACK,
+                aws_extra=self.private_media_aws(),
+                response_policies=[
+                    ("api-response", "unchanged"), ("html-id", "unchanged"),
+                    ("static-id", "unchanged"), ("immutable-id", "unchanged"),
+                ],
+            )
+        self.assertEqual(result, 0)
+        patterns = [item["PathPattern"] for item in update.call_args.args[1]["CacheBehaviors"]["Items"]]
+        self.assertEqual(
+            patterns,
+            ["/api/public/stats", "/api/public/*", "/api/*", "album/*", "private-media/*", "assets/*", "images/*", "preserve/*"],
+        )
+
+    def test_main_without_private_media_flag_leaves_existing_behavior_untouched(self):
+        existing_behavior = {
+            "PathPattern": "private-media/*",
+            "TargetOriginId": "ian-photography-private-media-v1",
+            "TrustedKeyGroups": {"Enabled": True, "Quantity": 1, "Items": ["KEY-GROUP"]},
+            "FunctionAssociations": {
+                "Quantity": 1,
+                "Items": [{"EventType": "viewer-request", "FunctionARN": self.REWRITE_ARN}],
+            },
+        }
+        existing_origin = {
+            "Id": "ian-photography-private-media-v1",
+            "DomainName": "BUCKET.s3.us-west-2.amazonaws.com",
+            "S3OriginConfig": {"OriginAccessIdentity": ""},
+            "OriginAccessControlId": "MEDIA-OAC",
+        }
+        config = {
+            **self.config,
+            "Origins": {"Items": [*self.config["Origins"]["Items"], existing_origin]},
+            "CacheBehaviors": {"Items": [*self.config["CacheBehaviors"]["Items"], existing_behavior]},
+        }
+        result, output, update = self.run_main(*self.APPLY, config=config)
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            json.loads(output[: output.index("CloudFront update submitted")])["privateMedia"],
+            {"enabled": False, "originDomain": None, "keyGroupIdPresent": False, "missing": []},
+        )
+        desired = update.call_args.args[1]
+        self.assertIn(existing_origin, desired["Origins"]["Items"])
+        self.assertIn(existing_behavior, desired["CacheBehaviors"]["Items"])
+
+        # With the www router on, the flagless run keeps today's refusal
+        # instead of replacing the rewrite association with the redirect.
+        with self.assertRaisesRegex(RuntimeError, "unmanaged viewer-request function"):
+            self.run_main(*self.APPLY, "--include-www", config=config)
+
+    def test_main_private_media_dry_run_reports_gaps_and_apply_refuses(self):
+        partial = {
+            key: value for key, value in self.PRIVATE_MEDIA_STACK.items() if key != "PrivateMediaKeyGroup"
+        }
+        result, output, update = self.run_main(
+            "--include-private-media", stack_extra=partial, aws_extra=self.private_media_aws(rewrite_arn=None)
+        )
+        self.assertEqual(result, 0)
+        update.assert_not_called()
+        summary = json.loads(output[: output.index("Dry run only")])
+        self.assertFalse(summary["privateMedia"]["keyGroupIdPresent"])
+        self.assertEqual(summary["privateMedia"]["missing"], ["keyGroupId", "rewriteFunctionArn"])
+
+        with self.assertRaisesRegex(SystemExit, "keyGroupId, rewriteFunctionArn"):
+            self.run_main(
+                *self.APPLY, "--include-private-media",
+                stack_extra=partial, aws_extra=self.private_media_aws(rewrite_arn=None),
+            )
+        with self.assertRaisesRegex(SystemExit, "originAccessControlType=s3"):
+            self.run_main(
+                *self.APPLY, "--include-private-media",
+                stack_extra=self.PRIVATE_MEDIA_STACK, aws_extra=self.private_media_aws(oac_type="mediastore"),
+            )
+
+    def test_private_media_discovery_resolves_function_names_and_tolerates_gaps(self):
+        stack = {**self.PRIVATE_MEDIA_STACK, "PrivateMediaRewriteFunction": "private-media-rewrite"}
+
+        def resource(stack_name, logical_id, *unused):
+            if logical_id not in stack:
+                raise subprocess.CalledProcessError(254, ["aws"])
+            return stack[logical_id]
+
+        def aws(arguments, *, profile=None):
+            if arguments[:2] == ["cloudformation", "describe-stacks"]:
+                self.assertIn("--region", arguments)
+                return {"Stacks": [{}]}
+            if arguments[:2] == ["cloudfront", "describe-function"]:
+                self.assertEqual(arguments[3:], ["private-media-rewrite", "--stage", "LIVE"])
+                return {"FunctionSummary": {"FunctionMetadata": {"FunctionARN": "arn:resolved"}}}
+            if arguments[:2] == ["s3api", "get-bucket-location"]:
+                return {"LocationConstraint": None}
+            if arguments[:2] == ["cloudfront", "get-origin-access-control"]:
+                return {"OriginAccessControl": {"OriginAccessControlConfig": {"OriginAccessControlOriginType": "s3"}}}
+            raise AssertionError(arguments)
+
+        with patch.object(cloudfront_frontend, "stack_resource", side_effect=resource), patch.object(
+            cloudfront_frontend, "aws_json", side_effect=aws
+        ):
+            resolved = cloudfront_frontend.discover_private_media_resources(
+                "stack", media_bucket="media", profile=None, region="us-west-2"
+            )
+            self.assertEqual(resolved["rewriteFunctionArn"], "arn:resolved")
+            # get-bucket-location reports us-east-1 as a null constraint.
+            self.assertEqual(resolved["originDomain"], "media.s3.us-east-1.amazonaws.com")
+            self.assertEqual(cloudfront_frontend.missing_private_media_resources(resolved), [])
+
+        def failing(arguments, *, profile=None):
+            raise RuntimeError("AccessDenied")
+
+        with patch.object(cloudfront_frontend, "stack_resource", side_effect=RuntimeError("missing")), patch.object(
+            cloudfront_frontend, "aws_json", side_effect=failing
+        ):
+            empty = cloudfront_frontend.discover_private_media_resources(
+                "stack", media_bucket="media", profile=None, region=None
+            )
+        self.assertEqual(
+            cloudfront_frontend.missing_private_media_resources(empty),
+            [
+                "keyGroupId", "cachePolicyId", "responsePolicyId", "originAccessControlId",
+                "rewriteFunctionArn", "originDomain",
+            ],
+        )
+
+        stack_without_output = {**self.PRIVATE_MEDIA_STACK, "PrivateMediaRewriteFunction": self.REWRITE_ARN}
+
+        def arn_resource(stack_name, logical_id, *unused):
+            return stack_without_output[logical_id]
+
+        def arn_aws(arguments, *, profile=None):
+            if arguments[:2] == ["cloudformation", "describe-stacks"]:
+                self.assertNotIn("--region", arguments)
+                return {"Stacks": []}
+            if arguments[:2] == ["cloudfront", "describe-function"]:
+                raise RuntimeError("NoSuchFunctionExists")
+            if arguments[:2] == ["s3api", "get-bucket-location"]:
+                return {"LocationConstraint": "us-west-2"}
+            if arguments[:2] == ["cloudfront", "get-origin-access-control"]:
+                raise RuntimeError("NoSuchOriginAccessControl")
+            raise AssertionError(arguments)
+
+        with patch.object(cloudfront_frontend, "stack_resource", side_effect=arn_resource), patch.object(
+            cloudfront_frontend, "aws_json", side_effect=arn_aws
+        ):
+            by_arn = cloudfront_frontend.discover_private_media_resources(
+                "stack", media_bucket="media", profile=None, region=None
+            )
+        self.assertEqual(by_arn["rewriteFunctionArn"], self.REWRITE_ARN)
+        self.assertEqual(cloudfront_frontend.missing_private_media_resources(by_arn), ["originAccessControlType=s3"])
+
+        stack_without_output["PrivateMediaRewriteFunction"] = "unpublished-rewrite"
+        with patch.object(cloudfront_frontend, "stack_resource", side_effect=arn_resource), patch.object(
+            cloudfront_frontend, "aws_json", side_effect=arn_aws
+        ):
+            unpublished = cloudfront_frontend.discover_private_media_resources(
+                "stack", media_bucket="media", profile=None, region=None
+            )
+        self.assertEqual(unpublished["rewriteFunctionArn"], "")
+
+    def test_private_media_origin_refuses_a_rebound_managed_id(self):
+        resources = {"originDomain": "media.s3.us-west-2.amazonaws.com", "originAccessControlId": "oac"}
+        for origins, message in (
+            (
+                [{"Id": "ian-photography-private-media-v1", "DomainName": "other.s3.us-west-2.amazonaws.com"}],
+                "another domain",
+            ),
+            (
+                [{"Id": "ian-photography-private-media-v1", "DomainName": "media.s3.us-west-2.amazonaws.com"}] * 2,
+                "Multiple origins",
+            ),
+        ):
+            with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
+                cloudfront_frontend.upsert_private_media_origin({"Origins": {"Items": origins}}, resources)
+
+    def test_private_media_origin_cannot_satisfy_the_frontend_origin_check(self):
+        config = {
+            **self.config,
+            "Origins": {
+                "Items": [
+                    {"Id": "origin", "DomainName": "custom.example"},
+                    {
+                        "Id": "ian-photography-private-media-v1",
+                        "DomainName": "BUCKET.s3.us-west-2.amazonaws.com",
+                        "S3OriginConfig": {"OriginAccessIdentity": ""},
+                        "OriginAccessControlId": "MEDIA-OAC",
+                    },
+                ]
+            },
+        }
+        with self.assertRaisesRegex(SystemExit, "frontend origin"):
+            self.run_main(config=config)
 
 
 class MigrationHelperTests(unittest.TestCase):

@@ -29,6 +29,18 @@ WWW_REDIRECT_SOURCE = HERE / "cloudfront_www_redirect.js"
 SOCIAL_ROUTER_SOURCE = HERE / "cloudfront_social_router.js"
 FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
 LEGACY_SPA_ERROR_CODES = frozenset({403, 404})
+# Shared with backend/template.yaml: the SAM stack owns the key group, cache and
+# response policies, origin access control, and rewrite function; this script
+# only binds them to the frontend distribution, which is outside CloudFormation.
+PRIVATE_MEDIA_ORIGIN_ID = "ian-photography-private-media-v1"
+PRIVATE_MEDIA_PATH_PATTERN = "private-media/*"
+PRIVATE_MEDIA_REWRITE_OUTPUT = "PrivateMediaRewriteFunctionArn"
+PRIVATE_MEDIA_RESOURCES = {
+    "keyGroupId": "PrivateMediaKeyGroup",
+    "cachePolicyId": "PrivateMediaCachePolicy",
+    "responsePolicyId": "PrivateMediaResponseHeadersPolicy",
+    "originAccessControlId": "PrivateMediaOriginAccessControl",
+}
 
 
 def aws_json(arguments: list[str], *, profile: str | None = None) -> dict[str, Any]:
@@ -55,6 +67,22 @@ def aws_with_json_file(
         handle.flush()
         replaced = [part.replace("{json_file}", handle.name) for part in arguments]
         return aws_json(replaced, profile=profile)
+
+
+def stack_output(
+    stack_name: str, output_key: str, profile: str | None, region: str | None
+) -> str:
+    """Return one stack Output value, or an empty string when it is not declared."""
+    arguments = ["cloudformation", "describe-stacks", "--stack-name", stack_name]
+    if region:
+        arguments.extend(["--region", region])
+    stacks = aws_json(arguments, profile=profile).get("Stacks", []) or []
+    outputs = (stacks[0].get("Outputs", []) or []) if stacks else []
+    for output in outputs:
+        if output.get("OutputKey") == output_key:
+            value = output.get("OutputValue")
+            return value if isinstance(value, str) else ""
+    return ""
 
 
 def normalize(value: Any) -> Any:
@@ -729,6 +757,174 @@ def validate_front_door_apply_guards(
         raise SystemExit(f"Refusing front-door apply: --confirm-front-door must equal {FRONT_DOOR_CONFIRMATION}")
 
 
+def discover_private_media_resources(
+    stack_name: str, *, media_bucket: str, profile: str | None, region: str | None
+) -> dict[str, str]:
+    """Resolve the SAM-owned private-media edge resources without mutating anything.
+
+    Missing values are returned empty rather than raised so a dry run can report
+    exactly what the stack has not provisioned yet; apply refuses on any gap.
+    """
+    resources: dict[str, str] = {}
+    for key, logical_id in PRIVATE_MEDIA_RESOURCES.items():
+        try:
+            resources[key] = stack_resource(stack_name, logical_id, profile, region)
+        except (RuntimeError, subprocess.CalledProcessError):
+            resources[key] = ""
+
+    # Prefer the explicit stack output. The physical ID of an
+    # AWS::CloudFront::Function is normally its ARN, but resolve a bare name too
+    # so the association never receives a value CloudFront would reject.
+    try:
+        function_arn = stack_output(stack_name, PRIVATE_MEDIA_REWRITE_OUTPUT, profile, region)
+    except RuntimeError:
+        function_arn = ""
+    if not function_arn:
+        try:
+            physical = stack_resource(stack_name, "PrivateMediaRewriteFunction", profile, region)
+        except (RuntimeError, subprocess.CalledProcessError):
+            physical = ""
+        if physical.startswith("arn:"):
+            function_arn = physical
+        elif physical:
+            try:
+                described = aws_json(
+                    ["cloudfront", "describe-function", "--name", physical, "--stage", "LIVE"],
+                    profile=profile,
+                )
+                function_arn = (
+                    described.get("FunctionSummary", {}).get("FunctionMetadata", {}).get("FunctionARN")
+                    or ""
+                )
+            except RuntimeError:
+                function_arn = ""
+    resources["rewriteFunctionArn"] = function_arn
+
+    # Use the regional REST endpoint so SigV4 signing through the origin access
+    # control never depends on the legacy global endpoint's redirects.
+    try:
+        location = aws_json(
+            ["s3api", "get-bucket-location", "--bucket", media_bucket], profile=profile
+        ).get("LocationConstraint")
+        resources["originDomain"] = f"{media_bucket}.s3.{location or 'us-east-1'}.amazonaws.com"
+    except RuntimeError:
+        resources["originDomain"] = ""
+
+    resources["originAccessControlType"] = ""
+    if resources["originAccessControlId"]:
+        try:
+            control = aws_json(
+                [
+                    "cloudfront", "get-origin-access-control", "--id",
+                    resources["originAccessControlId"],
+                ],
+                profile=profile,
+            )
+            resources["originAccessControlType"] = (
+                control.get("OriginAccessControl", {})
+                .get("OriginAccessControlConfig", {})
+                .get("OriginAccessControlOriginType")
+                or ""
+            )
+        except RuntimeError:
+            resources["originAccessControlType"] = ""
+    return resources
+
+
+def missing_private_media_resources(resources: dict[str, str]) -> list[str]:
+    missing = [
+        key
+        for key in (*PRIVATE_MEDIA_RESOURCES, "rewriteFunctionArn", "originDomain")
+        if not resources.get(key)
+    ]
+    if resources.get("originAccessControlId") and resources.get("originAccessControlType") != "s3":
+        missing.append("originAccessControlType=s3")
+    return missing
+
+
+def validate_private_media_apply_guards(*, apply: bool, resources: dict[str, str]) -> None:
+    if not apply:
+        return
+    missing = missing_private_media_resources(resources)
+    if missing:
+        raise SystemExit(
+            "Refusing private media apply: SAM edge resources are missing or invalid: "
+            + ", ".join(missing)
+        )
+
+
+def private_media_origin(resources: dict[str, str]) -> dict[str, Any]:
+    return {
+        "Id": PRIVATE_MEDIA_ORIGIN_ID,
+        "DomainName": resources["originDomain"],
+        "OriginPath": "",
+        "CustomHeaders": {"Quantity": 0},
+        "S3OriginConfig": {"OriginAccessIdentity": ""},
+        "OriginAccessControlId": resources["originAccessControlId"],
+        "ConnectionAttempts": 3,
+        "ConnectionTimeout": 10,
+        "OriginShield": {"Enabled": False},
+    }
+
+
+def upsert_private_media_origin(config: dict[str, Any], resources: dict[str, str]) -> None:
+    origins = config.get("Origins", {}).get("Items", []) or []
+    matches = [item for item in origins if item.get("Id") == PRIVATE_MEDIA_ORIGIN_ID]
+    if len(matches) > 1:
+        raise RuntimeError("Multiple origins use the managed private-media origin ID")
+    if matches and matches[0].get("DomainName") != resources["originDomain"]:
+        raise RuntimeError("Managed private-media origin ID is already bound to another domain")
+    retained = [item for item in origins if item.get("Id") != PRIVATE_MEDIA_ORIGIN_ID]
+    retained.append(private_media_origin(resources))
+    config["Origins"] = {"Quantity": len(retained), "Items": retained}
+
+
+def private_media_cache_behavior(
+    default: dict[str, Any], resources: dict[str, str]
+) -> dict[str, Any]:
+    # Start from the default behavior like the other managed behaviors, but drop
+    # what must not carry over to signed media: legacy TTLs, any origin request
+    # policy (the S3 origin must never receive viewer cookies), and the
+    # default's www redirect (CloudFront allows one viewer-request function).
+    behavior = {
+        key: copy.deepcopy(value)
+        for key, value in default.items()
+        if key not in {
+            "ForwardedValues", "MinTTL", "DefaultTTL", "MaxTTL", "OriginRequestPolicyId",
+        }
+    }
+    behavior.update({
+        "PathPattern": PRIVATE_MEDIA_PATH_PATTERN,
+        "TargetOriginId": PRIVATE_MEDIA_ORIGIN_ID,
+        "ViewerProtocolPolicy": "https-only",
+        "AllowedMethods": {
+            "Quantity": 3,
+            "Items": ["GET", "HEAD", "OPTIONS"],
+            "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]},
+        },
+        # Images and HLS segments are already compressed; edge recompression
+        # would only spend CPU and complicate byte-range video requests.
+        "Compress": False,
+        "CachePolicyId": resources["cachePolicyId"],
+        "ResponseHeadersPolicyId": resources["responsePolicyId"],
+        "TrustedKeyGroups": {
+            "Enabled": True,
+            "Quantity": 1,
+            "Items": [resources["keyGroupId"]],
+        },
+        "TrustedSigners": {"Enabled": False, "Quantity": 0},
+        "LambdaFunctionAssociations": {"Quantity": 0},
+        "FunctionAssociations": {
+            "Quantity": 1,
+            "Items": [{
+                "EventType": "viewer-request",
+                "FunctionARN": resources["rewriteFunctionArn"],
+            }],
+        },
+    })
+    return behavior
+
+
 def load_origin_verification_value(parameter_name: str, *, region: str, profile: str | None) -> str:
     response = aws_json(
         ["ssm", "get-parameter", "--name", parameter_name, "--with-decryption", "--region", region],
@@ -904,6 +1100,11 @@ def main() -> int:
     )
     parser.add_argument("--expected-web-acl-arn")
     parser.add_argument("--confirm-front-door")
+    parser.add_argument(
+        "--include-private-media",
+        action="store_true",
+        help="Bind the SAM signed-cookie private-media origin and private-media/* behavior",
+    )
     parser.add_argument("--logging-bucket-domain", help="Opt-in standard-log S3 domain; never inferred")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
@@ -939,7 +1140,13 @@ def main() -> int:
     )
     etag = current["ETag"]
     config = current["DistributionConfig"]
-    origins = config.get("Origins", {}).get("Items", []) or []
+    # The private-media origin is also an S3 REST/OAC origin; exclude it so it
+    # can never stand in for the frontend origin in the stage check below.
+    origins = [
+        origin
+        for origin in config.get("Origins", {}).get("Items", []) or []
+        if origin.get("Id") != PRIVATE_MEDIA_ORIGIN_ID
+    ]
     domains = {origin.get("DomainName") for origin in origins}
     website_origin = any(
         isinstance(origin.get("DomainName"), str)
@@ -972,6 +1179,13 @@ def main() -> int:
         account=account,
     )
     validate_cache_policy_ids(baseline, args.profile)
+
+    private_media: dict[str, str] = {}
+    if args.include_private_media:
+        private_media = discover_private_media_resources(
+            args.stack_name, media_bucket=media_bucket, profile=args.profile, region=args.region
+        )
+        validate_private_media_apply_guards(apply=args.apply, resources=private_media)
 
     api_settings = baseline.get("api_front_door", {})
     public_api_cache_id = public_stats_cache_id = None
@@ -1046,7 +1260,10 @@ def main() -> int:
     redirect_action = "disabled"
     request_router_enabled = args.include_www or args.include_api_front_door
     if request_router_enabled:
-        assert_no_foreign_viewer_request_function(config, {redirect_name, social_router_name})
+        allowed_functions = {redirect_name, social_router_name}
+        if args.include_private_media and private_media.get("rewriteFunctionArn"):
+            allowed_functions.add(private_media["rewriteFunctionArn"].rsplit("function/", 1)[-1])
+        assert_no_foreign_viewer_request_function(config, allowed_functions)
     if args.include_www:
         certificate_arn = config.get("ViewerCertificate", {}).get("ACMCertificateArn")
         if not certificate_arn:
@@ -1146,6 +1363,13 @@ def main() -> int:
             "policies": api_policy_actions,
             "secretValueRead": bool(args.apply and args.include_api_front_door),
         },
+        # Identifiers only: the signing key stays in SSM and is never read here.
+        "privateMedia": {
+            "enabled": args.include_private_media,
+            "originDomain": private_media.get("originDomain") or None,
+            "keyGroupIdPresent": bool(private_media.get("keyGroupId")),
+            "missing": missing_private_media_resources(private_media) if args.include_private_media else [],
+        },
     }, indent=2))
     if not args.apply:
         print("Dry run only. Re-run with --apply, --expected-etag, and --expected-account-id after review.")
@@ -1193,6 +1417,8 @@ def main() -> int:
         upsert_exact_api_origin(desired_distribution, api_settings, origin_verification_value)
         desired_distribution["WebACLId"] = args.web_acl_arn
         remove_legacy_spa_error_responses(desired_distribution)
+    if args.include_private_media:
+        upsert_private_media_origin(desired_distribution, private_media)
 
     existing_behaviors = desired_distribution.get("CacheBehaviors", {}).get("Items", []) or []
     managed_patterns = set(baseline["immutable_path_patterns"])
@@ -1206,6 +1432,10 @@ def main() -> int:
             api_settings["private_path_pattern"],
         })
         managed_patterns.update(api_settings.get("social_path_patterns", []))
+    if args.include_private_media:
+        # Only the flag makes private-media/* managed; without it an existing
+        # behavior stays in `preserved` exactly as before.
+        managed_patterns.add(PRIVATE_MEDIA_PATH_PATTERN)
     preserved = [item for item in existing_behaviors if item.get("PathPattern") not in managed_patterns]
     immutable = [
         cache_behavior(default, pattern, immutable_id, baseline)
@@ -1281,11 +1511,17 @@ def main() -> int:
             social_behavior["ViewerProtocolPolicy"] = "redirect-to-https"
             associate_viewer_request(social_behavior, social_router_arn)
             api_behaviors.append(social_behavior)
+    private_media_behaviors = []
+    if args.include_private_media:
+        private_media_behaviors = [private_media_cache_behavior(default, private_media)]
     # CloudFront selects the first matching ordered behavior, so the exact
     # daily stats path precedes the five-minute public wildcard, and both
     # precede the cache-disabled catch-all API path. The album/video social
     # document behaviors cache for up to 60 s, per the origin's s-maxage.
-    managed = api_behaviors + print_behaviors + immutable + static
+    # private-media/* overlaps no other pattern; it follows the API behaviors
+    # only to keep the managed order deterministic. Being managed, it is never
+    # in `preserved`, so the www redirect below is not attached to it.
+    managed = api_behaviors + private_media_behaviors + print_behaviors + immutable + static
     if request_router_enabled:
         for behavior in preserved:
             associate_viewer_request(behavior, redirect_arn)

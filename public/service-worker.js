@@ -93,6 +93,9 @@ self.addEventListener('fetch', event => {
   // entirely, including a navigation to an API URL, so JSON never reaches the
   // shell cache or its offline fallback.
   if (url.pathname === '/api' || url.pathname.startsWith('/api/') || request.headers.has('authorization')) return
+  // Signed-cookie album media is private and short-lived; never cache it or let
+  // a slow image/HLS navigation lose the offline-shell race to index.html.
+  if (url.pathname.startsWith('/private-media/')) return
 
   if (request.mode === 'navigate') {
     event.respondWith(networkFirst(request))

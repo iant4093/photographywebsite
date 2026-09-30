@@ -21,6 +21,10 @@ are **dry-run by default** and require multiple exact production guards to apply
   certificate, DNS, or logging destination.
 - [`API_FRONT_DOOR.md`](API_FRONT_DOOR.md) defines current same-origin API,
   origin-verification, WAF, rotation, validation, and rollback operations.
+- [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md) covers signed-cookie delivery of
+  protected album media through the frontend distribution: SAM resources, the
+  `--include-private-media` edge change, rollout, verification, key rotation,
+  revocation bounds, and rollback.
 - [`FOTOMOTO_PRINTS.md`](FOTOMOTO_PRINTS.md) defines the isolated print-store
   origin, private-gallery capability boundary, Free-plan preview handoff, and
   manual print-ready upload procedure.
