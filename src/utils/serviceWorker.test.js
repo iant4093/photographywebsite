@@ -89,4 +89,16 @@ describe('optional bounded offline caching', () => {
         }
         expect(handled).toEqual(['https://site.test/album/one'])
     })
+    it('leaves signed-cookie /private-media requests, including navigations, to the network', () => {
+        const w = worker()
+        const handled = []
+        const dispatch = request => w.handlers.fetch({ request, respondWith: () => handled.push(request.url) })
+        const base = 'https://site.test/private-media/albums/a1'
+        for (const url of [`${base}/preview/v3/p-960.webp`, `${base}/hls/master.m3u8`, `${base}/hls/segment-001.ts`]) {
+            dispatch({ method: 'GET', mode: 'no-cors', url, headers: new Headers() })
+            dispatch({ method: 'GET', mode: 'cors', url, headers: new Headers() })
+            dispatch({ method: 'GET', mode: 'navigate', url, headers: new Headers() })
+        }
+        expect(handled).toEqual([])
+    })
 })
