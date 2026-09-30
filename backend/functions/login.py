@@ -7,7 +7,7 @@ from aws_request_config import request_config
 
 from audit_helpers import emit_audit_event
 from response_helpers import error_response, internal_error, json_response
-from security_helpers import check_rate_limit, is_rate_limit_denied, verify_turnstile
+from security_helpers import check_rate_limit, verify_turnstile
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_email
 
 
@@ -53,15 +53,16 @@ def handler(event, context):
         turnstile_token = require_string(body.get("turnstileToken"), "turnstileToken", maximum=4096)
         ip = ((event or {}).get("requestContext", {}).get("http", {}).get("sourceIp") or "unknown")
 
-        if is_rate_limit_denied(ip, "login_ip", max_requests=15, window_seconds=600):
+        # The source quota is a cheap table write; spend it before the
+        # Cloudflare round-trip so floods are rejected without verification.
+        if not check_rate_limit(ip, "login_ip", max_requests=15, window_seconds=600, fail_closed=True):
             _audit(event, context, "denied", "rate_limited_ip")
             return error_response(429, "Too many login attempts. Please try again later.", code="rate_limited")
         if not verify_turnstile(turnstile_token, ip, expected_action="login"):
             _audit(event, context, "denied", "captcha_failed")
             return error_response(403, "Security verification failed", code="captcha_failed")
-        if not check_rate_limit(ip, "login_ip", max_requests=15, window_seconds=600, fail_closed=True):
-            _audit(event, context, "denied", "rate_limited_ip")
-            return error_response(429, "Too many login attempts. Please try again later.", code="rate_limited")
+        # Account quota stays behind Turnstile: unverified traffic must not be
+        # able to lock a known email out of sign-in or probe its block state.
         if not check_rate_limit(email, "login_user", max_requests=8, window_seconds=600, fail_closed=True):
             _audit(event, context, "denied", "rate_limited_user")
             return error_response(429, "Too many login attempts. Please try again later.", code="rate_limited")

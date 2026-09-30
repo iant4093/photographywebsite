@@ -147,6 +147,9 @@ def handler(event, context):
         )
     except AuthError as error:
         _audit(event, context, "denied", "access_denied", actor_type=access_actor, auth_method=access_auth)
+        # Share lookups never reveal whether a code exists but is inactive.
+        if ((event or {}).get("pathParameters") or {}).get("shareCode"):
+            return _not_found()
         return auth_error_response(error)
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_request", actor_type=access_actor, auth_method=access_auth)

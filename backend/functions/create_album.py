@@ -27,7 +27,7 @@ from album_mutation_helpers import resolve_owner as _resolve_owner
 from album_mutation_helpers import validate_created_at as _validate_created_at
 from auth_helpers import get_caller_claims, require_admin
 from cache_invalidation import request_public_api_invalidation
-from dynamodb_helpers import ensure_album_item_budget
+from dynamodb_helpers import AlbumManifestTooLarge, ensure_album_item_budget
 from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
 from media_helpers import extract_exif_data, hls_master_playlist_key, start_mediaconvert_job
@@ -429,6 +429,9 @@ def handler(event, context):
         return error_response(409, str(error), code="media_busy")
     except drive_backup_jobs.DriveBackupBusy as error:
         return error_response(409, str(error), code="backup_busy")
+    except AlbumManifestTooLarge as error:
+        _audit(event, context, "denied", "manifest_too_large")
+        return error_response(413, str(error), code="album_manifest_too_large")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_album")
         return error_response(400, str(error), code="invalid_album")

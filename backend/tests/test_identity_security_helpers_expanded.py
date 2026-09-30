@@ -537,10 +537,62 @@ class EmailResponseAndDynamoHelperTests(unittest.TestCase):
         self.assertEqual(response_body(response_helpers.error_response(400, "bad")), {"error": "bad"})
         with patch.object(response_helpers.logger, "error") as log:
             response = response_helpers.internal_error(
-                SimpleNamespace(aws_request_id="request"), RuntimeError("secret text"), "operation"
+                SimpleNamespace(aws_request_id="request"),
+                RuntimeError(f"secret text albums/{'a' * 8}/private.jpg"),
+                "operation",
             )
         self.assertEqual(response["statusCode"], 500)
-        self.assertNotIn("secret text", str(log.call_args))
+        self.assertNotIn("secret text", response["body"])
+        self.assertNotIn("private.jpg", str(log.call_args))
+        self.assertEqual(
+            log.call_args.args,
+            (
+                "operation_failed operation=%s request_id=%s error_type=%s error_detail=%s",
+                "operation", "request", "RuntimeError", "secret text albums/<redacted>",
+            ),
+        )
+
+    def test_redact_error_detail_removes_keys_identities_and_credentials(self):
+        redact = response_helpers.redact_error_detail
+        for prefix in ("albums", "public-previews", "temp-zips", "album-zips", "fotomoto", "site/hero"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(
+                    redact(f"NoSuchKey: {prefix}/2f0c9a4e-51d8-4b5e-9d52-5f5ad1a0c3b1/Wedding_Guest.jpg missing"),
+                    f"NoSuchKey: {prefix}/<redacted> missing",
+                )
+                self.assertEqual(redact(f"key='{prefix}/x/y.jpg'"), f"key='{prefix}/<redacted>'")
+        self.assertEqual(redact("owner visitor.name+tag@example.co.uk rejected"), "owner <email> rejected")
+        self.assertEqual(redact("Authorization: Bearer abc.def.ghi failed"), "Authorization: Bearer <redacted> failed")
+        self.assertEqual(redact("header bearer short"), "header Bearer <redacted>")
+        jwt_like = "eyJhbGciOiJSUzI1NiJ9." + "a" * 40 + ".signature"
+        self.assertEqual(redact(f"invalid {jwt_like} token"), "invalid <token> token")
+        self.assertEqual(redact("sha " + "f" * 39), "sha " + "f" * 39)
+        self.assertEqual(redact("sha " + "f" * 40), "sha <token>")
+        self.assertEqual(
+            redact("GET ?X-Amz-Credential=AKIA/2026/us-west-2/s3&X-Amz-Date=20260930T000000Z&x=1"),
+            "GET ?X-Amz-<redacted>&X-Amz-<redacted>&x=1",
+        )
+        self.assertEqual(redact("forged\r\nsecond line\x00"), "forged second line ")
+        self.assertEqual(len(redact("x " * 400)), response_helpers.ERROR_DETAIL_MAX_CHARS)
+        self.assertEqual(redact(None), "")
+        self.assertEqual(redact(""), "")
+        botocore = (
+            "An error occurred (ConditionalCheckFailedException) when calling the UpdateItem "
+            "operation: The conditional request failed"
+        )
+        self.assertEqual(redact(botocore), botocore)
+
+    def test_internal_error_detail_handles_missing_and_unprintable_errors(self):
+        class Unprintable(Exception):
+            def __str__(self):
+                raise RuntimeError("cannot render")
+
+        for error, expected_type in ((None, "UnknownError"), (Unprintable(), "Unprintable")):
+            with self.subTest(error=expected_type), patch.object(response_helpers.logger, "error") as log:
+                response = response_helpers.internal_error(None, error)
+            self.assertEqual(response_body(response), {"error": "Internal server error", "code": "internal_error"})
+            self.assertEqual(response["headers"]["Cache-Control"], "no-store")
+            self.assertEqual(log.call_args.args[1:], ("request", "unknown", expected_type, ""))
 
     def test_dynamodb_budget_configuration_and_estimate(self):
         with patch.dict(os.environ, {"ALBUM_ITEM_BUDGET_BYTES": "bad"}):

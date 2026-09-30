@@ -11,6 +11,10 @@ from validation_helpers import ValidationError
 _serializer = TypeSerializer()
 
 
+class AlbumManifestTooLarge(ValidationError):
+    """A write would push the inline album manifest toward DynamoDB's item limit."""
+
+
 def album_item_budget_bytes():
     try:
         configured = int(os.environ.get("ALBUM_ITEM_BUDGET_BYTES", str(350 * 1024)))
@@ -28,4 +32,4 @@ def estimated_item_bytes(item):
 
 def ensure_album_item_budget(item):
     if estimated_item_bytes(item) > album_item_budget_bytes():
-        raise ValidationError("Album metadata is too large; split the media into multiple albums")
+        raise AlbumManifestTooLarge("Album manifest is too large; split the album or remove captions/transcripts")

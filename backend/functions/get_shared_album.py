@@ -11,7 +11,7 @@ from album_access import authorize_album
 from auth_helpers import AuthError, auth_error_response
 from media_access import serialize_album_detail, serialize_images
 from response_helpers import error_response, internal_error, json_response
-from security_helpers import check_rate_limit, is_rate_limit_denied, verify_turnstile
+from security_helpers import check_rate_limit, verify_turnstile
 from validation_helpers import ValidationError, validate_uuid
 
 
@@ -49,15 +49,14 @@ def handler(event, context):
             return error_response(404, "Shared album not found", code="not_found")
         headers = {str(key).lower(): value for key, value in ((event or {}).get("headers") or {}).items()}
         turnstile_token = headers.get("x-turnstile-token", "")
-        if is_rate_limit_denied(ip, "shared_album", max_requests=30, window_seconds=300):
+        # The quota is a cheap table write; spend it before the Cloudflare
+        # round-trip so floods are rejected without verification.
+        if not check_rate_limit(ip, "shared_album", max_requests=30, window_seconds=300, fail_closed=True):
             _audit(event, context, "denied", "rate_limited")
             return error_response(429, "Too many requests. Please try again later.", code="rate_limited")
         if not verify_turnstile(turnstile_token, ip, expected_action="shared_album"):
             _audit(event, context, "denied", "captcha_failed")
             return error_response(403, "Security verification failed", code="captcha_failed")
-        if not check_rate_limit(ip, "shared_album", max_requests=30, window_seconds=300, fail_closed=True):
-            _audit(event, context, "denied", "rate_limited")
-            return error_response(429, "Too many requests. Please try again later.", code="rate_limited")
 
         response = table.query(
             IndexName=os.environ.get("SHARE_CODE_INDEX", "ShareCodeIndex"),

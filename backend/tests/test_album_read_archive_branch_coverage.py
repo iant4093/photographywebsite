@@ -459,6 +459,18 @@ class CreateZipBranchTests(unittest.TestCase):
             self._call({"albumId": ALBUM_ID}, record=album(visibility="private"), authorize_error=create_zip.AuthError("no", 403))[0]["statusCode"], 403,
         )
         self.assertEqual(self._call({"albumId": "bad"}, record=album())[0]["statusCode"], 400)
+
+    def test_revoked_share_code_is_indistinguishable_from_a_missing_album(self):
+        shared = album(visibility="unlisted", isShared=False, shareCode=SHARE_CODE)
+        for status in (401, 403, 404):
+            with self.subTest(status=status):
+                response, s3, queue = self._call(
+                    {"shareCode": SHARE_CODE}, record=shared, authorize_error=create_zip.AuthError("revoked", status),
+                )
+                self.assertEqual(response["statusCode"], 404)
+                self.assertEqual(response_body(response), {"error": "Album not found", "code": "not_found"})
+                s3.list_objects_v2.assert_not_called()
+                queue.assert_not_called()
         for effect in (
             client_error("AccessDenied", "ListObjectsV2"),
             [{"Contents": []}, client_error("AccessDenied", "ListObjectsV2")],

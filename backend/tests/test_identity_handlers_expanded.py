@@ -108,7 +108,9 @@ class LoginExpandedTests(unittest.TestCase):
                 response = login.handler(self.event(), CONTEXT)
             self.assertEqual(response["statusCode"], 401)
             self.assertNotIn("provider detail", response["body"])
-        with patch.object(login, "verify_turnstile", side_effect=RuntimeError("secret")):
+        with patch.object(login, "check_rate_limit", return_value=True), patch.object(
+            login, "verify_turnstile", side_effect=RuntimeError("secret")
+        ):
             response = login.handler(self.event(), CONTEXT)
         self.assertEqual(response["statusCode"], 500)
         self.assertNotIn("secret", response["body"])
@@ -133,7 +135,7 @@ class CompleteChallengeExpandedTests(unittest.TestCase):
 
     def test_captcha_and_both_rate_limit_paths(self):
         cases = (
-            (False, [], 403, "captcha_failed"),
+            (False, [True], 403, "captcha_failed"),
             (True, [False], 429, "rate_limited_ip"),
             (True, [True, False], 429, "rate_limited_user"),
         )
@@ -191,7 +193,9 @@ class CompleteChallengeExpandedTests(unittest.TestCase):
                 response = complete_challenge.handler(self.event(), CONTEXT)
             self.assertEqual(response["statusCode"], 401)
             self.assertNotIn("provider detail", response["body"])
-        with patch.object(complete_challenge, "verify_turnstile", side_effect=RuntimeError("secret")):
+        with patch.object(complete_challenge, "check_rate_limit", return_value=True), patch.object(
+            complete_challenge, "verify_turnstile", side_effect=RuntimeError("secret")
+        ):
             response = complete_challenge.handler(self.event(), CONTEXT)
         self.assertEqual(response["statusCode"], 500)
         self.assertNotIn("secret", response["body"])

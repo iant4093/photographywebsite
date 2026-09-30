@@ -132,7 +132,9 @@ class AuditIntegrationTests(unittest.TestCase):
             }),
             "requestContext": {"requestId": "request-123", "http": {"sourceIp": "192.0.2.8"}},
         }
-        with patch.object(login, "verify_turnstile", return_value=False), self.assertLogs(
+        with patch.object(login, "check_rate_limit", return_value=True), patch.object(
+            login, "verify_turnstile", return_value=False
+        ), self.assertLogs(
             "photography_api.audit", level=logging.INFO
         ) as captured:
             response = login.handler(event, SimpleNamespace(aws_request_id="lambda-123"))

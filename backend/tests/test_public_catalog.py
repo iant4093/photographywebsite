@@ -355,6 +355,8 @@ class PublicAlbumDetailTests(unittest.TestCase):
             )
         self.assertEqual(response["statusCode"], 500)
         self.assertNotIn("provider detail", response["body"])
+        # Failures must never be held by the edge like the social document.
+        self.assertEqual(response["headers"]["Cache-Control"], "no-store")
 
     def test_document_overlaps_shell_and_metadata_reads(self):
         metadata_started = threading.Event()
@@ -647,6 +649,8 @@ class PublicAlbumDetailTests(unittest.TestCase):
             response = get_public_album.handler(event, None)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response["headers"]["Content-Type"], "text/html; charset=utf-8")
+        # CloudFront may hold the public document briefly; browsers revalidate.
+        self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=0, s-maxage=60, must-revalidate")
         self.assertIn("default-src 'self'", response["headers"]["Content-Security-Policy"])
         self.assertIn("Portraits &amp; friends", response["body"])
         self.assertIn("Misty &lt;script&gt;", response["body"])

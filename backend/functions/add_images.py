@@ -22,7 +22,7 @@ from preview_jobs import enqueue_preview_jobs
 from original_comparison_jobs import request_original_comparisons
 from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
-from dynamodb_helpers import ensure_album_item_budget
+from dynamodb_helpers import AlbumManifestTooLarge, ensure_album_item_budget
 from validation_helpers import ValidationError, parse_json_body, validate_uuid
 
 
@@ -229,6 +229,9 @@ def handler(event, context):
         return error_response(409, str(error), code="media_busy")
     except drive_backup_jobs.DriveBackupBusy as error:
         return error_response(409, str(error), code="backup_busy")
+    except AlbumManifestTooLarge as error:
+        _audit(event, context, "denied", "manifest_too_large")
+        return error_response(413, str(error), code="album_manifest_too_large")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_media")
         return error_response(400, str(error), code="invalid_images")
