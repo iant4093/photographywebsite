@@ -12,14 +12,16 @@ set -euo pipefail
 : "${RELEASE_DEPENDENCIES_PATH:=ops/ci/release_dependencies.json}"
 : "${PARAMETER_ADDITIONS_PATH:=ops/ci/release_parameter_additions.json}"
 
-# The create-complete waiter returns on Status alone; ExecutionStatus can lag
-# AVAILABLE by tens of seconds on a large change set. Sample both in a single
-# call and allow a bounded settle window before failing closed.
+# Scalar reads must disable CLI auto-pagination: once a change set exceeds one
+# page of Changes, a paginated scalar query returns the value followed by
+# "None" for every extra page and no exact comparison below can match. Sample
+# Status and ExecutionStatus together and allow a bounded settle window in case
+# ExecutionStatus lags CREATE_COMPLETE, still failing closed.
 status=""
 execution_status=""
 for _attempt in $(seq 1 20); do
   IFS=$'\t' read -r status execution_status < <(aws cloudformation describe-change-set \
-    --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+    --no-paginate --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
     --query '[Status, ExecutionStatus]' --output text)
   if [[ "$status" == "CREATE_COMPLETE" && "$execution_status" == "AVAILABLE" ]]; then
     break
@@ -30,16 +32,16 @@ for _attempt in $(seq 1 20); do
   sleep 6
 done
 actual_name="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+  --no-paginate --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query ChangeSetName --output text)"
 actual_stack="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+  --no-paginate --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query StackName --output text)"
 description="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+  --no-paginate --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query Description --output text)"
 release_sha="$(aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+  --no-paginate --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query 'Parameters[?ParameterKey==`ReleaseSha`].ParameterValue | [0]' --output text)"
 
 if [[ "$status" != "CREATE_COMPLETE" || "$execution_status" != "AVAILABLE" ]]; then
@@ -59,7 +61,7 @@ fi
 
 parameters_path="$(dirname "$CHANGE_PAGES_PATH")/change-set-parameters.json"
 aws cloudformation describe-change-set \
-  --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
+  --no-paginate --region "$AWS_REGION" --stack-name "$EXPECTED_STACK_NAME" --change-set-name "$CHANGE_SET_NAME" \
   --query Parameters --output json > "$parameters_path"
 if [[ -n "${EXPECTED_REQUESTED_PARAMETERS_PATH:-}" ]]; then
   python3 ops/ci/release_guard.py preserved-parameters \
