@@ -1,0 +1,55 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["OPEN AND DECODE"]
+    direction LR
+    n00["Local photo file<br/>User file picker or drag/drop"]:::actor
+    n01["Standard / RAW decoders<br/>Browser image decode or<br/>rawconvert-wasm RAW conversion"]:::app
+    n02["Editor source + previews<br/>Orientation, working buffers;<br/>fast and full preview sizes"]:::app
+    n03["Local editing session<br/>Geometry, adjustments, presets;<br/>undo/redo, comparison, clipping"]:::app
+    n00 -->|"open"| n01
+    n01 -->|"decode"| n02
+    n02 -->|"edit"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["INTERACTIVE PREVIEW"]
+    direction LR
+    n10["Direct controls<br/>Exposure, color, crop/rotate;<br/>zoom and pan"]:::actor
+    n11["WebGL live renderer<br/>Responsive GPU preview;<br/>worker fallback when needed"]:::app
+    n12["Web Worker + canvas<br/>Exact queued processing;<br/>cancel stale work"]:::job
+    n13["Before/After canvas<br/>Local source vs current edit;<br/>keeps UI responsive"]:::app
+    n10 -->|"adjust"| n11
+    n11 -->|"settle / fallback"| n12
+    n12 -->|"render"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["SAVE AND RESTORE LOCALLY"]
+    direction LR
+    n20["Source + editor state<br/>History, geometry, adjustments"]:::app
+    n21["IndexedDB sessionStore<br/>Persist local source and session;<br/>localStorage holds preferences"]:::data
+    n22["Reopened /editor<br/>Restore prior session;<br/>clear session on request"]:::app
+    n20 -->|"save"| n21
+    n21 -->|"restore"| n22
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["EXPORT"]
+    direction LR
+    n30["Export settings<br/>JPEG / PNG / WebP;<br/>quality, dimensions, filename"]:::actor
+    n31["Dedicated export worker<br/>Full-resolution adjustments;<br/>progress, timeout, cancellation"]:::job
+    n32["Canvas → Blob<br/>sRGB; metadata removed<br/>from exported image"]:::app
+    n33["Local browser download<br/>User saves edited output"]:::actor
+    n30 -->|"start"| n31
+    n31 -->|"encode"| n32
+    n32 -->|"save file"| n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

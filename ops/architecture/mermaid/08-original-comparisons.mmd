@@ -1,0 +1,55 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["PRIVATE ARCHIVE INDEX"]
+    direction LR
+    n00["EventBridge · 15 minutes<br/>Enabled flag + Google credential<br/>parameter required"]:::job
+    n01["OriginalIndexRefresh<br/>Read-only service account;<br/>full inventory + Drive changes"]:::job
+    n02["Raw-archive Drive JPGs<br/>Exact configured root descendants;<br/>exclude RAW / edited backup"]:::provider
+    n03["Private index + system row<br/>OriginalPreviewBucket index/;<br/>OriginalComparisonTable pointer"]:::data
+    n00 -->|"invoke"| n01
+    n01 -->|"read inventory"| n02
+    n02 -->|"publish complete index"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["MATCH AND GENERATE"]
+    direction LR
+    n10["Commit + reconciliation<br/>New committed photos +<br/>missing/retryable comparisons"]:::app
+    n11["OriginalComparisonQueue<br/>At most two workers;<br/>five attempts → dedicated DLQ"]:::job
+    n12["OriginalComparisonWorker<br/>Recheck membership; filename +<br/>capture time + camera + checksum"]:::job
+    n13["Private Before variants<br/>Read verified Drive JPG; write<br/>640 / 960 / 1440 / 1920 WebP"]:::data
+    n10 -->|"enqueue"| n11
+    n11 -->|"consume / lease"| n12
+    n12 -->|"render full framing"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["AUTHORIZED DELIVERY"]
+    direction LR
+    n20["Album / comparison API<br/>Public, owner/admin, share policy"]:::security
+    n21["OriginalComparisonTable<br/>pending / ready / unavailable /<br/>ambiguous / failed; private evidence"]:::data
+    n22["Signed before/ URLs<br/>Separate private S3 bucket;<br/>30-minute expiry + private cache"]:::security
+    n23["Photo lightbox Before toggle<br/>Lazy load fitted variant;<br/>reuse while authorized and valid"]:::app
+    n20 -->|"read comparison"| n21
+    n21 -->|"sign allowed output"| n22
+    n22 -->|"fetch on demand"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["PENDING WORK AND FAILURE"]
+    direction LR
+    n30["Pending / failed photo<br/>Edited image remains visible"]:::app
+    n31["Visible-view refresh<br/>Backoff; cancel on navigation;<br/>share viewer retains security check"]:::app
+    n32["Reconciliation + alarms<br/>Retry missing work; DLQ and<br/>index-refresh error signals → 11"]:::job
+    n30 -. "refresh status" .-> n31
+    n31 -. "repair / observe" .-> n32
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

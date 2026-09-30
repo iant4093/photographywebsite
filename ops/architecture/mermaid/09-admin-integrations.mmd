@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["CONTENT AND ACCOUNT MANAGEMENT"]
+    direction LR
+    n00["Protected admin portal<br/>Dashboard; uploads; albums/media;<br/>hero; users; security / TOTP"]:::actor
+    n01["Admin API handlers<br/>Verified Admins claims;<br/>validated, bounded mutations"]:::security
+    n02["Cognito + application data<br/>Users, owner assignment, media,<br/>visibility, order, hero assets"]:::data
+    n03["Follow-up work · 04–06<br/>Retag, delete, derive, refresh;<br/>Resend invitations / notices"]:::job
+    n00 -->|"same-origin API"| n01
+    n01 -->|"read / mutate"| n02
+    n02 -->|"dispatch"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["WEBSITE USAGE AND OPERATIONS REPORTS"]
+    direction LR
+    n10["AnalyticsTracker<br/>Page/media events + web vitals;<br/>DNT/GPC and route exclusions"]:::app
+    n11["analytics ingest<br/>Validate + rate limit;<br/>privacy-safe aggregate counters"]:::app
+    n12["AnalyticsTable<br/>TTL-bounded anonymous aggregates"]:::data
+    n13["Admin analytics<br/>/admin/analytics;<br/>get_analytics_report"]:::app
+    n10 -->|"POST events"| n11
+    n11 -->|"aggregate"| n12
+    n12 -->|"read report"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["EDITED MEDIA BACKUP AND DRIVE USAGE"]
+    direction LR
+    n20["Content mutation / daily job<br/>Optional backup; 09:15 UTC refresh"]:::job
+    n21["Drive workers<br/>google_drive_sync writes edited<br/>backup; usage refresher reads"]:::job
+    n22["Google Drive + cache<br/>Edited website uploads backup;<br/>DriveUsageCacheTable"]:::provider
+    n23["Admin Drive usage<br/>/admin/drive-usage; cached report<br/>and bounded on-demand refresh"]:::app
+    n20 -->|"invoke"| n21
+    n21 -->|"sync / measure"| n22
+    n22 -->|"serve summary"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["BILLING, REPOSITORY AND HEALTH"]
+    direction LR
+    n30["Admin report APIs<br/>Costs; GitHub; site health; audit"]:::app
+    n31["Purpose-specific sources<br/>Cost Explorer; GitHub API;<br/>CloudWatch alarms / Logs Insights"]:::provider
+    n32["Caches / safe projection<br/>CostReportCache, GitHub cache;<br/>allowlisted health + audit DTOs"]:::data
+    n33["Admin report pages<br/>/costs, /github-analytics,<br/>/site-health, /audit-log under /admin"]:::app
+    n30 -->|"query source"| n31
+    n31 -->|"cache / filter"| n32
+    n32 -->|"display"| n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

@@ -1,0 +1,53 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["VISIBILITY, DELETION AND CACHES"]
+    direction LR
+    n00["Album / image mutations<br/>Update, delete, reorder, share;<br/>source-of-truth authorization"]:::app
+    n01["Retag / remove / reconcile<br/>Restrict tags before private change;<br/>update media, preview, QR state"]:::app
+    n02["CacheInvalidationQueue<br/>Coalesce narrow paths;<br/>CacheInvalidationWorker"]:::job
+    n03["Frontend + media CDN<br/>Invalidate affected catalog,<br/>album and public-preview paths"]:::edge
+    n00 -. "apply transition" .-> n01
+    n01 -. "enqueue paths" .-> n02
+    n02 -. "invalidate" .-> n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["ALBUM CARD HOVER MANIFESTS"]
+    direction LR
+    n10["Preview stream + refresh<br/>PreviewMetadata stream; targeted<br/>HoverPreviewRefreshQueue; 15 min"]:::job
+    n11["HoverPreviewManifestBuilder<br/>Recheck public album + cover;<br/>select ready landscape previews"]:::job
+    n12["Manifest + pointer<br/>Immutable S3 hover JSON +<br/>PreviewMetadataTable pointer"]:::data
+    n13["AlbumCard<br/>Fetch small manifest via CDN;<br/>shuffle five frames locally"]:::app
+    n10 -->|"trigger"| n11
+    n11 -->|"publish conditionally"| n12
+    n12 -->|"hover playback"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["RANDOM DECKS AND NORMALIZED MEDIA"]
+    direction LR
+    n20["Targeted random refresh<br/>RandomPhotoRefreshQueue;<br/>hourly reconciliation"]:::job
+    n21["RandomPhotoPoolBuilder<br/>Query current public albums;<br/>immutable shards + pointer swap"]:::job
+    n22["PreviewMetadataTable<br/>Materialized global/category decks;<br/>public readers recheck every ref"]:::data
+    n20 -->|"trigger"| n21
+    n21 -->|"publish generation"| n22
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["LEGACY MIGRATION REPAIR"]
+    direction LR
+    n30["EventBridge · 15 minutes<br/>Bounded media reconciliation"]:::job
+    n31["AlbumMediaBackfill<br/>AlbumsTable legacy manifests"]:::job
+    n32["AlbumMediaTable<br/>Repair normalized rows;<br/>admin media paging"]:::data
+    n30 -->|"invoke"| n31
+    n31 -->|"backfill"| n32
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

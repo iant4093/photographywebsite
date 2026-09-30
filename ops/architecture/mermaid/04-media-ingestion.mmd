@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["UPLOAD AND COMMIT"]
+    direction LR
+    n00["Admin upload UI<br/>Photo/video files + local previews"]:::actor
+    n01["get_upload_url<br/>Admin-only presigned upload;<br/>key, type, size and pending tag"]:::security
+    n02["Browser → ImagesBucket<br/>Direct PUT of source + fallback;<br/>API does not carry large bytes"]:::data
+    n03["create_album / add_images<br/>Validate owned keys; EXIF;<br/>commit media rows + visibility tags"]:::app
+    n00 -->|"request capability"| n01
+    n01 -->|"upload bytes"| n02
+    n02 -->|"commit metadata"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["RESPONSIVE PHOTO DERIVATIVES"]
+    direction LR
+    n10["Committed photos<br/>Keep JPEG fallback available"]:::app
+    n11["PreviewQueue<br/>Bounded jobs + partial retries"]:::job
+    n12["PreviewWorker<br/>Node.js 22 + Sharp; V3 WebP<br/>variants, blurhash, Explore metadata"]:::job
+    n13["S3 + PreviewMetadataTable<br/>Versioned variants + ready record;<br/>visibility checks and invalidation"]:::data
+    n10 -->|"enqueue"| n11
+    n11 -->|"consume"| n12
+    n12 -->|"publish ready"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["VIDEO TRANSCODING"]
+    direction LR
+    n20["Committed video album<br/>create_album records source/job"]:::app
+    n21["AWS MediaConvert<br/>Assumed media service role"]:::job
+    n22["ImagesBucket HLS output<br/>Master playlist + renditions;<br/>source MP4 remains available"]:::data
+    n23["Media CDN → VideoPlayer<br/>Public HLS when accessible;<br/>protected/fallback signed source"]:::edge
+    n20 -->|"submit job"| n21
+    n21 -->|"read source / write HLS"| n22
+    n22 -->|"play media"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["MANAGED HOMEPAGE AND VIDEO HERO"]
+    direction LR
+    n30["ManageHero<br/>/admin/hero; image covers for<br/>photo + video landing pages"]:::actor
+    n31["hero_cover + PreviewQueue<br/>Presign image PUT; validate complete;<br/>queue hero publication job"]:::app
+    n32["Sharp hero worker<br/>Write ImagesBucket hero variants<br/>and manifest; invalidate cache"]:::job
+    n33["Home + Videos hero<br/>Managed CDN images; bundled<br/>frontend image fallback"]:::edge
+    n30 -->|"upload + complete"| n31
+    n31 -->|"queue publication"| n32
+    n32 -->|"serve cover"| n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

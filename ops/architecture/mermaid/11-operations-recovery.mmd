@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["WEBSITE HEALTH AND INCIDENT DELIVERY"]
+    direction LR
+    n00["API / Lambda / SQS / edge<br/>Access + JSON audit logs, X-Ray;<br/>latency, errors, queue and WAF metrics"]:::ops
+    n01["CloudWatch + registry<br/>Dashboards, alarms, runbooks;<br/>app alarms → central SNS"]:::ops
+    n02["Validated signal routing<br/>Edge/WAF + backup events → SQS<br/>→ signal Lambda → same SNS topic"]:::security
+    n03["Website responder<br/>Owner-approved monitored subscriber;<br/>delivery DLQ + triage runbooks"]:::actor
+    n00 -. "emit signals" .-> n01
+    n01 -. "event route where needed" .-> n02
+    n02 -. "notify" .-> n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["ACCOUNT EVIDENCE AND POSTURE"]
+    direction LR
+    n10["AWS management events<br/>Global + multi-Region API activity"]:::ops
+    n11["CloudTrail audit foundation<br/>Retained Object-Locked S3 evidence;<br/>CloudWatch logs + metric filters"]:::data
+    n12["Home-Region posture<br/>Targeted Config; GuardDuty;<br/>standards-free Security Hub; Analyzer"]:::security
+    n13["Read-only account audit<br/>Queryable findings + drift checks;<br/>account signals are audit-only"]:::ops
+    n10 -. "record" .-> n11
+    n11 ~~~ n12
+    n12 -. "review findings" .-> n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["METADATA BACKUP AND RESTORE"]
+    direction LR
+    n20["Application DynamoDB<br/>Retained + deletion-protected;<br/>PITR across application tables"]:::data
+    n21["Daily AWS Backup selection<br/>AlbumsTable + PreviewMetadataTable;<br/>08:00 UTC; 35-day recovery points"]:::job
+    n22["Primary metadata vault<br/>us-west-2; freshness + failure<br/>signals; guarded restore tests"]:::data
+    n23["Recovery destination vault<br/>us-east-2; separate KMS key;<br/>no automatic CopyActions in plan"]:::data
+    n20 -. "two selected tables" .-> n21
+    n21 -. "store recovery point" .-> n22
+    n22 ~~~ n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["MEDIA, COST AND CONTROL SAFEGUARDS"]
+    direction LR
+    n30["ImagesBucket versioning<br/>30-day noncurrent media;<br/>pending/ZIP/reference lifecycles"]:::data
+    n31["Edited Drive backup · 09<br/>Optional external media copy;<br/>restore via reviewed tooling"]:::provider
+    n32["Guarded security controls<br/>IAM + SSM/KMS; optional DNSSEC;<br/>WAF + bounded concurrency"]:::security
+    n33["Cost governance<br/>Optional console-only budget;<br/>no website notification route"]:::ops
+    n30 -. "optional backup" .-> n31
+    n31 ~~~ n32
+    n32 ~~~ n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

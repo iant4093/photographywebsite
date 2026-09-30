@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["VIEW PUBLIC OR PROTECTED MEDIA"]
+    direction LR
+    n00["Public / client / shared viewer<br/>SharedAlbum checks Turnstile;<br/>owner/admin JWT where applicable"]:::actor
+    n01["Album authorization<br/>Current visibility + membership;<br/>active exact unlisted share grant"]:::security
+    n02["Media URLs<br/>Public: CloudFront OAC + tags;<br/>protected: presigned S3 GET"]:::edge
+    n03["Progressive image / video<br/>Blurhash → responsive preview;<br/>expiry-aware refresh + fallback"]:::app
+    n00 -->|"open album"| n01
+    n01 -->|"serialize allowed"| n02
+    n02 -->|"fetch bytes"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["SINGLE FILE AND ALBUM ZIP"]
+    direction LR
+    n10["Download or ZIP action<br/>Album route or exact share route"]:::actor
+    n11["Download / create_zip API<br/>Authorize media; rate limit;<br/>return URL or async ZIP job"]:::security
+    n12["WorkerZip → ImagesBucket<br/>Read selected sources; write<br/>temp-zips job/status + archive"]:::job
+    n13["Browser download<br/>Poll job; signed archive URL;<br/>temp-zips expire after one day"]:::app
+    n10 -->|"POST request"| n11
+    n11 -->|"ZIP only: invoke"| n12
+    n12 -->|"download ready ZIP"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["PRINT CAPABILITY AND ISOLATED STORE"]
+    direction LR
+    n20["Photo → Order a Print<br/>prepare_print authorizes access"]:::actor
+    n21["Five-minute capability<br/>One photo; signed opaque token;<br/>print/session rechecks grant"]:::security
+    n22["Opaque reference preview<br/>Copy JPEG to fotomoto/references;<br/>public CDN; 30-day lifecycle"]:::data
+    n23["Isolated print.html<br/>prints subdomain iframe; clears<br/>its storage before vendor script"]:::edge
+    n20 -->|"issue capability"| n21
+    n21 -->|"redeem + copy"| n22
+    n22 -->|"preview for widget"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["ORDER FULFILLMENT"]
+    direction LR
+    n30["Fotomoto<br/>Products, crop, checkout;<br/>Stripe payment integration"]:::provider
+    n31["Photographer<br/>Receive paid order; identify photo"]:::actor
+    n32["Manual print-ready upload<br/>Upload matching high-resolution<br/>JPEG to the vendor order"]:::actor
+    n33["Fotomoto lab<br/>Produce, pack, ship;<br/>customer order updates"]:::provider
+    n30 -->|"paid order"| n31
+    n31 -->|"supply original"| n32
+    n32 -->|"fulfill order"| n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

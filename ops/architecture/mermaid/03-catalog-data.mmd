@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["CATALOG AND PRESENTATION"]
+    direction LR
+    n00["Home / Videos / Search<br/>Public catalogs; owner/admin lists"]:::app
+    n01["Catalog handlers<br/>get_public_albums / get_albums"]:::app
+    n02["AlbumsTable<br/>Album identity, visibility, owner,<br/>share, status + legacy manifest"]:::data
+    n03["GallerySettingsTable<br/>Read order/section settings;<br/>merge into catalog response"]:::data
+    n00 -->|"paged requests"| n01
+    n01 -->|"query selected GSI"| n02
+    n02 -->|"combine settings"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["ALBUM DETAIL AND ADMIN PAGINATION"]
+    direction LR
+    n10["Album/detail readers<br/>Public, client, shared, admin"]:::app
+    n11["Album access + media store<br/>Check album; normalized rows<br/>with legacy migration fallback"]:::security
+    n12["AlbumMediaTable<br/>albumId + mediaId;<br/>AlbumOrderIndex for paging"]:::data
+    n13["PreviewMetadataTable<br/>Join ready variants and metadata<br/>for selected media IDs"]:::data
+    n10 -->|"request detail"| n11
+    n11 -->|"read media"| n12
+    n12 -->|"enrich response"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["EXPLORE AND RANDOM PHOTOS"]
+    direction LR
+    n20["Explore / random endpoints<br/>Filters, samples, shuffle decks"]:::app
+    n21["PreviewMetadataTable<br/>Sparse Explore refs, readiness<br/>markers, sharded random pools"]:::data
+    n22["Authoritative recheck<br/>Join current AlbumsTable +<br/>media/preview membership"]:::security
+    n23["Public discovery DTO<br/>Responsive URLs + coarse EXIF;<br/>stale references cannot grant access"]:::app
+    n20 -->|"read indexed refs"| n21
+    n21 -->|"resolve candidates"| n22
+    n22 -->|"serialize allowed"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["SUMMARY AND AUXILIARY STATE"]
+    direction LR
+    n30["Stats + admin readers<br/>Public stats; reports in 09"]:::app
+    n31["Authoritative / cached reads<br/>Public albums for photo stats;<br/>report caches for admin metrics"]:::app
+    n32["Other DynamoDB tables<br/>RateLimit + Analytics + cost,<br/>Drive, GitHub report caches"]:::data
+    n33["OriginalComparisonTable · 08<br/>Separate private matching state;<br/>album/media keyed comparison DTO"]:::data
+    n30 -->|"request summaries"| n31
+    n31 -->|"read by purpose"| n32
+    n32 ~~~ n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

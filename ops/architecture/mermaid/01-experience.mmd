@@ -1,0 +1,55 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["PHOTO BROWSING"]
+    direction LR
+    n00["Home + Search<br/>/ and /search; filter album catalog"]:::actor
+    n01["Photo album<br/>/album/:albumId; cards + hover"]:::app
+    n02["Photo lightbox<br/>Responsive image + Before/After"]:::app
+    n03["Photo actions · 06 / 08<br/>Share, QR, download, ZIP, print"]:::app
+    n00 -->|"open album"| n01
+    n01 -->|"select photo"| n02
+    n02 -->|"authorized action"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["VIDEO BROWSING"]
+    direction LR
+    n10["Videos<br/>/videos; category sections"]:::actor
+    n11["Video album<br/>/video/:albumId; hover previews"]:::app
+    n12["VideoPlayer<br/>Native HLS / hls.js + fallback"]:::app
+    n13["Media delivery · 04 / 06<br/>HLS segments, MP4, thumbnails"]:::edge
+    n10 -->|"open album"| n11
+    n11 -->|"play video"| n12
+    n12 -->|"fetch media"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["DISCOVERY"]
+    direction LR
+    n20["Explore + Stats<br/>/explore/* and /stats"]:::actor
+    n21["Browse or play<br/>Color, lens, exposure, time, season;<br/>shuffle, guess settings, 3D gallery"]:::app
+    n22["Public read APIs · 03<br/>Explore, random, stats, albums"]:::app
+    n23["Verified public photos<br/>Current visibility + membership;<br/>lightbox and album links"]:::app
+    n20 -->|"choose experience"| n21
+    n21 -->|"fetch data"| n22
+    n22 -->|"resolve references"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["CONTACT AND SHARED APP SHELL"]
+    direction LR
+    n30["Contact form<br/>/contact + Turnstile"]:::actor
+    n31["Contact handler<br/>Validate + rate limit"]:::app
+    n32["Resend<br/>Transactional contact email"]:::provider
+    n30 -->|"POST /api/contact"| n31
+    n31 -->|"send message"| n32
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

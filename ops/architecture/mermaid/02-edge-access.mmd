@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["API FRONT DOOR"]
+    direction LR
+    n00["Browser HTTPS /api<br/>Canonical website origin"]:::actor
+    n01["Frontend CloudFront + WAF<br/>Managed rules; API / Explore limits"]:::edge
+    n02["Regional HTTP API<br/>origin-api custom domain; JWT<br/>authorizer on protected routes"]:::edge
+    n03["Lambda request boundary<br/>Verify X-Origin-Verify first;<br/>then validation + authorization"]:::security
+    n00 -->|"edge inspection"| n01
+    n01 -->|"origin secret header"| n02
+    n02 -->|"dispatch handler"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["SIGN IN AND SESSION"]
+    direction LR
+    n10["Login / challenge UI<br/>/login; password + bot check"]:::actor
+    n11["Login + challenge handlers<br/>Turnstile + RateLimitTable"]:::app
+    n12["Cognito user pool<br/>Password / new-password / TOTP;<br/>Admins group"]:::security
+    n13["AuthProvider session<br/>Token refresh; sign-out cleanup;<br/>/dashboard or /admin"]:::app
+    n10 -->|"same-origin POST"| n11
+    n11 -->|"authenticate"| n12
+    n12 -->|"verified tokens"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["RESOURCE ACCESS POLICY"]
+    direction LR
+    n20["Requested album or media<br/>Public, private, or unlisted"]:::app
+    n21["Shared auth helpers<br/>Gateway claims or optional JWT;<br/>active album + valid visibility"]:::security
+    n22["Grant decision<br/>Public / exact owner sub / Admins;<br/>unlisted: active exact share code"]:::security
+    n23["Scoped response<br/>Allowlisted metadata / short-lived<br/>capability; otherwise 401/403/404"]:::app
+    n20 -->|"load current state"| n21
+    n21 -->|"verify grant"| n22
+    n22 -->|"authorize resource"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["STATIC DELIVERY AND SOCIAL ENTRY"]
+    direction LR
+    n30["Route 53 + ACM<br/>Canonical, www, prints, API;<br/>global + regional certificates"]:::edge
+    n31["CloudFront Functions<br/>www redirect + social routing"]:::edge
+    n32["Selected destination<br/>SPA from private S3, or<br/>/public/social HTML for crawlers"]:::edge
+    n33["Browser shell + policies<br/>CSP, CORS, HSTS; PWA shell/assets;<br/>API responses outside SW cache"]:::app
+    n30 -->|"DNS + TLS"| n31
+    n31 -->|"choose route"| n32
+    n32 -->|"deliver response"| n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["PULL REQUEST QUALITY"]
+    direction LR
+    n00["Pull request<br/>Source + dependency + IaC changes"]:::actor
+    n01["Reusable quality workflow<br/>Frontend / Python / ops / Sharp;<br/>coverage, SAM + infrastructure lint"]:::ops
+    n02["Security + artifact gates<br/>CodeQL, dependency/history scans;<br/>source allowlists + byte budgets"]:::security
+    n03["Reviewable result<br/>No AWS identity in PR checks"]:::ops
+    n00 -->|"run checks"| n01
+    n01 -->|"verify"| n02
+    n02 -->|"report"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["MAIN RELEASE"]
+    direction LR
+    n10["Push to main<br/>Repeat quality gate; build once"]:::actor
+    n11["Attested immutable artifacts<br/>Checksums; versioned S3 release<br/>objects encrypted with bootstrap KMS"]:::data
+    n12["Plan → execute OIDC roles<br/>Drift + intent + parameters;<br/>reviewed non-replacing change set"]:::security
+    n13["SAM application stack<br/>Backend UPDATE_COMPLETE;<br/>backend/template.yaml ownership"]:::ops
+    n10 -. "package tested bytes" .-> n11
+    n11 -. "plan guarded update" .-> n12
+    n12 -. "execute approved intent" .-> n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["FRONTEND RELEASE AND RECOVERY"]
+    direction LR
+    n20["Backend release complete<br/>Exact attested release SHA"]:::ops
+    n21["Frontend OIDC role<br/>Upload assets, index last;<br/>non-deleting S3 writes"]:::security
+    n22["Frontend CloudFront<br/>Await exact invalidation;<br/>credential-free public posture smoke"]:::edge
+    n23["Manual recovery workflow<br/>Select attested successful main SHA;<br/>current trusted control scripts"]:::ops
+    n20 -. "permit frontend stage" .-> n21
+    n21 -. "publish / verify" .-> n22
+    n22 -. "recover if needed" .-> n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["SEPARATE OPERATIONS OWNERSHIP"]
+    direction LR
+    n30["ops templates + tools<br/>Frontend edge / WAF / DNS /<br/>security / backups / observability"]:::ops
+    n31["Inventory + guarded changes<br/>Exact account/resource scope;<br/>dry-run tooling + change-set review"]:::security
+    n32["Independent ops stacks<br/>us-west-2 home; us-east-1 edge;<br/>us-east-2 recovery vault"]:::ops
+    n33["Weekly audit OIDC role<br/>Quality + history + drift/posture;<br/>read-only, no auto-remediation"]:::ops
+    n30 -. "prepare" .-> n31
+    n31 -. "apply scoped change" .-> n32
+    n32 -. "inspect" .-> n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3

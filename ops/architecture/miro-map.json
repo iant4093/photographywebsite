@@ -1,0 +1,19 @@
+{
+  "board_url": "https://miro.com/app/board/uXjVHsf6LH0=/",
+  "guide_url": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780889564",
+  "inventory_url": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780889285",
+  "views": {
+    "00-system": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780829950",
+    "01-experience": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830052",
+    "02-edge-access": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830094",
+    "03-catalog-data": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830147",
+    "04-media-ingestion": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830586",
+    "05-consistency-workers": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830632",
+    "06-sharing-delivery": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830671",
+    "07-local-editor": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830717",
+    "08-original-comparisons": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780830888",
+    "09-admin-integrations": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780888933",
+    "10-release-ownership": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780889000",
+    "11-operations-recovery": "https://miro.com/app/board/uXjVHsf6LH0=/?moveToWidget=3458764682780889047"
+  }
+}

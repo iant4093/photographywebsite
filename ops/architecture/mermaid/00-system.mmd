@@ -1,0 +1,57 @@
+flowchart TB
+  classDef actor fill:#EAF2FF,stroke:#3864A3,color:#172B3A,stroke-width:1.5px
+  classDef edge fill:#E8F6F6,stroke:#287C83,color:#172B3A,stroke-width:1.5px
+  classDef app fill:#EFF1FC,stroke:#606AAF,color:#172B3A,stroke-width:1.5px
+  classDef data fill:#FFF3DB,stroke:#A7792B,color:#172B3A,stroke-width:1.5px
+  classDef job fill:#FCEEE5,stroke:#AF704A,color:#172B3A,stroke-width:1.5px
+  classDef security fill:#F9EAF0,stroke:#A65774,color:#172B3A,stroke-width:1.5px
+  classDef provider fill:#F1EBF8,stroke:#86639D,color:#172B3A,stroke-width:1.5px
+  classDef ops fill:#EDF2F5,stroke:#62798A,color:#172B3A,stroke-width:1.5px
+  subgraph lane0["WEBSITE DELIVERY · 01–02"]
+    direction LR
+    n00["Visitors, clients, admin<br/>Browser and installed PWA"]:::actor
+    n01["Frontend CloudFront<br/>Route 53 + ACM + WAF"]:::edge
+    n02["Private frontend S3<br/>HTML, versioned JS/CSS, assets"]:::data
+    n03["React application<br/>Public pages + protected portal"]:::app
+    n00 -->|"HTTPS"| n01
+    n01 -->|"OAC origin read"| n02
+    n02 -->|"serves app"| n03
+  end
+  style lane0 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane1["APPLICATION REQUESTS · 02–03, 06, 09"]
+    direction LR
+    n10["React API client<br/>Same-origin /api"]:::app
+    n11["CloudFront API behavior<br/>Public cache / protected no-store"]:::edge
+    n12["API Gateway + Lambda<br/>Origin check + route/album auth"]:::app
+    n13["Application state<br/>DynamoDB + Cognito + providers"]:::data
+    n10 -->|"JSON requests"| n11
+    n11 -->|"verified origin"| n12
+    n12 -->|"authorized work"| n13
+  end
+  style lane1 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane2["MEDIA LIFECYCLE · 04–06, 08"]
+    direction LR
+    n20["Admin upload + commit<br/>Presigned S3 transfer; API metadata"]:::actor
+    n21["Private media S3<br/>Original uploads + JPEG fallback"]:::data
+    n22["Background processing<br/>SQS / Lambda / MediaConvert"]:::job
+    n23["Viewer media<br/>Public CDN; private signed S3"]:::edge
+    n20 -->|"direct bytes"| n21
+    n21 -->|"derive / index"| n22
+    n22 -->|"publish outputs"| n23
+  end
+  style lane2 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  subgraph lane3["CHANGE AND OPERATE · 10–11"]
+    direction LR
+    n30["GitHub Actions<br/>PR checks; main release; audits"]:::ops
+    n31["AWS OIDC roles<br/>Plan / execute / frontend / audit"]:::security
+    n32["Application + ops<br/>SAM app; separately guarded ops"]:::ops
+    n33["Observe and recover<br/>Logs, alarms, PITR, backups"]:::ops
+    n30 -. "short-lived identity" .-> n31
+    n31 -. "scoped control" .-> n32
+    n32 -. "operational signals" .-> n33
+  end
+  style lane3 fill:#FAFBFD,stroke:#DCE3EB,color:#526578
+  %% Invisible links only stack lanes; they do not represent system relationships.
+  lane0 ~~~ lane1
+  lane1 ~~~ lane2
+  lane2 ~~~ lane3
