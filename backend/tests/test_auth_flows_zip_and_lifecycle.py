@@ -38,9 +38,9 @@ class UserAuthenticationFlowTests(unittest.TestCase):
                 {"email": "user@example.com", "password": "Password123!", "turnstileToken": "bad"}
             )
         }
-        with patch.object(login, "verify_turnstile", return_value=False), patch.object(
-            login.cognito, "admin_initiate_auth"
-        ) as auth:
+        with patch.object(login, "check_rate_limit", return_value=True), patch.object(
+            login, "verify_turnstile", return_value=False
+        ), patch.object(login.cognito, "admin_initiate_auth") as auth:
             response = login.handler(event, None)
         self.assertEqual(response["statusCode"], 403)
         auth.assert_not_called()

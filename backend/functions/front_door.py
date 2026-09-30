@@ -159,7 +159,7 @@ def verify_front_door_request(event, _context=None):
 
 def reset_front_door_cache_for_tests():
     """Clear process-local state without returning or logging cached values."""
-    global _secrets_client
+    global _ssm_client
     with _CACHE_LOCK:
-        _CACHE.update(arn=None, current=None, previous=None, expires_at=0.0)
-    _secrets_client = None
+        _CACHE.update(name=None, current=None, previous=None, expires_at=0.0)
+    _ssm_client = None

@@ -15,6 +15,7 @@ from album_media_store import deactivate_album_media, update_album_media, mutati
 from auth_helpers import require_admin
 from cache_invalidation import request_public_api_invalidation, invalidate_album_media
 from deletion_helpers import DeletionTooLargeError, delete_keys_all_versions, preflight_deletion
+from dynamodb_helpers import AlbumManifestTooLarge, ensure_album_item_budget, estimated_item_bytes
 from media_access import media_id_for_key, serialize_images, tag_keys_visibility, validate_album_media_key
 from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
@@ -173,6 +174,21 @@ def handler(event, context):
                 update_parts.append(f"images[{target_index}].{field} = :{field}")
                 values[f":{field}"] = value
 
+            updated_image = {**images[target_index], **accessibility}
+            if ":thumbKey" in values:
+                updated_image["thumbKey"] = values[":thumbKey"]
+            if ":blurhash" in values:
+                updated_image["blurhash"] = values[":blurhash"]
+            # Captions and transcripts live inline in the album item. Refuse a
+            # growing write before any tagging or cleanup starts, but never block
+            # the edit that shrinks an album which is already over budget.
+            prospective = {
+                **album,
+                "images": [updated_image if index == target_index else image for index, image in enumerate(images)],
+            }
+            if estimated_item_bytes(prospective) > estimated_item_bytes(album):
+                ensure_album_item_budget(prospective)
+
             if obsolete_thumb:
                 preflight_deletion(keys=[obsolete_thumb], max_versions=100)
             if "thumbKey" in body and not mutation_protocol_enabled():
@@ -220,11 +236,6 @@ def handler(event, context):
                     catalog=True,
                     reason="album-media-updated",
                 )
-            updated_image = {**images[target_index], **accessibility}
-            if ":thumbKey" in values:
-                updated_image["thumbKey"] = values[":thumbKey"]
-            if ":blurhash" in values:
-                updated_image["blurhash"] = values[":blurhash"]
             if mutation_protocol_enabled():
                 updated_images = [updated_image if index == target_index else image for index, image in enumerate(images)]
                 if ":thumbKey" in values:
@@ -259,6 +270,9 @@ def handler(event, context):
             "The obsolete thumbnail has too many versions for synchronous cleanup",
             code="deletion_too_large",
         )
+    except AlbumManifestTooLarge as error:
+        _audit(event, context, "denied", "manifest_too_large")
+        return error_response(413, str(error), code="album_manifest_too_large")
     except ValidationError as error:
         _audit(event, context, "denied", "invalid_request")
         return error_response(400, str(error), code="invalid_request")

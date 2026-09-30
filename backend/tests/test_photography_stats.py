@@ -164,11 +164,13 @@ class PhotographyStatsTests(unittest.TestCase):
         self.assertEqual(response_body(response)["code"], "stats_preparing")
 
         with patch.object(photography_stats, "verify_front_door_request", return_value=None), patch.object(
-            photography_stats.cache_table, "get_item", side_effect=RuntimeError("secret details")
+            photography_stats.cache_table, "get_item", side_effect=RuntimeError("secret details for owner@example.com")
         ), self.assertLogs("photography_api", level="ERROR") as logs:
             response = photography_stats.handler({}, CONTEXT)
         self.assertEqual(response["statusCode"], 500)
-        self.assertNotIn("secret details", " ".join(logs.output))
+        self.assertNotIn("secret details", response["body"])
+        self.assertNotIn("owner@example.com", " ".join(logs.output))
+        self.assertIn("error_detail=secret details for <email>", " ".join(logs.output))
 
     def test_scheduled_wrapper_refreshes_stats_after_drive_usage(self):
         with patch.object(

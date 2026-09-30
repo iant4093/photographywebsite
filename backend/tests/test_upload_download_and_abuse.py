@@ -215,9 +215,9 @@ class AbuseProtectionTests(unittest.TestCase):
             "headers": {"X-Turnstile-Token": "bad"},
             "requestContext": {"http": {"sourceIp": "192.0.2.1"}},
         }
-        with patch.object(get_shared_album, "verify_turnstile", return_value=False), patch.object(
-            get_shared_album.table, "query"
-        ) as query:
+        with patch.object(get_shared_album, "check_rate_limit", return_value=True), patch.object(
+            get_shared_album, "verify_turnstile", return_value=False
+        ), patch.object(get_shared_album.table, "query") as query:
             response = get_shared_album.handler(event, None)
         self.assertEqual(response["statusCode"], 403)
         query.assert_not_called()

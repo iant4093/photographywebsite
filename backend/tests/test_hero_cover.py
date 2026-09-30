@@ -265,13 +265,16 @@ class HeroActivationTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 409)
         self.assertNotIn("private detail", response["body"])
 
-        hero_cover.s3.head_object.side_effect = RuntimeError("provider secret detail")
+        hero_cover.s3.head_object.side_effect = RuntimeError("provider failed for site/hero/pending/secret-name.jpg")
         with patch.object(hero_cover, "verify_front_door_request", return_value=None), patch.object(
             hero_cover, "require_admin", return_value=None
         ), self.assertLogs("photography_api", level="ERROR") as captured:
             response = hero_cover.handler(self.request, SimpleNamespace(aws_request_id="request-safe"))
         self.assertEqual(response["statusCode"], 500)
-        self.assertNotIn("provider secret detail", response["body"] + "\n".join(captured.output))
+        self.assertNotIn("provider failed", response["body"])
+        # Logs keep the redacted diagnosis but never the object key.
+        self.assertNotIn("secret-name", response["body"] + "\n".join(captured.output))
+        self.assertIn("site/hero/<redacted>", "\n".join(captured.output))
 
 
 if __name__ == "__main__":

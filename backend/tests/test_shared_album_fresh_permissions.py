@@ -21,7 +21,6 @@ class SharedAlbumFreshPermissionTests(unittest.TestCase):
         self.table.query.return_value = {"Items": [self.stale]}
         self.table.get_item.return_value = {"Item": self.fresh}
         self.enterContext(patch.object(get_shared_album, "table", self.table))
-        self.enterContext(patch.object(get_shared_album, "is_rate_limit_denied", return_value=False))
         self.enterContext(patch.object(get_shared_album, "verify_turnstile", return_value=True))
         self.enterContext(patch.object(get_shared_album, "check_rate_limit", return_value=True))
         self.enterContext(patch.object(get_shared_album, "_audit"))

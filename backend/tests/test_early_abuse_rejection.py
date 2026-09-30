@@ -1,4 +1,4 @@
-"""Cached denials save external work without replacing CAPTCHA or database limits."""
+"""Source rate limits reject floods before CAPTCHA; cached denials also skip the table."""
 
 import json
 import os
@@ -49,41 +49,64 @@ class EarlyAbuseRejectionTests(unittest.TestCase):
             with self.subTest(handler=module.__name__):
                 self.block(action, limit, window)
                 lookups = self.get_table.call_count
-                with patch.object(module, "verify_turnstile") as captcha, patch.object(module, "check_rate_limit") as rate:
+                with patch.object(module, "verify_turnstile") as captcha:
                     response = module.handler(self.event(body), None)
                 self.assertEqual(response["statusCode"], 429)
                 captcha.assert_not_called()
-                rate.assert_not_called()
                 self.assertEqual(self.get_table.call_count, lookups)
 
-    def test_expired_blocks_resume_captcha_then_authoritative_rate_check(self):
+    def test_expired_blocks_resume_authoritative_rate_check_before_captcha(self):
         for module, action, limit, window, body in CASES:
             with self.subTest(handler=module.__name__):
                 self.block(action, limit, window)
                 self.now += window
                 order = []
-                with patch.object(module, "verify_turnstile", side_effect=lambda *_a, **_k: order.append("captcha") or True), patch.object(
-                    module, "check_rate_limit", side_effect=lambda *_a, **_k: order.append("rate") or False,
+                with patch.object(module, "verify_turnstile", side_effect=lambda *_a, **_k: order.append("captcha") or False), patch.object(
+                    module, "check_rate_limit", side_effect=lambda *_a, **_k: order.append("rate") or True,
                 ):
                     response = module.handler(self.event(body), None)
-                self.assertEqual(response["statusCode"], 429)
-                self.assertEqual(order, ["captcha", "rate"])
+                self.assertEqual(response["statusCode"], 403)
+                self.assertEqual(order, ["rate", "captcha"])
 
-    def test_cold_cache_misses_still_require_captcha_before_database_work(self):
-        for module, _action, _limit, _window, body in CASES:
-            with self.subTest(handler=module.__name__), patch.object(module, "verify_turnstile", return_value=False) as captcha, patch.object(
-                module, "check_rate_limit",
-            ) as rate:
+    def test_cold_cache_misses_spend_source_quota_before_captcha(self):
+        for module, action, limit, window, body in CASES:
+            with self.subTest(handler=module.__name__), patch.object(module, "verify_turnstile", return_value=False) as captcha:
                 self.assertEqual(module.handler(self.event(body), None)["statusCode"], 403)
                 captcha.assert_called_once()
-                rate.assert_not_called()
-        self.get_table.assert_not_called()
+                self.assertEqual(self.table.rows[security_helpers._identifier_hash(IP, action)]["count"], 1)
+
+    def _assert_rate_denial_skips_captcha(self, module, body):
+        with patch.object(module, "verify_turnstile") as captcha, patch.object(
+            module, "check_rate_limit", return_value=False,
+        ) as rate:
+            response = module.handler(self.event(body), None)
+        self.assertEqual(response["statusCode"], 429)
+        self.assertEqual(json.loads(response["body"])["code"], "rate_limited")
+        rate.assert_called_once()
+        captcha.assert_not_called()
+
+    def test_login_rate_denial_never_calls_turnstile(self):
+        self._assert_rate_denial_skips_captcha(login, CASES[0][4])
+
+    def test_complete_challenge_rate_denial_never_calls_turnstile(self):
+        self._assert_rate_denial_skips_captcha(complete_challenge, CASES[1][4])
+
+    def test_contact_rate_denial_never_calls_turnstile(self):
+        self._assert_rate_denial_skips_captcha(contact, CASES[2][4])
+
+    def test_shared_album_rate_denial_never_calls_turnstile(self):
+        self._assert_rate_denial_skips_captcha(get_shared_album, CASES[3][4])
 
     def test_username_blocks_do_not_create_an_unauthenticated_account_probe(self):
-        self.block("login_user", 8, 600, identifier="user@example.com")
-        with patch.object(login, "verify_turnstile", return_value=False) as captcha:
-            self.assertEqual(login.handler(self.event(CASES[0][4]), None)["statusCode"], 403)
-        captcha.assert_called_once()
+        for module, action, limit, body in (
+            (login, "login_user", 8, CASES[0][4]),
+            (complete_challenge, "login_challenge_user", 5, CASES[1][4]),
+        ):
+            with self.subTest(handler=module.__name__):
+                self.block(action, limit, 600, identifier="user@example.com")
+                with patch.object(module, "verify_turnstile", return_value=False) as captcha:
+                    self.assertEqual(module.handler(self.event(body), None)["statusCode"], 403)
+                captcha.assert_called_once()
 
     def test_peek_is_scoped_to_identifier_action_policy_table_and_secret(self):
         self.block("contact", 3, 600)
@@ -103,11 +126,12 @@ class EarlyAbuseRejectionTests(unittest.TestCase):
         self.block("contact", 3, 600)
         for action, limit, window in ((None, 3, 600), ("", 3, 600), ("x" * 65, 3, 600), ("contact", "bad", 600), ("contact", 0, 600), ("contact", 3, 0)):
             self.assertFalse(security_helpers.is_rate_limit_denied(IP, action, limit, window))
+        # An unavailable limiter fails closed before any CAPTCHA round-trip.
         with patch.object(security_helpers, "_identifier_hash", side_effect=RuntimeError("unavailable")), patch.object(
             contact, "verify_turnstile", return_value=False,
         ) as captcha:
-            self.assertEqual(contact.handler(self.event(CASES[2][4]), None)["statusCode"], 403)
-        captcha.assert_called_once()
+            self.assertEqual(contact.handler(self.event(CASES[2][4]), None)["statusCode"], 429)
+        captcha.assert_not_called()
 
     def test_duplicate_fields_fail_as_client_errors_before_captcha_or_quota(self):
         for module, _action, _limit, _window, body in CASES[:3]:

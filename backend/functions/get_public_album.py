@@ -1706,7 +1706,7 @@ def _html_response(body):
         "statusCode": 200,
         "headers": {
             "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-cache, max-age=0, must-revalidate",
+            "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
             "Content-Security-Policy": content_security_policy,
         },
         "body": body,

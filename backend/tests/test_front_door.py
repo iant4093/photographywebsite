@@ -58,6 +58,14 @@ class FrontDoorVerifierTests(unittest.TestCase):
         }
         return current, previous, client
 
+    def test_cache_reset_clears_the_parameter_cache_and_client(self) -> None:
+        with front_door._CACHE_LOCK:
+            front_door._CACHE.update(name="/old", current="c" * 32, previous=None, expires_at=10**12)
+        front_door._ssm_client = MagicMock()
+        front_door.reset_front_door_cache_for_tests()
+        self.assertEqual(front_door._CACHE, {"name": None, "current": None, "previous": None, "expires_at": 0.0})
+        self.assertIsNone(front_door._ssm_client)
+
     def test_enforcement_off_is_backward_compatible_and_never_reads_secret(self) -> None:
         with patch.dict(os.environ, {"FRONT_DOOR_ENFORCEMENT_ENABLED": "false"}), patch.object(
             front_door, "_client", side_effect=AssertionError("secret provider should not be called")

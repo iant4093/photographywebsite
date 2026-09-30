@@ -2,11 +2,23 @@
 
 import json
 import logging
+import re
 from decimal import Decimal
 
 
 logger = logging.getLogger("photography_api")
 logger.setLevel(logging.INFO)
+
+ERROR_DETAIL_MAX_CHARS = 300
+_ERROR_DETAIL_REDACTIONS = (
+    # Object keys embed album ids and original filenames.
+    (re.compile(r"(albums|public-previews|temp-zips|album-zips|fotomoto|site/hero)/[^\s\"']+"), r"\1/<redacted>"),
+    (re.compile(r"[^\s@\"']+@[^\s@\"']+\.[^\s@\"']+"), "<email>"),
+    (re.compile(r"Bearer\s+[^\s\"']+", re.IGNORECASE), "Bearer <redacted>"),
+    # JWTs, presigned signatures, hashes, and other opaque credentials.
+    (re.compile(r"[A-Za-z0-9_\-.=]{40,}"), "<token>"),
+    (re.compile(r"X-Amz-[A-Za-z-]+=[^&\s]+"), "X-Amz-<redacted>"),
+)
 
 
 class DynamoJsonEncoder(json.JSONEncoder):
@@ -36,9 +48,25 @@ def error_response(status_code, message, *, code=None):
     return json_response(status_code, body)
 
 
+def redact_error_detail(text):
+    """Return exception text with object keys, emails, and credentials removed."""
+    # Collapse control characters so a message cannot forge extra log lines.
+    detail = re.sub(r"[\x00-\x1f\x7f]+", " ", str(text or ""))
+    for pattern, replacement in _ERROR_DETAIL_REDACTIONS:
+        detail = pattern.sub(replacement, detail)
+    return detail[:ERROR_DETAIL_MAX_CHARS]
+
+
 def internal_error(context=None, error=None, operation="request"):
     request_id = getattr(context, "aws_request_id", "unknown") if context else "unknown"
     error_type = type(error).__name__ if error else "UnknownError"
-    # Intentionally exclude exception text, event data, object keys, and PII.
-    logger.error("operation_failed operation=%s request_id=%s error_type=%s", operation, request_id, error_type)
+    try:
+        error_text = "" if error is None else str(error)
+    except Exception:
+        error_text = ""
+    # Exception text is logged only after redaction; event data never is.
+    logger.error(
+        "operation_failed operation=%s request_id=%s error_type=%s error_detail=%s",
+        operation, request_id, error_type, redact_error_detail(error_text),
+    )
     return error_response(500, "Internal server error", code="internal_error")
