@@ -497,6 +497,7 @@ class CloudFrontMainTests(unittest.TestCase):
                 "public_query_strings": ["cursor"],
                 "public_forward_headers": ["Origin"],
                 "private_forward_headers": ["Authorization"],
+                "private_forward_cookies": ["CloudFront-Key-Pair-Id"],
                 "public_cache_policy_name": "public",
                 "stats_cache_policy_name": "stats",
                 "public_origin_request_policy_name": "public-origin",
@@ -527,8 +528,8 @@ class CloudFrontMainTests(unittest.TestCase):
         ), patch.object(
             cloudfront_frontend,
             "ensure_origin_request_policy",
-            side_effect=[("public-origin", "unchanged"), ("private-origin", "unchanged")],
-        ), patch.object(
+            side_effect=[("public-origin", "unchanged"), ("private-origin", "updated")],
+        ) as origin_policies, patch.object(
             cloudfront_frontend,
             "ensure_response_policy",
             side_effect=[
@@ -562,6 +563,20 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(behaviors["/api/*"]["CachePolicyId"], "html-cache")
         self.assertEqual(behaviors["/api/public/*"]["CachePolicyId"], "public-cache")
         self.assertEqual(behaviors["/api/public/stats"]["CachePolicyId"], "stats-cache")
+
+        # The apply path hands the allowlisted-cookie config to the private
+        # origin request policy only; the public one keeps forwarding none.
+        (public_policy,), public_options = origin_policies.call_args_list[0]
+        (private_policy,), private_options = origin_policies.call_args_list[1]
+        self.assertEqual(public_policy["Name"], "public-origin")
+        self.assertEqual(public_policy["CookiesConfig"], {"CookieBehavior": "none"})
+        self.assertEqual(private_policy["Name"], "private-origin")
+        self.assertEqual(
+            private_policy["CookiesConfig"],
+            {"CookieBehavior": "whitelist", "Cookies": {"Quantity": 1, "Items": ["CloudFront-Key-Pair-Id"]}},
+        )
+        self.assertTrue(public_options["apply"] and private_options["apply"])
+        self.assertEqual(behaviors["/api/*"]["OriginRequestPolicyId"], "private-origin")
 
     PRIVATE_MEDIA_STACK = {
         "PrivateMediaKeyGroup": "KEY-GROUP",
@@ -893,6 +908,65 @@ class CloudFrontMainTests(unittest.TestCase):
         ):
             with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
                 cloudfront_frontend.upsert_private_media_origin({"Origins": {"Items": origins}}, resources)
+
+    def test_private_api_origin_policy_gains_the_cookie_allowlist_in_place(self):
+        baseline = json.loads((OPS / "frontend_cloudfront_baseline.json").read_text(encoding="utf-8"))
+        settings = baseline["api_front_door"]
+        self.assertEqual(settings["private_forward_cookies"], ["CloudFront-Key-Pair-Id"])
+        # /api/* must stay on the managed CachingDisabled policy so nothing is
+        # cached per cookie.
+        self.assertEqual(baseline["cache_policies"]["html"], "4135ea2d-6df8-44a3-9df3-4b5a84be39ad")
+        desired = cloudfront_frontend.api_origin_request_policy_config(settings, public=False)
+        deployed = {
+            **desired,
+            "Comment": "Same-origin API forwarding; never forwards viewer cookies or host",
+            "CookiesConfig": {"CookieBehavior": "none"},
+        }
+        listing = {
+            "OriginRequestPolicyList": {
+                "Items": [{
+                    "OriginRequestPolicy": {
+                        "Id": "private-origin-id",
+                        "OriginRequestPolicyConfig": {"Name": "IanTruong-API-Private-Origin-v1"},
+                    }
+                }]
+            }
+        }
+
+        def aws(arguments, *, profile=None):
+            if arguments[:2] == ["cloudfront", "list-origin-request-policies"]:
+                return listing
+            if arguments[:2] == ["cloudfront", "get-origin-request-policy-config"]:
+                self.assertEqual(arguments[-1], "private-origin-id")
+                return {"ETag": "policy-etag", "OriginRequestPolicyConfig": deployed}
+            raise AssertionError(arguments)
+
+        with patch.object(cloudfront_frontend, "aws_json", side_effect=aws), patch.object(
+            cloudfront_frontend, "aws_with_json_file"
+        ) as write:
+            self.assertEqual(
+                cloudfront_frontend.ensure_origin_request_policy(desired, apply=False, profile=None),
+                ("private-origin-id", "update"),
+            )
+            write.assert_not_called()
+            self.assertEqual(
+                cloudfront_frontend.ensure_origin_request_policy(desired, apply=True, profile=None),
+                ("private-origin-id", "updated"),
+            )
+        # The existing policy is updated under its ETag; no new policy is made.
+        write.assert_called_once()
+        arguments, payload = write.call_args.args
+        self.assertEqual(arguments[:6], [
+            "cloudfront", "update-origin-request-policy", "--id", "private-origin-id", "--if-match", "policy-etag",
+        ])
+        self.assertEqual(payload, desired)
+
+        deployed = desired
+        with patch.object(cloudfront_frontend, "aws_json", side_effect=aws):
+            self.assertEqual(
+                cloudfront_frontend.ensure_origin_request_policy(desired, apply=True, profile=None),
+                ("private-origin-id", "unchanged"),
+            )
 
     def test_private_media_origin_cannot_satisfy_the_frontend_origin_check(self):
         config = {
