@@ -1091,6 +1091,8 @@ Resources:
               - cloudfront:CreateResponseHeadersPolicy
               - cloudfront:DeleteCachePolicy
               - cloudfront:DeleteFunction
+              - cloudfront:DeleteKeyGroup
+              - cloudfront:DeletePublicKey
               - cloudfront:DeleteOriginAccessControl
               - cloudfront:DeleteResponseHeadersPolicy
               - cloudfront:DescribeFunction
@@ -1098,7 +1100,9 @@ Resources:
               - cloudfront:GetDistribution
               - cloudfront:GetDistributionConfig
               - cloudfront:GetFunction
+              - cloudfront:GetKeyGroup
               - cloudfront:GetOriginAccessControl
+              - cloudfront:GetPublicKey
               - cloudfront:GetResponseHeadersPolicy
               - cloudfront:ListTagsForResource
               - cloudfront:TagResource
@@ -1106,14 +1110,19 @@ Resources:
               - cloudfront:UpdateCachePolicy
               - cloudfront:UpdateDistribution
               - cloudfront:UpdateFunction
+              - cloudfront:UpdateKeyGroup
               - cloudfront:UpdateOriginAccessControl
+              - cloudfront:UpdatePublicKey
               - cloudfront:UpdateResponseHeadersPolicy
               - cloudfront:PublishFunction
             Resource:
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:cache-policy/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:function/*'
+              # Signed-cookie key material for private media delivery (ops/PRIVATE_MEDIA.md).
+              - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:key-group/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:origin-access-control/*'
+              - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:public-key/*'
               - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:response-headers-policy/*'
           - Sid: CreateCloudFrontResources
             Effect: Allow
@@ -1121,12 +1130,16 @@ Resources:
               - cloudfront:CreateCachePolicy
               - cloudfront:CreateDistribution
               - cloudfront:CreateFunction
+              - cloudfront:CreateKeyGroup
               - cloudfront:CreateOriginAccessControl
+              - cloudfront:CreatePublicKey
               - cloudfront:CreateResponseHeadersPolicy
               - cloudfront:ListCachePolicies
               - cloudfront:ListDistributions
               - cloudfront:ListFunctions
+              - cloudfront:ListKeyGroups
               - cloudfront:ListOriginAccessControls
+              - cloudfront:ListPublicKeys
               - cloudfront:ListResponseHeadersPolicies
             Resource: '*'
   CloudFormationExecutionEncryptionAndObservabilityPolicy:

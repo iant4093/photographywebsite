@@ -699,12 +699,21 @@ fi
             "cloudfront:PublishFunction",
             "cloudfront:UpdateOriginAccessControl",
             "cloudfront:UpdateResponseHeadersPolicy",
+            # Signed-cookie key material for private media delivery.
+            "cloudfront:GetKeyGroup",
+            "cloudfront:UpdateKeyGroup",
+            "cloudfront:DeleteKeyGroup",
+            "cloudfront:GetPublicKey",
+            "cloudfront:UpdatePublicKey",
+            "cloudfront:DeletePublicKey",
         ):
             self.assertIn(action, managed)
         for resource_family in (
             "distribution/*",
             "cache-policy/*",
             "function/*",
+            "key-group/*",
+            "public-key/*",
             "origin-access-control/*",
             "response-headers-policy/*",
         ):
@@ -724,6 +733,10 @@ fi
             "cloudfront:ListFunctions",
             "cloudfront:ListOriginAccessControls",
             "cloudfront:ListResponseHeadersPolicies",
+            "cloudfront:CreateKeyGroup",
+            "cloudfront:CreatePublicKey",
+            "cloudfront:ListKeyGroups",
+            "cloudfront:ListPublicKeys",
         ):
             self.assertIn(action, create_and_list)
         self.assertIn("Resource: '*'", create_and_list)
