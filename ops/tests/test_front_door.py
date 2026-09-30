@@ -275,7 +275,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             "Action": {"Block": {}},
                             "Statement": {
                                 "RateBasedStatement": {
-                                    "Limit": 300,
+                                    "Limit": 600,
                                     "EvaluationWindowSec": 300,
                                     "AggregateKeyType": "IP",
                                     "ScopeDownStatement": {
@@ -293,7 +293,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             "Action": {"Block": {}},
                             "Statement": {
                                 "RateBasedStatement": {
-                                    "Limit": 1500,
+                                    "Limit": 5000,
                                     "EvaluationWindowSec": 300,
                                     "AggregateKeyType": "CONSTANT",
                                     "ScopeDownStatement": {
@@ -311,7 +311,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             "Action": {"Block": {}},
                             "Statement": {
                                 "RateBasedStatement": {
-                                    "Limit": 1200,
+                                    "Limit": 3000,
                                     "EvaluationWindowSec": 300,
                                     "AggregateKeyType": "IP",
                                     "ScopeDownStatement": {
@@ -329,7 +329,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             "Action": {"Block": {}},
                             "Statement": {
                                 "RateBasedStatement": {
-                                    "Limit": 3000,
+                                    "Limit": 15000,
                                     "EvaluationWindowSec": 300,
                                     "AggregateKeyType": "CONSTANT",
                                     "ScopeDownStatement": {
@@ -569,3 +569,22 @@ class WafAndPreflightTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WafRateLimitContractTests(unittest.TestCase):
+    def test_script_contract_matches_waf_template_defaults(self):
+        template = (ROOT / "ops" / "waf_front_door_template.yaml").read_text(encoding="utf-8")
+        defaults = {
+            match.group(1): int(match.group(2))
+            for match in re.finditer(r"(?m)^  (\w+RequestLimit):\n    Type: Number\n    Default: (\d+)$", template)
+        }
+        expected = {
+            "ExplorePerIpRateLimit": defaults["ExplorePerIpRequestLimit"],
+            "ExploreGlobalCircuitBreaker": defaults["ExploreGlobalRequestLimit"],
+            "ApiPerIpRateLimit": defaults["ApiPerIpRequestLimit"],
+            "ApiGlobalCircuitBreaker": defaults["ApiGlobalRequestLimit"],
+        }
+        self.assertEqual(
+            {name: limit for name, _key, limit, _path, _constraint in cloudfront_frontend.WAF_RATE_LIMIT_CONTRACT},
+            expected,
+        )

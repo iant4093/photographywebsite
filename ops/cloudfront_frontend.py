@@ -28,6 +28,16 @@ DEFAULT_BASELINE = HERE / "frontend_cloudfront_baseline.json"
 WWW_REDIRECT_SOURCE = HERE / "cloudfront_www_redirect.js"
 SOCIAL_ROUTER_SOURCE = HERE / "cloudfront_social_router.js"
 FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
+# Five-minute WAF rate limits the front door must find on the live ACL. These
+# values are the parameter defaults in ops/waf_front_door_template.yaml (a test
+# pins the two together); update both when the WAF stack is re-deployed with
+# new limits, or every later frontend distribution run refuses.
+WAF_RATE_LIMIT_CONTRACT = (
+    ("ExplorePerIpRateLimit", "IP", 600, "/api/public/explore", "EXACTLY"),
+    ("ExploreGlobalCircuitBreaker", "CONSTANT", 5000, "/api/public/explore", "EXACTLY"),
+    ("ApiPerIpRateLimit", "IP", 3000, "/api/", "STARTS_WITH"),
+    ("ApiGlobalCircuitBreaker", "CONSTANT", 15000, "/api/", "STARTS_WITH"),
+)
 LEGACY_SPA_ERROR_CODES = frozenset({403, 404})
 # Shared with backend/template.yaml: the SAM stack owns the key group, cache and
 # response policies, origin access control, and rewrite function; this script
@@ -718,12 +728,7 @@ def validate_front_door_resources(
         for name, (container, action) in expected_actions.items()
     ):
         raise SystemExit("Refusing front door: WAF selective-block rule contract differs")
-    for name, aggregate_key, limit, path, positional_constraint in (
-        ("ExplorePerIpRateLimit", "IP", 300, "/api/public/explore", "EXACTLY"),
-        ("ExploreGlobalCircuitBreaker", "CONSTANT", 1500, "/api/public/explore", "EXACTLY"),
-        ("ApiPerIpRateLimit", "IP", 1200, "/api/", "STARTS_WITH"),
-        ("ApiGlobalCircuitBreaker", "CONSTANT", 3000, "/api/", "STARTS_WITH"),
-    ):
+    for name, aggregate_key, limit, path, positional_constraint in WAF_RATE_LIMIT_CONTRACT:
         rate = actual_rules[name].get("Statement", {}).get("RateBasedStatement", {})
         scope = rate.get("ScopeDownStatement", {}).get("ByteMatchStatement", {})
         if (
