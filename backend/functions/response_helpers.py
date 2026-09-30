@@ -30,15 +30,20 @@ class DynamoJsonEncoder(json.JSONEncoder):
         return super().default(value)
 
 
-def json_response(status_code, body, *, cache_control="no-store", headers=None, encoder=None):
+def json_response(status_code, body, *, cache_control="no-store", headers=None, encoder=None, cookies=None):
     response_headers = {"Content-Type": "application/json", "Cache-Control": cache_control}
     if headers:
         response_headers.update(headers)
-    return {
+    response = {
         "statusCode": status_code,
         "headers": response_headers,
         "body": json.dumps(body, cls=encoder or DynamoJsonEncoder),
     }
+    if cookies:
+        # HTTP API payload 2.0 emits one Set-Cookie header per list entry; a
+        # single headers-map value cannot carry several cookies.
+        response["cookies"] = list(cookies)
+    return response
 
 
 def error_response(status_code, message, *, code=None):

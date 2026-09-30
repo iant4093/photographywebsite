@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -934,6 +935,152 @@ class BrowserBoundaryTests(unittest.TestCase):
             self.assertIn(expected, script)
 
 
+PRIVATE_MEDIA_SIGNERS = (
+    "GetAlbumFunction",
+    "GetSharedAlbumFunction",
+    "GetAdminAlbumMediaFunction",
+    "AddImagesFunction",
+    "UpdateImageFunction",
+)
+
+
+class PrivateMediaEdgeTests(unittest.TestCase):
+    def test_signed_cookie_edge_resources_exist_and_trust_only_the_stack_key(self) -> None:
+        for logical_id, resource_type in (
+            ("PrivateMediaPublicKey", "AWS::CloudFront::PublicKey"),
+            ("PrivateMediaKeyGroup", "AWS::CloudFront::KeyGroup"),
+            ("PrivateMediaOriginAccessControl", "AWS::CloudFront::OriginAccessControl"),
+            ("PrivateMediaCachePolicy", "AWS::CloudFront::CachePolicy"),
+            ("PrivateMediaResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
+            ("PrivateMediaRewriteFunction", "AWS::CloudFront::Function"),
+        ):
+            with self.subTest(logical_id=logical_id):
+                self.assertIn(f"Type: {resource_type}\n", resource_block(logical_id))
+        public_key = resource_block("PrivateMediaPublicKey")
+        self.assertIn("-----BEGIN PUBLIC KEY-----", public_key)
+        self.assertNotIn("PRIVATE KEY", public_key)
+        self.assertIn("CallerReference: !Sub 'ian-photography-private-media-2026-09-${Stage}'", public_key)
+        group = resource_block("PrivateMediaKeyGroup")
+        self.assertIn("Items:\n          - !Ref PrivateMediaPublicKey\n", group)
+        self.assertEqual(group.count("- !Ref"), 1)
+        oac = resource_block("PrivateMediaOriginAccessControl")
+        for expected in ("OriginAccessControlOriginType: s3", "SigningBehavior: always", "SigningProtocol: sigv4"):
+            self.assertIn(expected, oac)
+
+    def test_private_media_cache_and_headers_never_key_on_viewer_input(self) -> None:
+        cache = resource_block("PrivateMediaCachePolicy")
+        for expected in (
+            "DefaultTTL: 86400", "MaxTTL: 31536000", "MinTTL: 0",
+            "CookieBehavior: none", "HeaderBehavior: none", "QueryStringBehavior: none",
+            "EnableAcceptEncodingBrotli: false", "EnableAcceptEncodingGzip: false",
+        ):
+            self.assertIn(expected, cache)
+        headers = resource_block("PrivateMediaResponseHeadersPolicy")
+        self.assertNotIn("CorsConfig", headers)
+        self.assertIn("Value: private, max-age=86400\n              Override: true", headers)
+        self.assertIn("FrameOption: DENY", headers)
+
+    def test_frontend_distribution_reads_only_album_objects(self) -> None:
+        policy = resource_block("ImagesBucketPolicy")
+        statement = re.search(
+            r"(?ms)- Sid: AllowFrontendDistributionPrivateMediaReads\n(?P<body>.*?)(?=\n          - |\n\n)",
+            policy,
+        )
+        self.assertIsNotNone(statement)
+        body = statement.group("body")
+        self.assertIn("Effect: Allow", body)
+        self.assertIn("Service: cloudfront.amazonaws.com", body)
+        self.assertIn("Action: s3:GetObject\n", body)
+        self.assertIn("Resource: !Sub '${ImagesBucket.Arn}/albums/*'", body)
+        self.assertIn(
+            "AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'",
+            body,
+        )
+        self.assertEqual(policy.count("distribution/EIOCCNR8XGQ1B"), 1)
+
+    def test_cookie_signers_ship_disabled_with_exact_key_parameter_access(self) -> None:
+        parameter_arn = (
+            "Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}"
+            ":parameter/ian-website/${Stage}/private-media-signing-key'"
+        )
+        for logical_id in PRIVATE_MEDIA_SIGNERS:
+            with self.subTest(function=logical_id):
+                block = resource_block(logical_id)
+                self.assertIn("PRIVATE_MEDIA_DELIVERY: 'false'\n", block)
+                self.assertIn("PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'", block)
+                self.assertIn("PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey", block)
+                self.assertIn(
+                    "PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'",
+                    block,
+                )
+                self.assertIn(f"Action: ssm:GetParameter\n              {parameter_arn}", block)
+                self.assertIn(f"SOURCES_{logical_id} := ", MAKEFILE)
+                sources = re.search(rf"(?m)^SOURCES_{logical_id} := (.+)$", MAKEFILE).group(1).split()
+                self.assertIn("media_signing.py", sources)
+                deps = re.search(rf"(?m)^DEPS_{logical_id} := (.+)$", MAKEFILE).group(1).split()
+                self.assertIn("cryptography==50.0.0", deps)
+        self.assertEqual(TEMPLATE.count("private-media-signing-key'"), 10)
+        self.assertEqual(TEMPLATE.count("PRIVATE_MEDIA_DELIVERY:"), len(PRIVATE_MEDIA_SIGNERS))
+
+    def test_private_media_outputs_expose_edge_identifiers(self) -> None:
+        outputs = TEMPLATE.split("\nOutputs:\n", 1)[1]
+        for name, value in (
+            ("PrivateMediaPublicKeyId", "!Ref PrivateMediaPublicKey"),
+            ("PrivateMediaKeyGroupId", "!Ref PrivateMediaKeyGroup"),
+            ("PrivateMediaOriginAccessControlId", "!GetAtt PrivateMediaOriginAccessControl.Id"),
+            ("PrivateMediaCachePolicyId", "!Ref PrivateMediaCachePolicy"),
+            ("PrivateMediaResponseHeadersPolicyId", "!Ref PrivateMediaResponseHeadersPolicy"),
+            ("PrivateMediaRewriteFunctionArn", "!GetAtt PrivateMediaRewriteFunction.FunctionMetadata.FunctionARN"),
+        ):
+            self.assertRegex(outputs, rf"(?m)^  {name}:\n    Description: .+\n    Value: {re.escape(value)}$")
+
+    def test_private_media_rewrite_accepts_only_album_objects(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is required to execute the CloudFront Function regression")
+        block = resource_block("PrivateMediaRewriteFunction")
+        self.assertIn("Runtime: cloudfront-js-2.0", block)
+        self.assertIn("AutoPublish: true", block)
+        source = textwrap.dedent(block.split("      FunctionCode: |\n", 1)[1])
+        album_id = "11111111-1111-4111-8111-111111111111"
+        accepted = [
+            ("GET", f"/private-media/albums/{album_id}/original/photo%20one.jpg", f"/albums/{album_id}/original/photo%20one.jpg"),
+            ("HEAD", f"/private-media/albums/{album_id}/preview/v3/abc-w640.webp", f"/albums/{album_id}/preview/v3/abc-w640.webp"),
+            ("GET", "/private-media/albums/legacy.album_2019/clip_hls/segment0.ts", "/albums/legacy.album_2019/clip_hls/segment0.ts"),
+        ]
+        rejected = [
+            ("POST", f"/private-media/albums/{album_id}/photo.jpg"),
+            ("GET", f"/private-media/albums/{album_id}"),
+            ("GET", f"/private-media/albums/{album_id}/"),
+            ("GET", f"/private-media/albums/{album_id}/../other/photo.jpg"),
+            ("GET", f"/private-media/albums/{album_id}/./photo.jpg"),
+            ("GET", f"/private-media/albums/{album_id}//photo.jpg"),
+            ("GET", f"/private-media/albums/{album_id}/%2e%2e/photo.jpg"),
+            ("GET", f"/private-media/albums/{album_id}/a%2Fb.jpg"),
+            ("GET", "/private-media/albums/../temp-zips/archive.zip"),
+            ("GET", "/private-media/albums/UPPER/photo.jpg"),
+            ("GET", "/private-media/albums/-bad/photo.jpg"),
+            ("GET", "/private-media/temp-zips/archive.zip"),
+            ("GET", "/private-media/site/hero/current.jpg"),
+            ("GET", f"/albums/{album_id}/photo.jpg"),
+            ("GET", f"/private-mediax/albums/{album_id}/photo.jpg"),
+        ]
+        requests = [{"method": method, "uri": uri, "headers": {}, "querystring": {}}
+                    for method, uri, *_ in accepted + rejected]
+        runner = source + "\nprocess.stdout.write(JSON.stringify(" + json.dumps(requests) + ".map(function(request) { return handler({request: request}); })));"
+        results = json.loads(subprocess.run(
+            [node, "-e", runner], check=True, text=True, capture_output=True
+        ).stdout)
+        for (method, uri, expected), result in zip(accepted, results):
+            with self.subTest(uri=uri):
+                self.assertEqual(result["uri"], expected)
+                self.assertEqual(result["method"], method)
+        for (method, uri), result in zip(rejected, results[len(accepted):]):
+            with self.subTest(method=method, uri=uri):
+                self.assertEqual(result["statusCode"], 404)
+                self.assertEqual(result["headers"]["cache-control"]["value"], "private, no-store")
+
+
 class IdentityAndSecretTests(unittest.TestCase):
     def test_global_environment_contains_only_identifiers_and_rollout_controls(self) -> None:
         globals_section = TEMPLATE.split("Globals:", 1)[1].split("Resources:", 1)[0]
@@ -976,7 +1123,8 @@ class IdentityAndSecretTests(unittest.TestCase):
             TEMPLATE.count("RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'"),
             8,
         )
-        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 20)
+        # 20 pre-existing reads plus the five private-media cookie signers.
+        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 25)
 
     def test_free_print_plan_has_no_vendor_credential_or_original_staging_path(self) -> None:
         print_function = resource_block("PreparePrintFunction")

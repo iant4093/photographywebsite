@@ -18,6 +18,7 @@ from auth_helpers import require_admin
 from cache_invalidation import request_public_api_invalidation
 from create_album import _extract_exif, _normalize_images, _start_video_jobs
 from media_access import album_known_keys, serialize_album_summary, serialize_images, tag_keys_visibility
+from media_signing import private_media_delivery
 from preview_jobs import enqueue_preview_jobs
 from original_comparison_jobs import request_original_comparisons
 from random_pool_refresh import request_random_photo_pool_refresh
@@ -214,6 +215,9 @@ def handler(event, context):
             requested_raw_keys = {image["rawKey"] for image in images}
             saved_images = [image for image in candidate["images"]
                             if (image.get("rawKey") or image.get("key")) in requested_raw_keys]
+            # The manager may open a just-saved protected item before its next
+            # media read, so the mutation response carries the album cookies too.
+            delivery = private_media_delivery(candidate, operation="add_images")
             return json_response(200, {
                 "message": "Images appended successfully",
                 "added": len(fresh_images),
@@ -221,8 +225,9 @@ def handler(event, context):
                 "items": serialize_images(
                     {**candidate, "images": saved_images},
                     include_internal=True,
+                    private_media_base=delivery.base_url,
                 ),
-            })
+            }, cookies=delivery.cookies)
     except MediaAlbumMissing:
         return error_response(404, "Album not found", code="not_found")
     except MediaMutationBusy as error:

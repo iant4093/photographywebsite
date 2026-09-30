@@ -10,6 +10,7 @@ from audit_helpers import emit_audit_event
 from album_access import authorize_album
 from auth_helpers import AuthError, auth_error_response
 from media_access import serialize_album_detail, serialize_images
+from media_signing import private_media_delivery
 from response_helpers import error_response, internal_error, json_response
 from security_helpers import check_rate_limit, verify_turnstile
 from validation_helpers import ValidationError, validate_uuid
@@ -79,9 +80,12 @@ def handler(event, context):
         # Compatibility shape: current shared frontend expects album fields and
         # images at the top level.
         body = serialize_album_detail(album)
-        body["images"] = serialize_images(album)
+        # Cookies are minted only after the share grant has been re-authorized
+        # against the consistent album read above.
+        delivery = private_media_delivery(album, operation="get_shared_album")
+        body["images"] = serialize_images(album, private_media_base=delivery.base_url)
         _audit(event, context, "success", "share_access_granted")
-        return json_response(200, body, cache_control="private, no-store")
+        return json_response(200, body, cache_control="private, no-store", cookies=delivery.cookies)
     except AuthError as error:
         _audit(event, context, "denied", "share_access_denied")
         # Do not distinguish revoked/forbidden share codes from missing codes.

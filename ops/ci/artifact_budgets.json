@@ -16,6 +16,10 @@
       "fileCount": 350
     },
     "overrides": {
+      "AddImagesFunction": {
+        "uncompressedBytes": 25000000,
+        "fileCount": 600
+      },
       "GetGoogleDriveUsageFunction": {
         "uncompressedBytes": 25000000,
         "fileCount": 650

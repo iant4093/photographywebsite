@@ -150,6 +150,31 @@ an `admin_mfa_required` denial shows which role was refused.
   `is_admin` MFA requirement in the same release; an absent claim removes every
   administrator's privilege by design.
 
+### Private-media signed cookies
+
+When `PRIVATE_MEDIA_DELIVERY` is `true`, the album detail, shared album, admin
+media, add-images, and update-image handlers attach CloudFront signed cookies
+(one `CloudFront-Policy`/`-Signature`/`-Key-Pair-Id` triple per approved album
+prefix, `Path=/private-media/albums/<segment>`) after authorizing the album, and
+emit protected media URLs under `/private-media/`. The cookie policy expires
+with the same TTL as a presigned URL (`MEDIA_URL_TTL_SECONDS`), so revoking a
+share or making an album private takes effect within one TTL, exactly as
+before. Covers in list views, QR codes, and downloads stay presigned.
+
+- A signing failure (missing or unreadable
+  `/ian-website/<stage>/private-media-signing-key`, SSM error, bad key ID) never
+  fails the request: that response falls back to presigned URLs, without
+  protected HLS, and logs `private_media_signing_failed operation=...
+  error_type=...` at WARNING. Neither the key nor the album is logged.
+- A sustained run of those warnings means every viewer is on the fallback path.
+  Check the SSM parameter and the function role's `ssm:GetParameter` grant; do
+  not paste the private key into an environment variable to recover.
+- 403s from `/private-media/*` with no signing warnings point at the edge: the
+  behavior's trusted key group, an expired cookie that the viewer did not
+  refresh, or a key ID that no longer matches `PrivateMediaPublicKey`.
+- Rolling back is setting the literal to `'false'`; responses return to
+  presigned URLs immediately and issued cookies expire within one TTL.
+
 ## Deployment and rollback checks
 
 Before execution:
