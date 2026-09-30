@@ -18,12 +18,20 @@ if [[ "$public_block" != $'True\tTrue\tTrue\tTrue' ]]; then
   echo "Frontend bucket public-access block is not fully enabled." >&2
   exit 2
 fi
+# The distribution may carry additional OAC origins (for example the
+# private-media origin on the media bucket), so verify that the origin behind
+# the default behavior — the one this script publishes to — is OAC-backed
+# rather than counting every origin.
+default_origin_id="$(aws cloudfront get-distribution \
+  --id "$FRONTEND_DISTRIBUTION_ID" \
+  --query 'Distribution.DistributionConfig.DefaultCacheBehavior.TargetOriginId' \
+  --output text)"
 distribution_state="$(aws cloudfront get-distribution \
   --id "$FRONTEND_DISTRIBUTION_ID" \
-  --query '[Distribution.Status,Distribution.DistributionConfig.Enabled,length(Distribution.DistributionConfig.Origins.Items[?OriginAccessControlId!=`null` && OriginAccessControlId!=``])]' \
+  --query "[Distribution.Status,Distribution.DistributionConfig.Enabled,length(Distribution.DistributionConfig.Origins.Items[?Id=='${default_origin_id}' && OriginAccessControlId!=\`null\` && OriginAccessControlId!=\`\`])]" \
   --output text)"
-if [[ "$distribution_state" != $'Deployed\tTrue\t1' ]]; then
-  echo "Frontend distribution is not deployed, enabled, and OAC-backed." >&2
+if [[ -z "$default_origin_id" || "$distribution_state" != $'Deployed\tTrue\t1' ]]; then
+  echo "Frontend distribution is not deployed, enabled, and OAC-backed at its default origin." >&2
   exit 2
 fi
 
