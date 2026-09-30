@@ -98,7 +98,7 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
             private["CookiesConfig"],
             {
                 "CookieBehavior": "whitelist",
-                "Cookies": {"Quantity": 1, "Items": ["CloudFront-Key-Pair-Id"]},
+                "Cookies": {"Quantity": 1, "Items": ["ian-photography-set-cookie-passthrough"]},
             },
         )
         self.assertEqual(private["Name"], "IanTruong-API-Private-Origin-v1")

@@ -125,10 +125,11 @@ than replacing it with the `www` redirect.
    `privateMedia.missing` list. The same run also reports
    `apiFrontDoor.policies.privateOrigin: update`: the existing
    `IanTruong-API-Private-Origin-v1` origin request policy is updated in place
-   to allowlist the `CloudFront-Key-Pair-Id` cookie. CloudFront strips
+   to allowlist the `ian-photography-set-cookie-passthrough` cookie. CloudFront strips
    `Set-Cookie` from origin responses when a behavior forwards no cookies, so
    without this change the signed cookies the API issues never reach the
-   browser. The cookie is path-scoped to `/private-media/albums/<id>`, so the
+   browser. The site never sets a cookie with that name (the `CloudFront-*`
+   names are reserved for signature validation), so the
    API still receives no viewer cookie, and `/api/*` stays CachingDisabled.
 3. **Apply the unchanged plan** and wait for deployment:
 

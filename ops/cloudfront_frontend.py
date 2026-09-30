@@ -583,9 +583,9 @@ def api_origin_request_policy_config(settings: dict[str, Any], *, public: bool) 
         # AWS Cookies.html: when cookies are not forwarded, CloudFront "removes
         # Set-Cookie headers from responses before returning responses to your
         # viewers". The private API issues the private-media signed cookies, so
-        # it must allowlist at least one cookie. CloudFront-Key-Pair-Id is scoped
-        # to /private-media/albums/<id>, so browsers never actually send it to
-        # /api and the origin still receives no viewer cookie. /api/* keeps the
+        # it must allowlist at least one cookie. The allowlisted name is one the
+        # site never sets (CloudFront-* names are reserved for signature
+        # validation), so the origin still receives no viewer cookie. /api/* keeps the
         # CachingDisabled policy, so nothing is ever cached per cookie. The
         # public policy stays "none": public responses never set cookies.
         cookies_config = {

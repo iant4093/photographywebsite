@@ -16,8 +16,8 @@ WAF is defense in depth.
   API responses retain the five-minute maximum.
 - `/api/*` otherwise has caching disabled and forwards only the reviewed
   methods, query strings, and API/auth/CORS headers. Its origin request policy
-  allowlists only the path-scoped `CloudFront-Key-Pair-Id` cookie, which
-  browsers never send to `/api`; allowlisting any cookie is what lets CloudFront
+  allowlists only the `ian-photography-set-cookie-passthrough` cookie, which
+  the site never sets; allowlisting any cookie is what lets CloudFront
   pass the API's private-media `Set-Cookie` headers through (see
   [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md)).
 - CloudFront reaches the TLS 1.2 regional custom domain through the fixed `api`

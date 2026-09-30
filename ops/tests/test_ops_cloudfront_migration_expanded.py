@@ -497,7 +497,7 @@ class CloudFrontMainTests(unittest.TestCase):
                 "public_query_strings": ["cursor"],
                 "public_forward_headers": ["Origin"],
                 "private_forward_headers": ["Authorization"],
-                "private_forward_cookies": ["CloudFront-Key-Pair-Id"],
+                "private_forward_cookies": ["ian-photography-set-cookie-passthrough"],
                 "public_cache_policy_name": "public",
                 "stats_cache_policy_name": "stats",
                 "public_origin_request_policy_name": "public-origin",
@@ -573,7 +573,7 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(private_policy["Name"], "private-origin")
         self.assertEqual(
             private_policy["CookiesConfig"],
-            {"CookieBehavior": "whitelist", "Cookies": {"Quantity": 1, "Items": ["CloudFront-Key-Pair-Id"]}},
+            {"CookieBehavior": "whitelist", "Cookies": {"Quantity": 1, "Items": ["ian-photography-set-cookie-passthrough"]}},
         )
         self.assertTrue(public_options["apply"] and private_options["apply"])
         self.assertEqual(behaviors["/api/*"]["OriginRequestPolicyId"], "private-origin")
@@ -912,7 +912,7 @@ class CloudFrontMainTests(unittest.TestCase):
     def test_private_api_origin_policy_gains_the_cookie_allowlist_in_place(self):
         baseline = json.loads((OPS / "frontend_cloudfront_baseline.json").read_text(encoding="utf-8"))
         settings = baseline["api_front_door"]
-        self.assertEqual(settings["private_forward_cookies"], ["CloudFront-Key-Pair-Id"])
+        self.assertEqual(settings["private_forward_cookies"], ["ian-photography-set-cookie-passthrough"])
         # /api/* must stay on the managed CachingDisabled policy so nothing is
         # cached per cookie.
         self.assertEqual(baseline["cache_policies"]["html"], "4135ea2d-6df8-44a3-9df3-4b5a84be39ad")
