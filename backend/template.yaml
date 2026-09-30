@@ -2426,9 +2426,10 @@ Resources:
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
-          # Phase 1 ships the edge resources with delivery off; a follow-up
-          # flips this literal once the frontend private-media/* behavior exists.
-          PRIVATE_MEDIA_DELIVERY: 'false'
+          # Enabled 2026-09-30 after the frontend private-media/* behavior was
+          # bound and verified. Set back to 'false' to return protected media
+          # to presigned S3 URLs immediately (ops/PRIVATE_MEDIA.md).
+          PRIVATE_MEDIA_DELIVERY: 'true'
           PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
           PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
           PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
@@ -2489,9 +2490,10 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
-          # Phase 1 ships the edge resources with delivery off; a follow-up
-          # flips this literal once the frontend private-media/* behavior exists.
-          PRIVATE_MEDIA_DELIVERY: 'false'
+          # Enabled 2026-09-30 after the frontend private-media/* behavior was
+          # bound and verified. Set back to 'false' to return protected media
+          # to presigned S3 URLs immediately (ops/PRIVATE_MEDIA.md).
+          PRIVATE_MEDIA_DELIVERY: 'true'
           PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
           PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
           PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
@@ -2594,9 +2596,10 @@ Resources:
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
           TURNSTILE_SECRET_PARAMETER: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
-          # Phase 1 ships the edge resources with delivery off; a follow-up
-          # flips this literal once the frontend private-media/* behavior exists.
-          PRIVATE_MEDIA_DELIVERY: 'false'
+          # Enabled 2026-09-30 after the frontend private-media/* behavior was
+          # bound and verified. Set back to 'false' to return protected media
+          # to presigned S3 URLs immediately (ops/PRIVATE_MEDIA.md).
+          PRIVATE_MEDIA_DELIVERY: 'true'
           PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
           PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
           PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
@@ -3300,9 +3303,10 @@ Resources:
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
-          # Phase 1 ships the edge resources with delivery off; a follow-up
-          # flips this literal once the frontend private-media/* behavior exists.
-          PRIVATE_MEDIA_DELIVERY: 'false'
+          # Enabled 2026-09-30 after the frontend private-media/* behavior was
+          # bound and verified. Set back to 'false' to return protected media
+          # to presigned S3 URLs immediately (ops/PRIVATE_MEDIA.md).
+          PRIVATE_MEDIA_DELIVERY: 'true'
           PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
           PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
           PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
@@ -4065,9 +4069,10 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
-          # Phase 1 ships the edge resources with delivery off; a follow-up
-          # flips this literal once the frontend private-media/* behavior exists.
-          PRIVATE_MEDIA_DELIVERY: 'false'
+          # Enabled 2026-09-30 after the frontend private-media/* behavior was
+          # bound and verified. Set back to 'false' to return protected media
+          # to presigned S3 URLs immediately (ops/PRIVATE_MEDIA.md).
+          PRIVATE_MEDIA_DELIVERY: 'true'
           PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
           PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
           PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'

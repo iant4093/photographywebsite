@@ -998,7 +998,9 @@ class PrivateMediaEdgeTests(unittest.TestCase):
         )
         self.assertEqual(policy.count("distribution/EIOCCNR8XGQ1B"), 1)
 
-    def test_cookie_signers_ship_disabled_with_exact_key_parameter_access(self) -> None:
+    def test_cookie_signers_are_enabled_with_exact_key_parameter_access(self) -> None:
+        # Delivery was switched on 2026-09-30 once the frontend private-media/*
+        # behavior was bound and verified; 'false' is the documented rollback.
         parameter_arn = (
             "Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}"
             ":parameter/ian-website/${Stage}/private-media-signing-key'"
@@ -1006,7 +1008,7 @@ class PrivateMediaEdgeTests(unittest.TestCase):
         for logical_id in PRIVATE_MEDIA_SIGNERS:
             with self.subTest(function=logical_id):
                 block = resource_block(logical_id)
-                self.assertIn("PRIVATE_MEDIA_DELIVERY: 'false'\n", block)
+                self.assertIn("PRIVATE_MEDIA_DELIVERY: 'true'\n", block)
                 self.assertIn("PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'", block)
                 self.assertIn("PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey", block)
                 self.assertIn(
