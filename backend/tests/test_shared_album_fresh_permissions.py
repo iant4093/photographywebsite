@@ -25,7 +25,7 @@ class SharedAlbumFreshPermissionTests(unittest.TestCase):
         self.enterContext(patch.object(get_shared_album, "check_rate_limit", return_value=True))
         self.enterContext(patch.object(get_shared_album, "_audit"))
         self.detail = self.enterContext(patch.object(get_shared_album, "serialize_album_detail", side_effect=lambda album: {"title": album["title"]}))
-        self.images = self.enterContext(patch.object(get_shared_album, "serialize_images", side_effect=lambda album: album["images"]))
+        self.images = self.enterContext(patch.object(get_shared_album, "serialize_images", side_effect=lambda album, **_kwargs: album["images"]))
 
     def call(self):
         return get_shared_album.handler({"pathParameters": {"shareCode": SHARE_CODE},
@@ -38,7 +38,7 @@ class SharedAlbumFreshPermissionTests(unittest.TestCase):
         self.assertEqual(response_body(response), {"title": "Current title", "images": [{"rawKey": "current"}]})
         self.table.get_item.assert_called_once_with(Key={"albumId": ALBUM_ID}, ConsistentRead=True)
         self.detail.assert_called_once_with(self.fresh)
-        self.images.assert_called_once_with(self.fresh)
+        self.images.assert_called_once_with(self.fresh, private_media_base=None)
 
     def test_revoked_rotated_private_deleted_and_missing_records_issue_no_media_urls(self):
         candidates = [None, {}, {**self.fresh, "isShared": False}, {**self.fresh, "shareCode": "new-share-code"},

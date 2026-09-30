@@ -17,10 +17,10 @@ SOURCES_RandomPhotoPoolBuilderFunction := cache_invalidation.py media_access.py 
 SOURCES_CacheInvalidationWorkerFunction := cache_invalidation.py cache_invalidation_worker.py media_access.py original_comparison_access.py validation_helpers.py aws_request_config.py media_mutation.py
 SOURCES_HoverPreviewManifestBuilderFunction := album_media_store.py cache_invalidation.py hover_preview_manifest_builder.py media_access.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_GetAlbumsFunction := public_catalog_cursor.py album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py gallery_order.py get_albums.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
-SOURCES_GetAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_album.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
-SOURCES_GetAdminAlbumMediaFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_album_media.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
+SOURCES_GetAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_album.py media_access.py media_signing.py response_helpers.py secret_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
+SOURCES_GetAdminAlbumMediaFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_album_media.py media_access.py media_signing.py response_helpers.py secret_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_AlbumMediaBackfillFunction := album_media_store.py backfill_album_media.py media_access.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
-SOURCES_GetSharedAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_shared_album.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
+SOURCES_GetSharedAlbumFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_shared_album.py media_access.py media_signing.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_LoginFunction := audit_helpers.py front_door.py login.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py aws_request_config.py
 SOURCES_CompleteChallengeFunction := audit_helpers.py complete_challenge.py front_door.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py aws_request_config.py
 SOURCES_ContactFunction := audit_helpers.py contact.py email_helpers.py front_door.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py aws_request_config.py
@@ -30,7 +30,7 @@ SOURCES_CreateAlbumFunction := drive_backup_jobs.py album_media_store.py album_m
 SOURCES_UpdateAlbumFunction := drive_backup_jobs.py album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py explore_index.py front_door.py hover_preview_refresh.py media_access.py random_pool_refresh.py response_helpers.py update_album.py validation_helpers.py original_comparison_access.py aws_request_config.py dynamodb_helpers.py media_mutation.py visibility_change.py cleanup_work.py ownership_guard.py
 SOURCES_UpdateGalleryOrderFunction := audit_helpers.py auth_helpers.py cache_invalidation.py front_door.py gallery_order.py media_access.py original_comparison_access.py response_helpers.py update_gallery_order.py validation_helpers.py aws_request_config.py media_mutation.py
 SOURCES_DeleteAlbumFunction := drive_backup_jobs.py album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py delete_album.py deletion_helpers.py explore_index.py front_door.py media_access.py random_pool_refresh.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py cleanup_work.py video_cleanup.py dynamodb_helpers.py ownership_guard.py comparison_cleanup.py
-SOURCES_AddImagesFunction := drive_backup_jobs.py add_images.py album_media_store.py album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py preview_jobs.py random_pool_refresh.py response_helpers.py secret_helpers.py validation_helpers.py original_comparison_access.py original_comparison_jobs.py aws_request_config.py media_mutation.py upload_followup.py visibility_change.py video_jobs.py cleanup_work.py ownership_guard.py
+SOURCES_AddImagesFunction := drive_backup_jobs.py add_images.py album_media_store.py album_mutation_helpers.py album_qr.py audit_helpers.py auth_helpers.py cache_invalidation.py create_album.py dynamodb_helpers.py email_helpers.py front_door.py media_access.py media_helpers.py media_signing.py preview_jobs.py random_pool_refresh.py response_helpers.py secret_helpers.py validation_helpers.py original_comparison_access.py original_comparison_jobs.py aws_request_config.py media_mutation.py upload_followup.py visibility_change.py video_jobs.py cleanup_work.py ownership_guard.py
 SOURCES_CreateZipFunction := album_access.py audit_helpers.py auth_helpers.py create_zip.py cursor_helpers.py front_door.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py zip_jobs.py aws_request_config.py media_mutation.py
 SOURCES_ZipArchiveRefreshFunction := zip_archive_refresh.py zip_jobs.py zip_helpers.py media_access.py original_comparison_access.py validation_helpers.py aws_request_config.py media_mutation.py
 SOURCES_WorkerZipFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py media_access.py validation_helpers.py worker_zip.py zip_helpers.py original_comparison_access.py zip_jobs.py aws_request_config.py media_mutation.py
@@ -38,7 +38,7 @@ SOURCES_DeleteImagesFunction := dynamodb_helpers.py drive_backup_jobs.py album_m
 SOURCES_TagMediaObjectFunction := media_access.py tag_media_object.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py cache_invalidation.py response_helpers.py
 SOURCES_GetDownloadUrlFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py get_download_url.py media_access.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_PreparePrintFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py media_access.py prepare_print.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
-SOURCES_UpdateImageFunction := album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py deletion_helpers.py front_door.py media_access.py response_helpers.py update_image.py validation_helpers.py original_comparison_access.py random_pool_refresh.py aws_request_config.py drive_backup_jobs.py dynamodb_helpers.py media_mutation.py visibility_change.py cleanup_work.py ownership_guard.py
+SOURCES_UpdateImageFunction := album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py deletion_helpers.py front_door.py media_access.py media_signing.py response_helpers.py secret_helpers.py update_image.py validation_helpers.py original_comparison_access.py random_pool_refresh.py aws_request_config.py drive_backup_jobs.py dynamodb_helpers.py media_mutation.py visibility_change.py cleanup_work.py ownership_guard.py
 SOURCES_GetUploadUrlFunction := audit_helpers.py auth_helpers.py front_door.py get_upload_url.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_HeroCoverFunction := audit_helpers.py auth_helpers.py front_door.py hero_cover.py response_helpers.py validation_helpers.py aws_request_config.py
 SOURCES_CreateUserFunction := audit_helpers.py auth_helpers.py create_user.py front_door.py response_helpers.py validation_helpers.py aws_request_config.py
@@ -65,6 +65,9 @@ PIP_PLATFORM_OriginalComparisonWorkerFunction := manylinux_2_28_x86_64
 
 DEPS_GetAlbumFunction := PyJWT==2.15.0 cryptography==50.0.0
 DEPS_GetAdminAlbumMediaFunction := PyJWT==2.15.0 cryptography==50.0.0
+# CloudFront signed cookies for protected media (media_signing.py).
+DEPS_GetSharedAlbumFunction := cryptography==50.0.0
+DEPS_UpdateImageFunction := cryptography==50.0.0
 DEPS_GetAlbumsFunction := PyJWT==2.15.0 cryptography==50.0.0
 DEPS_CreateZipFunction := PyJWT==2.15.0 cryptography==50.0.0
 DEPS_GetDownloadUrlFunction := PyJWT==2.15.0 cryptography==50.0.0
@@ -72,7 +75,7 @@ DEPS_PreparePrintFunction := PyJWT==2.15.0 cryptography==50.0.0
 DEPS_ContactFunction := resend==2.34.0
 DEPS_CreateAlbumFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6
 DEPS_UpdateAlbumFunction := segno==1.6.6
-DEPS_AddImagesFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6
+DEPS_AddImagesFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6 cryptography==50.0.0
 DEPS_GoogleDriveBackupFunction := google-api-python-client==2.198.0 google-auth==2.56.0 google-auth-httplib2==0.4.0
 DEPS_GetGoogleDriveUsageFunction := google-auth==2.56.0 requests==2.34.2
 DEPS_RefreshGoogleDriveUsageFunction := google-auth==2.56.0 requests==2.34.2

@@ -17,6 +17,7 @@ from cache_invalidation import request_public_api_invalidation, invalidate_album
 from deletion_helpers import DeletionTooLargeError, delete_keys_all_versions, preflight_deletion
 from dynamodb_helpers import AlbumManifestTooLarge, ensure_album_item_budget, estimated_item_bytes
 from media_access import media_id_for_key, serialize_images, tag_keys_visibility, validate_album_media_key
+from media_signing import private_media_delivery
 from random_pool_refresh import request_random_photo_pool_refresh
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, optional_string, parse_json_body, require_string, validate_uuid
@@ -249,16 +250,20 @@ def handler(event, context):
                 if not _finish_thumbnail_cleanup({**album, "images": updated_images,
                     **({"coverThumbKey": values[":thumbKey"]} if is_cover and ":thumbKey" in values else {})}):
                     return json_response(202, {"pending": True, "retryAfter": 15})
+            # A replaced thumbnail is shown immediately, so the refreshed item
+            # carries the album cookies when protected media uses the CDN.
+            delivery = private_media_delivery(album, operation="update_image")
             serialized = serialize_images(
                 {**album, "images": [updated_image]},
                 include_internal=True,
+                private_media_base=delivery.base_url,
             )
             _audit(event, context, "success", "media_updated")
             return json_response(200, {
                 "message": "Media metadata updated",
                 "mediaId": raw_key,
                 "item": serialized[0] if serialized else None,
-            })
+            }, cookies=delivery.cookies)
     except MediaAlbumMissing:
         return error_response(404, "Album not found", code="not_found")
     except MediaMutationBusy as error:

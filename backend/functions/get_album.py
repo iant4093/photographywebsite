@@ -8,6 +8,7 @@ from audit_helpers import actor_context, emit_audit_event
 from album_access import authorize_album
 from auth_helpers import AuthError, auth_error_response, get_verified_claims, is_admin
 from media_access import album_media_prefixes, bucket_name, serialize_album_detail, serialize_images
+from media_signing import private_media_delivery
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_uuid
 
@@ -97,9 +98,15 @@ def handler(event, context):
         # cover, thumbnail, and deletion mutations. Never infer this from
         # visibility alone: the optional JWT has already been fully verified.
         include_admin = bool(claims and is_admin(claims))
+        # Signed only after authorize_album; public albums never get cookies.
+        delivery = private_media_delivery(album, operation="get_album")
         body = {
             "album": serialize_album_detail(album, include_admin=include_admin),
-            "images": serialize_images(album, include_internal=include_admin),
+            "images": serialize_images(
+                album,
+                include_internal=include_admin,
+                private_media_base=delivery.base_url,
+            ),
         }
         cache_control = (
             "public, max-age=60, s-maxage=300"
@@ -111,7 +118,7 @@ def handler(event, context):
                 event, context, "success", "protected_access_granted",
                 actor_type=access_actor, auth_method=access_auth,
             )
-        return json_response(200, body, cache_control=cache_control)
+        return json_response(200, body, cache_control=cache_control, cookies=delivery.cookies)
     except AuthError as error:
         if protected_request:
             _audit(

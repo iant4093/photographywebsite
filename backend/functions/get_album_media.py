@@ -11,6 +11,7 @@ from album_access import decode_cursor, encode_cursor
 from auth_helpers import require_admin
 from front_door import verify_front_door_request
 from media_access import media_id_for_key, serialize_album_detail, serialize_images
+from media_signing import private_media_delivery
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, validate_limit, validate_uuid
 
@@ -86,16 +87,22 @@ def handler(event, context):
             0,
             int(album.get("imageCount", len(album.get("images", [])))),
         )
+        delivery = private_media_delivery(album, operation="get_album_media")
         return json_response(
             200,
             {
                 "album": album_detail,
-                "items": serialize_images(media_album, include_internal=True),
+                "items": serialize_images(
+                    media_album,
+                    include_internal=True,
+                    private_media_base=delivery.base_url,
+                ),
                 "nextCursor": encode_cursor(next_key, scope),
                 **({"pendingDeletionKeys": album["pendingMediaDeletion"]["requested"]}
                    if album.get("pendingMediaDeletion") else {}),
             },
             cache_control="private, no-store",
+            cookies=delivery.cookies,
         )
     except (TypeError, ValueError, ValidationError) as error:
         return error_response(400, str(error), code="invalid_request")

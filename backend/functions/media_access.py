@@ -171,11 +171,35 @@ def presigned_get_url(key, *, download_filename=None, expiration=None):
     )
 
 
-def media_url(key, visibility, *, download_filename=None):
+def private_cdn_url(key, base_url):
+    """Map an album object to the signed-cookie namespace on the site origin.
+
+    The edge function and the bucket grant cover only ``albums/``; refusing
+    anything else here keeps a stored key from producing a dead or broader URL.
+    """
+    key = normalize_object_key(key)
+    if not key.startswith("albums/"):
+        raise ValidationError("Media key is outside the private media namespace")
+    base = str(base_url or "").strip().rstrip("/")
+    if not base.startswith("https://"):
+        raise RuntimeError("Private media CDN is not configured")
+    return f"{base}/{urllib.parse.quote(key, safe='/~')}"
+
+
+def media_url(key, visibility, *, download_filename=None, private_media_base=None):
+    """Return the viewer URL for one object.
+
+    ``private_media_base`` is supplied only by handlers that have authorized
+    the album and attached its signed cookies to the same response (see
+    ``media_signing.private_media_delivery``). Every other caller, and every
+    download, keeps a presigned URL for protected media.
+    """
     if not key:
         return ""
     if visibility == "public" and download_filename is None:
         return public_url(key)
+    if private_media_base and visibility in PROTECTED_VISIBILITIES and download_filename is None:
+        return private_cdn_url(key, private_media_base)
     return presigned_get_url(key, download_filename=download_filename)
 
 
@@ -401,15 +425,18 @@ def find_image_by_media_id(album, media_id):
     return None
 
 
-def serialize_image(image, visibility, *, include_internal=False, album=None, preview_metadata=None):
+def serialize_image(
+    image, visibility, *, include_internal=False, album=None, preview_metadata=None, private_media_base=None,
+):
     key = normalize_object_key(_raw_key(image))
     source = image if isinstance(image, dict) else {}
     thumb_key = source.get("thumbKey") or ""
     hls_key = source.get("hlsUrl") or ""
+    private_base = private_media_base if visibility in PROTECTED_VISIBILITIES else None
     result = {
         "id": media_id_for_key(key),
-        "url": media_url(key, visibility),
-        "thumbnailUrl": media_url(thumb_key, visibility) if thumb_key else media_url(key, visibility),
+        "url": media_url(key, visibility, private_media_base=private_base),
+        "thumbnailUrl": media_url(thumb_key or key, visibility, private_media_base=private_base),
     }
     if isinstance(source.get("isFavorite"), bool):
         result["isFavorite"] = source["isFavorite"]
@@ -421,7 +448,7 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
                 "url": (
                     public_url(public_preview_key(album.get("albumId"), preview_keys[str(width)]))
                     if visibility == "public"
-                    else media_url(preview_keys[str(width)], visibility)
+                    else media_url(preview_keys[str(width)], visibility, private_media_base=private_base)
                 ),
             }
             for width in PREVIEW_WIDTHS
@@ -432,6 +459,8 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
     if visibility == "public":
         result["downloadUrl"] = public_url(key)
     else:
+        # The signed-cookie policy uses the same TTL, so this expiry also
+        # tells the viewer when to refetch the album for fresh cookies.
         result.update(url_expiry_metadata())
         result["freshDownloadRequired"] = True
     for field in ("width", "height", "blurhash", "exif", "thumbnailTime", "altText", "captionVtt", "captionLanguage", "transcript"):
@@ -439,10 +468,11 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
             result[field] = source[field]
 
     # Relative HLS manifests cannot propagate an S3 signature to segment requests.
-    # Protected videos therefore use the signed raw URL until signed-cookie CDN
-    # delivery is available. Public videos keep CDN HLS playback.
-    if visibility == "public" and hls_key:
-        result["hlsUrl"] = media_url(hls_key, visibility)
+    # Protected videos therefore use the signed raw URL unless this response
+    # carries album-scoped CloudFront cookies, which the browser also sends
+    # for every relative segment under the same album prefix.
+    if hls_key and (visibility == "public" or private_base):
+        result["hlsUrl"] = media_url(hls_key, visibility, private_media_base=private_base)
     if include_internal:
         result.update({"rawKey": key, "thumbKey": thumb_key, "hlsKey": hls_key})
         if "originalFilename" in source:
@@ -454,7 +484,10 @@ def serialize_image(image, visibility, *, include_internal=False, album=None, pr
     return result
 
 
-def serialize_images(album, *, include_internal=False, preview_metadata_by_id=None):
+def serialize_images(album, *, include_internal=False, preview_metadata_by_id=None, private_media_base=None):
+    """Serialize album media; ``private_media_base`` must come from
+    ``media_signing.private_media_delivery`` for this same album and response.
+    """
     visibility = album.get("visibility")
     if visibility not in ALLOWED_VISIBILITIES:
         raise ValidationError("Album has an invalid visibility")
@@ -493,11 +526,14 @@ def serialize_images(album, *, include_internal=False, preview_metadata_by_id=No
             include_internal=include_internal,
             album=album,
             preview_metadata=metadata_by_id.get(media_id),
+            private_media_base=private_media_base,
         ))
     return results
 
 
 def serialize_album_summary(album, *, include_admin=False):
+    # Covers stay presigned for protected albums: list views render many
+    # albums without holding any album's signed cookies.
     visibility = album.get("visibility")
     if visibility not in ALLOWED_VISIBILITIES:
         raise ValidationError("Album has an invalid visibility")
@@ -591,6 +627,8 @@ def serialize_album_detail(album, *, include_admin=False):
             and re.fullmatch(r"[A-Za-z0-9_-]{8,128}", album["shareCode"])
         )
     ):
+        # The QR image is shared and embedded outside the album viewer, so it
+        # stays presigned rather than depending on the viewer's cookies.
         summary["qrCodeUrl"] = media_url(qr_key, album["visibility"])
     if include_admin:
         summary["backupToGoogleDrive"] = bool(album.get("backupToGoogleDrive", False))

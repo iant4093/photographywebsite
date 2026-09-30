@@ -444,6 +444,12 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("PublicPreviewCachePolicy", "AWS::CloudFront::CachePolicy"),
                 ("PublicPreviewResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
                 ("PublicPreviewRewriteFunction", "AWS::CloudFront::Function"),
+                ("PrivateMediaPublicKey", "AWS::CloudFront::PublicKey"),
+                ("PrivateMediaKeyGroup", "AWS::CloudFront::KeyGroup"),
+                ("PrivateMediaOriginAccessControl", "AWS::CloudFront::OriginAccessControl"),
+                ("PrivateMediaCachePolicy", "AWS::CloudFront::CachePolicy"),
+                ("PrivateMediaResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
+                ("PrivateMediaRewriteFunction", "AWS::CloudFront::Function"),
                 ("PrintSessionSecret", "AWS::SecretsManager::Secret"),
                 ("PreparePrintFunction", "AWS::Lambda::Function"),
                 ("PreparePrintFunctionRole", "AWS::IAM::Role"),
@@ -516,6 +522,51 @@ class ReleaseIntentTests(unittest.TestCase):
                 self.assertTrue(rule["allowNoDetails"])
 
         self.assertFalse(any(rule["action"] == "Remove" for rule in document["rules"]))
+
+    def test_private_media_edge_release_is_bounded_to_reviewed_changes(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        dependencies = release_guard.load_release_dependencies(json.loads(
+            (ROOT / "ops/ci/release_dependencies.json").read_text(encoding="utf-8")
+        ))
+        additions = []
+        for logical_id, resource_type in (
+            ("PrivateMediaPublicKey", "AWS::CloudFront::PublicKey"),
+            ("PrivateMediaKeyGroup", "AWS::CloudFront::KeyGroup"),
+            ("PrivateMediaOriginAccessControl", "AWS::CloudFront::OriginAccessControl"),
+            ("PrivateMediaCachePolicy", "AWS::CloudFront::CachePolicy"),
+            ("PrivateMediaResponseHeadersPolicy", "AWS::CloudFront::ResponseHeadersPolicy"),
+            ("PrivateMediaRewriteFunction", "AWS::CloudFront::Function"),
+        ):
+            item = change(action="Add", logical_id=logical_id, resource_type=resource_type, replacement=None)
+            item["ResourceChange"]["Details"] = []
+            additions.append(item)
+        signers = ("GetAlbumFunction", "GetSharedAlbumFunction", "GetAdminAlbumMediaFunction",
+                   "AddImagesFunction", "UpdateImageFunction")
+        modifications = [
+            change(logical_id="ImagesBucketPolicy", resource_type="AWS::S3::BucketPolicy",
+                   property_name="PolicyDocument"),
+            *[change(logical_id=logical_id) for logical_id in signers],
+            *[change(logical_id=f"{logical_id}Role", resource_type="AWS::IAM::Role", property_name="Policies")
+              for logical_id in signers],
+        ]
+        self.assertEqual(release_guard.gate_change_set(
+            [{"Changes": additions + modifications}],
+            release_intent=intent, release_dependencies=dependencies,
+        ), {"Add": 6, "Modify": 11, "Total": 17})
+
+        # An initial Add never authorizes a later in-place edit of the key or
+        # its group; rotation is a separate reviewed release.
+        for logical_id, resource_type, name in (
+            ("PrivateMediaPublicKey", "AWS::CloudFront::PublicKey", "PublicKeyConfig"),
+            ("PrivateMediaKeyGroup", "AWS::CloudFront::KeyGroup", "KeyGroupConfig"),
+        ):
+            item = change(logical_id=logical_id, resource_type=resource_type, property_name=name)
+            with self.subTest(logical_id=logical_id), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set(
+                    [{"Changes": [item]}], release_intent=intent, release_dependencies=dependencies,
+                )
 
     def test_original_comparison_routes_have_a_bounded_release_intent(self):
         intent = release_guard.load_release_intent(json.loads(

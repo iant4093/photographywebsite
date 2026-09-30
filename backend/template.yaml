@@ -1023,6 +1023,20 @@ Resources:
             Condition:
               StringEquals:
                 AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+          # The frontend distribution is managed outside this stack; its ID is
+          # the same literal the cache-invalidation worker is scoped to. Its
+          # private-media/* behavior requires PrivateMediaKeyGroup, so this read
+          # is reachable only with a valid album-scoped signed cookie. Nothing
+          # outside albums/ (zips, hero, public previews) is granted.
+          - Sid: AllowFrontendDistributionPrivateMediaReads
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'
           - Sid: DenyCloudFrontTemporaryZipReads
             Effect: Deny
             Principal:
@@ -1354,6 +1368,142 @@ Resources:
             - Header: Cache-Control
               Value: public, max-age=86400
               Override: true
+
+  # Protected album media is served same-origin by the frontend distribution's
+  # private-media/* behavior (wired by ops/cloudfront_frontend.py), which
+  # trusts only this key group. Album handlers sign per-album-prefix cookies
+  # with the matching private key in /ian-website/${Stage}/private-media-signing-key.
+  # Rotation: add a new PublicKey, add it to the key group alongside this one,
+  # store the new private key and re-point PRIVATE_MEDIA_KEY_PAIR_ID, wait one
+  # cookie TTL, then remove the old key from the group and the template.
+  PrivateMediaPublicKey:
+    Type: AWS::CloudFront::PublicKey
+    Properties:
+      PublicKeyConfig:
+        CallerReference: !Sub 'ian-photography-private-media-2026-09-${Stage}'
+        Name: !Sub 'IanTruongPhotography-PrivateMedia-2026-09-${Stage}'
+        Comment: Verifies album-scoped signed cookies for protected media; rotate via a second key-group member
+        EncodedKey: |
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAutu/OAxwvafzSVeT8bbk
+          o01mSmzgX6+QKea+XZz83eDLSFZ9y9xUS18tUn49cRal8+0hJuJYNLu8re0/Axvj
+          nbT7HPGf8jEkUq2FMo/EHTVttyTijiyWFTXPJia8Mq5SGfq7OA9oQwv6JtwAhOE1
+          VLv9z/4gPBGidhA0t4zQM0ZaF6/cpUhDA0WNo33a/v+XQV6Gh+IorWm/vW9LaeQz
+          kgKqie2goUn3+iCYd+mKo28Uney/mXl3HQ5Za1c8+8noxzH0PmYvpRbZH8uTuoDD
+          wrT077aXVtTHJ+SUKAzjiAVgBVd2/FUsHoQwcoRypph+XRzglMP8eSLhYUzXR786
+          uwIDAQAB
+          -----END PUBLIC KEY-----
+
+  PrivateMediaKeyGroup:
+    Type: AWS::CloudFront::KeyGroup
+    Properties:
+      KeyGroupConfig:
+        Name: !Sub 'IanTruongPhotography-PrivateMedia-${Stage}'
+        Comment: Trusted signers for the frontend private-media behavior
+        Items:
+          - !Ref PrivateMediaPublicKey
+
+  # A dedicated OAC keeps the frontend distribution's S3 origin independent of
+  # the media CDN's control, so either can be rotated without touching the other.
+  PrivateMediaOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'PrivateMediaOAC-${Stage}'
+        Description: Frontend distribution reads of album media behind signed cookies
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront validates the signed cookies on every viewer request,
+  # independently of the cache key, so a cached object is never served to a
+  # viewer without a valid cookie. Album objects are content-addressed, which
+  # makes long edge caching safe; revocation is bounded by the cookie TTL.
+  PrivateMediaCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub 'IanTruongPhotography-PrivateMedia-${Stage}'
+        Comment: Cache signed-cookie album media at the edge; cookies are validated outside the cache key
+        DefaultTTL: 86400
+        MaxTTL: 31536000
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          EnableAcceptEncodingBrotli: false
+          EnableAcceptEncodingGzip: false
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  # Same-origin delivery needs no CORS. Browsers may keep the bytes privately,
+  # but shared caches must not, because access depends on the viewer's cookies.
+  PrivateMediaResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub 'IanTruongPhotography-PrivateMedia-Headers-${Stage}'
+        Comment: Browser hardening and private caching for signed-cookie album media
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Preload: false
+            Override: true
+        CustomHeadersConfig:
+          Items:
+            - Header: Cache-Control
+              Value: private, max-age=86400
+              Override: true
+
+  # The album segment pattern is media_access.LEGACY_PREFIX_SEGMENT, which
+  # canonical UUID prefixes also satisfy. Anything outside one album's object
+  # namespace is rejected before it can reach the origin.
+  PrivateMediaRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      AutoPublish: true
+      Name: !Sub 'IanTruongPhotography-PrivateMedia-${Stage}'
+      FunctionConfig:
+        Comment: Strictly map signed-cookie private-media paths to album objects
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          var parts = uri.split('/');
+          var segmentPattern = /^[a-z0-9](?:[a-z0-9._-]{0,198}[a-z0-9])?$/;
+          var valid = (request.method === 'GET' || request.method === 'HEAD')
+            && parts.length >= 5
+            && parts[0] === ''
+            && parts[1] === 'private-media'
+            && parts[2] === 'albums'
+            && segmentPattern.test(parts[3])
+            && !/%2e|%2f|%5c|\\/i.test(uri);
+          for (var index = 4; valid && index < parts.length; index++) {
+            // Empty parts cover both '//' and a trailing slash.
+            valid = parts[index] !== '' && parts[index] !== '.' && parts[index] !== '..';
+          }
+          if (!valid) {
+            return {
+              statusCode: 404,
+              statusDescription: 'Not Found',
+              headers: { 'cache-control': { value: 'private, no-store' } }
+            };
+          }
+          request.uri = uri.substring('/private-media'.length);
+          return request;
+        }
 
   MediaAccessLogsBucket:
     Type: AWS::S3::Bucket
@@ -2276,6 +2426,12 @@ Resources:
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
+          # Phase 1 ships the edge resources with delivery off; a follow-up
+          # flips this literal once the frontend private-media/* behavior exists.
+          PRIVATE_MEDIA_DELIVERY: 'false'
+          PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
+          PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
+          PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
       Policies:
         - Statement:
             - Effect: Allow
@@ -2285,6 +2441,13 @@ Resources:
               Action: s3:GetObject
               Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - !Ref FrontDoorOriginSecretReadPolicy
+        # CloudFront cookie-signing key. Like rate-limit-hash it is a
+        # SecureString under the AWS-managed aws/ssm key, so SSM decrypts it
+        # without a separate kms:Decrypt grant.
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/private-media-signing-key'
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
         - Statement:
@@ -2326,6 +2489,12 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          # Phase 1 ships the edge resources with delivery off; a follow-up
+          # flips this literal once the frontend private-media/* behavior exists.
+          PRIVATE_MEDIA_DELIVERY: 'false'
+          PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
+          PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
+          PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
       Policies:
         - Statement:
             - Effect: Allow
@@ -2335,6 +2504,13 @@ Resources:
               Action: s3:GetObject
               Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - !Ref FrontDoorOriginSecretReadPolicy
+        # CloudFront cookie-signing key. Like rate-limit-hash it is a
+        # SecureString under the AWS-managed aws/ssm key, so SSM decrypts it
+        # without a separate kms:Decrypt grant.
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/private-media-signing-key'
         - DynamoDBReadPolicy:
             TableName: !Ref AlbumsTable
         - Statement:
@@ -2418,6 +2594,12 @@ Resources:
           TURNSTILE_SECRET_KEY: !Ref TurnstileSecretKey
           TURNSTILE_SECRET_PARAMETER: !Ref TurnstileSecretArn
           TURNSTILE_EXPECTED_HOSTNAMES: !Ref FrontendHostname
+          # Phase 1 ships the edge resources with delivery off; a follow-up
+          # flips this literal once the frontend private-media/* behavior exists.
+          PRIVATE_MEDIA_DELIVERY: 'false'
+          PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
+          PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
+          PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
       Policies:
         - Statement:
             - Effect: Allow
@@ -2427,6 +2609,13 @@ Resources:
               Action: s3:GetObject
               Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - !Ref FrontDoorOriginSecretReadPolicy
+        # CloudFront cookie-signing key. Like rate-limit-hash it is a
+        # SecureString under the AWS-managed aws/ssm key, so SSM decrypts it
+        # without a separate kms:Decrypt grant.
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/private-media-signing-key'
         - Statement:
             - Effect: Allow
               Action: dynamodb:Query
@@ -3111,6 +3300,12 @@ Resources:
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           MEDIACONVERT_ROLE_ARN: !GetAtt MediaConvertRole.Arn
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
+          # Phase 1 ships the edge resources with delivery off; a follow-up
+          # flips this literal once the frontend private-media/* behavior exists.
+          PRIVATE_MEDIA_DELIVERY: 'false'
+          PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
+          PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
+          PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
       Policies:
         - Statement:
             - Effect: Allow
@@ -3136,6 +3331,13 @@ Resources:
               Action: s3:GetObject
               Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
         - !Ref FrontDoorOriginSecretReadPolicy
+        # CloudFront cookie-signing key. Like rate-limit-hash it is a
+        # SecureString under the AWS-managed aws/ssm key, so SSM decrypts it
+        # without a separate kms:Decrypt grant.
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/private-media-signing-key'
         - Statement:
             - Effect: Allow
               Action:
@@ -3863,8 +4065,21 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          # Phase 1 ships the edge resources with delivery off; a follow-up
+          # flips this literal once the frontend private-media/* behavior exists.
+          PRIVATE_MEDIA_DELIVERY: 'false'
+          PRIVATE_MEDIA_BASE_URL: !Sub '${FrontendUrl}/private-media'
+          PRIVATE_MEDIA_KEY_PAIR_ID: !Ref PrivateMediaPublicKey
+          PRIVATE_MEDIA_SIGNING_KEY_PARAMETER: !Sub '/ian-website/${Stage}/private-media-signing-key'
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
+        # CloudFront cookie-signing key. Like rate-limit-hash it is a
+        # SecureString under the AWS-managed aws/ssm key, so SSM decrypts it
+        # without a separate kms:Decrypt grant.
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ian-website/${Stage}/private-media-signing-key'
         - Statement:
             - Effect: Allow
               Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
@@ -5045,3 +5260,21 @@ Outputs:
   PrivateMediaCloudFrontDenyEnforced:
     Description: Guard state for non-public object-tag enforcement at the media CDN origin
     Value: !Ref EnforcePrivateMediaCloudFrontDeny
+  PrivateMediaPublicKeyId:
+    Description: CloudFront public key ID used as the signed-cookie Key-Pair-Id (public, not a secret)
+    Value: !Ref PrivateMediaPublicKey
+  PrivateMediaKeyGroupId:
+    Description: Trusted key group required by the frontend private-media/* behavior
+    Value: !Ref PrivateMediaKeyGroup
+  PrivateMediaOriginAccessControlId:
+    Description: Origin access control for the frontend distribution's album media origin
+    Value: !GetAtt PrivateMediaOriginAccessControl.Id
+  PrivateMediaCachePolicyId:
+    Description: Cache policy for the frontend private-media/* behavior
+    Value: !Ref PrivateMediaCachePolicy
+  PrivateMediaResponseHeadersPolicyId:
+    Description: Response headers policy for the frontend private-media/* behavior
+    Value: !Ref PrivateMediaResponseHeadersPolicy
+  PrivateMediaRewriteFunctionArn:
+    Description: Viewer-request function that maps private-media paths to album objects
+    Value: !GetAtt PrivateMediaRewriteFunction.FunctionMetadata.FunctionARN
