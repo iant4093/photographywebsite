@@ -43,10 +43,20 @@ SUMMARY_OPTIONAL_FIELDS = {
     "galleryCategoryOrder",
     "coverHlsUrl",
     "coverThumbnailTime",
+    "coverMediaId",
 } | HOVER_PREVIEW_FIELDS
 DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
-IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl", "downloadUrl"}
+IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl"}
+# Managed photo originals are download-only through the presigned endpoint: such
+# an image carries freshDownloadRequired instead of a public downloadUrl.
+RESTRICTED_ORIGINAL_PATH = re.compile(
+    r"/albums/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"/original/[0-9a-f]{32}\.(?:jpg|jpeg|png|webp|heic|heif)$",
+    re.IGNORECASE,
+)
 IMAGE_OPTIONAL_FIELDS = {
+    "downloadUrl",
+    "freshDownloadRequired",
     "isFavorite",
     "before",
     "previewSrcSet",
@@ -330,6 +340,13 @@ def validate_summary(value: object) -> dict:
             raise ProbeError("album summary has an invalid text field")
     _public_url(item["coverImageUrl"], allow_empty=True)
     _public_url(item["coverThumbnailUrl"], allow_empty=True)
+    if "coverMediaId" in item and (
+        not isinstance(item["coverMediaId"], str) or not re.fullmatch(r"[a-f0-9]{24}", item["coverMediaId"])
+    ):
+        raise ProbeError("album summary has an invalid cover media identifier")
+    for name in ("coverImageUrl", "coverThumbnailUrl"):
+        if RESTRICTED_ORIGINAL_PATH.search(urllib.parse.urlsplit(item[name]).path):
+            raise ProbeError("album summary exposes a photo original")
     return item
 
 
@@ -365,8 +382,15 @@ def validate_detail(payload: object, expected_album_id: str) -> int:
             raise ProbeError("public image has an invalid identifier")
         if "isFavorite" in image and not isinstance(image["isFavorite"], bool):
             raise ProbeError("public image favorite flag is invalid")
+        if ("downloadUrl" in image) == ("freshDownloadRequired" in image):
+            raise ProbeError("public image download contract is invalid")
+        if "freshDownloadRequired" in image and image["freshDownloadRequired"] is not True:
+            raise ProbeError("public image download contract is invalid")
         for name in ("url", "thumbnailUrl", "downloadUrl"):
-            _public_url(image[name])
+            if name in image:
+                _public_url(image[name])
+                if RESTRICTED_ORIGINAL_PATH.search(urllib.parse.urlsplit(image[name]).path):
+                    raise ProbeError("public image exposes a photo original")
         if "hlsUrl" in image:
             _public_url(image["hlsUrl"])
         if "before" in image:
