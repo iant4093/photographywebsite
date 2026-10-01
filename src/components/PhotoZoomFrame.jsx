@@ -21,8 +21,12 @@ export default function PhotoZoomFrame({ bounds, loaded = false, visible = true,
 
     const width = Number(imageProps.width) || naturalSize?.width
     const height = Number(imageProps.height) || naturalSize?.height
+    // Width and height describe the original. Without a srcset the natural
+    // size is the source's real size, and a smaller stand-in (a thumbnail when
+    // previews are not ready) must not get a frame larger than it fills.
+    const sourceFit = !imageProps.srcSet && naturalSize && width > 0 ? naturalSize.width / width : 1
     const fit = width > 0 && height > 0 && bounds.width > 0 && bounds.height > 0
-        ? Math.min(1, bounds.width / width, bounds.height / height)
+        ? Math.min(1, sourceFit, bounds.width / width, bounds.height / height)
         : null
     const interactive = loaded && visible && !outgoing
     const Frame = outgoing ? 'div' : 'button'

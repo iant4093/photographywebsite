@@ -20,7 +20,8 @@ it.each(['/', '/videos/', '/album/example', '/search', '/explore/immersive-galle
         document, window: { setTimeout: () => {}, addEventListener: () => {}, location: { pathname }, localStorage: { getItem: () => 'light' } },
     })
     if (pathname === '/' || pathname === '/videos/') {
-        expect(links).toHaveLength(1)
+        // The catalog fetch hint is pinned to the app's request in pages/catalogPreload.test.jsx.
+        expect(links.map(link => link.as)).toEqual(['image', 'fetch'])
         expect(links[0]).toMatchObject({ rel: 'preload', as: 'image', fetchPriority: 'high' })
         expect(links[0].href).toBe(`https://media.test/site/hero/${pathname === '/' ? '' : 'video/'}current/hero-960.avif`)
         expect(links[0].imageSrcset).toContain('2560w')

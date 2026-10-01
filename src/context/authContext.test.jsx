@@ -16,6 +16,7 @@ const cognito = vi.hoisted(() => ({
   verifyError: null,
   preferenceError: null,
   globalSignOutError: null,
+  revokeHandler: null,
 }))
 
 vi.mock('../utils/api', () => ({ clearApiCache: apiCache.clearApiCache }))
@@ -52,6 +53,7 @@ vi.mock('amazon-cognito-identity-js', () => {
         cognito.globalSignOutError ? callbacks.onFailure(cognito.globalSignOutError) : callbacks.onSuccess('SUCCESS')
       ))
       this.signOut = vi.fn()
+      this.revokeToken = vi.fn(({ callback }) => cognito.revokeHandler ? cognito.revokeHandler(callback) : callback())
       cognito.users.push(this)
     }
   }
@@ -122,6 +124,7 @@ describe('AuthProvider', () => {
     cognito.verifyError = null
     cognito.preferenceError = null
     cognito.globalSignOutError = null
+    cognito.revokeHandler = null
     vi.stubGlobal('fetch', vi.fn())
   })
 
@@ -428,6 +431,80 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('viewer@example.com|viewer|signed|not-required'))
     await act(async () => { finish(null, { UserMFASettingList: ['SOFTWARE_TOKEN_MFA'] }) })
     expect(screen.getByTestId('state')).toHaveTextContent('viewer@example.com|viewer|signed|not-required')
+  })
+
+  it('revokes the stored refresh token only after signing out locally', async () => {
+    const { prefix, account } = storedUser('first@example.com')
+    localStorage.setItem(`${prefix}.first@example.com.refreshToken`, 'refresh-first')
+    mount()
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('first@example.com|viewer|signed'))
+    const nonce = localStorage.getItem(`ian:auth-session:${import.meta.env.VITE_COGNITO_CLIENT_ID}`)
+    let finishRevoke
+    cognito.revokeHandler = (callback) => { finishRevoke = callback }
+
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    // Local sign-out and the cross-tab notice are synchronous; revocation is not awaited.
+    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
+    expect(account.signOut).toHaveBeenCalledWith()
+    expect(Object.keys(localStorage).filter(key => key.startsWith(prefix))).toEqual([])
+    expect(localStorage.getItem(`ian:auth-session:${import.meta.env.VITE_COGNITO_CLIENT_ID}`)).not.toBe(nonce)
+
+    await waitFor(() => expect(cognito.users.at(-1)?.revokeToken).toHaveBeenCalledWith({ token: 'refresh-first', callback: expect.any(Function) }))
+    const revoker = cognito.users.at(-1)
+    expect(revoker.options).toMatchObject({ Username: 'first@example.com', Pool: cognito.pools.at(-1), Storage: persistentStorage })
+    act(() => finishRevoke(new Error('offline')))
+    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
+  })
+
+  it('swallows synchronous revocation failures and skips revocation without a refresh token', async () => {
+    const { prefix } = storedUser('first@example.com')
+    localStorage.setItem(`${prefix}.first@example.com.refreshToken`, 'refresh-first')
+    mount()
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('first@example.com|viewer|signed'))
+    cognito.revokeHandler = () => { throw new Error('network unavailable') }
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    await waitFor(() => expect(cognito.users.at(-1)?.revokeToken).toHaveBeenCalled())
+    expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out')
+
+    const users = cognito.users.length
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    await act(async () => {})
+    expect(cognito.users).toHaveLength(users)
+  })
+
+  it('revokes the discarded refresh token after MFA setup only when global sign-out failed', async () => {
+    const prefix = `CognitoIdentityServiceProvider.${import.meta.env.VITE_COGNITO_CLIENT_ID}`
+    const login = async () => {
+      fetch.mockResolvedValueOnce(response({
+        AuthenticationResult: {
+          IdToken: jwt({ email: 'admin@example.com', 'cognito:groups': ['Admins'] }),
+          AccessToken: 'access',
+          RefreshToken: 'refresh',
+        },
+      }))
+      fireEvent.click(screen.getByRole('button', { name: 'login' }))
+      await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('admin@example.com|admin|signed|required'))
+      // The real SDK caches these while establishing the session.
+      localStorage.setItem(`${prefix}.LastAuthUser`, 'viewer@example.com')
+      localStorage.setItem(`${prefix}.viewer@example.com.refreshToken`, 'refresh-admin')
+    }
+    const revoked = () => cognito.users.flatMap(user => user.revokeToken.mock.calls)
+    mount()
+
+    await login()
+    fireEvent.click(screen.getByRole('button', { name: 'complete-mfa-setup' }))
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out|not-required'))
+    await act(async () => {})
+    expect(revoked()).toEqual([])
+
+    cognito.globalSignOutError = new Error('offline')
+    await login()
+    const adminUser = cognito.users.at(-1)
+    fireEvent.click(screen.getByRole('button', { name: 'complete-mfa-setup' }))
+    await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('ready||viewer|out|not-required'))
+    expect(adminUser.signOut).toHaveBeenCalled()
+    expect(localStorage.getItem(`${prefix}.viewer@example.com.refreshToken`)).toBeNull()
+    await waitFor(() => expect(revoked()).toEqual([[{ token: 'refresh-admin', callback: expect.any(Function) }]]))
   })
 
   it('keeps logout working when the browser lacks randomUUID', async () => {

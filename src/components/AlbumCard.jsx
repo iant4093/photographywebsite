@@ -25,6 +25,7 @@ function AlbumCard({
     const [coverPreview, setCoverPreview] = useState({ identity: '', srcSet: '' })
     const albumId = album?.albumId || ''
     const coverImageUrl = album?.coverImageUrl || ''
+    const coverMediaId = album?.coverMediaId || ''
     const usesResponsiveCover = album?.type !== 'video' && album?.visibility === 'public'
     const previewIdentity = usesResponsiveCover ? `${albumId}\n${coverImageUrl}` : ''
     const coverPreviewSrcSet = coverPreview.identity === previewIdentity ? coverPreview.srcSet : ''
@@ -95,7 +96,7 @@ function AlbumCard({
     useEffect(() => {
         if (!previewIdentity) return undefined
         let active = true
-        albumCoverPreviewSrcSet({ albumId, coverImageUrl })
+        albumCoverPreviewSrcSet({ albumId, coverImageUrl, coverMediaId })
             .then((srcSet) => {
                 if (active) setCoverPreview({ identity: previewIdentity, srcSet })
             })
@@ -103,7 +104,7 @@ function AlbumCard({
                 if (active) setCoverPreview({ identity: previewIdentity, srcSet: '' })
             })
         return () => { active = false }
-    }, [albumId, coverImageUrl, previewIdentity])
+    }, [albumId, coverImageUrl, coverMediaId, previewIdentity])
 
     // Determine the route: jump directly to video player if only 1 video
     const isSingleVideo = album.type === 'video' && album.imageCount === 1

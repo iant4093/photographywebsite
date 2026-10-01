@@ -285,6 +285,37 @@ describe('AlbumGallery', () => {
     await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('could not be downloaded')))
   })
 
+  it('downloads a public preview-only photo through the fresh endpoint while signed out', async () => {
+    const { resolveMediaDownloadUrl } = await vi.importActual('../utils/mediaUrls')
+    urls.resolveMediaDownloadUrl.mockImplementation(resolveMediaDownloadUrl)
+    auth.getIdToken.mockRejectedValue(new Error('anonymous'))
+    const [first, second] = photoData.images
+    api.fetchAlbumForViewing.mockResolvedValue({
+      ...photoData,
+      images: [
+        { ...first, url: 'https://x.test/1920', freshDownloadRequired: true },
+        { ...second, url: 'https://x.test/two-thumb', freshDownloadRequired: true },
+      ],
+    })
+    api.requestAlbumMediaDownload.mockResolvedValueOnce({ downloadUrl: 'https://s3.test/one-original?X-Amz-Signature=x' })
+    gallery(<AlbumGallery />, '/album/a1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Open item 1 from Wild Album' }))
+    expect(screen.getByRole('img', { name: /^Photograph \d/ })).toHaveAttribute('src', 'https://x.test/1920')
+    fireEvent.click(screen.getByTitle('Download Photo'))
+    await waitFor(() => expect(urls.startBrowserDownload).toHaveBeenCalledWith('https://s3.test/one-original?X-Amz-Signature=x', 'one'))
+    expect(api.requestAlbumMediaDownload).toHaveBeenCalledWith('a1', 'one', null)
+
+    // A missing photo must fail visibly rather than saving its preview.
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+    api.requestAlbumMediaDownload.mockRejectedValueOnce(Object.assign(new Error('gone'), { status: 404 }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+    fireEvent.click(screen.getByTitle('Download Photo'))
+    await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('could not be downloaded')))
+    expect(api.requestAlbumMediaDownload).toHaveBeenLastCalledWith('a1', 'two', null)
+    expect(urls.startBrowserDownload).toHaveBeenCalledOnce()
+  })
+
   it('shows an empty loaded album', async () => {
     api.fetchAlbumForViewing.mockResolvedValue({ createdAt: '2026-01-01' })
     gallery(<AlbumGallery />, '/album/a1')

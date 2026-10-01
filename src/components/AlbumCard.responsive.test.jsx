@@ -51,6 +51,7 @@ describe('AlbumCard responsive covers', () => {
         expect(media.albumCoverPreviewSrcSet).toHaveBeenCalledWith({
             albumId: photoAlbum.albumId,
             coverImageUrl: photoAlbum.coverImageUrl,
+            coverMediaId: '',
         })
     })
 

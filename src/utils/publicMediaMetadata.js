@@ -51,6 +51,7 @@ export function normalizeHeroManifest(value, heroType = 'photo') {
 
 
 const ALBUM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const COVER_MEDIA_ID_PATTERN = /^[a-f0-9]{24}$/
 const coverPreviewSets = new Map()
 const MAX_COVER_PREVIEW_SETS = 256
 
@@ -68,12 +69,20 @@ export async function albumCoverPreviewSrcSet(album) {
         return ''
     }
     if (!rawKey.startsWith('albums/') || rawKey.includes('\\') || rawKey.split('/').some((part) => !part || part === '.' || part === '..')) return ''
-    const key = `${albumId}\n${cover}`
+    // A managed-original cover is served as its thumbnail, whose key does not
+    // identify the previews; the API publishes the cover's media id instead.
+    const coverMediaId = COVER_MEDIA_ID_PATTERN.test(album?.coverMediaId) ? album.coverMediaId : ''
+    if (!coverMediaId && rawKey.split('/')[2] === 'thumbnail') return ''
+    const key = `${albumId}\n${cover}\n${coverMediaId}`
     let result = coverPreviewSets.get(key)
     if (result) coverPreviewSets.delete(key)
     else {
-        result = globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawKey)).then(digest => {
-            const mediaId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
+        const digest = coverMediaId
+            ? Promise.resolve(null)
+            : globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawKey))
+        result = digest.then(digest => {
+            const mediaId = coverMediaId
+                || Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 24)
             return PREVIEW_WIDTHS
                 .map((width) => `${cdnUrl(`public-previews/${albumId}/v${PREVIEW_VERSION}/${mediaId}-w${width}.webp`)} ${width}w`)
                 .join(', ')

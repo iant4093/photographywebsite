@@ -43,3 +43,21 @@
   preload.fetchPriority = 'high'
   document.head.appendChild(preload)
 }())
+
+// Preload the app's first catalog request (fetchAlbumsPage) byte for byte,
+// unless a fresh tab snapshot lets the app skip it.
+;(function preloadRouteCatalog() {
+  var route = window.location.pathname.replace(/\/$/, '')
+  if (route !== '' && route !== '/videos') return
+  var type = route ? 'video' : 'photo'
+  try {
+    var snapshot = JSON.parse(window.sessionStorage.getItem('ian:public-catalog:v6:public-' + type + 's'))
+    if (snapshot.version === 6 && Date.now() - snapshot.savedAt <= 300000) return
+  } catch { /* Without a readable snapshot the app fetches the page. */ }
+  var link = document.createElement('link')
+  link.rel = 'preload'
+  link.as = 'fetch'
+  link.crossOrigin = 'anonymous'
+  link.href = '/api/public/albums?type=' + type + '&limit=100'
+  document.head.appendChild(link)
+}())

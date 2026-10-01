@@ -153,3 +153,35 @@ describe('PhotoZoomFrame detail upgrade', () => {
         expect(screen.getByAltText('Photo')).toHaveAttribute('src', 'https://media.test/refreshed.jpg')
     })
 })
+
+describe('PhotoZoomFrame sizing', () => {
+    function loadWithNaturalSize(image, width, height) {
+        Object.defineProperty(image, 'naturalWidth', { configurable: true, value: width })
+        Object.defineProperty(image, 'naturalHeight', { configurable: true, value: height })
+        fireEvent.load(image)
+    }
+
+    it('does not frame a thumbnail stand-in at the original dimensions', () => {
+        const { src: _src, srcSet: _srcSet, ...rest } = props
+        render(<PhotoZoomFrame {...rest} bounds={{ width: 2000, height: 1500 }} src="https://media.test/thumb.jpg" />)
+        const frame = screen.getByRole('button', { name: 'Zoom in on photo' })
+        expect(frame).toHaveStyle({ width: '2000px' })
+        loadWithNaturalSize(screen.getByAltText('Photo'), 800, 533)
+        expect(frame).toHaveStyle({ width: '800px' })
+        fireEvent.click(frame)
+        expect(document.querySelector('.linen-lightbox-photo-detail')).toBeNull()
+    })
+
+    it('keeps the fitted frame for a full-size source and for responsive previews', () => {
+        const { src: _src, srcSet: _srcSet, ...rest } = props
+        const { unmount } = render(<PhotoZoomFrame {...rest} bounds={{ width: 2000, height: 1500 }} src="https://media.test/full.jpg" />)
+        loadWithNaturalSize(screen.getByAltText('Photo'), 6000, 4000)
+        expect(screen.getByRole('button', { name: 'Zoom in on photo' })).toHaveStyle({ width: '2000px' })
+        unmount()
+
+        // With a width-descriptor srcset the natural size is density-corrected.
+        render(<PhotoZoomFrame {...props} bounds={{ width: 2000, height: 1500 }} />)
+        loadWithNaturalSize(screen.getByAltText('Photo'), 960, 640)
+        expect(screen.getByRole('button', { name: 'Zoom in on photo' })).toHaveStyle({ width: '2000px' })
+    })
+})

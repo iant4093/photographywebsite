@@ -230,6 +230,8 @@ export function mediaThumbnailUrl(media) {
 
 export function mediaDisplayUrl(media) {
     if (typeof media === 'string') return media
+    // A fresh-download photo's original is never a viewer URL.
+    if (media?.freshDownloadRequired === true) return media.url || ''
     return media?.url
         || cdnUrl(media?.rawKey)
         || cdnUrl(media?.key)
@@ -265,7 +267,8 @@ export async function resolveMediaDownloadUrl(request, media) {
         if (!url) throw new Error('No download URL was returned')
         return url
     } catch (error) {
-        if (error?.status !== 404) throw error
+        // Its display URL is only a preview, so it is never a download fallback.
+        if (error?.status !== 404 || media?.freshDownloadRequired === true) throw error
         const legacyUrl = media && typeof media === 'object' && media.downloadUrl
             ? media.downloadUrl
             : mediaDisplayUrl(media)

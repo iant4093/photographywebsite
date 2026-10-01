@@ -97,6 +97,22 @@ function publishSessionChange() {
     try { persistentStorage.setItem(sessionChangeKey, nonce); return nonce } catch { return null }
 }
 
+function storedRefreshToken() {
+    const username = persistentStorage.getItem(`${storagePrefix}.LastAuthUser`)
+    const token = username && persistentStorage.getItem(`${storagePrefix}.${username}.refreshToken`)
+    return token ? { username, token } : null
+}
+
+// Best effort: local sign-out never waits for or fails with this request. The
+// token is read before local cleanup, so revocation never touches storage.
+function revokeRefreshToken(credentials) {
+    if (!credentials) return
+    Promise.all([getUserPool(), loadCognitoModule()]).then(([pool, { CognitoUser }]) => {
+        if (!pool) return
+        const account = new CognitoUser({ Username: credentials.username, Pool: pool, Storage: persistentStorage })
+        account.revokeToken({ token: credentials.token, callback: () => {} })
+    }).catch(() => {})
+}
 
 async function accountRead(user, method, assertCurrent) {
     return (await import('../utils/cognitoOperation')).readAccount(user, method, assertCurrent)
@@ -242,6 +258,8 @@ export function AuthProvider({ children }) {
         if (!user || !isAdmin) throw new Error('Administrator access is required.')
         const { completeMfaSetup } = await import('../utils/authActions')
         assertCurrentSession(generation)
+        // Setup clears Cognito storage itself, so capture the token first.
+        const credentials = storedRefreshToken()
         const result = await completeMfaSetup(user, code, () => assertCurrentSession(generation))
         assertCurrentSession(generation)
         clearSessionState()
@@ -249,6 +267,8 @@ export function AuthProvider({ children }) {
         clearCognitoCredentials(tabStorage)
         sessionIdentity.current = ''
         sessionNonce.current = publishSessionChange()
+        // A successful global sign-out has already revoked every refresh token.
+        if (!result?.globallySignedOut) revokeRefreshToken(credentials)
         return result
     }, [assertCurrentSession, clearSessionState, isAdmin, user])
 
@@ -337,6 +357,7 @@ export function AuthProvider({ children }) {
     const completeMfa = useCallback((input) => authenticate('mfa', input), [authenticate])
 
     const logout = useCallback(() => {
+        const credentials = storedRefreshToken()
         const currentUser = user || loadedUserPool?.getCurrentUser()
         currentUser?.signOut()
         clearSessionState()
@@ -344,6 +365,7 @@ export function AuthProvider({ children }) {
         clearCognitoCredentials(tabStorage)
         sessionIdentity.current = ''
         sessionNonce.current = publishSessionChange()
+        revokeRefreshToken(credentials)
     }, [clearSessionState, user])
 
     const getIdToken = useCallback(async () => {

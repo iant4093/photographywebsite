@@ -5,7 +5,6 @@
       <stop offset="100%" stop-color="#8b7565" />
     </linearGradient>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&amp;display=swap');
       .it-text {
         font-family: 'Playfair Display', serif;
         font-weight: 700;
