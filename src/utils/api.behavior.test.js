@@ -228,21 +228,6 @@ describe('public API client behavior', () => {
     await expect(api.deleteAlbum('token', 'a')).resolves.toBeNull()
   })
 
-  it('requests a fresh original anonymously without an Authorization header', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ downloadUrl: 'https://s3.test/original' })))
-    vi.stubGlobal('fetch', fetchMock)
-    await api.requestAlbumMediaDownload('album', 'media', null)
-    await api.requestSharedMediaDownload('code', 'media')
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      expect.stringMatching(/\/albums\/album\/download-url$/),
-      expect.stringMatching(/\/shared\/code\/download-url$/),
-    ])
-    for (const [, options] of fetchMock.mock.calls) {
-      expect(options).toMatchObject({ method: 'POST', body: JSON.stringify({ mediaId: 'media' }) })
-      expect(options.headers).not.toHaveProperty('Authorization')
-    }
-  })
-
   it('passes a durable media deletion receipt to the manager before cleanup completes', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn()

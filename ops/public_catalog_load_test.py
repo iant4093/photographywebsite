@@ -47,13 +47,8 @@ SUMMARY_OPTIONAL_FIELDS = {
 } | HOVER_PREVIEW_FIELDS
 DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl"}
-# Managed photo originals are download-only through the presigned endpoint: such
-# an image carries freshDownloadRequired instead of a public downloadUrl.
-RESTRICTED_ORIGINAL_PATH = re.compile(
-    r"/albums/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    r"/original/[0-9a-f]{32}\.(?:jpg|jpeg|png|webp|heic|heif)$",
-    re.IGNORECASE,
-)
+# A public image normally carries downloadUrl. An edge-cached response from the
+# short-lived preview-only contract may carry freshDownloadRequired instead.
 IMAGE_OPTIONAL_FIELDS = {
     "downloadUrl",
     "freshDownloadRequired",
@@ -344,9 +339,6 @@ def validate_summary(value: object) -> dict:
         not isinstance(item["coverMediaId"], str) or not re.fullmatch(r"[a-f0-9]{24}", item["coverMediaId"])
     ):
         raise ProbeError("album summary has an invalid cover media identifier")
-    for name in ("coverImageUrl", "coverThumbnailUrl"):
-        if RESTRICTED_ORIGINAL_PATH.search(urllib.parse.urlsplit(item[name]).path):
-            raise ProbeError("album summary exposes a photo original")
     return item
 
 
@@ -389,8 +381,6 @@ def validate_detail(payload: object, expected_album_id: str) -> int:
         for name in ("url", "thumbnailUrl", "downloadUrl"):
             if name in image:
                 _public_url(image[name])
-                if RESTRICTED_ORIGINAL_PATH.search(urllib.parse.urlsplit(image[name]).path):
-                    raise ProbeError("public image exposes a photo original")
         if "hlsUrl" in image:
             _public_url(image["hlsUrl"])
         if "before" in image:

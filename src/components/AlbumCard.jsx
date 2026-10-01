@@ -17,7 +17,10 @@ function AlbumCard({
     showNewFlag = false,
     preview = false,
     responsivePreview = false,
-    imageSizes = '(min-width: 1024px) 360px, (min-width: 640px) 320px, 280px',
+    // The phone slot is 280px wide, but the 4:3 crop of a wide cover and 3x
+    // screens need more pixels than that implies; 420px selects one preview
+    // tier higher (960w at 2x, 1440w at 3x).
+    imageSizes = '(min-width: 1024px) 360px, (min-width: 640px) 320px, 420px',
 }) {
     const intentTimer = useRef(null)
     const hoverController = useRef(null)
@@ -25,7 +28,6 @@ function AlbumCard({
     const [coverPreview, setCoverPreview] = useState({ identity: '', srcSet: '' })
     const albumId = album?.albumId || ''
     const coverImageUrl = album?.coverImageUrl || ''
-    const coverMediaId = album?.coverMediaId || ''
     const usesResponsiveCover = album?.type !== 'video' && album?.visibility === 'public'
     const previewIdentity = usesResponsiveCover ? `${albumId}\n${coverImageUrl}` : ''
     const coverPreviewSrcSet = coverPreview.identity === previewIdentity ? coverPreview.srcSet : ''
@@ -96,7 +98,7 @@ function AlbumCard({
     useEffect(() => {
         if (!previewIdentity) return undefined
         let active = true
-        albumCoverPreviewSrcSet({ albumId, coverImageUrl, coverMediaId })
+        albumCoverPreviewSrcSet({ albumId, coverImageUrl })
             .then((srcSet) => {
                 if (active) setCoverPreview({ identity: previewIdentity, srcSet })
             })
@@ -104,7 +106,7 @@ function AlbumCard({
                 if (active) setCoverPreview({ identity: previewIdentity, srcSet: '' })
             })
         return () => { active = false }
-    }, [albumId, coverImageUrl, coverMediaId, previewIdentity])
+    }, [albumId, coverImageUrl, previewIdentity])
 
     // Determine the route: jump directly to video player if only 1 video
     const isSingleVideo = album.type === 'video' && album.imageCount === 1

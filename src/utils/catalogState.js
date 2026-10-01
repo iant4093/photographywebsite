@@ -27,7 +27,6 @@ const PUBLIC_ALBUM_FIELDS = [
     'coverImageUrl',
     'coverThumbnailUrl',
     'coverBlurhash',
-    'coverMediaId',
     'coverHlsUrl',
     'coverThumbnailTime',
     'hoverPreviewStatus',

@@ -151,22 +151,6 @@ describe('media URL compatibility', () => {
         await expect(albumCoverPreviewSrcSet({ albumId: 'not-a-uuid', coverImageUrl: cover })).resolves.toBe('')
     })
 
-    it('does not derive cover previews from a thumbnail standing in for a managed original', async () => {
-        const albumId = '123e4567-e89b-42d3-a456-426614174000'
-        const thumbnail = cdnUrl(`albums/${albumId}/thumbnail/0123456789abcdef0123456789abcdef.jpg`)
-        await expect(albumCoverPreviewSrcSet({ albumId, coverImageUrl: thumbnail })).resolves.toBe('')
-        await expect(albumCoverPreviewSrcSet({ albumId, coverImageUrl: thumbnail, coverMediaId: 'not-an-id' })).resolves.toBe('')
-    })
-
-    it('builds cover previews from the published cover media id', async () => {
-        const albumId = '123e4567-e89b-42d3-a456-426614174000'
-        const thumbnail = cdnUrl(`albums/${albumId}/thumbnail/0123456789abcdef0123456789abcdef.jpg`)
-        const coverMediaId = '0123456789abcdef01234567'
-        const srcSet = await albumCoverPreviewSrcSet({ albumId, coverImageUrl: thumbnail, coverMediaId })
-        expect(srcSet).toContain(`public-previews/${albumId}/v3/${coverMediaId}-w640.webp 640w`)
-        expect(srcSet).toContain(`${coverMediaId}-w1920.webp 1920w`)
-    })
-
     it('uses the opaque media id for API actions and derives a friendly filename', () => {
         const media = { id: 'media-123', rawKey: 'albums/private/original.nef' }
         expect(mediaId(media)).toBe('media-123')
@@ -298,22 +282,6 @@ describe('media URL compatibility', () => {
             () => Promise.reject(forbidden),
             { downloadUrl: 'https://legacy.example/download' },
         )).rejects.toBe(forbidden)
-    })
-
-    it('never falls back to a preview or key-derived URL for a fresh-download photo', async () => {
-        const missing = Object.assign(new Error('not found'), { status: 404 })
-        const photo = {
-            id: 'media-1',
-            url: 'https://cdn.example/public-previews/a/v3/m-w1920.webp',
-            rawKey: 'albums/a/original/0123456789abcdef0123456789abcdef.jpg',
-            freshDownloadRequired: true,
-        }
-        await expect(resolveMediaDownloadUrl(() => Promise.reject(missing), photo)).rejects.toBe(missing)
-        await expect(resolveMediaDownloadUrl(() => Promise.resolve({ downloadUrl: 'https://s3.example/original?X-Amz-Signature=x' }), photo))
-            .resolves.toBe('https://s3.example/original?X-Amz-Signature=x')
-        expect(mediaDisplayUrl(photo)).toBe(photo.url)
-        expect(mediaDisplayUrl({ ...photo, url: '' })).toBe('')
-        expect(mediaDisplayUrl({ rawKey: 'albums/a/video.mp4' })).toBe(cdnUrl('albums/a/video.mp4'))
     })
 
     it('does not use the legacy fallback for malformed successful responses', async () => {

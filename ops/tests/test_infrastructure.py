@@ -998,64 +998,7 @@ class PrivateMediaEdgeTests(unittest.TestCase):
             "AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'",
             body,
         )
-        # The only other reference is the photo-original Deny below.
-        self.assertEqual(policy.count("distribution/EIOCCNR8XGQ1B"), 2)
-
-    def test_cloudfront_never_reads_managed_photo_originals(self) -> None:
-        policy = resource_block("ImagesBucketPolicy")
-        statement = re.search(
-            r"(?ms)- Sid: DenyCloudFrontPhotoOriginals\n(?P<body>.*?)(?=\n          - |\n\n)",
-            policy,
-        )
-        self.assertIsNotNone(statement)
-        body = statement.group("body")
-        self.assertIn("Effect: Deny", body)
-        self.assertIn("Service: cloudfront.amazonaws.com", body)
-        self.assertIn("Action: s3:GetObject\n", body)
-        uuid = "????????-????-????-????-????????????"
-        name = "?" * 32
-        resources = re.findall(r"(?m)^              - !Sub '(.+)'$", body)
-        self.assertEqual(resources, [
-            f"${{ImagesBucket.Arn}}/albums/{uuid}/original/{name}.{extension}"
-            for extension in ("jpg", "jpeg", "png", "webp", "heic", "heif")
-        ])
-        # Neither video originals nor their nested HLS outputs are denied.
-        self.assertNotRegex(body, r"\.(mp4|mov|webm|m4v|m3u8|ts)'")
-        self.assertIn(
-            "AWS:SourceArn:\n"
-            "                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'\n"
-            "                  - !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/EIOCCNR8XGQ1B'",
-            body,
-        )
-        self.assertIn("StringEquals:", body)
-
-    def test_photo_original_deny_matches_the_backend_restricted_layout(self) -> None:
-        # S3 policy wildcards: '?' is exactly one character, '*' any run.
-        policy = resource_block("ImagesBucketPolicy")
-        body = policy.split("- Sid: DenyCloudFrontPhotoOriginals\n", 1)[1].split("\n          - ", 1)[0]
-        patterns = [
-            re.compile("^" + re.escape(resource.removeprefix("${ImagesBucket.Arn}/")).replace(r"\?", ".").replace(r"\*", ".*") + "$", re.S)
-            for resource in re.findall(r"(?m)^              - !Sub '(.+)'$", body)
-        ]
-        album_id = "11111111-1111-4111-8111-111111111111"
-        hex_name = "0123456789abcdef0123456789abcdef"
-        denied = [f"albums/{album_id}/original/{hex_name}.{ext}" for ext in ("jpg", "jpeg", "png", "webp", "heic", "heif")]
-        allowed = [
-            f"albums/{album_id}/original/{hex_name}.mp4",
-            f"albums/{album_id}/original/{hex_name}_hls/{hex_name}.m3u8",
-            f"albums/{album_id}/original/{hex_name}_hls/{hex_name}_1080p5m00001.ts",
-            f"albums/{album_id}/thumbnail/{hex_name}.jpg",
-            f"albums/{album_id}/preview/v3/{'a' * 24}-w1920.webp",
-            f"albums/{album_id}/original/photo.jpg",
-            "albums/summer-portraits-a1b2c3d4/original/photo.jpg",
-            f"albums/summer-portraits-a1b2c3d4/original/{hex_name}.jpg",
-        ]
-        for key in denied:
-            with self.subTest(key=key):
-                self.assertTrue(any(pattern.match(key) for pattern in patterns))
-        for key in allowed:
-            with self.subTest(key=key):
-                self.assertFalse(any(pattern.match(key) for pattern in patterns))
+        self.assertEqual(policy.count("distribution/EIOCCNR8XGQ1B"), 1)
 
     def test_cookie_signers_are_enabled_with_exact_key_parameter_access(self) -> None:
         # Delivery was switched on 2026-09-30 once the frontend private-media/*
@@ -1109,7 +1052,7 @@ class PrivateMediaEdgeTests(unittest.TestCase):
             ("GET", f"/private-media/albums/{album_id}/original/photo%20one.jpg", f"/albums/{album_id}/original/photo%20one.jpg"),
             ("HEAD", f"/private-media/albums/{album_id}/preview/v3/abc-w640.webp", f"/albums/{album_id}/preview/v3/abc-w640.webp"),
             ("GET", "/private-media/albums/legacy.album_2019/clip_hls/segment0.ts", "/albums/legacy.album_2019/clip_hls/segment0.ts"),
-            # Videos, nested HLS output, and legacy/non-managed originals still pass.
+            # Originals, videos, and nested HLS output all pass with a valid cookie.
             ("GET", f"/private-media/albums/{album_id}/original/{hex_name}.mp4", f"/albums/{album_id}/original/{hex_name}.mp4"),
             ("GET", f"/private-media/albums/{album_id}/original/{hex_name}_hls/{hex_name}.m3u8",
              f"/albums/{album_id}/original/{hex_name}_hls/{hex_name}.m3u8"),
@@ -1117,6 +1060,7 @@ class PrivateMediaEdgeTests(unittest.TestCase):
              f"/albums/{album_id}/original/{hex_name}_hls/{hex_name}.jpg"),
             ("GET", f"/private-media/albums/legacy.album_2019/original/{hex_name}.jpg",
              f"/albums/legacy.album_2019/original/{hex_name}.jpg"),
+            ("GET", f"/private-media/albums/{album_id}/original/{hex_name}.jpg", f"/albums/{album_id}/original/{hex_name}.jpg"),
             ("GET", f"/private-media/albums/{album_id}/thumbnail/{hex_name}.jpg", f"/albums/{album_id}/thumbnail/{hex_name}.jpg"),
         ]
         rejected = [
@@ -1135,13 +1079,6 @@ class PrivateMediaEdgeTests(unittest.TestCase):
             ("GET", "/private-media/site/hero/current.jpg"),
             ("GET", f"/albums/{album_id}/photo.jpg"),
             ("GET", f"/private-mediax/albums/{album_id}/photo.jpg"),
-            # Managed photo originals are download-only, in any letter case or encoding.
-            *[("GET", f"/private-media/albums/{album_id}/original/{hex_name}.{extension}")
-              for extension in ("jpg", "jpeg", "png", "webp", "heic", "heif", "JPG", "HeIc")],
-            ("HEAD", f"/private-media/albums/{album_id}/original/{hex_name}.jpg"),
-            ("GET", f"/private-media/albums/{album_id}/original/{hex_name}.%6Apg"),
-            ("GET", f"/private-media/albums/{album_id}/original/{hex_name}%2Ejpg"),
-            ("GET", f"/private-media/albums/{album_id}/original/{hex_name}.jpg%"),
         ]
         requests = [{"method": method, "uri": uri, "headers": {}, "querystring": {}}
                     for method, uri, *_ in accepted + rejected]
