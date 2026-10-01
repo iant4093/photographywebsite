@@ -141,7 +141,7 @@ class ExploreApiTests(unittest.TestCase):
             }, None)
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
         item = response_body(response)["items"][0]
         self.assertEqual(item["albumTitle"], "Blue Mountain")
         self.assertEqual(item["lens"], "Sigma 18-50mm F2.8")
@@ -185,7 +185,7 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(response_body(response)["items"], [
             {"name": "Sigma 18-50mm F2.8", "photos": 1},
         ])
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
 
     def test_color_options_only_include_populated_current_public_facets(self):
         with patch.object(
@@ -201,7 +201,7 @@ class ExploreApiTests(unittest.TestCase):
                 "queryStringParameters": {"mode": "colors"},
             })
         self.assertEqual(response_body(response)["items"], [{"id": "blue", "photos": 1}])
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
 
     def test_exposure_options_count_the_complete_public_archive_and_bundle_a_page(self):
         items = [
@@ -233,7 +233,7 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(body["initialPage"]["value"], "aperture:wide")
         self.assertEqual(body["initialPage"]["total"], 1)
         self.assertEqual(len(body["initialPage"]["items"]), 1)
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
 
     def test_exposure_snapshot_is_reused_for_filter_changes_and_pagination(self):
         preview_table = Mock(scan=Mock(return_value={"Items": [metadata()]}))
@@ -544,7 +544,7 @@ class ExploreApiTests(unittest.TestCase):
         self.assertEqual(body["initialPage"]["value"], "blue")
         self.assertEqual(body["initialPage"]["items"][0]["mediaId"], MEDIA_ID)
         page.assert_called_once_with("color", "blue", get_public_album.EXPLORE_DEFAULT_LIMIT)
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
 
     def test_materialized_count_uses_a_true_low_level_dynamodb_client(self):
         partition = facet_partition("color", "blue")

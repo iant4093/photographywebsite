@@ -236,7 +236,7 @@ def handler(event, context):
         return json_response(
             200,
             {"items": items, "nextCursor": encode_public_cursor(last_key, scope)},
-            cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=60",
+            cache_control="public, max-age=60, s-maxage=3600, stale-while-revalidate=60",
         )
     except ValidationError as error:
         return error_response(400, str(error), code="invalid_request")

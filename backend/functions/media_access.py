@@ -29,6 +29,13 @@ PUBLIC_PREVIEW_PREFIX = "public-previews"
 HOVER_PREVIEW_MANIFEST_VERSION = 1
 HOVER_PREVIEW_MANIFEST_PATTERN = re.compile(r"^hover-([a-f0-9]{24})\.json$")
 ALBUM_QR_KEY_PATTERN = re.compile(r"^albums/([0-9a-f-]{36})/qr/v1/[a-f0-9]{24}\.svg$")
+# Exactly the photo-original layout issued by get_upload_url. The bucket policy
+# and the private-media edge function deny the same shape to CloudFront, so a
+# viewer URL for one of these objects would be dead as well as oversized.
+RESTRICTED_ORIGINAL_PATTERN = re.compile(
+    r"^albums/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"/original/[0-9a-f]{32}\.(?:jpg|jpeg|png|webp|heic|heif)$"
+)
 
 _s3 = None
 _dynamodb = None
@@ -201,6 +208,15 @@ def media_url(key, visibility, *, download_filename=None, private_media_base=Non
     if private_media_base and visibility in PROTECTED_VISIBILITIES and download_filename is None:
         return private_cdn_url(key, private_media_base)
     return presigned_get_url(key, download_filename=download_filename)
+
+
+def is_restricted_original(key):
+    """True only for managed photo originals, which are never CDN-delivered.
+
+    Videos and legacy-layout keys keep their existing viewer URLs; originals
+    are available only through the presigned, rate-limited download endpoint.
+    """
+    return isinstance(key, str) and bool(RESTRICTED_ORIGINAL_PATTERN.fullmatch(key))
 
 
 def media_id_for_key(key):
@@ -433,30 +449,46 @@ def serialize_image(
     thumb_key = source.get("thumbKey") or ""
     hls_key = source.get("hlsUrl") or ""
     private_base = private_media_base if visibility in PROTECTED_VISIBILITIES else None
+    restricted = is_restricted_original(key)
+    preview_keys = validated_preview_keys(source, album, preview_metadata) if album else {}
+    preview_src_set = [
+        {
+            "width": width,
+            "url": (
+                public_url(public_preview_key(album.get("albumId"), preview_keys[str(width)]))
+                if visibility == "public"
+                else media_url(preview_keys[str(width)], visibility, private_media_base=private_base)
+            ),
+        }
+        for width in PREVIEW_WIDTHS
+    ] if preview_keys else []
+    if restricted:
+        # Display the largest ready derivative instead of the original object.
+        if thumb_key:
+            thumbnail_url = media_url(thumb_key, visibility, private_media_base=private_base)
+        else:
+            thumbnail_url = preview_src_set[0]["url"] if preview_src_set else ""
+        display_url = preview_src_set[-1]["url"] if preview_src_set else thumbnail_url
+    else:
+        display_url = media_url(key, visibility, private_media_base=private_base)
+        thumbnail_url = media_url(thumb_key or key, visibility, private_media_base=private_base)
     result = {
         "id": media_id_for_key(key),
-        "url": media_url(key, visibility, private_media_base=private_base),
-        "thumbnailUrl": media_url(thumb_key or key, visibility, private_media_base=private_base),
+        "url": display_url,
+        "thumbnailUrl": thumbnail_url,
     }
     if isinstance(source.get("isFavorite"), bool):
         result["isFavorite"] = source["isFavorite"]
-    preview_keys = validated_preview_keys(source, album, preview_metadata) if album else {}
-    if preview_keys:
-        result["previewSrcSet"] = [
-            {
-                "width": width,
-                "url": (
-                    public_url(public_preview_key(album.get("albumId"), preview_keys[str(width)]))
-                    if visibility == "public"
-                    else media_url(preview_keys[str(width)], visibility, private_media_base=private_base)
-                ),
-            }
-            for width in PREVIEW_WIDTHS
-        ]
+    if preview_src_set:
+        result["previewSrcSet"] = preview_src_set
     before = original_comparison_hint(album)
     if before is not None:
         result["before"] = before
-    if visibility == "public":
+    if visibility == "public" and restricted:
+        # Public responses are edge-cached, so they carry no expiry metadata;
+        # the viewer requests a presigned original only when downloading.
+        result["freshDownloadRequired"] = True
+    elif visibility == "public":
         result["downloadUrl"] = public_url(key)
     else:
         # The signed-cookie policy uses the same TTL, so this expiry also
@@ -539,17 +571,28 @@ def serialize_album_summary(album, *, include_admin=False):
         raise ValidationError("Album has an invalid visibility")
     cover_key = album.get("coverImageUrl", "")
     cover_url = ""
+    restricted_cover = False
     if isinstance(cover_key, str) and cover_key.startswith("https://"):
         parsed = urllib.parse.urlsplit(cover_key)
         # Retain only legacy absolute URLs served by this configured CDN.
         if visibility == "public" and parsed.scheme == "https" and parsed.netloc == cdn_domain():
-            cover_url = cover_key
+            cover_object_key = urllib.parse.unquote(parsed.path).lstrip("/")
+            restricted_cover = is_restricted_original(cover_object_key)
+            if not restricted_cover:
+                cover_url = cover_key
     elif cover_key:
         cover_key = validate_album_media_key(cover_key, album=album)
-        cover_url = media_url(cover_key, visibility)
+        cover_object_key = cover_key
+        restricted_cover = is_restricted_original(cover_key)
+        if not restricted_cover:
+            cover_url = media_url(cover_key, visibility)
     thumb_key = album.get("coverThumbKey", "")
     if thumb_key:
         thumb_key = validate_album_media_key(thumb_key, album=album)
+    thumb_url = media_url(thumb_key, visibility) if thumb_key else ""
+    if restricted_cover:
+        # A photo-original cover is shown through its thumbnail, never the original.
+        cover_url = thumb_url
     summary = {
         "albumId": album.get("albumId", ""),
         "type": album.get("type", "photo"),
@@ -561,9 +604,13 @@ def serialize_album_summary(album, *, include_admin=False):
         "visibility": visibility,
         "imageCount": len(album.get("images", [])),
         "coverImageUrl": cover_url,
-        "coverThumbnailUrl": media_url(thumb_key, visibility) if thumb_key else cover_url,
+        "coverThumbnailUrl": thumb_url or cover_url,
         "coverBlurhash": album.get("coverBlurhash", ""),
     }
+    if restricted_cover and visibility == "public":
+        # The cover URL no longer names the original, so the viewer cannot
+        # derive the cover's public preview set from it; publish the media id.
+        summary["coverMediaId"] = media_id_for_key(cover_object_key)
     if visibility == "public" and album.get("type", "photo") == "photo":
         hover_status = album.get("hoverPreviewStatus")
         if hover_status in {"ready", "unavailable"}:

@@ -36,12 +36,15 @@ class CacheInvalidationTests(unittest.TestCase):
         request = self.client.create_invalidation.call_args.kwargs
         self.assertEqual(request["DistributionId"], "frontend")
         self.assertEqual(request["InvalidationBatch"]["Paths"], {
-            "Quantity": 4,
+            "Quantity": 7,
             "Items": [
+                "/album/*",
                 "/api/public/albums*",
                 "/api/public/explore*",
                 "/api/public/featured-photos*",
                 "/api/public/random-photos*",
+                "/api/public/social/*",
+                "/video/*",
             ],
         })
         self.assertTrue(request["InvalidationBatch"]["CallerReference"].startswith("album-updated-"))
@@ -53,13 +56,15 @@ class CacheInvalidationTests(unittest.TestCase):
                 catalog=True, random_photos=True,
             )
         paths = self.client.create_invalidation.call_args.kwargs['InvalidationBatch']['Paths']
-        self.assertEqual(paths['Quantity'], 4)
+        self.assertEqual(paths['Quantity'], 7)
         covered = [
             '/api/public/albums', '/api/public/albums?category=travel&page=2',
             f'/api/public/albums/{ALBUM_ID}', f'/api/public/albums/{ALBUM_ID}?page=2',
             '/api/public/explore', '/api/public/explore?cursor=next',
             '/api/public/featured-photos', '/api/public/featured-photos?mode=category&value=Hikes&limit=6',
             '/api/public/random-photos', '/api/public/random-photos?category=travel',
+            f'/album/{ALBUM_ID}', f'/album/{ALBUM_ID}/', f'/video/{ALBUM_ID}',
+            f'/api/public/social/album/{ALBUM_ID}', f'/api/public/social/video/{ALBUM_ID}',
         ]
         for url in covered:
             with self.subTest(url=url):
@@ -73,8 +78,40 @@ class CacheInvalidationTests(unittest.TestCase):
         with patch.object(cache_invalidation, "_client", return_value=self.client):
             cache_invalidation.invalidate_public_api_batch(album_ids=[ALBUM_ID, ALBUM_ID])
         self.assertEqual(self.client.create_invalidation.call_args.kwargs['InvalidationBatch']['Paths'], {
-            'Quantity': 1, 'Items': [f'/api/public/albums/{ALBUM_ID}'],
+            'Quantity': 5, 'Items': [
+                f'/album/{ALBUM_ID}*',
+                f'/api/public/albums/{ALBUM_ID}',
+                f'/api/public/social/album/{ALBUM_ID}',
+                f'/api/public/social/video/{ALBUM_ID}',
+                f'/video/{ALBUM_ID}*',
+            ],
         })
+
+    def test_album_documents_cover_viewer_and_rewritten_paths_only_for_that_album(self):
+        other = "22222222-2222-4222-8222-222222222222"
+        with patch.object(cache_invalidation, "_client", return_value=self.client):
+            cache_invalidation.invalidate_public_api_batch(album_ids=[ALBUM_ID])
+        items = self.client.create_invalidation.call_args.kwargs['InvalidationBatch']['Paths']['Items']
+        # The social router rewrites /album/<id>[/] and /video/<id>[/] to the
+        # anonymous social document, and CloudFront caches the rewritten URL.
+        for url in (f'/album/{ALBUM_ID}', f'/album/{ALBUM_ID}/', f'/video/{ALBUM_ID}',
+                    f'/api/public/social/album/{ALBUM_ID}', f'/api/public/social/video/{ALBUM_ID}'):
+            with self.subTest(url=url):
+                self.assertTrue(any(fnmatchcase(url, path) for path in items))
+        for url in (f'/album/{other}', f'/api/public/social/album/{other}', '/api/public/albums',
+                    f'/albums/{ALBUM_ID}/original/photo.jpg'):
+            with self.subTest(url=url):
+                self.assertFalse(any(fnmatchcase(url, path) for path in items))
+
+    def test_many_album_documents_collapse_to_bounded_wildcards(self):
+        albums = [f"{index}1111111-1111-4111-8111-111111111111" for index in range(1, 9)]
+        with patch.object(cache_invalidation, "_client", return_value=self.client):
+            cache_invalidation.invalidate_public_api_batch(album_ids=albums)
+        items = self.client.create_invalidation.call_args.kwargs['InvalidationBatch']['Paths']['Items']
+        # CloudFront allows only 15 wildcard paths in progress per distribution.
+        self.assertLessEqual(sum('*' in path for path in items), 3)
+        self.assertEqual([path for path in items if '*' in path], ['/album/*', '/api/public/social/*', '/video/*'])
+        self.assertEqual(len([path for path in items if path.startswith('/api/public/albums/')]), 8)
 
     def test_catalog_does_not_skip_album_identity_validation(self):
         with patch.object(cache_invalidation, "_client", return_value=self.client):
@@ -209,6 +246,28 @@ class CacheInvalidationTests(unittest.TestCase):
             strict=True,
         )
 
+    def test_worker_coalesces_album_documents_into_one_request(self):
+        other = "22222222-2222-4222-8222-222222222222"
+        event = {"Records": [
+            {"messageId": "a", "body": json.dumps({"version": 1, "albumId": ALBUM_ID, "reason": "one"})},
+            {"messageId": "b", "body": json.dumps({"version": 1, "albumId": other, "reason": "two"})},
+            {"messageId": "c", "body": json.dumps({"version": 1, "albumId": ALBUM_ID, "reason": "three"})},
+        ]}
+        with patch.dict(os.environ, {"FRONTEND_DISTRIBUTION_ID": "frontend"}), patch.object(
+            cache_invalidation, "_client", return_value=self.client
+        ):
+            result = cache_invalidation_worker.handler(event, None)
+        self.assertEqual(result, {"invalidated": True, "albumCount": 2, "catalog": False})
+        self.client.create_invalidation.assert_called_once()
+        items = self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"]["Items"]
+        self.assertEqual(items, sorted(set(items)))
+        for album_id in (ALBUM_ID, other):
+            for path in (f"/album/{album_id}*", f"/video/{album_id}*", f"/api/public/albums/{album_id}",
+                         f"/api/public/social/album/{album_id}", f"/api/public/social/video/{album_id}"):
+                with self.subTest(path=path):
+                    self.assertIn(path, items)
+        self.assertEqual(len(items), 10)
+
     def test_random_photo_queue_message_purges_only_random_photo_paths(self):
         queue = Mock()
         with patch.dict(os.environ, {
@@ -239,9 +298,10 @@ class CacheInvalidationTests(unittest.TestCase):
                 {"body": json.dumps({"version": 1, "catalog": True, "albumId": ALBUM_ID})},
             ]}, None)
         paths = self.client.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"]
-        self.assertEqual(paths["Quantity"], 4)
+        self.assertEqual(paths["Quantity"], 7)
         self.assertIn("/api/public/albums*", paths["Items"])
         self.assertIn("/api/public/explore*", paths["Items"])
+        self.assertIn("/api/public/social/*", paths["Items"])
 
 
 if __name__ == "__main__":

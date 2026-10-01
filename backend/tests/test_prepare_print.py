@@ -42,6 +42,7 @@ class PrintSessionTests(unittest.TestCase):
     def setUp(self):
         prepare_print.reset_caches_for_tests()
         prepare_print._cached_secret = b"unit-test-print-secret-that-is-long-enough"
+        prepare_print._cached_secret_refresh_at = float("inf")
 
     def tearDown(self):
         prepare_print.reset_caches_for_tests()
@@ -155,6 +156,48 @@ class PrintSessionTests(unittest.TestCase):
                 source_etag="etag",
             )
         s3.copy_object.assert_called_once()
+
+
+class PrintSecretCacheTests(unittest.TestCase):
+    FIRST = "a" * 40
+    ROTATED = "b" * 40
+
+    def setUp(self):
+        prepare_print.reset_caches_for_tests()
+        self.addCleanup(prepare_print.reset_caches_for_tests)
+        self.clock = [5000.0]
+        self.client = Mock()
+        self.enterContext(patch.dict(os.environ, {
+            "PRINT_SESSION_SECRET_ARN": "arn:aws:secretsmanager:us-west-2:111111111111:secret:print",
+            "SECRET_CACHE_TTL_SECONDS": "300",
+        }))
+        self.enterContext(patch.object(prepare_print, "_secrets_client", return_value=self.client))
+        self.enterContext(patch.object(prepare_print.time, "monotonic", side_effect=lambda: self.clock[0]))
+
+    def test_secret_is_refreshed_after_the_cache_ttl(self):
+        self.client.get_secret_value.side_effect = [{"SecretString": self.FIRST}, {"SecretString": self.ROTATED}]
+        self.assertEqual(prepare_print._signing_secret(), self.FIRST.encode())
+        self.clock[0] += 299
+        self.assertEqual(prepare_print._signing_secret(), self.FIRST.encode())
+        self.clock[0] += 2
+        self.assertEqual(prepare_print._signing_secret(), self.ROTATED.encode())
+        self.assertEqual(self.client.get_secret_value.call_count, 2)
+
+    def test_refresh_failure_keeps_the_previous_secret_without_logging_it(self):
+        self.client.get_secret_value.side_effect = [
+            {"SecretString": self.FIRST}, RuntimeError(f"provider echoed {self.FIRST}"),
+        ]
+        self.assertEqual(prepare_print._signing_secret(), self.FIRST.encode())
+        self.clock[0] += 301
+        with self.assertLogs("photography_api.prepare_print", level="WARNING") as logs:
+            self.assertEqual(prepare_print._signing_secret(), self.FIRST.encode())
+        self.assertEqual(logs.output, ["WARNING:photography_api.prepare_print:print_secret_refresh_failed error_type=RuntimeError"])
+
+    def test_first_read_failure_still_fails_closed(self):
+        self.client.get_secret_value.return_value = {"SecretString": "too-short"}
+        with self.assertRaises(RuntimeError):
+            prepare_print._signing_secret()
+        self.assertIsNone(prepare_print._cached_secret)
 
 
 if __name__ == "__main__":

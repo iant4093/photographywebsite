@@ -15,6 +15,7 @@ import datetime
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import time
@@ -30,6 +31,7 @@ from auth_helpers import AuthError, auth_error_response, get_verified_claims, is
 from front_door import verify_front_door_request
 from media_access import find_image_by_media_id, public_url, validate_album_media_key
 from response_helpers import error_response, internal_error, json_response
+from secret_helpers import MIN_CACHE_TTL_SECONDS, cache_ttl_seconds
 from security_helpers import check_rate_limit, is_rate_limit_denied
 from validation_helpers import ValidationError, parse_json_body, require_string, validate_uuid
 from zip_helpers import get_album_record
@@ -46,6 +48,8 @@ MAX_CLOCK_SKEW_SECONDS = 30
 _secrets = None
 _s3 = None
 _cached_secret = None
+_cached_secret_refresh_at = 0.0
+logger = logging.getLogger("photography_api.prepare_print")
 
 
 def _secrets_client():
@@ -69,16 +73,26 @@ def _s3_client():
 
 
 def _signing_secret():
-    global _cached_secret
-    if _cached_secret is not None:
+    global _cached_secret, _cached_secret_refresh_at
+    now = time.monotonic()
+    if _cached_secret is not None and now < _cached_secret_refresh_at:
         return _cached_secret
-    secret_arn = os.environ.get("PRINT_SESSION_SECRET_ARN", "").strip()
-    if not secret_arn:
-        raise RuntimeError("Print session secret is not configured")
-    value = _secrets_client().get_secret_value(SecretId=secret_arn).get("SecretString", "")
-    if not isinstance(value, str) or not 32 <= len(value) <= 512:
-        raise RuntimeError("Print session secret is invalid")
+    try:
+        secret_arn = os.environ.get("PRINT_SESSION_SECRET_ARN", "").strip()
+        if not secret_arn:
+            raise RuntimeError("Print session secret is not configured")
+        value = _secrets_client().get_secret_value(SecretId=secret_arn).get("SecretString", "")
+        if not isinstance(value, str) or not 32 <= len(value) <= 512:
+            raise RuntimeError("Print session secret is invalid")
+    except Exception as error:
+        if _cached_secret is None:
+            raise
+        # Availability: keep signing with the last good secret and retry soon.
+        logger.warning("print_secret_refresh_failed error_type=%s", type(error).__name__)
+        _cached_secret_refresh_at = now + MIN_CACHE_TTL_SECONDS
+        return _cached_secret
     _cached_secret = value.encode("utf-8")
+    _cached_secret_refresh_at = now + cache_ttl_seconds()
     return _cached_secret
 
 
@@ -348,7 +362,8 @@ def handler(event, context):
 
 
 def reset_caches_for_tests():
-    global _cached_secret, _secrets, _s3
+    global _cached_secret, _cached_secret_refresh_at, _secrets, _s3
     _cached_secret = None
+    _cached_secret_refresh_at = 0.0
     _secrets = None
     _s3 = None

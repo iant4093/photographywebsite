@@ -71,7 +71,10 @@ SITE_DESCRIPTION = (
 )
 HERO_IMAGE_URL = "https://{}/site/hero/current/hero.jpg"
 MAX_SHELL_BYTES = 512 * 1024
-SHELL_CACHE_SECONDS = 60
+# The rendered document is cached at the edge for an hour, so renders are rare;
+# each one should read the current shell so a frontend deploy is not pinned to
+# a stale shell. This only coalesces bursts of concurrent cold renders.
+SHELL_CACHE_SECONDS = 5
 _shell_cache = {"html": None, "expires_at": 0.0}
 _shell_lock = threading.Lock()
 _SOCIAL_META_PATTERN = re.compile(
@@ -577,7 +580,7 @@ def _exposure_options_response(params):
             "items": groups,
             "initialPage": {"value": first_value, **initial_page},
         },
-        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=300, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -596,7 +599,7 @@ def _exposure_media_response(params):
     return _explore_json_response(
         200,
         payload,
-        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=60, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -830,7 +833,7 @@ def _indexed_media_response(params):
     return _explore_json_response(
         200,
         payload,
-        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=60, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -871,7 +874,7 @@ def _indexed_options_response(mode):
             "items": items,
             "initialPage": {"value": first_value, **initial_page},
         },
-        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=300, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -909,7 +912,7 @@ def _indexed_exposure_options_response():
             "items": groups,
             "initialPage": {"value": first_value, **initial_page},
         },
-        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=300, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -933,7 +936,7 @@ def _indexed_temporal_options_response(mode):
             "items": items,
             "initialPage": {"value": first_value, **initial_page},
         },
-        cache_control="public, max-age=300, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=300, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -1009,7 +1012,7 @@ def _scan_explore_media_response(event, params):
     return _explore_json_response(
         200,
         {"items": output, "nextCursor": encode_cursor(next_key, scope)},
-        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=60, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -1051,7 +1054,7 @@ def _lens_options_response(params):
     return _explore_json_response(
         200,
         {"items": sorted(counts.values(), key=lambda item: (-item["photos"], item["name"].casefold()))},
-        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=60, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -1094,7 +1097,7 @@ def _color_options_response(params):
     return _explore_json_response(
         200,
         {"items": [{"id": family, "photos": counts[family]} for family in EXPLORE_COLOR_ORDER if counts[family]]},
-        cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=60, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -1399,7 +1402,7 @@ def _random_photos_response(event):
     return json_response(
         200,
         body,
-        cache_control="public, max-age=0, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=0, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -1536,7 +1539,7 @@ def _featured_photos_response(event):
     return json_response(
         200,
         body,
-        cache_control="public, max-age=0, s-maxage=300, stale-while-revalidate=600",
+        cache_control="public, max-age=0, s-maxage=3600, stale-while-revalidate=600",
     )
 
 
@@ -1677,37 +1680,14 @@ def _render_shell(shell, metadata):
 
 
 def _html_response(body):
-    media_domain = os.environ.get("CLOUDFRONT_DOMAIN", "").strip().removeprefix("https://").rstrip("/")
-    media_origin = f"https://{media_domain}"
-    bucket = bucket_name()
-    s3_origins = (
-        f"https://{bucket}.s3.amazonaws.com "
-        f"https://{bucket}.s3.{os.environ.get('AWS_REGION', 'us-west-2')}.amazonaws.com"
-    )
-    original_bucket = os.environ.get("ORIGINAL_PREVIEW_BUCKET", "").strip()
-    if original_bucket:
-        s3_origins += (
-            f" https://{original_bucket}.s3.amazonaws.com"
-            f" https://{original_bucket}.s3.{os.environ.get('AWS_REGION', 'us-west-2')}.amazonaws.com"
-        )
-    content_security_policy = (
-        "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        "form-action 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' data: https://fonts.gstatic.com; "
-        f"img-src 'self' data: blob: {media_origin} {s3_origins}; "
-        f"media-src 'self' blob: {media_origin} {s3_origins}; "
-        f"connect-src 'self' https://cognito-idp.us-west-2.amazonaws.com {media_origin} "
-        f"{s3_origins} https://challenges.cloudflare.com; "
-        "frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; "
-        "manifest-src 'self'; upgrade-insecure-requests"
-    )
+    # The frontend distribution's response-headers policy is the single source
+    # of the document's Content-Security-Policy, so none is emitted here.
+    # Album/video mutations invalidate both the viewer and rewritten paths.
     return {
         "statusCode": 200,
         "headers": {
             "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
-            "Content-Security-Policy": content_security_policy,
+            "Cache-Control": "public, max-age=0, s-maxage=3600, must-revalidate",
         },
         "body": body,
     }
@@ -1805,7 +1785,7 @@ def handler(event, context):
         return json_response(
             200,
             body,
-            cache_control="public, max-age=60, s-maxage=300, stale-while-revalidate=60",
+            cache_control="public, max-age=60, s-maxage=3600, stale-while-revalidate=60",
         )
     except ValidationError as error:
         return error_response(400, str(error), code="invalid_request")

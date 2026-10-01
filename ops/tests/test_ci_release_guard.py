@@ -280,7 +280,7 @@ class ReleaseIntentTests(unittest.TestCase):
             expected_paths = ["Code", "Environment"]
             if rule["logicalId"] == "GetPhotographyStatsFunction":
                 expected_paths.append("ReservedConcurrentExecutions")
-            if rule["logicalId"] == "GetPublicAlbumFunction":
+            if rule["logicalId"] in {"GetPublicAlbumFunction", "GetPublicAlbumsFunction"}:
                 expected_paths.append("MemorySize")
             if rule["logicalId"] == "GoogleDriveBackupFunction":
                 expected_paths.append("EphemeralStorage")
@@ -567,6 +567,44 @@ class ReleaseIntentTests(unittest.TestCase):
                 release_guard.gate_change_set(
                     [{"Changes": [item]}], release_intent=intent, release_dependencies=dependencies,
                 )
+
+    def test_photo_original_edge_hardening_release_is_bounded(self):
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        modifications = [
+            change(logical_id="ImagesBucketPolicy", resource_type="AWS::S3::BucketPolicy",
+                   property_name="PolicyDocument"),
+            change(logical_id="PrivateMediaRewriteFunction", resource_type="AWS::CloudFront::Function",
+                   property_name="FunctionCode"),
+            change(logical_id="PrivateMediaResponseHeadersPolicy",
+                   resource_type="AWS::CloudFront::ResponseHeadersPolicy",
+                   property_name="ResponseHeadersPolicyConfig"),
+            change(logical_id="GetPublicAlbumsFunction", property_name="MemorySize"),
+        ]
+        self.assertEqual(release_guard.gate_change_set(
+            [{"Changes": modifications}], release_intent=intent,
+        ), {"Add": 0, "Modify": 4, "Total": 4})
+
+        # Only the reviewed properties are approved; key material, the cache
+        # policy, other function settings, and replacements stay blocked.
+        for logical_id, resource_type, property_name in (
+            ("PrivateMediaRewriteFunction", "AWS::CloudFront::Function", "FunctionConfig"),
+            ("PrivateMediaRewriteFunction", "AWS::CloudFront::Function", "Name"),
+            ("PrivateMediaCachePolicy", "AWS::CloudFront::CachePolicy", "CachePolicyConfig"),
+            ("PrivateMediaKeyGroup", "AWS::CloudFront::KeyGroup", "KeyGroupConfig"),
+            ("GetPublicAlbumsFunction", "AWS::Lambda::Function", "Timeout"),
+            ("GetPublicAlbumsFunction", "AWS::Lambda::Function", "ReservedConcurrentExecutions"),
+        ):
+            item = change(logical_id=logical_id, resource_type=resource_type, property_name=property_name)
+            with self.subTest(logical_id=logical_id, property_name=property_name), self.assertRaises(
+                release_guard.GateError
+            ):
+                release_guard.gate_change_set([{"Changes": [item]}], release_intent=intent)
+        replaced = change(logical_id="PrivateMediaRewriteFunction", resource_type="AWS::CloudFront::Function",
+                          property_name="FunctionCode", replacement="True")
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set([{"Changes": [replaced]}], release_intent=intent)
 
     def test_original_comparison_routes_have_a_bounded_release_intent(self):
         intent = release_guard.load_release_intent(json.loads(

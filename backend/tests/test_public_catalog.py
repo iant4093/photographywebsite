@@ -232,7 +232,7 @@ class PublicCatalogListTests(unittest.TestCase):
                 None,
             )
         self.assertEqual(response["statusCode"], 200)
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
         body = response_body(response)
         self.assertEqual(len(body["items"]), 1)
         self.assertEqual(body["items"][0]["imageCount"], 1)
@@ -391,7 +391,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
                 {"pathParameters": {"albumId": ALBUM_ID}}, None
             )
         self.assertEqual(response["statusCode"], 200)
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
         self.assertEqual(
             response_body(response),
             {"album": {"albumId": ALBUM_ID}, "images": [{"url": "https://media.example.test/photo"}]},
@@ -405,7 +405,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
         ):
             response = get_public_album.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=60, s-maxage=300, stale-while-revalidate=60")
+        self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=60, s-maxage=3600, stale-while-revalidate=60")
         self.assertEqual(response_body(response)["images"][0]["before"], {"status": "unresolved"})
 
     def test_public_detail_keeps_stable_and_video_cache_policy(self):
@@ -423,7 +423,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
             ), patch.object(get_public_album, "serialize_images", return_value=images):
                 response = get_public_album.handler({"pathParameters": {"albumId": ALBUM_ID}}, None)
             self.assertEqual(response["statusCode"], 200)
-            self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=60, s-maxage=300, stale-while-revalidate=60")
+            self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=60, s-maxage=3600, stale-while-revalidate=60")
 
     def test_random_photos_are_sampled_only_from_public_photo_albums(self):
         second_id = "22222222-2222-4222-8222-222222222222"
@@ -456,7 +456,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
             )
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
         self.assertIn("stale-while-revalidate=600", response["headers"]["Cache-Control"])
         body = response_body(response)
         self.assertEqual(body["totalPhotos"], 2)
@@ -613,7 +613,7 @@ class PublicAlbumDetailTests(unittest.TestCase):
             )
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
         self.assertEqual(response_body(response)["category"], "Birding")
         self.assertEqual(response_body(response)["images"][0]["albumCategory"], "Birding")
         load_albums.assert_called_once_with("Birding")
@@ -649,9 +649,11 @@ class PublicAlbumDetailTests(unittest.TestCase):
             response = get_public_album.handler(event, None)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(response["headers"]["Content-Type"], "text/html; charset=utf-8")
-        # CloudFront may hold the public document briefly; browsers revalidate.
-        self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=0, s-maxage=60, must-revalidate")
-        self.assertIn("default-src 'self'", response["headers"]["Content-Security-Policy"])
+        # CloudFront holds the public document (mutations invalidate it);
+        # browsers revalidate.
+        self.assertEqual(response["headers"]["Cache-Control"], "public, max-age=0, s-maxage=3600, must-revalidate")
+        # The frontend distribution's response-headers policy owns the CSP.
+        self.assertNotIn("Content-Security-Policy", response["headers"])
         self.assertIn("Portraits &amp; friends", response["body"])
         self.assertIn("Misty &lt;script&gt;", response["body"])
         self.assertNotIn('<script>alert("x")</script>', response["body"])

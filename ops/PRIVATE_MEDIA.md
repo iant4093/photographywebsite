@@ -36,7 +36,7 @@ Public albums keep their existing media CDN URLs and are unaffected.
   `PrivateMediaOriginAccessControl` (SigV4, always sign). The bucket policy
   grants the frontend distribution `s3:GetObject` on `albums/*` only; zips,
   hero media, and public previews stay unreachable through this path.
-- Responses carry `Cache-Control: private, max-age=86400` and hardening
+- Responses carry `Cache-Control: private, max-age=600, must-revalidate` and hardening
   headers from `PrivateMediaResponseHeadersPolicy`. Shared caches never store
   them; the service worker leaves `/private-media/` to the network.
 - The RSA private key lives only in the SSM SecureString
@@ -177,7 +177,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -I -H "Cookie: $cookie" "$media"   # 2
 ```
 
 Also confirm that the same cookie returns `403` for a different album's object,
-that responses carry `Cache-Control: private, max-age=86400`, and that a second
+that responses carry `Cache-Control: private, max-age=600, must-revalidate`, and that a second
 request reports `X-Cache: Hit from cloudfront` while still requiring the cookie.
 Record only status codes and header names, never cookie values.
 

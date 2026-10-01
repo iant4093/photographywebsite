@@ -16,6 +16,9 @@ from validation_helpers import validate_uuid
 
 logger = logging.getLogger("photography_api.cache_invalidation")
 DEFAULT_FRONTEND_DISTRIBUTION_ID = "EIOCCNR8XGQ1B"
+# Beyond this many albums one set of document wildcards is cheaper than two
+# wildcard paths per album.
+MAX_PER_ALBUM_DOCUMENT_INVALIDATIONS = 2
 _cloudfront = None
 _sqs = None
 
@@ -84,6 +87,20 @@ def invalidate_public_api_batch(*, album_ids=None, catalog=False, random_photos=
         paths.extend(("/api/public/albums*", "/api/public/explore*"))
     else:
         paths.extend(f"/api/public/albums/{album_id}" for album_id in validated_albums)
+    # The album/video social documents are edge-cached too. The social router
+    # rewrites the viewer path in a viewer-request function, so purge both the
+    # viewer path and the rewritten social API path.
+    if catalog or len(validated_albums) > MAX_PER_ALBUM_DOCUMENT_INVALIDATIONS:
+        # Also bounds wildcard paths: CloudFront allows only 15 in progress.
+        paths.extend(("/album/*", "/video/*", "/api/public/social/*"))
+    else:
+        for album_id in validated_albums:
+            paths.extend((
+                f"/album/{album_id}*",
+                f"/video/{album_id}*",
+                f"/api/public/social/album/{album_id}",
+                f"/api/public/social/video/{album_id}",
+            ))
     if catalog or random_photos:
         paths.append("/api/public/random-photos*")
     if catalog or featured_photos:

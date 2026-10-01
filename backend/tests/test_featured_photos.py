@@ -135,7 +135,7 @@ class FeaturedApiTests(unittest.TestCase):
         self.assertTrue(all(image["isFavorite"] is True for image in body["images"]))
         self.assertTrue(all(len(image["previewSrcSet"]) == 4 for image in body["images"]))
         self.assertTrue(all("rawKey" not in image for image in body["images"]))
-        self.assertIn("s-maxage=300", response["headers"]["Cache-Control"])
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
         self.assertEqual(load.call_args.kwargs["limit"], 6)
         self.metadata.assert_not_called()
         scan.assert_not_called()

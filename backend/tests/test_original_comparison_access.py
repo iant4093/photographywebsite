@@ -168,10 +168,11 @@ class OriginalComparisonAccessTests(unittest.TestCase):
             body = response_body(get_public_album._explore_json_response(200, {"items": [item]}))
         self.assertEqual(body["items"], [])
 
-    def test_csp_allows_private_original_bucket(self):
-        csp = get_public_album._html_response("shell")["headers"]["Content-Security-Policy"]
-        self.assertIn("https://before-test.s3.amazonaws.com", csp)
-        self.assertIn("https://before-test.s3.us-west-2.amazonaws.com", csp)
+    def test_social_document_leaves_csp_to_the_edge_policy(self):
+        # ops/cloudfront_frontend.render_csp adds the original-preview bucket to
+        # the overriding response-headers policy; Lambda emits no second CSP.
+        headers = get_public_album._html_response("shell")["headers"]
+        self.assertNotIn("Content-Security-Policy", headers)
 
 
 class OriginalFilenamePreservationTests(unittest.TestCase):

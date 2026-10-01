@@ -410,6 +410,70 @@ class SecretAndErrorTests(unittest.TestCase):
         self.assertEqual(second, "from-parameter")
         fake.get_parameter.assert_called_once_with(Name="/test", WithDecryption=True)
 
+    def _resolve(self):
+        return secret_helpers.resolve_secret(direct_env="TEST_DIRECT", parameter_env="TEST_SECRET_PARAMETER")
+
+    def test_parameter_cache_refreshes_after_ttl(self):
+        fake = Mock()
+        fake.get_parameter.side_effect = [
+            {"Parameter": {"Value": "first-value"}},
+            {"Parameter": {"Value": "rotated-value"}},
+        ]
+        clock = [1000.0]
+        with patch.dict(os.environ, {"TEST_SECRET_PARAMETER": "/test", "SECRET_CACHE_TTL_SECONDS": "120"}), patch.object(
+            secret_helpers, "_ssm_client", return_value=fake
+        ), patch.object(secret_helpers.time, "monotonic", side_effect=lambda: clock[0]):
+            self.assertEqual(self._resolve(), "first-value")
+            clock[0] += 119
+            self.assertEqual(self._resolve(), "first-value")
+            self.assertEqual(fake.get_parameter.call_count, 1)
+            clock[0] += 2
+            self.assertEqual(self._resolve(), "rotated-value")
+        self.assertEqual(fake.get_parameter.call_count, 2)
+
+    def test_cache_ttl_defaults_and_clamps(self):
+        for configured, expected in (
+            (None, 300), ("bad", 300), ("1", 30), ("600", 600), ("999999", 3600),
+        ):
+            env = {} if configured is None else {"SECRET_CACHE_TTL_SECONDS": configured}
+            with self.subTest(configured=configured), patch.dict(os.environ, env):
+                if configured is None:
+                    os.environ.pop("SECRET_CACHE_TTL_SECONDS", None)
+                self.assertEqual(secret_helpers.cache_ttl_seconds(), expected)
+
+    def test_refresh_failure_serves_previous_value_without_logging_it(self):
+        fake = Mock()
+        fake.get_parameter.side_effect = [
+            {"Parameter": {"Value": "kept-secret-value"}},
+            RuntimeError("provider said kept-secret-value"),
+            {"Parameter": {"Value": "rotated-value"}},
+        ]
+        clock = [1000.0]
+        with patch.dict(os.environ, {"TEST_SECRET_PARAMETER": "/test", "SECRET_CACHE_TTL_SECONDS": "300"}), patch.object(
+            secret_helpers, "_ssm_client", return_value=fake
+        ), patch.object(secret_helpers.time, "monotonic", side_effect=lambda: clock[0]):
+            self.assertEqual(self._resolve(), "kept-secret-value")
+            clock[0] += 301
+            with self.assertLogs("photography_api.secret_helpers", level="WARNING") as logs:
+                self.assertEqual(self._resolve(), "kept-secret-value")
+            self.assertEqual(logs.output, ["WARNING:photography_api.secret_helpers:secret_refresh_failed error_type=RuntimeError"])
+            # A failed refresh backs off briefly instead of retrying every request.
+            clock[0] += 10
+            self.assertEqual(self._resolve(), "kept-secret-value")
+            self.assertEqual(fake.get_parameter.call_count, 2)
+            clock[0] += 30
+            self.assertEqual(self._resolve(), "rotated-value")
+
+    def test_first_read_failure_still_fails_closed(self):
+        fake = Mock()
+        fake.get_parameter.side_effect = RuntimeError("unavailable")
+        with patch.dict(os.environ, {"TEST_SECRET_PARAMETER": "/test"}), patch.object(
+            secret_helpers, "_ssm_client", return_value=fake
+        ):
+            with self.assertRaises(RuntimeError):
+                self._resolve()
+        secret_helpers.clear_secret_cache()
+
     def test_missing_secret_fails_closed(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MISSING_DIRECT", None)

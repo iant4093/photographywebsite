@@ -62,20 +62,78 @@ def _valid_image_count(value):
     return isinstance(value, Decimal) and value >= 0 and value == value.to_integral_value()
 
 
+# Exactly what serialize_album_summary(include_admin=True) and the handler read,
+# plus the imageCount aggregate. The inline `images` manifest is deliberately
+# excluded; records that still need it are re-read by _complete_admin_records.
+ADMIN_SUMMARY_FIELDS = (
+    "albumId", "status", "visibility", "type", "title", "description", "category",
+    "createdAt", "uploadedAt", "imageCount", "coverImageUrl", "coverThumbKey",
+    "coverBlurhash", "hoverPreviewStatus", "hoverPreviewVersion",
+    "hoverPreviewManifestKey", "ownerEmail", "ownerSub", "isShared", "shareCode",
+    "legacyS3Prefix",
+)
+# Every field is a placeholder so no current or future reserved word can break
+# the scan. These names never collide with boto3's generated #n0-style names.
+ADMIN_SUMMARY_PROJECTION = ", ".join(f"#{field}" for field in ADMIN_SUMMARY_FIELDS)
+
+
+def _admin_summary_names():
+    # boto3 merges FilterExpression placeholders into this same map in place,
+    # so every request needs its own copy.
+    return {f"#{field}": field for field in ADMIN_SUMMARY_FIELDS}
+
+
+def _needs_full_record(record):
+    """A projected record lacks `images`, which some summaries still derive from."""
+    if "images" in record:
+        return False
+    return not _valid_image_count(record.get("imageCount")) or record.get("type") == "video"
+
+
+def _complete_admin_records(records):
+    """Replace projected records whose summary depends on `images` with full items."""
+    album_ids = list(dict.fromkeys(
+        record["albumId"] for record in records
+        if _needs_full_record(record) and isinstance(record.get("albumId"), str)
+    ))
+    if not album_ids:
+        return records
+    full_by_id = {}
+    for offset in range(0, len(album_ids), 100):
+        request = {table.name: {"Keys": [{"albumId": album_id} for album_id in album_ids[offset:offset + 100]]}}
+        for _attempt in range(3):
+            response = dynamodb.batch_get_item(RequestItems=request)
+            for item in response.get("Responses", {}).get(table.name, []):
+                if isinstance(item, dict) and isinstance(item.get("albumId"), str):
+                    full_by_id[item["albumId"]] = item
+            unprocessed = response.get("UnprocessedKeys", {}).get(table.name, {}).get("Keys", [])
+            if not unprocessed:
+                break
+            request = {table.name: {"Keys": unprocessed}}
+        else:
+            raise RuntimeError("Admin catalog record completion remained unprocessed")
+    # A record deleted between the scan and this read keeps its projected form.
+    return [full_by_id.get(record.get("albumId"), record) if _needs_full_record(record) else record for record in records]
+
+
 def _filter_for(visibility, album_type=None, *, owner_sub=None, owner_email=None):
-    expression = Attr("visibility").eq(visibility)
+    # "all" is an admin selector, not a stored value: it applies no visibility condition.
+    expression = Attr("visibility").eq(visibility) if visibility != "all" else None
     type_filter = _type_filter(album_type)
     if type_filter is not None:
-        expression &= type_filter
+        expression = type_filter if expression is None else expression & type_filter
+    owner_filter = None
     if owner_sub and owner_email:
-        expression &= (
+        owner_filter = (
             Attr("ownerSub").eq(owner_sub)
             | (Attr("ownerSub").not_exists() & Attr("ownerEmail").eq(owner_email))
         )
     elif owner_sub:
-        expression &= Attr("ownerSub").eq(owner_sub)
+        owner_filter = Attr("ownerSub").eq(owner_sub)
     elif owner_email:
-        expression &= Attr("ownerEmail").eq(owner_email)
+        owner_filter = Attr("ownerEmail").eq(owner_email)
+    if owner_filter is not None:
+        expression = owner_filter if expression is None else expression & owner_filter
     return expression
 
 
@@ -107,8 +165,10 @@ def _fetch_page(
                     "IndexName": os.environ["OWNER_SUB_CREATED_AT_INDEX"],
                     "KeyConditionExpression": Key("ownerSub").eq(owner_sub),
                     "ScanIndexForward": False,
-                    "FilterExpression": _filter_for(visibility, album_type),
                 }
+                filter_expression = _filter_for(visibility, album_type)
+                if filter_expression is not None:
+                    params["FilterExpression"] = filter_expression
                 response = table.query(**params)
             elif query_kind in {"visibility", "public_summary"}:
                 params = {
@@ -142,8 +202,12 @@ def _fetch_page(
                         owner_email=owner_email,
                     )
                     if admin_owner_email:
-                        filter_expression &= Attr("ownerEmail").eq(admin_owner_email)
+                        owner_filter = Attr("ownerEmail").eq(admin_owner_email)
+                        filter_expression = owner_filter if filter_expression is None else filter_expression & owner_filter
                 params = {**common}
+                if admin_all:
+                    params["ProjectionExpression"] = ADMIN_SUMMARY_PROJECTION
+                    params["ExpressionAttributeNames"] = _admin_summary_names()
                 if filter_expression is not None:
                     params["FilterExpression"] = filter_expression
                 response = table.scan(**params)
@@ -187,6 +251,8 @@ def _fetch_page(
         cursor_key = response.get("LastEvaluatedKey")
         if not cursor_key:
             break
+    if admin_all:
+        return _complete_admin_records(items[:limit]), cursor_key
     return items[:limit], cursor_key
 
 
@@ -356,7 +422,7 @@ def handler(event, context):
             # Malformed visibility records fail closed and disappear from lists.
             if record.get("status", "active") not in ({"active", "deleting", "updating"} if admin else {"active"}):
                 continue
-            if not admin_all and record.get("visibility") != visibility:
+            if not admin_all and visibility != "all" and record.get("visibility") != visibility:
                 continue
             try:
                 summary = serialize_album_summary(record, include_admin=admin)
