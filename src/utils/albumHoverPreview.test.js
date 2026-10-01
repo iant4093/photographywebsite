@@ -252,6 +252,31 @@ describe('album hover preview selection', () => {
         } finally { controller.stop(); vi.useRealTimers() }
     })
 
+    it('matches the preview tier the static cover loaded', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query === MOBILE_PREVIEW_QUERY }))
+        vi.stubGlobal('Image', class {
+            constructor() {
+                const image = document.createElement('img')
+                image.decode = () => Promise.resolve()
+                return image
+            }
+        })
+        const container = document.createElement('div')
+        const cover = document.createElement('img')
+        Object.defineProperty(cover, 'currentSrc', { value: 'https://media.example.test/public-previews/a/v3/cover-w1920.webp' })
+        container.append(cover)
+        const loadManifest = vi.fn().mockResolvedValue({
+            schemaVersion: 1, version: 'a'.repeat(24),
+            images: [1, 2, 3].map(id => ({ url: previews(id)[0].url, width: 640, height: 427, previewSrcSet: previews(id) })),
+        })
+        const controller = start({ container, loadManifest, loadDetail: vi.fn(), trigger: 'focus' })
+        try {
+            await vi.advanceTimersByTimeAsync(16)
+            expect(container.querySelector('.album-card-photo-preview').src).toMatch(/-1920\.webp$/)
+        } finally { controller.stop(); vi.useRealTimers() }
+    })
+
     it.each(['mobile', 'cancelled'])('does not fall back to a full album after a %s manifest miss', async reason => {
         vi.useFakeTimers()
         vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: reason === 'mobile'

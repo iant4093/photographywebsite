@@ -18,9 +18,9 @@ function AlbumCard({
     preview = false,
     responsivePreview = false,
     // The phone slot is 280px wide, but the 4:3 crop of a wide cover and 3x
-    // screens need more pixels than that implies; 420px selects one preview
-    // tier higher (960w at 2x, 1440w at 3x).
-    imageSizes = '(min-width: 1024px) 360px, (min-width: 640px) 320px, 420px',
+    // screens need more pixels than that implies; 640px selects two preview
+    // tiers higher (1440w at 2x, 1920w at 3x).
+    imageSizes = '(min-width: 1024px) 360px, (min-width: 640px) 320px, 640px',
 }) {
     const intentTimer = useRef(null)
     const hoverController = useRef(null)

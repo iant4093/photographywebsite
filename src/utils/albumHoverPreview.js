@@ -169,9 +169,15 @@ export function start({ container, coverImageUrl, loadManifest, loadDetail, trig
             }
         }
         if (!active) return
-        const targetWidth = responsive
-            ? Math.max(ALBUM_HOVER_PREVIEW_WIDTH, Math.ceil((container?.clientWidth || 0) * (window.devicePixelRatio || 1)))
-            : ALBUM_HOVER_PREVIEW_WIDTH
+        // Frames use the preview tier the static cover actually loaded, so the
+        // card does not visibly soften when the shuffle starts.
+        const coverSource = container?.querySelector?.('img:not(.album-card-photo-preview)')?.currentSrc || ''
+        const coverWidth = Number(/-w(\d+)\.webp(?:[?#]|$)/.exec(coverSource)?.[1]) || 0
+        const targetWidth = Math.max(
+            ALBUM_HOVER_PREVIEW_WIDTH,
+            coverWidth,
+            responsive ? Math.ceil((container?.clientWidth || 0) * (window.devicePixelRatio || 1)) : 0,
+        )
         const frames = selectAlbumHoverPreviews(detail, coverImageUrl, Math.random, targetWidth).slice(0, mobile ? 3 : ALBUM_HOVER_PREVIEW_LIMIT)
         if (frames.length < 2) return
 
