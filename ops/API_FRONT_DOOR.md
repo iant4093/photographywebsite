@@ -13,7 +13,9 @@ WAF is defense in depth.
   keys plus compression.
 - The exact `/api/public/stats` behavior precedes that wildcard and permits the
   materialized daily report to remain at the edge for one day. All other public
-  API responses retain the five-minute maximum.
+  API responses, and the `/album/*` and `/video/*` social documents that share
+  the same cache policy, follow the origin's `s-maxage` up to a one-hour
+  maximum.
 - `/api/*` otherwise has caching disabled and forwards only the reviewed
   methods, query strings, and API/auth/CORS headers. Its origin request policy
   allowlists only the `ian-photography-set-cookie-passthrough` cookie, which

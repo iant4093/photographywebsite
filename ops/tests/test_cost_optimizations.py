@@ -36,30 +36,37 @@ class FrontendChangesTests(unittest.TestCase):
         self.assertEqual(plan['uploads'], [])
         self.assertEqual(plan['invalidation']['Paths']['Quantity'], 0)
 
-    def test_new_release_updates_only_changed_shell_and_keeps_assets_cached(self):
+    def test_new_release_uploads_only_changed_files_and_purges_the_edge(self):
         (self.root / 'index.html').write_text('new release')
         (self.root / 'assets/hashed-new.js').write_text('new asset')
         plan = frontend.plan_changes(self.root, self.first['manifest'], self.live)
         self.assertEqual([x['path'] for x in plan['uploads']], ['assets/hashed-new.js', 'index.html'])
-        self.assertEqual(plan['invalidation']['Paths']['Items'], ['/', '/index.html'])
+        # The edge holds the shell and social documents, so one wildcard path
+        # (one billable path) purges everything.
+        self.assertEqual(plan['invalidation']['Paths'], {'Quantity': 1, 'Items': ['/*']})
 
-    def test_changed_print_service_worker_and_hero_have_precise_invalidations(self):
-        for name in ['print.html', 'service-worker.js', 'images/heroes/one.webp']:
-            (self.root / name).write_text('new')
-        plan = frontend.plan_changes(self.root, self.first['manifest'], self.live)
-        self.assertEqual(plan['invalidation']['Paths']['Items'], ['/images/heroes/*', '/print.html', '/service-worker.js'])
+    def test_any_changed_file_purges_the_whole_edge_with_one_path(self):
+        for name in ['print.html', 'service-worker.js', 'images/heroes/one.webp', 'assets/hashed.js']:
+            with self.subTest(name=name):
+                original = (self.root / name).read_text()
+                (self.root / name).write_text('new')
+                plan = frontend.plan_changes(self.root, self.first['manifest'], self.live)
+                self.assertEqual([x['path'] for x in plan['uploads']], [name])
+                self.assertEqual(plan['invalidation']['Paths'], {'Quantity': 1, 'Items': ['/*']})
+                self.assertTrue(plan['invalidation']['CallerReference'].startswith('frontend-'))
+                (self.root / name).write_text(original)
 
     def test_interrupted_publication_repeats_invalidations_even_if_bytes_uploaded(self):
         plan = frontend.plan_changes(self.root, {}, self.live)
         self.assertEqual(plan['uploads'], [])
-        self.assertGreater(plan['invalidation']['Paths']['Quantity'], 0)
+        self.assertEqual(plan['invalidation']['Paths']['Items'], ['/*'])
 
     def test_rollback_repairs_partial_failed_upload_even_when_marker_matches_target(self):
         live = copy.deepcopy(self.live)
         live['index.html']['ETag'] = 'partially-uploaded-new-release'
         plan = frontend.plan_changes(self.root, self.first['manifest'], live)
         self.assertEqual([x['path'] for x in plan['uploads']], ['index.html'])
-        self.assertEqual(plan['invalidation']['Paths']['Items'], ['/', '/index.html'])
+        self.assertEqual(plan['invalidation']['Paths']['Items'], ['/*'])
 
     def test_cache_metadata_and_unverifiable_etags_are_repaired(self):
         for change in [{'CacheControl': 'wrong'}, {'ContentType': 'wrong'}, {'ServerSideEncryption': 'aws:kms'}]:

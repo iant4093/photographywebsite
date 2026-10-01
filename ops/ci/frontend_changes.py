@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Publish changed frontend files and invalidate only changed mutable entrypoints.
+"""Publish changed frontend files and purge the frontend edge when anything changed.
+
+The edge holds the SPA shell for a day and the album/video social documents
+(which embed the shell's hashed asset names) for up to an hour, so any change
+invalidates the single wildcard path `/*` (one billable path). An unchanged
+redeploy creates no invalidation.
 
 The published manifest advances only AFTER CloudFront invalidation completes.
 An interrupted deployment therefore repeats the outstanding invalidations.
@@ -21,8 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ops.ci.release_guard import frontend_upload_plan, sha256_file  # noqa: E402
 
 PUBLISHED_KEY = "_deployment/frontend-manifest.json"
-IMMEDIATE_PATHS = frozenset({"index.html", "print.html", "theme-init.js", "dark-theme.css",
-                             "favicon.svg", "manifest.webmanifest", "service-worker.js"})
+PURGE_PATHS = ("/*",)
 
 
 def plan_changes(root, previous, live=None):
@@ -37,19 +41,12 @@ def plan_changes(root, previous, live=None):
     # while leaving the last successful publication marker unchanged.
     changed = [item for item in uploads if (item["path"] in unpublished if live is None
                else not matches_object(root / item["path"], item, live.get(item["path"], {})))]
-    paths = set()
-    for path in unpublished | {item["path"] for item in changed}:
-        if path in IMMEDIATE_PATHS:
-            paths.add("/" + path)
-        if path == "index.html":
-            paths.add("/")
-        if path.startswith("images/heroes/"):
-            paths.add("/images/heroes/*")
+    paths = list(PURGE_PATHS) if unpublished or changed else []
     manifest = {"version": 1, "files": files}
     identity = hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
     return {"uploads": changed, "manifest": manifest,
             "invalidation": {"CallerReference": "frontend-" + identity,
-                             "Paths": {"Quantity": len(paths), "Items": sorted(paths)}}}
+                             "Paths": {"Quantity": len(paths), "Items": paths}}}
 
 
 def matches_object(path, item, metadata):

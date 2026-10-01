@@ -109,7 +109,8 @@ def normalize_policy(value: Any) -> Any:
         normalized: dict[str, Any] = {}
         for key, item in sorted(value.items()):
             child = normalize_policy(item)
-            if key in {"ContentSecurityPolicy", "XSSProtection"} and child == {}:
+            # CloudFront reports an unset security header as an empty object.
+            if key in {"ContentSecurityPolicy", "XSSProtection", "FrameOptions"} and child == {}:
                 continue
             if key in {"Headers", "Cookies", "QueryStrings"} and isinstance(child, dict):
                 entries = child.get("Items")
@@ -477,7 +478,7 @@ def ensure_cache_policy(
         if item["CachePolicy"]["CachePolicyConfig"]["Name"] == desired["Name"]
     ]
     if len(matches) > 1:
-        raise RuntimeError("Multiple custom cache policies have the managed front-door name")
+        raise RuntimeError("Multiple custom cache policies have the same managed name")
     if not matches:
         if not apply:
             return None, "create"
@@ -550,8 +551,9 @@ def public_api_cache_policy_config(settings: dict[str, Any]) -> dict[str, Any]:
     return {
         "Name": settings["public_cache_policy_name"],
         "Comment": "Anonymous allowlisted public catalog only; managed in source control",
+        # The origin's s-maxage sets edge reuse; MaxTTL only caps it.
         "DefaultTTL": 60,
-        "MaxTTL": 300,
+        "MaxTTL": 3600,
         "MinTTL": 0,
         "ParametersInCacheKeyAndForwardedToOrigin": {
             "EnableAcceptEncodingGzip": True,
@@ -575,6 +577,30 @@ def public_stats_cache_policy_config(settings: dict[str, Any]) -> dict[str, Any]
         "MaxTTL": 86400,
     })
     return policy
+
+
+def shell_cache_policy_config(baseline: dict[str, Any]) -> dict[str, Any]:
+    """Edge cache for the default behavior: the SPA shell and unhashed root files.
+
+    The S3 objects carry no-cache metadata, which CloudFront obeys when MinTTL
+    is 0, so the TTL floor is what makes the edge hold them. Releases purge the
+    whole distribution; the HTML response policy still sends viewers no-cache.
+    """
+    settings = baseline["shell_cache_policy"]
+    return {
+        "Name": settings["name"],
+        "Comment": "Frontend shell; purged by every release; managed in source control",
+        "DefaultTTL": settings["default_ttl"],
+        "MaxTTL": settings["max_ttl"],
+        "MinTTL": settings["min_ttl"],
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+            "EnableAcceptEncodingGzip": True,
+            "EnableAcceptEncodingBrotli": True,
+            "CookiesConfig": {"CookieBehavior": "none"},
+            "HeadersConfig": {"HeaderBehavior": "none"},
+            "QueryStringsConfig": {"QueryStringBehavior": "none"},
+        },
+    }
 
 
 def api_origin_request_policy_config(settings: dict[str, Any], *, public: bool) -> dict[str, Any]:
@@ -1364,6 +1390,9 @@ def main() -> int:
         print_id, print_action = ensure_response_policy(
             print_policy_config(baseline), apply=args.apply, profile=args.profile
         )
+    shell_cache_id, shell_cache_action = ensure_cache_policy(
+        shell_cache_policy_config(baseline), apply=args.apply, profile=args.profile
+    )
 
     print(json.dumps({
         "mode": "apply" if args.apply else "dry-run",
@@ -1377,6 +1406,7 @@ def main() -> int:
             "immutable": immutable_action,
             "fotomotoPrint": print_action,
         },
+        "shellCachePolicy": shell_cache_action,
         "wwwRedirect": redirect_action,
         "socialPreviewRouter": social_router_action,
         "apiFrontDoor": {
@@ -1397,7 +1427,7 @@ def main() -> int:
         print("Dry run only. Re-run with --apply, --expected-etag, and --expected-account-id after review.")
         return 0
 
-    assert html_id and static_id and immutable_id
+    assert html_id and static_id and immutable_id and shell_cache_id
     if args.include_fotomoto_print:
         assert print_id
     # Updating an already-associated response policy can rotate the
@@ -1411,11 +1441,14 @@ def main() -> int:
     default = desired_distribution["DefaultCacheBehavior"]
     for legacy_key in ("ForwardedValues", "MinTTL", "DefaultTTL", "MaxTTL"):
         default.pop(legacy_key, None)
+    # Only the default behavior uses the shell policy: every behavior derived
+    # from it below sets its own CachePolicyId, and /api/* and print.html keep
+    # the CachingDisabled "html" policy.
     default.update(
         {
             "ViewerProtocolPolicy": "redirect-to-https",
             "Compress": True,
-            "CachePolicyId": baseline["cache_policies"]["html"],
+            "CachePolicyId": shell_cache_id,
             "ResponseHeadersPolicyId": html_id,
         }
     )
@@ -1539,7 +1572,8 @@ def main() -> int:
     # CloudFront selects the first matching ordered behavior, so the exact
     # daily stats path precedes the five-minute public wildcard, and both
     # precede the cache-disabled catch-all API path. The album/video social
-    # document behaviors cache for up to 60 s, per the origin's s-maxage.
+    # document behaviors cache per the origin's s-maxage, capped at one hour by
+    # the public catalog policy's MaxTTL.
     # private-media/* overlaps no other pattern; it follows the API behaviors
     # only to keep the managed order deterministic. Being managed, it is never
     # in `preserved`, so the www redirect below is not attached to it.

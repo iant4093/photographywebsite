@@ -69,13 +69,18 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
 - Frontend deployment never deletes S3 objects. The uploader compares object
   content and cache metadata and uploads only changed files, with `index.html`
   last. Fingerprinted assets retain immutable caching; other static files use
-  five-minute caching and HTML entrypoints use no-cache metadata. Only changed
-  HTML, theme, hero, favicon, manifest, and service-worker paths are invalidated.
+  five-minute caching and HTML entrypoints use no-cache metadata. CloudFront
+  holds the default behavior (the SPA shell and other unhashed root files) for
+  one day regardless of that metadata, and the `/album/*` and `/video/*` social
+  documents, which embed the shell's hashed asset names, for up to an hour, so
+  any changed or unpublished file invalidates the single path `/*`. That one
+  billable path also purges the public API and private-media edge caches.
   The publication manifest advances after the invalidation waiter succeeds, so
   an interrupted publication repeats its outstanding invalidations. Actual
   object checks also repair a rollback after a partial failed upload. Unchanged
-  redeployments create no invalidation; `/assets/*` stays cached. These steps run
-  under the existing production release/rollback lock and need no new IAM grants.
+  redeployments create no invalidation. These steps run under the existing
+  production release/rollback lock and need no new IAM grants. An object changed
+  in the frontend bucket outside this script needs its own invalidation.
 - A manual workflow can only redeploy independently attested artifacts from a
   successful `main` production workflow path whose exact SHA remains in `main`
   history. Guard, deploy, and smoke scripts stay at the current trusted control

@@ -55,6 +55,9 @@ class CloudFrontHelperTests(unittest.TestCase):
                 "ContentTypeOptions": {"Override": True},
                 "ContentSecurityPolicy": {},
                 "XSSProtection": {},
+                # The Fotomoto print policy omits FrameOptions; CloudFront
+                # reports it back as an empty object.
+                "FrameOptions": {},
             },
             "HeadersConfig": {
                 "HeadersBehavior": "whitelist",
@@ -357,6 +360,7 @@ class CloudFrontMainTests(unittest.TestCase):
             "immutable_cache_control": "max-age=2, immutable",
             "response_policy_names": {"html": "html", "static": "static", "immutable": "immutable"},
             "cache_policies": {"html": "html-cache", "static": "static-cache", "immutable": "immutable-cache"},
+            "shell_cache_policy": {"name": "shell", "min_ttl": 86400, "default_ttl": 86400, "max_ttl": 86400},
             "immutable_path_patterns": ["assets/*"],
             "static_path_patterns": ["images/*"],
         }
@@ -394,6 +398,13 @@ class CloudFrontMainTests(unittest.TestCase):
             return {"ETag": "etag", "DistributionConfig": config or self.config}
         if arguments[:2] == ["sts", "get-caller-identity"]:
             return {"Account": "123"}
+        if arguments[:2] == ["cloudfront", "list-cache-policies"]:
+            return {"CachePolicyList": {"Items": [{
+                "CachePolicy": {"Id": "shell-cache", "CachePolicyConfig": {"Name": "shell"}}
+            }]}}
+        if arguments[:2] == ["cloudfront", "get-cache-policy-config"]:
+            self.assertEqual(arguments[-1], "shell-cache")
+            return {"ETag": "shell-etag", "CachePolicyConfig": cloudfront_frontend.shell_cache_policy_config(self.baseline)}
         if arguments[:2] == ["acm", "describe-certificate"]:
             return {
                 "Certificate": {
@@ -481,6 +492,30 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(desired["HttpVersion"], "http2and3")
         self.assertEqual(desired["CacheBehaviors"]["Quantity"], 3)
         self.assertIn("update submitted", output)
+        self.assertEqual(json.loads(output[: output.index("CloudFront update submitted")])["shellCachePolicy"], "unchanged")
+        # The edge-cached, compressible shell policy applies to the default
+        # behavior only; managed behaviors keep their own policies.
+        self.assertEqual(desired["DefaultCacheBehavior"]["CachePolicyId"], "shell-cache")
+        self.assertTrue(desired["DefaultCacheBehavior"]["Compress"])
+        behaviors = {item["PathPattern"]: item for item in desired["CacheBehaviors"]["Items"]}
+        self.assertEqual(behaviors["assets/*"]["CachePolicyId"], "immutable-cache")
+        self.assertEqual(behaviors["images/*"]["CachePolicyId"], "static-cache")
+        self.assertNotIn("CachePolicyId", behaviors["preserve/*"])
+        print_behavior = cloudfront_frontend.cache_behavior(
+            desired["DefaultCacheBehavior"], "print.html", "print-id", self.baseline, cache_policy="html"
+        )
+        self.assertEqual(print_behavior["CachePolicyId"], "html-cache")
+
+    def test_main_dry_run_plans_missing_shell_cache_policy_without_creating_it(self):
+        def no_custom_policies(arguments):
+            if arguments[:2] == ["cloudfront", "list-cache-policies"]:
+                return {"CachePolicyList": {"Items": []}}
+            return None
+
+        result, output, update = self.run_main(aws_extra=no_custom_policies)
+        self.assertEqual(result, 0)
+        update.assert_not_called()
+        self.assertEqual(json.loads(output[: output.index("Dry run only")])["shellCachePolicy"], "create")
 
     def test_main_front_door_edge_caches_social_documents_with_public_policy(self):
         baseline = {
@@ -524,7 +559,7 @@ class CloudFrontMainTests(unittest.TestCase):
         ), patch.object(cloudfront_frontend, "validate_front_door_apply_guards"), patch.object(
             cloudfront_frontend,
             "ensure_cache_policy",
-            side_effect=[("public-cache", "unchanged"), ("stats-cache", "unchanged")],
+            side_effect=[("public-cache", "unchanged"), ("stats-cache", "unchanged"), ("shell-cache", "unchanged")],
         ), patch.object(
             cloudfront_frontend,
             "ensure_origin_request_policy",
@@ -563,6 +598,9 @@ class CloudFrontMainTests(unittest.TestCase):
         self.assertEqual(behaviors["/api/*"]["CachePolicyId"], "html-cache")
         self.assertEqual(behaviors["/api/public/*"]["CachePolicyId"], "public-cache")
         self.assertEqual(behaviors["/api/public/stats"]["CachePolicyId"], "stats-cache")
+        # Only the default behavior (the SPA shell) uses the shell cache policy.
+        self.assertEqual(update.call_args.args[1]["DefaultCacheBehavior"]["CachePolicyId"], "shell-cache")
+        self.assertNotIn("shell-cache", {item.get("CachePolicyId") for item in behaviors.values()})
 
         # The apply path hands the allowlisted-cookie config to the private
         # origin request policy only; the public one keeps forwarding none.
@@ -724,7 +762,7 @@ class CloudFrontMainTests(unittest.TestCase):
             cloudfront_frontend, "validate_front_door_apply_guards"
         ), patch.object(
             cloudfront_frontend, "ensure_cache_policy",
-            side_effect=[("public-cache", "unchanged"), ("stats-cache", "unchanged")],
+            side_effect=[("public-cache", "unchanged"), ("stats-cache", "unchanged"), ("shell-cache", "unchanged")],
         ), patch.object(
             cloudfront_frontend, "ensure_origin_request_policy",
             side_effect=[("public-origin", "unchanged"), ("private-origin", "unchanged")],

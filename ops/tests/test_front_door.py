@@ -78,7 +78,9 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
             ["cursor", "limit", "mode", "seed", "type", "value"],
         )
         self.assertEqual(cache["MinTTL"], 0)
-        self.assertEqual(cache["MaxTTL"], 300)
+        self.assertEqual(cache["DefaultTTL"], 60)
+        # The origin's s-maxage=3600 must not be capped below one hour.
+        self.assertEqual(cache["MaxTTL"], 3600)
 
         stats_cache = cloudfront_frontend.public_stats_cache_policy_config(SETTINGS)
         self.assertEqual(stats_cache["Name"], "IanTruong-API-Public-Stats-v1")
@@ -87,6 +89,21 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
         self.assertEqual(
             stats_cache["ParametersInCacheKeyAndForwardedToOrigin"],
             parameters,
+        )
+
+        shell = cloudfront_frontend.shell_cache_policy_config(BASELINE)
+        self.assertEqual(shell["Name"], "IanTruong-Frontend-Shell-v1")
+        # MinTTL is the floor that overrides the objects' no-cache metadata;
+        # each release then purges the edge.
+        self.assertEqual((shell["MinTTL"], shell["DefaultTTL"], shell["MaxTTL"]), (86400, 86400, 86400))
+        shell_parameters = shell["ParametersInCacheKeyAndForwardedToOrigin"]
+        self.assertTrue(shell_parameters["EnableAcceptEncodingGzip"])
+        self.assertTrue(shell_parameters["EnableAcceptEncodingBrotli"])
+        self.assertEqual(shell_parameters["CookiesConfig"], {"CookieBehavior": "none"})
+        self.assertEqual(shell_parameters["HeadersConfig"], {"HeaderBehavior": "none"})
+        self.assertEqual(shell_parameters["QueryStringsConfig"], {"QueryStringBehavior": "none"})
+        self.assertNotIn(
+            BASELINE["shell_cache_policy"]["name"], json.dumps(BASELINE["cache_policies"])
         )
 
         public = cloudfront_frontend.api_origin_request_policy_config(SETTINGS, public=True)

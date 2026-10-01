@@ -267,8 +267,10 @@ download, ZIP, expired-URL, and anonymous-guess behavior.
 ## Current frontend and DNS boundary
 
 The frontend distribution uses the private S3 REST origin with Origin Access
-Control, hardened response headers, immutable fingerprinted assets, short-lived
-HTML, SPA navigation rewriting, and the path-preserving `www` redirect. The
+Control, hardened response headers, immutable fingerprinted assets, an
+edge-cached and compressed HTML shell (`IanTruong-Frontend-Shell-v1`: one day at
+the edge, purged by every frontend release, while browsers still receive
+`no-cache`), SPA navigation rewriting, and the path-preserving `www` redirect. The
 dedicated `/album/*` and `/video/*` behaviors return the current SPA shell from
 the existing public API origin with server-visible, public-only social metadata;
 private, unlisted, missing, or malformed identifiers receive the generic shell
