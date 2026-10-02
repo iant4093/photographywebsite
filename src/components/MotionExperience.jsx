@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router'
 import useMediaQuery from '../hooks/useMediaQuery'
+import './MotionExperience.css'
 
 const TARGET_CLASSES = ['linen-section-heading', 'photo-stats-hero', 'photo-stats-motion-section', 'album-card']
 const TARGET_SELECTOR = [...TARGET_CLASSES.map(name => `main .${name}`), 'main .linen-gallery-page [data-page-scroll-media]'].join(', ')
@@ -34,10 +35,25 @@ function clearMotionStyles(target) {
         'editorial-index-0',
         'editorial-index-1',
         'editorial-index-2',
+        'editorial-timeline',
     )
     Array.from(target.style)
         .filter((property) => property.startsWith('--editorial-'))
         .forEach((property) => target.style.removeProperty(property))
+}
+
+// Scroll-linked poses at the ends of an element's pass through the viewport,
+// matching update() below; CSS interpolates them through the centred rest pose.
+function setTimelinePose(target, isMedia, position, catalog) {
+    const offset = position - 1
+    const amplitude = isMedia ? 1 : 0.76
+    const card = isMedia && target.matches('.album-card, .linen-media-frame')
+    const y = card ? (catalog ? -32 : -16) : (catalog ? -44 : -52 * amplitude)
+    const scale = card ? (catalog ? 0.87 : 0.978) : (catalog ? 0.93 : 0.95)
+    setMotionStyle(target, 'tl-y', y, 'px')
+    setMotionStyle(target, 'tl-x', catalog ? 0 : offset * 0.28 * 36 * amplitude, 'px')
+    setMotionStyle(target, 'tl-r', catalog ? 0 : offset * (card ? 0.62 : 0.72 * amplitude), 'deg', 3)
+    setMotionStyle(target, 'tl-s0', scale + 0.72 * (1 - scale), '', 5)
 }
 
 export default function MotionExperience() {
@@ -169,6 +185,10 @@ export default function MotionExperience() {
         let thumbTravel = 0
         const activeTargets = new Set()
         const browserTracksScroll = window.CSS?.supports?.('animation-timeline', 'scroll(root block)') === true
+        // Let the browser drive poses where it can: script updates trail the
+        // compositor's scroll by a frame, which shows as jitter during momentum.
+        const timelineMotion = window.CSS?.supports?.('animation-timeline', 'view()') === true
+        const visibleClass = timelineMotion ? 'editorial-timeline' : 'is-motion-visible'
 
         root.classList.add('editorial-motion-active', 'editorial-scrollbar-active')
 
@@ -183,7 +203,7 @@ export default function MotionExperience() {
                     if (!metadata.has(entry.target)) return
                     if (entry.isIntersecting) activeTargets.add(entry.target)
                     else activeTargets.delete(entry.target)
-                    entry.target.classList.toggle('is-motion-visible', entry.isIntersecting)
+                    entry.target.classList.toggle(visibleClass, entry.isIntersecting)
                 })
                 requestUpdate()
             }, { rootMargin: '160px 0px', threshold: 0 })
@@ -215,7 +235,8 @@ export default function MotionExperience() {
                 }
                 if (!previous || previous.isMedia !== isMedia) target.classList.toggle('editorial-motion-media', isMedia)
                 metadata.set(target, { ...previous, position, isMedia, inScrollRow: Boolean(target.closest('[data-scroll-row]')) })
-                if (usesCatalogMotion) {
+                if (timelineMotion) setTimelinePose(target, isMedia, position, usesCatalogMotion)
+                else if (usesCatalogMotion) {
                     setMotionStyle(target, 'x', 0, 'px', 0)
                     setMotionStyle(target, 'card-rotation', 0, 'deg', 0)
                     setMotionStyle(target, 'rotation', 0, 'deg', 0)
@@ -225,7 +246,7 @@ export default function MotionExperience() {
                     if (visibilityObserver) visibilityObserver.observe(target)
                     else {
                         activeTargets.add(target)
-                        target.classList.add('is-motion-visible')
+                        target.classList.add(visibleClass)
                     }
                 }
             })
@@ -310,6 +331,7 @@ export default function MotionExperience() {
                 setMotionStyle(target, 'card-rotation', position * phase * 0.62, 'deg', 3)
                 setMotionStyle(target, 'rotation', position * phase * 0.72 * amplitude, 'deg', 3)
             }
+            if (timelineMotion) return
             activeTargets.forEach(target => {
                 const info = metadata.get(target)
                 if (!info.inScrollRow) updateTarget(target, info)
