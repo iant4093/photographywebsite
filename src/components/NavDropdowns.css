@@ -41,7 +41,6 @@
   padding: 1.1rem 1.25rem 1.2rem;
   border: 1px solid var(--color-charcoal);
   background: var(--color-cream);
-  box-shadow: 9px 10px 0 rgba(91, 70, 51, 0.08);
 }
 
 /* Panel links opt out of the masthead's uppercase link treatment. */

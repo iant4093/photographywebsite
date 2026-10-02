@@ -34,7 +34,6 @@ html[data-theme="dark"] body {
 
 .linen-site[data-theme="dark"] .linen-nav-dropdown-inner {
   border-color: var(--color-warm-border);
-  box-shadow: 9px 10px 0 rgba(0, 0, 0, 0.24);
 }
 
 .linen-site[data-theme="dark"] .linen-menu {
