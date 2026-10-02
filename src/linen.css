@@ -99,7 +99,7 @@
 
 .linen-site .linen-nav-inner {
   height: 100%;
-  max-width: 104rem;
+  max-width: max(104rem, 90vw);
   padding-block: 0;
   padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
   padding-right: max(1.5rem, env(safe-area-inset-right, 0px));
@@ -285,7 +285,8 @@
 @media (min-width: 768px) {
   .linen-site .linen-hero,
   .linen-site .linen-video-hero {
-    --portfolio-hero-height: clamp(46.5rem, 92svh, 780px);
+    /* Grow with wide monitors so a 3:2 cover is not cut to a thin band. */
+    --portfolio-hero-height: clamp(46.5rem, 92svh, max(780px, 46vw));
   }
 }
 
@@ -1007,8 +1008,9 @@
 }
 
 @media (min-width: 1440px) {
+  /* Widen with large monitors; unchanged below 1850px wide. */
   .linen-site:not(.linen-admin) .max-w-7xl {
-    max-width: 104rem;
+    max-width: max(104rem, 90vw);
   }
 }
 

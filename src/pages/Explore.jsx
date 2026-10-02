@@ -81,7 +81,7 @@ const TEMPORAL_CONFIG = Object.freeze({
         fetchOptions: fetchExploreSeasons,
     },
 })
-const CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 1080px) 50vw, (min-width: 1440px) 420px, 360px'
+const CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 1080px) 50vw, (min-width: 2200px) calc((90vw - 3rem) / 5), (min-width: 1850px) calc((90vw - 3rem) / 4), (min-width: 1440px) 420px, 360px'
 
 function exposureSelection(value) {
     const [groupId, optionId] = String(value || '').split(':', 2)

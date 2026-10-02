@@ -54,3 +54,10 @@
         height: 28px;
     }
 }
+
+/* Large monitors get a fourth column instead of oversized cards. */
+@media (min-width: 2200px) {
+    .linen-site .section-albums-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}

@@ -133,6 +133,12 @@
   gap: clamp(1.3rem, 2.6vw, 2.6rem);
 }
 
+@media (min-width: 2200px) {
+  .linen-site .archive-search-results {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .linen-site .archive-search-loading,
 .linen-site .archive-search-error {
   margin-block: 1rem;
