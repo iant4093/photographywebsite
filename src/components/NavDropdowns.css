@@ -1,0 +1,152 @@
+/* Desktop navigation dropdowns. The wrapper spans the masthead height so the
+   pointer can travel from the link into the panel without closing it. */
+.linen-site .linen-nav-dropdown {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 74px;
+}
+
+.linen-site .linen-desktop-links .linen-nav-dropdown.is-open > a::after {
+  right: 0;
+}
+
+.linen-site .linen-nav-dropdown-panel {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  z-index: 60;
+  width: max-content;
+  min-width: 17rem;
+  max-width: min(36rem, calc(100vw - 3rem));
+  padding-top: 1px;
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(-50%, -6px);
+  transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms;
+}
+
+.linen-site .linen-nav-dropdown.is-open .linen-nav-dropdown-panel {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition: opacity 180ms ease, transform 180ms ease, visibility 0s;
+}
+
+.linen-site .linen-nav-dropdown-inner {
+  max-height: calc(100vh - 74px - 2rem);
+  max-height: calc(100dvh - 74px - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.1rem 1.25rem 1.2rem;
+  border: 1px solid var(--color-charcoal);
+  background: var(--color-cream);
+  box-shadow: 9px 10px 0 rgba(91, 70, 51, 0.08);
+}
+
+/* Panel links opt out of the masthead's uppercase link treatment. */
+.linen-site .linen-desktop-links .linen-nav-dropdown-panel a::after,
+.linen-site .linen-desktop-links .linen-nav-dropdown-panel a:hover::after {
+  content: none;
+}
+
+.linen-site .linen-nav-dropdown-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2rem;
+  padding-bottom: 0.7rem;
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid var(--color-warm-border);
+  font-size: 0.6rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.linen-site .linen-nav-dropdown-head span {
+  color: var(--color-warm-gray);
+}
+
+.linen-site .linen-nav-dropdown-panel .linen-nav-dropdown-head a {
+  color: var(--color-amber-dark);
+  font-size: inherit;
+  white-space: nowrap;
+}
+
+.linen-site .linen-nav-dropdown-panel .linen-nav-dropdown-head a:hover {
+  color: var(--color-charcoal);
+}
+
+.linen-site .linen-nav-dropdown-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 1.25rem;
+}
+
+.linen-site .linen-nav-dropdown-list--columns,
+.linen-site .linen-nav-dropdown-list--modules {
+  grid-template-columns: repeat(2, minmax(13rem, 1fr));
+}
+
+.linen-site .linen-nav-dropdown-panel .linen-nav-dropdown-list a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.55rem 0.5rem;
+  margin-inline: -0.5rem;
+  color: var(--color-charcoal);
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  line-height: 1.25;
+  letter-spacing: normal;
+  text-transform: none;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.linen-site .linen-nav-dropdown-list span {
+  overflow-wrap: anywhere;
+}
+
+.linen-site .linen-nav-dropdown-list small {
+  flex: none;
+  color: var(--color-warm-gray);
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+
+.linen-site .linen-nav-dropdown-panel .linen-nav-dropdown-list--modules a {
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.linen-site .linen-nav-dropdown-list--modules small {
+  flex: initial;
+  letter-spacing: 0.02em;
+}
+
+.linen-site .linen-nav-dropdown-panel .linen-nav-dropdown-list a:hover,
+.linen-site .linen-nav-dropdown-panel .linen-nav-dropdown-list a:focus-visible {
+  color: var(--color-amber-dark);
+  background: var(--color-cream-dark);
+}
+
+.linen-site .linen-nav-dropdown-panel .linen-nav-dropdown-list a.is-active {
+  color: var(--color-amber-dark);
+}
+
+.linen-site .linen-nav-dropdown-note {
+  padding: 0.6rem 0 0.1rem;
+  color: var(--color-warm-gray);
+  font-size: 0.8rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .linen-site .linen-nav-dropdown-panel,
+  .linen-site .linen-nav-dropdown.is-open .linen-nav-dropdown-panel {
+    transform: translate(-50%, 0);
+    transition: none;
+  }
+}

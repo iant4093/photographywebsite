@@ -12,22 +12,43 @@ import { EXPLORE_MODULES } from '../utils/exploreModules'
 import Navbar from './Navbar'
 
 const auth = { user: null, isAdmin: false, logout: vi.fn() }
-const routed = (path = '/') => render(
+const renderNavbar = (path) => render(
   <AuthContext.Provider value={auth}>
     <MemoryRouter initialEntries={[path]}><Navbar /></MemoryRouter>
   </AuthContext.Provider>,
 )
+// The dropdowns load lazily, so wait until they replace the plain links.
+const routed = async (path = '/') => {
+  const view = renderNavbar(path)
+  await waitFor(() => expect(view.container.querySelectorAll('.linen-nav-dropdown')).toHaveLength(3))
+  return view
+}
+const stubHoverDesktop = (matches) => {
+  window.matchMedia = vi.fn(query => ({
+    matches, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+  }))
+}
 const desktop = (container) => container.querySelector('.linen-desktop-links')
 const trigger = (container, name) => within(desktop(container)).getByRole('link', { name })
 const panelFor = (link) => document.getElementById(link.getAttribute('aria-controls'))
 
 describe('desktop navigation dropdowns', () => {
+  const originalMatchMedia = window.matchMedia
   beforeEach(() => {
     clearCatalogSnapshots()
     fetchAlbumsPage.mockReset()
+    stubHoverDesktop(true)
   })
   afterEach(() => {
     vi.useRealTimers()
+    window.matchMedia = originalMatchMedia
+  })
+
+  it('keeps plain links without loading dropdowns on touch or narrow screens', () => {
+    stubHoverDesktop(false)
+    const { container } = renderNavbar('/')
+    expect(trigger(container, 'Photographs')).not.toHaveAttribute('aria-expanded')
+    expect(container.querySelector('.linen-nav-dropdown')).toBeNull()
   })
 
   it('groups the public catalog into curated sections with album counts', () => {
@@ -55,7 +76,7 @@ describe('desktop navigation dropdowns', () => {
       ],
       nextCursor: null,
     })
-    const { container } = routed('/sections/photo/Night%20Sky')
+    const { container } = await routed('/sections/photo/Night%20Sky')
     const photos = trigger(container, 'Photographs')
     expect(photos).toHaveAttribute('aria-expanded', 'false')
     expect(panelFor(photos)).toHaveAttribute('inert')
@@ -82,12 +103,12 @@ describe('desktop navigation dropdowns', () => {
     expect(photos).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('reuses a fresh catalog snapshot and picks up new sections once it changes', () => {
+  it('reuses a fresh catalog snapshot and picks up new sections once it changes', async () => {
     setCatalogSnapshot('public-videos', {
       items: [{ albumId: 'v1', type: 'video', category: 'Weddings', visibility: 'public' }],
       nextCursor: null,
     })
-    const { container } = routed()
+    const { container } = await routed()
     const videos = trigger(container, 'Videos')
     fireEvent.pointerEnter(videos.parentElement)
     expect(within(panelFor(videos)).getByRole('link', { name: /Weddings/ })).toHaveAttribute('href', '/sections/video/Weddings')
@@ -107,15 +128,15 @@ describe('desktop navigation dropdowns', () => {
 
   it('reports an unavailable catalog without breaking navigation', async () => {
     fetchAlbumsPage.mockRejectedValue(new Error('offline'))
-    const { container } = routed()
+    const { container } = await routed()
     const photos = trigger(container, 'Photographs')
     fireEvent.pointerEnter(photos.parentElement)
     await waitFor(() => expect(panelFor(photos)).toHaveTextContent('Sections are unavailable right now.'))
     expect(photos).toHaveAttribute('href', '/')
   })
 
-  it('lists every Explore module and ignores touch hovers', () => {
-    const { container } = routed('/explore/lenses')
+  it('lists every Explore module and ignores touch hovers', async () => {
+    const { container } = await routed('/explore/lenses')
     const explore = trigger(container, 'Explore')
     // React derives pointerenter from pointerover; jsdom has no PointerEvent, so
     // set the pointer type on the event directly.
@@ -134,8 +155,8 @@ describe('desktop navigation dropdowns', () => {
   })
 
   it('closes after the pointer leaves unless it comes back first', async () => {
+    const { container } = await routed()
     vi.useFakeTimers()
-    const { container } = routed()
     const explore = trigger(container, 'Explore')
     fireEvent.pointerEnter(explore.parentElement)
     fireEvent.pointerLeave(explore.parentElement)
@@ -149,8 +170,8 @@ describe('desktop navigation dropdowns', () => {
     expect(explore).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('supports keyboard navigation through a panel', () => {
-    const { container } = routed()
+  it('supports keyboard navigation through a panel', async () => {
+    const { container } = await routed()
     const explore = trigger(container, 'Explore')
     explore.focus()
     fireEvent.keyDown(explore, { key: 'ArrowDown' })
@@ -167,8 +188,8 @@ describe('desktop navigation dropdowns', () => {
     expect(explore).toHaveFocus()
   })
 
-  it('leaves Editor, Stats, Find Album, and Contact as plain links', () => {
-    const { container } = routed()
+  it('leaves Editor, Stats, Find Album, and Contact as plain links', async () => {
+    const { container } = await routed()
     for (const name of ['Editor', 'Stats', 'Find Album', 'Contact', 'Sign In']) {
       const link = trigger(container, name)
       expect(link).not.toHaveAttribute('aria-expanded')

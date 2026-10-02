@@ -1,41 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useAuth } from '../context/auth'
-import useNavSections from '../hooks/useNavSections'
-import { EXPLORE_MODULES } from '../utils/exploreModules'
-import NavDropdown from './NavDropdown'
+import useMediaQuery from '../hooks/useMediaQuery'
 
-function SectionLinks({ mediaType, sections, failed, pathname }) {
-    const noun = mediaType === 'video' ? 'video' : 'photo'
-    return (
-        <>
-            <div className="linen-nav-dropdown-head">
-                <span>{mediaType === 'video' ? 'Video' : 'Photo'} sections</span>
-                <Link to={mediaType === 'video' ? '/videos' : '/#photo-albums'}>All {noun} albums →</Link>
-            </div>
-            {sections?.length ? (
-                <ul className={`linen-nav-dropdown-list${sections.length > 8 ? ' linen-nav-dropdown-list--columns' : ''}`}>
-                    {sections.map(({ category, count }) => {
-                        const to = `/sections/${mediaType}/${encodeURIComponent(category)}`
-                        const current = pathname === to
-                        return (
-                            <li key={category}>
-                                <Link to={to} className={current ? 'is-active' : undefined} aria-current={current ? 'page' : undefined}>
-                                    <span>{category}</span>
-                                    <small>{count}</small>
-                                </Link>
-                            </li>
-                        )
-                    })}
-                </ul>
-            ) : (
-                <p className="linen-nav-dropdown-note">
-                    {failed ? 'Sections are unavailable right now.' : (sections ? `No ${noun} sections yet.` : 'Loading sections…')}
-                </p>
-            )}
-        </>
-    )
-}
+const NavDropdowns = lazy(() => import('./NavDropdowns'))
 
 // Navigation bar with role-based links
 function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = true }) {
@@ -48,9 +16,8 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const visibleRef = useRef(true)
     const menuToggleRef = useRef(null)
     const menuRef = useRef(null)
-    const [dropdown, setDropdown] = useState(null)
-    const photoSections = useNavSections('photo')
-    const videoSections = useNavSections('video')
+    // Hover dropdowns only load where the desktop links are shown to a pointer.
+    const hoverDropdowns = useMediaQuery('(hover: hover) and (min-width: 1080px)')
     const photoActive = pathname === '/' || pathname.startsWith('/album/') || pathname.startsWith('/sections/photo/')
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/') || pathname.startsWith('/sections/video/')
     const searchActive = pathname === '/search'
@@ -66,18 +33,13 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     })
     const menuLinkClass = (active) => `font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300${active ? ' is-active' : ''}`
     const closeMenu = () => setIsMenuOpen(false)
-    // Remember where a dropdown was opened so navigating away closes it.
-    const openDropdown = dropdown?.pathname === pathname ? dropdown.id : null
-    const dropdownProps = (id) => ({
-        id,
-        open: openDropdown === id,
-        onOpen: (next) => {
-            if (next === 'photo') photoSections.refresh()
-            if (next === 'video') videoSections.refresh()
-            setDropdown({ id: next, pathname })
-        },
-        onClose: (closing) => setDropdown(current => (current?.id === closing ? null : current)),
-    })
+    const primaryLinks = (
+        <>
+            <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
+            <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
+            <Link to="/explore" {...activeAttributes(exploreActive)}>Explore</Link>
+        </>
+    )
 
     // Smart Navbar scroll logic
     useEffect(() => {
@@ -198,31 +160,11 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                     {/* Navigation Container */}
                     <div className="flex items-center gap-6 relative z-50">
                         <div className="linen-desktop-links hidden" aria-label="Primary navigation">
-                            <NavDropdown {...dropdownProps('photo')} label="Photographs" to="/" active={photoActive}>
-                                <SectionLinks mediaType="photo" pathname={pathname} {...photoSections} />
-                            </NavDropdown>
-                            <NavDropdown {...dropdownProps('video')} label="Videos" to="/videos" active={videoActive}>
-                                <SectionLinks mediaType="video" pathname={pathname} {...videoSections} />
-                            </NavDropdown>
-                            <NavDropdown {...dropdownProps('explore')} label="Explore" to="/explore" active={exploreActive}>
-                                <div className="linen-nav-dropdown-head">
-                                    <span>Explore modules</span>
-                                    <Link to="/explore">All modules →</Link>
-                                </div>
-                                <ul className="linen-nav-dropdown-list linen-nav-dropdown-list--modules">
-                                    {EXPLORE_MODULES.map(module => {
-                                        const current = pathname === module.path
-                                        return (
-                                            <li key={module.id}>
-                                                <Link to={module.path} className={current ? 'is-active' : undefined} aria-current={current ? 'page' : undefined}>
-                                                    <span>{module.title}</span>
-                                                    <small>{module.summary}</small>
-                                                </Link>
-                                            </li>
-                                        )
-                                    })}
-                                </ul>
-                            </NavDropdown>
+                            {hoverDropdowns ? (
+                                <Suspense fallback={primaryLinks}>
+                                    <NavDropdowns pathname={pathname} photoActive={photoActive} videoActive={videoActive} exploreActive={exploreActive} />
+                                </Suspense>
+                            ) : primaryLinks}
                             <Link to="/editor" {...activeAttributes(editorActive)}>Editor</Link>
                             <Link to="/stats" {...activeAttributes(statsActive)}>Stats</Link>
                             <Link to="/sharedalbum" {...activeAttributes(sharedActive)}>Find Album</Link>
