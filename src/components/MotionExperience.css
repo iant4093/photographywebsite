@@ -1,0 +1,43 @@
+/* Scroll-driven poses for browsers with view timelines (see MotionExperience).
+   The browser samples the scroll position in the same frame it paints, so
+   cards stay locked to momentum scrolling instead of trailing it. */
+@keyframes editorial-scroll-pose {
+  0% {
+    transform:
+      translate(var(--editorial-tl-x), calc(-1 * var(--editorial-tl-y)))
+      rotate(calc(-1 * var(--editorial-tl-r)))
+      scale(var(--editorial-tl-s0));
+  }
+
+  50% {
+    transform: translate(0px, 0px) rotate(0deg) scale(1);
+  }
+
+  100% {
+    transform:
+      translate(var(--editorial-tl-x), var(--editorial-tl-y))
+      rotate(var(--editorial-tl-r))
+      scale(var(--editorial-tl-s0));
+  }
+}
+
+.linen-site .editorial-timeline {
+  animation: editorial-scroll-pose 1ms linear both;
+  animation-timeline: view();
+  transform-origin: center;
+}
+
+/* A row is its own horizontal scroller; track the row's pass through the page. */
+.linen-site [data-scroll-row] {
+  view-timeline: --editorial-row block;
+}
+
+.linen-site [data-scroll-row] .editorial-timeline {
+  animation-timeline: --editorial-row;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .linen-site .editorial-timeline {
+    animation: none;
+  }
+}

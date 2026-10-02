@@ -565,4 +565,40 @@ describe('MotionExperience film-strip scrollbar', () => {
     flushFrames()
     expect(view.container.querySelectorAll('.is-motion-visible').length).toBeGreaterThan(0)
   })
+
+  it('hands poses to scroll-driven animations where the browser supports view timelines', () => {
+    vi.stubGlobal('CSS', { supports: (property, value) => property === 'animation-timeline' && value === 'view()' })
+    const view = renderExperience('/')
+    flushFrames()
+    const card = view.container.querySelector('.album-card')
+    const heading = view.container.querySelector('.linen-section-heading')
+    expect(card).toHaveClass('editorial-timeline', 'editorial-motion-media')
+    expect(card).not.toHaveClass('is-motion-visible')
+    expect(card.style.getPropertyValue('--editorial-tl-y')).toBe('-32.00px')
+    expect(card.style.getPropertyValue('--editorial-tl-x')).toBe('0.00px')
+    expect(card.style.getPropertyValue('--editorial-tl-s0')).toBe('0.96360')
+    expect(heading.style.getPropertyValue('--editorial-tl-y')).toBe('-44.00px')
+
+    // Scrolling no longer rewrites per-frame poses; CSS follows the scroll itself.
+    window.scrollY = 600
+    fireEvent.scroll(window)
+    flushFrames()
+    for (const target of [card, heading]) {
+      expect(target.style.getPropertyValue('--editorial-y')).toBe('')
+      expect(target.style.getPropertyValue('--editorial-card-y')).toBe('')
+    }
+    view.unmount()
+    expect(card).not.toHaveClass('editorial-timeline')
+    expect(card.style.getPropertyValue('--editorial-tl-y')).toBe('')
+  })
+
+  it('keeps expressive album-route poses in scroll-driven mode', () => {
+    vi.stubGlobal('CSS', { supports: (property, value) => property === 'animation-timeline' && value === 'view()' })
+    const view = renderExperience('/album/example')
+    flushFrames()
+    const card = view.container.querySelector('.album-card')
+    expect(card.style.getPropertyValue('--editorial-tl-y')).toBe('-16.00px')
+    expect(card.style.getPropertyValue('--editorial-tl-x')).toBe('-10.08px')
+    expect(card.style.getPropertyValue('--editorial-tl-r')).toBe('-0.620deg')
+  })
 })
