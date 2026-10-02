@@ -15,7 +15,7 @@ const FeaturedPhotoExplorer = lazy(() => import('../components/FeaturedPhotoExpl
 const RandomPhotoExplorer = lazy(() => import('../components/RandomPhotoExplorer'))
 const EMPTY = []
 // Match the grid columns, gutters, and the wider container from linen.css.
-const SECTION_IMAGE_SIZES = '(min-width: 1664px) 523px, (min-width: 1440px) calc((100vw - 6rem) / 3), (min-width: 1280px) 395px, (min-width: 1024px) calc((100vw - 6rem) / 3), (min-width: 640px) calc((100vw - 4.5rem) / 2), calc(100vw - 3rem)'
+const SECTION_IMAGE_SIZES = '(min-width: 2200px) calc((90vw - 7.5rem) / 4), (min-width: 1850px) calc((90vw - 6rem) / 3), (min-width: 1664px) 523px, (min-width: 1440px) calc((100vw - 6rem) / 3), (min-width: 1280px) 395px, (min-width: 1024px) calc((100vw - 6rem) / 3), (min-width: 640px) calc((100vw - 4.5rem) / 2), calc(100vw - 3rem)'
 
 export default function SectionAlbums() {
     const { mediaType, category } = useParams()
@@ -100,7 +100,7 @@ export default function SectionAlbums() {
         </div>
         {loading && !albums.length && <SkeletonGrid count={6} type={mediaType} />}
         {error && <div role="alert" className="mb-8 text-red-700"><p>{error}</p><button type="button" onClick={() => setAttempt(value => value + 1)} className="mt-3 underline cursor-pointer">Try again</button></div>}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-10">
+        <div className="section-albums-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-10">
             {albums.map(album => mediaType === 'video'
                 ? <VideoAlbumCard key={album.albumId} album={album} />
                 : <AlbumCard key={album.albumId} album={album} showNewFlag preview responsivePreview imageSizes={SECTION_IMAGE_SIZES} />)}

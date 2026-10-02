@@ -1,5 +1,5 @@
 .photo-stats-page {
-    width: min(100%, 104rem);
+    width: min(100%, max(104rem, 90vw));
     margin-inline: auto;
     padding: 7rem clamp(1rem, 3vw, 3rem) 5rem;
 }

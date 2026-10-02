@@ -21,7 +21,7 @@ const CATALOGS = [
 ]
 const TYPE_OPTIONS = new Set(['all', 'photo', 'video'])
 const SORT_OPTIONS = new Set(['newest', 'oldest', 'title'])
-const SEARCH_CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 1080px) 50vw, (min-width: 1440px) 520px, 400px'
+const SEARCH_CARD_SIZES = '(max-width: 720px) calc(100vw - 3rem), (max-width: 1080px) 50vw, (min-width: 2200px) calc((90vw - 3rem) / 4), (min-width: 1850px) calc((90vw - 3rem) / 3), (min-width: 1440px) 520px, 400px'
 
 const SearchResults = memo(function SearchResults({ albums }) {
     return <div className="archive-search-results">

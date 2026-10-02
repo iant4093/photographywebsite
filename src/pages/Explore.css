@@ -608,6 +608,12 @@
   align-items: start;
 }
 
+@media (min-width: 2200px) {
+  .linen-site .explore-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
 .linen-site .explore-photo-card {
   --editorial-card-scale: 1;
   --editorial-hover-scale: 0;
