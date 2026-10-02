@@ -1,6 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useAuth } from '../context/auth'
+import useMediaQuery from '../hooks/useMediaQuery'
+
+const NavDropdowns = lazy(() => import('./NavDropdowns'))
 
 // Navigation bar with role-based links
 function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = true }) {
@@ -13,8 +16,10 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const visibleRef = useRef(true)
     const menuToggleRef = useRef(null)
     const menuRef = useRef(null)
-    const photoActive = pathname === '/' || pathname.startsWith('/album/')
-    const videoActive = pathname === '/videos' || pathname.startsWith('/video/')
+    // Hover dropdowns only load where the desktop links are shown to a pointer.
+    const hoverDropdowns = useMediaQuery('(hover: hover) and (min-width: 1080px)')
+    const photoActive = pathname === '/' || pathname.startsWith('/album/') || pathname.startsWith('/sections/photo/')
+    const videoActive = pathname === '/videos' || pathname.startsWith('/video/') || pathname.startsWith('/sections/video/')
     const searchActive = pathname === '/search'
     const exploreActive = pathname === '/explore' || pathname.startsWith('/explore/')
     const editorActive = pathname === '/editor'
@@ -28,6 +33,13 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     })
     const menuLinkClass = (active) => `font-serif text-4xl md:text-5xl lg:text-6xl text-charcoal hover:text-amber transition-colors duration-300${active ? ' is-active' : ''}`
     const closeMenu = () => setIsMenuOpen(false)
+    const primaryLinks = (
+        <>
+            <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
+            <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
+            <Link to="/explore" {...activeAttributes(exploreActive)}>Explore</Link>
+        </>
+    )
 
     // Smart Navbar scroll logic
     useEffect(() => {
@@ -148,9 +160,11 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                     {/* Navigation Container */}
                     <div className="flex items-center gap-6 relative z-50">
                         <div className="linen-desktop-links hidden" aria-label="Primary navigation">
-                            <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
-                            <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
-                            <Link to="/explore" {...activeAttributes(exploreActive)}>Explore</Link>
+                            {hoverDropdowns ? (
+                                <Suspense fallback={primaryLinks}>
+                                    <NavDropdowns pathname={pathname} photoActive={photoActive} videoActive={videoActive} exploreActive={exploreActive} />
+                                </Suspense>
+                            ) : primaryLinks}
                             <Link to="/editor" {...activeAttributes(editorActive)}>Editor</Link>
                             <Link to="/stats" {...activeAttributes(statsActive)}>Stats</Link>
                             <Link to="/sharedalbum" {...activeAttributes(sharedActive)}>Find Album</Link>

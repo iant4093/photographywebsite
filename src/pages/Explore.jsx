@@ -33,6 +33,7 @@ import './Explore.css'
 import { openPrintOrder } from '../utils/printOrders'
 import { shareUrlForAlbumPhoto } from '../utils/share'
 import { saveVerticalScroll } from '../utils/scroll'
+import { EXPLORE_MODULES } from '../utils/exploreModules'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
 
 const PAGE_SIZE = 24
@@ -101,6 +102,38 @@ function ExploreHeader({ title = 'Explore', detail = 'Choose a different way int
     )
 }
 
+// Each module's card illustration, keyed by its id in EXPLORE_MODULES.
+const MODULE_ART = {
+    immersive: (
+        <div className="explore-module-museum" aria-hidden="true">
+            <span className="explore-module-museum-ceiling" />
+            <i /><i /><i /><i /><i /><i />
+            <strong>ENTER GALLERY</strong>
+        </div>
+    ),
+    color: (
+        <div className="explore-module-colors" aria-hidden="true">
+            {COLOR_OPTIONS.slice(0, 8).map(option => <i key={option.id} style={{ backgroundColor: option.color }} />)}
+        </div>
+    ),
+    lens: (
+        <div className="explore-module-lens" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+        </div>
+    ),
+    exposure: <div className="explore-module-exposure" aria-hidden="true"><i /><i /><i /><i /></div>,
+    time: <div className="explore-module-time" aria-hidden="true"><i /><i /><i /><i /><i /></div>,
+    season: <div className="explore-module-season" aria-hidden="true"><i /><i /><i /><i /></div>,
+    guess: (
+        <div className="explore-module-game" aria-hidden="true">
+            <span>?</span>
+            <i>1/500</i><i>f/2.8</i><i>ISO 400</i>
+        </div>
+    ),
+}
+
 function ExploreLanding() {
     const warmModule = useCallback((mode) => {
         prefetchExploreModule(mode).catch(() => {})
@@ -110,128 +143,24 @@ function ExploreLanding() {
         <div className="explore-page animate-fade-in pt-[74px]">
             <ExploreHeader />
             <section className="explore-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Explore modules">
-                <Link
-                    to="/explore/immersive-gallery"
-                    className="explore-module-card explore-module-card--immersive editorial-motion-media"
-                    onClick={() => saveVerticalScroll('/explore')}
-                >
-                    <span className="explore-module-number">01</span>
-                    <div className="explore-module-museum" aria-hidden="true">
-                        <span className="explore-module-museum-ceiling" />
-                        <i /><i /><i /><i /><i /><i />
-                        <strong>ENTER GALLERY</strong>
-                    </div>
-                    <div>
-                        <h2>Immersive Gallery</h2>
-                        <p>Walk through a living museum generated from every public photography collection.</p>
-                    </div>
-                    <span className="explore-module-arrow" aria-hidden="true">→</span>
-                </Link>
-                <Link
-                    to="/explore/colors"
-                    className="explore-module-card editorial-motion-media"
-                    onClick={() => saveVerticalScroll('/explore')}
-                    onPointerEnter={() => warmModule('color')}
-                    onFocus={() => warmModule('color')}
-                >
-                    <span className="explore-module-number">02</span>
-                    <div className="explore-module-colors" aria-hidden="true">
-                        {COLOR_OPTIONS.slice(0, 8).map(option => <i key={option.id} style={{ backgroundColor: option.color }} />)}
-                    </div>
-                    <div>
-                        <h2>Color Explorer</h2>
-                        <p>Browse photographs by the colors that meaningfully shape each frame.</p>
-                    </div>
-                    <span className="explore-module-arrow" aria-hidden="true">→</span>
-                </Link>
-                <Link
-                    to="/explore/lenses"
-                    className="explore-module-card editorial-motion-media"
-                    onClick={() => saveVerticalScroll('/explore')}
-                    onPointerEnter={() => warmModule('lens')}
-                    onFocus={() => warmModule('lens')}
-                >
-                    <span className="explore-module-number">03</span>
-                    <div className="explore-module-lens" aria-hidden="true">
-                        <i />
-                        <i />
-                        <i />
-                    </div>
-                    <div>
-                        <h2>Lens Explorer</h2>
-                        <p>See how each lens renders the archive, from wide landscapes to distant wildlife.</p>
-                    </div>
-                    <span className="explore-module-arrow" aria-hidden="true">→</span>
-                </Link>
-                <Link
-                    to="/explore/exposure"
-                    className="explore-module-card editorial-motion-media"
-                    onClick={() => saveVerticalScroll('/explore')}
-                    onPointerEnter={() => warmModule('exposure')}
-                    onFocus={() => warmModule('exposure')}
-                >
-                    <span className="explore-module-number">04</span>
-                    <div className="explore-module-exposure" aria-hidden="true">
-                        <i /><i /><i /><i />
-                    </div>
-                    <div>
-                        <h2>Exposure Explorer</h2>
-                        <p>Browse by aperture, shutter speed, ISO, and focal length.</p>
-                    </div>
-                    <span className="explore-module-arrow" aria-hidden="true">→</span>
-                </Link>
-                <Link
-                    to="/explore/time-of-day"
-                    className="explore-module-card editorial-motion-media"
-                    onClick={() => saveVerticalScroll('/explore')}
-                    onPointerEnter={() => warmModule('time')}
-                    onFocus={() => warmModule('time')}
-                >
-                    <span className="explore-module-number">05</span>
-                    <div className="explore-module-time" aria-hidden="true">
-                        <i /><i /><i /><i /><i />
-                    </div>
-                    <div>
-                        <h2>Time of Day Explorer</h2>
-                        <p>Follow the changing character of light from dawn through night.</p>
-                    </div>
-                    <span className="explore-module-arrow" aria-hidden="true">→</span>
-                </Link>
-                <Link
-                    to="/explore/seasons"
-                    className="explore-module-card editorial-motion-media"
-                    onClick={() => saveVerticalScroll('/explore')}
-                    onPointerEnter={() => warmModule('season')}
-                    onFocus={() => warmModule('season')}
-                >
-                    <span className="explore-module-number">06</span>
-                    <div className="explore-module-season" aria-hidden="true">
-                        <i /><i /><i /><i />
-                    </div>
-                    <div>
-                        <h2>Season Explorer</h2>
-                        <p>See the archive shift through winter, spring, summer, and autumn.</p>
-                    </div>
-                    <span className="explore-module-arrow" aria-hidden="true">→</span>
-                </Link>
-                <Link
-                    to="/explore/guess-settings"
-                    className="explore-module-card editorial-motion-media"
-                    onClick={() => saveVerticalScroll('/explore')}
-                    onPointerEnter={() => warmModule('sample')}
-                    onFocus={() => warmModule('sample')}
-                >
-                    <span className="explore-module-number">07</span>
-                    <div className="explore-module-game" aria-hidden="true">
-                        <span>?</span>
-                        <i>1/500</i><i>f/2.8</i><i>ISO 400</i>
-                    </div>
-                    <div>
-                        <h2>Guess the Settings</h2>
-                        <p>Read the frame, choose the camera setting, and test your eye.</p>
-                    </div>
-                    <span className="explore-module-arrow" aria-hidden="true">→</span>
-                </Link>
+                {EXPLORE_MODULES.map((module, index) => (
+                    <Link
+                        key={module.id}
+                        to={module.path}
+                        className={`explore-module-card${module.id === 'immersive' ? ' explore-module-card--immersive' : ''} editorial-motion-media`}
+                        onClick={() => saveVerticalScroll('/explore')}
+                        onPointerEnter={module.prefetch ? () => warmModule(module.prefetch) : undefined}
+                        onFocus={module.prefetch ? () => warmModule(module.prefetch) : undefined}
+                    >
+                        <span className="explore-module-number">{String(index + 1).padStart(2, '0')}</span>
+                        {MODULE_ART[module.id] || <div aria-hidden="true" />}
+                        <div>
+                            <h2>{module.title}</h2>
+                            <p>{module.detail}</p>
+                        </div>
+                        <span className="explore-module-arrow" aria-hidden="true">→</span>
+                    </Link>
+                ))}
             </section>
         </div>
     )
