@@ -1312,6 +1312,38 @@ class ReleaseDependencyTests(unittest.TestCase):
                 "Conditional",
                 "Always",
             ),
+            (
+                "HeroReelFunctionReconcile",
+                "AWS::Events::Rule",
+                "Targets",
+                "HeroReelFunction.Arn",
+                "False",
+                "Never",
+            ),
+            (
+                "HeroReelFunctionReconcilePermission",
+                "AWS::Lambda::Permission",
+                "SourceArn",
+                "HeroReelFunctionReconcile.Arn",
+                "Conditional",
+                "Always",
+            ),
+            (
+                "HeroCoverFunctionRole",
+                "AWS::IAM::Role",
+                "Policies",
+                "HeroReelFunction.Arn",
+                "False",
+                "Never",
+            ),
+            (
+                "HeroReelFunctionRole",
+                "AWS::IAM::Role",
+                "Policies",
+                "ImagesBucket.Arn",
+                "False",
+                "Never",
+            ),
         )
         changes = []
         for logical_id, resource_type, property_name, cause, replacement, recreation in observed:
@@ -1335,7 +1367,7 @@ class ReleaseDependencyTests(unittest.TestCase):
                 release_intent=intent,
                 release_dependencies=dependencies,
             ),
-            {"Add": 0, "Modify": 6, "Total": 6},
+            {"Add": 0, "Modify": 10, "Total": 10},
         )
 
     def test_preview_stream_change_allows_only_the_observed_read_role_cascades(self):
