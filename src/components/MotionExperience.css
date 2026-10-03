@@ -1,4 +1,4 @@
-/* Scroll-driven poses for browsers with view timelines (see MotionExperience).
+/* Scroll-driven poses for browsers with scroll timelines (see MotionExperience).
    The browser samples the scroll position in the same frame it paints, so
    cards stay locked to momentum scrolling instead of trailing it. */
 @keyframes editorial-scroll-pose {
@@ -23,17 +23,11 @@
 
 .linen-site .editorial-timeline {
   animation: editorial-scroll-pose 1ms linear both;
-  animation-timeline: view();
+  /* Fixed page offsets rather than view(): a view timeline follows the
+     visible viewport, which iOS Safari resizes as its toolbars move. */
+  animation-timeline: scroll(root block);
+  animation-range: var(--editorial-tl-start) var(--editorial-tl-end);
   transform-origin: center;
-}
-
-/* A row is its own horizontal scroller; track the row's pass through the page. */
-.linen-site [data-scroll-row] {
-  view-timeline: --editorial-row block;
-}
-
-.linen-site [data-scroll-row] .editorial-timeline {
-  animation-timeline: --editorial-row;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -566,8 +566,15 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(view.container.querySelectorAll('.is-motion-visible').length).toBeGreaterThan(0)
   })
 
-  it('hands poses to scroll-driven animations where the browser supports view timelines', () => {
-    vi.stubGlobal('CSS', { supports: (property, value) => property === 'animation-timeline' && value === 'view()' })
+  it('hands poses to scroll-driven animations where the browser supports scroll timelines', () => {
+    vi.stubGlobal('CSS', { supports: property => ['animation-timeline', 'animation-range'].includes(property) })
+    // jsdom has no layout; report the large-viewport probe as a 1000px viewport.
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() { return this.style.height === '100lvh' ? 1000 : 0 },
+    })
+    try {
     const view = renderExperience('/')
     flushFrames()
     const card = view.container.querySelector('.album-card')
@@ -578,6 +585,14 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(card.style.getPropertyValue('--editorial-tl-x')).toBe('0.00px')
     expect(card.style.getPropertyValue('--editorial-tl-s0')).toBe('0.96360')
     expect(heading.style.getPropertyValue('--editorial-tl-y')).toBe('-44.00px')
+    // Ranges are fixed page offsets (top - viewport .. top + height), so a
+    // viewport resize from collapsing browser toolbars cannot shift poses.
+    expect(card.style.getPropertyValue('--editorial-tl-start')).toBe('-1000.0px')
+    expect(card.style.getPropertyValue('--editorial-tl-end')).toBe('1.0px')
+    window.innerHeight = 900
+    fireEvent.resize(window)
+    flushFrames()
+    expect(card.style.getPropertyValue('--editorial-tl-start')).toBe('-1000.0px')
 
     // Scrolling no longer rewrites per-frame poses; CSS follows the scroll itself.
     window.scrollY = 600
@@ -590,10 +605,13 @@ describe('MotionExperience film-strip scrollbar', () => {
     view.unmount()
     expect(card).not.toHaveClass('editorial-timeline')
     expect(card.style.getPropertyValue('--editorial-tl-y')).toBe('')
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight)
+    }
   })
 
   it('keeps expressive album-route poses in scroll-driven mode', () => {
-    vi.stubGlobal('CSS', { supports: (property, value) => property === 'animation-timeline' && value === 'view()' })
+    vi.stubGlobal('CSS', { supports: property => ['animation-timeline', 'animation-range'].includes(property) })
     const view = renderExperience('/album/example')
     flushFrames()
     const card = view.container.querySelector('.album-card')
