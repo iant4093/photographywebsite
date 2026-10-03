@@ -1,0 +1,23 @@
+/* The reel sits exactly over the still hero (same overscan and parallax) and
+   fades in once frames are actually playing. */
+.linen-site .linen-video-hero .hero-reel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 900ms ease;
+}
+
+.linen-site .linen-video-hero .hero-reel.is-playing {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .linen-site .linen-video-hero .hero-reel {
+    display: none;
+  }
+}

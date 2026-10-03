@@ -4169,9 +4169,19 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           HERO_DERIVATIVE_QUEUE_URL: !Ref PreviewQueue
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
+          HERO_REEL_FUNCTION_NAME: !Ref HeroReelFunction
       Policies:
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt GallerySettingsTable.Arn
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt HeroReelFunction.Arn
             - Effect: Allow
               Action:
                 - s3:PutObject
@@ -4191,6 +4201,83 @@ Resources:
             ApiId: !Ref Api
             Path: /admin/hero/{operation}
             Method: POST
+
+  # Builds the silent, looping Videos-page hero reel. A pinned, hash-checked
+  # ffmpeg ships inside the artifact (see backend/Makefile). One build runs at
+  # a time; the schedule is a cheap digest check that only rebuilds when the
+  # public video catalog changed. Admin drafts arrive as async invocations.
+  HeroReelFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: hero_reel.handler
+      Timeout: 900
+      MemorySize: 10240
+      EphemeralStorage:
+        Size: 4096
+      ReservedConcurrentExecutions: 1
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 3600
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
+          VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+          IMAGES_BUCKET: !Ref ImagesBucket
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
+          HERO_DERIVATIVE_QUEUE_URL: !Ref PreviewQueue
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource:
+                - !Sub '${AlbumsTable.Arn}/index/VisibilityCreatedAtIndex'
+                - !GetAtt AlbumMediaTable.Arn
+                - !Sub '${AlbumMediaTable.Arn}/index/AlbumOrderIndex'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt GallerySettingsTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:PutObjectTagging
+                - s3:DeleteObject
+              Resource: !Sub '${ImagesBucket.Arn}/site/hero/versions/video/reel/*'
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectTagging
+              Resource:
+                - !Sub '${ImagesBucket.Arn}/site/hero/video/reel.json'
+                - !Sub '${ImagesBucket.Arn}/temp-zips/video-hero-pending'
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: site/hero/versions/video/reel/*
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt PreviewQueue.Arn
+            - Effect: Allow
+              Action: cloudfront:CreateInvalidation
+              Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+      Events:
+        Reconcile:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Input: '{"action":"reconcile"}'
+            Enabled: true
 
   CreateUserFunction:
     Type: AWS::Serverless::Function

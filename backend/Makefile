@@ -40,7 +40,8 @@ SOURCES_GetDownloadUrlFunction := album_access.py audit_helpers.py auth_helpers.
 SOURCES_PreparePrintFunction := album_access.py audit_helpers.py auth_helpers.py cursor_helpers.py front_door.py media_access.py prepare_print.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py zip_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
 SOURCES_UpdateImageFunction := album_media_store.py audit_helpers.py auth_helpers.py cache_invalidation.py deletion_helpers.py front_door.py media_access.py media_signing.py response_helpers.py secret_helpers.py update_image.py validation_helpers.py original_comparison_access.py random_pool_refresh.py aws_request_config.py drive_backup_jobs.py dynamodb_helpers.py media_mutation.py visibility_change.py cleanup_work.py ownership_guard.py
 SOURCES_GetUploadUrlFunction := audit_helpers.py auth_helpers.py front_door.py get_upload_url.py media_access.py response_helpers.py validation_helpers.py original_comparison_access.py aws_request_config.py media_mutation.py
-SOURCES_HeroCoverFunction := audit_helpers.py auth_helpers.py front_door.py hero_cover.py response_helpers.py validation_helpers.py aws_request_config.py
+SOURCES_HeroCoverFunction := audit_helpers.py auth_helpers.py front_door.py hero_cover.py hero_reel_admin.py response_helpers.py validation_helpers.py aws_request_config.py
+SOURCES_HeroReelFunction := album_media_store.py aws_request_config.py hero_reel.py hero_reel_plan.py media_access.py media_mutation.py original_comparison_access.py validation_helpers.py
 SOURCES_CreateUserFunction := audit_helpers.py auth_helpers.py create_user.py front_door.py response_helpers.py validation_helpers.py aws_request_config.py
 SOURCES_ListUsersFunction := audit_helpers.py auth_helpers.py front_door.py list_users.py response_helpers.py validation_helpers.py aws_request_config.py
 SOURCES_GetCostReportFunction := audit_helpers.py auth_helpers.py front_door.py get_cost_report.py response_helpers.py aws_request_config.py
@@ -99,6 +100,39 @@ build-PreviewWorkerFunction:
 	  test -f node_modules/sharp/dist/index.mjs; \
 	  test -d node_modules/@img/sharp-linux-x64; \
 	  test -d node_modules/@img/sharp-libvips-linux-x64
+
+# The hero reel worker shells out to a static ffmpeg 7.0.2 (libx264). It comes
+# from the imageio-ffmpeg wheel on PyPI, pinned by version and by the wheel's
+# published SHA-256; only the binary itself enters the artifact.
+FFMPEG_WHEEL := imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl
+FFMPEG_WHEEL_SHA256 := c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282
+FFMPEG_BINARY_SHA256 := e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99
+
+.PHONY: build-HeroReelFunction
+build-HeroReelFunction:
+	@set -euo pipefail; \
+	  test -n "$(ARTIFACTS_DIR)"; \
+	  mkdir -p "$(ARTIFACTS_DIR)/bin"; \
+	  for source in $(SOURCES_HeroReelFunction); do \
+	    test -f "functions/$$source"; \
+	    cp "functions/$$source" "$(ARTIFACTS_DIR)/"; \
+	  done; \
+	  workdir="$$(mktemp -d)"; \
+	  trap 'rm -rf "$$workdir"' EXIT; \
+	  "$(PYTHON)" -m pip download \
+	    --disable-pip-version-check \
+	    --no-deps \
+	    --only-binary=:all: \
+	    --platform manylinux2014_x86_64 \
+	    --implementation py \
+	    --python-version "$(PIP_PYTHON_VERSION)" \
+	    --dest "$$workdir" \
+	    imageio-ffmpeg==0.6.0; \
+	  echo "$(FFMPEG_WHEEL_SHA256)  $$workdir/$(FFMPEG_WHEEL)" | sha256sum --check --quiet; \
+	  "$(PYTHON)" -c 'import sys, zipfile; open(sys.argv[2], "wb").write(zipfile.ZipFile(sys.argv[1]).read("imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2"))' \
+	    "$$workdir/$(FFMPEG_WHEEL)" "$(ARTIFACTS_DIR)/bin/ffmpeg"; \
+	  echo "$(FFMPEG_BINARY_SHA256)  $(ARTIFACTS_DIR)/bin/ffmpeg" | sha256sum --check --quiet; \
+	  chmod 0755 "$(ARTIFACTS_DIR)/bin/ffmpeg"
 
 .PHONY: build-%
 build-%:

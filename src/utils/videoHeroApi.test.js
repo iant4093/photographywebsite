@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { completeVideoHeroUpload, requestVideoHeroUploadUrl } from './videoHeroApi'
+import { fetchHeroReelStatus, publishHeroReel, requestHeroReelDraft } from './videoHeroApi'
 
 const response = (value, status = 200) => new Response(JSON.stringify(value), {
     status,
@@ -10,42 +10,43 @@ const response = (value, status = 200) => new Response(JSON.stringify(value), {
 describe('video hero API', () => {
     afterEach(() => vi.unstubAllGlobals())
 
-    it('authorizes and completes only the video hero namespace', async () => {
+    it('reads reel status, requests drafts, and publishes a reviewed version', async () => {
         const fetch = vi.fn()
-            .mockResolvedValueOnce(response({ uploadUrl: 'https://upload.test' }))
-            .mockResolvedValueOnce(response({ status: 'processing' }, 202))
+            .mockResolvedValueOnce(response({ job: null }))
+            .mockResolvedValueOnce(response({ job: { status: 'queued' } }, 202))
+            .mockResolvedValueOnce(response({ job: { status: 'queued' } }, 202))
         vi.stubGlobal('fetch', fetch)
         const signal = new AbortController().signal
-        const file = new File(['video hero'], 'video-hero.jpg', { type: 'image/jpeg' })
 
-        await requestVideoHeroUploadUrl('token', file, { signal })
-        await completeVideoHeroUpload('token', '0123456789abcdef0123456789abcdef', { signal })
+        await expect(fetchHeroReelStatus('token', { signal })).resolves.toEqual({ job: null })
+        await requestHeroReelDraft('token')
+        await publishHeroReel('token', 'a'.repeat(24))
 
-        expect(fetch).toHaveBeenNthCalledWith(1, expect.stringContaining('/admin/hero/upload-url'), expect.objectContaining({
-            body: JSON.stringify({
-                filename: 'video-hero.jpg',
-                contentType: 'image/jpeg',
-                size: file.size,
-                heroType: 'video',
-            }),
+        expect(fetch).toHaveBeenNthCalledWith(1, expect.stringContaining('/admin/hero/reel-status'), expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({ Authorization: 'Bearer token' }),
             signal: expect.any(AbortSignal),
         }))
-        expect(fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('/admin/hero/complete'), expect.objectContaining({
-            body: JSON.stringify({ etag: '0123456789abcdef0123456789abcdef', heroType: 'video' }),
+        expect(fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('/admin/hero/reel-generate'), expect.anything())
+        expect(fetch).toHaveBeenNthCalledWith(3, expect.stringContaining('/admin/hero/reel-publish'), expect.objectContaining({
+            body: JSON.stringify({ version: 'a'.repeat(24), heroType: 'video' }),
         }))
     })
 
     it('redacts provider failures and preserves safe validation messages', async () => {
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response({ message: 'Use a valid video hero' }, 400)))
-        await expect(completeVideoHeroUpload('token', 'bad')).rejects.toMatchObject({
-            status: 400,
-            message: 'Use a valid video hero',
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response({ message: 'A hero video job is already in progress' }, 409)))
+        await expect(requestHeroReelDraft('token')).rejects.toMatchObject({
+            status: 409,
+            message: 'A hero video job is already in progress',
         })
 
         globalThis.fetch.mockResolvedValueOnce(response({ message: 'private provider detail' }, 500))
-        await expect(completeVideoHeroUpload('token', 'bad')).rejects.toMatchObject({
+        await expect(publishHeroReel('token', 'bad')).rejects.toMatchObject({
             status: 500,
             message: 'The service is temporarily unavailable. Please try again.',
         })
+
+        globalThis.fetch.mockRejectedValueOnce(new TypeError('offline'))
+        await expect(fetchHeroReelStatus('token')).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
     })
 })

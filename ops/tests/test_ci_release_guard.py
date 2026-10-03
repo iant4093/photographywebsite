@@ -392,6 +392,11 @@ class ReleaseIntentTests(unittest.TestCase):
         self.assertEqual(
             add_rules,
             {
+                ("HeroReelFunction", "AWS::Lambda::Function"),
+                ("HeroReelFunctionRole", "AWS::IAM::Role"),
+                ("HeroReelFunctionEventInvokeConfig", "AWS::Lambda::EventInvokeConfig"),
+                ("HeroReelFunctionReconcile", "AWS::Events::Rule"),
+                ("HeroReelFunctionReconcilePermission", "AWS::Lambda::Permission"),
                 ("ZipPreparationQueue", "AWS::SQS::Queue"),
                 ("ZipPreparationDeadLetterQueue", "AWS::SQS::Queue"),
                 ("ZipPreparationFailureAlarm", "AWS::CloudWatch::Alarm"),
