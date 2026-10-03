@@ -222,20 +222,19 @@ class SelectionTests(unittest.TestCase):
 
 
 class FilterGraphTests(unittest.TestCase):
-    def test_graph_crossfades_every_clip_and_loops_back_to_the_first(self):
+    def test_graph_hard_cuts_between_clips_without_repeating_any(self):
         clips = [{"duration": 5.0}, {"duration": 4.0}, {"duration": 5.0}]
         graph, total = plan.filter_graph(clips, "24")
-        fade = plan.CROSSFADE_SECONDS
-        self.assertAlmostEqual(total, 14.0 - 3 * fade)
-        self.assertIn(f"[c0][c1]xfade=transition=fade:duration={fade:.3f}:offset={5 - fade:.3f}[x1]", graph)
-        self.assertIn(f"offset={5 + 4 - 2 * fade:.3f}[x2]", graph)
-        self.assertIn(f"[x2][head]xfade=transition=fade:duration={fade:.3f}:offset={14 - 3 * fade:.3f}[x3]", graph)
-        self.assertIn(f"[x3]trim=start={fade:.3f}:duration={total:.3f}", graph)
+        self.assertAlmostEqual(total, 14.0)
+        self.assertEqual(plan.reel_seconds(clips), 14.0)
+        self.assertNotIn("xfade", graph)
+        self.assertIn("[c0][c1][c2]concat=n=3:v=1:a=0[joined]", graph)
+        self.assertIn("[joined]trim=duration=14.000,setpts=PTS-STARTPTS,fps=24,split=4", graph)
+        self.assertNotIn("[3:v]", graph)
         self.assertIn("[s0]null[out0]", graph)
         self.assertIn("[s1]scale=1280:720:flags=lanczos[out1]", graph)
         self.assertIn("[s2]crop=608:1080[out2]", graph)
         self.assertIn("[s3]trim=end_frame=1[poster]", graph)
-        self.assertIn("[3:v]", graph)
         self.assertIn("crop=1920:1080", plan.clip_filter("24"))
 
 

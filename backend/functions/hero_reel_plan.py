@@ -17,7 +17,6 @@ import urllib.parse
 
 BUILDER_VERSION = "hero-reel-v1"
 TARGET_SECONDS = 60.0
-CROSSFADE_SECONDS = 0.75
 MIN_CLIP_SECONDS = 3.0
 MAX_CLIP_SECONDS = 5.0
 FALLBACK_MIN_CLIP_SECONDS = 1.6
@@ -327,8 +326,8 @@ def candidate_clips(video, shots, rng, *, relaxed=False):
 
 
 def reel_seconds(clips):
-    """Length of the looped reel: every clip loses one crossfade."""
-    return sum(clip["duration"] for clip in clips) - CROSSFADE_SECONDS * len(clips)
+    """Length of the looped reel; clips are joined with hard cuts."""
+    return sum(clip["duration"] for clip in clips)
 
 
 def select_clips(candidates_by_video, rng, target=TARGET_SECONDS):
@@ -358,7 +357,7 @@ def select_clips(candidates_by_video, rng, target=TARGET_SECONDS):
     if chosen and excess > 0:
         # Land on the target length by shortening the clip that overshot it.
         last = chosen[-1]
-        last["duration"] = round(max(FALLBACK_MIN_CLIP_SECONDS + CROSSFADE_SECONDS, last["duration"] - excess), 3)
+        last["duration"] = round(max(FALLBACK_MIN_CLIP_SECONDS, last["duration"] - excess), 3)
     return _interleave(chosen, rng)
 
 
@@ -396,35 +395,24 @@ def clip_filter(rate):
 
 
 def filter_graph(clips, rate):
-    """Build a crossfaded filter graph whose last frame flows into its first.
+    """Build a filter graph that hard-cuts from each clip to the next.
 
-    Inputs 0..n-1 are the normalized clips; input n repeats clip 0. The chain
-    crossfades the last clip into that repeat, then trims the first crossfade
-    so the loop point is seamless.
+    Inputs 0..n-1 are the normalized clips. The reel loops by cutting from
+    the last clip straight back to the first, like every other transition.
     """
-    fade = CROSSFADE_SECONDS
     width, height = OUTPUT_WIDTH, OUTPUT_HEIGHT
     parts = []
     for index, clip in enumerate(clips):
         parts.append(f"[{index}:v]trim=duration={clip['duration']:.3f},setpts=PTS-STARTPTS,settb=AVTB,fps={rate}[c{index}]")
-    # xfade needs a constant frame rate on both inputs, so fps comes last.
-    parts.append(f"[{len(clips)}:v]trim=duration={fade + 0.2:.3f},setpts=PTS-STARTPTS,settb=AVTB,fps={rate}[head]")
-    previous = "c0"
-    elapsed = clips[0]["duration"]
-    labels = [f"c{index}" for index in range(1, len(clips))] + ["head"]
-    for step, label in enumerate(labels, start=1):
-        output = f"x{step}"
-        parts.append(
-            f"[{previous}][{label}]xfade=transition=fade:duration={fade:.3f}:offset={elapsed - fade:.3f}[{output}]"
-        )
-        if label != "head":
-            elapsed += clips[step]["duration"] - fade
-        previous = output
+    labels = "".join(f"[c{index}]" for index in range(len(clips)))
+    parts.append(f"{labels}concat=n={len(clips)}:v=1:a=0[joined]")
     total = reel_seconds(clips)
     outputs = len(RENDITIONS) + 1
     split_labels = "".join(f"[s{index}]" for index in range(outputs))
     parts.append(
-        f"[{previous}]trim=start={fade:.3f}:duration={total:.3f},setpts=PTS-STARTPTS,split={outputs}{split_labels}"
+        # setpts drops the frame-rate tag; restate it or the encoder assumes
+        # 25 fps and duplicates frames to fill the gap.
+        f"[joined]trim=duration={total:.3f},setpts=PTS-STARTPTS,fps={rate},split={outputs}{split_labels}"
     )
     for index, rendition in enumerate(RENDITIONS):
         steps = []

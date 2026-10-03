@@ -216,10 +216,10 @@ class FfmpegTests(unittest.TestCase):
         self.assertIn("trim=start=0.000:duration=4.000", " ".join(commands[1]))
         final = commands[2]
         self.assertIn("-filter_complex", final)
-        self.assertEqual(final.count("-i"), 3)
+        self.assertEqual(final.count("-i"), 2)
         self.assertEqual(sorted(outputs), sorted(item["name"] for item in hero_reel_plan.RENDITIONS))
         self.assertTrue(poster.endswith("poster.jpg"))
-        self.assertAlmostEqual(seconds, 9.0 - 2 * hero_reel_plan.CROSSFADE_SECONDS)
+        self.assertAlmostEqual(seconds, 9.0)
         self.assertEqual(rate, "24")
         self.assertIn("-an", final)
 
@@ -732,8 +732,9 @@ class RealFfmpegTests(unittest.TestCase):
         output = outputs["reel-608x1080"]
         probe = subprocess.run(["ffmpeg", "-hide_banner", "-i", output], capture_output=True, text=True)
         self.assertIn("608x1080", probe.stderr)
+        self.assertIn(" 24 fps", probe.stderr)
         self.assertNotIn("Audio:", probe.stderr)
-        self.assertAlmostEqual(seconds, 3.8 - 2 * hero_reel_plan.CROSSFADE_SECONDS)
+        self.assertAlmostEqual(seconds, 3.8)
 
 
 if __name__ == "__main__":

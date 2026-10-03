@@ -29,9 +29,9 @@ copies only the binary into the artifact (about 80 MB unzipped, budgeted in
    rather than failing.
 4. Encode: each clip is trimmed and normalized to 1080p (frame-accurate trims
    inside the filter graph, because demuxer seeks are unreliable across the
-   discontinuities of concatenated HLS segments). One pass then crossfades the
-   clips (0.75 s), loops the last clip back into the first so the loop point is
-   seamless, and writes `reel-1920x1080.mp4`, `reel-1280x720.mp4`, the
+   discontinuities of concatenated HLS segments). One pass then joins the
+   clips with hard cuts (the loop point is just another cut, from the last
+   clip back to the first) and writes `reel-1920x1080.mp4`, `reel-1280x720.mp4`, the
    center-cropped portrait `reel-608x1080.mp4` (H.264 high, no audio,
    faststart) and the first frame as `poster.jpg`.
 
