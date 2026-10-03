@@ -57,11 +57,13 @@ Expect roughly 8 to 10 minutes per build at 10 GB / 6 vCPU; the function has a
 
 ## Triggers
 
-- Every 15 minutes the schedule runs `reconcile`. It hashes the eligible
-  inputs and exits unless they changed or a still-transcoding video's playlist
-  has appeared. New uploads therefore get a fresh reel within about 15 minutes
-  of MediaConvert finishing. If a reel uses a video that stopped being public,
-  the pointer is cleared before rebuilding.
+- Once a day the schedule runs `reconcile`. It hashes the eligible inputs and
+  exits unless they changed or a still-transcoding video's playlist has
+  appeared. New uploads therefore get a fresh reel within about a day; uploads
+  are infrequent, so the cheaper cadence is preferred over speed. If a reel
+  uses a video that stopped being public, the pointer is cleared before
+  rebuilding. To refresh sooner (including right after deleting or hiding a
+  video), use Regenerate and Publish in the admin.
 - `/admin/hero` → Video Page → **Regenerate video** queues a draft
   (`POST /admin/hero/reel-generate`, async Lambda invoke). The admin previews
   desktop and phone cuts, then **Publish** (`reel-publish`) makes that exact
@@ -86,6 +88,6 @@ Power Mode) or the file fails, the still image stays.
   the published reel stays. To remove the reel, publish an empty pointer by
   making no videos eligible or write `{"schemaVersion":1,"version":null,"renditions":[]}`
   to the pointer key and invalidate `/site/hero/video/reel.json`.
-- Cost: an unchanged reconcile is a short GSI query (~$0.50–1/month at the
-  15-minute cadence); a build is about 5,000 GB-seconds (~$0.08) plus one
+- Cost: an unchanged reconcile is a short daily GSI query (well under a cent a
+  month); a build is about 5,000 GB-seconds (~$0.08) plus one
   pointer invalidation and the still-hero invalidations.
