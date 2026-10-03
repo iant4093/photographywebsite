@@ -2,7 +2,7 @@
 
 The worker samples bounded windows of each public video's HLS rendition,
 finds calm shots with ffmpeg's scene detector, splices short clips together
-with crossfades, and publishes three MP4 renditions plus a poster frame.
+with hard cuts, and publishes three MP4 renditions plus a poster frame.
 
 Actions:
   reconcile  scheduled; rebuilds and publishes only when the public video
@@ -35,7 +35,6 @@ from botocore.exceptions import BotoCoreError, ClientError
 from album_media_store import MEDIA_STORE_VERSION, query_album_media
 from hero_reel_plan import (
     BUILDER_VERSION,
-    CROSSFADE_SECONDS,
     RENDITIONS,
     PlaylistError,
     candidate_clips,
@@ -272,7 +271,7 @@ def analyse_window(source, metadata_path, timeout):
 def normalize_clip(clip, source, offset, rate, path, timeout):
     """Cut one clip to the 1080p working format.
 
-    Decoding every 4K source at once inside the crossfade graph would hold a
+    Decoding every 4K source at once inside the joining graph would hold a
     frame queue per input; normalizing first keeps memory flat.
     """
     # Trim inside the graph rather than with -ss: demuxer seeks are unreliable
@@ -305,7 +304,6 @@ def encode_reel(clips, sources, workspace, deadline):
     arguments = []
     for path in normalized:
         arguments += ["-i", path]
-    arguments += ["-i", normalized[0]]
     arguments += ["-filter_complex", graph]
     gop = "48" if rate in {"24", "24000/1001", "25"} else "60"
     outputs = {}
