@@ -1,0 +1,11 @@
+/* Admin previews keep the live hero's proportions: 16:9 for desktop, 9:16
+   for phones. Kept out of the global stylesheet's utility budget. */
+.hero-reel-preview {
+  aspect-ratio: 16 / 9;
+}
+
+.hero-reel-preview.is-phone {
+  aspect-ratio: 9 / 16;
+  max-height: 32rem;
+  margin-inline: auto;
+}

@@ -13,6 +13,7 @@ from botocore.exceptions import ClientError
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from front_door import verify_front_door_request
+import hero_reel_admin
 from response_helpers import error_response, internal_error, json_response
 from validation_helpers import ValidationError, parse_json_body, require_string
 
@@ -39,6 +40,7 @@ HERO_CONFIGS = {
     },
 }
 PENDING_TAGGING = "visibility=pending"
+REEL_OPERATIONS = ("reel-status", "reel-generate", "reel-publish")
 MAX_HERO_BYTES = 50 * 1024 * 1024
 MIN_HERO_BYTES = 1024
 ETAG_PATTERN = re.compile(r"^[a-fA-F0-9]{32}$")
@@ -78,7 +80,7 @@ def _audit(event, context, operation, outcome, reason_code, hero_type="photo"):
 
 def _operation(event):
     value = str(((event or {}).get("pathParameters") or {}).get("operation") or "").strip()
-    if value not in {"upload-url", "complete"}:
+    if value not in {"upload-url", "complete", *REEL_OPERATIONS}:
         raise ValidationError("Unsupported hero operation")
     return value
 
@@ -239,6 +241,36 @@ def _activate_upload(event, context, body):
     )
 
 
+def _reel_operation(event, context, operation, body):
+    """Video hero reel controls: read status, build a draft, publish a draft."""
+    if operation == "reel-status":
+        return json_response(200, hero_reel_admin.status())
+    action = "hero.reel.generate" if operation == "reel-generate" else "hero.reel.publish"
+    actor_type, auth_method = actor_context(event)
+
+    def audit(outcome, reason_code):
+        emit_audit_event(
+            event_name="admin.hero_reel_requested",
+            outcome=outcome,
+            action=action,
+            resource_type="media",
+            reason_code=reason_code,
+            event=event,
+            context=context,
+            actor_type=actor_type,
+            auth_method=auth_method,
+            details={"hero_type": "video"},
+        )
+
+    try:
+        job = hero_reel_admin.generate() if operation == "reel-generate" else hero_reel_admin.publish(body)
+    except hero_reel_admin.ReelBusy:
+        audit("denied", "reel_job_active")
+        return error_response(409, "A hero video job is already in progress", code="reel_busy")
+    audit("success", "reel_job_queued")
+    return json_response(202, {"job": job})
+
+
 def handler(event, context):
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
@@ -250,6 +282,8 @@ def handler(event, context):
     try:
         operation = _operation(event)
         body = parse_json_body(event, max_bytes=16 * 1024)
+        if operation in REEL_OPERATIONS:
+            return _reel_operation(event, context, operation, body)
         if operation == "upload-url":
             return _authorize_upload(event, context, body)
         return _activate_upload(event, context, body)

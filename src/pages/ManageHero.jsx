@@ -3,7 +3,7 @@ import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { completeHeroUpload, requestHeroUploadUrl, uploadFileToS3 } from '../utils/api'
 import { cdnUrl, heroCoverUrl, heroManifestImageUrl } from '../utils/mediaUrls'
-import { completeVideoHeroUpload, requestVideoHeroUploadUrl } from '../utils/videoHeroApi'
+import HeroReelManager from '../components/HeroReelManager'
 import { waitForHeroPublication } from '../utils/heroPublication'
 import usePublishedHero from '../hooks/usePublishedHero'
 
@@ -99,9 +99,7 @@ export default function ManageHero() {
         try {
             setStatus('Preparing secure upload…')
             const token = await getIdToken()
-            const authorization = heroType === 'video'
-                ? await requestVideoHeroUploadUrl(token, file, { signal: controller.signal })
-                : await requestHeroUploadUrl(token, file, { signal: controller.signal })
+            const authorization = await requestHeroUploadUrl(token, file, { signal: controller.signal })
 
             setStatus('Uploading original image without compression…')
             const uploadResponse = await uploadFileToS3(
@@ -114,11 +112,7 @@ export default function ManageHero() {
             if (!etag) throw new Error('The upload finished without a receipt. Please try again.')
 
             setStatus('Creating responsive high-quality versions…')
-            if (heroType === 'video') {
-                await completeVideoHeroUpload(token, etag, { signal: controller.signal })
-            } else {
-                await completeHeroUpload(token, etag, { signal: controller.signal })
-            }
+            await completeHeroUpload(token, etag, { signal: controller.signal })
             setStatus('Publishing your new cover… This page will confirm when it is live.')
             const published = await waitForHeroPublication(heroType, etag, { signal: controller.signal })
             setConfirmedHero(published)
@@ -153,7 +147,7 @@ export default function ManageHero() {
 
                 <div className="mb-10">
                     <h1 className="font-serif text-4xl font-semibold text-charcoal">Change Hero Cover</h1>
-                    <p className="mt-2 text-warm-gray">Replace the large cover image on either public gallery page.</p>
+                    <p className="mt-2 text-warm-gray">Replace the photography cover image, or manage the Video page's hero reel.</p>
                 </div>
 
                 <div className="mb-8 grid grid-cols-2 border border-warm-border" role="tablist" aria-label="Hero page">
@@ -189,49 +183,50 @@ export default function ManageHero() {
                     </div>
                 )}
 
-                <form id="hero-cover-panel" role="tabpanel" onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 md:p-8 shadow-warm-lg border border-warm-border">
-                    <div className="aspect-[3/2] overflow-hidden rounded-2xl bg-charcoal mb-7">
-                        <img
-                            key={displayedImage}
-                            src={displayedImage}
-                            alt={previewUrl ? 'Selected hero cover preview' : `Current ${activeTab.description} hero cover`}
-                            className="h-full w-full object-cover object-[center_30%]"
-                            onLoad={(event) => {
-                                if (previewUrl) {
-                                    setDimensions({
-                                        width: event.currentTarget.naturalWidth,
-                                        height: event.currentTarget.naturalHeight,
-                                    })
-                                }
-                            }}
-                            onError={() => {
-                                if (!previewUrl && currentHero) setCurrentFailed(true)
-                            }}
-                        />
-                    </div>
+                {heroType === 'video' ? <HeroReelManager /> : (
+                    <form id="hero-cover-panel" role="tabpanel" onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 md:p-8 shadow-warm-lg border border-warm-border">
+                        <div className="aspect-[3/2] overflow-hidden rounded-2xl bg-charcoal mb-7">
+                            <img
+                                key={displayedImage}
+                                src={displayedImage}
+                                alt={previewUrl ? 'Selected hero cover preview' : `Current ${activeTab.description} hero cover`}
+                                className="h-full w-full object-cover object-[center_30%]"
+                                onLoad={(event) => {
+                                    if (previewUrl) {
+                                        setDimensions({
+                                            width: event.currentTarget.naturalWidth,
+                                            height: event.currentTarget.naturalHeight,
+                                        })
+                                    }
+                                }}
+                                onError={() => {
+                                    if (!previewUrl && currentHero) setCurrentFailed(true)
+                                }}
+                            />
+                        </div>
 
-                    <div className="mb-7">
-                        <label htmlFor="hero-file" className="block text-sm font-medium text-charcoal mb-2">New hero image</label>
-                        <input
-                            ref={fileInputRef}
-                            id="hero-file"
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp,image/avif,.jpg,.jpeg,.png,.webp,.avif"
-                            onChange={handleFileChange}
-                            disabled={uploading}
-                            required
-                            className="block w-full text-sm text-warm-gray file:mr-4 file:rounded-xl file:border-0 file:bg-amber file:px-5 file:py-3 file:font-medium file:text-white hover:file:bg-amber-dark disabled:opacity-60"
-                        />
-                        <p className="mt-3 text-sm text-warm-gray leading-relaxed">
-                            JPEG, PNG, WebP, or AVIF; up to 50 MB. For a crisp result, use a landscape image at least 2560 pixels wide.
-                            The exact selected file is retained as the unmodified master with no Google Drive backup. Responsive high-quality display versions are generated automatically for fast loading.
-                        </p>
-                        <p className="mt-2 text-sm font-medium text-charcoal">Updating: {activeTab.label}</p>
-                        {file && (
-                            <p className="mt-2 text-sm font-medium text-charcoal">
-                                {file.name} · {formatMegabytes(file.size)}
-                                {dimensions ? ` · ${dimensions.width} × ${dimensions.height}` : ''}
+                        <div className="mb-7">
+                            <label htmlFor="hero-file" className="block text-sm font-medium text-charcoal mb-2">New hero image</label>
+                            <input
+                                ref={fileInputRef}
+                                id="hero-file"
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/avif,.jpg,.jpeg,.png,.webp,.avif"
+                                onChange={handleFileChange}
+                                disabled={uploading}
+                                required
+                                className="block w-full text-sm text-warm-gray file:mr-4 file:rounded-xl file:border-0 file:bg-amber file:px-5 file:py-3 file:font-medium file:text-white hover:file:bg-amber-dark disabled:opacity-60"
+                            />
+                            <p className="mt-3 text-sm text-warm-gray leading-relaxed">
+                                JPEG, PNG, WebP, or AVIF; up to 50 MB. For a crisp result, use a landscape image at least 2560 pixels wide.
+                                The exact selected file is retained as the unmodified master with no Google Drive backup. Responsive high-quality display versions are generated automatically for fast loading.
                             </p>
+                            <p className="mt-2 text-sm font-medium text-charcoal">Updating: {activeTab.label}</p>
+                            {file && (
+                                <p className="mt-2 text-sm font-medium text-charcoal">
+                                    {file.name} · {formatMegabytes(file.size)}
+                                    {dimensions ? ` · ${dimensions.width} × ${dimensions.height}` : ''}
+                                </p>
                         )}
                         {dimensions && dimensions.width < 2560 && (
                             <p className="mt-2 text-sm text-amber-dark">This image is under the recommended 2560-pixel width and may look soft on large displays.</p>
@@ -247,6 +242,7 @@ export default function ManageHero() {
                         {uploading ? 'Updating Cover…' : 'Upload and Change Cover'}
                     </button>
                 </form>
+                )}
             </div>
         </div>
     )

@@ -8,8 +8,9 @@ const api = vi.hoisted(() => ({
   completeHeroUpload: vi.fn(),
 }))
 const videoApi = vi.hoisted(() => ({
-  requestVideoHeroUploadUrl: vi.fn(),
-  completeVideoHeroUpload: vi.fn(),
+  fetchHeroReelStatus: vi.fn(),
+  requestHeroReelDraft: vi.fn(),
+  publishHeroReel: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const publication = vi.hoisted(() => ({ waitForHeroPublication: vi.fn() }))
@@ -53,14 +54,7 @@ describe('admin hero cover upload', () => {
     })
     api.uploadFileToS3.mockResolvedValue(new Response('', { headers: { ETag: `"${ETAG}"` } }))
     api.completeHeroUpload.mockResolvedValue({ heroUrl: 'https://media.example/site/hero/home' })
-    videoApi.requestVideoHeroUploadUrl.mockResolvedValue({
-      uploadUrl: 'https://upload.example',
-      requiredHeaders: {
-        'Content-Type': 'image/jpeg',
-        'x-amz-tagging': 'visibility=pending',
-      },
-    })
-    videoApi.completeVideoHeroUpload.mockResolvedValue({ heroUrl: 'https://media.example/site/hero/video/home' })
+    videoApi.fetchHeroReelStatus.mockResolvedValue({ job: null, draft: null, published: null, auto: null })
   })
 
   it('uploads the exact original file and activates it without album or backup fields', async () => {
@@ -126,29 +120,14 @@ describe('admin hero cover upload', () => {
       .toHaveAttribute('src', '/images/heroes/photo-1280.jpg')
   })
 
-  it('switches to an isolated video-page hero and uploads within that tab', async () => {
-    const { container } = mounted()
+  it('replaces the video tab upload with the hero reel controls', async () => {
+    mounted()
     fireEvent.click(screen.getByRole('tab', { name: 'Video Page' }))
     expect(screen.getByRole('tab', { name: 'Video Page' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('Updating: Video Page')).toBeInTheDocument()
-    const current = screen.getByRole('img', { name: 'Current video page hero cover' })
-    expect(current).toHaveAttribute('src', expect.stringContaining('/site/hero/video/home'))
-
-    const file = heroFile('video-hero.jpg')
-    fireEvent.change(screen.getByLabelText('New hero image'), { target: { files: [file] } })
-    fireEvent.submit(container.querySelector('form'))
-    expect(await screen.findByText('Video Page cover is live.')).toBeInTheDocument()
-    expect(publication.waitForHeroPublication).toHaveBeenCalledWith('video', `"${ETAG}"`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
-    expect(videoApi.requestVideoHeroUploadUrl).toHaveBeenCalledWith(
-      'admin-token',
-      file,
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    )
-    expect(videoApi.completeVideoHeroUpload).toHaveBeenCalledWith(
-      'admin-token',
-      `"${ETAG}"`,
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    )
+    expect(screen.queryByLabelText('New hero image')).not.toBeInTheDocument()
+    expect(await screen.findByText(/No reel is published yet/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Regenerate video' })).toBeEnabled()
+    expect(videoApi.fetchHeroReelStatus).toHaveBeenCalledWith('admin-token', expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
   it('retains the selected preview and waits for publication before announcing success', async () => {

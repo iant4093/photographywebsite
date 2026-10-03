@@ -1,19 +1,25 @@
 import { useEffect } from 'react'
 import useMediaQuery from './useMediaQuery'
 
-export default function useHeroParallax(ref, speed, maximum) {
+// `followerRef` (optional) receives the same transform in the same frame, so
+// layered media such as the video hero reel moves exactly with the hero.
+export default function useHeroParallax(ref, speed, maximum, followerRef) {
     const disabled = useMediaQuery('(prefers-reduced-motion: reduce)')
     useEffect(() => {
         const hero = ref.current
         if (!hero || disabled) return undefined
         let frame = null
         let visible = false
+        const moved = new Set([hero])
         const update = () => {
             frame = null
             if (!visible || document.hidden) return
             const shift = Math.min(Math.max(0, window.scrollY) * Math.abs(speed), maximum) * Math.sign(speed)
             const transform = `translateY(${shift}px)`
-            if (hero.style.transform !== transform) hero.style.transform = transform
+            if (followerRef?.current) moved.add(followerRef.current)
+            for (const element of moved) {
+                if (element.style.transform !== transform) element.style.transform = transform
+            }
         }
         const schedule = () => {
             if (visible && !document.hidden && frame === null) frame = window.requestAnimationFrame(update)
@@ -32,7 +38,7 @@ export default function useHeroParallax(ref, speed, maximum) {
             window.removeEventListener('scroll', schedule)
             document.removeEventListener('visibilitychange', schedule)
             if (frame !== null) window.cancelAnimationFrame(frame)
-            hero.style.removeProperty('transform')
+            for (const element of moved) element.style.removeProperty('transform')
         }
-    }, [disabled, maximum, ref, speed])
+    }, [disabled, followerRef, maximum, ref, speed])
 }

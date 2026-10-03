@@ -43,6 +43,10 @@
       "OriginalComparisonWorkerFunction": {
         "uncompressedBytes": 50000000,
         "fileCount": 900
+      },
+      "HeroReelFunction": {
+        "uncompressedBytes": 85000000,
+        "fileCount": 40
       }
     }
   }

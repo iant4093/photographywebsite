@@ -4,6 +4,7 @@ import SiteSelect from '../components/SiteSelect'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import VideoAlbumCard from '../components/VideoAlbumCard'
+import HeroReel from '../components/HeroReel'
 import ScrollRow from '../components/ScrollRow'
 import SkeletonGrid from '../components/SkeletonGrid'
 import { fetchAlbumsPage } from '../utils/api'
@@ -42,6 +43,7 @@ export default function Videos() {
     const [initialSnapshot] = useState(() => getCatalogSnapshot(CATALOG_KEY))
     const pageRef = useRef(null)
     const heroRef = useRef(null)
+    const reelRef = useRef(null)
     const publishedHero = usePublishedHero('video', heroRef)
     const [failedHeroVersion, setFailedHeroVersion] = useState(null)
 
@@ -85,7 +87,7 @@ export default function Videos() {
         return () => window.clearTimeout(timer)
     }, [])
 
-    useHeroParallax(heroRef, 0.15, 60)
+    useHeroParallax(heroRef, 0.15, 60, reelRef)
 
 
     useEffect(() => {
@@ -185,6 +187,7 @@ export default function Videos() {
                             className="video-hero-media w-full object-cover object-center parallax-hero"
                         />
                     </picture>
+                    <HeroReel videoRef={reelRef} />
                     <div className="absolute inset-0 bg-gradient-to-b from-charcoal/60 via-charcoal/40 to-cream" />
                 </div>
                 <div className="linen-hero-content relative max-w-7xl mx-auto px-6 py-32 md:py-48">

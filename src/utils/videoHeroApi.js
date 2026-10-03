@@ -41,14 +41,14 @@ async function postVideoHero(path, token, body, signal) {
     return response.json()
 }
 
-export function requestVideoHeroUploadUrl(token, file, options = {}) {
-    return postVideoHero('/admin/hero/upload-url', token, {
-        filename: file.name,
-        contentType: file.type,
-        size: file.size,
-    }, options.signal)
+export function fetchHeroReelStatus(token, options = {}) {
+    return postVideoHero('/admin/hero/reel-status', token, {}, options.signal)
 }
 
-export function completeVideoHeroUpload(token, etag, options = {}) {
-    return postVideoHero('/admin/hero/complete', token, { etag }, options.signal)
+export function requestHeroReelDraft(token, options = {}) {
+    return postVideoHero('/admin/hero/reel-generate', token, {}, options.signal)
+}
+
+export function publishHeroReel(token, version, options = {}) {
+    return postVideoHero('/admin/hero/reel-publish', token, { version }, options.signal)
 }
