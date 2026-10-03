@@ -181,16 +181,24 @@ export default function MotionExperience() {
         let rowTargets = []
         const metadata = new Map()
         let layoutDirty = true
+        let motionHeight = 1
         let pageTravel = 0
         let thumbTravel = 0
         const activeTargets = new Set()
         const browserTracksScroll = window.CSS?.supports?.('animation-timeline', 'scroll(root block)') === true
         // Let the browser drive poses where it can: script updates trail the
         // compositor's scroll by a frame, which shows as jitter during momentum.
-        const timelineMotion = window.CSS?.supports?.('animation-timeline', 'view()') === true
+        const timelineMotion = browserTracksScroll && window.CSS.supports('animation-range', '0px 1px')
         const visibleClass = timelineMotion ? 'editorial-timeline' : 'is-motion-visible'
 
         root.classList.add('editorial-motion-active', 'editorial-scrollbar-active')
+        // iOS Safari resizes the viewport as its toolbars collapse and expand
+        // mid-scroll. Poses follow the large viewport, which stays fixed, so
+        // the toolbar cannot shift every card at once.
+        const viewportProbe = document.createElement('div')
+        viewportProbe.setAttribute('aria-hidden', 'true')
+        viewportProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none'
+        document.body.append(viewportProbe)
 
         const requestUpdate = () => {
             if (!document.hidden && updateFrame === null) updateFrame = window.requestAnimationFrame(update)
@@ -253,6 +261,12 @@ export default function MotionExperience() {
 
             targets = nextTargets
             layoutDirty = true
+            // Scroll ranges must exist before a target can start animating;
+            // measure again next frame, as the script-driven path does.
+            if (timelineMotion) {
+                update()
+                layoutDirty = true
+            }
             requestUpdate()
         }
 
@@ -281,6 +295,14 @@ export default function MotionExperience() {
                     const info = metadata.get(target)
                     Object.assign(info, { top, height: target.offsetHeight })
                     if (info.inScrollRow) rowTargets.push({ target, info })
+                })
+                motionHeight = Math.max(viewportProbe.offsetHeight || viewportHeight, 1)
+                // The page scroll offsets over which each pose runs, matching
+                // the progress formula in updateTarget below.
+                if (timelineMotion) targets.forEach(target => {
+                    const { top, height } = metadata.get(target)
+                    setMotionStyle(target, 'tl-start', top - motionHeight, 'px', 1)
+                    setMotionStyle(target, 'tl-end', top + Math.min(Math.max(height, 1), motionHeight), 'px', 1)
                 })
                 rowTargets.sort((left, right) => left.info.top - right.info.top)
                 let maxBottom = -Infinity
@@ -314,8 +336,8 @@ export default function MotionExperience() {
             }
 
             const updateTarget = (target, info) => {
-                const measuredHeight = Math.min(Math.max(info.height, 1), viewportHeight)
-                const progress = clamp((viewportHeight - (info.top - scrollY)) / (viewportHeight + measuredHeight), 0, 1)
+                const measuredHeight = Math.min(Math.max(info.height, 1), motionHeight)
+                const progress = clamp((motionHeight - (info.top - scrollY)) / (motionHeight + measuredHeight), 0, 1)
                 const phase = (progress - 0.5) * 2
                 const presence = clamp(1 - Math.abs(phase) * 0.28, 0.72, 1)
                 const position = info.position - 1
@@ -387,6 +409,7 @@ export default function MotionExperience() {
             if (updateFrame !== null) window.cancelAnimationFrame(updateFrame)
             if (collectFrame !== null) window.cancelAnimationFrame(collectFrame)
             targets.forEach(clearMotionStyles)
+            viewportProbe.remove()
             root.classList.remove('editorial-motion-active', 'editorial-scrollbar-active')
             // Preserve the handle position until the next route measures its layout.
         }
