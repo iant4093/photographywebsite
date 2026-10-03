@@ -4204,8 +4204,8 @@ Resources:
 
   # Builds the silent, looping Videos-page hero reel. A pinned, hash-checked
   # ffmpeg ships inside the artifact (see backend/Makefile). One build runs at
-  # a time; the schedule is a cheap digest check that only rebuilds when the
-  # public video catalog changed. Admin drafts arrive as async invocations.
+  # a time; the daily schedule is a cheap digest check that only rebuilds when
+  # the public video catalog changed. Admin drafts arrive as async invocations.
   HeroReelFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
@@ -4275,7 +4275,7 @@ Resources:
         Reconcile:
           Type: Schedule
           Properties:
-            Schedule: rate(15 minutes)
+            Schedule: rate(1 day)
             Input: '{"action":"reconcile"}'
             Enabled: true
 

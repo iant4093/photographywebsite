@@ -153,7 +153,7 @@ export default function HeroReelManager() {
         <div id="hero-cover-panel" role="tabpanel" className="bg-white rounded-2xl p-6 md:p-8 shadow-warm-lg border border-warm-border">
             <p className="mb-6 text-sm text-warm-gray leading-relaxed">
                 The Video page hero is a silent, looping reel of about a minute, spliced automatically from calm moments in
-                your public videos. It rebuilds on its own after you publish new videos. Regenerate it any time for a fresh
+                your public videos. It rebuilds on its own within a day of you publishing new videos. Regenerate it any time for a fresh
                 cut, preview it, then publish.
             </p>
 
