@@ -113,7 +113,6 @@
     {"logicalId": "HeroReelFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "HeroReelFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment"], "allowNoDetails": false},
     {"logicalId": "HeroReelFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
-    {"logicalId": "HeroReelFunctionEventInvokeConfig", "resourceType": "AWS::Lambda::EventInvokeConfig", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "HeroReelFunctionReconcile", "resourceType": "AWS::Events::Rule", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "HeroReelFunctionReconcile", "resourceType": "AWS::Events::Rule", "action": "Modify", "propertyPaths": ["ScheduleExpression"], "allowNoDetails": false},
     {"logicalId": "HeroReelFunctionReconcilePermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},

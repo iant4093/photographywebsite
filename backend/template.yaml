@@ -4217,9 +4217,9 @@ Resources:
       EphemeralStorage:
         Size: 4096
       ReservedConcurrentExecutions: 1
-      EventInvokeConfig:
-        MaximumRetryAttempts: 0
-        MaximumEventAgeInSeconds: 3600
+      # No EventInvokeConfig: the deploy role cannot manage one. The worker
+      # records build failures itself instead of raising, so Lambda's async
+      # retries only cover transient AWS errors.
       Environment:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable

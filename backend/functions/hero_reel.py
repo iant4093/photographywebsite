@@ -679,10 +679,11 @@ def reconcile(context):
     try:
         record = make_reel(videos, digest, "auto", context)
     except ReelError as error:
+        # Recorded, not raised: an async retry would only repeat the same
+        # expensive build. The next scheduled run tries again.
         save_state({"auto": {"status": "failed", "reason": error.reason, "at": _now(), "inputDigest": digest}})
-        if error.reason in {"no_ready_videos", "not_enough_footage"}:
-            return {"status": "skipped", "reason": error.reason}
-        raise
+        logger.warning("hero_reel_auto_failed reason=%s", error.reason)
+        return {"status": "skipped", "reason": error.reason}
     update, poster_queued = publish_record(state, record, eligible_ids)
     save_state(update | {"auto": {"status": "published", "at": _now(), "version": record["version"]}})
     logger.info(

@@ -394,7 +394,6 @@ class ReleaseIntentTests(unittest.TestCase):
             {
                 ("HeroReelFunction", "AWS::Lambda::Function"),
                 ("HeroReelFunctionRole", "AWS::IAM::Role"),
-                ("HeroReelFunctionEventInvokeConfig", "AWS::Lambda::EventInvokeConfig"),
                 ("HeroReelFunctionReconcile", "AWS::Events::Rule"),
                 ("HeroReelFunctionReconcilePermission", "AWS::Lambda::Permission"),
                 ("ZipPreparationQueue", "AWS::SQS::Queue"),

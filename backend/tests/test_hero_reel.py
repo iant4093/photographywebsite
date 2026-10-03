@@ -608,10 +608,11 @@ class ActionTests(unittest.TestCase):
         unpublish.assert_called_once()
         self.assertEqual(saved[-1]["auto"]["reason"], "not_enough_footage")
 
-    def test_unexpected_build_failures_are_recorded_and_raised(self):
-        self.patches({})
-        with patch.object(hero_reel, "make_reel", side_effect=hero_reel.ReelError("ffmpeg_failed")), self.assertRaises(hero_reel.ReelError):
-            hero_reel.reconcile(Context())
+    def test_build_failures_are_recorded_without_triggering_async_retries(self):
+        saved = self.patches({})
+        with patch.object(hero_reel, "make_reel", side_effect=hero_reel.ReelError("ffmpeg_failed")):
+            self.assertEqual(hero_reel.reconcile(Context()), {"status": "skipped", "reason": "ffmpeg_failed"})
+        self.assertEqual(saved[-1]["auto"]["reason"], "ffmpeg_failed")
 
     def test_generate_saves_a_draft_without_publishing(self):
         saved = self.patches({"draft": {"version": "old", "mediaIds": []}})
