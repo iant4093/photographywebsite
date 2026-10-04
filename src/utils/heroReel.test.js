@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
-import { chooseHeroReelRendition, fetchHeroReel, heroReelAllowed, normalizeHeroReel, pickHeroReelCut } from './heroReel'
+import { chooseHeroReelRendition, chooseHeroReelSource, fetchHeroReel, heroReelAllowed, normalizeHeroReel, pickHeroReelCut } from './heroReel'
+import { canPlayHlsNatively, isHlsUrl, loadHlsLibrary } from './hlsSource'
 
 const VERSION = 'a'.repeat(24)
 const rendition = (width, height) => ({
@@ -71,6 +72,54 @@ describe('hero reel pointer', () => {
         expect(pickHeroReelCut(null)).toBeNull()
         expect(normalizeHeroReel({ schemaVersion: 2, version: VERSION, cuts: 'nope' })).toBeNull()
         expect(normalizeHeroReel({ schemaVersion: 3, version: VERSION, cuts: [] })).toBeNull()
+    })
+
+    it('reads adaptive cuts by their exact master playlist keys, next to older MP4 cuts', () => {
+        const master = (cut, orientation) => ({ key: `site/hero/versions/video/reel/v1/${VERSION}/reel-${cut}-${orientation}.m3u8`, maxWidth: 2560, maxHeight: 1440 })
+        const streams = cut => ({ landscape: master(cut, 'landscape'), portrait: master(cut, 'portrait') })
+        const reel = normalizeHeroReel({
+            schemaVersion: 3,
+            version: VERSION,
+            cuts: [
+                { duration: 60, streams: streams(0) },
+                { duration: 60, streams: { ...streams(1), portrait: { key: 'https://evil.example/x.m3u8' } } },
+                { duration: 60, streams: { landscape: master(2, 'landscape') } },
+                { duration: 60, renditions: [{ ...rendition(1920, 1080), key: `site/hero/versions/video/reel/v1/${VERSION}/reel-3-1920x1080.mp4` }] },
+                { duration: 60, streams: streams(1) },
+            ],
+        })
+        expect(reel.cuts).toHaveLength(2)
+        expect(reel.cuts[0].streams).toEqual({
+            landscape: `https://media.example.invalid/site/hero/versions/video/reel/v1/${VERSION}/reel-0-landscape.m3u8`,
+            portrait: `https://media.example.invalid/site/hero/versions/video/reel/v1/${VERSION}/reel-0-portrait.m3u8`,
+        })
+        expect(reel.cuts[1].renditions[0].width).toBe(1920)
+        expect(reel.cuts[1].streams).toBeUndefined()
+        // Schema 2 never carries streams.
+        expect(normalizeHeroReel({ schemaVersion: 2, version: VERSION, cuts: [{ streams: streams(0) }] })).toBeNull()
+
+        const picked = pickHeroReelCut(reel, () => 0)
+        expect(picked.streams.portrait).toContain('reel-0-portrait.m3u8')
+        expect(chooseHeroReelSource(picked, { width: 390, height: 740 })).toBe(picked.streams.portrait)
+        expect(chooseHeroReelSource(picked, { width: 1440, height: 780 })).toBe(picked.streams.landscape)
+        expect(chooseHeroReelSource(picked, { width: 0, height: 780 })).toBe('')
+        const older = pickHeroReelCut(reel, () => 0.99)
+        expect(older.streams).toBeNull()
+        expect(chooseHeroReelSource(older, { width: 1440, height: 780 })).toContain('reel-3-1920x1080.mp4')
+        expect(chooseHeroReelSource({ renditions: [] }, { width: 1440, height: 780 })).toBe('')
+    })
+
+    it('recognises HLS playback support', async () => {
+        expect(isHlsUrl('https://x/a.m3u8')).toBe(true)
+        expect(isHlsUrl('https://x/a.m3u8?v=1')).toBe(true)
+        expect(isHlsUrl('https://x/a.mp4')).toBe(false)
+        expect(isHlsUrl(null)).toBe(false)
+        expect(canPlayHlsNatively({ canPlayType: () => 'maybe' })).toBe(true)
+        expect(canPlayHlsNatively({ canPlayType: () => '' })).toBe(false)
+        expect(canPlayHlsNatively({ canPlayType: () => { throw new Error('no') } })).toBe(false)
+        expect(canPlayHlsNatively(null)).toBe(false)
+        const Hls = await loadHlsLibrary()
+        expect(Hls === null || typeof Hls === 'function').toBe(true)
     })
 
     it('fetches the pointer without credentials and tolerates bad responses', async () => {

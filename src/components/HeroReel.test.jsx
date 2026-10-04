@@ -2,6 +2,24 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const hlsState = vi.hoisted(() => ({ instances: [], supported: true }))
+vi.mock('hls.js', () => {
+    class Hls {
+        static Events = { ERROR: 'hlsError' }
+        static isSupported = () => hlsState.supported
+        constructor(config) {
+            this.config = config
+            this.handlers = {}
+            this.loadSource = vi.fn()
+            this.attachMedia = vi.fn()
+            this.destroy = vi.fn()
+            this.on = vi.fn((event, callback) => { this.handlers[event] = callback })
+            hlsState.instances.push(this)
+        }
+    }
+    return { default: Hls }
+})
+
 vi.mock('../utils/heroReel', async (importOriginal) => ({
     ...(await importOriginal()),
     fetchHeroReel: vi.fn(),
@@ -16,6 +34,11 @@ const renditions = [
     { width: 608, height: 1080, url: 'https://media.example/reel-608x1080.mp4' },
 ]
 const reel = { version: 'a'.repeat(24), cuts: [{ renditions }] }
+const streams = {
+    landscape: 'https://media.example/reel-0-landscape.m3u8',
+    portrait: 'https://media.example/reel-0-portrait.m3u8',
+}
+const adaptive = { version: 'a'.repeat(24), cuts: [{ streams, renditions: [] }] }
 
 let observerCallback
 let sectionSize
@@ -54,6 +77,8 @@ describe('video hero reel', () => {
     const originalMatchMedia = window.matchMedia
     beforeEach(() => {
         observerCallback = undefined
+        hlsState.instances.length = 0
+        hlsState.supported = true
         vi.useFakeTimers()
         sectionSize = { width: 1440, height: 780 }
         fetchHeroReel.mockReset().mockResolvedValue(reel)
@@ -295,6 +320,78 @@ describe('video hero reel', () => {
         await loaded(video)
         act(() => observerCallback([{ isIntersecting: true }]))
         expect(video.getAttribute('src')).toBe('https://media.example/cut2-1280x720.mp4')
+    })
+
+    it('streams adaptive cuts through hls.js and swaps orientation streams without restarting', async () => {
+        fetchHeroReel.mockResolvedValue(adaptive)
+        const { wrapper, video, spare } = mount()
+        await loaded(video)
+        act(() => observerCallback([{ isIntersecting: true }]))
+        expect(hlsState.instances).toHaveLength(1)
+        const [first] = hlsState.instances
+        expect(first.loadSource).toHaveBeenCalledWith(streams.landscape)
+        expect(first.attachMedia).toHaveBeenCalledWith(video)
+        expect(first.config).toMatchObject({ capLevelToPlayerSize: true, abrEwmaDefaultEstimate: 5e6 })
+        expect(video.getAttribute('src')).toBeNull()
+        act(() => video.dispatchEvent(new Event('playing')))
+        expect(wrapper).toHaveClass('is-playing')
+
+        // A narrower window that stays landscape keeps the same stream.
+        sectionSize = { width: 900, height: 600 }
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        expect(hlsState.instances).toHaveLength(1)
+
+        media(video, { paused: false, currentTime: 20 })
+        sectionSize = { width: 390, height: 740 }
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        const second = hlsState.instances[1]
+        expect(second.loadSource).toHaveBeenCalledWith(streams.portrait)
+        expect(second.attachMedia).toHaveBeenCalledWith(spare)
+        media(spare, { duration: 60, paused: false, currentTime: 20.05 })
+        act(() => spare.dispatchEvent(new Event('loadedmetadata')))
+        act(() => spare.dispatchEvent(new Event('seeked')))
+        expect(spare).toHaveClass('is-active')
+        expect(first.destroy).toHaveBeenCalled()
+        expect(second.destroy).not.toHaveBeenCalled()
+
+        // A fatal stream error stops the reel like a media error.
+        act(() => second.handlers.hlsError(null, { fatal: false }))
+        expect(second.destroy).not.toHaveBeenCalled()
+        act(() => second.handlers.hlsError(null, { fatal: true }))
+        expect(second.destroy).toHaveBeenCalled()
+        expect(wrapper).not.toHaveClass('is-playing')
+        // Errors from a stream already released are ignored.
+        act(() => first.handlers.hlsError(null, { fatal: true }))
+    })
+
+    it('seeds the bandwidth guess from the reported downlink', async () => {
+        vi.stubGlobal('navigator', { ...navigator, connection: { downlink: 10 } })
+        fetchHeroReel.mockResolvedValue(adaptive)
+        const { video } = mount()
+        await loaded(video)
+        act(() => observerCallback([{ isIntersecting: true }]))
+        expect(hlsState.instances[0].config.abrEwmaDefaultEstimate).toBe(8e6)
+    })
+
+    it('lets Safari play adaptive cuts natively', async () => {
+        vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('maybe')
+        fetchHeroReel.mockResolvedValue(adaptive)
+        const { video } = mount()
+        await loaded(video)
+        act(() => observerCallback([{ isIntersecting: true }]))
+        expect(video.getAttribute('src')).toBe(streams.landscape)
+        expect(hlsState.instances).toHaveLength(0)
+    })
+
+    it('keeps the still image where adaptive cuts cannot play', async () => {
+        hlsState.supported = false
+        fetchHeroReel.mockResolvedValue(adaptive)
+        const { video } = mount()
+        await loaded(video)
+        expect(observerCallback).toBeUndefined()
+        expect(video.getAttribute('src')).toBeNull()
     })
 
     it('keeps the still image when no reel is published', async () => {

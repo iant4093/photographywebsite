@@ -196,47 +196,198 @@ class FfmpegTests(unittest.TestCase):
         self.assertEqual(frames, [{"t": 1.0, "score": 0.0, "luma": 90.0}])
         self.assertIn("scdet=threshold=100", " ".join(runner.call_args.args[0]))
 
-    def test_encode_normalizes_clips_then_writes_every_rendition_and_poster(self):
+    def fake_ladder_run(self, commands, playlist=None):
+        def run(arguments, timeout, cwd=None):
+            commands.append((arguments, cwd))
+            for index, value in enumerate(arguments):
+                if value == "-hls_segment_filename":
+                    media = arguments[index + 1]
+                    with open(os.path.join(cwd, media), "wb") as handle:
+                        handle.write(b"12345")
+                    with open(os.path.join(cwd, media.replace(".mp4", ".m3u8")), "w", encoding="utf-8") as handle:
+                        handle.write(playlist or (
+                            f'#EXTM3U\n#EXT-X-MAP:URI="{media}",BYTERANGE="9@0"\n#EXTINF:4,\n'
+                            f"#EXT-X-BYTERANGE:5@9\n{media}\n#EXT-X-ENDLIST\n"
+                        ))
+                elif value == "-y" and not arguments[index + 1].endswith(".m3u8"):
+                    with open(os.path.join(cwd or "", arguments[index + 1]), "wb") as handle:
+                        handle.write(b"x")
+        return run
+
+    def test_ladder_encodes_every_rung_as_byte_range_hls_and_a_poster(self):
+        workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, workspace)
+        commands = []
+        clips = [{"duration": 5.0, "rate": "24", "start": 1.0}, {"duration": 4.0, "rate": "24", "start": 0.0}]
+        sources = [{"kind": "hls", "path": "concat:a.ts", "offset": 1.5}, {"kind": "hls", "path": "b.ts", "offset": -1}]
+        with patch.object(hero_reel, "_run_ffmpeg", side_effect=self.fake_ladder_run(commands)):
+            result = hero_reel.encode_ladder(clips, sources, "landscape", 2, workspace, hero_reel.time.monotonic() + 600)
+        self.assertEqual(len(commands), 3)
+        self.assertIn("trim=start=1.500:duration=5.000", " ".join(commands[0][0]))
+        self.assertIn("trim=start=0.000:duration=4.000", " ".join(commands[1][0]))
+        self.assertIn("crop=2560:1440", " ".join(commands[0][0]))
+        final, cwd = commands[2]
+        self.assertEqual(cwd, os.path.join(workspace, "out"))
+        self.assertEqual(final.count("-filter_complex"), 1)
+        self.assertEqual(final.count("hls"), 4)
+        self.assertEqual(final.count("single_file+independent_segments"), 4)
+        self.assertIn("expr:gte(t,n_forced*4)", final)
+        self.assertEqual(
+            sorted(result["files"]),
+            ["reel-2-1280x720", "reel-2-1920x1080", "reel-2-2560x1440", "reel-2-960x540"],
+        )
+        self.assertEqual(result["files"]["reel-2-2560x1440"]["bytes"], 5)
+        self.assertTrue(result["poster"].endswith("poster.jpg"))
+        self.assertAlmostEqual(result["seconds"], 9.0)
+        self.assertIn("reel-2-1280x720.m3u8", result["master"])
+        self.assertIn('CODECS="avc1.640032"', result["master"])
+
+        commands.clear()
+        with patch.object(hero_reel, "_run_ffmpeg", side_effect=self.fake_ladder_run(commands)):
+            portrait = hero_reel.encode_ladder(clips, sources, "portrait", 0, tempfile.mkdtemp(dir=workspace), hero_reel.time.monotonic() + 600)
+        self.assertIsNone(portrait["poster"])
+        self.assertEqual(sorted(portrait["files"]), ["reel-0-1080x1920", "reel-0-540x960", "reel-0-720x1280"])
+        self.assertNotIn("[poster]", commands[-1][0])
+
+    def test_ladder_failures_become_reason_codes(self):
+        workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, workspace)
+        clips = [{"duration": 5.0, "rate": "24", "start": 0.0}]
+        sources = [{"kind": "hls", "path": "a.ts", "offset": 0}]
+
+        def attempt(run, **patches):
+            with patch.object(hero_reel, "_run_ffmpeg", side_effect=run), patch.multiple(hero_reel, **patches), \
+                    self.assertRaises(hero_reel.ReelError) as raised:
+                hero_reel.encode_ladder(clips, sources, "portrait", 0, tempfile.mkdtemp(dir=workspace), hero_reel.time.monotonic() + 60)
+            return raised.exception.reason
+
+        self.assertEqual(attempt(lambda arguments, timeout, cwd=None: None, logger=Mock()), "encode_missing_output")
+        self.assertEqual(attempt(self.fake_ladder_run([]), MAX_RENDITION_BYTES=0), "encode_too_large")
+        for playlist in (
+            "#EXTM3U\n#EXTINF:4,\nhttps://elsewhere/x.mp4\n#EXT-X-ENDLIST\n",
+            "#EXTM3U\n#EXTINF:4,\nreel-0-540x960.mp4\n",
+            '#EXTM3U\n#EXT-X-MAP:URI="../other.mp4"\n#EXTINF:4,\nreel-0-540x960.mp4\n#EXT-X-ENDLIST\n',
+        ):
+            run = self.fake_ladder_run([], playlist=playlist)
+            with patch.object(hero_reel, "_run_ffmpeg", side_effect=run), self.assertRaises(hero_reel.ReelError) as raised:
+                hero_reel.encode_ladder(clips, sources, "portrait", 0, tempfile.mkdtemp(dir=workspace), hero_reel.time.monotonic() + 60)
+            self.assertEqual(raised.exception.reason, "encode_bad_playlist")
+
+        def no_poster(arguments, timeout, cwd=None):
+            self.fake_ladder_run([])(arguments, timeout, cwd)
+            if cwd:
+                os.remove(os.path.join(cwd, "poster.jpg"))
+
+        with patch.object(hero_reel, "_run_ffmpeg", side_effect=no_poster), self.assertRaises(hero_reel.ReelError) as raised:
+            hero_reel.encode_ladder(clips, sources, "landscape", 0, tempfile.mkdtemp(dir=workspace), hero_reel.time.monotonic() + 60)
+        self.assertEqual(raised.exception.reason, "encode_missing_output")
+        with patch.object(hero_reel, "_run_ffmpeg"), self.assertRaises(hero_reel.ReelError):
+            hero_reel.normalize_clip(clips[0], sources[0], "24", "portrait", os.path.join(workspace, "none.mp4"), 10)
+
+    def test_originals_seek_accurately_over_loopback_and_hdr_is_tone_mapped(self):
         workspace = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, workspace)
         commands = []
 
-        def run(arguments, timeout):
+        def run(arguments, timeout, cwd=None):
             commands.append(arguments)
-            for index, value in enumerate(arguments):
-                if value == "-y":
-                    with open(arguments[index + 1], "wb") as handle:
-                        handle.write(b"x")
+            with open(arguments[-1], "wb") as handle:
+                handle.write(b"x")
 
-        clips = [{"duration": 5.0, "rate": "24"}, {"duration": 4.0, "rate": "24"}]
+        clip = {"start": 12.25, "duration": 4.0}
+        source = {"kind": "original", "url": "http://127.0.0.1:9/source/t", "hdr": True}
         with patch.object(hero_reel, "_run_ffmpeg", side_effect=run):
-            outputs, poster, seconds, rate = hero_reel.encode_reel(
-                clips, [("a.ts", 1.5), ("b.ts", -1)], workspace, hero_reel.time.monotonic() + 600,
-            )
-        self.assertEqual(len(commands), 3)
-        self.assertIn("trim=start=1.500:duration=5.000", " ".join(commands[0]))
-        self.assertIn("trim=start=0.000:duration=4.000", " ".join(commands[1]))
-        final = commands[2]
-        self.assertIn("-filter_complex", final)
-        self.assertEqual(final.count("-i"), 2)
-        self.assertEqual(sorted(outputs), sorted(item["name"] for item in hero_reel_plan.RENDITIONS))
-        self.assertTrue(poster.endswith("poster.jpg"))
-        self.assertAlmostEqual(seconds, 9.0)
-        self.assertEqual(rate, "24")
-        self.assertIn("-an", final)
+            hero_reel.normalize_clip(clip, source, "24", "portrait", os.path.join(workspace, "n.mp4"), 30)
+            hero_reel.normalize_clip(clip, {**source, "hdr": False}, "24", "landscape", os.path.join(workspace, "m.mp4"), 30)
+        command = commands[0]
+        self.assertLess(command.index("-ss"), command.index("-i"))
+        self.assertEqual(command[command.index("-ss") + 1], "12.250")
+        self.assertEqual(command[command.index("-t") + 1], "4.200")
+        graph = command[command.index("-vf") + 1]
+        self.assertIn("tonemap=hable", graph)
+        self.assertIn("crop=1080:1920", graph)
+        self.assertNotIn("trim=", graph)
+        self.assertNotIn("tonemap", commands[1][commands[1].index("-vf") + 1])
 
-        with patch.object(hero_reel, "_run_ffmpeg"), self.assertRaises(hero_reel.ReelError):
-            hero_reel.normalize_clip(clips[0], "a.ts", 0, "24", os.path.join(workspace, "none.mp4"), 10)
-        with patch.object(hero_reel, "_run_ffmpeg", side_effect=lambda arguments, timeout: None), patch.object(
-            hero_reel, "normalize_clip", return_value="n.mp4"
-        ), self.assertRaises(hero_reel.ReelError) as raised:
-            hero_reel.encode_reel(clips, [("a.ts", 0), ("b.ts", 0)], tempfile.mkdtemp(dir=workspace), hero_reel.time.monotonic() + 60)
-        self.assertEqual(raised.exception.reason, "encode_missing_output")
-        with patch.object(hero_reel, "_run_ffmpeg", side_effect=run), patch.object(
-            hero_reel, "MAX_RENDITION_BYTES", 0
-        ), self.assertRaises(hero_reel.ReelError) as raised:
-            hero_reel.encode_reel(clips, [("a.ts", 0), ("b.ts", 0)], workspace, hero_reel.time.monotonic() + 60)
-        self.assertEqual(raised.exception.reason, "encode_too_large")
+    def test_probe_reads_the_original_stream_header(self):
+        header = (
+            "Input #0, mov,mp4, from 'http://127.0.0.1/source/t':\n"
+            "  Stream #0:0[0x1](und): Video: hevc (Main 10) (hvc1 / 0x31637668), "
+            "yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67), 3840x2160, 120000 kb/s, 23.98 fps\n"
+            "At least one output file must be specified\n"
+        )
+        with patch.object(hero_reel.subprocess, "run", return_value=SimpleNamespace(returncode=1, stderr=header.encode())) as runner:
+            self.assertEqual(hero_reel.probe_original("http://127.0.0.1/source/t", 30), {"hdr": True, "width": 3840, "height": 2160})
+        self.assertNotIn("-tls_verify", runner.call_args.args[0])
+        sdr = header.replace("arib-std-b67", "bt709").replace("3840x2160", "1920x1080")
+        with patch.object(hero_reel.subprocess, "run", return_value=SimpleNamespace(returncode=1, stderr=sdr.encode())):
+            self.assertEqual(hero_reel.probe_original("u", 30), {"hdr": False, "width": 1920, "height": 1080})
+        with patch.object(hero_reel.subprocess, "run", return_value=SimpleNamespace(returncode=1, stderr=b"Server returned 404 Not Found")):
+            self.assertIsNone(hero_reel.probe_original("u", 30))
+        with patch.object(hero_reel.subprocess, "run", side_effect=subprocess.TimeoutExpired("ffmpeg", 1)):
+            self.assertIsNone(hero_reel.probe_original("u", 30))
+
+
+class FakeS3Objects:
+    def __init__(self, objects):
+        self.objects = objects
+        self.ranges = []
+
+    def head_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise client_error("404", "HeadObject")
+        return {"ContentLength": len(self.objects[Key])}
+
+    def get_object(self, Bucket, Key, Range):
+        self.ranges.append(Range)
+        start, end = (int(value) for value in Range.removeprefix("bytes=").split("-"))
+        return {"Body": io.BytesIO(self.objects[Key][start:end + 1])}
+
+
+class SourceServerTests(unittest.TestCase):
+    """The loopback endpoint ffmpeg reads originals through."""
+
+    def setUp(self):
+        self.s3 = FakeS3Objects({"albums/a/original/v.mov": bytes(range(256)) * 40})
+        for item in (
+            patch.object(hero_reel, "_client", return_value=self.s3),
+            patch.dict(os.environ, {"IMAGES_BUCKET": "bucket"}),
+            patch.object(hero_reel, "SOURCE_BLOCK_BYTES", 1000),
+        ):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def fetch(self, url, method="GET", headers=None):
+        import urllib.error
+        import urllib.request
+
+        request = urllib.request.Request(url, method=method, headers=headers or {})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=10) as response:
+                return response.status, dict(response.headers), response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, dict(error.headers), b""
+
+    def test_only_registered_keys_are_served_with_byte_ranges(self):
+        data = self.s3.objects["albums/a/original/v.mov"]
+        with hero_reel.SourceServer() as server:
+            url = server.register("albums/a/original/v.mov")
+            self.assertTrue(url.startswith("http://127.0.0.1:"))
+            status, headers, body = self.fetch(url, headers={"Range": "bytes=100-2599"})
+            self.assertEqual((status, body), (206, data[100:2600]))
+            self.assertEqual(headers["Content-Range"], f"bytes 100-2599/{len(data)}")
+            # Large ranges are fetched from S3 in bounded blocks.
+            self.assertEqual(self.s3.ranges, ["bytes=100-1099", "bytes=1100-2099", "bytes=2100-2599"])
+            status, headers, body = self.fetch(url, headers={"Range": "bytes=10000-"})
+            self.assertEqual((status, body), (206, data[10000:]))
+            status, headers, body = self.fetch(url)
+            self.assertEqual((status, len(body), headers["Accept-Ranges"]), (200, len(data), "bytes"))
+            status, headers, body = self.fetch(url, method="HEAD")
+            self.assertEqual((status, headers["Content-Length"], body), (200, str(len(data)), b""))
+            self.assertEqual(self.fetch(url, headers={"Range": "bytes=999999-"})[0], 416)
+            self.assertEqual(self.fetch(url.rsplit("/", 1)[0] + "/unknown")[0], 404)
+            self.assertEqual(self.fetch(server.register("albums/a/original/missing.mov"))[0], 404)
 
 
 def ready_video(media_id, same=True, segments=2):
@@ -352,38 +503,96 @@ class PlanTests(unittest.TestCase):
 
 PLANNED = [
     {"albumId": "a", "mediaId": "m1", "shot": "0.0", "start": 12.5, "duration": 4.0, "rate": "24",
-     "segments": [{"key": "s1", "start": 10.0}]},
+     "rawKey": "albums/a/original/m1.mov", "segments": [{"key": "s1", "start": 10.0}]},
     {"albumId": "a", "mediaId": "m2", "shot": "1.0", "start": 3.0, "duration": 4.0, "rate": "24",
-     "segments": [{"key": "s2", "start": 0.0}, {"key": "s3", "start": 10.0}]},
+     "rawKey": "albums/a/original/m2.mov", "segments": [{"key": "s2", "start": 0.0}, {"key": "s3", "start": 10.0}]},
+    {"albumId": "a", "mediaId": "m1", "shot": "0.1", "start": 30.0, "duration": 4.0, "rate": "24",
+     "rawKey": "albums/a/original/m1.mov", "segments": [{"key": "s4", "start": 30.0}]},
 ]
 
 
-class EncodeCutTests(unittest.TestCase):
+class EncodeStepTests(unittest.TestCase):
     def setUp(self):
         self.workspace = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.workspace)
 
-    def test_planned_segments_are_fetched_and_offsets_kept(self):
-        with patch.object(hero_reel, "download_segments", side_effect=lambda segments, workspace, cache: "concat:" + segments[0]["key"]), patch.object(
-            hero_reel, "encode_reel", return_value=({"reel-1920x1080": "a"}, "poster", 55.55, "24")
-        ) as encode:
-            result = hero_reel.encode_cut(PLANNED, Context(), self.workspace)
-        self.assertEqual(result["seconds"], 55.55)
-        self.assertEqual(encode.call_args.args[1], [("concat:s1", 2.5), ("concat:s2", 3.0)])
+    def server(self):
+        server = Mock()
+        server.register.side_effect = lambda key: f"http://127.0.0.1:1/source/{key.rsplit('/', 1)[-1]}"
+        return server
 
-    def test_failures_become_reason_codes(self):
-        with patch.object(hero_reel, "download_segments", side_effect=PlaylistError("missing")), self.assertRaises(hero_reel.ReelError) as raised:
-            hero_reel.encode_cut(PLANNED, Context(), self.workspace)
+    def test_clips_come_from_originals_probed_once_each(self):
+        server = self.server()
+        with patch.object(hero_reel, "probe_original", return_value={"hdr": True, "width": 3840, "height": 2160}) as probe, patch.object(
+            hero_reel, "download_segments"
+        ) as download:
+            sources = hero_reel.clip_sources(PLANNED, server, self.workspace, hero_reel.time.monotonic() + 600)
+        self.assertEqual([source["kind"] for source in sources], ["original"] * 3)
+        self.assertEqual(sources[0]["url"], sources[2]["url"])
+        self.assertTrue(sources[1]["hdr"])
+        self.assertEqual(probe.call_count, 2)
+        download.assert_not_called()
+
+    def test_unreadable_originals_fall_back_to_hls_segments(self):
+        server = self.server()
+        legacy = [{key: value for key, value in clip.items() if key != "rawKey"} for clip in PLANNED[:1]]
+        with patch.object(hero_reel, "probe_original", side_effect=lambda url, timeout: None if "m2" in url else {"hdr": False}), patch.object(
+            hero_reel, "download_segments", side_effect=lambda segments, workspace, cache: "concat:" + segments[0]["key"]
+        ):
+            sources = hero_reel.clip_sources([*PLANNED, *legacy], server, self.workspace, hero_reel.time.monotonic() + 600)
+        self.assertEqual([source["kind"] for source in sources], ["original", "hls", "original", "hls"])
+        self.assertEqual((sources[1]["path"], sources[1]["offset"]), ("concat:s2", 3.0))
+        self.assertEqual((sources[3]["path"], sources[3]["offset"]), ("concat:s1", 2.5))
+        with patch.object(hero_reel, "probe_original", return_value=None), patch.object(
+            hero_reel, "download_segments", side_effect=PlaylistError("missing")
+        ), self.assertRaises(hero_reel.ReelError) as raised:
+            hero_reel.clip_sources(PLANNED, server, self.workspace, hero_reel.time.monotonic() + 600)
         self.assertEqual(raised.exception.reason, "clip_download_failed")
-        with patch.object(hero_reel, "download_segments", return_value="concat:x"), self.assertRaises(hero_reel.ReelError) as raised:
-            hero_reel.encode_cut(PLANNED, Context(100_000), self.workspace)
+
+    def test_a_step_serves_originals_only_while_it_encodes(self):
+        entered = []
+
+        class Server:
+            def __enter__(self):
+                entered.append("in")
+                return self
+
+            def __exit__(self, *exc):
+                entered.append("out")
+
+        with patch.object(hero_reel, "SourceServer", Server), patch.object(
+            hero_reel, "clip_sources", return_value=["s"]
+        ) as sources, patch.object(hero_reel, "encode_ladder", return_value={"files": {}}) as ladder:
+            self.assertEqual(hero_reel.encode_step(PLANNED, "portrait", 1, Context(), self.workspace), {"files": {}})
+        self.assertEqual(entered, ["in", "out"])
+        self.assertIsInstance(sources.call_args.args[1], Server)
+        self.assertEqual(ladder.call_args.args[1:5], (["s"], "portrait", 1, self.workspace))
+        with self.assertRaises(hero_reel.ReelError) as raised:
+            hero_reel.encode_step(PLANNED, "portrait", 1, Context(100_000), self.workspace)
         self.assertEqual(raised.exception.reason, "timeout")
 
 
 VERSION_A = "a" * 24
-CUT = {
-    "renditions": [{"key": f"{hero_reel.REEL_PREFIX}{VERSION_A}/reel-0-1920x1080.mp4", "width": 1920, "height": 1080, "bytes": 10}],
-    "posterKey": f"{hero_reel.REEL_PREFIX}{VERSION_A}/poster-0.jpg",
+FOLDER = f"{hero_reel.REEL_PREFIX}{VERSION_A}/"
+
+
+def step_entry(cut, orientation, **extra):
+    rungs = [{"width": rung["width"], "height": rung["height"], "bytes": 10} for rung in hero_reel_plan.LADDERS[orientation]]
+    entry = {"cut": cut, "orientation": orientation, "master": f"{FOLDER}reel-{cut}-{orientation}.m3u8",
+             "rungs": rungs, "duration": "58.2", "fps": "24"}
+    if orientation == "landscape":
+        entry["posterKey"] = f"{FOLDER}poster-{cut}.jpg"
+    return {**entry, **extra}
+
+
+def steps(cuts):
+    return [step_entry(cut, orientation) for cut in range(cuts) for orientation in hero_reel_plan.ORIENTATIONS]
+
+
+CUT = hero_reel._cuts_from_steps(steps(1))[0]
+LEGACY_CUT = {
+    "renditions": [{"key": f"{FOLDER}reel-0-1920x1080.mp4", "width": 1920, "height": 1080, "bytes": 10}],
+    "posterKey": f"{FOLDER}poster-0.jpg",
     "duration": "58.2",
     "fps": "24",
 }
@@ -401,28 +610,40 @@ RECORD = {
 
 
 class PublishTests(unittest.TestCase):
-    def test_cut_files_are_public_immutable_and_numbered(self):
+    def test_step_files_are_public_immutable_and_the_master_goes_last(self):
         workspace = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, workspace)
-        outputs = {}
-        for rendition in hero_reel_plan.RENDITIONS:
-            outputs[rendition["name"]] = os.path.join(workspace, rendition["name"])
-            with open(outputs[rendition["name"]], "wb") as handle:
-                handle.write(b"12345")
+        files = {}
+        for rung in hero_reel_plan.LADDERS["landscape"]:
+            name = hero_reel_plan.rung_name(3, rung)
+            files[name] = {"media": os.path.join(workspace, f"{name}.mp4"), "playlist": os.path.join(workspace, f"{name}.m3u8"),
+                           "width": rung["width"], "height": rung["height"], "bytes": 5}
+            for path in (files[name]["media"], files[name]["playlist"]):
+                with open(path, "wb") as handle:
+                    handle.write(b"12345")
         poster = os.path.join(workspace, "poster.jpg")
         with open(poster, "wb") as handle:
             handle.write(b"jpg")
         s3 = Mock()
+        result = {"files": files, "master": "#EXTM3U\n", "poster": poster, "seconds": 59.456, "rate": "24"}
         with patch.object(hero_reel, "_client", return_value=s3):
-            renditions, poster_key = hero_reel.upload_cut("b" * 24, 3, {"outputs": outputs, "poster": poster})
-        self.assertEqual([item["key"].rsplit("/", 1)[1] for item in renditions], ["reel-3-1920x1080.mp4", "reel-3-1280x720.mp4", "reel-3-608x1080.mp4"])
-        self.assertEqual(renditions[0]["bytes"], 5)
-        self.assertTrue(poster_key.endswith("/poster-3.jpg"))
+            entry = hero_reel.upload_step("b" * 24, 3, "landscape", result)
+            portrait = hero_reel.upload_step("b" * 24, 3, "portrait", {**result, "files": {}, "poster": None})
+        keys = [call.kwargs["Key"].rsplit("/", 1)[1] for call in s3.put_object.call_args_list]
+        self.assertEqual(keys[:2], ["reel-3-2560x1440.mp4", "reel-3-2560x1440.m3u8"])
+        self.assertEqual(keys[8:10], ["reel-3-landscape.m3u8", "poster-3.jpg"])
+        self.assertEqual(entry["master"], f"{hero_reel.REEL_PREFIX}{'b' * 24}/reel-3-landscape.m3u8")
+        self.assertEqual((entry["cut"], entry["orientation"], entry["duration"]), (3, "landscape", "59.46"))
+        self.assertTrue(entry["posterKey"].endswith("/poster-3.jpg"))
+        self.assertEqual(entry["rungs"][0], {"width": 2560, "height": 1440, "bytes": 5})
+        self.assertNotIn("posterKey", portrait)
+        types = {call.kwargs["Key"].rsplit(".", 1)[1]: call.kwargs["ContentType"] for call in s3.put_object.call_args_list}
+        self.assertEqual(types, {"mp4": "video/mp4", "m3u8": "application/vnd.apple.mpegurl", "jpg": "image/jpeg"})
         for call in s3.put_object.call_args_list:
             self.assertEqual(call.kwargs["Tagging"], "visibility=public")
             self.assertIn("immutable", call.kwargs["CacheControl"])
 
-    def test_records_describe_all_cuts_without_titles(self):
+    def test_records_pair_each_cuts_steps_without_titles(self):
         build = {
             "version": VERSION_A,
             "digest": "d",
@@ -431,44 +652,39 @@ class PublishTests(unittest.TestCase):
                 [{"albumId": "a2", "mediaId": "m3"}, {"albumId": "a2", "mediaId": "m3"}],
                 [{"albumId": "a9", "mediaId": "never-encoded"}],
             ]),
-            "results": [CUT, {**CUT, "posterKey": "p1"}],
+            # Cut 2 only has its landscape half: it is not part of the record.
+            "results": [*steps(2), step_entry(2, "landscape")],
             "pending": ["p"],
             "pendingKeys": ["k"],
         }
         record = hero_reel._reel_record(build, "auto")
         self.assertEqual(len(record["cuts"]), 2)
+        self.assertEqual(record["cuts"][1]["portrait"]["master"], f"{FOLDER}reel-1-portrait.m3u8")
         self.assertEqual(record["mediaIds"], ["m1", "m2", "m3"])
         self.assertEqual(record["albumIds"], ["a1", "a2"])
         self.assertEqual((record["clipCount"], record["sourceCount"]), (2, 3))
-        self.assertEqual(record["posterKey"], CUT["posterKey"])
+        self.assertEqual(record["posterKey"], f"{FOLDER}poster-0.jpg")
         self.assertEqual(record["duration"], "58.2")
 
     def test_older_single_reel_records_read_as_one_cut(self):
-        legacy = {"renditions": CUT["renditions"], "posterKey": "p", "duration": "40"}
-        self.assertEqual(hero_reel.record_cuts(legacy), [{"renditions": CUT["renditions"], "posterKey": "p", "duration": "40"}])
+        legacy = {"renditions": LEGACY_CUT["renditions"], "posterKey": "p", "duration": "40"}
+        self.assertEqual(hero_reel.record_cuts(legacy), [{"renditions": LEGACY_CUT["renditions"], "posterKey": "p", "duration": "40"}])
         self.assertEqual(hero_reel.record_cuts(None), [])
         self.assertEqual(hero_reel.record_cuts(RECORD), RECORD["cuts"])
 
-    def test_pointer_lists_only_rendition_urls_per_cut(self):
+    def test_pointer_lists_each_cuts_streams_or_older_renditions(self):
         document = hero_reel.pointer_document({**RECORD, "publishedAt": "2026-10-01T00:00:00Z"})
-        self.assertEqual(document["schemaVersion"], 2)
+        self.assertEqual(document["schemaVersion"], 3)
         self.assertEqual(document["version"], VERSION_A)
         self.assertEqual([cut["duration"] for cut in document["cuts"]], [58.2, 59.0])
+        self.assertEqual(document["cuts"][0]["streams"], {
+            "landscape": {"key": f"{FOLDER}reel-0-landscape.m3u8", "maxWidth": 2560, "maxHeight": 1440},
+            "portrait": {"key": f"{FOLDER}reel-0-portrait.m3u8", "maxWidth": 1080, "maxHeight": 1920},
+        })
         self.assertNotIn("mediaIds", document)
-        self.assertEqual(hero_reel.pointer_document(None), {"schemaVersion": 2, "version": None, "cuts": []})
-
-        s3 = Mock()
-        cloudfront = Mock()
-        with patch.object(hero_reel, "_client", side_effect=lambda name: {"s3": s3, "cloudfront": cloudfront}[name]), patch.dict(
-            os.environ, {"IMAGES_DISTRIBUTION_ID": "EDIST"}
-        ):
-            hero_reel.write_pointer(RECORD)
-        put = s3.put_object.call_args.kwargs
-        self.assertEqual(put["Key"], hero_reel.POINTER_KEY)
-        self.assertIn("max-age=0", put["CacheControl"])
-        self.assertEqual(json.loads(put["Body"])["cuts"][0]["renditions"][0]["width"], 1920)
-        paths = cloudfront.create_invalidation.call_args.kwargs["InvalidationBatch"]["Paths"]
-        self.assertEqual(paths, {"Quantity": 1, "Items": [f"/{hero_reel.POINTER_KEY}"]})
+        older = hero_reel.pointer_document({**RECORD, "cuts": [LEGACY_CUT]})
+        self.assertEqual(older["cuts"][0], {"duration": 58.2, "renditions": LEGACY_CUT["renditions"]})
+        self.assertEqual(hero_reel.pointer_document(None), {"schemaVersion": 3, "version": None, "cuts": []})
 
     def test_invalidation_is_optional_and_failure_tolerant(self):
         with patch.dict(os.environ, {"IMAGES_DISTRIBUTION_ID": ""}):
@@ -706,12 +922,14 @@ class ActionTests(unittest.TestCase):
 def batch(mode="draft", results=(), cuts=3):
     return {
         "batchId": "batch",
+        "builder": hero_reel_plan.BUILDER_VERSION,
         "mode": mode,
         "requestId": "req" if mode == "draft" else None,
         "version": VERSION_A,
         "digest": "digest",
         "plan": json.dumps([[{"albumId": "a", "mediaId": "m1", "start": 1.0, "duration": 4.0, "segments": [{"key": "s", "start": 0.0}]}]] * cuts),
         "cutCount": cuts,
+        "stepCount": cuts * 2,
         "results": list(results),
         "pending": [],
         "pendingKeys": [],
@@ -734,77 +952,93 @@ class BatchTests(unittest.TestCase):
     def invoked(self):
         return [json.loads(call.kwargs["Payload"]) for call in self.lambda_client.invoke.call_args_list]
 
-    def test_starting_a_batch_plans_every_cut_and_chains_to_the_first(self):
+    def test_starting_a_batch_plans_every_cut_and_chains_to_the_first_step(self):
         planned = {"cuts": [[{"mediaId": "m1", "start": 1.5}]] * 4, "pending": ["p"], "pendingKeys": ["k"]}
         with patch.object(hero_reel, "plan_cuts", return_value=planned):
             result = hero_reel.start_batch(VIDEOS, "seed", "auto", Context())
         self.assertEqual(result["cuts"], 4)
         build = self.saved[-1]["build"]
         self.assertEqual(build["mode"], "auto")
-        self.assertEqual(build["cutCount"], 4)
+        self.assertEqual((build["cutCount"], build["stepCount"]), (4, 8))
+        self.assertEqual(build["builder"], hero_reel_plan.BUILDER_VERSION)
         self.assertEqual(json.loads(build["plan"])[0][0]["start"], 1.5)
         self.assertEqual(build["results"], [])
-        self.assertEqual(self.invoked(), [{"action": "build-cut", "batchId": build["batchId"], "cut": 0}])
+        self.assertEqual(self.invoked(), [{"action": "build-cut", "batchId": build["batchId"], "step": 0}])
         call = self.lambda_client.invoke.call_args.kwargs
         self.assertEqual(call["InvocationType"], "Event")
         self.assertEqual(call["FunctionName"], Context.invoked_function_arn)
 
-    def run_cut(self, state, event, appended=True):
+    def run_step(self, state, event, appended=True):
+        def upload(version, cut, orientation, result):
+            return step_entry(cut, orientation, duration="59.5")
+
         with patch.object(hero_reel, "load_state", return_value=state), patch.object(
-            hero_reel, "encode_cut", return_value={"outputs": {}, "poster": "p", "seconds": 59.5, "rate": "24"}
-        ) as encode, patch.object(hero_reel, "upload_cut", return_value=(CUT["renditions"], "poster-key")), patch.object(
+            hero_reel, "encode_step", return_value={"files": {}, "poster": None, "seconds": 59.5, "rate": "24"}
+        ) as encode, patch.object(hero_reel, "upload_step", side_effect=upload), patch.object(
             hero_reel, "_append_result", return_value=appended
         ) as append:
             result = hero_reel.build_cut(event, Context())
         return result, encode, append
 
-    def test_each_cut_encodes_once_then_chains_to_the_next(self):
-        result, encode, append = self.run_cut({"build": batch()}, {"batchId": "batch", "cut": 0})
-        self.assertEqual(result, {"status": "building", "cut": 1})
+    def test_each_step_encodes_one_orientation_once_then_chains_to_the_next(self):
+        result, encode, append = self.run_step({"build": batch()}, {"batchId": "batch", "step": 0})
+        self.assertEqual(result, {"status": "building", "step": 1})
         encode.assert_called_once()
+        self.assertEqual(encode.call_args.args[1:3], ("landscape", 0))
         self.assertEqual(append.call_args.args[1], 0)
         self.assertEqual(append.call_args.args[2]["duration"], "59.5")
-        self.assertEqual(self.invoked(), [{"action": "build-cut", "batchId": "batch", "cut": 1}])
-        self.assertEqual(self.saved[-1]["job"]["progress"], 1)
+        self.assertEqual(self.invoked(), [{"action": "build-cut", "batchId": "batch", "step": 1}])
+        # Progress counts whole cuts.
+        self.assertEqual(self.saved[-1]["job"]["progress"], 0)
         self.assertEqual(self.saved[-1]["job"]["total"], 3)
+        result, encode, _ = self.run_step({"build": batch(results=steps(1)[:1])}, {"batchId": "batch", "step": 1})
+        self.assertEqual(encode.call_args.args[1:3], ("portrait", 0))
+        self.assertEqual(self.saved[-1]["job"]["progress"], 1)
 
     def test_retried_or_stale_invocations_do_not_re_encode(self):
-        result, encode, _ = self.run_cut({"build": batch(results=[CUT])}, {"batchId": "batch", "cut": 0})
-        self.assertEqual(result, {"status": "building", "cut": 1})
+        result, encode, _ = self.run_step({"build": batch(results=steps(1)[:1])}, {"batchId": "batch", "step": 0})
+        self.assertEqual(result, {"status": "building", "step": 1})
         encode.assert_not_called()
         for state, event in (
-            ({"build": batch()}, {"batchId": "other", "cut": 0}),
-            ({}, {"batchId": "batch", "cut": 0}),
+            ({"build": batch()}, {"batchId": "other", "step": 0}),
+            ({}, {"batchId": "batch", "step": 0}),
         ):
-            self.assertEqual(self.run_cut(state, event)[0], {"status": "superseded"})
-        self.assertEqual(self.run_cut({"build": batch()}, {"batchId": "batch", "cut": 2})[0], {"status": "rejected"})
-        self.assertEqual(self.run_cut({"build": batch()}, {"batchId": "batch", "cut": "x"})[0], {"status": "rejected"})
-        self.assertEqual(self.run_cut({"build": batch()}, {"batchId": "batch", "cut": 0}, appended=False)[0], {"status": "superseded"})
+            self.assertEqual(self.run_step(state, event)[0], {"status": "superseded"})
+        self.assertEqual(self.run_step({"build": batch()}, {"batchId": "batch", "step": 2})[0], {"status": "rejected"})
+        self.assertEqual(self.run_step({"build": batch(cuts=1, results=steps(1))}, {"batchId": "batch", "step": 1})[0]["status"], "ready")
+        self.assertEqual(self.run_step({"build": batch()}, {"batchId": "batch", "step": "x"})[0], {"status": "rejected"})
+        self.assertEqual(self.run_step({"build": batch()}, {"batchId": "batch", "step": 0}, appended=False)[0], {"status": "superseded"})
 
-    def test_a_failed_cut_stops_the_batch_and_reports_the_reason(self):
+    def test_batches_from_an_older_worker_are_abandoned(self):
+        older = {key: value for key, value in batch().items() if key != "builder"}
+        result, encode, _ = self.run_step({"build": older}, {"batchId": "batch", "step": 0})
+        self.assertEqual(result, {"status": "failed", "reason": "builder_changed"})
+        encode.assert_not_called()
+
+    def test_a_failed_step_stops_the_batch_and_reports_the_reason(self):
         with patch.object(hero_reel, "load_state", return_value={"build": batch()}), patch.object(
-            hero_reel, "encode_cut", side_effect=hero_reel.ReelError("timeout")
+            hero_reel, "encode_step", side_effect=hero_reel.ReelError("timeout")
         ):
-            self.assertEqual(hero_reel.build_cut({"batchId": "batch", "cut": 0}, Context()), {"status": "failed", "reason": "timeout"})
+            self.assertEqual(hero_reel.build_cut({"batchId": "batch", "step": 0}, Context()), {"status": "failed", "reason": "timeout"})
         self.assertIsNone(self.saved[-1]["build"])
         self.assertEqual(self.saved[-1]["job"]["reason"], "timeout")
         hero_reel._fail_batch(batch(mode="auto"), "ffmpeg_failed")
         self.assertEqual(self.saved[-1]["auto"]["reason"], "ffmpeg_failed")
 
-    def test_the_last_cut_publishes_automatic_batches(self):
-        state = {"build": batch(mode="auto", results=[CUT, CUT], cuts=3)}
+    def test_the_last_step_publishes_automatic_batches(self):
+        state = {"build": batch(mode="auto", results=steps(3)[:-1], cuts=3)}
         with patch.object(hero_reel, "publish_record", return_value=({"published": {"version": VERSION_A}}, True)) as publish:
-            result, _, _ = self.run_cut(state, {"batchId": "batch", "cut": 2})
+            result, _, _ = self.run_step(state, {"batchId": "batch", "step": 5})
         self.assertEqual(result, {"status": "published", "version": VERSION_A})
         self.assertEqual(len(publish.call_args.args[1]["cuts"]), 3)
         self.assertIsNone(self.saved[-1]["build"])
         self.assertEqual(self.saved[-1]["auto"]["status"], "published")
         self.assertEqual(self.invoked(), [])
 
-    def test_the_last_cut_turns_a_draft_batch_into_a_reviewable_draft(self):
-        state = {"build": batch(results=[CUT, CUT], cuts=3), "draft": {"version": "old", "mediaIds": []}}
+    def test_the_last_step_turns_a_draft_batch_into_a_reviewable_draft(self):
+        state = {"build": batch(results=steps(3)[:-1], cuts=3), "draft": {"version": "old", "mediaIds": []}}
         with patch.object(hero_reel, "cleanup_versions") as cleanup, patch.object(hero_reel, "write_pointer") as pointer:
-            result, _, _ = self.run_cut(state, {"batchId": "batch", "cut": 2})
+            result, _, _ = self.run_step(state, {"batchId": "batch", "step": 5})
         self.assertEqual(result, {"status": "ready", "version": VERSION_A})
         final = self.saved[-1]
         self.assertEqual(len(final["draft"]["cuts"]), 3)
@@ -815,20 +1049,21 @@ class BatchTests(unittest.TestCase):
 
     def test_finishing_refuses_sources_that_left_the_public_catalog(self):
         with patch.object(hero_reel, "eligible_videos", return_value=[]):
-            self.assertEqual(hero_reel.finish_batch({}, batch(results=[CUT])), {"status": "failed", "reason": "sources_changed"})
+            self.assertEqual(hero_reel.finish_batch({}, batch(results=steps(1))), {"status": "failed", "reason": "sources_changed"})
 
-    def test_results_append_only_for_the_expected_cut(self):
+    def test_results_append_only_for_the_expected_step(self):
         table = Mock()
+        entry = step_entry(0, "portrait")
         with patch.object(hero_reel, "_table", return_value=table):
-            self.assertTrue(hero_reel._append_result("batch", 1, CUT))
+            self.assertTrue(hero_reel._append_result("batch", 1, entry))
             update = table.update_item.call_args.kwargs
-            self.assertIn("size(#build.#results) = :cut", update["ConditionExpression"])
-            self.assertEqual(update["ExpressionAttributeValues"][":cut"], 1)
+            self.assertIn("size(#build.#results) = :step", update["ConditionExpression"])
+            self.assertEqual(update["ExpressionAttributeValues"][":step"], 1)
             table.update_item.side_effect = client_error("ConditionalCheckFailedException", "UpdateItem")
-            self.assertFalse(hero_reel._append_result("batch", 1, CUT))
+            self.assertFalse(hero_reel._append_result("batch", 1, entry))
             table.update_item.side_effect = client_error("Throttling", "UpdateItem")
             with self.assertRaises(ClientError):
-                hero_reel._append_result("batch", 1, CUT)
+                hero_reel._append_result("batch", 1, entry)
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is not installed")
@@ -870,21 +1105,28 @@ class RealFfmpegTests(unittest.TestCase):
         self.assertEqual(hero_reel_plan.frame_rate(frames), "24")
 
         clips = [
-            {"duration": 2.0, "rate": "24"},
-            {"duration": 1.8, "rate": "24"},
+            {"duration": 2.0, "rate": "24", "start": 0.5},
+            {"duration": 1.8, "rate": "24", "start": 0.1},
         ]
-        portrait = ({**hero_reel_plan.RENDITIONS[2]},)
-        with patch.object(hero_reel_plan, "RENDITIONS", portrait), patch.object(hero_reel, "RENDITIONS", portrait):
-            outputs, poster, seconds, rate = hero_reel.encode_reel(
-                clips, [(f"concat:{steady}", 0.5), (cut, 0.1)], self.workspace, hero_reel.time.monotonic() + 300,
+        small = {"portrait": ({"width": 270, "height": 480, "crf": 30, "maxrate": 800, "level": "4.1"},
+                              {"width": 180, "height": 320, "crf": 30, "maxrate": 400, "level": "4.1"})}
+        with patch.dict(hero_reel_plan.LADDERS, small), patch.dict(hero_reel_plan.MASTERS, {"portrait": (270, 480)}):
+            result = hero_reel.encode_ladder(
+                clips,
+                [{"kind": "hls", "path": f"concat:{steady}", "offset": 0.5}, {"kind": "hls", "path": cut, "offset": 0.1}],
+                "portrait", 0, self.workspace, hero_reel.time.monotonic() + 300,
             )
-        self.assertTrue(os.path.getsize(poster) > 0)
-        output = outputs["reel-608x1080"]
-        probe = subprocess.run(["ffmpeg", "-hide_banner", "-i", output], capture_output=True, text=True)
-        self.assertIn("608x1080", probe.stderr)
+        self.assertAlmostEqual(result["seconds"], 3.8)
+        top = result["files"]["reel-0-270x480"]
+        probe = subprocess.run(["ffmpeg", "-hide_banner", "-i", top["playlist"]], capture_output=True, text=True)
+        self.assertIn("270x480", probe.stderr)
         self.assertIn(" 24 fps", probe.stderr)
         self.assertNotIn("Audio:", probe.stderr)
-        self.assertAlmostEqual(seconds, 3.8)
+        with open(top["playlist"], encoding="utf-8") as handle:
+            playlist = handle.read()
+        self.assertIn("#EXT-X-BYTERANGE:", playlist)
+        self.assertIn('#EXT-X-MAP:URI="reel-0-270x480.mp4"', playlist)
+        self.assertIn("RESOLUTION=180x320", result["master"])
 
 
 if __name__ == "__main__":
