@@ -2581,6 +2581,38 @@ Resources:
             Schedule: rate(15 minutes)
             Enabled: true
 
+  # Re-converts videos published before the current HLS ladder, a few per
+  # run, through each album's durable video worker (AddImagesFunction).
+  VideoUpgradeFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: video_upgrade.handler
+      Timeout: 120
+      MemorySize: 512
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt CacheInvalidationQueue.Arn
+      Events:
+        QueueUpgrades:
+          Type: Schedule
+          Properties:
+            Schedule: rate(3 hours)
+            Enabled: true
+
   GetSharedAlbumFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild

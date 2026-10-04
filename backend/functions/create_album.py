@@ -30,7 +30,7 @@ from cache_invalidation import request_public_api_invalidation
 from dynamodb_helpers import AlbumManifestTooLarge, ensure_album_item_budget
 from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
-from media_helpers import extract_exif_data, hls_master_playlist_key, start_mediaconvert_job
+from media_helpers import extract_exif_data, hls_destination_prefix, hls_master_playlist_key, start_mediaconvert_job
 from preview_jobs import enqueue_preview_jobs
 from original_comparison_jobs import request_original_comparisons
 from random_pool_refresh import request_random_photo_pool_refresh
@@ -170,11 +170,12 @@ def _start_video_jobs(images):
     bucket = os.environ["IMAGES_BUCKET"]
     for image in images:
         raw_key = image["rawKey"]
-        output_prefix = raw_key.rsplit(".", 1)[0] + "_hls/"
         try:
             image["mediaConvertJobId"] = start_mediaconvert_job(
                 f"s3://{bucket}/{raw_key}",
-                f"s3://{bucket}/{output_prefix}",
+                f"s3://{bucket}/{hls_destination_prefix(raw_key)}",
+                width=image.get("width"),
+                height=image.get("height"),
             )
             # A retried upload may have an old rendition URL or no URL after a
             # failed submission. Only newly submitted jobs switch to the master.

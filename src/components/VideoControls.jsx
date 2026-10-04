@@ -8,7 +8,7 @@ const timestamp = seconds => {
     return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`
 }
 
-export default function VideoControls({ videoRef, playerRef, captionKey = '' }) {
+export default function VideoControls({ videoRef, playerRef, captionKey = '', quality = null }) {
     const [media, setMedia] = useState({ paused: true, time: 0, duration: 0, muted: true, volume: 1, rate: 1 })
     const [fullscreen, setFullscreen] = useState(false)
     const [canFullscreen, setCanFullscreen] = useState(false)
@@ -103,6 +103,9 @@ export default function VideoControls({ videoRef, playerRef, captionKey = '' }) 
                 </label>
                 <SiteSelect aria-label="Playback speed" className="site-video-speed" value={media.rate} options={SPEEDS}
                     onChange={value => { videoRef.current.playbackRate = Number(value) }} />
+                {quality?.options?.length > 1 && <SiteSelect aria-label="Video quality" className="site-video-quality" value={quality.value}
+                    options={[{ value: 'auto', label: quality.playing ? `Auto · ${quality.playing}` : 'Auto' }, ...quality.options]}
+                    onChange={value => quality.select(String(value))} />}
                 {captionKey && <button type="button" onClick={toggleCaptions} aria-label="Captions" aria-pressed={captionsOn}>CC</button>}
                 {canPip && <button type="button" onClick={togglePip} aria-label="Picture in picture"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="1" fill="none" stroke="currentColor" /><path d="M10 10h6v5h-6z" /></svg></button>}
                 {canFullscreen && <button type="button" onClick={toggleFullscreen} aria-label={fullscreen ? 'Exit fullscreen video' : 'Fullscreen video'}>
