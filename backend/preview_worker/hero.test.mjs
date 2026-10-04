@@ -6,6 +6,7 @@ import {
     HERO_DERIVATIVE_VERSION,
     HERO_FORMATS,
     buildHeroManifest,
+    heroAliasSources,
     heroCurrentFallbackKey,
     heroCurrentKey,
     heroDerivativeKey,
@@ -97,6 +98,26 @@ test('accepts only fixed hero sources and opaque version identifiers', () => {
     ]) {
         assert.throws(() => parseHeroJob(value), /Invalid hero/)
     }
+})
+
+test('fills every advertised current width from the closest variant', () => {
+    const variant = (width) => ({ width, key: `v/hero-${width}.jpg` })
+    assert.deepEqual(heroAliasSources([variant(1920), variant(640), variant(1280), variant(960)]), [
+        { width: 640, key: 'v/hero-640.jpg' },
+        { width: 960, key: 'v/hero-960.jpg' },
+        { width: 1280, key: 'v/hero-1280.jpg' },
+        { width: 1920, key: 'v/hero-1920.jpg' },
+        { width: 2560, key: 'v/hero-1920.jpg' },
+    ])
+    assert.deepEqual(heroAliasSources([variant(500)]).map(({ width, key }) => `${width}:${key}`), [
+        '500:v/hero-500.jpg', '640:v/hero-500.jpg', '960:v/hero-500.jpg',
+        '1280:v/hero-500.jpg', '1920:v/hero-500.jpg', '2560:v/hero-500.jpg',
+    ])
+    assert.deepEqual(heroAliasSources([variant(640), variant(960), variant(1280), variant(1500)]).map(({ width, key }) => `${width}:${key}`), [
+        '640:v/hero-640.jpg', '960:v/hero-960.jpg', '1280:v/hero-1280.jpg',
+        '1500:v/hero-1500.jpg', '1920:v/hero-1500.jpg', '2560:v/hero-1500.jpg',
+    ])
+    assert.throws(() => heroAliasSources([]), /variants are missing/)
 })
 
 test('uses bounded no-upscale widths and deterministic immutable keys', () => {

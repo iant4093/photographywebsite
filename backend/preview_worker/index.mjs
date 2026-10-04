@@ -61,6 +61,7 @@ import { isPreviousPreviewContract, validateReadyOrMarkPending } from './workflo
 import {
     HERO_CONTENT_TYPES,
     HERO_FORMATS,
+    heroAliasSources,
     buildHeroManifest,
     heroCurrentFallbackKey,
     heroCurrentKey,
@@ -295,7 +296,7 @@ async function publishHero(job, manifest, sourceContentType) {
 
     const currentAliases = []
     for (const format of HERO_FORMATS) {
-        for (const variant of manifest.variants[format]) {
+        for (const variant of heroAliasSources(manifest.variants[format])) {
             const aliasKey = heroCurrentKey(variant.width, format, job.heroType)
             await s3.send(new CopyObjectCommand({
                 Bucket: bucket,

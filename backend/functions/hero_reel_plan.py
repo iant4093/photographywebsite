@@ -44,11 +44,12 @@ STANDARD_RATES = (
     ("30000/1001", 30000 / 1001),
     ("30", 30.0),
 )
-# The reel sits under a dark gradient, so it can be leaner than a feature video.
+# The sources are 1080p HLS at about 5 Mbit/s, so the reel is a second
+# generation: keep it close to the source rather than starving it.
 RENDITIONS = (
-    {"name": "reel-1920x1080", "width": 1920, "height": 1080, "crf": 28, "maxrate": "2500k", "bufsize": "5000k"},
-    {"name": "reel-1280x720", "width": 1280, "height": 720, "crf": 28, "maxrate": "1400k", "bufsize": "2800k"},
-    {"name": "reel-608x1080", "width": 608, "height": 1080, "crf": 28, "maxrate": "1200k", "bufsize": "2400k"},
+    {"name": "reel-1920x1080", "width": 1920, "height": 1080, "crf": 21, "maxrate": "5000k", "bufsize": "10000k"},
+    {"name": "reel-1280x720", "width": 1280, "height": 720, "crf": 22, "maxrate": "2800k", "bufsize": "5600k"},
+    {"name": "reel-608x1080", "width": 608, "height": 1080, "crf": 22, "maxrate": "2400k", "bufsize": "4800k"},
 )
 
 

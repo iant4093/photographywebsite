@@ -33,7 +33,14 @@ function mount() {
     const view = render(<Harness />)
     const section = view.container.querySelector('section')
     section.getBoundingClientRect = () => ({ width: sectionSize.width, height: sectionSize.height })
-    return { ...view, video: view.container.querySelector('video') }
+    const [video, spare] = view.container.querySelectorAll('video')
+    return { ...view, wrapper: view.container.querySelector('.hero-reel'), video, spare }
+}
+
+function media(video, values) {
+    for (const [key, value] of Object.entries(values)) {
+        Object.defineProperty(video, key, { configurable: true, writable: true, value })
+    }
 }
 
 async function loaded(video) {
@@ -72,16 +79,19 @@ describe('video hero reel', () => {
 
     it('renders nothing for reduced motion and never fetches the reel', async () => {
         window.matchMedia = vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-        const { video } = mount()
-        expect(video).toBeNull()
+        const { wrapper, video } = mount()
+        expect(wrapper).toBeNull()
+        expect(video).toBeUndefined()
         await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
         expect(fetchHeroReel).not.toHaveBeenCalled()
     })
 
     it('loads after the page settles, plays muted only while visible, and fades in once playing', async () => {
-        const { video } = mount()
+        const { wrapper, video, spare } = mount()
         expect(video).toHaveAttribute('preload', 'none')
-        expect(video).toHaveAttribute('aria-hidden', 'true')
+        expect(wrapper).toHaveAttribute('aria-hidden', 'true')
+        expect(video).toHaveClass('is-active')
+        expect(spare).not.toHaveClass('is-active')
         expect(video.getAttribute('src')).toBeNull()
         await loaded(video)
         expect(video.muted).toBe(true)
@@ -91,9 +101,10 @@ describe('video hero reel', () => {
         act(() => observerCallback([{ isIntersecting: true }]))
         expect(video.getAttribute('src')).toBe('https://media.example/reel-1280x720.mp4')
         expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1)
-        expect(video).not.toHaveClass('is-playing')
+        expect(wrapper).not.toHaveClass('is-playing')
         act(() => video.dispatchEvent(new Event('playing')))
-        expect(video).toHaveClass('is-playing')
+        expect(wrapper).toHaveClass('is-playing')
+        expect(spare.getAttribute('src')).toBeNull()
 
         act(() => observerCallback([{ isIntersecting: false }]))
         expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled()
@@ -105,25 +116,140 @@ describe('video hero reel', () => {
         act(() => observerCallback([{ isIntersecting: false }]))
         await act(async () => { await vi.advanceTimersByTimeAsync(HERO_REEL_UNLOAD_MS + 10) })
         expect(video.getAttribute('src')).toBeNull()
-        expect(video).not.toHaveClass('is-playing')
+        expect(wrapper).not.toHaveClass('is-playing')
         expect(HTMLMediaElement.prototype.load).toHaveBeenCalled()
 
         act(() => observerCallback([{ isIntersecting: true }]))
         expect(video.getAttribute('src')).toBe('https://media.example/reel-1280x720.mp4')
     })
 
-    it('uses the portrait cut on phones and swaps when the hero changes shape', async () => {
+    it('uses the portrait cut on phones and swaps renditions mid-play without restarting', async () => {
         sectionSize = { width: 390, height: 740 }
         window.devicePixelRatio = 3
-        const { video } = mount()
+        const { wrapper, video, spare } = mount()
         await loaded(video)
         act(() => observerCallback([{ isIntersecting: true }]))
         expect(video.getAttribute('src')).toBe('https://media.example/reel-608x1080.mp4')
+        act(() => video.dispatchEvent(new Event('playing')))
+        media(video, { paused: false, currentTime: 42.5 })
+        HTMLMediaElement.prototype.play.mockClear()
 
         sectionSize = { width: 900, height: 600 }
         act(() => window.dispatchEvent(new Event('resize')))
         await act(async () => { await vi.advanceTimersByTimeAsync(300) })
-        expect(video.getAttribute('src')).toBe('https://media.example/reel-1920x1080.mp4')
+        // The landscape file loads behind the portrait one, which keeps playing.
+        expect(video.getAttribute('src')).toBe('https://media.example/reel-608x1080.mp4')
+        expect(spare.getAttribute('src')).toBe('https://media.example/reel-1920x1080.mp4')
+        expect(spare.preload).toBe('auto')
+        expect(HTMLMediaElement.prototype.play.mock.contexts).toEqual([spare])
+        expect(video).toHaveClass('is-active')
+
+        media(spare, { duration: 40, paused: false })
+        act(() => spare.dispatchEvent(new Event('loadedmetadata')))
+        expect(spare.currentTime).toBe(2.5)
+        // A slow seek is corrected by aiming ahead.
+        media(video, { currentTime: 43 })
+        act(() => spare.dispatchEvent(new Event('seeked')))
+        expect(spare.currentTime).toBe(3.5)
+        expect(video).toHaveClass('is-active')
+        media(video, { currentTime: 43.6 })
+        media(spare, { currentTime: 3.62 })
+        act(() => spare.dispatchEvent(new Event('seeked')))
+        expect(spare).toHaveClass('is-active')
+        expect(video).not.toHaveClass('is-active')
+        expect(video.getAttribute('src')).toBeNull()
+        expect(wrapper).toHaveClass('is-playing')
+
+        // The next swap reuses the first layer, and waits for real playback.
+        sectionSize = { width: 390, height: 740 }
+        media(spare, { currentTime: 10 })
+        media(video, { duration: 40, paused: true })
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        expect(video.getAttribute('src')).toBe('https://media.example/reel-608x1080.mp4')
+        act(() => video.dispatchEvent(new Event('loadedmetadata')))
+        act(() => video.dispatchEvent(new Event('playing')))
+        expect(spare).toHaveClass('is-active')
+        HTMLMediaElement.prototype.play.mockClear()
+        act(() => video.dispatchEvent(new Event('seeked')))
+        expect(HTMLMediaElement.prototype.play.mock.contexts).toEqual([video])
+        expect(spare).toHaveClass('is-active')
+        act(() => video.dispatchEvent(new Event('playing')))
+        expect(video).toHaveClass('is-active')
+        expect(spare.getAttribute('src')).toBeNull()
+    })
+
+    it('swaps a paused reel in place and lets a resize back cancel a pending swap', async () => {
+        const { video, spare } = mount()
+        await loaded(video)
+        act(() => observerCallback([{ isIntersecting: true }]))
+        media(video, { paused: false, currentTime: 5 })
+        sectionSize = { width: 390, height: 740 }
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        expect(spare.getAttribute('src')).toBe('https://media.example/reel-608x1080.mp4')
+
+        // Rotating back before the swap lands keeps the current file.
+        sectionSize = { width: 1440, height: 780 }
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        expect(spare.getAttribute('src')).toBeNull()
+        expect(video.getAttribute('src')).toBe('https://media.example/reel-1280x720.mp4')
+
+        // Scrolled away (paused): the swap still keeps the position.
+        act(() => observerCallback([{ isIntersecting: false }]))
+        media(video, { paused: true })
+        HTMLMediaElement.prototype.play.mockClear()
+        sectionSize = { width: 390, height: 740 }
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
+        // Returning resumes both layers so the pending one can load.
+        act(() => observerCallback([{ isIntersecting: true }]))
+        expect(HTMLMediaElement.prototype.play.mock.contexts).toEqual([video, spare])
+        act(() => observerCallback([{ isIntersecting: false }]))
+        HTMLMediaElement.prototype.pause.mockClear()
+        act(() => spare.dispatchEvent(new Event('loadedmetadata')))
+        expect(spare.currentTime).toBe(5)
+        act(() => spare.dispatchEvent(new Event('seeked')))
+        expect(HTMLMediaElement.prototype.pause.mock.contexts).toContain(spare)
+        expect(spare).toHaveClass('is-active')
+        expect(video.getAttribute('src')).toBeNull()
+        await act(async () => { await vi.advanceTimersByTimeAsync(HERO_REEL_UNLOAD_MS + 10) })
+        expect(spare.getAttribute('src')).toBeNull()
+    })
+
+    it('keeps the playing rendition when the swap layer may not autoplay', async () => {
+        const { wrapper, video, spare } = mount()
+        await loaded(video)
+        act(() => observerCallback([{ isIntersecting: true }]))
+        act(() => video.dispatchEvent(new Event('playing')))
+        media(video, { paused: false })
+        HTMLMediaElement.prototype.play.mockRejectedValueOnce(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
+        sectionSize = { width: 390, height: 740 }
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        expect(spare.getAttribute('src')).toBeNull()
+        expect(video.getAttribute('src')).toBe('https://media.example/reel-1280x720.mp4')
+        expect(wrapper).toHaveClass('is-playing')
+    })
+
+    it('keeps the working rendition when the new one fails to load', async () => {
+        const { wrapper, video, spare } = mount()
+        await loaded(video)
+        act(() => observerCallback([{ isIntersecting: true }]))
+        act(() => video.dispatchEvent(new Event('playing')))
+        sectionSize = { width: 390, height: 740 }
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        act(() => spare.dispatchEvent(new Event('error')))
+        expect(spare.getAttribute('src')).toBeNull()
+        expect(video.getAttribute('src')).toBe('https://media.example/reel-1280x720.mp4')
+        expect(wrapper).toHaveClass('is-playing')
+        // The failed size is not retried until the hero changes shape again.
+        act(() => window.dispatchEvent(new Event('resize')))
+        await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+        expect(spare.getAttribute('src')).toBeNull()
     })
 
     it('pauses in background tabs and resumes when visible again', async () => {

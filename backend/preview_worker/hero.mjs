@@ -72,6 +72,20 @@ export function heroDerivativeKey(version, width, format, heroType = 'photo') {
     return `${paths.versions}/${parsed.version}/hero-${width}.${extension}`
 }
 
+// Pages advertise every standard width of the current alias, so each one must
+// exist even when the source was smaller: missing widths reuse the smallest
+// variant that covers them, or the largest variant there is.
+export function heroAliasSources(variants) {
+    const sorted = [...variants].sort((a, b) => a.width - b.width)
+    if (!sorted.length) throw new Error('Hero alias variants are missing')
+    const aliases = new Map(sorted.map((variant) => [variant.width, variant.key]))
+    for (const width of HERO_WIDTHS) {
+        if (aliases.has(width)) continue
+        aliases.set(width, (sorted.find((variant) => variant.width >= width) || sorted.at(-1)).key)
+    }
+    return [...aliases].sort(([a], [b]) => a - b).map(([width, key]) => ({ width, key }))
+}
+
 export function heroCurrentKey(width, format, heroType = 'photo') {
     if (!Number.isSafeInteger(width) || width < 1 || width > HERO_WIDTHS.at(-1)) {
         throw new Error('Invalid current hero width')
