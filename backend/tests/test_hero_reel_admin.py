@@ -73,6 +73,7 @@ class ReelAdminTests(unittest.TestCase):
         self.assertEqual(published["pendingCount"], 1)
         self.assertEqual(published["cuts"], [{
             "renditions": [{"url": f"https://media.example.test/{REEL_KEY}", "width": 1920, "height": 1080, "bytes": 123}],
+            "streams": None,
             "posterUrl": f"https://media.example.test/site/hero/versions/video/reel/v1/{VERSION}/poster.jpg",
             "duration": 58.2,
         }])
@@ -97,6 +98,29 @@ class ReelAdminTests(unittest.TestCase):
         self.assertTrue(multi["cuts"][0]["posterUrl"].endswith("/poster-2.jpg"))
         self.assertEqual(multi["cuts"][0]["duration"], 59.9)
         self.assertEqual(hero_reel_admin._plain([Decimal("0.5")]), [0.5])
+
+    def test_adaptive_cuts_expose_one_master_playlist_per_orientation(self):
+        folder = f"site/hero/versions/video/reel/v1/{VERSION}/"
+
+        def stream(orientation, width, height):
+            return {"master": f"{folder}reel-0-{orientation}.m3u8",
+                    "rungs": [{"width": Decimal(width), "height": Decimal(height)}, {"width": Decimal(width // 2), "height": Decimal(height // 2)}]}
+
+        cut = {"landscape": stream("landscape", 2560, 1440), "portrait": stream("portrait", 1080, 1920),
+               "posterKey": f"{folder}poster-0.jpg", "duration": "60"}
+        record = hero_reel_admin._public_record({"version": VERSION, "cuts": [
+            cut,
+            {**cut, "portrait": {"master": "albums/elsewhere/x.m3u8", "rungs": []}},
+            {**cut, "portrait": None},
+        ]})
+        self.assertEqual(len(record["cuts"]), 1)
+        self.assertEqual(record["cuts"][0]["renditions"], [])
+        self.assertEqual(record["cuts"][0]["streams"], {
+            "landscape": {"url": f"https://media.example.test/{folder}reel-0-landscape.m3u8", "maxHeight": 1440, "maxWidth": 2560},
+            "portrait": {"url": f"https://media.example.test/{folder}reel-0-portrait.m3u8", "maxHeight": 1920, "maxWidth": 1080},
+        })
+        # Rung playlists and media are never handed out individually.
+        self.assertIsNone(hero_reel_admin._media_url(f"{folder}reel-0-1920x1080.m3u8"))
 
     def test_generate_records_a_job_and_invokes_the_worker_asynchronously(self):
         job = hero_reel_admin.generate()

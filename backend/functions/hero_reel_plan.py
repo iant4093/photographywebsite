@@ -15,7 +15,7 @@ import random
 import urllib.parse
 
 
-BUILDER_VERSION = "hero-reel-v1"
+BUILDER_VERSION = "hero-reel-v2"
 TARGET_SECONDS = 60.0
 MIN_CLIP_SECONDS = 3.0
 MAX_CLIP_SECONDS = 5.0
@@ -35,8 +35,9 @@ MAX_WINDOW_SECONDS = 30.0
 MIN_WINDOW_SECONDS = 10.0
 MAX_VIDEOS = 40
 MAX_PLAYLIST_SEGMENTS = 2000
-OUTPUT_WIDTH = 1920
-OUTPUT_HEIGHT = 1080
+# Clips come from the original upload; when it cannot be read they fall back
+# to the best HLS rendition, which needs at least this height.
+FALLBACK_SOURCE_HEIGHT = 1080
 STANDARD_RATES = (
     ("24000/1001", 24000 / 1001),
     ("24", 24.0),
@@ -44,13 +45,29 @@ STANDARD_RATES = (
     ("30000/1001", 30000 / 1001),
     ("30", 30.0),
 )
-# The sources are 1080p HLS at about 5 Mbit/s, so the reel is a second
-# generation: keep it close to the source rather than starving it.
-RENDITIONS = (
-    {"name": "reel-1920x1080", "width": 1920, "height": 1080, "crf": 21, "maxrate": "5000k", "bufsize": "10000k"},
-    {"name": "reel-1280x720", "width": 1280, "height": 720, "crf": 22, "maxrate": "2800k", "bufsize": "5600k"},
-    {"name": "reel-608x1080", "width": 608, "height": 1080, "crf": 22, "maxrate": "2400k", "bufsize": "4800k"},
-)
+# Each orientation is its own adaptive (HLS) ladder cut from its own master
+# frame, so the phone version is cropped from the 4K original rather than
+# from a 1080p frame. Players start low and step up as bandwidth allows;
+# BANDWIDTH in the master playlist is the encoder's peak (maxrate).
+ORIENTATIONS = ("landscape", "portrait")
+MASTERS = {"landscape": (2560, 1440), "portrait": (1080, 1920)}
+LADDERS = {
+    "landscape": (
+        {"width": 2560, "height": 1440, "crf": 19, "maxrate": 12000, "level": "5.0"},
+        {"width": 1920, "height": 1080, "crf": 20, "maxrate": 8000, "level": "4.1"},
+        {"width": 1280, "height": 720, "crf": 21, "maxrate": 4000, "level": "4.1"},
+        {"width": 960, "height": 540, "crf": 22, "maxrate": 1600, "level": "4.1"},
+    ),
+    "portrait": (
+        {"width": 1080, "height": 1920, "crf": 20, "maxrate": 8000, "level": "4.1"},
+        {"width": 720, "height": 1280, "crf": 21, "maxrate": 4000, "level": "4.1"},
+        {"width": 540, "height": 960, "crf": 22, "maxrate": 1600, "level": "4.1"},
+    ),
+}
+# The variant a player without a bandwidth estimate (Safari) starts on.
+START_VARIANT = {"landscape": (1280, 720), "portrait": (720, 1280)}
+SEGMENT_SECONDS = 4
+CODEC_LEVELS = {"4.1": "640029", "5.0": "640032"}
 
 
 class PlaylistError(ValueError):
@@ -170,7 +187,7 @@ def choose_variant(variants, purpose):
     if purpose == "analysis":
         usable = [variant for variant in by_height if variant["height"] >= 360]
         return (usable or by_height)[0]
-    usable = [variant for variant in by_height if variant["height"] >= OUTPUT_HEIGHT]
+    usable = [variant for variant in by_height if variant["height"] >= FALLBACK_SOURCE_HEIGHT]
     return (usable or by_height)[0] if usable else by_height[-1]
 
 
@@ -351,11 +368,13 @@ def select_clips(candidates_by_video, rng, target=TARGET_SECONDS, used=frozenset
     order = list(pools)
     rng.shuffle(order)
     chosen = []
+    # Unused clips from every video come before any reuse.
+    reuse = not any(clip_id(pool[0]) not in used for pool in pools.values())
     while pools and reel_seconds(chosen) < target:
         progressed = False
         for media_id in list(order):
             pool = pools.get(media_id)
-            if not pool:
+            if not pool or (not reuse and clip_id(pool[0]) in used):
                 continue
             clip = pool.pop(0)
             # Never reuse the same shot twice.
@@ -364,9 +383,11 @@ def select_clips(candidates_by_video, rng, target=TARGET_SECONDS, used=frozenset
             progressed = True
             if reel_seconds(chosen) >= target:
                 break
-        if not progressed:
-            break
         pools = {media_id: pool for media_id, pool in pools.items() if pool}
+        if not progressed:
+            if reuse or not pools:
+                break
+            reuse = True
         order = [media_id for media_id in order if media_id in pools]
     excess = reel_seconds(chosen) - target
     if chosen and excess > 0:
@@ -400,42 +421,78 @@ def output_rate(clips):
     return max(sorted(counts), key=lambda rate: counts[rate]) if counts else "24"
 
 
-def clip_filter(rate):
-    """Scale and crop any source to the 1080p working frame."""
-    width, height = OUTPUT_WIDTH, OUTPUT_HEIGHT
+def clip_filter(rate, orientation, hdr=False):
+    """Scale and crop any source to the orientation's master frame.
+
+    HDR (PQ or HLG) originals are tone-mapped to SDR BT.709 first.
+    """
+    width, height = MASTERS[orientation]
+    tonemap = (
+        "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+        "tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,"
+    ) if hdr else ""
     return (
-        f"fps={rate},scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"{tonemap}fps={rate},scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={width}:{height},setsar=1,format=yuv420p"
     )
 
 
-def filter_graph(clips, rate):
+def filter_graph(clips, rate, orientation):
     """Build a filter graph that hard-cuts from each clip to the next.
 
     Inputs 0..n-1 are the normalized clips. The reel loops by cutting from
     the last clip straight back to the first, like every other transition.
+    The landscape graph also yields the poster frame.
     """
-    width, height = OUTPUT_WIDTH, OUTPUT_HEIGHT
+    ladder = LADDERS[orientation]
+    width, height = MASTERS[orientation]
     parts = []
     for index, clip in enumerate(clips):
         parts.append(f"[{index}:v]trim=duration={clip['duration']:.3f},setpts=PTS-STARTPTS,settb=AVTB,fps={rate}[c{index}]")
     labels = "".join(f"[c{index}]" for index in range(len(clips)))
     parts.append(f"{labels}concat=n={len(clips)}:v=1:a=0[joined]")
     total = reel_seconds(clips)
-    outputs = len(RENDITIONS) + 1
+    poster = orientation == "landscape"
+    outputs = len(ladder) + int(poster)
     split_labels = "".join(f"[s{index}]" for index in range(outputs))
     parts.append(
         # setpts drops the frame-rate tag; restate it or the encoder assumes
         # 25 fps and duplicates frames to fill the gap.
         f"[joined]trim=duration={total:.3f},setpts=PTS-STARTPTS,fps={rate},split={outputs}{split_labels}"
     )
-    for index, rendition in enumerate(RENDITIONS):
-        steps = []
-        if rendition["width"] / rendition["height"] < width / height:
-            crop_width = round(height * rendition["width"] / rendition["height"] / 2) * 2
-            steps.append(f"crop={crop_width}:{height}")
-        if (rendition["width"], rendition["height"]) != (width, height) and rendition["height"] != height:
-            steps.append(f"scale={rendition['width']}:{rendition['height']}:flags=lanczos")
-        parts.append(f"[s{index}]{','.join(steps) or 'null'}[out{index}]")
-    parts.append(f"[s{len(RENDITIONS)}]trim=end_frame=1[poster]")
+    for index, rung in enumerate(ladder):
+        step = "null" if (rung["width"], rung["height"]) == (width, height) else (
+            f"scale={rung['width']}:{rung['height']}:flags=lanczos"
+        )
+        parts.append(f"[s{index}]{step}[out{index}]")
+    if poster:
+        parts.append(f"[s{len(ladder)}]trim=end_frame=1[poster]")
     return ";".join(parts), total
+
+
+def rung_name(cut, rung):
+    return f"reel-{cut}-{rung['width']}x{rung['height']}"
+
+
+def master_playlist(cut, orientation, rate, sizes, seconds):
+    """The adaptive master playlist for one cut and orientation.
+
+    `sizes` maps each rung name to its encoded bytes, for AVERAGE-BANDWIDTH.
+    The start variant is listed first because Safari begins with it.
+    """
+    ladder = sorted(
+        LADDERS[orientation],
+        key=lambda rung: ((rung["width"], rung["height"]) != START_VARIANT[orientation], -rung["width"]),
+    )
+    fps = dict(STANDARD_RATES).get(rate, 24.0)
+    lines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS"]
+    for rung in ladder:
+        name = rung_name(cut, rung)
+        average = max(1, round(sizes[name] * 8 / max(seconds, 0.1)))
+        lines.append(
+            f"#EXT-X-STREAM-INF:BANDWIDTH={rung['maxrate'] * 1000},AVERAGE-BANDWIDTH={average},"
+            f"RESOLUTION={rung['width']}x{rung['height']},FRAME-RATE={fps:.3f},"
+            f'CODECS="avc1.{CODEC_LEVELS[rung["level"]]}"'
+        )
+        lines.append(f"{name}.m3u8")
+    return "\n".join(lines) + "\n"

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/auth'
+import { canPlayHlsNatively, isHlsUrl, loadHlsLibrary } from '../utils/hlsSource'
 import { fetchHeroReelStatus, publishHeroReel, requestHeroReelDraft } from '../utils/videoHeroApi'
 import './HeroReelManager.css'
 
@@ -30,11 +31,41 @@ function describe(record) {
     return parts.join(' · ')
 }
 
-function pickRendition(cut, view) {
+function pickSource(cut, view) {
+    const stream = cut?.streams?.[view === 'phone' ? 'portrait' : 'landscape']
+    if (stream?.url) return stream.url
     const renditions = cut?.renditions || []
     const portrait = renditions.filter(item => item.height > item.width)
     const landscape = renditions.filter(item => item.width >= item.height).sort((a, b) => b.width - a.width)
-    return view === 'phone' ? (portrait[0] || landscape[0]) : (landscape[0] || portrait[0])
+    return (view === 'phone' ? (portrait[0] || landscape[0]) : (landscape[0] || portrait[0]))?.url || ''
+}
+
+// Plays an MP4 directly, or an adaptive stream natively (Safari) or via hls.js.
+function PreviewVideo({ url, ...props }) {
+    const ref = useRef(null)
+    useEffect(() => {
+        const video = ref.current
+        if (!video) return undefined
+        let hls = null
+        let disposed = false
+        if (!isHlsUrl(url) || canPlayHlsNatively(video)) {
+            video.src = url
+        } else {
+            loadHlsLibrary().then((Hls) => {
+                if (disposed || !Hls) return
+                hls = new Hls({ capLevelToPlayerSize: true })
+                hls.loadSource(url)
+                hls.attachMedia(video)
+            }).catch(() => {})
+        }
+        return () => {
+            disposed = true
+            hls?.destroy()
+            video.removeAttribute('src')
+            video.load()
+        }
+    }, [url])
+    return <video ref={ref} {...props} />
 }
 
 const toggleClass = (selected) => `px-4 py-2 text-xs font-medium uppercase tracking-wider border border-warm-border transition-colors ${
@@ -46,8 +77,8 @@ function ReelPreview({ record, label }) {
     const [cutIndex, setCutIndex] = useState(0)
     const cuts = record?.cuts || []
     const cut = cuts[Math.min(cutIndex, cuts.length - 1)]
-    const rendition = pickRendition(cut, view)
-    if (!rendition) return null
+    const source = pickSource(cut, view)
+    if (!source) return null
     const phone = view === 'phone'
     const cutLabel = cuts.length > 1 ? ` cut ${Math.min(cutIndex, cuts.length - 1) + 1}` : ''
     return (
@@ -81,9 +112,9 @@ function ReelPreview({ record, label }) {
                 ))}
             </div>
             <div className={`hero-reel-preview overflow-hidden rounded-2xl bg-charcoal${phone ? ' is-phone' : ''}`}>
-                <video
-                    key={rendition.url}
-                    src={rendition.url}
+                <PreviewVideo
+                    key={source}
+                    url={source}
                     poster={cut.posterUrl || undefined}
                     aria-label={`${label}${cutLabel} (${phone ? 'phone' : 'desktop'} version)`}
                     className="h-full w-full object-cover"
