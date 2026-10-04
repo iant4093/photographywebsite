@@ -131,7 +131,7 @@ class UserAuthenticationFlowTests(unittest.TestCase):
         normalized = create_album._normalize_images([{"rawKey": raw_key}], ALBUM_ID, "video")
         self.assertEqual(
             normalized[0]["hlsUrl"],
-            f"albums/{ALBUM_ID}/original/movie_hls/movie.m3u8",
+            f"albums/{ALBUM_ID}/original/movie_hls/v2/movie.m3u8",
         )
 
 

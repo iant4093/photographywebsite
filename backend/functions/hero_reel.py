@@ -195,11 +195,17 @@ def eligible_videos():
 
 # ---------------------------------------------------------------- storage
 
-def _read_bytes(key, limit):
+def _read_bytes(key, limit, byte_range=None):
+    request = {"Bucket": _bucket(), "Key": key}
+    if byte_range is not None:
+        offset, length = byte_range
+        if length > limit:
+            raise PlaylistError("too_large")
+        request["Range"] = f"bytes={offset}-{offset + length - 1}"
     try:
-        response = _client("s3").get_object(Bucket=_bucket(), Key=key)
+        response = _client("s3").get_object(**request)
     except ClientError as error:
-        if error.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "AccessDenied"}:
+        if error.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "AccessDenied", "InvalidRange"}:
             raise PlaylistError("missing") from error
         raise
     if int(response.get("ContentLength") or 0) > limit:
@@ -207,6 +213,8 @@ def _read_bytes(key, limit):
     body = response["Body"].read(limit + 1)
     if len(body) > limit:
         raise PlaylistError("too_large")
+    if byte_range is not None and len(body) != byte_range[1]:
+        raise PlaylistError("short_range")
     return body
 
 
@@ -247,13 +255,15 @@ def download_segments(segments, workspace, cache):
     """
     paths, total = [], 0
     for segment in segments:
-        path = cache.get(segment["key"])
+        byte_range = tuple(segment["range"]) if segment.get("range") else None
+        identity = f"{segment['key']}#{byte_range[0]}" if byte_range else segment["key"]
+        path = cache.get(identity)
         if path is None:
-            data = _read_bytes(segment["key"], MAX_SEGMENT_BYTES)
+            data = _read_bytes(segment["key"], MAX_SEGMENT_BYTES, byte_range)
             path = os.path.join(workspace, f"segment-{len(cache)}.ts")
             with open(path, "wb") as handle:
                 handle.write(data)
-            cache[segment["key"]] = path
+            cache[identity] = path
         total += os.path.getsize(path)
         if total > MAX_WINDOW_BYTES:
             raise PlaylistError("window_too_large")
@@ -589,7 +599,10 @@ def plan_cuts(videos, seed, context, workspace):
                 **clip,
                 "rawKey": video.get("rawKey"),
                 # The HLS fallback for an original that cannot be read.
-                "segments": [{"key": item["key"], "start": item["start"]} for item in covering],
+                "segments": [
+                    {"key": item["key"], "start": item["start"], **({"range": item["range"]} if item.get("range") else {})}
+                    for item in covering
+                ],
             })
         cuts.append(planned)
     return {

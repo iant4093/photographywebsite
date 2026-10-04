@@ -75,6 +75,31 @@ class PlaylistTests(unittest.TestCase):
         tiny = [{"key": "t", "width": 320, "height": 180, "bandwidth": 1}]
         self.assertEqual(plan.choose_variant(tiny, "analysis")["key"], "t")
 
+    def test_single_file_renditions_are_read_as_byte_ranges(self):
+        # MediaConvert SINGLE_FILE output: one .ts per rendition.
+        text = (
+            "#EXTM3U\n#EXT-X-VERSION:4\n#EXT-X-TARGETDURATION:6\n"
+            "#EXTINF:6.006,\n#EXT-X-BYTERANGE:1000@0\nclip_360p.ts\n"
+            "#EXTINF:6.006,\n#EXT-X-BYTERANGE:800\nclip_360p.ts\n"
+            "#EXTINF:2.0,\n#EXT-X-BYTERANGE:50@5000\nclip_360p.ts\n#EXT-X-ENDLIST\n"
+        )
+        segments = plan.parse_media_playlist(KEY, text)
+        self.assertEqual([segment["range"] for segment in segments], [[0, 1000], [1000, 800], [5000, 50]])
+        self.assertEqual([segment["start"] for segment in segments], [0.0, 6.006, 12.012])
+        self.assertTrue(all(segment["key"].endswith("/clip_360p.ts") for segment in segments))
+        for text in (
+            "#EXTM3U\n#EXTINF:6,\n#EXT-X-BYTERANGE:800\na.ts\n#EXT-X-ENDLIST\n",
+            "#EXTM3U\n#EXTINF:6,\n#EXT-X-BYTERANGE:x@0\na.ts\n#EXT-X-ENDLIST\n",
+            "#EXTM3U\n#EXTINF:6,\n#EXT-X-BYTERANGE:0@0\na.ts\n#EXT-X-ENDLIST\n",
+            "#EXTM3U\n#EXTINF:6,\n#EXT-X-BYTERANGE:5@-1\na.ts\n#EXT-X-ENDLIST\n",
+        ):
+            with self.subTest(text=text), self.assertRaises(plan.PlaylistError) as raised:
+                plan.parse_media_playlist(KEY, text)
+            self.assertEqual(str(raised.exception), "bad_byterange")
+        with self.assertRaises(plan.PlaylistError) as raised:
+            plan.parse_media_playlist(KEY, '#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:6,\na.m4s\n#EXT-X-ENDLIST\n')
+        self.assertEqual(str(raised.exception), "unsupported_feature")
+
     def test_unsafe_or_incomplete_playlists_are_rejected(self):
         cases = {
             "not_a_playlist": "hello",

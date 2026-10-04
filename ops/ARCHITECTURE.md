@@ -347,7 +347,7 @@ flowchart TB
     direction LR
     n20["Committed video album<br/>create_album records source/job"]:::app
     n21["AWS MediaConvert<br/>Assumed media service role"]:::job
-    n22["ImagesBucket HLS output<br/>Master playlist + renditions;<br/>source MP4 remains available"]:::data
+    n22["ImagesBucket HLS output (_hls/v2/)<br/>Master + up to 6 single-file renditions;<br/>source MP4 remains available"]:::data
     n23["Media CDN → VideoPlayer<br/>Public HLS when accessible;<br/>protected/fallback signed source"]:::edge
     n20 -->|"submit job"| n21
     n21 -->|"read source / write HLS"| n22
@@ -371,9 +371,11 @@ flowchart TB
   lane2 ~~~ lane3
 ```
 
+Videos are converted into an adaptive HLS ladder in `<source>_hls/v2/`: 2160p (16 Mbit/s peak), 1440p (10), 1080p (6.5), 720p (3.5), 540p (1.8) and 360p (0.8), H.264 QVBR with muxed AAC. Boxes follow the source orientation (a portrait video's "1080p" is 1080 wide), rungs that would only repeat a larger one for a smaller source are dropped, and every rendition is one TS file addressed by byte ranges, so a video is about a dozen objects whatever its length. The player picks a level from bandwidth and player size; the custom controls also offer a fixed quality (hls.js levels, or the variant playlist itself on Safari's native HLS). `VideoUpgradeFunction` (every 3 hours) gives converted videos still on the older two-rendition ladder an upgrade receipt, at most 8 new and 12 in flight; the album's durable video worker re-converts each from its original into the new folder and switches `hlsUrl` only once the new master playlist exists, then invalidates the public API cache. An upgrade that never completes within a day keeps the old stream.
+
 After commit, auxiliary jobs also refresh catalog caches, random pools, hover manifests, optional edited-file Drive backups (09), and original comparisons (08). Preview generation is additive: failure keeps source and JPEG fallback intact. Source media, previews, HLS, QR assets and temporary ZIPs share ImagesBucket but use separate prefixes and policies. No S3-upload event is assumed to dispatch these jobs; the implemented upload-completion path does.
 
-Sources: [src/pages/Admin.jsx](../src/pages/Admin.jsx), [src/pages/UploadVideo.jsx](../src/pages/UploadVideo.jsx), [src/pages/ManageHero.jsx](../src/pages/ManageHero.jsx), [backend/functions/get_upload_url.py](../backend/functions/get_upload_url.py), [backend/functions/create_album.py](../backend/functions/create_album.py), [backend/functions/add_images.py](../backend/functions/add_images.py), [backend/functions/hero_cover.py](../backend/functions/hero_cover.py), [backend/functions/media_helpers.py](../backend/functions/media_helpers.py), [backend/preview_worker/index.mjs](../backend/preview_worker/index.mjs), [backend/preview_worker/hero.mjs](../backend/preview_worker/hero.mjs).
+Sources: [src/pages/Admin.jsx](../src/pages/Admin.jsx), [src/pages/UploadVideo.jsx](../src/pages/UploadVideo.jsx), [src/pages/ManageHero.jsx](../src/pages/ManageHero.jsx), [backend/functions/get_upload_url.py](../backend/functions/get_upload_url.py), [backend/functions/create_album.py](../backend/functions/create_album.py), [backend/functions/add_images.py](../backend/functions/add_images.py), [backend/functions/hero_cover.py](../backend/functions/hero_cover.py), [backend/functions/media_helpers.py](../backend/functions/media_helpers.py), [backend/functions/video_jobs.py](../backend/functions/video_jobs.py), [backend/functions/video_upgrade.py](../backend/functions/video_upgrade.py), [backend/preview_worker/index.mjs](../backend/preview_worker/index.mjs), [backend/preview_worker/hero.mjs](../backend/preview_worker/hero.mjs).
 
 <a id="05-consistency-workers"></a>
 

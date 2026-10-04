@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const hlsInstances = []
 vi.mock('hls.js', () => {
   class Hls {
-    static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error' }
+    static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error', LEVEL_SWITCHED: 'levelSwitched' }
     static isSupported = vi.fn(() => true)
     constructor() {
       this.handlers = {}
+      this.levels = []
+      this.currentLevel = -1
       this.loadSource = vi.fn()
       this.attachMedia = vi.fn()
       this.on = vi.fn((event, callback) => { this.handlers[event] = callback })
@@ -21,6 +23,7 @@ vi.mock('hls.js', () => {
 vi.mock('../utils/imagePlaceholder', () => ({ imagePlaceholder: () => 'data:image/png;base64,placeholder' }))
 
 import { AuthContext } from '../context/auth'
+import { selectChoice } from '../test/selectChoice'
 import Hls from 'hls.js'
 import AlbumCard from './AlbumCard'
 import BackToTop from './BackToTop'
@@ -390,8 +393,10 @@ describe('scroll controls and progressive loading', () => {
 })
 
 describe('VideoPlayer', () => {
+  afterEach(() => vi.unstubAllGlobals())
   beforeEach(() => {
     hlsInstances.length = 0
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, text: async () => '' })))
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
     vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
@@ -442,6 +447,78 @@ describe('VideoPlayer', () => {
     act(() => hlsInstances[0].handlers.error(null, { fatal: false }))
     act(() => hlsInstances[0].handlers.error(null, { fatal: true }))
     await waitFor(() => expect(document.querySelector('video').src).toBe('https://x.test/raw2.mp4'))
+  })
+
+  it('offers the stream\'s qualities through hls.js and follows the automatic choice', async () => {
+    render(<VideoPlayer videoInfo={{ url: 'https://x.test/raw.mp4', hlsUrl: 'https://x.test/hls.m3u8' }} />)
+    await waitFor(() => expect(hlsInstances).toHaveLength(1))
+    const instance = hlsInstances[0]
+    instance.levels = [
+      { width: 640, height: 360, bitrate: 800000 },
+      { width: 3840, height: 2160, bitrate: 16000000 },
+      { width: 1920, height: 1080, bitrate: 6500000 },
+      { width: 1920, height: 1080, bitrate: 5000000 },
+    ]
+    expect(screen.queryByRole('combobox', { name: 'Video quality' })).not.toBeInTheDocument()
+    act(() => instance.handlers.manifest())
+    const control = screen.getByRole('combobox', { name: 'Video quality' })
+    expect(control).toHaveTextContent('Auto')
+    fireEvent.click(control)
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Auto', '4K', '1080p', '360p'])
+    fireEvent.keyDown(control, { key: 'Escape' })
+
+    instance.currentLevel = 2
+    act(() => instance.handlers.levelSwitched())
+    expect(control).toHaveTextContent('Auto · 1080p')
+    selectChoice(control, '0')
+    expect(instance.currentLevel).toBe(0)
+    expect(control).toHaveTextContent('360p')
+    selectChoice(control, 'auto')
+    expect(instance.currentLevel).toBe(-1)
+    expect(control).toHaveTextContent('Auto')
+  })
+
+  it('hides the quality menu for a single-quality stream and after falling back to the raw file', async () => {
+    render(<VideoPlayer videoInfo={{ url: 'https://x.test/raw.mp4', hlsUrl: 'https://x.test/hls.m3u8' }} />)
+    await waitFor(() => expect(hlsInstances).toHaveLength(1))
+    hlsInstances[0].levels = [{ width: 1920, height: 1080, bitrate: 1 }]
+    act(() => hlsInstances[0].handlers.manifest())
+    act(() => hlsInstances[0].handlers.levelSwitched())
+    expect(screen.queryByRole('combobox', { name: 'Video quality' })).not.toBeInTheDocument()
+  })
+
+  it('lets Safari pick a quality by playing that variant from the same moment', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('probably')
+    const master = [
+      '#EXTM3U',
+      '#EXT-X-STREAM-INF:BANDWIDTH=6500000,AVERAGE-BANDWIDTH=4000000,RESOLUTION=1920x1080',
+      'movie_1080p.m3u8',
+      '#EXT-X-STREAM-INF:BANDWIDTH=3500000,RESOLUTION=1280x720',
+      'movie_720p.m3u8',
+    ].join('\n')
+    fetch.mockResolvedValue({ ok: true, text: async () => master })
+    const { container } = render(<VideoPlayer videoInfo={{ url: 'https://x.test/raw.mp4', hlsUrl: 'https://x.test/v2/movie.m3u8' }} />)
+    const video = container.querySelector('video')
+    fireEvent.loadedMetadata(video)
+    expect(video.muted).toBe(true)
+    const control = await screen.findByRole('combobox', { name: 'Video quality' })
+    expect(fetch).toHaveBeenCalledWith('https://x.test/v2/movie.m3u8')
+
+    video.muted = false
+    Object.defineProperty(video, 'paused', { configurable: true, value: false })
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 42 })
+    HTMLMediaElement.prototype.play.mockClear()
+    selectChoice(control, 'https://x.test/v2/movie_720p.m3u8')
+    expect(video.src).toBe('https://x.test/v2/movie_720p.m3u8')
+    expect(control).toHaveTextContent('720p')
+    video.currentTime = 0
+    fireEvent.loadedMetadata(video)
+    expect(video.currentTime).toBe(42)
+    expect(video.muted).toBe(false)
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce()
+
+    selectChoice(control, 'auto')
+    expect(video.src).toBe('https://x.test/v2/movie.m3u8')
   })
 
   it('does nothing without any playable URL', () => {

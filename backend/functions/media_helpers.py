@@ -2,6 +2,8 @@ import os
 import logging
 import urllib.parse
 import uuid
+
+from hls_ladder import hls_destination_prefix, hls_is_current, hls_master_playlist_key  # noqa: F401
 import boto3
 from botocore.config import Config
 import exifread
@@ -103,14 +105,53 @@ def extract_exif_data(bucket, key):
         logger.warning("exif_extraction_failed error_type=%s", type(error).__name__)
         return None
 
-def hls_master_playlist_key(raw_key):
-    """Match MediaConvert's input-based name for the HLS multivariant playlist."""
-    base_name = raw_key.rsplit(".", 1)[0]
-    filename = base_name.rsplit("/", 1)[-1]
-    return f"{base_name}_hls/{filename}.m3u8"
+# (name modifier, long side, short side, peak bit/s, QVBR quality). Each
+# rung is a box the source is fitted into without upscaling.
+HLS_LADDER = (
+    ("_2160p", 3840, 2160, 16_000_000, 8),
+    ("_1440p", 2560, 1440, 10_000_000, 8),
+    ("_1080p", 1920, 1080, 6_500_000, 8),
+    ("_720p", 1280, 720, 3_500_000, 7),
+    ("_540p", 960, 540, 1_800_000, 7),
+    ("_360p", 640, 360, 800_000, 7),
+)
+HLS_SEGMENT_SECONDS = 6
 
 
-def _hls_output(name_modifier, width, height, max_bitrate):
+def _fit(width, height, box_width, box_height):
+    scale = min(box_width / width, box_height / height, 1)
+    return (round(width * scale / 2) * 2, round(height * scale / 2) * 2)
+
+
+def hls_ladder(width=None, height=None):
+    """The rungs worth encoding for a source of this size.
+
+    Boxes follow the source's orientation, so a portrait phone video's
+    "1080p" rung is 1080 wide. A rung that would only repeat a larger rung's
+    output (a small source fitted into several boxes) is dropped. Unknown
+    sizes get the whole ladder.
+    """
+    try:
+        width, height = int(width), int(height)
+    except (TypeError, ValueError):
+        width = height = 0
+    if width <= 0 or height <= 0:
+        return [(name, long, short, bitrate, quality) for name, long, short, bitrate, quality in HLS_LADDER]
+    portrait = height > width
+    rungs, seen = [], set()
+    # Smallest first, so an output keeps the smallest box (and bitrate cap)
+    # that produces it: a 1080p source's top rung is "_1080p", not "_2160p".
+    for name, long, short, bitrate, quality in reversed(HLS_LADDER):
+        box = (short, long) if portrait else (long, short)
+        size = _fit(width, height, *box)
+        if size in seen:
+            continue
+        seen.add(size)
+        rungs.append((name, *box, bitrate, quality))
+    return rungs[::-1]
+
+
+def _hls_output(name_modifier, width, height, max_bitrate, quality=7):
     return {
         "VideoDescription": {
             "Width": width,
@@ -121,7 +162,7 @@ def _hls_output(name_modifier, width, height, max_bitrate):
                 "Codec": "H_264",
                 "H264Settings": {
                     "RateControlMode": "QVBR",
-                    "QvbrSettings": {"QvbrQualityLevel": 7},
+                    "QvbrSettings": {"QvbrQualityLevel": quality},
                     "MaxBitrate": max_bitrate,
                     "CodecProfile": "HIGH",
                     "GopSizeUnits": "AUTO",
@@ -145,9 +186,13 @@ def _hls_output(name_modifier, width, height, max_bitrate):
     }
 
 
-def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_token=None):
+def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_token=None, width=None, height=None):
     """
-    Submit two HLS renditions so the player can adapt to connection speed.
+    Submit an adaptive HLS ladder up to 4K so players can match each viewer's
+    screen and connection, and viewers can pick a quality.
+
+    Every rendition is a single file addressed by byte ranges, so a video is
+    about a dozen objects however long it runs.
     """
     mc_client = get_mediaconvert_client()
     role_arn = os.environ['MEDIACONVERT_ROLE_ARN']
@@ -160,7 +205,8 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_toke
                         "DefaultSelection": "DEFAULT"
                     }
                 },
-                "VideoSelector": {},
+                # Honour rotation metadata (phone footage).
+                "VideoSelector": {"Rotate": "AUTO"},
                 "TimecodeSource": "ZEROBASED",
                 "FileInput": source_s3_url
             }
@@ -171,16 +217,14 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_toke
                 "OutputGroupSettings": {
                     "Type": "HLS_GROUP_SETTINGS",
                     "HlsGroupSettings": {
-                        "SegmentLength": 10,
+                        "SegmentLength": HLS_SEGMENT_SECONDS,
                         "MinSegmentLength": 0,
+                        "SegmentControl": "SINGLE_FILE",
                         "Destination": destination_s3_prefix,
                         "OutputSelection": "MANIFESTS_AND_SEGMENTS",
                     }
                 },
-                "Outputs": [
-                    _hls_output("_1080p5m", 1920, 1080, 5000000),
-                    _hls_output("_540p1m2", 960, 540, 1200000),
-                ]
+                "Outputs": [_hls_output(*rung) for rung in hls_ladder(width, height)],
             }
         ],
         "TimecodeConfig": {

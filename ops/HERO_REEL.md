@@ -19,7 +19,9 @@ copies only the binary into the artifact (about 80 MB unzipped, budgeted in
    item with an `hlsUrl` inside the album's media namespace.
 2. Analysis: for each video (newest first, at most 40), one bounded window of
    whole HLS segments (10 to 30 seconds, 600 seconds of footage overall) from
-   the smallest rendition of at least 360p. ffmpeg's `scdet` and `signalstats`
+   the smallest rendition of at least 360p. Segments are separate files (the
+   older ladder) or byte ranges of one single-file rendition (the current
+   ladder); each range is fetched with an S3 range read. ffmpeg's `scdet` and `signalstats`
    mark cuts (score ≥ 6) and flashes (luma jump ≥ 24); fast-cut edits produce
    no long shots and are skipped.
 3. Selection: calm, well-lit shots of at least 3 seconds give 3 to 5 second

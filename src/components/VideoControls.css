@@ -28,6 +28,7 @@
 .site-video-volume input { width: 100%; }
 .site-video-controls input[type="range"] { accent-color: var(--color-amber-dark); cursor: pointer; min-height: 1.5rem; }
 .site-video-controls .site-video-speed { margin-left: auto; width: auto; min-height: 2.4rem; padding: .4rem .55rem; font-size: .72rem; gap: .5rem; }
+.site-video-controls .site-video-quality { width: auto; min-height: 2.4rem; padding: .4rem .55rem; font-size: .72rem; gap: .5rem; font-variant-numeric: tabular-nums; }
 .site-video-notice { padding: .45rem; font-size: .78rem; color: var(--color-amber-dark); }
 @media (max-width: 540px) {
   .site-video-control-row { flex-wrap: wrap; gap: .2rem; }

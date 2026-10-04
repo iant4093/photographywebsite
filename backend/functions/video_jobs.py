@@ -2,6 +2,10 @@
 
 Only a prepared receipt may create a job. An uncertain old submission is
 reconciled by provider token, never blindly replayed after its dedupe window.
+
+Upgrade receipts re-convert an already streaming video to the current ladder
+in a new folder. The video keeps its old stream until the new master
+playlist exists (MediaConvert writes manifests last), then switches.
 """
 import hashlib
 import logging
@@ -9,13 +13,21 @@ import os
 import time
 import uuid
 from copy import deepcopy
+import boto3
 from botocore.exceptions import ClientError
 from album_media_store import finish_media_sync
+from cache_invalidation import request_public_api_invalidation
 from dynamodb_helpers import ensure_album_item_budget
-from media_helpers import get_mediaconvert_client, hls_master_playlist_key, start_mediaconvert_job
+from hls_ladder import hls_destination_prefix, hls_is_current, hls_master_playlist_key, receipt_identity
+from media_helpers import get_mediaconvert_client, start_mediaconvert_job
 from visibility_change import enqueue
 
 logger = logging.getLogger("photography_api.video_dispatch")
+
+
+UPGRADE_FIRST_CHECK_SECONDS = 300
+UNRESOLVED_AFTER_SECONDS = 86400
+_s3 = None
 
 
 def prepare(album, images):
@@ -24,10 +36,22 @@ def prepare(album, images):
         if image.get("mediaConvertJobId"):
             continue
         key = image["rawKey"]
-        identity = hashlib.sha256(key.encode()).hexdigest()[:24]
-        jobs.setdefault(identity, {"key": key, "token": uuid.uuid4().hex, "phase": "prepared"})
+        jobs.setdefault(receipt_identity(key), {"key": key, "token": uuid.uuid4().hex, "phase": "prepared"})
         image.pop("hlsUrl", None)
     return jobs
+
+
+def _master_exists(key):
+    global _s3
+    if _s3 is None:
+        _s3 = boto3.client("s3")
+    try:
+        _s3.head_object(Bucket=os.environ["IMAGES_BUCKET"], Key=hls_master_playlist_key(key))
+        return True
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+            return False
+        raise
 
 
 def _save(table, album, *, images=False):
@@ -75,12 +99,34 @@ def resume(table, album, context=None):
         if time.monotonic() >= deadline or (callable(remaining) and remaining() < 20000):
             break
         image = by_key.get(receipt["key"])
-        if not image or image.get("mediaConvertJobId"):
+        upgrade = receipt.get("upgrade") is True
+        if not image or (image.get("mediaConvertJobId") and not upgrade) or (
+            upgrade and hls_is_current(receipt["key"], image.get("hlsUrl"))
+        ):
             del jobs[identity]
             _save(table, album)
             continue
         now = int(time.time())
         if int(receipt.get("checkAfter", 0)) > now or receipt.get("phase") == "unresolved":
+            continue
+        if receipt["phase"] == "transcoding":
+            if _master_exists(receipt["key"]):
+                image["hlsUrl"] = hls_master_playlist_key(receipt["key"])
+                image["mediaConvertJobId"] = receipt["jobId"]
+                del jobs[identity]
+                _save(table, album, images=True)
+                if album.get("visibility") == "public":
+                    # Cached public responses still name the old (intact) stream.
+                    request_public_api_invalidation(album_id=album["albumId"], catalog=True, reason="video-upgrade")
+                logger.info("video_upgrade_ready")
+                continue
+            attempt = min(4, int(receipt.get("checks", 0)))
+            receipt.update(checkAfter=now + min(1800, UPGRADE_FIRST_CHECK_SECONDS * (2 ** attempt)), checks=attempt + 1)
+            if now - int(receipt.get("transcodeStartedAt", now)) >= UNRESOLVED_AFTER_SECONDS:
+                # The job failed or never finished; the old stream stays.
+                receipt["phase"] = "unresolved"
+                logger.error("video_upgrade_unresolved")
+            _save(table, album)
             continue
         source = f"s3://{os.environ['IMAGES_BUCKET']}/{receipt['key']}"
         job_id = None
@@ -92,8 +138,8 @@ def resume(table, album, context=None):
         try:
             if submitting:
                 job_id = start_mediaconvert_job(source,
-                    f"s3://{os.environ['IMAGES_BUCKET']}/{receipt['key'].rsplit('.', 1)[0]}_hls/",
-                    request_token=receipt["token"])
+                    f"s3://{os.environ['IMAGES_BUCKET']}/{hls_destination_prefix(receipt['key'])}",
+                    request_token=receipt["token"], width=image.get("width"), height=image.get("height"))
             else:
                 job_id = _find(receipt, source)
         except Exception as error:
@@ -106,7 +152,12 @@ def resume(table, album, context=None):
             logger.warning("video_dispatch_deferred error_type=%s", type(error).__name__)
         # Keep persistence outside the provider exception handler. If saving
         # the accepted ID fails, the durable submitting receipt survives.
-        if job_id:
+        if job_id and upgrade:
+            # Keep serving the old stream until the new one is complete.
+            receipt.update(phase="transcoding", jobId=job_id, transcodeStartedAt=now,
+                           checkAfter=now + UPGRADE_FIRST_CHECK_SECONDS, checks=0)
+            _save(table, album)
+        elif job_id:
             image["mediaConvertJobId"] = job_id
             image["hlsUrl"] = hls_master_playlist_key(receipt["key"])
             del jobs[identity]
