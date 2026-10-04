@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import useMediaQuery from '../hooks/useMediaQuery'
-import { chooseHeroReelRendition, fetchHeroReel, heroReelAllowed } from '../utils/heroReel'
+import { chooseHeroReelRendition, fetchHeroReel, heroReelAllowed, pickHeroReelCut } from '../utils/heroReel'
 import './HeroReel.css'
 
 // Leaving the hero pauses immediately; staying away this long also releases
@@ -36,7 +36,7 @@ export default function HeroReel({ videoRef }) {
         const controller = new AbortController()
         const cancel = whenPageSettles(() => {
             fetchHeroReel({ signal: controller.signal })
-                .then((value) => { if (!controller.signal.aborted) setReel(value) })
+                .then((value) => { if (!controller.signal.aborted) setReel(pickHeroReelCut(value)) })
                 .catch(() => {})
         })
         return () => {

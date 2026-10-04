@@ -39,6 +39,7 @@ from hero_reel_plan import (
     PlaylistError,
     candidate_clips,
     choose_variant,
+    clip_id,
     clip_filter,
     detect_shots,
     filter_graph,
@@ -73,6 +74,9 @@ ENCODE_RESERVE_MS = 240_000
 ANALYSIS_RESERVE_MS = 420_000
 PENDING_RETRY_SECONDS = 24 * 60 * 60
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
+CUT_COUNT = 5
+# A batch whose chain stopped advancing stops blocking new batches after this.
+BUILD_STALE_SECONDS = 20 * 60
 
 _clients = {}
 
@@ -345,8 +349,12 @@ def _segments_covering(segments, start, end):
     return covering
 
 
-def build_reel(videos, seed, context, workspace):
-    """Analyse, select and encode. Returns the reel description and files."""
+def plan_cuts(videos, seed, context, workspace):
+    """Analyse once and plan CUT_COUNT distinct cuts.
+
+    Each planned clip carries the exact HLS segments that cover it, so every
+    cut can later be encoded in its own invocation without re-analysis.
+    """
     rng = seeded_random(BUILDER_VERSION, seed)
     ready, pending = [], []
     for video in videos:
@@ -374,53 +382,68 @@ def build_reel(videos, seed, context, workspace):
         plan = {**plan, "rate": frame_rate(frames)}
         analysed[plan["mediaId"]] = {"plan": plan, "shots": detect_shots(frames, start, end)}
 
-    candidates = {
+    strict = {
         media_id: candidate_clips(entry["plan"], entry["shots"], rng)
         for media_id, entry in analysed.items()
     }
-    clips = select_clips(candidates, rng)
-    if reel_seconds(clips) < MIN_REEL_SECONDS:
-        # Mostly fast-cut edits: fall back to the steadiest short stretches.
-        relaxed = {
-            media_id: candidate_clips(entry["plan"], entry["shots"], rng, relaxed=True)
-            for media_id, entry in analysed.items()
-        }
-        clips = select_clips(relaxed, rng)
-    if reel_seconds(clips) < MIN_REEL_SECONDS:
-        raise ReelError("not_enough_footage")
-
-    sources = []
-    for clip in clips:
-        segments = analysed[clip["mediaId"]]["plan"]["outputSegments"]
-        covering = _segments_covering(segments, clip["start"], clip["start"] + clip["duration"])
-        try:
-            # Same-variant videos reuse the segments already fetched for analysis.
-            source = download_segments(covering, workspace, cache)
-        except PlaylistError as error:
-            raise ReelError("clip_download_failed") from error
-        sources.append((source, clip["start"] - covering[0]["start"]))
-
-    remaining = _remaining_ms(context)
-    if remaining < ENCODE_RESERVE_MS:
-        raise ReelError("timeout")
-    deadline = time.monotonic() + (remaining - 60_000) / 1000
-    outputs, poster, seconds, rate = encode_reel(clips, sources, workspace, deadline)
+    relaxed = None
+    cuts, used = [], set()
+    for cut in range(CUT_COUNT):
+        cut_rng = seeded_random(BUILDER_VERSION, seed, "cut", cut)
+        clips = select_clips(strict, cut_rng, used=frozenset(used))
+        if reel_seconds(clips) < MIN_REEL_SECONDS:
+            # Mostly fast-cut edits: fall back to the steadiest short stretches.
+            if relaxed is None:
+                relaxed = {
+                    media_id: candidate_clips(entry["plan"], entry["shots"], rng, relaxed=True)
+                    for media_id, entry in analysed.items()
+                }
+            clips = select_clips(relaxed, cut_rng, used=frozenset(used))
+        if reel_seconds(clips) < MIN_REEL_SECONDS:
+            if not cuts:
+                raise ReelError("not_enough_footage")
+            break
+        used.update(clip_id(clip) for clip in clips)
+        planned = []
+        for clip in clips:
+            segments = analysed[clip["mediaId"]]["plan"]["outputSegments"]
+            covering = _segments_covering(segments, clip["start"], clip["start"] + clip["duration"])
+            planned.append({
+                **clip,
+                "segments": [{"key": item["key"], "start": item["start"]} for item in covering],
+            })
+        cuts.append(planned)
     return {
-        "clips": clips,
-        "outputs": outputs,
-        "poster": poster,
-        "seconds": round(seconds, 2),
-        "rate": rate,
+        "cuts": cuts,
         "pending": sorted({video["mediaId"] for video in pending}),
         "pendingKeys": sorted({video["hlsKey"] for video in pending}),
     }
 
 
-def upload_reel(version, result):
+def encode_cut(clips, context, workspace):
+    """Fetch the planned segments for one cut and encode it."""
+    cache = {}
+    sources = []
+    for clip in clips:
+        try:
+            source = download_segments(clip["segments"], workspace, cache)
+        except PlaylistError as error:
+            raise ReelError("clip_download_failed") from error
+        sources.append((source, clip["start"] - clip["segments"][0]["start"]))
+    remaining = _remaining_ms(context)
+    if remaining < ENCODE_RESERVE_MS:
+        raise ReelError("timeout")
+    deadline = time.monotonic() + (remaining - 60_000) / 1000
+    outputs, poster, seconds, rate = encode_reel(clips, sources, workspace, deadline)
+    return {"outputs": outputs, "poster": poster, "seconds": round(seconds, 2), "rate": rate}
+
+
+def upload_cut(version, cut, result):
     s3 = _client("s3")
     renditions = []
     for rendition in RENDITIONS:
-        key = f"{REEL_PREFIX}{version}/{rendition['name']}.mp4"
+        width, height = rendition["width"], rendition["height"]
+        key = f"{REEL_PREFIX}{version}/reel-{cut}-{width}x{height}.mp4"
         path = result["outputs"][rendition["name"]]
         with open(path, "rb") as body:
             s3.put_object(
@@ -429,13 +452,8 @@ def upload_reel(version, result):
                 ServerSideEncryption="AES256", Tagging="visibility=public",
                 Metadata={"generator": BUILDER_VERSION},
             )
-        renditions.append({
-            "key": key,
-            "width": rendition["width"],
-            "height": rendition["height"],
-            "bytes": os.path.getsize(path),
-        })
-    poster_key = f"{REEL_PREFIX}{version}/poster.jpg"
+        renditions.append({"key": key, "width": width, "height": height, "bytes": os.path.getsize(path)})
+    poster_key = f"{REEL_PREFIX}{version}/poster-{cut}.jpg"
     with open(result["poster"], "rb") as body:
         s3.put_object(
             Bucket=_bucket(), Key=poster_key, Body=body, ContentType="image/jpeg",
@@ -445,51 +463,54 @@ def upload_reel(version, result):
     return renditions, poster_key
 
 
-def _reel_record(version, digest, result, renditions, poster_key, mode):
-    clips = result["clips"]
+def record_cuts(record):
+    """Every cut of a record; single-cut records from before are one cut."""
+    if record and record.get("cuts"):
+        return record["cuts"]
+    if record and record.get("renditions"):
+        return [{"renditions": record["renditions"], "posterKey": record.get("posterKey"), "duration": record.get("duration")}]
+    return []
+
+
+def _reel_record(build, mode):
+    plans = json.loads(build["plan"])
+    cuts = [dict(item) for item in build["results"]]
+    clips = [clip for cut in plans[: len(cuts)] for clip in cut]
     return {
-        "version": version,
+        "version": build["version"],
         "mode": mode,
-        "inputDigest": digest,
+        "inputDigest": build["digest"],
         "createdAt": _now(),
-        "duration": str(result["seconds"]),
-        "fps": result["rate"],
-        "clipCount": len(clips),
+        "cuts": cuts,
+        "duration": cuts[0]["duration"],
+        "clipCount": round(len(clips) / len(cuts)),
         "sourceCount": len({clip["mediaId"] for clip in clips}),
         "mediaIds": sorted({clip["mediaId"] for clip in clips}),
         "albumIds": sorted({clip["albumId"] for clip in clips}),
-        "pending": result["pending"],
-        "pendingKeys": result["pendingKeys"],
-        "renditions": renditions,
-        "posterKey": poster_key,
+        "pending": list(build.get("pending") or []),
+        "pendingKeys": list(build.get("pendingKeys") or []),
+        "posterKey": cuts[0]["posterKey"],
     }
-
-
-def make_reel(videos, seed, mode, context):
-    digest = input_digest(videos)
-    workspace = tempfile.mkdtemp(prefix="hero-reel-", dir="/tmp")
-    try:
-        result = build_reel(videos, seed, context, workspace)
-        version = hashlib.sha256(f"{digest}|{seed}|{time.time_ns()}".encode("utf-8")).hexdigest()[:24]
-        renditions, poster_key = upload_reel(version, result)
-        return _reel_record(version, digest, result, renditions, poster_key, mode)
-    finally:
-        shutil.rmtree(workspace, ignore_errors=True)
 
 
 # ---------------------------------------------------------------- publish
 
 def pointer_document(record):
     if not record:
-        return {"schemaVersion": 1, "version": None, "renditions": []}
+        return {"schemaVersion": 2, "version": None, "cuts": []}
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "version": record["version"],
         "publishedAt": record.get("publishedAt") or _now(),
-        "duration": float(record["duration"]),
-        "renditions": [
-            {"key": item["key"], "width": int(item["width"]), "height": int(item["height"]), "bytes": int(item["bytes"])}
-            for item in record["renditions"]
+        "cuts": [
+            {
+                "duration": float(cut["duration"]),
+                "renditions": [
+                    {"key": item["key"], "width": int(item["width"]), "height": int(item["height"]), "bytes": int(item["bytes"])}
+                    for item in cut["renditions"]
+                ],
+            }
+            for cut in record_cuts(record)
         ],
     }
 
@@ -654,10 +675,153 @@ def _pending_became_ready(record):
     return any(_object_exists(key) for key in keys[:10])
 
 
+def _build_active(state):
+    build = state.get("build")
+    if not isinstance(build, dict):
+        return False
+    stale = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=BUILD_STALE_SECONDS)
+    return str(build.get("updatedAt") or "") > stale.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _invoke_next(context, batch_id, cut):
+    _client("lambda").invoke(
+        FunctionName=context.invoked_function_arn,
+        InvocationType="Event",
+        Payload=json.dumps({"action": "build-cut", "batchId": batch_id, "cut": cut}, separators=(",", ":")).encode("utf-8"),
+    )
+
+
+def start_batch(videos, seed, mode, context, request_id=None):
+    """Plan every cut, record the batch, and hand cut 0 to the next invocation.
+
+    Starting a batch supersedes any batch already in flight.
+    """
+    digest = input_digest(videos)
+    workspace = tempfile.mkdtemp(prefix="hero-reel-", dir="/tmp")
+    try:
+        planned = plan_cuts(videos, seed, context, workspace)
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+    batch_id = uuid.uuid4().hex
+    version = hashlib.sha256(f"{digest}|{seed}|{batch_id}".encode("utf-8")).hexdigest()[:24]
+    save_state({"build": {
+        "batchId": batch_id,
+        "mode": mode,
+        "requestId": request_id,
+        "version": version,
+        "digest": digest,
+        "plan": json.dumps(planned["cuts"], separators=(",", ":")),
+        "cutCount": len(planned["cuts"]),
+        "results": [],
+        "pending": planned["pending"],
+        "pendingKeys": planned["pendingKeys"],
+        "updatedAt": _now(),
+    }})
+    _invoke_next(context, batch_id, 0)
+    return {"status": "building", "version": version, "cuts": len(planned["cuts"])}
+
+
+def _append_result(batch_id, cut, result):
+    try:
+        _table("GALLERY_SETTINGS_TABLE").update_item(
+            Key=STATE_KEY,
+            UpdateExpression="SET #build.#results = list_append(#build.#results, :result), #build.#updatedAt = :now",
+            ConditionExpression="#build.#batchId = :batch AND size(#build.#results) = :cut",
+            ExpressionAttributeNames={"#build": "build", "#results": "results", "#updatedAt": "updatedAt", "#batchId": "batchId"},
+            ExpressionAttributeValues={":result": [result], ":now": _now(), ":batch": batch_id, ":cut": cut},
+        )
+        return True
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _fail_batch(build, reason):
+    update = {"build": None}
+    if build.get("mode") == "draft" and build.get("requestId"):
+        update["job"] = _job(build["requestId"], "draft", "failed", reason=reason)
+    else:
+        update["auto"] = {"status": "failed", "reason": reason, "at": _now(), "inputDigest": build.get("digest")}
+    save_state(update)
+    logger.warning("hero_reel_batch_failed mode=%s reason=%s", build.get("mode"), reason)
+    return {"status": "failed", "reason": reason}
+
+
+def build_cut(event, context):
+    """Encode one planned cut, then chain to the next or finish the batch."""
+    state = load_state()
+    build = state.get("build")
+    batch_id = str(event.get("batchId") or "")
+    try:
+        cut = int(event.get("cut"))
+    except (TypeError, ValueError):
+        return {"status": "rejected"}
+    if not isinstance(build, dict) or build.get("batchId") != batch_id:
+        return {"status": "superseded"}
+    plans = json.loads(build["plan"])
+    done = len(build.get("results") or [])
+    if cut < done:
+        # A retried invocation: the cut is already encoded.
+        return _advance(state, build, context, done)
+    if cut != done or cut >= len(plans):
+        return {"status": "rejected"}
+    workspace = tempfile.mkdtemp(prefix="hero-reel-", dir="/tmp")
+    try:
+        result = encode_cut(plans[cut], context, workspace)
+        renditions, poster_key = upload_cut(build["version"], cut, result)
+    except ReelError as error:
+        return _fail_batch(build, error.reason)
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+    entry = {"renditions": renditions, "posterKey": poster_key, "duration": str(result["seconds"]), "fps": result["rate"]}
+    if not _append_result(batch_id, cut, entry):
+        return {"status": "superseded"}
+    build = {**build, "results": [*(build.get("results") or []), entry]}
+    if build.get("mode") == "draft" and build.get("requestId"):
+        save_state({"job": _job(build["requestId"], "draft", "running", progress=cut + 1, total=len(plans))})
+    return _advance(state, build, context, cut + 1)
+
+
+def _advance(state, build, context, done):
+    plans_total = int(build.get("cutCount") or len(json.loads(build["plan"])))
+    if done < plans_total:
+        _invoke_next(context, build["batchId"], done)
+        return {"status": "building", "cut": done}
+    return finish_batch(state, build)
+
+
+def finish_batch(state, build):
+    videos = eligible_videos()
+    eligible_ids = {video["mediaId"] for video in videos}
+    record = _reel_record(build, build["mode"])
+    if not _still_eligible(record, eligible_ids):
+        return _fail_batch(build, "sources_changed")
+    if build["mode"] == "auto":
+        update, poster_queued = publish_record(state, record, eligible_ids)
+        save_state(update | {"build": None, "auto": {"status": "published", "at": _now(), "version": record["version"]}})
+        logger.info(
+            "hero_reel_published mode=auto cuts=%d sources=%d pending=%d poster=%s",
+            len(record["cuts"]), record["sourceCount"], len(record["pending"]), poster_queued,
+        )
+        return {"status": "published", "version": record["version"]}
+    old_draft = state.get("draft")
+    update = {"draft": record, "build": None}
+    if build.get("requestId"):
+        update["job"] = _job(build["requestId"], "draft", "ready", version=record["version"])
+    save_state(update)
+    if old_draft and old_draft.get("version") != record["version"]:
+        cleanup_versions(_versions_to_keep({**state, "draft": record}, eligible_ids))
+    logger.info("hero_reel_draft_ready cuts=%d sources=%d", len(record["cuts"]), record["sourceCount"])
+    return {"status": "ready", "version": record["version"]}
+
+
 # ---------------------------------------------------------------- actions
 
 def reconcile(context):
     state = load_state()
+    if _build_active(state):
+        return {"status": "busy"}
     videos = eligible_videos()
     eligible_ids = {video["mediaId"] for video in videos}
     published = state.get("published")
@@ -673,41 +837,25 @@ def reconcile(context):
         # A clip's source left the public catalog: take the reel down now
         # rather than waiting for the rebuild below to finish.
         save_state(unpublish(state, eligible_ids))
-        state = {**state, "published": None, "previous": None}
     try:
-        record = make_reel(videos, digest, "auto", context)
+        return start_batch(videos, digest, "auto", context)
     except ReelError as error:
         # Recorded, not raised: an async retry would only repeat the same
         # expensive build. The next scheduled run tries again.
         save_state({"auto": {"status": "failed", "reason": error.reason, "at": _now(), "inputDigest": digest}})
         logger.warning("hero_reel_auto_failed reason=%s", error.reason)
         return {"status": "skipped", "reason": error.reason}
-    update, poster_queued = publish_record(state, record, eligible_ids)
-    save_state(update | {"auto": {"status": "published", "at": _now(), "version": record["version"]}})
-    logger.info(
-        "hero_reel_published mode=auto clips=%d sources=%d pending=%d poster=%s",
-        record["clipCount"], record["sourceCount"], len(record["pending"]), poster_queued,
-    )
-    return {"status": "published", "version": record["version"]}
 
 
 def generate(event, context):
-    request_id = _claim_job(event, "draft", "running", startedAt=_now())
+    request_id = _claim_job(event, "draft", "running", startedAt=_now(), progress=0, total=CUT_COUNT)
     videos = eligible_videos()
     try:
-        record = make_reel(videos, f"draft|{request_id}", "draft", context)
+        return start_batch(videos, f"draft|{request_id}", "draft", context, request_id=request_id)
     except ReelError as error:
         save_state({"job": _job(request_id, "draft", "failed", reason=error.reason)})
         logger.warning("hero_reel_draft_failed reason=%s", error.reason)
         return {"status": "failed", "reason": error.reason}
-    state = load_state()
-    eligible_ids = {video["mediaId"] for video in videos}
-    old_draft = state.get("draft")
-    save_state({"draft": record, "job": _job(request_id, "draft", "ready", version=record["version"])})
-    if old_draft and old_draft.get("version") != record["version"]:
-        cleanup_versions(_versions_to_keep({**state, "draft": record}, eligible_ids))
-    logger.info("hero_reel_draft_ready clips=%d sources=%d", record["clipCount"], record["sourceCount"])
-    return {"status": "ready", "version": record["version"]}
 
 
 def publish(event, context):
@@ -729,7 +877,7 @@ def publish(event, context):
     record = {**draft, "mode": "manual", "inputDigest": input_digest(videos)}
     update, poster_queued = publish_record(state, record, eligible_ids)
     save_state(update | {"draft": None, "job": _job(request_id, "publish", "published", version=version)})
-    logger.info("hero_reel_published mode=manual clips=%d poster=%s", record["clipCount"], poster_queued)
+    logger.info("hero_reel_published mode=manual cuts=%d poster=%s", len(record_cuts(record)), poster_queued)
     return {"status": "published", "version": version}
 
 
@@ -737,6 +885,8 @@ def handler(event, context):
     event = event if isinstance(event, dict) else {}
     action = event.get("action") or "reconcile"
     try:
+        if action == "build-cut":
+            return build_cut(event, context)
         if action == "generate":
             return generate(event, context)
         if action == "publish":

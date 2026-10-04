@@ -126,7 +126,7 @@ describe('admin hero cover upload', () => {
     expect(screen.getByRole('tab', { name: 'Video Page' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.queryByLabelText('New hero image')).not.toBeInTheDocument()
     expect(await screen.findByText(/No reel is published yet/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Regenerate video' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Regenerate videos' })).toBeEnabled()
     expect(videoApi.fetchHeroReelStatus).toHaveBeenCalledWith('admin-token', expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
