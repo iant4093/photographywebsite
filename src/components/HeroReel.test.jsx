@@ -10,14 +10,12 @@ vi.mock('../utils/heroReel', async (importOriginal) => ({
 import { fetchHeroReel } from '../utils/heroReel'
 import HeroReel, { HERO_REEL_UNLOAD_MS } from './HeroReel'
 
-const reel = {
-    version: 'a'.repeat(24),
-    renditions: [
-        { width: 1920, height: 1080, url: 'https://media.example/reel-1920x1080.mp4' },
-        { width: 1280, height: 720, url: 'https://media.example/reel-1280x720.mp4' },
-        { width: 608, height: 1080, url: 'https://media.example/reel-608x1080.mp4' },
-    ],
-}
+const renditions = [
+    { width: 1920, height: 1080, url: 'https://media.example/reel-1920x1080.mp4' },
+    { width: 1280, height: 720, url: 'https://media.example/reel-1280x720.mp4' },
+    { width: 608, height: 1080, url: 'https://media.example/reel-608x1080.mp4' },
+]
+const reel = { version: 'a'.repeat(24), cuts: [{ renditions }] }
 
 let observerCallback
 let sectionSize
@@ -161,6 +159,16 @@ describe('video hero reel', () => {
         expect(video.getAttribute('src')).toBeNull()
         unmount()
         expect(observerCallback).toBeNull()
+    })
+
+    it('plays a random one of the published cuts', async () => {
+        const other = renditions.map((item) => ({ ...item, url: item.url.replace('reel-', 'cut2-') }))
+        fetchHeroReel.mockResolvedValue({ version: reel.version, cuts: [{ renditions }, { renditions: other }] })
+        vi.spyOn(Math, 'random').mockReturnValue(0.9)
+        const { video } = mount()
+        await loaded(video)
+        act(() => observerCallback([{ isIntersecting: true }]))
+        expect(video.getAttribute('src')).toBe('https://media.example/cut2-1280x720.mp4')
     })
 
     it('keeps the still image when no reel is published', async () => {

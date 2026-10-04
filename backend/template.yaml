@@ -4271,6 +4271,11 @@ Resources:
             - Effect: Allow
               Action: cloudfront:CreateInvalidation
               Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${ImagesCloudFront}'
+            # Each cut encodes in its own invocation; the worker chains them.
+            # A name pattern avoids a role -> function -> role cycle.
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-HeroReelFunction-*'
       Events:
         Reconcile:
           Type: Schedule

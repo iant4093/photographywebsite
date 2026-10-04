@@ -25,7 +25,9 @@ ACTIVE_STATUSES = ("queued", "running")
 # new requests after this long.
 STALE_JOB_SECONDS = 20 * 60
 VERSION_PATTERN = re.compile(r"^[a-f0-9]{24}$")
-REEL_KEY_PATTERN = re.compile(r"^site/hero/versions/video/reel/v1/[a-f0-9]{24}/(?:reel-\d{3,4}x\d{3,4}\.mp4|poster\.jpg)$")
+REEL_KEY_PATTERN = re.compile(
+    r"^site/hero/versions/video/reel/v1/[a-f0-9]{24}/(?:reel-(?:\d-)?\d{3,4}x\d{3,4}\.mp4|poster(?:-\d)?\.jpg)$"
+)
 
 _lambda = None
 _table = None
@@ -74,31 +76,46 @@ def _media_url(key):
     return f"https://{domain}/{key}"
 
 
+def _renditions(items):
+    renditions = []
+    for item in items or []:
+        url = _media_url(item.get("key"))
+        if url:
+            renditions.append({"url": url, "width": item.get("width"), "height": item.get("height"), "bytes": item.get("bytes")})
+    return renditions
+
+
+def _seconds(value):
+    try:
+        return round(float(value), 1)
+    except (TypeError, ValueError):
+        return None
+
+
 def _public_record(record):
     """Expose only what the admin preview needs; never source IDs."""
     if not isinstance(record, dict) or not VERSION_PATTERN.fullmatch(str(record.get("version") or "")):
         return None
     record = _plain(record)
-    renditions = []
-    for item in record.get("renditions") or []:
-        url = _media_url(item.get("key"))
-        if url:
-            renditions.append({"url": url, "width": item.get("width"), "height": item.get("height"), "bytes": item.get("bytes")})
-    try:
-        duration = round(float(record.get("duration")), 1)
-    except (TypeError, ValueError):
-        duration = None
+    raw_cuts = record.get("cuts") or (
+        [{"renditions": record.get("renditions"), "posterKey": record.get("posterKey"), "duration": record.get("duration")}]
+        if record.get("renditions") else []
+    )
+    cuts = [
+        {"renditions": _renditions(cut.get("renditions")), "posterUrl": _media_url(cut.get("posterKey")), "duration": _seconds(cut.get("duration"))}
+        for cut in raw_cuts
+    ]
+    cuts = [cut for cut in cuts if cut["renditions"]]
     return {
         "version": record["version"],
         "mode": record.get("mode"),
         "createdAt": record.get("createdAt"),
         "publishedAt": record.get("publishedAt"),
-        "duration": duration,
+        "duration": _seconds(record.get("duration")),
         "clipCount": record.get("clipCount"),
         "sourceCount": record.get("sourceCount"),
         "pendingCount": len(record.get("pending") or []),
-        "posterUrl": _media_url(record.get("posterKey")),
-        "renditions": renditions,
+        "cuts": cuts,
     }
 
 
@@ -112,6 +129,8 @@ def _public_job(job):
         "status": job.get("status"),
         "reason": job.get("reason"),
         "version": job.get("version"),
+        "progress": job.get("progress"),
+        "total": job.get("total"),
         "updatedAt": job.get("updatedAt"),
     }
 

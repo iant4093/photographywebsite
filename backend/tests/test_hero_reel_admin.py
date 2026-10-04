@@ -71,18 +71,31 @@ class ReelAdminTests(unittest.TestCase):
         self.assertEqual(published["duration"], 58.2)
         self.assertEqual(published["clipCount"], 14)
         self.assertEqual(published["pendingCount"], 1)
-        self.assertEqual(published["renditions"], [{
-            "url": f"https://media.example.test/{REEL_KEY}", "width": 1920, "height": 1080, "bytes": 123,
+        self.assertEqual(published["cuts"], [{
+            "renditions": [{"url": f"https://media.example.test/{REEL_KEY}", "width": 1920, "height": 1080, "bytes": 123}],
+            "posterUrl": f"https://media.example.test/site/hero/versions/video/reel/v1/{VERSION}/poster.jpg",
+            "duration": 58.2,
         }])
-        self.assertTrue(published["posterUrl"].endswith("/poster.jpg"))
         self.assertNotIn("secret", json.dumps(status))
         self.assertIsNone(status["draft"])
         self.assertEqual(status["job"]["status"], "ready")
+        self.assertIn("progress", status["job"])
         self.assertEqual(status["auto"], {"status": "failed", "reason": "not_enough_footage", "at": "t"})
 
         self.table.get_item.return_value = {}
         self.assertEqual(hero_reel_admin.status(), {"job": None, "draft": None, "published": None, "auto": None})
         self.assertIsNone(hero_reel_admin._public_record({"version": VERSION, "duration": "bad"})["duration"])
+        cut_key = f"site/hero/versions/video/reel/v1/{VERSION}/reel-2-608x1080.mp4"
+        multi = hero_reel_admin._public_record({
+            "version": VERSION,
+            "cuts": [
+                {"renditions": [{"key": cut_key, "width": 608, "height": 1080, "bytes": 5}], "posterKey": f"site/hero/versions/video/reel/v1/{VERSION}/poster-2.jpg", "duration": "59.94"},
+                {"renditions": [{"key": "albums/elsewhere.mp4", "width": 1, "height": 1, "bytes": 1}]},
+            ],
+        })
+        self.assertEqual(len(multi["cuts"]), 1)
+        self.assertTrue(multi["cuts"][0]["posterUrl"].endswith("/poster-2.jpg"))
+        self.assertEqual(multi["cuts"][0]["duration"], 59.9)
         self.assertEqual(hero_reel_admin._plain([Decimal("0.5")]), [0.5])
 
     def test_generate_records_a_job_and_invokes_the_worker_asynchronously(self):

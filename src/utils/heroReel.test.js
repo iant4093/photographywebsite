@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
-import { chooseHeroReelRendition, fetchHeroReel, heroReelAllowed, normalizeHeroReel } from './heroReel'
+import { chooseHeroReelRendition, fetchHeroReel, heroReelAllowed, normalizeHeroReel, pickHeroReelCut } from './heroReel'
 
 const VERSION = 'a'.repeat(24)
 const rendition = (width, height) => ({
@@ -24,8 +24,9 @@ describe('hero reel pointer', () => {
     it('accepts only the exact keys the reel worker writes', () => {
         const reel = normalizeHeroReel(pointer)
         expect(reel.version).toBe(VERSION)
-        expect(reel.renditions.map(({ width }) => width)).toEqual([1920, 1280, 608])
-        expect(reel.renditions[0].url).toBe(`https://media.example.invalid/site/hero/versions/video/reel/v1/${VERSION}/reel-1920x1080.mp4`)
+        expect(reel.cuts).toHaveLength(1)
+        expect(reel.cuts[0].renditions.map(({ width }) => width)).toEqual([1920, 1280, 608])
+        expect(reel.cuts[0].renditions[0].url).toBe(`https://media.example.invalid/site/hero/versions/video/reel/v1/${VERSION}/reel-1920x1080.mp4`)
 
         expect(normalizeHeroReel(null)).toBeNull()
         expect(normalizeHeroReel({ ...pointer, schemaVersion: 2 })).toBeNull()
@@ -44,6 +45,34 @@ describe('hero reel pointer', () => {
         })).toBeNull()
     })
 
+    it('reads every cut of a multi-cut pointer and picks one at random', () => {
+        const cutRendition = (cut, width, height) => ({
+            key: `site/hero/versions/video/reel/v1/${VERSION}/reel-${cut}-${width}x${height}.mp4`,
+            width,
+            height,
+            bytes: 1,
+        })
+        const reel = normalizeHeroReel({
+            schemaVersion: 2,
+            version: VERSION,
+            cuts: [
+                { renditions: [cutRendition(0, 1920, 1080), cutRendition(0, 608, 1080)] },
+                { renditions: [cutRendition(1, 1920, 1080)] },
+                // A rendition labelled with another cut's number is rejected.
+                { renditions: [cutRendition(0, 1280, 720)] },
+                null,
+            ],
+        })
+        expect(reel.cuts).toHaveLength(2)
+        expect(reel.cuts[1].renditions[0].url).toContain('/reel-1-1920x1080.mp4')
+        expect(pickHeroReelCut(reel, () => 0).cut).toBe(0)
+        expect(pickHeroReelCut(reel, () => 0.99)).toMatchObject({ cut: 1, version: VERSION })
+        expect(pickHeroReelCut(reel, () => 1).cut).toBe(1)
+        expect(pickHeroReelCut(null)).toBeNull()
+        expect(normalizeHeroReel({ schemaVersion: 2, version: VERSION, cuts: 'nope' })).toBeNull()
+        expect(normalizeHeroReel({ schemaVersion: 3, version: VERSION, cuts: [] })).toBeNull()
+    })
+
     it('fetches the pointer without credentials and tolerates bad responses', async () => {
         const fetch = vi.fn()
             .mockResolvedValueOnce(new Response(JSON.stringify(pointer)))
@@ -60,7 +89,7 @@ describe('hero reel pointer', () => {
     })
 
     it('picks the portrait cut for phones and the smallest sufficient landscape file elsewhere', () => {
-        const reel = normalizeHeroReel(pointer)
+        const reel = pickHeroReelCut(normalizeHeroReel(pointer))
         expect(chooseHeroReelRendition(reel, { width: 380, height: 700, pixelRatio: 3 }).width).toBe(608)
         expect(chooseHeroReelRendition(reel, { width: 1000, height: 780, pixelRatio: 1 }).width).toBe(1280)
         expect(chooseHeroReelRendition(reel, { width: 1440, height: 780, pixelRatio: 2 }).width).toBe(1920)

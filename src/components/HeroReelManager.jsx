@@ -23,25 +23,50 @@ function formatDate(value) {
 function describe(record) {
     if (!record) return ''
     const parts = []
-    if (record.duration) parts.push(`${Math.round(record.duration)} seconds`)
-    if (record.clipCount) parts.push(`${record.clipCount} clips from ${record.sourceCount} ${record.sourceCount === 1 ? 'video' : 'videos'}`)
+    const cuts = record.cuts?.length || 0
+    if (cuts > 1) parts.push(`${cuts} cuts`)
+    if (record.duration) parts.push(`about ${Math.round(record.duration)} seconds each`)
+    if (record.clipCount) parts.push(`~${record.clipCount} clips per cut from ${record.sourceCount} ${record.sourceCount === 1 ? 'video' : 'videos'}`)
     return parts.join(' · ')
 }
 
-function pickRendition(record, view) {
-    const renditions = record?.renditions || []
+function pickRendition(cut, view) {
+    const renditions = cut?.renditions || []
     const portrait = renditions.filter(item => item.height > item.width)
     const landscape = renditions.filter(item => item.width >= item.height).sort((a, b) => b.width - a.width)
     return view === 'phone' ? (portrait[0] || landscape[0]) : (landscape[0] || portrait[0])
 }
 
+const toggleClass = (selected) => `px-4 py-2 text-xs font-medium uppercase tracking-wider border border-warm-border transition-colors ${
+    selected ? 'bg-charcoal text-cream' : 'bg-transparent text-charcoal hover:bg-cream-dark'
+}`
+
 function ReelPreview({ record, label }) {
     const [view, setView] = useState('desktop')
-    const rendition = pickRendition(record, view)
+    const [cutIndex, setCutIndex] = useState(0)
+    const cuts = record?.cuts || []
+    const cut = cuts[Math.min(cutIndex, cuts.length - 1)]
+    const rendition = pickRendition(cut, view)
     if (!rendition) return null
     const phone = view === 'phone'
+    const cutLabel = cuts.length > 1 ? ` cut ${Math.min(cutIndex, cuts.length - 1) + 1}` : ''
     return (
         <div>
+            {cuts.length > 1 && (
+                <div className="mb-2 flex flex-wrap gap-2" role="group" aria-label={`${label} cut`}>
+                    {cuts.map((_, index) => (
+                        <button
+                            key={index}
+                            type="button"
+                            aria-pressed={cutIndex === index}
+                            onClick={() => setCutIndex(index)}
+                            className={toggleClass(cutIndex === index)}
+                        >
+                            Cut {index + 1}
+                        </button>
+                    ))}
+                </div>
+            )}
             <div className="mb-3 flex gap-2" role="group" aria-label={`${label} preview size`}>
                 {['desktop', 'phone'].map((option) => (
                     <button
@@ -49,9 +74,7 @@ function ReelPreview({ record, label }) {
                         type="button"
                         aria-pressed={view === option}
                         onClick={() => setView(option)}
-                        className={`px-4 py-2 text-xs font-medium uppercase tracking-wider border border-warm-border transition-colors ${
-                            view === option ? 'bg-charcoal text-cream' : 'bg-transparent text-charcoal hover:bg-cream-dark'
-                        }`}
+                        className={toggleClass(view === option)}
                     >
                         {option === 'desktop' ? 'Desktop' : 'Phone'}
                     </button>
@@ -61,8 +84,8 @@ function ReelPreview({ record, label }) {
                 <video
                     key={rendition.url}
                     src={rendition.url}
-                    poster={record.posterUrl || undefined}
-                    aria-label={`${label} (${phone ? 'phone' : 'desktop'} version)`}
+                    poster={cut.posterUrl || undefined}
+                    aria-label={`${label}${cutLabel} (${phone ? 'phone' : 'desktop'} version)`}
                     className="h-full w-full object-cover"
                     muted
                     loop
@@ -94,8 +117,8 @@ export default function HeroReelManager() {
         lastJobRef.current = job
         if (!job || !previous || previous.requestId !== job.requestId || !ACTIVE.has(previous.status)) return
         if (job.status === 'failed') setError(REASONS[job.reason] || GENERIC_FAILURE)
-        if (job.status === 'ready') setNotice('Your new reel is ready to preview below.')
-        if (job.status === 'published') setNotice('The new reel is live on the Video page.')
+        if (job.status === 'ready') setNotice('Your new reels are ready to preview below.')
+        if (job.status === 'published') setNotice('The new reels are live on the Video page.')
     }, [])
     const loadStatus = useCallback(
         async (signal) => fetchHeroReelStatus(await getIdToken(), { signal }),
@@ -152,9 +175,9 @@ export default function HeroReelManager() {
     return (
         <div id="hero-cover-panel" role="tabpanel" className="bg-white rounded-2xl p-6 md:p-8 shadow-warm-lg border border-warm-border">
             <p className="mb-6 text-sm text-warm-gray leading-relaxed">
-                The Video page hero is a silent, looping reel of about a minute, spliced automatically from calm moments in
-                your public videos. It rebuilds on its own within a day of you publishing new videos. Regenerate it any time for a fresh
-                cut, preview it, then publish.
+                The Video page hero plays one of five silent, looping reels of about a minute, picked at random on each visit
+                and spliced automatically from calm moments in your public videos. All five rebuild on their own within a day of
+                you publishing new videos. Regenerate them any time for fresh cuts, preview each one, then publish.
             </p>
 
             {error && (
@@ -196,7 +219,7 @@ export default function HeroReelManager() {
                         disabled={sending || jobActive}
                         className="mt-5 w-full rounded-xl bg-charcoal px-6 py-3 font-medium text-cream transition-colors hover:bg-charcoal-light disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        {publishing ? 'Publishing…' : 'Publish this reel'}
+                        {publishing ? 'Publishing…' : 'Publish these reels'}
                     </button>
                 </section>
             )}
@@ -204,8 +227,8 @@ export default function HeroReelManager() {
             {jobActive && (
                 <p className="mb-4 text-sm text-warm-gray" role="status" aria-live="polite">
                     {publishing
-                        ? 'Publishing the new reel…'
-                        : 'Generating a new reel from your videos. This usually takes a few minutes; you can leave this page and come back.'}
+                        ? 'Publishing the new reels…'
+                        : `Generating new reels from your videos${job?.total ? ` (cut ${Math.min((job.progress || 0) + 1, job.total)} of ${job.total})` : ''}. This takes about 15–20 minutes; you can leave this page and come back.`}
                 </p>
             )}
             <button
@@ -214,7 +237,7 @@ export default function HeroReelManager() {
                 disabled={loading || sending || jobActive}
                 className="w-full rounded-xl bg-amber px-6 py-3 font-medium text-white shadow-warm transition-colors hover:bg-amber-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
-                {generating ? 'Generating…' : 'Regenerate video'}
+                {generating ? 'Generating…' : 'Regenerate videos'}
             </button>
         </div>
     )

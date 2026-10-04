@@ -208,6 +208,18 @@ class SelectionTests(unittest.TestCase):
         exhausted = plan.select_clips({"one": candidates("one", 9)}, random.Random(4), target=500)
         self.assertEqual(len(exhausted), 3)
 
+    def test_later_cuts_prefer_clips_earlier_cuts_did_not_use(self):
+        pool = {"one": [
+            {"albumId": "a", "mediaId": "one", "shot": f"{index}.0", "start": index * 6.0, "duration": 5.0, "quality": 10 - index, "rate": "24"}
+            for index in range(6)
+        ]}
+        first = plan.select_clips(pool, random.Random(1), target=10)
+        used = {plan.clip_id(clip) for clip in first}
+        second = plan.select_clips(pool, random.Random(2), target=10, used=frozenset(used))
+        self.assertFalse(used & {plan.clip_id(clip) for clip in second})
+        # Selection works on copies: trimming one cut never changes the pool.
+        self.assertTrue(all(item["duration"] == 5.0 for item in pool["one"]))
+
     def test_interleaving_avoids_back_to_back_clips_from_one_video(self):
         clips = [{"mediaId": "a"}] * 3 + [{"mediaId": "b"}] * 2 + [{"mediaId": "c"}]
         ordered = plan._interleave(clips, random.Random(5))

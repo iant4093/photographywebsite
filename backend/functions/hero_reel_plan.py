@@ -330,9 +330,23 @@ def reel_seconds(clips):
     return sum(clip["duration"] for clip in clips)
 
 
-def select_clips(candidates_by_video, rng, target=TARGET_SECONDS):
-    """Pick clips round-robin across videos until the reel is long enough."""
-    pools = {media_id: list(items) for media_id, items in candidates_by_video.items() if items}
+def clip_id(clip):
+    return f"{clip['mediaId']}|{clip['shot']}"
+
+
+def select_clips(candidates_by_video, rng, target=TARGET_SECONDS, used=frozenset()):
+    """Pick clips round-robin across videos until the reel is long enough.
+
+    Clips another cut already used go last, and a little per-cut noise in the
+    ranking keeps several cuts built from one analysis distinct.
+    """
+    pools = {
+        media_id: sorted(
+            (dict(item) for item in items),
+            key=lambda item: (clip_id(item) in used, -(item["quality"] + rng.uniform(0, 2.5))),
+        )
+        for media_id, items in candidates_by_video.items() if items
+    }
     order = list(pools)
     rng.shuffle(order)
     chosen = []

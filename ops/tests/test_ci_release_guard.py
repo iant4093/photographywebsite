@@ -341,6 +341,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "GetPublicAlbumFunctionRole",
                 "GetPublicAlbumsFunctionRole",
                 "HeroCoverFunctionRole",
+                "HeroReelFunctionRole",
                 "PreviewWorkerFunctionRole",
                 "TagMediaObjectFunctionRole",
                 "PreparePrintFunctionRole",
