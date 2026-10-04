@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -7,6 +7,20 @@ const api = vi.hoisted(() => ({
     publishHeroReel: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
+const hlsState = vi.hoisted(() => ({ instances: [] }))
+vi.mock('hls.js', () => {
+    class Hls {
+        static isSupported = () => true
+        constructor(config) {
+            this.config = config
+            this.loadSource = vi.fn()
+            this.attachMedia = vi.fn()
+            this.destroy = vi.fn()
+            hlsState.instances.push(this)
+        }
+    }
+    return { default: Hls }
+})
 vi.mock('../utils/videoHeroApi', () => api)
 vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 
@@ -47,6 +61,8 @@ describe('hero reel manager', () => {
         vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
     })
     afterEach(() => {
+        // Unmount while the media stubs are still installed.
+        cleanup()
         vi.useRealTimers()
         vi.restoreAllMocks()
     })
@@ -64,6 +80,40 @@ describe('hero reel manager', () => {
         expect(screen.getByLabelText('Live hero video cut 2 (phone version)')).toHaveAttribute('src', expect.stringContaining('reel-1-608x1080.mp4'))
         expect(screen.getByRole('button', { name: 'Cut 2' })).toHaveAttribute('aria-pressed', 'true')
         expect(screen.queryByText('New draft')).not.toBeInTheDocument()
+    })
+
+    it('previews adaptive cuts as streams per orientation', async () => {
+        hlsState.instances.length = 0
+        const folder = `https://media.example/${LIVE}`
+        const adaptive = {
+            ...record(LIVE),
+            cuts: [{
+                posterUrl: `${folder}/poster-0.jpg`,
+                renditions: [],
+                streams: {
+                    landscape: { url: `${folder}/reel-0-landscape.m3u8`, maxWidth: 2560, maxHeight: 1440 },
+                    portrait: { url: `${folder}/reel-0-portrait.m3u8`, maxWidth: 1080, maxHeight: 1920 },
+                },
+            }],
+        }
+        api.fetchHeroReelStatus.mockResolvedValue({ job: null, draft: null, published: adaptive, auto: null })
+        render(<HeroReelManager />)
+        await flush()
+        await flush()
+        expect(hlsState.instances[0].loadSource).toHaveBeenCalledWith(`${folder}/reel-0-landscape.m3u8`)
+        expect(hlsState.instances[0].attachMedia).toHaveBeenCalledWith(screen.getByLabelText('Live hero video (desktop version)'))
+        fireEvent.click(screen.getByRole('button', { name: 'Phone' }))
+        await flush()
+        expect(hlsState.instances[0].destroy).toHaveBeenCalled()
+        expect(hlsState.instances[1].loadSource).toHaveBeenCalledWith(`${folder}/reel-0-portrait.m3u8`)
+
+        // Safari plays the stream itself.
+        cleanup()
+        vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('maybe')
+        render(<HeroReelManager />)
+        await flush()
+        expect(screen.getByLabelText('Live hero video (desktop version)')).toHaveAttribute('src', `${folder}/reel-0-landscape.m3u8`)
+        expect(hlsState.instances).toHaveLength(2)
     })
 
     it('shows a single older reel without cut buttons', async () => {

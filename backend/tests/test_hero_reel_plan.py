@@ -220,6 +220,22 @@ class SelectionTests(unittest.TestCase):
         # Selection works on copies: trimming one cut never changes the pool.
         self.assertTrue(all(item["duration"] == 5.0 for item in pool["one"]))
 
+    def test_fresh_clips_from_any_video_come_before_reusing_one(self):
+        def clip(media_id, shot):
+            return {"albumId": "a", "mediaId": media_id, "shot": shot, "start": 0.0, "duration": 5.0, "quality": 1, "rate": "24"}
+
+        # "solo" has a single clip that an earlier cut used.
+        pool = {"solo": [clip("solo", "0.0")], "many": [clip("many", f"{index}.0") for index in range(4)]}
+        used = frozenset({"solo|0.0"})
+        for seed in range(8):
+            chosen = plan.select_clips(pool, random.Random(seed), target=15, used=used)
+            self.assertNotIn("solo", {item["mediaId"] for item in chosen})
+        # Reuse only once nothing fresh is left.
+        everything = plan.select_clips(pool, random.Random(1), target=25, used=used)
+        self.assertIn("solo", {item["mediaId"] for item in everything})
+        all_used = frozenset(plan.clip_id(item) for items in pool.values() for item in items)
+        self.assertGreaterEqual(plan.reel_seconds(plan.select_clips(pool, random.Random(1), target=10, used=all_used)), 10 - 1e-6)
+
     def test_interleaving_avoids_back_to_back_clips_from_one_video(self):
         clips = [{"mediaId": "a"}] * 3 + [{"mediaId": "b"}] * 2 + [{"mediaId": "c"}]
         ordered = plan._interleave(clips, random.Random(5))
@@ -234,20 +250,59 @@ class SelectionTests(unittest.TestCase):
 
 
 class FilterGraphTests(unittest.TestCase):
-    def test_graph_hard_cuts_between_clips_without_repeating_any(self):
+    def test_landscape_graph_hard_cuts_into_every_rung_and_a_poster(self):
         clips = [{"duration": 5.0}, {"duration": 4.0}, {"duration": 5.0}]
-        graph, total = plan.filter_graph(clips, "24")
+        graph, total = plan.filter_graph(clips, "24", "landscape")
         self.assertAlmostEqual(total, 14.0)
         self.assertEqual(plan.reel_seconds(clips), 14.0)
         self.assertNotIn("xfade", graph)
         self.assertIn("[c0][c1][c2]concat=n=3:v=1:a=0[joined]", graph)
-        self.assertIn("[joined]trim=duration=14.000,setpts=PTS-STARTPTS,fps=24,split=4", graph)
+        self.assertIn("[joined]trim=duration=14.000,setpts=PTS-STARTPTS,fps=24,split=5", graph)
         self.assertNotIn("[3:v]", graph)
         self.assertIn("[s0]null[out0]", graph)
-        self.assertIn("[s1]scale=1280:720:flags=lanczos[out1]", graph)
-        self.assertIn("[s2]crop=608:1080[out2]", graph)
-        self.assertIn("[s3]trim=end_frame=1[poster]", graph)
-        self.assertIn("crop=1920:1080", plan.clip_filter("24"))
+        self.assertIn("[s1]scale=1920:1080:flags=lanczos[out1]", graph)
+        self.assertIn("[s3]scale=960:540:flags=lanczos[out3]", graph)
+        self.assertIn("[s4]trim=end_frame=1[poster]", graph)
+
+    def test_portrait_graph_has_its_own_master_and_no_poster(self):
+        graph, _ = plan.filter_graph([{"duration": 5.0}], "30", "portrait")
+        self.assertIn("split=3", graph)
+        self.assertIn("[s0]null[out0]", graph)
+        self.assertIn("[s2]scale=540:960:flags=lanczos[out2]", graph)
+        self.assertNotIn("poster", graph)
+
+    def test_clip_filter_covers_the_master_frame_and_tone_maps_hdr(self):
+        self.assertIn("scale=2560:1440:force_original_aspect_ratio=increase", plan.clip_filter("24", "landscape"))
+        self.assertIn("crop=1080:1920", plan.clip_filter("24", "portrait"))
+        self.assertNotIn("tonemap", plan.clip_filter("24", "portrait"))
+        hdr = plan.clip_filter("24", "portrait", hdr=True)
+        self.assertTrue(hdr.startswith("zscale=t=linear"))
+        self.assertIn("tonemap=hable", hdr)
+        self.assertTrue(hdr.endswith("format=yuv420p"))
+
+    def test_master_playlist_lists_the_start_rung_first_with_peak_and_average_rates(self):
+        sizes = {plan.rung_name(1, rung): 3_000_000 for rung in plan.LADDERS["landscape"]}
+        text = plan.master_playlist(1, "landscape", "24000/1001", sizes, 60.0)
+        lines = text.splitlines()
+        self.assertEqual(lines[:3], ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS"])
+        self.assertEqual(
+            [line for line in lines if not line.startswith("#")],
+            ["reel-1-1280x720.m3u8", "reel-1-2560x1440.m3u8", "reel-1-1920x1080.m3u8", "reel-1-960x540.m3u8"],
+        )
+        self.assertIn("BANDWIDTH=4000000,AVERAGE-BANDWIDTH=400000,RESOLUTION=1280x720,FRAME-RATE=23.976", lines[3])
+        self.assertIn('CODECS="avc1.640032"', lines[5])
+        self.assertTrue(text.endswith("\n"))
+        portrait = plan.master_playlist(0, "portrait", "30", {plan.rung_name(0, rung): 1 for rung in plan.LADDERS["portrait"]}, 0)
+        self.assertIn("reel-0-720x1280.m3u8", portrait.splitlines()[4])
+        self.assertIn("FRAME-RATE=30.000", portrait)
+
+    def test_every_rung_fits_its_h264_level(self):
+        # Level 4.1 allows 8192 macroblocks a frame; 5.0 allows 22080.
+        for ladder in plan.LADDERS.values():
+            for rung in ladder:
+                blocks = -(-rung["width"] // 16) * -(-rung["height"] // 16)
+                self.assertLessEqual(blocks, 8192 if rung["level"] == "4.1" else 22080, rung)
+                self.assertEqual(rung["width"] % 2 + rung["height"] % 2, 0)
 
 
 if __name__ == "__main__":

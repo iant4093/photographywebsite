@@ -26,8 +26,10 @@ ACTIVE_STATUSES = ("queued", "running")
 STALE_JOB_SECONDS = 20 * 60
 VERSION_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 REEL_KEY_PATTERN = re.compile(
-    r"^site/hero/versions/video/reel/v1/[a-f0-9]{24}/(?:reel-(?:\d-)?\d{3,4}x\d{3,4}\.mp4|poster(?:-\d)?\.jpg)$"
+    r"^site/hero/versions/video/reel/v1/[a-f0-9]{24}/"
+    r"(?:reel-(?:\d-)?\d{3,4}x\d{3,4}\.mp4|reel-\d-(?:landscape|portrait)\.m3u8|poster(?:-\d)?\.jpg)$"
 )
+ORIENTATIONS = ("landscape", "portrait")
 
 _lambda = None
 _table = None
@@ -85,6 +87,23 @@ def _renditions(items):
     return renditions
 
 
+def _streams(cut):
+    """Adaptive (HLS) master playlists per orientation, or None for older MP4 reels."""
+    streams = {}
+    for orientation in ORIENTATIONS:
+        stream = cut.get(orientation)
+        url = _media_url(stream.get("master")) if isinstance(stream, dict) else None
+        if not url:
+            return None
+        rungs = stream.get("rungs") or []
+        streams[orientation] = {
+            "url": url,
+            "maxHeight": max((int(rung.get("height") or 0) for rung in rungs), default=0),
+            "maxWidth": max((int(rung.get("width") or 0) for rung in rungs), default=0),
+        }
+    return streams
+
+
 def _seconds(value):
     try:
         return round(float(value), 1)
@@ -102,10 +121,15 @@ def _public_record(record):
         if record.get("renditions") else []
     )
     cuts = [
-        {"renditions": _renditions(cut.get("renditions")), "posterUrl": _media_url(cut.get("posterKey")), "duration": _seconds(cut.get("duration"))}
+        {
+            "renditions": _renditions(cut.get("renditions")),
+            "streams": _streams(cut),
+            "posterUrl": _media_url(cut.get("posterKey")),
+            "duration": _seconds(cut.get("duration")),
+        }
         for cut in raw_cuts
     ]
-    cuts = [cut for cut in cuts if cut["renditions"]]
+    cuts = [cut for cut in cuts if cut["renditions"] or cut["streams"]]
     return {
         "version": record["version"],
         "mode": record.get("mode"),

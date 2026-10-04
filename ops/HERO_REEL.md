@@ -30,26 +30,48 @@ copies only the binary into the artifact (about 80 MB unzipped, budgeted in
    did not use (with per-cut ranking noise), so the cuts differ. If the
    catalog is mostly fast cuts, shorter or busier stretches are allowed rather
    than failing; a small catalog may yield fewer than five cuts.
-4. Encode: each clip is trimmed and normalized to 1080p (frame-accurate trims
-   inside the filter graph, because demuxer seeks are unreliable across the
-   discontinuities of concatenated HLS segments). One pass then joins the
-   clips with hard cuts (the loop point is just another cut, from the last
-   clip back to the first) and writes `reel-{cut}-1920x1080.mp4`,
-   `reel-{cut}-1280x720.mp4`, the center-cropped portrait
-   `reel-{cut}-608x1080.mp4` (H.264 high, no audio, faststart, x264 `slow`;
-   CRF 21/22 capped at 5, 2.8 and 2.4 Mbit/s, close to the 5 Mbit/s 1080p
-   sources so the second generation stays clean) and the first frame as
-   `poster-{cut}.jpg`.
+4. Encode: clips are cut from the **original uploads** (typically 4K), not
+   from the 1080p HLS renditions, so the reel is a single generation from
+   the camera-quality source. The bundled ffmpeg is a static build whose own
+   DNS resolution crashes, so it never contacts S3: the worker runs a loopback
+   HTTP server (`SourceServer`, 127.0.0.1, random per-object tokens) that
+   answers ffmpeg's byte-range requests with bounded 8 MB S3 range reads under
+   the worker role. Each original is probed once; HDR (PQ/HLG) originals are
+   tone-mapped to SDR BT.709 (zscale + hable). An original that cannot be read
+   or decoded falls back to the clip's planned 1080p HLS segments (frame-
+   accurate trims inside the filter graph, because demuxer seeks are
+   unreliable across concatenated HLS segments). Each clip is normalized to
+   the orientation's master frame (landscape 2560x1440, portrait 1080x1920
+   centre crop), then one pass joins the clips with hard cuts (the loop point
+   is just another cut back to the first clip) and encodes that orientation's
+   adaptive ladder:
 
-Five cuts do not fit one 15-minute invocation, so a build is a chained batch:
-the first invocation analyses and plans every cut (each planned clip records
-the exact HLS segments that cover it) and stores the plan in the `build` state
-record; each following invocation (`action: build-cut`) encodes one cut,
-appends its result with a conditional write, and asynchronously invokes the
-function for the next cut. A retried invocation finds its cut already appended
-and only advances; a newer batch supersedes an older one. Expect roughly 20 to
-30 minutes per batch at 10 GB / 6 vCPU (4 GB of `/tmp`, reserved concurrency
-1; the next link waits a moment in Lambda's async retry until the previous one
+   | Orientation | Rungs (peak Mbit/s) |
+   | --- | --- |
+   | landscape | 2560x1440 (12), 1920x1080 (8), 1280x720 (4), 960x540 (1.6) |
+   | portrait | 1080x1920 (8), 720x1280 (4), 540x960 (1.6) |
+
+   x264 `medium`, CRF 19-22 under those caps, keyframes every 4 s with no
+   scene-cut keyframes so every rung switches at the same segment
+   boundaries. Each rung is one fragmented MP4 addressed by byte ranges
+   (`reel-{cut}-{w}x{h}.mp4` plus its `.m3u8`); the worker writes the master
+   playlist `reel-{cut}-{orientation}.m3u8` itself (peak `BANDWIDTH`, measured
+   `AVERAGE-BANDWIDTH`, the 720p rung first because Safari starts on the first
+   variant). The landscape pass also writes the first frame as
+   `poster-{cut}.jpg` (2560 wide).
+
+Five cuts in two orientations do not fit one 15-minute invocation, so a build
+is a chained batch: the first invocation analyses and plans every cut (each
+planned clip records its original and the exact HLS segments that cover it)
+and stores the plan in the `build` state record; each following invocation
+(`action: build-cut`, `step` n) encodes one orientation of one cut (step
+2c = landscape of cut c, 2c+1 = portrait), uploads it (rungs first, master
+last), appends its result with a conditional write, and asynchronously invokes
+the function for the next step. A retried invocation finds its step already
+appended and only advances; a newer batch supersedes an older one, and a batch
+planned by an older worker version is abandoned. Expect roughly 40 to 60
+minutes per batch at 10 GB / 6 vCPU (4 GB of `/tmp`, reserved concurrency 1;
+the next link waits a moment in Lambda's async retry until the previous one
 returns).
 
 ## Publish
@@ -58,9 +80,10 @@ returns).
   `visibility=public`, one-year immutable caching (the `site/hero/versions/*`
   behaviour has no edge TTL, so deleted versions disappear immediately).
 - Pointer: `site/hero/video/reel.json` (short cache, invalidated on publish),
-  schema 2, lists only each cut's renditions. An empty pointer
-  (`"version": null`) removes the reel. The frontend accepts only the exact
-  keys the worker writes and still reads the older single-reel schema 1.
+  schema 3: each cut lists its landscape and portrait master playlists
+  (`streams`), or MP4 `renditions` for a reel published before adaptive
+  streams. An empty pointer (`"version": null`) removes the reel. The frontend
+  accepts only the exact keys the worker writes and still reads schemas 1-2.
 - Poster: the first cut's first frame is handed to the existing still-hero
   pipeline (`temp-zips/video-hero-pending` plus a `kind: hero` PreviewQueue
   job); the reel's fade-in covers the other cuts' different first frames. The
@@ -92,12 +115,17 @@ returns).
 ## Frontend
 
 `src/components/HeroReel.jsx` loads the pointer only after the page `load`
-event and idle time and picks one cut at random. It skips reduced-motion, Save-Data and 2G visitors,
-picks the portrait cut for tall heroes and otherwise the smallest landscape
-file that covers the hero at up to 2× density. It plays muted and inline while
+event and idle time and picks one cut at random. It skips reduced-motion,
+Save-Data and 2G visitors and picks the portrait stream for tall heroes,
+otherwise the landscape one. Safari plays the stream natively; elsewhere
+hls.js (lazy `vendor-hls` chunk) does, capped to the hero's on-screen size,
+seeded with the reported downlink (or 5 Mbit/s) and then adapting to measured
+bandwidth, so slow connections stay on a low rung instead of stalling and
+fast ones climb to 1440p within a few segments. Older MP4 cuts still play as
+files. It plays muted and inline while
 the hero is on screen, pauses off screen or in background tabs, and releases
-the decoder after 15 seconds away. Two stacked video layers handle rotation
-and resizes: the new rendition of the same cut loads hidden behind the playing
+the decoder after 15 seconds away. Two stacked video layers handle rotation:
+the other orientation's stream of the same cut loads hidden behind the playing
 one, seeks to the same moment (aiming ahead by the seek's own delay), and is
 revealed once it plays, so the reel continues instead of restarting. A
 rendition that fails to load is not retried; the working one keeps playing. If autoplay is refused (for example iOS Low
@@ -112,5 +140,5 @@ Power Mode) or the file fails, the still image stays.
   making no videos eligible or write `{"schemaVersion":2,"version":null,"cuts":[]}`
   to the pointer key and invalidate `/site/hero/video/reel.json`.
 - Cost: an unchanged reconcile is a short daily GSI query (well under a cent a
-  month); a five-cut batch is about 15,000 GB-seconds (~$0.25) plus one
+  month); a five-cut batch is about 30,000 GB-seconds (~$0.50) plus one
   pointer invalidation and the still-hero invalidations.

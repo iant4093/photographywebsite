@@ -1,8 +1,10 @@
 """Build the silent, looping Videos-page hero reel from public videos.
 
 The worker samples bounded windows of each public video's HLS rendition,
-finds calm shots with ffmpeg's scene detector, splices short clips together
-with hard cuts, and publishes three MP4 renditions plus a poster frame.
+finds calm shots with ffmpeg's scene detector, cuts the chosen clips from the
+original uploads (falling back to the HLS rendition), splices them with hard
+cuts, and publishes adaptive HLS ladders (landscape and portrait) plus a
+poster frame.
 
 Actions:
   reconcile  scheduled; rebuilds and publishes only when the public video
@@ -20,9 +22,13 @@ import hashlib
 import json
 import logging
 import os
+import http.server
+import re
+import secrets
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.parse
 import uuid
@@ -35,7 +41,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 from album_media_store import MEDIA_STORE_VERSION, query_album_media
 from hero_reel_plan import (
     BUILDER_VERSION,
-    RENDITIONS,
+    LADDERS,
+    ORIENTATIONS,
+    SEGMENT_SECONDS,
     PlaylistError,
     candidate_clips,
     choose_variant,
@@ -45,12 +53,14 @@ from hero_reel_plan import (
     filter_graph,
     frame_rate,
     input_digest,
+    master_playlist,
     output_rate,
     parse_frame_metadata,
     parse_master_playlist,
     parse_media_playlist,
     plan_analysis,
     reel_seconds,
+    rung_name,
     seeded_random,
     select_clips,
 )
@@ -67,7 +77,7 @@ POSTER_PENDING_KEY = "temp-zips/video-hero-pending"
 MAX_PLAYLIST_BYTES = 512 * 1024
 MAX_SEGMENT_BYTES = 96 * 1024 * 1024
 MAX_WINDOW_BYTES = 320 * 1024 * 1024
-MAX_RENDITION_BYTES = 80 * 1024 * 1024
+MAX_RENDITION_BYTES = 160 * 1024 * 1024
 MAX_POSTER_BYTES = 8 * 1024 * 1024
 MIN_REEL_SECONDS = 12.0
 ENCODE_RESERVE_MS = 240_000
@@ -75,6 +85,9 @@ ANALYSIS_RESERVE_MS = 420_000
 PENDING_RETRY_SECONDS = 24 * 60 * 60
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
 CUT_COUNT = 5
+SOURCE_CHUNK_BYTES = 1024 * 1024
+SOURCE_BLOCK_BYTES = 8 * 1024 * 1024
+HDR_TRANSFERS = ("smpte2084", "arib-std-b67")
 # A batch whose chain stopped advancing stops blocking new batches after this.
 BUILD_STALE_SECONDS = 20 * 60
 
@@ -173,6 +186,7 @@ def eligible_videos():
             videos.append({
                 "albumId": album["albumId"],
                 "mediaId": media_id_for_key(raw_key),
+                "rawKey": raw_key,
                 "hlsKey": hls_key,
                 "createdAt": str(album.get("uploadedAt") or album.get("createdAt") or ""),
             })
@@ -249,10 +263,10 @@ def download_segments(segments, workspace, cache):
 
 # ---------------------------------------------------------------- ffmpeg
 
-def _run_ffmpeg(arguments, timeout):
+def _run_ffmpeg(arguments, timeout, cwd=None):
     command = [ffmpeg_path(), "-hide_banner", "-nostdin", "-loglevel", "error", *arguments]
     try:
-        completed = subprocess.run(command, capture_output=True, timeout=max(5, timeout), check=False)
+        completed = subprocess.run(command, capture_output=True, timeout=max(5, timeout), check=False, cwd=cwd)
     except subprocess.TimeoutExpired as error:
         raise ReelError("ffmpeg_timeout") from error
     if completed.returncode != 0:
@@ -272,21 +286,153 @@ def analyse_window(source, metadata_path, timeout):
         return parse_frame_metadata(handle.read())
 
 
-def normalize_clip(clip, source, offset, rate, path, timeout):
-    """Cut one clip to the 1080p working format.
+class _SourceHandler(http.server.BaseHTTPRequestHandler):
+    """Serve registered S3 objects to ffmpeg with byte-range support."""
 
-    Decoding every 4K source at once inside the joining graph would hold a
-    frame queue per input; normalizing first keeps memory flat.
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def do_HEAD(self):
+        self._serve(body=False)
+
+    def do_GET(self):
+        self._serve(body=True)
+
+    def _serve(self, body):
+        server = self.server
+        key = server.sources.get(self.path.rsplit("/", 1)[-1])
+        if not key:
+            self.send_error(404)
+            return
+        try:
+            size = server.size(key)
+        except ClientError:
+            self.send_error(404)
+            return
+        match = re.fullmatch(r"bytes=(\d+)-(\d*)", self.headers.get("Range", "").strip())
+        start, end = 0, size - 1
+        if match:
+            start = int(match.group(1))
+            end = min(size - 1, int(match.group(2))) if match.group(2) else size - 1
+            if start >= size or start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+        self.send_response(206 if match else 200)
+        if match:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Content-Type", "application/octet-stream")
+        self.end_headers()
+        if not body or end < start:
+            return
+        # ffmpeg asks for open-ended ranges and hangs up when it seeks, so
+        # fetch bounded blocks lazily instead of one request to the end.
+        position = start
+        try:
+            while position <= end:
+                last = min(end, position + SOURCE_BLOCK_BYTES - 1)
+                stream = _client("s3").get_object(Bucket=_bucket(), Key=key, Range=f"bytes={position}-{last}")["Body"]
+                try:
+                    for chunk in iter(lambda: stream.read(SOURCE_CHUNK_BYTES), b""):
+                        self.wfile.write(chunk)
+                finally:
+                    stream.close()
+                position = last + 1
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+
+class SourceServer(http.server.ThreadingHTTPServer):
+    """A loopback HTTP endpoint for original uploads.
+
+    The bundled ffmpeg is a static build whose own name resolution crashes,
+    so it never talks to S3 directly: it reads 127.0.0.1 with plain HTTP and
+    this server fetches the requested byte ranges from S3 with the worker's
+    role. Only registered keys are served, under random tokens.
     """
-    # Trim inside the graph rather than with -ss: demuxer seeks are unreliable
-    # across the timestamp discontinuities of concatenated HLS segments.
+
+    daemon_threads = True
+
+    def __init__(self):
+        super().__init__(("127.0.0.1", 0), _SourceHandler)
+        self.sources = {}
+        self._sizes = {}
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.shutdown()
+        self.server_close()
+
+    def register(self, key):
+        token = secrets.token_hex(12)
+        self.sources[token] = key
+        return f"http://127.0.0.1:{self.server_address[1]}/source/{token}"
+
+    def size(self, key):
+        with self._lock:
+            if key not in self._sizes:
+                head = _client("s3").head_object(Bucket=_bucket(), Key=key)
+                self._sizes[key] = int(head["ContentLength"])
+            return self._sizes[key]
+
+
+def _network_input():
+    return ["-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "4", "-rw_timeout", "30000000"]
+
+
+def probe_original(url, timeout):
+    """Read an original's stream header; None when it cannot be decoded here."""
+    command = [ffmpeg_path(), "-hide_banner", "-nostdin", *_network_input(), "-i", url]
+    try:
+        completed = subprocess.run(command, capture_output=True, timeout=max(5, timeout), check=False)
+    except subprocess.TimeoutExpired:
+        return None
+    text = completed.stderr.decode("utf-8", "replace")
+    video = next((line for line in text.splitlines() if re.search(r"Stream #\d+:\d+.*: Video: ", line)), None)
+    if video is None:
+        return None
+    size = re.search(r", (\d{2,5})x(\d{2,5})[ ,]", video)
+    return {
+        "hdr": any(transfer in video for transfer in HDR_TRANSFERS),
+        "width": int(size.group(1)) if size else 0,
+        "height": int(size.group(2)) if size else 0,
+    }
+
+
+def normalize_clip(clip, source, rate, orientation, path, timeout):
+    """Cut one clip to the orientation's master frame.
+
+    `source` is either an original upload (a URL read with an accurate input
+    seek) or concatenated HLS segments. Decoding every source at once inside
+    the joining graph would hold a frame queue per input; normalizing first
+    keeps memory flat.
+    """
+    if source["kind"] == "original":
+        arguments = [
+            *_network_input(),
+            "-ss", f"{clip['start']:.3f}", "-t", f"{clip['duration'] + 0.2:.3f}", "-i", source["url"],
+        ]
+        trim = ""
+    else:
+        # Trim inside the graph rather than with -ss: demuxer seeks are
+        # unreliable across the timestamp discontinuities of concatenated HLS.
+        arguments = ["-i", source["path"]]
+        trim = f"setpts=PTS-STARTPTS,trim=start={max(0.0, source['offset']):.3f}:duration={clip['duration']:.3f},"
     _run_ffmpeg([
-        "-i", source,
+        *arguments,
         "-an", "-sn", "-dn",
-        "-vf", (
-            f"setpts=PTS-STARTPTS,trim=start={max(0.0, offset):.3f}:duration={clip['duration']:.3f},"
-            f"setpts=PTS-STARTPTS,{clip_filter(rate)}"
-        ),
+        "-vf", f"{trim}setpts=PTS-STARTPTS,{clip_filter(rate, orientation, source.get('hdr', False))}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p",
         "-map_metadata", "-1", "-y", path,
     ], timeout)
@@ -295,45 +441,76 @@ def normalize_clip(clip, source, offset, rate, path, timeout):
     return path
 
 
-def encode_reel(clips, sources, workspace, deadline):
-    """Normalize each clip, then encode every rendition and the poster frame."""
+def _check_rung_playlist(path, media_name):
+    """The rung playlist may only point at its own media file."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        lines = [line.strip() for line in handle if line.strip()]
+    uris = [line for line in lines if not line.startswith("#")]
+    maps = re.findall(r'URI="([^"]*)"', "\n".join(lines))
+    if not lines or lines[0] != "#EXTM3U" or "#EXT-X-ENDLIST" not in lines or not uris:
+        raise ReelError("encode_bad_playlist")
+    if any(uri != media_name for uri in [*uris, *maps]):
+        raise ReelError("encode_bad_playlist")
+
+
+def encode_ladder(clips, sources, orientation, cut, workspace, deadline):
+    """Normalize each clip, then encode the orientation's HLS ladder.
+
+    Every rung is a single fragmented MP4 addressed by byte ranges, with
+    keyframes on a fixed grid so players can switch rungs at any segment.
+    The landscape pass also writes the poster frame.
+    """
     rate = output_rate(clips)
     normalized = []
-    for index, (clip, (source, offset)) in enumerate(zip(clips, sources)):
+    for index, (clip, source) in enumerate(zip(clips, sources)):
         normalized.append(normalize_clip(
-            clip, source, offset, rate, os.path.join(workspace, f"normalized-{index}.mp4"),
+            clip, source, rate, orientation, os.path.join(workspace, f"normalized-{index}.mp4"),
             max(5, deadline - time.monotonic()),
         ))
-    graph, seconds = filter_graph(clips, rate)
+    graph, seconds = filter_graph(clips, rate, orientation)
+    output = os.path.join(workspace, "out")
+    os.makedirs(output, exist_ok=True)
     arguments = []
     for path in normalized:
         arguments += ["-i", path]
     arguments += ["-filter_complex", graph]
-    gop = "48" if rate in {"24", "24000/1001", "25"} else "60"
-    outputs = {}
-    for index, rendition in enumerate(RENDITIONS):
-        path = os.path.join(workspace, f"{rendition['name']}.mp4")
-        outputs[rendition["name"]] = path
+    rungs = {}
+    for index, rung in enumerate(LADDERS[orientation]):
+        name = rung_name(cut, rung)
+        rungs[name] = rung
         arguments += [
             "-map", f"[out{index}]", "-an",
-            "-c:v", "libx264", "-preset", "slow", "-crf", str(rendition["crf"]),
-            "-maxrate", rendition["maxrate"], "-bufsize", rendition["bufsize"],
-            "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p",
-            "-g", gop, "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
-            "-movflags", "+faststart", "-tag:v", "avc1", "-map_metadata", "-1", "-y", path,
+            "-c:v", "libx264", "-preset", "medium", "-crf", str(rung["crf"]),
+            "-maxrate", f"{rung['maxrate']}k", "-bufsize", f"{rung['maxrate'] * 2}k",
+            "-profile:v", "high", "-level:v", rung["level"], "-pix_fmt", "yuv420p",
+            "-force_key_frames", f"expr:gte(t,n_forced*{SEGMENT_SECONDS})", "-sc_threshold", "0",
+            "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
+            "-map_metadata", "-1",
+            "-f", "hls", "-hls_time", str(SEGMENT_SECONDS), "-hls_playlist_type", "vod",
+            "-hls_segment_type", "fmp4", "-hls_flags", "single_file+independent_segments",
+            "-hls_segment_filename", f"{name}.mp4", "-y", f"{name}.m3u8",
         ]
-    poster = os.path.join(workspace, "poster.jpg")
-    arguments += ["-map", "[poster]", "-frames:v", "1", "-q:v", "2", "-map_metadata", "-1", "-y", poster]
-    _run_ffmpeg(arguments, max(5, deadline - time.monotonic()))
-    for path in [*outputs.values(), poster]:
-        if not os.path.isfile(path) or os.path.getsize(path) == 0:
-            raise ReelError("encode_missing_output")
-        if os.path.getsize(path) > MAX_RENDITION_BYTES:
+    poster = None
+    if orientation == "landscape":
+        poster = os.path.join(output, "poster.jpg")
+        arguments += ["-map", "[poster]", "-frames:v", "1", "-q:v", "2", "-map_metadata", "-1", "-y", "poster.jpg"]
+    _run_ffmpeg(arguments, max(5, deadline - time.monotonic()), cwd=output)
+    files = {}
+    for name, rung in rungs.items():
+        media, playlist = os.path.join(output, f"{name}.mp4"), os.path.join(output, f"{name}.m3u8")
+        for path in (media, playlist):
+            if not os.path.isfile(path) or os.path.getsize(path) == 0:
+                raise ReelError("encode_missing_output")
+        if os.path.getsize(media) > MAX_RENDITION_BYTES:
             raise ReelError("encode_too_large")
-    return outputs, poster, seconds, rate
+        _check_rung_playlist(playlist, f"{name}.mp4")
+        files[name] = {"media": media, "playlist": playlist, "width": rung["width"], "height": rung["height"],
+                       "bytes": os.path.getsize(media)}
+    if poster is not None and (not os.path.isfile(poster) or os.path.getsize(poster) == 0):
+        raise ReelError("encode_missing_output")
+    master = master_playlist(cut, orientation, rate, {name: item["bytes"] for name, item in files.items()}, seconds)
+    return {"files": files, "master": master, "poster": poster, "seconds": seconds, "rate": rate}
 
-
-# ---------------------------------------------------------------- build
 
 def _remaining_ms(context):
     try:
@@ -406,10 +583,12 @@ def plan_cuts(videos, seed, context, workspace):
         used.update(clip_id(clip) for clip in clips)
         planned = []
         for clip in clips:
-            segments = analysed[clip["mediaId"]]["plan"]["outputSegments"]
-            covering = _segments_covering(segments, clip["start"], clip["start"] + clip["duration"])
+            video = analysed[clip["mediaId"]]["plan"]
+            covering = _segments_covering(video["outputSegments"], clip["start"], clip["start"] + clip["duration"])
             planned.append({
                 **clip,
+                "rawKey": video.get("rawKey"),
+                # The HLS fallback for an original that cannot be read.
                 "segments": [{"key": item["key"], "start": item["start"]} for item in covering],
             })
         cuts.append(planned)
@@ -420,47 +599,75 @@ def plan_cuts(videos, seed, context, workspace):
     }
 
 
-def encode_cut(clips, context, workspace):
-    """Fetch the planned segments for one cut and encode it."""
-    cache = {}
-    sources = []
+def clip_sources(clips, server, workspace, deadline):
+    """Where each clip is cut from: its original upload, else HLS segments.
+
+    Originals are probed once each; anything that cannot be read or decoded
+    here falls back to the 1080p HLS rendition.
+    """
+    probes, cache, sources = {}, {}, []
     for clip in clips:
+        raw_key = clip.get("rawKey")
+        if raw_key:
+            if raw_key not in probes:
+                url = server.register(raw_key)
+                probe = probe_original(url, min(60, max(5, deadline - time.monotonic())))
+                probes[raw_key] = {**probe, "url": url} if probe else None
+            probe = probes[raw_key]
+            if probe:
+                sources.append({"kind": "original", "url": probe["url"], "hdr": probe["hdr"]})
+                continue
         try:
-            source = download_segments(clip["segments"], workspace, cache)
+            path = download_segments(clip["segments"], workspace, cache)
         except PlaylistError as error:
             raise ReelError("clip_download_failed") from error
-        sources.append((source, clip["start"] - clip["segments"][0]["start"]))
+        sources.append({"kind": "hls", "path": path, "offset": clip["start"] - clip["segments"][0]["start"]})
+    fallbacks = sum(1 for source in sources if source["kind"] == "hls")
+    if fallbacks:
+        logger.info("hero_reel_source_fallback clips=%d of=%d", fallbacks, len(sources))
+    return sources
+
+
+def encode_step(clips, orientation, cut, context, workspace):
+    """Encode one orientation of one cut."""
     remaining = _remaining_ms(context)
     if remaining < ENCODE_RESERVE_MS:
         raise ReelError("timeout")
     deadline = time.monotonic() + (remaining - 60_000) / 1000
-    outputs, poster, seconds, rate = encode_reel(clips, sources, workspace, deadline)
-    return {"outputs": outputs, "poster": poster, "seconds": round(seconds, 2), "rate": rate}
+    with SourceServer() as server:
+        sources = clip_sources(clips, server, workspace, deadline)
+        return encode_ladder(clips, sources, orientation, cut, workspace, deadline)
 
 
-def upload_cut(version, cut, result):
-    s3 = _client("s3")
-    renditions = []
-    for rendition in RENDITIONS:
-        width, height = rendition["width"], rendition["height"]
-        key = f"{REEL_PREFIX}{version}/reel-{cut}-{width}x{height}.mp4"
-        path = result["outputs"][rendition["name"]]
-        with open(path, "rb") as body:
-            s3.put_object(
-                Bucket=_bucket(), Key=key, Body=body, ContentType="video/mp4",
-                CacheControl="public, max-age=31536000, immutable",
-                ServerSideEncryption="AES256", Tagging="visibility=public",
-                Metadata={"generator": BUILDER_VERSION},
-            )
-        renditions.append({"key": key, "width": width, "height": height, "bytes": os.path.getsize(path)})
-    poster_key = f"{REEL_PREFIX}{version}/poster-{cut}.jpg"
-    with open(result["poster"], "rb") as body:
-        s3.put_object(
-            Bucket=_bucket(), Key=poster_key, Body=body, ContentType="image/jpeg",
-            CacheControl="public, max-age=31536000, immutable",
-            ServerSideEncryption="AES256", Tagging="visibility=public",
-        )
-    return renditions, poster_key
+def _put(key, body, content_type):
+    _client("s3").put_object(
+        Bucket=_bucket(), Key=key, Body=body, ContentType=content_type,
+        CacheControl="public, max-age=31536000, immutable",
+        ServerSideEncryption="AES256", Tagging="visibility=public",
+        Metadata={"generator": BUILDER_VERSION},
+    )
+
+
+def upload_step(version, cut, orientation, result):
+    """Upload one ladder; the master playlist goes last, once its rungs exist."""
+    folder = f"{REEL_PREFIX}{version}/"
+    rungs = []
+    for name, item in result["files"].items():
+        with open(item["media"], "rb") as body:
+            _put(f"{folder}{name}.mp4", body, "video/mp4")
+        with open(item["playlist"], "rb") as body:
+            _put(f"{folder}{name}.m3u8", body, "application/vnd.apple.mpegurl")
+        rungs.append({"width": item["width"], "height": item["height"], "bytes": item["bytes"]})
+    master_key = f"{folder}reel-{cut}-{orientation}.m3u8"
+    _put(master_key, result["master"].encode("utf-8"), "application/vnd.apple.mpegurl")
+    entry = {"cut": cut, "orientation": orientation, "master": master_key, "rungs": rungs,
+             "duration": str(round(result["seconds"], 2)), "fps": result["rate"]}
+    if result["poster"]:
+        poster_key = f"{folder}poster-{cut}.jpg"
+        with open(result["poster"], "rb") as body:
+            _put(poster_key, body, "image/jpeg")
+        entry["posterKey"] = poster_key
+    return entry
 
 
 def record_cuts(record):
@@ -472,9 +679,20 @@ def record_cuts(record):
     return []
 
 
+def _cuts_from_steps(results):
+    """Pair each cut's landscape and portrait step results."""
+    cuts = {}
+    for entry in results:
+        cut = cuts.setdefault(int(entry["cut"]), {"duration": entry["duration"], "fps": entry["fps"]})
+        cut[entry["orientation"]] = {"master": entry["master"], "rungs": entry["rungs"]}
+        if entry.get("posterKey"):
+            cut["posterKey"] = entry["posterKey"]
+    return [cuts[index] for index in sorted(cuts) if all(orientation in cuts[index] for orientation in ORIENTATIONS)]
+
+
 def _reel_record(build, mode):
     plans = json.loads(build["plan"])
-    cuts = [dict(item) for item in build["results"]]
+    cuts = _cuts_from_steps(build["results"])
     clips = [clip for cut in plans[: len(cuts)] for clip in cut]
     return {
         "version": build["version"],
@@ -495,23 +713,37 @@ def _reel_record(build, mode):
 
 # ---------------------------------------------------------------- publish
 
+def _pointer_cut(cut):
+    if cut.get("landscape"):
+        return {
+            "duration": float(cut["duration"]),
+            "streams": {
+                orientation: {
+                    "key": cut[orientation]["master"],
+                    "maxWidth": max(int(rung["width"]) for rung in cut[orientation]["rungs"]),
+                    "maxHeight": max(int(rung["height"]) for rung in cut[orientation]["rungs"]),
+                }
+                for orientation in ORIENTATIONS
+            },
+        }
+    # A reel published before adaptive streams: progressive MP4 renditions.
+    return {
+        "duration": float(cut["duration"]),
+        "renditions": [
+            {"key": item["key"], "width": int(item["width"]), "height": int(item["height"]), "bytes": int(item["bytes"])}
+            for item in cut["renditions"]
+        ],
+    }
+
+
 def pointer_document(record):
     if not record:
-        return {"schemaVersion": 2, "version": None, "cuts": []}
+        return {"schemaVersion": 3, "version": None, "cuts": []}
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "version": record["version"],
         "publishedAt": record.get("publishedAt") or _now(),
-        "cuts": [
-            {
-                "duration": float(cut["duration"]),
-                "renditions": [
-                    {"key": item["key"], "width": int(item["width"]), "height": int(item["height"]), "bytes": int(item["bytes"])}
-                    for item in cut["renditions"]
-                ],
-            }
-            for cut in record_cuts(record)
-        ],
+        "cuts": [_pointer_cut(cut) for cut in record_cuts(record)],
     }
 
 
@@ -683,16 +915,21 @@ def _build_active(state):
     return str(build.get("updatedAt") or "") > stale.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _invoke_next(context, batch_id, cut):
+def _invoke_next(context, batch_id, step):
     _client("lambda").invoke(
         FunctionName=context.invoked_function_arn,
         InvocationType="Event",
-        Payload=json.dumps({"action": "build-cut", "batchId": batch_id, "cut": cut}, separators=(",", ":")).encode("utf-8"),
+        Payload=json.dumps({"action": "build-cut", "batchId": batch_id, "step": step}, separators=(",", ":")).encode("utf-8"),
     )
 
 
+def _step(step):
+    """Each cut is two steps: its landscape ladder, then its portrait one."""
+    return step // len(ORIENTATIONS), ORIENTATIONS[step % len(ORIENTATIONS)]
+
+
 def start_batch(videos, seed, mode, context, request_id=None):
-    """Plan every cut, record the batch, and hand cut 0 to the next invocation.
+    """Plan every cut, record the batch, and hand step 0 to the next invocation.
 
     Starting a batch supersedes any batch already in flight.
     """
@@ -706,12 +943,14 @@ def start_batch(videos, seed, mode, context, request_id=None):
     version = hashlib.sha256(f"{digest}|{seed}|{batch_id}".encode("utf-8")).hexdigest()[:24]
     save_state({"build": {
         "batchId": batch_id,
+        "builder": BUILDER_VERSION,
         "mode": mode,
         "requestId": request_id,
         "version": version,
         "digest": digest,
         "plan": json.dumps(planned["cuts"], separators=(",", ":")),
         "cutCount": len(planned["cuts"]),
+        "stepCount": len(planned["cuts"]) * len(ORIENTATIONS),
         "results": [],
         "pending": planned["pending"],
         "pendingKeys": planned["pendingKeys"],
@@ -721,14 +960,14 @@ def start_batch(videos, seed, mode, context, request_id=None):
     return {"status": "building", "version": version, "cuts": len(planned["cuts"])}
 
 
-def _append_result(batch_id, cut, result):
+def _append_result(batch_id, step, result):
     try:
         _table("GALLERY_SETTINGS_TABLE").update_item(
             Key=STATE_KEY,
             UpdateExpression="SET #build.#results = list_append(#build.#results, :result), #build.#updatedAt = :now",
-            ConditionExpression="#build.#batchId = :batch AND size(#build.#results) = :cut",
+            ConditionExpression="#build.#batchId = :batch AND size(#build.#results) = :step",
             ExpressionAttributeNames={"#build": "build", "#results": "results", "#updatedAt": "updatedAt", "#batchId": "batchId"},
-            ExpressionAttributeValues={":result": [result], ":now": _now(), ":batch": batch_id, ":cut": cut},
+            ExpressionAttributeValues={":result": [result], ":now": _now(), ":batch": batch_id, ":step": step},
         )
         return True
     except ClientError as error:
@@ -749,45 +988,49 @@ def _fail_batch(build, reason):
 
 
 def build_cut(event, context):
-    """Encode one planned cut, then chain to the next or finish the batch."""
+    """Encode one planned step, then chain to the next or finish the batch."""
     state = load_state()
     build = state.get("build")
     batch_id = str(event.get("batchId") or "")
     try:
-        cut = int(event.get("cut"))
+        step = int(event.get("step"))
     except (TypeError, ValueError):
         return {"status": "rejected"}
     if not isinstance(build, dict) or build.get("batchId") != batch_id:
         return {"status": "superseded"}
+    if build.get("builder") != BUILDER_VERSION:
+        # Planned by an older worker whose results this one cannot read.
+        return _fail_batch(build, "builder_changed")
     plans = json.loads(build["plan"])
+    total = int(build["stepCount"])
     done = len(build.get("results") or [])
-    if cut < done:
-        # A retried invocation: the cut is already encoded.
+    if step < done:
+        # A retried invocation: the step is already encoded.
         return _advance(state, build, context, done)
-    if cut != done or cut >= len(plans):
+    if step != done or step >= total:
         return {"status": "rejected"}
+    cut, orientation = _step(step)
     workspace = tempfile.mkdtemp(prefix="hero-reel-", dir="/tmp")
     try:
-        result = encode_cut(plans[cut], context, workspace)
-        renditions, poster_key = upload_cut(build["version"], cut, result)
+        result = encode_step(plans[cut], orientation, cut, context, workspace)
+        entry = upload_step(build["version"], cut, orientation, result)
     except ReelError as error:
         return _fail_batch(build, error.reason)
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
-    entry = {"renditions": renditions, "posterKey": poster_key, "duration": str(result["seconds"]), "fps": result["rate"]}
-    if not _append_result(batch_id, cut, entry):
+    if not _append_result(batch_id, step, entry):
         return {"status": "superseded"}
     build = {**build, "results": [*(build.get("results") or []), entry]}
     if build.get("mode") == "draft" and build.get("requestId"):
-        save_state({"job": _job(build["requestId"], "draft", "running", progress=cut + 1, total=len(plans))})
-    return _advance(state, build, context, cut + 1)
+        save_state({"job": _job(build["requestId"], "draft", "running",
+                                progress=(step + 1) // len(ORIENTATIONS), total=len(plans))})
+    return _advance(state, build, context, step + 1)
 
 
 def _advance(state, build, context, done):
-    plans_total = int(build.get("cutCount") or len(json.loads(build["plan"])))
-    if done < plans_total:
+    if done < int(build["stepCount"]):
         _invoke_next(context, build["batchId"], done)
-        return {"status": "building", "cut": done}
+        return {"status": "building", "step": done}
     return finish_batch(state, build)
 
 

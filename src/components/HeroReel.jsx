@@ -1,11 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
 import useMediaQuery from '../hooks/useMediaQuery'
-import { chooseHeroReelRendition, fetchHeroReel, heroReelAllowed, pickHeroReelCut } from '../utils/heroReel'
+import { chooseHeroReelSource, fetchHeroReel, heroReelAllowed, pickHeroReelCut } from '../utils/heroReel'
+import { canPlayHlsNatively, isHlsUrl, loadHlsLibrary } from '../utils/hlsSource'
 import './HeroReel.css'
 
 // Leaving the hero pauses immediately; staying away this long also releases
 // the decoder and buffered video so long scroll sessions stay light.
 export const HERO_REEL_UNLOAD_MS = 15_000
+
+// hls.js starts from this bandwidth guess until it has measured the first
+// segments; browsers that report a downlink seed it instead.
+function startingEstimate() {
+    const downlink = Number(navigator.connection?.downlink)
+    return Number.isFinite(downlink) && downlink > 0
+        ? Math.min(20e6, Math.max(1.5e6, downlink * 1e6 * 0.8))
+        : 5e6
+}
+
+// Adaptive cuts need native HLS (Safari) or hls.js; older MP4 cuts need
+// neither. Resolves to the cut and the hls.js class it needs, or null.
+async function playableCut(cut) {
+    if (!cut?.streams || canPlayHlsNatively(document.createElement('video'))) return cut && { ...cut, Hls: null }
+    const Hls = await loadHlsLibrary().catch(() => null)
+    if (Hls) return { ...cut, Hls }
+    return cut.renditions?.length ? { ...cut, streams: null, Hls: null } : null
+}
 
 function whenPageSettles(callback) {
     let idle = null
@@ -32,6 +51,8 @@ function prepare(video) {
 
 function release(layer) {
     if (!layer.url) return
+    layer.hls?.destroy()
+    layer.hls = null
     layer.video.pause()
     layer.video.removeAttribute('src')
     layer.video.load()
@@ -40,8 +61,9 @@ function release(layer) {
 
 // A silent, looping compilation layered over the still hero. The still stays
 // the LCP image and the fallback; the reel fades in only once it is playing.
-// Two stacked video layers let a rotation or resize swap to another rendition
-// of the same cut at the same moment instead of restarting it. The page passes
+// Two stacked video layers let a rotation or resize swap to another stream
+// of the same cut at the same moment instead of restarting it; within one
+// adaptive stream the player moves between qualities by itself. The page passes
 // `videoRef` (the wrapper) so the hero parallax can move both layers.
 export default function HeroReel({ videoRef }) {
     const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
@@ -56,7 +78,8 @@ export default function HeroReel({ videoRef }) {
         const controller = new AbortController()
         const cancel = whenPageSettles(() => {
             fetchHeroReel({ signal: controller.signal })
-                .then((value) => { if (!controller.signal.aborted) setReel(pickHeroReelCut(value)) })
+                .then((value) => playableCut(pickHeroReelCut(value)))
+                .then((cut) => { if (!controller.signal.aborted) setReel(cut) })
                 .catch(() => {})
         })
         return () => {
@@ -67,7 +90,7 @@ export default function HeroReel({ videoRef }) {
 
     useEffect(() => {
         const section = videoRef.current?.closest('section')
-        const layers = [firstRef.current, secondRef.current].map((video) => ({ video, url: '' }))
+        const layers = [firstRef.current, secondRef.current].map((video) => ({ video, url: '', hls: null }))
         if (!section || !reel || layers.some(({ video }) => !video)) return undefined
         layers.forEach(({ video }) => prepare(video))
         let active = 0
@@ -81,11 +104,11 @@ export default function HeroReel({ videoRef }) {
 
         const pick = () => {
             const rect = section.getBoundingClientRect()
-            return chooseHeroReelRendition(reel, {
+            return chooseHeroReelSource(reel, {
                 width: rect.width,
                 height: rect.height,
                 pixelRatio: window.devicePixelRatio || 1,
-            })?.url || ''
+            })
         }
         const cancelSwap = () => {
             if (!swap) return
@@ -114,9 +137,26 @@ export default function HeroReel({ videoRef }) {
             })
         }
         const load = (layer, url) => {
+            layer.url = url
+            if (reel.Hls && isHlsUrl(url)) {
+                const hls = new reel.Hls({
+                    capLevelToPlayerSize: true,
+                    abrEwmaDefaultEstimate: startingEstimate(),
+                    maxBufferLength: 12,
+                    maxMaxBufferLength: 20,
+                    backBufferLength: 4,
+                })
+                // Fatal stream errors behave like a media error on the layer.
+                hls.on(reel.Hls.Events.ERROR, (_event, data) => {
+                    if (data?.fatal && layer.hls === hls) layer.video.dispatchEvent(new Event('error'))
+                })
+                layer.hls = hls
+                hls.loadSource(url)
+                hls.attachMedia(layer.video)
+                return
+            }
             layer.video.preload = 'auto'
             layer.video.src = url
-            layer.url = url
         }
         const play = () => {
             if (stopped || !visible || document.hidden || !source) return
