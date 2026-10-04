@@ -316,7 +316,7 @@ def encode_reel(clips, sources, workspace, deadline):
         outputs[rendition["name"]] = path
         arguments += [
             "-map", f"[out{index}]", "-an",
-            "-c:v", "libx264", "-preset", "medium", "-crf", str(rendition["crf"]),
+            "-c:v", "libx264", "-preset", "slow", "-crf", str(rendition["crf"]),
             "-maxrate", rendition["maxrate"], "-bufsize", rendition["bufsize"],
             "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p",
             "-g", gop, "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
