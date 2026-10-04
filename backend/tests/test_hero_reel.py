@@ -122,6 +122,34 @@ class StorageTests(unittest.TestCase):
         with patch.object(hero_reel, "_client", return_value=s3), self.assertRaises(ClientError):
             hero_reel._read_bytes("k", 10)
 
+    def test_ranged_reads_fetch_exactly_the_segment(self):
+        s3 = self.s3(b"abcd")
+        with patch.object(hero_reel, "_client", return_value=s3):
+            self.assertEqual(hero_reel._read_bytes("k", 10, (100, 4)), b"abcd")
+        self.assertEqual(s3.get_object.call_args.kwargs["Range"], "bytes=100-103")
+        with patch.object(hero_reel, "_client", return_value=self.s3(b"ab")), self.assertRaises(PlaylistError) as raised:
+            hero_reel._read_bytes("k", 10, (0, 4))
+        self.assertEqual(str(raised.exception), "short_range")
+        with self.assertRaises(PlaylistError):
+            hero_reel._read_bytes("k", 10, (0, 11))
+        s3 = Mock()
+        s3.get_object.side_effect = client_error("InvalidRange")
+        with patch.object(hero_reel, "_client", return_value=s3), self.assertRaises(PlaylistError):
+            hero_reel._read_bytes("k", 10, (999, 4))
+
+    def test_ranged_segments_of_one_file_download_separately_once_each(self):
+        workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, workspace)
+        cache = {}
+        segments = [{"key": "v.ts", "range": [0, 3]}, {"key": "v.ts", "range": [3, 3]}]
+        with patch.object(hero_reel, "_read_bytes", side_effect=[b"one", b"two"]) as read:
+            joined = hero_reel.download_segments(segments, workspace, cache)
+            again = hero_reel.download_segments(segments[1:], workspace, cache)
+        self.assertEqual([call.args for call in read.call_args_list], [
+            ("v.ts", hero_reel.MAX_SEGMENT_BYTES, (0, 3)), ("v.ts", hero_reel.MAX_SEGMENT_BYTES, (3, 3)),
+        ])
+        self.assertEqual(again, "concat:" + joined.removeprefix("concat:").split("|")[1])
+
     def test_object_exists_is_a_head_request(self):
         s3 = Mock()
         with patch.object(hero_reel, "_client", return_value=s3):
@@ -440,8 +468,15 @@ class PlanTests(unittest.TestCase):
         names = [f"v{index}" for index in range(8)]
         videos = [{"mediaId": name, "hlsKey": f"{name}.m3u8"} for name in names + ["late"]]
         loaded = {name: ready_video(name, segments=6) for name in names}
+        # A single-file (byte-range) rendition.
+        for index, segment in enumerate(loaded["v0"]["segments"]):
+            segment["range"] = [index * 100, 100]
         with patch.object(hero_reel_plan, "TARGET_SECONDS", 20.0):
             planned, downloads = self.plan(videos, loaded, lambda source: calm_frames(60))
+        ranged = [clip for cut in planned["cuts"] for clip in cut if clip["mediaId"] == "v0"]
+        self.assertTrue(ranged and all("range" in segment for clip in ranged for segment in clip["segments"]))
+        others = [clip for cut in planned["cuts"] for clip in cut if clip["mediaId"] != "v0"]
+        self.assertTrue(all("range" not in segment for clip in others for segment in clip["segments"]))
         cuts = planned["cuts"]
         self.assertEqual(len(cuts), hero_reel.CUT_COUNT)
         self.assertEqual(planned["pending"], ["late"])

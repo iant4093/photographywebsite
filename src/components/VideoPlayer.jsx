@@ -88,7 +88,7 @@ export default function VideoPlayer({ videoInfo, autoplay = true, controls = tru
             // Safari has no level API: a fixed quality plays that variant's
             // own playlist, resuming from the same moment.
             fetch(hlsUrl).then(response => (response.ok ? response.text() : '')).then((text) => {
-                const variants = parseHlsVariants(text, hlsUrl)
+                const variants = parseHlsVariants(text, new URL(hlsUrl, window.location.href).href)
                 const options = qualityOptions(variants.map(variant => ({ ...variant, value: variant.url })))
                 const select = (value) => {
                     if (disposed) return

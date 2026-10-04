@@ -147,7 +147,13 @@ def parse_master_playlist(playlist_key, text):
 
 
 def parse_media_playlist(playlist_key, text):
-    """Return timed segments for a complete VOD media playlist."""
+    """Return timed segments for a complete VOD media playlist.
+
+    Segments are separate files, or byte ranges of one file
+    (EXT-X-BYTERANGE, as single-file renditions use); a ranged segment
+    carries `range: [offset, length]`. Encrypted and fMP4 renditions are not
+    read.
+    """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines or lines[0] != "#EXTM3U":
         raise PlaylistError("not_a_playlist")
@@ -156,22 +162,42 @@ def parse_media_playlist(playlist_key, text):
     segments = []
     start = 0.0
     duration = None
+    byte_range = None
+    next_offset = {}
     for line in lines[1:]:
         if line.startswith("#EXTINF:"):
             try:
                 duration = float(line.split(":", 1)[1].split(",", 1)[0])
             except ValueError as error:
                 raise PlaylistError("bad_duration") from error
-        elif line.startswith("#EXT-X-BYTERANGE") or line.startswith("#EXT-X-KEY") or line.startswith("#EXT-X-MAP"):
+        elif line.startswith("#EXT-X-BYTERANGE:"):
+            length, _, offset = line.split(":", 1)[1].partition("@")
+            try:
+                byte_range = (int(offset) if offset else None, int(length))
+            except ValueError as error:
+                raise PlaylistError("bad_byterange") from error
+            if byte_range[1] <= 0 or (byte_range[0] is not None and byte_range[0] < 0):
+                raise PlaylistError("bad_byterange")
+        elif line.startswith("#EXT-X-KEY") or line.startswith("#EXT-X-MAP"):
             raise PlaylistError("unsupported_feature")
         elif not line.startswith("#"):
             if duration is None or not math.isfinite(duration) or duration <= 0:
                 raise PlaylistError("bad_duration")
-            segments.append({
+            segment = {
                 "key": resolve_playlist_uri(playlist_key, line),
                 "start": round(start, 3),
                 "duration": duration,
-            })
+            }
+            if byte_range is not None:
+                # Without an offset, a range continues where the previous
+                # range of the same file ended.
+                offset = byte_range[0] if byte_range[0] is not None else next_offset.get(segment["key"])
+                if offset is None:
+                    raise PlaylistError("bad_byterange")
+                segment["range"] = [offset, byte_range[1]]
+                next_offset[segment["key"]] = offset + byte_range[1]
+                byte_range = None
+            segments.append(segment)
             start += duration
             duration = None
             if len(segments) > MAX_PLAYLIST_SEGMENTS:
