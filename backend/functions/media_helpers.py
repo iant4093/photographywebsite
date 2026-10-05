@@ -8,6 +8,7 @@ from hls_ladder import SCRUB_FRAME_EDGE, SCRUB_FRAME_INTERVAL
 import boto3
 from botocore.config import Config
 import exifread
+from capture_calendar import day_from_tags
 from decimal import Decimal
 
 # Initialize AWS clients lazily
@@ -98,6 +99,10 @@ def extract_exif_data(bucket, key):
             exif_info['shutterSpeed'] = f"{format_fraction(tags['EXIF ExposureTime'])}s"
         if 'EXIF ISOSpeedRatings' in tags:
             exif_info['iso'] = f"ISO {tags['EXIF ISOSpeedRatings']}"
+        # Only the calendar day, for the Stats page shooting calendar.
+        taken_on = day_from_tags(tags)
+        if taken_on:
+            exif_info['takenOn'] = taken_on
 
         return exif_info
     except Exception as error:

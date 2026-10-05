@@ -247,6 +247,19 @@ describe('photography statistics page', () => {
         expect(screen.queryByText(/Photos without lens metadata are attributed/)).toBeNull()
     })
 
+    it('shows the shooting calendar only when the snapshot has one', async () => {
+        api.fetchPhotographyStats.mockResolvedValue(report)
+        const first = renderStats()
+        expect(await screen.findByText('63,900')).toBeInTheDocument()
+        expect(screen.queryByRole('heading', { level: 2, name: 'Shooting Calendar' })).toBeNull()
+        first.unmount()
+
+        api.fetchPhotographyStats.mockResolvedValue({ ...report, calendar: { albums: ['missing'], days: [['2026-08-07', 12, 0, [0]]] } })
+        renderStats()
+        expect(await screen.findByRole('heading', { level: 2, name: 'Shooting Calendar' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Friday, August 7, 2026: 12 photos' })).toBeInTheDocument()
+    })
+
     it('moves the album timeline with its visible navigation controls', async () => {
         api.fetchPhotographyStats.mockResolvedValue(report)
         renderStats()

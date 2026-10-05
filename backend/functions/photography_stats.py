@@ -11,6 +11,7 @@ import re
 
 import boto3
 
+import capture_calendar
 from front_door import verify_front_door_request
 from response_helpers import error_response, internal_error, json_response
 
@@ -22,6 +23,8 @@ DRIVE_CACHE_KEY = "google-drive-usage-v2"
 STATS_CACHE_KEY = "photography-stats-v1"
 STATS_SCHEMA_VERSION = 1
 MAX_CACHE_PAYLOAD_BYTES = 100_000
+# The snapshot carries the shooting calendar, which grows by one row per day shot.
+MAX_STATS_PAYLOAD_BYTES = 300_000
 MAX_ALBUM_SCAN_PAGES = 100
 MAX_TEXT_LENGTH = 200
 MANUAL_LENS_FALLBACK = "Sirui Nightwalker 75mm T1.2"
@@ -77,9 +80,10 @@ def _scan_albums():
     for _page in range(MAX_ALBUM_SCAN_PAGES):
         arguments = {
             "ProjectionExpression": (
-                "#visibility, #status, #type, #createdAt, #category, #images, #imageCount"
+                "#albumId, #visibility, #status, #type, #createdAt, #category, #images, #imageCount"
             ),
             "ExpressionAttributeNames": {
+                "#albumId": "albumId",
                 "#visibility": "visibility",
                 "#status": "status",
                 "#type": "type",
@@ -142,7 +146,42 @@ def _counter_rows(counter):
     ]
 
 
-def _build_snapshot(drive_report, albums, generated_at=None):
+def _is_public(album):
+    return album.get("visibility") == "public" and album.get("status", "active") == "active"
+
+
+def _calendar(albums, photo_days):
+    """Media counted per calendar day: [[day, photos, videos, [album indexes]]].
+
+    Photos use their own capture day when known, otherwise their album's
+    date; videos always use the album's date.
+    """
+    days = {}
+    for album in albums:
+        album_id = album.get("albumId")
+        if not _is_public(album) or not isinstance(album_id, str):
+            continue
+        fallback = capture_calendar.iso_day(album.get("createdAt"))
+        is_video = album.get("type") == "video"
+        known = [] if is_video else (photo_days.get(album_id) or [])
+        for index in range(_media_count(album)):
+            day = (known[index] if index < len(known) else None) or fallback
+            if not day:
+                continue
+            row = days.setdefault(day, {"photos": 0, "videos": 0, "albums": {}})
+            row["videos" if is_video else "photos"] += 1
+            row["albums"][album_id] = row["albums"].get(album_id, 0) + 1
+    album_ids = {}
+    rows = []
+    for day in sorted(days):
+        row = days[day]
+        # The day's albums, the one with the most of that day's work first.
+        ranked = sorted(row["albums"].items(), key=lambda item: (-item[1], item[0]))
+        rows.append([day, row["photos"], row["videos"], [album_ids.setdefault(album_id, len(album_ids)) for album_id, _ in ranked]])
+    return {"albums": list(album_ids), "days": rows}
+
+
+def _build_snapshot(drive_report, albums, generated_at=None, photo_days=None):
     raw_images = _aggregate_category(drive_report, "rawPhotoBackup", "images")
     raw_videos = _aggregate_category(drive_report, "rawPhotoBackup", "videos")
     website_photos = _aggregate_category(drive_report, "websiteBackup", "photos")
@@ -158,7 +197,7 @@ def _build_snapshot(drive_report, albums, generated_at=None):
     lenses = Counter()
 
     for album in albums:
-        if album.get("visibility") != "public" or album.get("status", "active") != "active":
+        if not _is_public(album):
             continue
         album_type = "video" if album.get("type") == "video" else "photo"
         media_count = _media_count(album)
@@ -253,7 +292,29 @@ def _build_snapshot(drive_report, albums, generated_at=None):
             "lenses": _counter_rows(lenses),
             "manualLensFallback": MANUAL_LENS_FALLBACK,
         },
+        "calendar": _calendar(albums, photo_days or {}),
     }
+
+
+def _valid_calendar(calendar):
+    if not isinstance(calendar, dict):
+        return False
+    albums = calendar.get("albums")
+    days = calendar.get("days")
+    if not isinstance(albums, list) or not isinstance(days, list):
+        return False
+    if not all(isinstance(album_id, str) for album_id in albums):
+        return False
+    return all(
+        isinstance(row, list)
+        and len(row) == 4
+        and capture_calendar.iso_day(row[0]) == row[0]
+        and _is_nonnegative_number(row[1])
+        and _is_nonnegative_number(row[2])
+        and isinstance(row[3], list)
+        and all(isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(albums) for index in row[3])
+        for row in days
+    )
 
 
 def _is_nonnegative_number(value):
@@ -283,6 +344,9 @@ def _valid_snapshot(snapshot):
         return False
     most_active = snapshot.get("mostActive")
     gear = snapshot.get("gear")
+    # Snapshots from before the calendar existed stay valid until the next refresh.
+    if "calendar" in snapshot and not _valid_calendar(snapshot["calendar"]):
+        return False
     return (
         isinstance(most_active, dict)
         and isinstance(gear, dict)
@@ -294,7 +358,7 @@ def _valid_snapshot(snapshot):
 
 def _store_snapshot(snapshot):
     payload = json.dumps(snapshot, separators=(",", ":"), sort_keys=True)
-    if len(payload.encode("utf-8")) > MAX_CACHE_PAYLOAD_BYTES:
+    if len(payload.encode("utf-8")) > MAX_STATS_PAYLOAD_BYTES:
         raise ValueError("Photography statistics cache payload exceeded safe limit")
     cache_table.put_item(Item={
         "cacheKey": STATS_CACHE_KEY,
@@ -309,7 +373,7 @@ def _read_snapshot():
     if not isinstance(item, dict):
         return None
     payload = item.get("payload")
-    if not isinstance(payload, str) or not 1 <= len(payload.encode("utf-8")) <= MAX_CACHE_PAYLOAD_BYTES:
+    if not isinstance(payload, str) or not 1 <= len(payload.encode("utf-8")) <= MAX_STATS_PAYLOAD_BYTES:
         return None
     try:
         snapshot = json.loads(payload)
@@ -318,9 +382,20 @@ def _read_snapshot():
     return snapshot if _valid_snapshot(snapshot) else None
 
 
+def _photo_days(albums):
+    public_photos = [album for album in albums if _is_public(album) and album.get("type") != "video"]
+    try:
+        return capture_calendar.photo_days(public_photos, cache_table)
+    except Exception as error:
+        # The calendar falls back to album dates; the rest of the stats still refresh.
+        logger.warning("capture_dates_unavailable error_type=%s", type(error).__name__)
+        return {}
+
+
 def refresh_photography_stats():
     drive_report = _read_drive_report()
-    snapshot = _build_snapshot(drive_report, _scan_albums())
+    albums = _scan_albums()
+    snapshot = _build_snapshot(drive_report, albums, photo_days=_photo_days(albums))
     _store_snapshot(snapshot)
     logger.info("photography_stats_refresh_succeeded")
     return snapshot
