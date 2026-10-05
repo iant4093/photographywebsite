@@ -32,6 +32,7 @@ from dynamodb_helpers import AlbumManifestTooLarge, ensure_album_item_budget
 from email_helpers import send_email
 from media_access import serialize_album_summary, tag_album_visibility, validate_album_media_key
 from media_helpers import extract_exif_data, hls_destination_prefix, hls_master_playlist_key, start_mediaconvert_job
+from hls_ladder import SCRUB_FRAMES, scrub_frames_prefix
 from preview_jobs import enqueue_preview_jobs
 from original_comparison_jobs import request_original_comparisons
 from random_pool_refresh import request_random_photo_pool_refresh
@@ -177,10 +178,12 @@ def _start_video_jobs(images):
                 f"s3://{bucket}/{hls_destination_prefix(raw_key)}",
                 width=image.get("width"),
                 height=image.get("height"),
+                frames_s3_prefix=f"s3://{bucket}/{scrub_frames_prefix(raw_key)}",
             )
             # A retried upload may have an old rendition URL or no URL after a
             # failed submission. Only newly submitted jobs switch to the master.
             image["hlsUrl"] = hls_master_playlist_key(raw_key)
+            image["scrubFrames"] = dict(SCRUB_FRAMES)
         except Exception:
             # Keep the raw protected video usable if transcoding is unavailable.
             image.pop("hlsUrl", None)

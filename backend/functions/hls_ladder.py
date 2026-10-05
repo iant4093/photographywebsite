@@ -30,6 +30,47 @@ def receipt_identity(key):
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
+# Timeline preview frames: one small JPEG every few seconds, in the stream's
+# folder tree so they share its visibility tags and lifecycle.
+SCRUB_FRAMES_VERSION = 1
+SCRUB_FRAME_INTERVAL = 2
+SCRUB_FRAME_EDGE = 320
+SCRUB_FRAMES = {"v": SCRUB_FRAMES_VERSION, "interval": SCRUB_FRAME_INTERVAL}
+
+
+def scrub_frames_prefix(raw_key):
+    return f"{raw_key.rsplit('.', 1)[0]}_hls/frames/v{SCRUB_FRAMES_VERSION}/"
+
+
+def scrub_frame_base_key(raw_key):
+    """Frame N is this plus a 7-digit index and ".jpg" (MediaConvert's naming)."""
+    filename = raw_key.rsplit(".", 1)[0].rsplit("/", 1)[-1]
+    return f"{scrub_frames_prefix(raw_key)}{filename}."
+
+
+def scrub_frames_current(frames):
+    return isinstance(frames, dict) and frames.get("v") == SCRUB_FRAMES_VERSION
+
+
+def frames_receipt_identity(key):
+    return receipt_identity(f"{key}#frames")
+
+
+def frames_candidates(album):
+    """Videos on the current ladder that have no timeline frames yet."""
+    jobs = album.get("videoJobs") or {}
+    return [
+        image["rawKey"] for image in album.get("images", [])
+        if isinstance(image, dict) and isinstance(image.get("rawKey"), str) and image.get("mediaConvertJobId")
+        and hls_is_current(image["rawKey"], image.get("hlsUrl")) and not scrub_frames_current(image.get("scrubFrames"))
+        and frames_receipt_identity(image["rawKey"]) not in jobs and receipt_identity(image["rawKey"]) not in jobs
+    ]
+
+
+def frames_receipt(key):
+    return frames_receipt_identity(key), {"key": key, "token": uuid.uuid4().hex, "phase": "prepared", "frames": True}
+
+
 def upgrade_candidates(album):
     """Converted videos whose stream predates the current ladder."""
     jobs = album.get("videoJobs") or {}

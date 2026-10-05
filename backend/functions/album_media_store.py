@@ -37,6 +37,7 @@ MEDIA_FIELDS = frozenset({
     "captionVtt",
     "captionLanguage",
     "transcript",
+    "scrubFrames",
 })
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import SiteSelect from './SiteSelect'
+import { scrubFrameUrl } from '../utils/hlsSource'
 import './VideoControls.css'
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2].map(value => ({ value, label: value === 1 ? 'Normal · 1×' : `${value}×` }))
@@ -8,8 +9,12 @@ const timestamp = seconds => {
     return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`
 }
 
-export default function VideoControls({ videoRef, playerRef, captionKey = '', quality = null }) {
+export default function VideoControls({ videoRef, playerRef, captionKey = '', quality = null, frames = null }) {
     const [media, setMedia] = useState({ paused: true, time: 0, duration: 0, muted: true, volume: 1, rate: 1 })
+    // The seek bar's hover/drag position, shown as a preview above it.
+    const [preview, setPreview] = useState(null)
+    const [pressing, setPressing] = useState(false)
+    const [missingFrames, setMissingFrames] = useState('')
     const [fullscreen, setFullscreen] = useState(false)
     const [canFullscreen, setCanFullscreen] = useState(false)
     const [canPip, setCanPip] = useState(false)
@@ -78,11 +83,36 @@ export default function VideoControls({ videoRef, playerRef, captionKey = '', qu
         <div className="site-video-controls" onKeyDown={event => {
             if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(event.key)) event.stopPropagation()
         }}>
-            <label className="site-video-seek">
+            <label className="site-video-seek"
+                onPointerMove={event => {
+                    if (!media.duration) return
+                    const box = event.currentTarget.getBoundingClientRect()
+                    const ratio = box.width > 0 ? Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)) : 0
+                    setPreview({ ratio, time: ratio * media.duration })
+                }}
+                onPointerLeave={() => { if (!pressing) setPreview(null) }}
+                onPointerDown={() => setPressing(true)}
+                onPointerUp={() => { setPressing(false); setPreview(null) }}
+                onPointerCancel={() => { setPressing(false); setPreview(null) }}>
                 <span className="sr-only">Video position</span>
                 <input type="range" min="0" max={media.duration || 0} step="0.1" value={Math.min(media.time, media.duration)}
                     disabled={!media.duration} aria-valuetext={`${timestamp(media.time)} of ${timestamp(media.duration)}`}
-                    onChange={event => { const time = Number(event.target.value); videoRef.current.currentTime = time; setMedia(previous => ({ ...previous, time })) }} />
+                    onChange={event => {
+                        const time = Number(event.target.value)
+                        videoRef.current.currentTime = time
+                        setMedia(previous => ({ ...previous, time }))
+                        if (pressing && media.duration) setPreview({ ratio: time / media.duration, time })
+                    }} />
+                {preview && (() => {
+                    const frame = missingFrames === frames?.url ? '' : scrubFrameUrl(frames, preview.time, media.duration)
+                    return (
+                        <span className={`site-video-preview${frame ? ' has-frame' : ''}`} aria-hidden="true"
+                            style={{ '--preview-at': `${preview.ratio * 100}%` }}>
+                            {frame && <img src={frame} alt="" decoding="async" onError={() => setMissingFrames(frames.url)} />}
+                            <span>{timestamp(preview.time)}</span>
+                        </span>
+                    )
+                })()}
             </label>
             <div className="site-video-control-row">
                 <button type="button" onClick={togglePlay} aria-label={media.paused ? 'Play video' : 'Pause video'}>

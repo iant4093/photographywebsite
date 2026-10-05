@@ -425,6 +425,17 @@ def find_image_by_media_id(album, media_id):
     return None
 
 
+# Mirrors hls_ladder's timeline frame naming (kept dependency-free here; a
+# test holds the two together).
+SCRUB_FRAMES_VERSION = 1
+SCRUB_FRAME_INTERVAL = 2
+
+
+def scrub_frame_base_key(raw_key):
+    stem = raw_key.rsplit(".", 1)[0]
+    return f"{stem}_hls/frames/v{SCRUB_FRAMES_VERSION}/{stem.rsplit('/', 1)[-1]}."
+
+
 def serialize_image(
     image, visibility, *, include_internal=False, album=None, preview_metadata=None, private_media_base=None,
 ):
@@ -473,6 +484,13 @@ def serialize_image(
     # for every relative segment under the same album prefix.
     if hls_key and (visibility == "public" or private_base):
         result["hlsUrl"] = media_url(hls_key, visibility, private_media_base=private_base)
+        frames = source.get("scrubFrames")
+        if isinstance(frames, dict) and frames.get("v") == SCRUB_FRAMES_VERSION:
+            # Frame N is this URL plus a 7-digit index and ".jpg".
+            result["scrubFrames"] = {
+                "url": media_url(scrub_frame_base_key(key), visibility, private_media_base=private_base),
+                "interval": SCRUB_FRAME_INTERVAL,
+            }
     if include_internal:
         result.update({"rawKey": key, "thumbKey": thumb_key, "hlsKey": hls_key})
         if "originalFilename" in source:

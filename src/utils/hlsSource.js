@@ -73,3 +73,12 @@ export function parseHlsVariants(text, baseUrl) {
     })
     return variants
 }
+
+// Timeline preview frames are named <url><7-digit index>.jpg, one per interval.
+export function scrubFrameUrl(frames, time, duration) {
+    const interval = Number(frames?.interval)
+    if (!frames?.url || !(interval > 0) || !(duration > 0)) return ''
+    const last = Math.max(0, Math.floor((duration - 0.001) / interval))
+    const index = Math.min(last, Math.max(0, Math.floor(time / interval)))
+    return `${frames.url}${String(index).padStart(7, '0')}.jpg`
+}

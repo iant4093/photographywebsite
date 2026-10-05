@@ -435,6 +435,26 @@ describe('VideoPlayer', () => {
     expect(instance.destroy).toHaveBeenCalledOnce()
   })
 
+  it('gives the seek bar timeline frames only while the stream plays', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('probably')
+    vi.stubGlobal('PointerEvent', class extends MouseEvent {})
+    const scrubFrames = { url: 'https://x.test/frames/movie.', interval: 2 }
+    const { container } = render(<VideoPlayer videoInfo={{ url: 'https://x.test/raw.mp4', hlsUrl: 'https://x.test/hls.m3u8', scrubFrames }} />)
+    const video = container.querySelector('video')
+    Object.defineProperty(video, 'duration', { configurable: true, value: 60 })
+    fireEvent.loadedMetadata(video)
+    const label = screen.getByLabelText('Video position').closest('label')
+    label.getBoundingClientRect = () => ({ left: 0, width: 600 })
+    fireEvent.pointerMove(label, { clientX: 300 })
+    expect(container.querySelector('.site-video-preview img')).toHaveAttribute('src', 'https://x.test/frames/movie.0000015.jpg')
+    // After falling back to the raw file, frames may not match it.
+    fireEvent.error(video)
+    await waitFor(() => expect(video.src).toBe('https://x.test/raw.mp4'))
+    fireEvent.pointerMove(label, { clientX: 310 })
+    expect(container.querySelector('.site-video-preview')).not.toBeNull()
+    expect(container.querySelector('.site-video-preview img')).toBeNull()
+  })
+
   it('falls back when hls.js is unsupported or emits a fatal error and respects autoplay=false', async () => {
     Hls.isSupported.mockReturnValueOnce(false)
     const unsupported = render(<VideoPlayer autoplay={false} videoInfo={{ url: 'https://x.test/raw.mp4', hlsUrl: 'https://x.test/hls.m3u8' }} />)
