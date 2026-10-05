@@ -17,8 +17,12 @@ from visibility_change import enqueue
 
 
 def owns(album, pending):
+    # A client's album in Recently Deleted keeps its former owner only in
+    # trashedFrom; it is still that person's data and is deleted with them.
+    former = album.get('trashedFrom') if album else None
     return bool(album and (album.get('ownerSub') == pending['subject'] or
-        ('ownerSub' not in album and album.get('ownerEmail') == pending['email'])))
+        ('ownerSub' not in album and album.get('ownerEmail') == pending['email']) or
+        (isinstance(former, dict) and former.get('ownerSub') == pending['subject'])))
 
 
 def begin(table, subject, username, email, event):
@@ -98,7 +102,8 @@ def advance(table, cognito, pool, subject, context):
             if phase in {'scan', 'verify'}:
                 params = {'ConsistentRead':True, 'Limit':100,
                     'ProjectionExpression':'albumId',
-                    'FilterExpression':Attr('ownerSub').eq(subject) | (Attr('ownerSub').not_exists() & Attr('ownerEmail').eq(pending['email']))}
+                    'FilterExpression':Attr('ownerSub').eq(subject) | (Attr('ownerSub').not_exists() & Attr('ownerEmail').eq(pending['email']))
+                        | Attr('trashedFrom.ownerSub').eq(subject)}
                 if pending.get('cursor'):
                     params['ExclusiveStartKey'] = pending['cursor']
                 page = table.scan(**params)

@@ -73,6 +73,17 @@ function AdminDashboard() {
             color: 'from-rose-500 to-amber-dark',
         },
         {
+            title: 'Recently Deleted',
+            description: 'Restore deleted albums, or delete them permanently. They are removed for good after 30 days.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                </svg>
+            ),
+            link: '/admin/recently-deleted',
+            color: 'from-charcoal-light to-charcoal',
+        },
+        {
             title: 'Manage Users',
             description: 'Add, edit, or remove user accounts and manage their access.',
             icon: (

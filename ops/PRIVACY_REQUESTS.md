@@ -18,7 +18,7 @@ Create a private inventory before deleting gallery/account records, so the mappi
 
 | System | Review/action |
 | --- | --- |
-| Cognito and album/media records | Find accounts, owner assignments, all owned galleries, and relevant individual photographs. Check access and share grants. |
+| Cognito and album/media records | Find accounts, owner assignments, all owned galleries, and relevant individual photographs. Check access and share grants. Also check Recently Deleted: the Delete button in Manage Albums only hides an album there for 30 days, so use "Delete permanently" on that page (account deletion already includes a client's binned albums). |
 | S3 and media delivery | Locate originals, thumbnails, previews, original-comparison derivatives, ZIPs, all object versions, and relevant cache entries. Use the existing version-aware deletion and invalidation procedures; verify public copies stop resolving. |
 | Google Drive backups | Whole-album deletion preserves this folder. Record verified root ancestry and IDs first. Distinguish synchronized backup copies from unrelated files, manual extras, and archives. Remove applicable copies separately; include Trash/retained versions in the review. |
 | Original-comparison archives | Inspect separately from the website backup root. These are deliberately outside ordinary gallery-sync deletion. Determine whether retained originals are necessary and legally permitted. |

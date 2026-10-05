@@ -198,11 +198,12 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
                     self.assertIn("set(event) == {'source', 'subject'}" if module_name in {"delete_user", "edit_user"} else "set(event) == {'source', 'albumId'}", condition)
                     self.assertIn("isinstance(event, dict)", condition)
                     body = body[1:]
-                if module_name == "update_album":
-                    # The publish schedule's exact EventBridge input.
+                schedule_inputs = {"update_album": "scheduled-publish", "delete_album": "trash-purge"}
+                if module_name in schedule_inputs:
+                    # The schedule's exact EventBridge input.
                     condition = ast.unparse(body[0].test)
                     self.assertIn("set(event) == {'source'}", condition)
-                    self.assertIn("'scheduled-publish'", condition)
+                    self.assertIn(f"'{schedule_inputs[module_name]}'", condition)
                     body = body[1:]
                 first = body[0]
                 self.assertIsInstance(first, ast.Assign)
@@ -222,14 +223,15 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
                     self.assertIs(module.handler(event, None), denied)
                     table.get_item.assert_not_called()
                     table.update_item.assert_not_called()
-        envelope = {"source": "scheduled-publish"}
-        for event in ({"body": json.dumps(envelope), "requestContext": {"http": {"method": "POST"}}},
-                      {**envelope, "requestContext": {}}, {**envelope, "body": "{}"}):
-            denied = {"statusCode": 403}
-            with self.subTest(event=event), patch.object(update_album, "verify_front_door_request", return_value=denied), \
-                    patch.object(update_album, "_publish_due") as publish:
-                self.assertIs(update_album.handler(event, None), denied)
-                publish.assert_not_called()
+        for module, source, runner in ((update_album, "scheduled-publish", "_publish_due"), (delete_album, "trash-purge", "purge_expired")):
+            envelope = {"source": source}
+            for event in ({"body": json.dumps(envelope), "requestContext": {"http": {"method": "POST"}}},
+                          {**envelope, "requestContext": {}}, {**envelope, "body": "{}"}):
+                denied = {"statusCode": 403}
+                with self.subTest(source=source, event=event), patch.object(module, "verify_front_door_request", return_value=denied), \
+                        patch.object(module, runner) as run:
+                    self.assertIs(module.handler(event, None), denied)
+                    run.assert_not_called()
 
     def test_each_http_function_has_exact_secret_read_policy(self) -> None:
         handlers = _http_handlers()
