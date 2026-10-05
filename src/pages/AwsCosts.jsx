@@ -83,6 +83,85 @@ function CostTrend({ months, formatCurrency }) {
     )
 }
 
+// List prices used only to give a rough sense of scale per album.
+const STORAGE_PRICE_PER_GB_MONTH = 0.023
+const TRANSFER_PRICE_PER_GB = 0.085
+const PLACES = { public: 'Main Gallery', unlisted: 'Link only', private: 'Client' }
+
+function byteLabel(bytes) {
+    const value = Math.max(0, Number(bytes) || 0)
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    const power = value > 0 ? Math.min(units.length - 1, Math.floor(Math.log10(value) / 3)) : 0
+    const scaled = value / 1000 ** power
+    return `${scaled >= 100 || power === 0 ? Math.round(scaled) : scaled.toFixed(1)} ${units[power]}`
+}
+
+function AlbumUsage({ usage, formatCurrency }) {
+    const [view, setView] = useState('storage')
+    const storage = view === 'storage'
+    const rows = (storage ? usage?.byStorage : usage?.byBandwidth) || []
+    const field = storage ? 'storageBytes' : 'bandwidthBytes'
+    const largest = Math.max(1, ...rows.map((row) => Number(row[field]) || 0))
+    const span = usage?.bandwidthWindow
+    const estimate = (bytes) => (Number(bytes) || 0) / 1e9 * (storage ? STORAGE_PRICE_PER_GB_MONTH : TRANSFER_PRICE_PER_GB)
+
+    return (
+        <div className="aws-cost-panel" aria-labelledby="album-usage-heading">
+            <div className="aws-cost-panel-heading">
+                <div>
+                    <p className="aws-cost-eyebrow">Storage and bandwidth</p>
+                    <h2 id="album-usage-heading" className="aws-cost-panel-title">Biggest albums</h2>
+                </div>
+                {usage && (
+                    <div className="aws-cost-tabs" role="group" aria-label="Rank albums by">
+                        <button type="button" aria-pressed={storage} className={storage ? 'is-active' : ''} onClick={() => setView('storage')}>Storage</button>
+                        <button type="button" aria-pressed={!storage} className={storage ? '' : 'is-active'} onClick={() => setView('bandwidth')}>Bandwidth · 30 days</button>
+                    </div>
+                )}
+            </div>
+            {!usage && <p className="aws-cost-empty">Album sizes and bandwidth appear after the first daily usage run.</p>}
+            {usage && (
+                <>
+                    <p className="aws-cost-detail aws-cost-usage-total">
+                        {storage
+                            ? `${byteLabel(usage.storageBytes)} across ${usage.albumCount} album${usage.albumCount === 1 ? '' : 's'} · about ${formatCurrency(estimate(usage.storageBytes))}/month`
+                            : `${byteLabel(usage.bandwidthBytes)} served${span?.days ? ` from ${dateLabel(span.from)} to ${dateLabel(span.to)}` : ''} · about ${formatCurrency(estimate(usage.bandwidthBytes))}`}
+                    </p>
+                    {rows.length ? (
+                        <ol className="aws-cost-services aws-cost-usage-list">
+                            {rows.map((row) => (
+                                <li key={row.albumId}>
+                                    <div className="aws-cost-service-heading">
+                                        <span className="aws-cost-service-name" title={row.title}>
+                                            {row.title}
+                                            <span className="aws-cost-usage-tags">
+                                                {row.type === 'video' ? 'Video' : 'Photos'} · {row.deleted ? 'Recently deleted' : PLACES[row.visibility] || 'Link only'}
+                                            </span>
+                                        </span>
+                                        <span className="aws-cost-service-amount">{byteLabel(row[field])}</span>
+                                    </div>
+                                    <div className="aws-cost-service-track" aria-hidden="true">
+                                        <div className="aws-cost-service-bar" style={{ width: `${Math.max(1, (Number(row[field]) || 0) / largest * 100)}%` }} />
+                                    </div>
+                                    <p className="aws-cost-service-share">
+                                        ≈ {formatCurrency(estimate(row[field]))}{storage ? '/month' : ' over 30 days'}
+                                        {storage && row.objectCount ? ` · ${row.objectCount} file${row.objectCount === 1 ? '' : 's'}` : ''}
+                                    </p>
+                                </li>
+                            ))}
+                        </ol>
+                    ) : (
+                        <p className="aws-cost-empty">{storage ? 'No album files were found.' : 'No album bandwidth was recorded in this window yet.'}</p>
+                    )}
+                    <p className="aws-cost-usage-note">
+                        Estimates use S3 Standard (${STORAGE_PRICE_PER_GB_MONTH}/GB-month) and CloudFront (${TRANSFER_PRICE_PER_GB}/GB) list prices, so free tiers and discounts make real costs lower. Bandwidth counts the media CDN; client galleries opened through the site&apos;s signed links aren&apos;t included. Updated daily.
+                    </p>
+                </>
+            )}
+        </div>
+    )
+}
+
 function SummaryCard({ label, value, note }) {
     return (
         <div className="aws-cost-summary-card">
@@ -217,6 +296,13 @@ export default function AwsCosts() {
                             note={isCurrent ? 'AWS forecast plus month-to-date cost' : 'Forecast shown only for the current month'}
                         />
                         <SummaryCard
+                            label="Next month forecast"
+                            value={report.nextMonth ? formatCurrency(report.nextMonth.forecastTotal) : 'Not available'}
+                            note={report.nextMonth
+                                ? `${monthLabel(report.nextMonth.month)} · trend ${Number(report.nextMonth.trendPerMonth) >= 0 ? '+' : '−'}${formatCurrency(Math.abs(Number(report.nextMonth.trendPerMonth) || 0))}/month`
+                                : 'Available after the next daily refresh'}
+                        />
+                        <SummaryCard
                             label="Previous month"
                             value={previous ? formatCurrency(previous.total) : 'Not available'}
                             note={previous ? monthLabel(previous.month) : 'No earlier month in this report'}
@@ -229,6 +315,8 @@ export default function AwsCosts() {
                     </div>
 
                     <CostTrend months={months} formatCurrency={formatCurrency} />
+
+                    <AlbumUsage usage={report.albumUsage} formatCurrency={formatCurrency} />
 
                     <div className="aws-cost-panel">
                         <div className="aws-cost-panel-heading">

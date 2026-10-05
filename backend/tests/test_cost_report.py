@@ -28,7 +28,7 @@ def months():
 
 def cached_report(**updates):
     report = {
-        "schemaVersion": 1,
+        "schemaVersion": get_cost_report.CACHE_SCHEMA_VERSION,
         "generatedAt": "2026-08-02T12:00:00Z",
         "dataThrough": "2026-08-01",
         "currency": "USD",
@@ -228,8 +228,8 @@ class CostReportContractTests(unittest.TestCase):
             {"Item": {"payload": ""}},
             {"Item": {"payload": "x" * (get_cost_report.MAX_CACHE_PAYLOAD_BYTES + 1)}},
             {"Item": {"payload": "{"}},
-            {"Item": {"payload": json.dumps({"schemaVersion": 2, "months": months()})}},
-            {"Item": {"payload": json.dumps({"schemaVersion": 1, "months": []})}},
+            {"Item": {"payload": json.dumps({"schemaVersion": 1, "months": months()})}},
+            {"Item": {"payload": json.dumps({"schemaVersion": get_cost_report.CACHE_SCHEMA_VERSION, "months": []})}},
         ]
         for response in candidates:
             with self.subTest(response=list(response)), patch.object(

@@ -78,6 +78,64 @@ describe('AWS costs admin page', () => {
         expect(screen.getAllByText('Not available').length).toBeGreaterThan(0)
     })
 
+    it('forecasts next month and ranks albums by storage and bandwidth', async () => {
+        const row = (albumId, title, extra) => ({ albumId, title, type: 'photo', visibility: 'public', deleted: false, storageBytes: 0, objectCount: 0, bandwidthBytes: 0, ...extra })
+        api.fetchCostReport.mockResolvedValue({
+            ...REPORT,
+            nextMonth: { month: '2026-09', forecastTotal: 14.5, trendPerMonth: 1.25 },
+            albumUsage: {
+                kind: 'album-usage', schemaVersion: 1, storageBytes: 5_400_000_000, albumCount: 3, bandwidthBytes: 120_000_000_000,
+                bandwidthWindow: { from: '2026-07-03', to: '2026-08-01', days: 30 },
+                byStorage: [
+                    row('a', 'Wedding Film', { type: 'video', visibility: 'private', storageBytes: 4_000_000_000, objectCount: 14 }),
+                    row('b', 'Coast', { storageBytes: 900_000_000, objectCount: 1 }),
+                    row('c', 'Old Trip', { deleted: true, visibility: 'unlisted', storageBytes: 512 }),
+                ],
+                byBandwidth: [row('b', 'Coast', { bandwidthBytes: 100_000_000_000 }), row('d', 'Odd', { visibility: 'other', bandwidthBytes: 0 })],
+            },
+        })
+        renderPage()
+        expect(await screen.findByText('$14.50')).toBeInTheDocument()
+        expect(screen.getByText('September 2026 · trend +$1.25/month')).toBeInTheDocument()
+        const panel = screen.getByRole('heading', { name: 'Biggest albums' }).closest('.aws-cost-panel')
+        expect(panel).toHaveTextContent('5.4 GB across 3 albums · about $0.12/month')
+        expect(panel).toHaveTextContent('Wedding FilmVideo · Client4.0 GB')
+        expect(panel).toHaveTextContent('≈ $0.09/month · 14 files')
+        expect(panel).toHaveTextContent('Photos · Main Gallery900 MB')
+        expect(panel).toHaveTextContent('≈ $0.02/month · 1 file')
+        expect(panel).toHaveTextContent('Photos · Recently deleted512 B')
+        expect(screen.getByRole('button', { name: 'Storage' })).toHaveAttribute('aria-pressed', 'true')
+
+        fireEvent.click(screen.getByRole('button', { name: 'Bandwidth · 30 days' }))
+        expect(screen.getByRole('button', { name: 'Bandwidth · 30 days' })).toHaveAttribute('aria-pressed', 'true')
+        expect(panel).toHaveTextContent('120 GB served from Jul 3, 2026 to Aug 1, 2026 · about $10.20')
+        expect(panel).toHaveTextContent('Coast')
+        expect(panel).toHaveTextContent('≈ $8.50 over 30 days')
+        expect(panel).toHaveTextContent('Photos · Link only0 B')
+    })
+
+    it('explains when album usage and next month are not ready yet', async () => {
+        api.fetchCostReport.mockResolvedValue({
+            ...REPORT,
+            nextMonth: { month: '2026-09', forecastTotal: 0, trendPerMonth: -2 },
+            albumUsage: { kind: 'album-usage', schemaVersion: 1, storageBytes: 0, albumCount: 1, bandwidthBytes: 0, byStorage: [], byBandwidth: [] },
+        })
+        const view = renderPage()
+        expect(await screen.findByText('September 2026 · trend −$2.00/month')).toBeInTheDocument()
+        expect(screen.getByText('No album files were found.')).toBeInTheDocument()
+        expect(screen.getByText(/0 B across 1 album ·/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: 'Bandwidth · 30 days' }))
+        expect(screen.getByText('No album bandwidth was recorded in this window yet.')).toBeInTheDocument()
+        expect(screen.getByText(/^0 B served · about/)).toBeInTheDocument()
+        view.unmount()
+
+        api.fetchCostReport.mockResolvedValue(REPORT)
+        renderPage()
+        expect(await screen.findByText('Album sizes and bandwidth appear after the first daily usage run.')).toBeInTheDocument()
+        expect(screen.getByText('Available after the next daily refresh')).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: 'Storage' })).toBeNull()
+    })
+
     it('shows a safe error and retries the page request', async () => {
         api.fetchCostReport.mockRejectedValueOnce(new Error('The service is temporarily unavailable.'))
             .mockResolvedValueOnce(REPORT)
