@@ -27,6 +27,7 @@ import {
 import { mediaDisplayUrl, mediaThumbnailUrl } from '../utils/mediaUrls'
 import { createMediaUploadSession, UPLOAD_RETRY_HINT } from '../utils/mediaUpload'
 import { sortGalleryAlbums, sortGalleryCategories } from '../utils/galleryOrder'
+import { PUBLISH_CHECK_MINUTES, formatPublishAt, localDateTimeValue, publishAtIso, publishScheduleError } from '../utils/publishSchedule'
 
 function urlPathMatchesKey(value, key) {
     if (!value || !key) return false
@@ -208,6 +209,7 @@ function ManageAlbums() {
     const [editDesc, setEditDesc] = useState('')
     const [editDate, setEditDate] = useState('')
     const [editCategory, setEditCategory] = useState('')
+    const [editPublish, setEditPublish] = useState('')
 
     // Album detail view (images) — tracks which albumId is expanded
     const [expandedAlbumId, setExpandedAlbumId] = useState(null)
@@ -537,6 +539,37 @@ function ManageAlbums() {
         setEditCategory(album.category || '')
         // Parse ISO date to YYYY-MM-DD for the date input
         setEditDate(album.createdAt ? album.createdAt.split('T')[0] : '')
+        setEditPublish(album.publishAt ? localDateTimeValue(new Date(album.publishAt)) : '')
+    }
+
+    // A link-only album's publish time: set, moved, or cleared (null).
+    function publishTimeChange(album) {
+        if (album?.visibility !== 'unlisted') return {}
+        const current = album.publishAt ? localDateTimeValue(new Date(album.publishAt)) : ''
+        if (editPublish === current) return {}
+        if (!editPublish) return { publishAt: null }
+        const problem = publishScheduleError(editPublish)
+        if (problem) throw new Error(problem)
+        return { publishAt: publishAtIso(editPublish) }
+    }
+
+    async function changeSchedule(album, updates, message) {
+        setActionError('')
+        setAlbumSaving(album.albumId, true)
+        try {
+            const token = await getIdToken()
+            const updated = await updateAlbum(token, album.albumId, updates)
+            if (updated?.visibility && updated.visibility !== album.visibility && scope === album.visibility) {
+                removeCatalogAlbum(album.albumId)
+            } else {
+                patchAlbum(album.albumId, { ...updates, ...(updated || {}), publishAt: updated?.publishAt ?? null })
+            }
+            setActionSuccess(message)
+        } catch (err) {
+            setActionError(err.message)
+        } finally {
+            setAlbumSaving(album.albumId, false)
+        }
     }
 
     // Save album edits
@@ -544,11 +577,16 @@ function ManageAlbums() {
         setActionError('')
         setAlbumSaving(albumId, true)
         try {
-            const token = await getIdToken()
             const updates = { title: editTitle, description: editDesc, category: editCategory }
             if (editDate) updates.createdAt = new Date(editDate + 'T12:00:00').toISOString()
+            Object.assign(updates, publishTimeChange(albums.find((album) => album.albumId === albumId)))
+            const token = await getIdToken()
             const updated = await updateAlbum(token, albumId, updates)
-            patchAlbum(albumId, { ...updates, ...(updated || {}) })
+            patchAlbum(albumId, {
+                ...updates,
+                ...(updated || {}),
+                ...(Object.hasOwn(updates, 'publishAt') ? { publishAt: updated?.publishAt ?? null } : {}),
+            })
             setEditingAlbum(null)
             setActionSuccess('Album updated!')
             refreshBackupStatus()
@@ -1098,6 +1136,26 @@ function ManageAlbums() {
                                                             onChange={(e) => setEditDate(e.target.value)}
                                                             className="w-full px-3 py-2 rounded-lg border border-warm-border text-sm focus:outline-none focus:ring-2 focus:ring-amber/40"
                                                         />
+                                                        {album.visibility === 'unlisted' && (
+                                                            <div>
+                                                                <label htmlFor={`publish-${album.albumId}`} className="block text-xs font-medium text-warm-gray mb-1">
+                                                                    Publish to the main gallery on (optional)
+                                                                </label>
+                                                                <div className="flex gap-2">
+                                                                    <input
+                                                                        id={`publish-${album.albumId}`}
+                                                                        type="datetime-local"
+                                                                        step={PUBLISH_CHECK_MINUTES * 60}
+                                                                        value={editPublish}
+                                                                        onChange={(e) => setEditPublish(e.target.value)}
+                                                                        className="min-w-0 flex-1 px-3 py-2 rounded-lg border border-warm-border text-sm focus:outline-none focus:ring-2 focus:ring-amber/40"
+                                                                    />
+                                                                    {editPublish && (
+                                                                        <button type="button" onClick={() => setEditPublish('')} className="px-3 py-2 rounded-lg bg-cream text-warm-gray text-sm font-medium cursor-pointer hover:bg-cream-dark transition-colors">Clear</button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                         <div className="flex gap-2">
                                                             <button disabled={savingAlbumIds.has(album.albumId)} onClick={() => saveEdit(album.albumId)} className="px-4 py-2 rounded-lg bg-amber text-white text-sm font-medium cursor-pointer hover:bg-amber-dark disabled:opacity-60 disabled:cursor-wait transition-colors">{savingAlbumIds.has(album.albumId) ? 'Saving…' : 'Save'}</button>
                                                             <button disabled={savingAlbumIds.has(album.albumId)} onClick={() => setEditingAlbum(null)} className="px-4 py-2 rounded-lg bg-cream text-warm-gray text-sm font-medium cursor-pointer hover:bg-cream-dark disabled:opacity-60 transition-colors">Cancel</button>
@@ -1158,6 +1216,35 @@ function ManageAlbums() {
                                                                     <button disabled={savingAlbumIds.has(album.albumId)} onClick={() => handleDelete(album.albumId)} className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-medium cursor-pointer hover:bg-red-100 disabled:opacity-60 transition-colors">{savingAlbumIds.has(album.albumId) ? 'Working…' : 'Delete'}</button>
                                                                 </>
                                                             )}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {viewMode === 'manage' && album.visibility === 'unlisted' && album.publishAt && (
+                                                    <div className="mt-4 pt-4 border-t border-warm-border flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <svg className="w-4 h-4 text-amber shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" strokeWidth={2} /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 7v5l3 2" /></svg>
+                                                            <span className="text-sm text-charcoal">
+                                                                <span className="font-medium">Scheduled</span> · publishes to the main gallery {formatPublishAt(album.publishAt)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex gap-2 shrink-0">
+                                                            <button
+                                                                type="button"
+                                                                disabled={savingAlbumIds.has(album.albumId)}
+                                                                onClick={() => changeSchedule(album, { visibility: 'public' }, 'Album published!')}
+                                                                className="px-3 py-1.5 rounded-lg bg-amber text-white text-xs font-medium cursor-pointer hover:bg-amber-dark disabled:opacity-60 transition-colors"
+                                                            >
+                                                                Publish now
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={savingAlbumIds.has(album.albumId)}
+                                                                onClick={() => changeSchedule(album, { publishAt: null }, 'Schedule cancelled. The album stays link-only.')}
+                                                                className="px-3 py-1.5 rounded-lg bg-cream text-charcoal text-xs font-medium cursor-pointer hover:bg-cream-dark disabled:opacity-60 transition-colors"
+                                                            >
+                                                                Cancel schedule
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 )}

@@ -70,7 +70,7 @@ ADMIN_SUMMARY_FIELDS = (
     "createdAt", "uploadedAt", "imageCount", "coverImageUrl", "coverThumbKey",
     "coverBlurhash", "hoverPreviewStatus", "hoverPreviewVersion",
     "hoverPreviewManifestKey", "ownerEmail", "ownerSub", "isShared", "shareCode",
-    "legacyS3Prefix",
+    "legacyS3Prefix", "publishAt",
 )
 # Every field is a placeholder so no current or future reserved word can break
 # the scan. These names never collide with boto3's generated #n0-style names.

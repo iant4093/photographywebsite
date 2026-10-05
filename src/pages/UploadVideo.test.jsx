@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  requestUploadUrls: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAlbums: vi.fn(),
+  requestUploadUrls: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAllAlbums: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processVideo: vi.fn() }))
@@ -38,7 +38,7 @@ describe('UploadVideo', () => {
     vi.clearAllMocks()
     auth.getIdToken.mockResolvedValue('admin-token')
     api.listUsers.mockResolvedValue([{ email: 'client@example.com' }, { email: 'iant4093@gmail.com' }])
-    api.fetchAlbums.mockResolvedValue([{ category: 'Weddings' }, { category: 'Weddings' }, { category: 'Commercial' }, {}])
+    api.fetchAllAlbums.mockResolvedValue([{ category: 'Weddings' }, { category: 'Weddings' }, { category: 'Commercial' }, {}])
     api.uploadFileToS3.mockResolvedValue(undefined)
     api.createAlbum.mockResolvedValue({ albumId: 'created' })
     media.processVideo.mockResolvedValue({
@@ -69,7 +69,7 @@ describe('UploadVideo', () => {
 
   it('loads categories and private users, adjusts thumbnail times, and creates a private video album', async () => {
     const { container, unmount } = mounted()
-    await waitFor(() => expect(api.fetchAlbums).toHaveBeenCalled())
+    await waitFor(() => expect(api.fetchAllAlbums).toHaveBeenCalledWith({ type: 'video' }))
     expect(expectSuggestion(screen.getByLabelText('Category'), 'Weddings')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
     fireEvent.click(screen.getByRole('combobox', { name: 'User Email *' }))
@@ -146,9 +146,29 @@ describe('UploadVideo', () => {
     expect(screen.queryByRole('combobox', { name: 'User Email *' })).toBeNull()
   })
 
+  it('schedules a main gallery video album to publish later', async () => {
+    const { container } = mounted()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule for later' }))
+    const when = screen.getByLabelText('Publish on')
+    fireEvent.change(when, { target: { value: '' } })
+    populate(container, [new File(['film'], 'clip.mp4', { type: 'video/mp4' })])
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText('Choose a date and time to publish.')).toBeInTheDocument()
+
+    const future = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+    future.setSeconds(0, 0)
+    const pad = (value) => String(value).padStart(2, '0')
+    fireEvent.change(when, { target: { value: `${future.getFullYear()}-${pad(future.getMonth() + 1)}-${pad(future.getDate())}T${pad(future.getHours())}:${pad(future.getMinutes())}` } })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText(/Video album scheduled! It will publish to the main gallery on/)).toBeInTheDocument()
+    expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
+      type: 'video', visibility: 'unlisted', isShared: false, publishAt: future.toISOString(),
+    }))
+  })
+
   it('reports discovery and upload errors without leaving the form disabled', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    api.fetchAlbums.mockRejectedValue(new Error('categories unavailable'))
+    api.fetchAllAlbums.mockRejectedValue(new Error('categories unavailable'))
     api.listUsers.mockRejectedValueOnce(new Error('users unavailable'))
     const { container } = mounted()
     await waitFor(() => expect(console.error).toHaveBeenCalled())

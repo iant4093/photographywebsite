@@ -336,6 +336,75 @@ describe('ManageAlbums', () => {
     expect(await screen.findByText('Album deleted!')).toBeInTheDocument()
   })
 
+  it('shows, moves, cancels, and publishes scheduled link-only albums', async () => {
+    const later = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+    later.setSeconds(0, 0)
+    const scheduled = [
+      { albumId: 'soon', title: 'Coming Soon', category: 'Travel', type: 'photo', visibility: 'unlisted', isShared: false, publishAt: later.toISOString(), createdAt: '2026-06-01T12:00:00.000Z' },
+      { albumId: 'next', title: 'Up Next', category: 'Travel', type: 'photo', visibility: 'unlisted', isShared: false, publishAt: later.toISOString(), createdAt: '2026-05-01T12:00:00.000Z' },
+    ]
+    api.fetchAlbumsFilteredPage.mockResolvedValue({ items: scheduled, nextCursor: null })
+    mounted()
+    fireEvent.click(await screen.findByRole('button', { name: 'Link Only' }))
+    expect(await screen.findByText('Coming Soon')).toBeInTheDocument()
+    expect(screen.getAllByText(/publishes to the main gallery/)).toHaveLength(2)
+
+    // Editing shows the time in local form and saves a moved time as ISO.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0])
+    const pad = (value) => String(value).padStart(2, '0')
+    const local = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+    const field = screen.getByLabelText('Publish to the main gallery on (optional)')
+    expect(field).toHaveValue(local(later))
+    const moved = new Date(later.getTime() + 60 * 60 * 1000)
+    fireEvent.change(field, { target: { value: local(moved) } })
+    api.updateAlbum.mockResolvedValueOnce({ ...scheduled[0], publishAt: moved.toISOString() })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.updateAlbum).toHaveBeenLastCalledWith('admin-token', 'soon', expect.objectContaining({ publishAt: moved.toISOString() })))
+
+    // A past time is refused before any request.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0])
+    fireEvent.change(screen.getByLabelText('Publish to the main gallery on (optional)'), { target: { value: '2020-01-01T09:00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Choose a time in the future.')).toBeInTheDocument()
+    expect(api.updateAlbum).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    api.updateAlbum.mockResolvedValueOnce({ ...scheduled[0], publishAt: undefined })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.updateAlbum).toHaveBeenLastCalledWith('admin-token', 'soon', expect.objectContaining({ publishAt: null })))
+    await waitFor(() => expect(screen.getAllByText(/publishes to the main gallery/)).toHaveLength(1))
+
+    // Cancelling keeps the album link-only; publishing moves it out of this list.
+    api.updateAlbum.mockResolvedValueOnce({ ...scheduled[1], publishAt: undefined })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel schedule' }))
+    await waitFor(() => expect(api.updateAlbum).toHaveBeenLastCalledWith('admin-token', 'next', { publishAt: null }))
+    expect(await screen.findByText('Schedule cancelled. The album stays link-only.')).toBeInTheDocument()
+    expect(screen.queryByText(/publishes to the main gallery/)).toBeNull()
+  })
+
+  it('publishes a scheduled album right away', async () => {
+    const scheduled = { albumId: 'soon', title: 'Coming Soon', category: 'Travel', type: 'photo', visibility: 'unlisted', isShared: false, publishAt: '2030-01-01T17:00:00Z', createdAt: '2026-06-01T12:00:00.000Z' }
+    api.fetchAlbumsFilteredPage.mockResolvedValue({ items: [scheduled], nextCursor: null })
+    api.updateAlbum.mockResolvedValueOnce({ ...scheduled, visibility: 'public', publishAt: undefined })
+    mounted()
+    fireEvent.click(await screen.findByRole('button', { name: 'Link Only' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish now' }))
+    await waitFor(() => expect(api.updateAlbum).toHaveBeenCalledWith('admin-token', 'soon', { visibility: 'public' }))
+    expect(await screen.findByText('Album published!')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Coming Soon')).toBeNull())
+  })
+
+  it('keeps a schedule when changing it fails', async () => {
+    const scheduled = { albumId: 'soon', title: 'Coming Soon', category: 'Travel', type: 'photo', visibility: 'unlisted', isShared: false, publishAt: '2030-01-01T17:00:00Z', createdAt: '2026-06-01T12:00:00.000Z' }
+    api.fetchAlbumsFilteredPage.mockResolvedValue({ items: [scheduled], nextCursor: null })
+    api.updateAlbum.mockRejectedValueOnce(new Error('Album changed while it was being updated'))
+    mounted()
+    fireEvent.click(await screen.findByRole('button', { name: 'Link Only' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel schedule' }))
+    expect(await screen.findByText('Album changed while it was being updated')).toBeInTheDocument()
+    expect(screen.getByText(/publishes to the main gallery/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel schedule' })).toBeEnabled()
+  })
+
   it('renders video albums and empty/error responses', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const first = mounted('/admin/albums?type=video')

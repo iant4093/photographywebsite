@@ -402,6 +402,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("VideoUpgradeFunctionRole", "AWS::IAM::Role"),
                 ("VideoUpgradeFunctionQueueUpgrades", "AWS::Events::Rule"),
                 ("VideoUpgradeFunctionQueueUpgradesPermission", "AWS::Lambda::Permission"),
+                ("UpdateAlbumFunctionPublishScheduled", "AWS::Events::Rule"),
+                ("UpdateAlbumFunctionPublishScheduledPermission", "AWS::Lambda::Permission"),
                 ("ZipPreparationQueue", "AWS::SQS::Queue"),
                 ("ZipPreparationDeadLetterQueue", "AWS::SQS::Queue"),
                 ("ZipPreparationFailureAlarm", "AWS::CloudWatch::Alarm"),

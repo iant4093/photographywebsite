@@ -611,6 +611,8 @@ def serialize_album_summary(album, *, include_admin=False):
                 "legacyS3Prefix": approved_legacy_prefix(album) or "",
             }
         )
+        if visibility == "unlisted" and isinstance(album.get("publishAt"), str):
+            summary["publishAt"] = album["publishAt"]
     return summary
 
 

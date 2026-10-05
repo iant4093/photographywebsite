@@ -249,3 +249,7 @@ html[data-theme="dark"] .linen-site.linen-admin :is(.aws-cost-error, .drive-usag
   background: #3b2020;
   border-color: #7f3b3b;
 }
+
+.linen-site[data-theme="dark"] input[type="datetime-local"] {
+  color-scheme: dark;
+}
