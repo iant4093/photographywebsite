@@ -22,9 +22,19 @@ import { navigateBackOr } from '../utils/navigation'
 import { pollZipJob } from '../utils/zipDownload'
 import { trackAlbumView, trackZipRequest } from '../utils/analytics'
 import { shareUrlForAlbumVideo } from '../utils/share'
+import useAlbumRouteId from '../hooks/useAlbumRouteId'
+import { albumHandle } from '../utils/albumRoutes'
+import AlbumLoadingSkeleton from '../components/AlbumLoadingSkeleton'
 
+// A readable URL (/video/<slug>) resolves to its album id before the page loads.
 export default function VideoGallery() {
-    const { albumId } = useParams()
+    const { albumId: handle } = useParams()
+    const albumId = useAlbumRouteId(handle, 'video')
+    if (!albumId) return <AlbumLoadingSkeleton standalone />
+    return <VideoGalleryContent key={albumId} albumId={albumId} />
+}
+
+function VideoGalleryContent({ albumId }) {
     const navigate = useNavigate()
     const [searchParams, setSearchParams] = useSearchParams()
     const [album, setAlbum] = useState(null)
@@ -400,7 +410,7 @@ export default function VideoGallery() {
                                         index={lightboxIndex}
                                         mediaType="video"
                                         shareTitle={`${album.title} — Ian Truong Photography`}
-                                        shareUrl={video => shareUrlForAlbumVideo(albumId, mediaId(video))}
+                                        shareUrl={video => shareUrlForAlbumVideo(albumHandle({ ...album, albumId }), mediaId(video))}
                                     />
                                 )}
                                 <button

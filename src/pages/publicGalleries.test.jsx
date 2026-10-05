@@ -20,6 +20,8 @@ const expiry = vi.hoisted(() => ({ refresh: vi.fn(), hook: vi.fn() }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 
 vi.mock('../utils/api', () => api)
+// Readable-URL resolution has its own tests; these pages receive the route's album id.
+vi.mock('../hooks/useAlbumRouteId', () => ({ default: (handle) => handle }))
 vi.mock('../utils/mediaUrls', async (importOriginal) => ({
   ...(await importOriginal()),
   resolveMediaDownloadUrl: urls.resolveMediaDownloadUrl,

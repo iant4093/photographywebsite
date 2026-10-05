@@ -549,6 +549,9 @@ def serialize_images(album, *, include_internal=False, preview_metadata_by_id=No
     return results
 
 
+PUBLIC_SLUG_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
 def serialize_album_summary(album, *, include_admin=False):
     # Covers stay presigned for protected albums: list views render many
     # albums without holding any album's signed cookies.
@@ -582,6 +585,10 @@ def serialize_album_summary(album, *, include_admin=False):
         "coverThumbnailUrl": media_url(thumb_key, visibility) if thumb_key else cover_url,
         "coverBlurhash": album.get("coverBlurhash", ""),
     }
+    # Readable URL (/album/<slug>); only public albums are reachable by one.
+    slug = album.get("slug")
+    if visibility == "public" and isinstance(slug, str) and PUBLIC_SLUG_PATTERN.fullmatch(slug):
+        summary["slug"] = slug
     if visibility == "public" and album.get("type", "photo") == "photo":
         hover_status = album.get("hoverPreviewStatus")
         if hover_status in {"ready", "unavailable"}:

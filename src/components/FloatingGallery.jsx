@@ -5,6 +5,7 @@ import { albumCoverPreviewSrcSet, albumCoverUrl } from '../utils/mediaUrls'
 import useMediaQuery from '../hooks/useMediaQuery'
 import useAlbumIntent from '../hooks/useAlbumIntent'
 import { gallerySessionSeed } from '../utils/gallerySeed'
+import { albumPath } from '../utils/albumRoutes'
 
 const TILT_PATTERN = [-0.3, 0.14, 0.28, -0.12]
 const LANE_COUNT = 3
@@ -70,7 +71,7 @@ function GalleryCard({ album, position, duplicate = false, responsiveSrcSet = ''
         <Link
             {...intent}
             data-camera-cursor="photo"
-            to={`/album/${album.albumId}`}
+            to={albumPath(album)}
             className="floating-print-card"
             aria-label={`View ${album.title}`}
             tabIndex={duplicate ? -1 : undefined}

@@ -108,6 +108,17 @@ describe('public API client behavior', () => {
     await expect(api.fetchAlbum('null')).resolves.toBeNull()
   })
 
+  it('caches a public album under both its readable slug and its id', async () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ album: { albumId: id, slug: 'prague' }, images: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const bySlug = await api.fetchAlbum('prague')
+    expect(fetchMock.mock.calls[0][0]).toContain('/public/albums/prague')
+    expect(await api.fetchAlbum(id)).toBe(bySlug)
+    expect(api.readCachedPublicAlbum('prague')).toBe(bySlug)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps authenticated album catalog and detail reads on the mixed compatibility routes', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }))

@@ -204,7 +204,7 @@ class PublisherTests(unittest.TestCase):
         at = "2026-10-05T11:55:00Z"
         albums = {name: album(albumId=name, visibility="unlisted", isShared=False, publishAt=at) for name in ("a", "b")}
         result, update, forget, _ = self.run_publisher([("a", at), ("b", at)], albums, {"b": 409})
-        self.assertEqual(result, {"published": 1, "waiting": 1})
+        self.assertEqual(result, {"published": 1, "waiting": 1, "named": 0})
         self.assertEqual(update.call_args_list, [
             call(None, update.call_args.args[1], album_id=name, body={"visibility": "public"}) for name in ("a", "b")
         ])
@@ -221,7 +221,7 @@ class PublisherTests(unittest.TestCase):
         entries = [("moved", at), ("cleared", at), ("published", at), ("uploading", at),
                    ("new", at), ("abandoned", "2026-10-04T11:00:00Z")]
         result, update, forget, record = self.run_publisher(entries, albums)
-        self.assertEqual(result, {"published": 0, "waiting": 1})
+        self.assertEqual(result, {"published": 0, "waiting": 1, "named": 0})
         update.assert_not_called()
         record.assert_called_once_with("moved", "2026-10-09T00:00:00Z")
         self.assertEqual(forget.call_args_list, [
@@ -235,7 +235,7 @@ class PublisherTests(unittest.TestCase):
         result, update, _, _ = self.run_publisher([(name, at) for name in names], albums)
         self.assertEqual(result["published"], update_album.PUBLISH_BATCH)
         result, update, _, _ = self.run_publisher([(name, at) for name in names], albums, remaining=1000)
-        self.assertEqual(result, {"published": 0, "waiting": 0})
+        self.assertEqual(result, {"published": 0, "waiting": 0, "named": 0})
 
     def test_the_schedule_event_runs_the_publisher_without_api_checks(self):
         with patch.object(update_album, "_publish_due", return_value={"published": 0}) as publish, \
@@ -268,7 +268,7 @@ class ScheduledPublicationTests(unittest.TestCase):
 
             result = update_album._publish_due(CONTEXT, now=NOW)
 
-            self.assertEqual(result, {"published": 1, "waiting": 0})
+            self.assertEqual(result, {"published": 1, "waiting": 0, "named": 0})
             published = self.album()
             self.assertEqual((published["visibility"], published["status"]), ("public", "active"))
             self.assertNotIn("publishAt", published)

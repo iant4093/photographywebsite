@@ -8,6 +8,7 @@ import secrets
 
 import boto3
 from media_mutation import album_lease, enabled as mutation_protocol_enabled, MediaMutationBusy, MediaAlbumMissing
+import album_slugs
 import drive_backup_jobs
 import scheduled_publish
 import trash_bin
@@ -227,6 +228,7 @@ def _continue_visibility(album_id, context, album=None, event=None):
             if metadata:
                 sync_album_index(dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]), target, metadata)
         committed = visibility_change.commit(table, album, target)
+        _name_public_album(committed)
         _forget_schedule(album, committed)
         _audit(event, context, "success", "album_updated",
                previous_visibility=album["visibility"], visibility=committed["visibility"])
@@ -240,6 +242,13 @@ def _continue_visibility(album_id, context, album=None, event=None):
             except Exception:
                 pass  # Existing legacy Drive reconciliation remains best-effort.
         return json_response(200, serialize_album_summary(committed, include_admin=True))
+
+
+def _name_public_album(album):
+    """Give a newly public album its readable URL (never fails the edit)."""
+    slug = album_slugs.assign_quietly(table, album)
+    if slug:
+        album["slug"] = slug
 
 
 def handler(event, context):
@@ -296,7 +305,14 @@ def _publish_due(context, now=None):
             waiting += 1
             logger.warning("scheduled_publish_deferred status=%s", response["statusCode"])
     logger.info("scheduled_publish_run published=%d waiting=%d", published, waiting)
-    return {"published": published, "waiting": waiting}
+    named = 0
+    if not callable(remaining) or remaining() >= 15000:
+        try:
+            # Public albums still on /album/<id> (new uploads, existing albums) get readable URLs.
+            named = album_slugs.sweep(table)
+        except Exception as error:
+            logger.warning("album_slug_sweep_failed error_type=%s", type(error).__name__)
+    return {"published": published, "waiting": waiting, "named": named}
 
 
 def _update(event, context, album_id=None, body=None):
@@ -437,6 +453,7 @@ def _update(event, context, album_id=None, body=None):
                 ReturnValues="ALL_NEW",
             )
             committed = response.get("Attributes") or updated
+            _name_public_album(committed)
             _forget_schedule(album, committed)
 
             if visibility_changed:

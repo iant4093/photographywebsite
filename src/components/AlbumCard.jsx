@@ -7,6 +7,7 @@ import { preloadAlbumRoute } from '../utils/routePreload'
 import { isWithinRecentDays } from '../utils/date'
 import { registerMobileAlbumPreview } from '../utils/mobileAlbumPreview'
 import { canRunAlbumPreview, MOBILE_PREVIEW_QUERY } from '../utils/albumPreviewPolicy'
+import { albumPath } from '../utils/albumRoutes'
 
 // Shared album card used by public, video, and signed-in catalogs.
 function AlbumCard({
@@ -109,10 +110,7 @@ function AlbumCard({
     }, [albumId, coverImageUrl, previewIdentity])
 
     // Determine the route: jump directly to video player if only 1 video
-    const isSingleVideo = album.type === 'video' && album.imageCount === 1
-    const targetRoute = isSingleVideo
-        ? `/video/${album.albumId}?play=1`
-        : `/${album.type === 'video' ? 'video' : 'album'}/${album.albumId}`
+    const targetRoute = albumPath(album)
 
     const content = (
         <>

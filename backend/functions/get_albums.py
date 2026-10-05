@@ -70,7 +70,7 @@ ADMIN_SUMMARY_FIELDS = (
     "createdAt", "uploadedAt", "imageCount", "coverImageUrl", "coverThumbKey",
     "coverBlurhash", "hoverPreviewStatus", "hoverPreviewVersion",
     "hoverPreviewManifestKey", "ownerEmail", "ownerSub", "isShared", "shareCode",
-    "legacyS3Prefix", "publishAt", "trashedAt", "trashedFrom",
+    "legacyS3Prefix", "publishAt", "trashedAt", "trashedFrom", "slug",
 )
 # Every field is a placeholder so no current or future reserved word can break
 # the scan. These names never collide with boto3's generated #n0-style names.
@@ -272,7 +272,7 @@ def _hydrate_public_summary_fields(records):
             table.name: {
                 "Keys": [{"albumId": album_id} for album_id in album_ids],
                 "ProjectionExpression": (
-                    "albumId, uploadedAt, hoverPreviewStatus, "
+                    "albumId, uploadedAt, slug, hoverPreviewStatus, "
                     "hoverPreviewVersion, hoverPreviewManifestKey"
                 ),
             }
@@ -286,6 +286,7 @@ def _hydrate_public_summary_fields(records):
             hydrated = by_id.get(record.get("albumId"), {})
             for field in (
                 "uploadedAt",
+                "slug",
                 "hoverPreviewStatus",
                 "hoverPreviewVersion",
                 "hoverPreviewManifestKey",

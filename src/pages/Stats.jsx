@@ -11,6 +11,7 @@ import { start as startVideoHoverPreview, warmVideoHoverRuntime } from '../utils
 import ProgressiveImage from '../components/ProgressiveImage'
 import ShootingCalendar from '../components/ShootingCalendar'
 import './Stats.css'
+import { albumPath } from '../utils/albumRoutes'
 
 
 const numberFormatter = new Intl.NumberFormat('en-US')
@@ -103,10 +104,7 @@ function albumTimestamp(album) {
     return Number.isFinite(timestamp) ? timestamp : 0
 }
 
-function albumRoute(album) {
-    if (album?.type === 'video' && album.imageCount === 1) return `/video/${album.albumId}?play=1`
-    return `/${album?.type === 'video' ? 'video' : 'album'}/${album?.albumId}`
-}
+const albumRoute = (album) => albumPath(album)
 
 function timelineDate(value) {
     const parsed = new Date(value)
