@@ -168,6 +168,27 @@ describe('navigation and metadata', () => {
     expect(screen.getByRole('link', { name: 'Search' })).toHaveAttribute('href', '/search')
   })
 
+  it('shows TV mode beside the theme toggle at every width, and keeps the narrowest header on one line', () => {
+    const first = routed(<Navbar />)
+    expect(screen.getByRole('link', { name: /TV mode/ })).not.toHaveClass('hidden')
+    expect(screen.getByText('Ian Truong')).toBeInTheDocument()
+    first.unmount()
+    const original = window.matchMedia
+    window.matchMedia = (query) => ({
+      matches: query === '(max-width: 359px)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+    try {
+      routed(<Navbar />)
+      expect(screen.queryByText('Ian Truong')).toBeNull()
+      expect(screen.getByRole('link', { name: 'Ian Truong, home' })).toHaveAttribute('href', '/')
+    } finally {
+      window.matchMedia = original
+    }
+  })
+
   it('uses the brand search control instead of a named navigation item', () => {
     const { container } = routed(<Navbar />, undefined, '/search')
     const search = screen.getByRole('link', { name: 'Search' })

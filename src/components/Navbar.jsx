@@ -18,6 +18,8 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const menuRef = useRef(null)
     // Hover dropdowns only load where the desktop links are shown to a pointer.
     const hoverDropdowns = useMediaQuery('(hover: hover) and (min-width: 1080px)')
+    // On the narrowest phones the logo stands alone so the header icons fit on one line.
+    const compactBrand = useMediaQuery('(max-width: 359px)')
     const photoActive = pathname === '/' || pathname.startsWith('/album/') || pathname.startsWith('/sections/photo/')
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/') || pathname.startsWith('/sections/video/')
     const searchActive = pathname === '/search'
@@ -115,13 +117,15 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                 <div className="linen-nav-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     {/* Brand */}
                     <div className="linen-brand-cluster flex items-center gap-3 z-50 relative">
-                        <Link to="/" onClick={closeMenu} className="linen-brand flex items-center gap-3 group relative">
+                        <Link to="/" onClick={closeMenu} className="linen-brand flex items-center gap-3 group relative" aria-label={compactBrand ? 'Ian Truong, home' : undefined}>
                             <div className="linen-logo-tile w-10 h-10 rounded-xl bg-gradient-to-br from-amber to-amber-dark flex items-center justify-center shadow-warm-sm group-hover:shadow-warm transition-shadow duration-300">
                                 <span className="text-cream font-serif font-bold text-sm tracking-tight">IT</span>
                             </div>
-                            <span className="font-serif text-xl font-semibold text-charcoal tracking-tight">
-                                Ian Truong
-                            </span>
+                            {!compactBrand && (
+                                <span className="font-serif text-xl font-semibold text-charcoal tracking-tight">
+                                    Ian Truong
+                                </span>
+                            )}
                         </Link>
                         {showThemeToggle && (
                             <button
@@ -147,7 +151,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         <Link
                             to="/tv"
                             onClick={closeMenu}
-                            className="linen-theme-toggle hidden sm:block"
+                            className="linen-theme-toggle block"
                             aria-label="TV mode: slideshow of favorite photos"
                             title="TV mode"
                         >
