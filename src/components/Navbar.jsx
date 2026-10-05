@@ -145,6 +145,18 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                             </button>
                         )}
                         <Link
+                            to="/tv"
+                            onClick={closeMenu}
+                            className="linen-theme-toggle hidden sm:block"
+                            aria-label="TV mode: slideshow of favorite photos"
+                            title="TV mode"
+                        >
+                            <svg className="linen-theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                <rect x="3" y="5" width="18" height="12" rx="1.5" />
+                                <path d="M8 21h8M12 17v4" />
+                            </svg>
+                        </Link>
+                        <Link
                             to="/search"
                             onClick={closeMenu}
                             className="linen-theme-toggle block"

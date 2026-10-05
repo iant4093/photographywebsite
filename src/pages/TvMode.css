@@ -1,0 +1,212 @@
+/* TV mode: a full-screen slideshow above the site, always on a dark stage. */
+.tv-mode {
+  --tv-ink: #f3ecdf;
+  --tv-muted: rgba(243, 236, 223, 0.66);
+  --tv-glass: rgba(20, 18, 15, 0.62);
+  --tv-line: rgba(243, 236, 223, 0.16);
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow: hidden;
+  background: #0d0c0a;
+  color: var(--tv-ink);
+  font-family: var(--font-sans);
+  cursor: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-y;
+}
+.tv-mode.is-awake { cursor: default; }
+
+.tv-bounds,
+.tv-stage {
+  position: absolute;
+  inset: max(6vh, 2.5rem) max(6vw, 1.5rem);
+}
+.tv-bounds { pointer-events: none; visibility: hidden; }
+.tv-stage { display: grid; place-items: center; }
+
+/* Each slide fades in over the previous one. */
+.tv-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: tv-fade-in var(--tv-fade) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.tv-layer.is-leaving { z-index: 0; }
+.tv-layer.is-current { z-index: 1; }
+@keyframes tv-fade-in { to { opacity: 1; } }
+
+.tv-backdrop {
+  position: absolute;
+  inset: -8%;
+  width: 116%;
+  height: 116%;
+  object-fit: cover;
+  filter: blur(48px) saturate(1.15) brightness(0.42);
+  transform: scale(1.05);
+}
+
+/* The lightbox's ivory border and soft offset shadow. */
+.tv-frame {
+  line-height: 0;
+  box-shadow:
+    0 0 0 6px rgba(248, 244, 235, 0.95),
+    0 0 0 7px rgba(54, 45, 37, 0.82),
+    8px 10px 0 7px rgba(0, 0, 0, 0.28),
+    0 30px 80px rgba(0, 0, 0, 0.45);
+  transform-origin: 50% 50%;
+}
+.tv-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+
+/* Slow zoom, in a different direction for each slide. */
+.has-motion .tv-frame { animation: tv-drift calc(var(--tv-interval) + var(--tv-fade)) linear both; }
+.has-motion .tv-drift-1 { animation-name: tv-drift-out; }
+.has-motion .tv-drift-2 { --tv-drift-x: -0.8%; }
+.has-motion .tv-drift-3 { animation-name: tv-drift-out; --tv-drift-x: 0.8%; }
+.is-paused .tv-frame,
+.is-paused .tv-progress span { animation-play-state: paused; }
+@keyframes tv-drift {
+  from { transform: scale(1) translateX(0); }
+  to { transform: scale(1.045) translateX(var(--tv-drift-x, 0.6%)); }
+}
+@keyframes tv-drift-out {
+  from { transform: scale(1.045) translateX(var(--tv-drift-x, -0.6%)); }
+  to { transform: scale(1) translateX(0); }
+}
+
+.tv-clock,
+.tv-caption {
+  position: absolute;
+  z-index: 2;
+  bottom: max(2.2vh, 1rem);
+  display: grid;
+  gap: 0.15rem;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.tv-clock { left: max(2.6vw, 1rem); }
+.tv-clock-time { font-family: var(--font-serif); font-size: clamp(1.8rem, 3.4vw, 3.4rem); line-height: 1; font-variant-numeric: tabular-nums; }
+.tv-clock-date { color: var(--tv-muted); font-size: clamp(0.75rem, 1vw, 1rem); letter-spacing: 0.04em; }
+.tv-caption { right: max(2.6vw, 1rem); justify-items: end; text-align: right; max-width: 40vw; }
+.tv-caption-title { font-family: var(--font-serif); font-size: clamp(1rem, 1.5vw, 1.5rem); }
+.tv-caption-camera { color: var(--tv-muted); font-size: clamp(0.7rem, 0.9vw, 0.9rem); letter-spacing: 0.03em; }
+
+.tv-progress { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(243, 236, 223, 0.1); }
+.tv-progress span { display: block; height: 100%; background: rgba(243, 236, 223, 0.7); transform-origin: left; animation: tv-progress var(--tv-interval) linear both; }
+@keyframes tv-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Controls fade away after a few seconds without movement. */
+.tv-top,
+.tv-transport {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+.is-awake .tv-top,
+.is-awake .tv-transport { opacity: 1; pointer-events: auto; }
+.tv-top { top: 1rem; left: 1rem; right: 1rem; justify-content: space-between; }
+.tv-top-buttons { display: flex; gap: 0.5rem; }
+.tv-count { color: var(--tv-muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); }
+.tv-transport { left: 50%; bottom: max(3vh, 1.25rem); gap: 0.75rem; transform: translateX(-50%); }
+
+.tv-button {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--tv-line);
+  border-radius: 999px;
+  background: var(--tv-glass);
+  color: var(--tv-ink);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.15s, border-color 0.2s;
+}
+.tv-button.is-primary { width: 3.4rem; height: 3.4rem; }
+.tv-button:hover:not(:disabled) { background: rgba(48, 43, 36, 0.8); border-color: rgba(243, 236, 223, 0.35); }
+.tv-button:active:not(:disabled) { transform: scale(0.94); }
+.tv-button:disabled { opacity: 0.35; cursor: default; }
+.tv-button svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.tv-button:focus-visible,
+.tv-choice button:focus-visible,
+.tv-text-button:focus-visible,
+.tv-toggle input:focus-visible + span { outline: 2px solid #d5ad89; outline-offset: 3px; }
+
+.tv-panel {
+  position: absolute;
+  z-index: 4;
+  top: 4.5rem;
+  right: 1rem;
+  display: grid;
+  gap: 1rem;
+  width: min(22rem, calc(100vw - 2rem));
+  padding: 1.1rem;
+  border: 1px solid var(--tv-line);
+  border-radius: 1rem;
+  background: rgba(20, 18, 15, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  cursor: default;
+}
+.tv-setting { display: grid; gap: 0.45rem; }
+.tv-setting-label { color: var(--tv-muted); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.tv-choice { display: flex; flex-wrap: wrap; border: 1px solid var(--tv-line); border-radius: 0.6rem; overflow: hidden; }
+.tv-choice button {
+  flex: 1 1 auto;
+  padding: 0.45rem 0.6rem;
+  color: var(--tv-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+.tv-choice button + button { border-left: 1px solid var(--tv-line); }
+.tv-choice button:hover { color: var(--tv-ink); }
+.tv-choice button[aria-pressed="true"] { background: rgba(243, 236, 223, 0.14); color: var(--tv-ink); }
+.tv-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem 1rem; }
+.tv-toggle { position: relative; display: flex; align-items: center; gap: 0.55rem; font-size: 0.82rem; cursor: pointer; }
+.tv-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.tv-toggle span { position: relative; flex: none; width: 2rem; height: 1.1rem; border-radius: 999px; background: rgba(243, 236, 223, 0.18); transition: background-color 0.2s; }
+.tv-toggle span::after { content: ''; position: absolute; top: 0.15rem; left: 0.15rem; width: 0.8rem; height: 0.8rem; border-radius: 999px; background: var(--tv-ink); transition: transform 0.2s; }
+.tv-toggle input:checked + span { background: #b4876a; }
+.tv-toggle input:checked + span::after { transform: translateX(0.9rem); }
+.tv-hint { color: var(--tv-muted); font-size: 0.72rem; }
+
+.tv-message {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 1rem;
+  color: var(--tv-muted);
+  text-align: center;
+}
+.tv-spinner { width: 2rem; height: 2rem; border: 2px solid var(--tv-line); border-top-color: var(--tv-ink); border-radius: 999px; animation: tv-spin 0.9s linear infinite; }
+@keyframes tv-spin { to { transform: rotate(360deg); } }
+.tv-text-button { padding: 0.55rem 1.1rem; border: 1px solid var(--tv-line); border-radius: 999px; color: var(--tv-ink); cursor: pointer; }
+
+@media (max-width: 640px) {
+  .tv-caption { max-width: 55vw; }
+  .tv-clock-date { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-layer { animation-duration: 1ms; }
+  .has-motion .tv-frame { animation: none; }
+  .tv-spinner { animation-duration: 2s; }
+}

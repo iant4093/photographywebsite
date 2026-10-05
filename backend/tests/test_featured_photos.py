@@ -192,8 +192,38 @@ class FeaturedApiTests(unittest.TestCase):
         ):
             self.assertEqual(self.request()["statusCode"], 503)
 
+    def test_all_mode_returns_every_public_favorite_in_album_order(self):
+        second_id = "22222222-2222-4222-8222-222222222222"
+        many = album(images=[{"rawKey": f"albums/{ALBUM_ID}/original/{i}.jpg", "isFavorite": True} for i in range(120)]
+                     + [{"rawKey": f"albums/{ALBUM_ID}/original/plain.jpg"}])
+        other = album(albumId=second_id, title="Coast", category="Sea",
+                      images=[{"rawKey": f"albums/{second_id}/original/s.jpg", "isFavorite": True}])
+        records = [many, album(visibility="private"), album(type="video"), album(images=[]), other]
+        with patch.object(api, "_random_photo_albums", return_value=records), patch.object(
+            api, "load_featured_references"
+        ) as pool:
+            response = self.request({"mode": "all"})
+        pool.assert_not_called()
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("s-maxage=3600", response["headers"]["Cache-Control"])
+        body = response_body(response)
+        self.assertEqual(body["totalPhotos"], 121)
+        self.assertEqual(len(body["images"]), 121)
+        self.assertEqual(body["images"][0]["id"], media_id_for_key(f"albums/{ALBUM_ID}/original/0.jpg"))
+        self.assertEqual(body["images"][119]["id"], media_id_for_key(f"albums/{ALBUM_ID}/original/119.jpg"))
+        self.assertEqual((body["images"][-1]["albumTitle"], body["images"][-1]["albumCategory"]), ("Coast", "Sea"))
+        self.assertTrue(all(image["isFavorite"] is True for image in body["images"]))
+
+        with patch.object(api, "ALL_FAVORITES_LIMIT", 100), patch.object(api, "_random_photo_albums", return_value=records):
+            self.assertEqual(response_body(self.request({"mode": "all"}))["totalPhotos"], 100)
+        with patch.object(api, "_random_photo_albums", return_value=[]):
+            self.assertEqual(response_body(self.request({"mode": "all"})), {"images": [], "totalPhotos": 0})
+        with patch.object(api, "_random_photo_albums", side_effect=api.PhotoFeedUnavailable()):
+            self.assertEqual(self.request({"mode": "all"})["statusCode"], 503)
+
     def test_invalid_queries_fail_before_reading(self):
-        for params in ({"favorite": "true"}, {"category": "Hikes"}, {"mode": "all"},
+        for params in ({"favorite": "true"}, {"category": "Hikes"}, {"mode": "every"},
+                       {"mode": "all", "limit": "5"}, {"mode": "all", "value": "Hikes"},
                        {"mode": "category"}, {"limit": "-1"}, {"limit": "oops"}):
             with self.subTest(params=params), patch.object(api, "load_featured_references") as load:
                 self.assertEqual(self.request(params)["statusCode"], 400)

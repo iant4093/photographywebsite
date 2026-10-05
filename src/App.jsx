@@ -19,6 +19,7 @@ const CameraCursor = lazy(() => import('./components/CameraCursor'))
 const MotionExperience = lazy(() => import('./components/MotionExperience'))
 const MistyEcho = lazy(() => import('./components/MistyEcho').catch(() => ({ default: () => null })))
 const Search = lazy(() => import('./pages/Search'))
+const TvMode = lazy(() => import('./pages/TvMode'))
 const Explore = lazy(() => import('./pages/Explore'))
 const Editor = lazy(() => import('./pages/Editor'))
 const Stats = lazy(() => import('./pages/Stats'))
@@ -71,7 +72,7 @@ function PageLoading() {
 function App() {
     const location = useLocation()
     const isAdminRoute = location.pathname.startsWith('/admin')
-    const isImmersiveRoute = location.pathname === '/explore/immersive-gallery'
+    const isImmersiveRoute = location.pathname === '/explore/immersive-gallery' || location.pathname === '/tv'
     const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)
     const theme = preferredTheme
 
@@ -108,6 +109,7 @@ function App() {
                         <Route path="/videos" element={<Videos />} />
                         <Route path="/sections/:mediaType/:category" element={<SectionAlbums />} />
                         <Route path="/search" element={<Search />} />
+                        <Route path="/tv" element={<TvMode />} />
                         <Route path="/explore/*" element={<Explore />} />
                         <Route path="/editor" element={<Editor />} />
                         <Route path="/stats" element={<Stats />} />
