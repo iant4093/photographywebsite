@@ -829,8 +829,13 @@ class BrowserBoundaryTests(unittest.TestCase):
         requests = [
             {"method": "GET", "uri": f"/album/{album_id}", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
             {"method": "HEAD", "uri": f"/video/{album_id}/", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
-            {"method": "GET", "uri": "/album/not-a-uuid", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "GET", "uri": "/album/Not%20A%20Slug", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
             {"method": "GET", "uri": f"/album/{album_id}", "headers": {"host": {"value": "www.example.test"}}, "querystring": {"view": {"value": "grid"}}},
+            {"method": "GET", "uri": "/album/prague-2026", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "GET", "uri": "/video/reel/", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "GET", "uri": "/album/Prague", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "GET", "uri": "/album/" + "a" * 81, "headers": {"host": {"value": "example.test"}}, "querystring": {}},
+            {"method": "GET", "uri": "/album/prague/extra", "headers": {"host": {"value": "example.test"}}, "querystring": {}},
         ]
         runner = source + "\nprocess.stdout.write(JSON.stringify(" + json.dumps(requests) + ".map(function(request) { return handler({request: request}); })));"
         results = json.loads(subprocess.run(
@@ -843,6 +848,10 @@ class BrowserBoundaryTests(unittest.TestCase):
             results[3]["headers"]["location"]["value"],
             f"https://example.test/album/{album_id}?view=grid",
         )
+        self.assertEqual(results[4]["uri"], "/api/public/social/album/prague-2026")
+        self.assertEqual(results[5]["uri"], "/api/public/social/video/reel")
+        for result in results[6:]:
+            self.assertEqual(result["uri"], "/api/public/social/album/invalid")
 
     def test_edge_request_router_preserves_api_and_rewrites_only_spa_navigation(self) -> None:
         node = shutil.which("node")
@@ -855,7 +864,7 @@ class BrowserBoundaryTests(unittest.TestCase):
         requests = [
             {
                 "method": "GET",
-                "uri": "/album/public-id",
+                "uri": "/album/Public%20Id",
                 "headers": {"host": {"value": "example.test"}},
                 "querystring": {},
             },
@@ -898,6 +907,12 @@ class BrowserBoundaryTests(unittest.TestCase):
                     "label": {"value": "golden%20hour"},
                 },
             },
+            {
+                "method": "GET",
+                "uri": "/video/prague-2026/",
+                "headers": {"host": {"value": "example.test"}},
+                "querystring": {},
+            },
         ]
         runner = source + "\nprocess.stdout.write(JSON.stringify(" + json.dumps(requests) + ".map(function(request) { return handler({request: request}); })));"
         completed = subprocess.run(
@@ -918,6 +933,7 @@ class BrowserBoundaryTests(unittest.TestCase):
             results[6]["headers"]["location"]["value"],
             "https://example.test/album/public-id?view=grid&label=golden%20hour",
         )
+        self.assertEqual(results[7]["uri"], "/api/public/social/video/prague-2026")
     def test_private_frontend_origin_migration_is_staged_and_guarded(self) -> None:
         script = (ROOT / "ops" / "migrate_frontend_origin.py").read_text(encoding="utf-8")
         for expected in (
