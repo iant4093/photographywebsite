@@ -2,6 +2,15 @@ function appendQueryPair(parts, key, value) {
   parts.push(key + '=' + (value || ''));
 }
 
+// An album id, or a public album's readable slug (/album/prague-2026).
+function albumHandle(candidate) {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)) {
+    return candidate.toLowerCase();
+  }
+  if (candidate.length <= 80 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(candidate)) return candidate;
+  return 'invalid';
+}
+
 function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value.toLowerCase();
@@ -31,9 +40,8 @@ function handler(event) {
   }
 
   if (request.method !== 'GET' && request.method !== 'HEAD') return request;
-  var match = request.uri.match(/^\/(album|video)\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/?$/i);
+  var match = request.uri.match(/^\/(album|video)\/([^/]*)\/?$/i);
   var routeKind = match && match[1].toLowerCase() === 'video' ? 'video' : 'album';
-  var albumId = match ? match[2].toLowerCase() : 'invalid';
-  request.uri = '/api/public/social/' + routeKind + '/' + albumId;
+  request.uri = '/api/public/social/' + routeKind + '/' + albumHandle(match ? match[2] : '');
   return request;
 }

@@ -4,6 +4,15 @@ function appendQueryPair(parts, key, value) {
   parts.push(key + '=' + (value || ''));
 }
 
+// An album id, or a public album's readable slug (/album/prague-2026).
+function albumHandle(candidate) {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)) {
+    return candidate.toLowerCase();
+  }
+  if (candidate.length <= 80 && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(candidate)) return candidate;
+  return 'invalid';
+}
+
 function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value.toLowerCase();
@@ -45,11 +54,7 @@ function handler(event) {
   var socialPath = request.uri.match(/^\/(album|video)(?:\/([^/]*))?\/?$/i);
   if (socialPath) {
     var routeKind = socialPath[1].toLowerCase() === 'video' ? 'video' : 'album';
-    var candidate = socialPath[2] || '';
-    var albumId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)
-      ? candidate.toLowerCase()
-      : 'invalid';
-    request.uri = '/api/public/social/' + routeKind + '/' + albumId;
+    request.uri = '/api/public/social/' + routeKind + '/' + albumHandle(socialPath[2] || '');
     return request;
   }
 
