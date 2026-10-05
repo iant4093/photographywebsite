@@ -9,10 +9,13 @@ import useAlbumRouteId from './useAlbumRouteId'
 
 const ID = '11111111-1111-4111-8111-111111111111'
 
+const seen = []
+
 function Probe() {
     const { handle } = useParams()
     const location = useLocation()
     const albumId = useAlbumRouteId(handle, 'album')
+    seen.push(albumId || 'resolving')
     return <p data-testid="probe">{`${location.pathname}${location.search} -> ${albumId || 'resolving'}`}</p>
 }
 
@@ -37,11 +40,14 @@ describe('useAlbumRouteId', () => {
         expect(api.fetchAlbum).toHaveBeenCalledWith('prague')
     })
 
-    it('moves an id link to the readable URL, keeping the shared photo', async () => {
+    it('moves an id link to the readable URL, keeping the shared photo and the page', async () => {
         api.fetchAlbum.mockResolvedValue({ album: { albumId: ID, slug: 'prague-2' } })
+        seen.length = 0
         mounted(`/album/${ID}?photo=abc`)
         expect(probe()).toBe(`/album/${ID}?photo=abc -> ${ID}`)
         await waitFor(() => expect(probe()).toBe(`/album/prague-2?photo=abc -> ${ID}`))
+        // The album id never drops out, so the page is not torn down and reloaded.
+        expect(seen).not.toContain('resolving')
     })
 
     it('keeps id links for albums without a slug, and private ones', async () => {
