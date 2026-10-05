@@ -2613,6 +2613,57 @@ Resources:
             Schedule: rate(3 hours)
             Enabled: true
 
+  # Daily per-album storage and media CDN bandwidth for the AWS costs page.
+  AlbumUsageFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: album_usage.handler
+      Timeout: 300
+      MemorySize: 512
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          ALBUMS_TABLE: !Ref AlbumsTable
+          COST_REPORT_CACHE_TABLE: !Ref CostReportCacheTable
+          IMAGES_BUCKET: !Ref ImagesBucket
+          MEDIA_LOGS_BUCKET: !Ref MediaAccessLogsBucket
+          IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:Scan
+              Resource: !GetAtt AlbumsTable.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:BatchGetItem
+              Resource: !GetAtt CostReportCacheTable.Arn
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ImagesBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: albums/*
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt MediaAccessLogsBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: media/*
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${MediaAccessLogsBucket.Arn}/media/*'
+      Events:
+        DailyUsage:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+            Enabled: true
+
   GetSharedAlbumFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild

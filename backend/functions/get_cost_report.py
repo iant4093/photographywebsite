@@ -12,6 +12,7 @@ import os
 
 import boto3
 
+import album_usage
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from front_door import verify_front_door_request
@@ -22,7 +23,8 @@ logger = logging.getLogger("photography_api.cost_report")
 logger.setLevel(logging.INFO)
 
 CACHE_KEY = "account-cost-report-v1"
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
+TREND_MONTHS = 6
 MONTH_COUNT = 13
 MAX_COST_EXPLORER_PAGES = 10
 MAX_CACHE_PAYLOAD_BYTES = 300_000
@@ -178,9 +180,36 @@ def _forecast(today, current_total):
     return _json_amount(projected)
 
 
+def _next_month(today, months, projected):
+    """Next month from the trend of recent complete months and this one's projection.
+
+    A least-squares line through the last few months (skipping months before
+    the account had costs), extended one month; never negative.
+    """
+    history = [month["total"] for month in months[:-1]][-TREND_MONTHS:]
+    while history and history[0] <= 0:
+        history.pop(0)
+    points = [*history, projected]
+    slope = 0.0
+    forecast = projected
+    if len(points) >= 3:
+        count = len(points)
+        mean_x = (count - 1) / 2
+        mean_y = sum(points) / count
+        spread = sum((index - mean_x) ** 2 for index in range(count))
+        slope = sum((index - mean_x) * (value - mean_y) for index, value in enumerate(points)) / spread
+        forecast = max(0.0, mean_y + slope * (count - mean_x))
+    return {
+        "month": _shift_month(_month_start(today), 1).strftime("%Y-%m"),
+        "forecastTotal": round(forecast, 4),
+        "trendPerMonth": round(slope, 4),
+    }
+
+
 def _build_report(today):
     months, currency = _cost_and_usage(today)
     current_total = months[-1]["total"]
+    projected = _forecast(today, current_total)
     return {
         "schemaVersion": CACHE_SCHEMA_VERSION,
         "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -188,7 +217,8 @@ def _build_report(today):
         "currency": currency,
         "metric": "UnblendedCost",
         "currentMonth": months[-1]["month"],
-        "forecastTotal": _forecast(today, current_total),
+        "forecastTotal": projected,
+        "nextMonth": _next_month(today, months, projected),
         "months": months,
     }
 
@@ -248,6 +278,14 @@ def _store_report(today, report):
 
 def _with_cache_status(report, status, today):
     result = copy.deepcopy(report)
+    try:
+        # Written daily by AlbumUsageFunction; the report works without it.
+        usage = album_usage.load_summary(cache_table)
+    except Exception as error:
+        logger.warning("album_usage_unavailable error_type=%s", type(error).__name__)
+        usage = None
+    if usage:
+        result["albumUsage"] = usage
     result["cacheStatus"] = status
     result["nextRefreshAt"] = dt.datetime.combine(
         today + dt.timedelta(days=1), dt.time.min, tzinfo=dt.timezone.utc

@@ -145,6 +145,23 @@ Cost Anomaly Detection monitor and daily-summary subscription; review that
 subscription separately instead of routing it into the website incident SNS
 topic.
 
+The report also estimates next month locally: a least-squares line through up
+to six recent complete months plus this month's projection, extended one month
+(never negative). It costs no extra Cost Explorer call.
+
+`AlbumUsageFunction` runs once a day and writes the "Biggest albums" summary
+into the same cache table:
+
+- **Storage**: one current-object listing of `albums/`.
+- **Bandwidth**: the media distribution's standard access logs. Each
+  complete log day, two days back to allow for late delivery, is reduced once
+  to a per-album byte map. The summary covers the 30 most recent such days.
+
+Only bytes per album path are kept, never addresses, user agents or query
+strings. Protected media served through the frontend's signed-cookie path
+does not appear in these logs. Per-album costs on the page are rough estimates
+from list prices.
+
 ## Admin Google Drive usage report
 
 The protected `/admin/drive-usage` page reuses the website backup worker's
