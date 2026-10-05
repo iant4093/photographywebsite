@@ -869,7 +869,16 @@ fi
         self.assertNotIn("iam:CreateAccessKey", execution)
         self.assertNotIn("iam:DeleteAccessKey", execution)
         bootstrap_role = statement_block(execution, "ReadBootstrapReleaseRoles")
-        self.assertIn("Action: iam:GetRole", bootstrap_role)
+        # Read-only: exactly what drift detection needs to read each bootstrap role.
+        for action in (
+            "iam:GetRole",
+            "iam:GetRolePolicy",
+            "iam:ListAttachedRolePolicies",
+            "iam:ListRolePolicies",
+        ):
+            self.assertIn(action, bootstrap_role)
+        for mutation in ("iam:Put", "iam:Attach", "iam:Detach", "iam:Delete", "iam:Update", "iam:Create", "iam:Tag"):
+            self.assertNotIn(mutation, bootstrap_role)
         self.assertIn("role/ian-photography-cloudformation-execution", bootstrap_role)
         self.assertIn("role/ian-photography-github-production-*", bootstrap_role)
         self.assertNotIn("Resource: '*'", bootstrap_role)

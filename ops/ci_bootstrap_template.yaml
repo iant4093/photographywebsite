@@ -753,9 +753,15 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ApplicationStackName}-*'
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-security--SecuritySignalProcessorRo-*'
+          # Drift detection on the bootstrap stack runs as this role and reads
+          # each of its roles the way CloudFormation's IAM role handler does.
           - Sid: ReadBootstrapReleaseRoles
             Effect: Allow
-            Action: iam:GetRole
+            Action:
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:ListAttachedRolePolicies
+              - iam:ListRolePolicies
             Resource:
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-cloudformation-execution'
               - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ian-photography-github-production-*'
