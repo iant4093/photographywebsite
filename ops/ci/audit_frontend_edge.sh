@@ -8,6 +8,8 @@ distribution_id="$(jq -er '.distributionId' "$contract")"
 bucket="$(jq -er '.bucketName' "$contract")"
 region="$(jq -er '.region' "$contract")"
 
+# An edge change takes several minutes to deploy; audit the settled configuration.
+aws cloudfront wait distribution-deployed --id "$distribution_id"
 aws cloudfront get-distribution --id "$distribution_id" --output json > "$workspace/distribution.json"
 aws s3api get-public-access-block --region "$region" --bucket "$bucket" --output json > "$workspace/public-access-block.json"
 aws s3api get-bucket-encryption --region "$region" --bucket "$bucket" --output json > "$workspace/encryption.json"

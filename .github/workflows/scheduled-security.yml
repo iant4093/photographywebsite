@@ -18,8 +18,34 @@ jobs:
       contents: read
       security-events: write
 
+  release-idle:
+    name: Wait for any production release to finish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      release_sha: ${{ steps.idle.outputs.release_sha }}
+    steps:
+      - name: Require trusted default-branch controls
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
+            echo 'Production audit controls must run from main.' >&2
+            exit 2
+          }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # Auditing mid-release reports a deploy in progress as drift.
+      - id: idle
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ops/ci/wait_for_release_idle.py --github-output "$GITHUB_OUTPUT"
+
   history-and-public-posture:
     name: Full-history credentials and public posture
+    needs: release-idle
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -46,11 +72,12 @@ jobs:
           EXECUTE_API_URL: ${{ vars.EXECUTE_API_URL }}
           MEDIA_DOMAIN: ${{ vars.VITE_CLOUDFRONT_DOMAIN }}
           MEDIA_BUCKET_NAME: ${{ vars.MEDIA_BUCKET_NAME }}
-          EXPECTED_RELEASE_SHA: ${{ github.sha }}
+          EXPECTED_RELEASE_SHA: ${{ needs.release-idle.outputs.release_sha }}
         run: ./ops/ci/public_smoke.sh
 
   production-drift:
     name: Read-only multi-stack production drift check
+    needs: release-idle
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:

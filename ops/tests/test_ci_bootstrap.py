@@ -343,6 +343,8 @@ elif [[ \"$1 $2\" == \"cloudformation describe-stack-drift-detection-status\" ]]
   printf 'DETECTION_COMPLETE\\tIN_SYNC\\n'
 elif [[ \"$1 $2\" == \"cloudformation list-stack-resources\" ]]; then
   printf '%s\\n' '[\"ConfigDeliveryBucketPolicy\",\"ConfigDeliveryChannel\",\"ConfigRecorder\",\"ConfigRule\",\"GuardDutyDetector\",\"SecurityHub\"]'
+elif [[ \"$1 $2 $3\" == \"cloudfront wait distribution-deployed\" ]]; then
+  :
 elif [[ \"$1 $2\" == \"cloudfront get-distribution\" ]]; then
   printf '%s\\n' '{"Distribution":{"ARN":"arn:aws:cloudfront::123456789012:distribution/EXAMPLE","Status":"Deployed","DistributionConfig":{"Enabled":true,"Origins":{"Items":[{"Id":"api","CustomHeaders":{"Items":[{"HeaderName":"X-Origin-Verify","HeaderValue":"test-secret"}]}}]}}}}'
 elif [[ \"$1 $2\" == \"s3api get-public-access-block\" ]]; then
@@ -412,6 +414,9 @@ fi
                 },
             )
             calls = call_log.read_text(encoding="utf-8").splitlines()
+            # The edge is audited only once its last change has deployed.
+            wait_index = calls.index("cloudfront wait distribution-deployed --id EXAMPLE")
+            self.assertLess(wait_index, calls.index("cloudfront get-distribution --id EXAMPLE --output json"))
             detections = [
                 call for call in calls if call.startswith("cloudformation detect-stack-drift")
             ]

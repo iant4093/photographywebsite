@@ -250,6 +250,15 @@ The non-CloudFormation frontend edge contract is
 configuration and exact bucket public-access, encryption, ownership, versioning,
 and policy-status documents; only the origin-verification header value is
 replaced with a fixed presence marker before hashing.
+The weekly audit first waits, for up to an hour, until no production release is
+running, and checks the public site against the commit of the latest successful
+release; it reads the distribution only after CloudFront reports it `Deployed`.
+Otherwise a deploy in progress looks like drift: CloudFormation refuses to start
+drift detection on an updating stack, and the site still serves the previous
+commit. When the edge differs from the contract, the failure names the drifted
+documents (`distribution`, `publicAccessBlock`, `encryption`, `ownership`,
+`versioning`, `policyStatus`), never their values. Every reviewed edge change
+must record its new hashes in the contract, or each later weekly run fails.
 After this source update, deploy the reviewed, non-executing bootstrap stack
 UPDATE change set before enabling or manually running the scheduled workflow;
 the existing audit role does not gain the new exact stack ARNs until that update

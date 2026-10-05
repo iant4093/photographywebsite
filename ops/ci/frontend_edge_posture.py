@@ -68,8 +68,12 @@ def verify(contract: Any, documents: dict[str, Any]) -> dict[str, int | str]:
         "versioningSha256": _digest(documents["versioning"]),
         "policyStatusSha256": _digest(documents["policyStatus"]),
     }
-    if any(actual[name] != contract[name] for name in actual):
-        raise EdgePostureError("frontend edge metadata differs from the reviewed contract")
+    differing = [name.removesuffix("Sha256") for name in actual if actual[name] != contract[name]]
+    if differing:
+        # Only document names are reported, never values or digests.
+        raise EdgePostureError(
+            "frontend edge metadata differs from the reviewed contract: " + ", ".join(differing)
+        )
     return {"metadataDocumentCount": len(actual), "status": "IN_SYNC"}
 
 
@@ -89,7 +93,10 @@ def main(argv: list[str] | None = None) -> int:
             "policyStatus": json.loads(args.policy_status.read_text(encoding="utf-8")),
         }
         result = verify(json.loads(args.contract.read_text(encoding="utf-8")), documents)
-    except (EdgePostureError, OSError, UnicodeError, json.JSONDecodeError, KeyError):
+    except EdgePostureError as error:
+        print(f"frontend edge posture audit failed closed: {error}", file=sys.stderr)
+        return 2
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError):
         print("frontend edge posture audit failed closed", file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True))

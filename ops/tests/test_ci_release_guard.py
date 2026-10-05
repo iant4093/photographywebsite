@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
+import io
 import datetime
 import json
 from dataclasses import replace
@@ -1669,8 +1671,40 @@ class ArtifactTests(unittest.TestCase):
             digests["distributionSha256"],
         )
         documents["distribution"]["Distribution"]["DistributionConfig"]["Enabled"] = False
-        with self.assertRaises(frontend_edge_posture.EdgePostureError):
+        documents["versioning"] = {"Status": "Enabled"}
+        with self.assertRaises(frontend_edge_posture.EdgePostureError) as raised:
             frontend_edge_posture.verify(contract, documents)
+        # The report names the drifted documents, never their values.
+        self.assertEqual(
+            str(raised.exception),
+            "frontend edge metadata differs from the reviewed contract: distribution, versioning",
+        )
+        self.assertNotIn("secret", str(raised.exception))
+        with tempfile.TemporaryDirectory() as directory:
+            paths = {}
+            for name, value in {**documents, "contract": contract}.items():
+                paths[name] = Path(directory) / f"{name}.json"
+                paths[name].write_text(json.dumps(value), encoding="utf-8")
+            argv = ["--contract", str(paths["contract"])]
+            for option, name in (
+                ("distribution", "distribution"), ("public-access-block", "publicAccessBlock"),
+                ("encryption", "encryption"), ("ownership", "ownership"),
+                ("versioning", "versioning"), ("policy-status", "policyStatus"),
+            ):
+                argv += [f"--{option}", str(paths[name])]
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(frontend_edge_posture.main(argv), 2)
+            self.assertEqual(
+                stderr.getvalue().strip(),
+                "frontend edge posture audit failed closed: "
+                "frontend edge metadata differs from the reviewed contract: distribution, versioning",
+            )
+            paths["versioning"].write_text("{", encoding="utf-8")
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(frontend_edge_posture.main(argv), 2)
+            self.assertEqual(stderr.getvalue().strip(), "frontend edge posture audit failed closed")
 
     def test_manifest_rejects_missing_mismatch_traversal_absolute_duplicate_and_bad_shape(self):
         with tempfile.TemporaryDirectory() as directory:
