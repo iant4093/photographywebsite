@@ -21,6 +21,7 @@ import { pollZipJob } from '../utils/zipDownload'
 import AlbumStats from '../components/AlbumStats'
 import PhotoLightbox from '../components/PhotoLightbox'
 import { openPrintOrder } from '../utils/printOrders'
+import { albumPath } from '../utils/albumRoutes'
 
 // User dashboard — shows only their private albums with download capability
 function UserDashboard() {
@@ -166,7 +167,7 @@ function UserDashboard() {
         if (album.type === 'video') {
             const isSingleVideo = album.imageCount === 1
             saveVerticalScroll(location.pathname)
-            navigate(`/video/${album.albumId}${isSingleVideo ? '?play=1' : ''}`)
+            navigate(albumPath(album, { play: isSingleVideo }))
             return
         }
 

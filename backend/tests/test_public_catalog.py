@@ -84,7 +84,7 @@ class PublicCatalogListTests(unittest.TestCase):
         self.assertEqual(
             batch_get.call_args.kwargs["RequestItems"][get_public_albums.table.name]["ProjectionExpression"],
             (
-                "albumId, uploadedAt, hoverPreviewStatus, "
+                "albumId, uploadedAt, slug, hoverPreviewStatus, "
                 "hoverPreviewVersion, hoverPreviewManifestKey"
             ),
         )
@@ -768,9 +768,15 @@ class PublicAlbumDetailTests(unittest.TestCase):
         )
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(
-            get_public_album.handler({"pathParameters": {"albumId": "bad"}}, None)["statusCode"],
+            get_public_album.handler({"pathParameters": {"albumId": "Bad Value!"}}, None)["statusCode"],
             400,
         )
+        # A well-formed slug that no album claimed is simply not found.
+        with patch.object(get_public_album.album_slugs, "resolve", return_value=None):
+            self.assertEqual(
+                get_public_album.handler({"pathParameters": {"albumId": "bad"}}, None)["statusCode"],
+                404,
+            )
         with patch.object(get_public_album.table, "get_item", side_effect=RuntimeError("secret")):
             response = get_public_album.handler(
                 {"pathParameters": {"albumId": ALBUM_ID}}, None

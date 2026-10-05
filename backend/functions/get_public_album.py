@@ -12,6 +12,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
+
+import album_slugs
 from aws_request_config import request_config
 from boto3.dynamodb.conditions import Attr, Key
 
@@ -1661,7 +1663,7 @@ def _social_metadata(album, route_kind):
     return {
         "title": f"{album_title} — {SITE_TITLE}",
         "description": _safe_text(summary.get("description"), fallback_description, 240),
-        "url": f"{SITE_ORIGIN}/{route_name}/{album_id}",
+        "url": f"{SITE_ORIGIN}/{route_name}/{summary.get('slug') or album_id}",
         "image": cover_url,
         "image_alt": f"Cover photograph for {album_title}",
         "image_dimensions": None,
@@ -1741,14 +1743,23 @@ def _html_response(body):
     }
 
 
+def _route_album_id(value):
+    """The albumId for an /album/<id-or-slug> route value."""
+    if isinstance(value, str) and album_slugs.UUID_RE.match(value):
+        return validate_uuid(value)
+    if album_slugs.is_slug(value):
+        return album_slugs.resolve(value)
+    raise ValidationError("Album identifier is invalid")
+
+
 def _social_album(event):
     params = (event or {}).get("pathParameters") or {}
     route_kind = params.get("albumType")
     album = None
     if route_kind in {"album", "video"}:
         try:
-            album_id = validate_uuid(params.get("albumId"))
-            candidate = table.get_item(Key={"albumId": album_id}).get("Item")
+            album_id = _route_album_id(params.get("albumId"))
+            candidate = table.get_item(Key={"albumId": album_id}).get("Item") if album_id else None
             if (
                 candidate
                 and candidate.get("visibility") == "public"
@@ -1815,8 +1826,8 @@ def handler(event, context):
     try:
         if (event or {}).get("queryStringParameters"):
             raise ValidationError("Public album detail does not accept query parameters")
-        album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
-        album = table.get_item(Key={"albumId": album_id}).get("Item")
+        album_id = _route_album_id(((event or {}).get("pathParameters") or {}).get("albumId"))
+        album = table.get_item(Key={"albumId": album_id}).get("Item") if album_id else None
         # Hide the existence and state of every non-public or malformed record.
         if (
             not album

@@ -527,7 +527,13 @@ export function fetchAlbum(albumId, token = null, options = {}) {
         if (generation !== cacheGeneration || controller.signal.aborted) {
             throw new DOMException('Request aborted', 'AbortError')
         }
-        if (publicAlbumRequests.get(key) === record) setCachedPublicAlbum(key, data)
+        if (publicAlbumRequests.get(key) === record) {
+            setCachedPublicAlbum(key, data)
+            // An album fetched by id or by slug is the same album: cache it under both.
+            for (const alias of [data?.album?.albumId, data?.album?.slug]) {
+                if (typeof alias === 'string' && alias && alias !== key) setCachedPublicAlbum(alias, data)
+            }
+        }
         return data
     }).finally(() => {
         if (publicAlbumRequests.get(key) === record) publicAlbumRequests.delete(key)

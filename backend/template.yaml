@@ -2084,11 +2084,16 @@ Resources:
           IMAGES_BUCKET: !Ref ImagesBucket
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
       Policies:
         - Statement:
             - Effect: Allow
               Action: dynamodb:BatchGetItem
               Resource: !GetAtt OriginalComparisonTable.Arn
+            # Resolves readable album URLs (album-slug#<slug> items).
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt GallerySettingsTable.Arn
             - Effect: Allow
               Action: s3:GetObject
               Resource: !Sub '${OriginalPreviewBucket.Arn}/before/*'
@@ -3180,6 +3185,7 @@ Resources:
           FRONTEND_URL: !Ref FrontendUrl
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
           GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
+          PUBLIC_SUMMARY_INDEX: VisibilityCreatedAtSummaryIndex
       Policies:
         - Statement:
             - Effect: Allow
@@ -3209,6 +3215,10 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:UpdateItem
               Resource: !GetAtt AlbumsTable.Arn
+            # The slug sweep lists public albums from the small summary index.
+            - Effect: Allow
+              Action: dynamodb:Query
+              Resource: !Sub '${AlbumsTable.Arn}/index/VisibilityCreatedAtSummaryIndex'
             - Effect: Allow
               Action:
                 - dynamodb:BatchGetItem

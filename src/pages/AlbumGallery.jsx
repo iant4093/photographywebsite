@@ -25,13 +25,16 @@ import { navigateBackOr } from '../utils/navigation'
 import { openPrintOrder } from '../utils/printOrders'
 import { trackAlbumView, trackPhotoDownload, trackZipRequest } from '../utils/analytics'
 import { shareUrlForAlbumPhoto } from '../utils/share'
+import useAlbumRouteId from '../hooks/useAlbumRouteId'
+import { albumHandle } from '../utils/albumRoutes'
 
 
 
 // The route owns navigation and document scroll memory. The same album content
 // can also live inside the museum without reading or changing its URL.
 function AlbumGallery() {
-    const { albumId } = useParams()
+    const { albumId: handle } = useParams()
+    const albumId = useAlbumRouteId(handle, 'album')
     const navigate = useNavigate()
     const location = useLocation()
 
@@ -49,6 +52,8 @@ function AlbumGallery() {
         [navigate],
     )
 
+    // A readable URL resolves to its album id before the page loads.
+    if (!albumId) return <AlbumLoadingSkeleton standalone />
     return <AlbumGalleryContent
         albumId={albumId}
         initialPhotoId={new URLSearchParams(location.search).get('photo') || ''}
@@ -290,7 +295,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                             </div>
 
                             <div className="flex flex-col items-stretch gap-3 shrink-0 mb-1">
-                                    {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} url={embedded ? shareUrlForAlbumPhoto(albumId) : undefined} />}
+                                    {album.visibility === 'public' && <AlbumShareButton albumTitle={album.title} url={embedded ? shareUrlForAlbumPhoto(albumHandle({ ...album, albumId })) : undefined} />}
                                     <AlbumQrCode albumTitle={album.title} qrCodeUrl={album.qrCodeUrl} />
                                     {images.length > 0 && (
                                         <button
@@ -350,7 +355,7 @@ export function AlbumGalleryContent({ albumId, embedded = false, onBack, initial
                                 onPrint={printImage}
                                 canShare={album.visibility === 'public'}
                                 shareTitle={`${album.title} — Ian Truong Photography`}
-                                shareUrl={image => shareUrlForAlbumPhoto(albumId, mediaId(image))}
+                                shareUrl={image => shareUrlForAlbumPhoto(albumHandle({ ...album, albumId }), mediaId(image))}
                                 onBeforeRefresh={refreshOriginal}
                                 onMediaError={handleMediaError}
                             />

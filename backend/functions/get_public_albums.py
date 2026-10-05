@@ -149,7 +149,7 @@ def _hydrate_summary_fields(records):
                 table.name: {
                     "Keys": [{"albumId": album_id} for album_id in album_ids],
                     "ProjectionExpression": (
-                        "albumId, uploadedAt, hoverPreviewStatus, "
+                        "albumId, uploadedAt, slug, hoverPreviewStatus, "
                         "hoverPreviewVersion, hoverPreviewManifestKey"
                     ),
                 }
@@ -166,6 +166,7 @@ def _hydrate_summary_fields(records):
             hydrated = summary_by_id.get(record.get("albumId"), {})
             for field in (
                 "uploadedAt",
+                "slug",
                 "hoverPreviewStatus",
                 "hoverPreviewVersion",
                 "hoverPreviewManifestKey",
