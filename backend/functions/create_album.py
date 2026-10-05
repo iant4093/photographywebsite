@@ -14,6 +14,7 @@ import uuid
 import upload_followup
 import video_jobs
 import ownership_guard
+import scheduled_publish
 from visibility_change import enqueue as enqueue_album_work
 
 import boto3
@@ -225,6 +226,11 @@ def handler(event, context):
         if visibility == "private":
             owner_email, owner_sub = _resolve_owner(body)
         is_shared = visibility == "unlisted" and validate_bool(body.get("isShared"), "isShared", default=True)
+        publish_at = None
+        if body.get("publishAt") not in (None, ""):
+            if visibility != "unlisted":
+                raise ValidationError("Only link-only albums can be scheduled for publishing")
+            publish_at = scheduled_publish.validate_publish_at(body["publishAt"])
 
         if album_type == "photo":
             _extract_exif(images)
@@ -266,6 +272,8 @@ def handler(event, context):
             item["ownerSub"] = owner_sub
         if is_shared:
             item["shareCode"] = secrets.token_urlsafe(24)
+        if publish_at:
+            item["publishAt"] = publish_at
 
         if mutation_protocol_enabled():
             item["pendingMediaUpload"] = {"id": uuid.uuid4().hex, "keys": [image["rawKey"] for image in images], "done": []}
@@ -274,6 +282,10 @@ def handler(event, context):
             if album_type == "video":
                 item["videoJobs"] = video_jobs.prepare(item, images)
         ensure_album_item_budget(item)
+        if publish_at:
+            # Before the album exists: the publisher drops an entry without a
+            # matching album, but an album time without an entry never publishes.
+            scheduled_publish.record(album_id, publish_at)
 
         try:
             ownership_guard.write(table, "Put", item.get("ownerSub"), Item=item, ConditionExpression="attribute_not_exists(albumId)")

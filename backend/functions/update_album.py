@@ -1,12 +1,15 @@
 """Validated album metadata/visibility update with derivative retagging."""
 
+import datetime
 import json
+import logging
 import os
 import secrets
 
 import boto3
 from media_mutation import album_lease, enabled as mutation_protocol_enabled, MediaMutationBusy, MediaAlbumMissing
 import drive_backup_jobs
+import scheduled_publish
 import visibility_change
 from botocore.exceptions import ClientError
 
@@ -56,8 +59,12 @@ MUTABLE_FIELDS = frozenset({
     "isShared",
     "shareCode",
     "qrCodeKey",
+    "publishAt",
 })
 _MISSING = object()
+# Scheduled albums published per check; any others wait for the next one.
+PUBLISH_BATCH = 5
+logger = logging.getLogger("photography_api.update_album")
 
 
 def _sync_drive_folder(album):
@@ -154,7 +161,26 @@ def _updated_album(album, body):
         if old_visibility == "unlisted" or "isShared" in album:
             updated["isShared"] = False
         updated.pop("shareCode", None)
+
+    # A publish time belongs to a hidden (link-only) album. Publishing it, or
+    # making it private, ends the schedule.
+    scheduling = body.get("publishAt") not in (None, "")
+    if scheduling and new_visibility != "unlisted":
+        raise ValidationError("Only link-only albums can be scheduled for publishing")
+    if scheduling:
+        updated["publishAt"] = scheduled_publish.validate_publish_at(body["publishAt"])
+    elif "publishAt" in body or new_visibility != "unlisted":
+        updated.pop("publishAt", None)
     return updated
+
+
+def _forget_schedule(album, committed):
+    if album.get("publishAt") and not committed.get("publishAt"):
+        try:
+            scheduled_publish.forget(album["albumId"], album["publishAt"])
+        except Exception as error:
+            # The album row is authoritative; the publisher drops stale entries.
+            logger.warning("scheduled_publish_forget_failed error_type=%s", type(error).__name__)
 
 
 def _reconcile_album_qr(updated):
@@ -187,6 +213,7 @@ def _continue_visibility(album_id, context, album=None, event=None):
             if metadata:
                 sync_album_index(dynamodb.Table(os.environ["PREVIEW_METADATA_TABLE"]), target, metadata)
         committed = visibility_change.commit(table, album, target)
+        _forget_schedule(album, committed)
         _audit(event, context, "success", "album_updated",
                previous_visibility=album["visibility"], visibility=committed["visibility"])
         request_public_api_invalidation(album_id=album_id, catalog=True, reason="album-updated")
@@ -209,16 +236,62 @@ def handler(event, context):
             return _continue_visibility(validate_uuid(event["albumId"]), context)
         except MediaAlbumMissing:
             return json_response(200, {"complete": True})
+    # The publish schedule's EventBridge input; API events always carry more keys.
+    if isinstance(event, dict) and set(event) == {"source"} and event.get("source") == "scheduled-publish":
+        return _publish_due(context)
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
         return front_door_denied
     denied = require_admin(event)
     if denied:
         return denied
+    return _update(event, context)
+
+
+def _publish_due(context, now=None):
+    """Publish link-only albums whose time has come, through the same update path."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    remaining = getattr(context, "get_remaining_time_in_millis", None)
+    published = waiting = attempts = 0
+    for album_id, at in scheduled_publish.due(now):
+        if attempts >= PUBLISH_BATCH or (callable(remaining) and remaining() < 25000):
+            break
+        album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+        if not album:
+            # Index entries are written just before their album, so allow an
+            # upload time to commit before treating the entry as abandoned.
+            if scheduled_publish.parse_time(at) < now - datetime.timedelta(days=1):
+                scheduled_publish.forget(album_id, at)
+            continue
+        if album.get("publishAt") != at or album.get("visibility") != "unlisted":
+            # The album is authoritative: repair or drop an entry it disagrees with.
+            if album.get("publishAt") and album.get("visibility") == "unlisted":
+                scheduled_publish.record(album_id, album["publishAt"])
+            else:
+                scheduled_publish.forget(album_id, at)
+            continue
+        if album.get("status", "active") != "active":
+            waiting += 1
+            continue
+        attempts += 1
+        response = _update(None, context, album_id=album_id, body={"visibility": "public"})
+        if response["statusCode"] in {200, 202}:
+            scheduled_publish.forget(album_id, at)
+            published += 1
+        else:
+            waiting += 1
+            logger.warning("scheduled_publish_deferred status=%s", response["statusCode"])
+    logger.info("scheduled_publish_run published=%d waiting=%d", published, waiting)
+    return {"published": published, "waiting": waiting}
+
+
+def _update(event, context, album_id=None, body=None):
     try:
-        album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
+        if album_id is None:
+            album_id = validate_uuid(((event or {}).get("pathParameters") or {}).get("albumId"))
         with album_lease(table, album_id, context, transition=True):
-            body = parse_json_body(event)
+            if body is None:
+                body = parse_json_body(event)
             if not body:
                 _audit(event, context, "denied", "empty_update")
                 return error_response(400, "No fields to update", code="invalid_album")
@@ -252,6 +325,10 @@ def handler(event, context):
                 )
                 return json_response(200, serialize_album_summary(album, include_admin=True))
 
+            if updated.get("publishAt") and updated["publishAt"] != album.get("publishAt"):
+                # Index first: an entry without its album time is dropped later,
+                # whereas an album time without an entry would never publish.
+                scheduled_publish.record(album_id, updated["publishAt"])
             visibility_changed = old_visibility != new_visibility
             if visibility_changed and mutation_protocol_enabled():
                 # A hover manifest made for the old visibility must not be
@@ -344,6 +421,7 @@ def handler(event, context):
                 ReturnValues="ALL_NEW",
             )
             committed = response.get("Attributes") or updated
+            _forget_schedule(album, committed)
 
             if visibility_changed:
                 if not (old_visibility == "public" and new_visibility != "public"):

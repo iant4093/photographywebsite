@@ -5,10 +5,12 @@ import DashboardBackLink from '../components/DashboardBackLink'
 import UploadProgress from '../components/UploadProgress'
 import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
-import { createAlbum, listUsers, fetchAlbums } from '../utils/api'
+import { createAlbum, listUsers, fetchAllAlbums } from '../utils/api'
 import { processVideo } from '../utils/mediaUtils'
 import { createMediaUploadSession, UPLOAD_RETRY_HINT } from '../utils/mediaUpload'
 import { currentLocalDateInputValue } from '../utils/date'
+import PublishSchedule from '../components/PublishSchedule'
+import { defaultPublishValue, formatPublishAt, publishAtIso, publishScheduleError } from '../utils/publishSchedule'
 
 // Helper component for picking a thumbnail time for a video
 function VideoThumbnailScrubber({ file, time, onTimeChange }) {
@@ -83,6 +85,8 @@ export default function UploadVideo() {
     const [users, setUsers] = useState([])
     const [usersLoaded, setUsersLoaded] = useState(false)
     const [existingCategories, setExistingCategories] = useState([])
+    const [scheduled, setScheduled] = useState(false)
+    const [publishValue, setPublishValue] = useState(defaultPublishValue)
 
     const fileInputRef = useRef(null)
     const uploadSession = useRef(null)
@@ -106,7 +110,8 @@ export default function UploadVideo() {
         }
 
         try {
-            const albums = await fetchAlbums()
+            // Category suggestions come from the main gallery's video albums.
+            const albums = await fetchAllAlbums({ type: 'video' })
             const uniqueCategories = [...new Set(albums.map(a => a.category).filter(Boolean))]
             setExistingCategories(uniqueCategories)
         } catch (err) {
@@ -138,6 +143,12 @@ export default function UploadVideo() {
         e.preventDefault()
         setError('')
         setSuccess(false)
+        const scheduling = visibility === 'public' && scheduled
+        if (scheduling && publishScheduleError(publishValue)) {
+            setError(publishScheduleError(publishValue))
+            return
+        }
+        const publishAt = scheduling ? publishAtIso(publishValue) : null
         setUploading(true)
         const transfer = startUpload(videoFiles.map(({ file }) => file))
 
@@ -178,14 +189,18 @@ export default function UploadVideo() {
                 images: finalImages,
                 s3Prefix,
                 createdAt: new Date(albumDate + 'T12:00:00').toISOString(),
-                visibility,
+                // A scheduled album stays link-only, with sharing off, until its time.
+                visibility: publishAt ? 'unlisted' : visibility,
                 ownerEmail: visibility === 'private' ? ownerEmail : '',
-                isShared: visibility === 'unlisted',
+                isShared: !publishAt && visibility === 'unlisted',
+                ...(publishAt ? { publishAt } : {}),
                 backupToGoogleDrive,
             }))
             uploadSession.current = null
 
-            if (createdAlbum?.shareCode) {
+            if (publishAt) {
+                setSuccess({ scheduledFor: createdAlbum?.publishAt || publishAt })
+            } else if (createdAlbum?.shareCode) {
                 setSuccess(`${window.location.origin}/sharedalbum/${createdAlbum.shareCode}`)
             } else {
                 setSuccess(true)
@@ -197,6 +212,8 @@ export default function UploadVideo() {
             setVideoFiles([])
             setOwnerEmail('')
             setAlbumDate(currentLocalDateInputValue())
+            setScheduled(false)
+            setPublishValue(defaultPublishValue())
             if (fileInputRef.current) fileInputRef.current.value = ''
 
         } catch (err) {
@@ -235,6 +252,8 @@ export default function UploadVideo() {
                                 <p className="font-medium mb-1">Link Only video album created successfully!</p>
                                 <p className="text-sm">Link: <code className="font-mono bg-green-100/50 px-2 py-0.5 rounded select-all">{success}</code></p>
                             </div>
+                        ) : success.scheduledFor ? (
+                            <p className="font-medium">Video album scheduled! It will publish to the main gallery on {formatPublishAt(success.scheduledFor)}.</p>
                         ) : (
                             <p className="font-medium">Video album created successfully! Transcoding may take a few minutes before the video is fully playable.</p>
                         )}
@@ -263,6 +282,16 @@ export default function UploadVideo() {
                             ))}
                         </div>
                     </div>
+
+                    {visibility === 'public' && (
+                        <PublishSchedule
+                            scheduled={scheduled}
+                            value={publishValue}
+                            onScheduledChange={setScheduled}
+                            onValueChange={setPublishValue}
+                            disabled={uploading}
+                        />
+                    )}
 
                     {visibility === 'private' && (
                         <div className="mb-6">

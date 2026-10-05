@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  requestUploadUrls: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAlbums: vi.fn(),
+  requestUploadUrls: vi.fn(), uploadFileToS3: vi.fn(), createAlbum: vi.fn(), listUsers: vi.fn(), fetchAllAlbums: vi.fn(),
 }))
 const auth = vi.hoisted(() => ({ getIdToken: vi.fn() }))
 const media = vi.hoisted(() => ({ processImage: vi.fn() }))
@@ -45,7 +45,7 @@ describe('Admin photo upload', () => {
     vi.clearAllMocks()
     auth.getIdToken.mockResolvedValue('admin-token')
     api.listUsers.mockResolvedValue([{ email: 'client@example.com' }, { email: 'iant4093@gmail.com' }])
-    api.fetchAlbums.mockResolvedValue([{ category: 'Travel' }, { category: 'Travel' }, { category: 'People' }, {}])
+    api.fetchAllAlbums.mockResolvedValue([{ category: 'Travel' }, { category: 'Travel' }, { category: 'People' }, {}])
     api.uploadFileToS3.mockResolvedValue(undefined)
     api.createAlbum.mockResolvedValue({ albumId: 'created' })
     media.processImage.mockImplementation(async () => ({
@@ -177,7 +177,7 @@ describe('Admin photo upload', () => {
     api.createAlbum.mockResolvedValue({ shareCode: 'share-123' })
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
-    await waitFor(() => expect(api.fetchAlbums).toHaveBeenCalled())
+    await waitFor(() => expect(api.fetchAllAlbums).toHaveBeenCalled())
     populate(container, [new File(['one'], 'Cover.png', { type: 'image/png' })], { category: '' })
     fireEvent.submit(container.querySelector('form'))
 
@@ -200,13 +200,49 @@ describe('Admin photo upload', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Main Gallery' }))
     expect(screen.queryByLabelText('User Email *')).toBeNull()
     expect(api.listUsers).toHaveBeenCalledTimes(1)
-    expect(api.fetchAlbums).toHaveBeenCalledTimes(2)
+    expect(api.fetchAllAlbums).toHaveBeenCalledTimes(1)
+  })
+
+  it('suggests existing photo categories as soon as the page opens', async () => {
+    mounted()
+    await waitFor(() => expect(api.fetchAllAlbums).toHaveBeenCalledWith({ type: 'photo' }))
+    expect(expectSuggestion(screen.getByLabelText('Category'), 'Travel')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'People' })).toBeInTheDocument()
+  })
+
+  it('schedules a main gallery upload as a hidden album with a publish time', async () => {
+    const { container } = mounted()
+    expect(screen.queryByLabelText('Publish on')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule for later' }))
+    const when = screen.getByLabelText('Publish on')
+    expect(when).toHaveAttribute('step', '300')
+    fireEvent.change(when, { target: { value: '2020-01-01T09:00' } })
+    populate(container, [new File(['one'], 'one.jpg', { type: 'image/jpeg' })])
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText('Choose a time in the future.')).toBeInTheDocument()
+    expect(api.requestUploadUrls).not.toHaveBeenCalled()
+
+    const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+    future.setSeconds(0, 0)
+    const pad = (value) => String(value).padStart(2, '0')
+    const local = `${future.getFullYear()}-${pad(future.getMonth() + 1)}-${pad(future.getDate())}T${pad(future.getHours())}:${pad(future.getMinutes())}`
+    fireEvent.change(when, { target: { value: local } })
+    api.createAlbum.mockResolvedValue({ albumId: 'created', visibility: 'unlisted', publishAt: future.toISOString().replace('.000', '') })
+    fireEvent.submit(container.querySelector('form'))
+    expect(await screen.findByText(/Album scheduled! It will publish to the main gallery on/)).toBeInTheDocument()
+    expect(api.createAlbum).toHaveBeenCalledWith('admin-token', expect.objectContaining({
+      visibility: 'unlisted', isShared: false, publishAt: future.toISOString(),
+    }))
+    // The form resets to publishing right away.
+    expect(screen.queryByLabelText('Publish on')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Link Only' }))
+    expect(screen.queryByRole('button', { name: 'Schedule for later' })).toBeNull()
   })
 
   it('surfaces upload failures and tolerates user/category discovery failures', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     api.listUsers.mockRejectedValueOnce(new Error('users unavailable'))
-    api.fetchAlbums.mockRejectedValueOnce(new Error('categories unavailable'))
+    api.fetchAllAlbums.mockRejectedValueOnce(new Error('categories unavailable'))
     const { container } = mounted()
     fireEvent.click(screen.getByRole('button', { name: 'Specific User' }))
     await waitFor(() => expect(console.error).toHaveBeenCalledTimes(2))

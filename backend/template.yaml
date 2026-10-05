@@ -2995,6 +2995,7 @@ Resources:
           RESEND_API_KEY_PARAMETER: !Ref ResendApiKeySecretArn
           VISIBILITY_CREATED_AT_INDEX: VisibilityCreatedAtIndex
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
       Policies:
         - Statement:
             - Effect: Allow
@@ -3003,6 +3004,10 @@ Resources:
               Condition:
                 ForAllValues:StringLike:
                   dynamodb:LeadingKeys: ['__USER_DELETION__*']
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt GallerySettingsTable.Arn
         - Statement:
             - Effect: Allow
               Action: mediaconvert:SearchJobs
@@ -3123,6 +3128,7 @@ Resources:
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           FRONTEND_URL: !Ref FrontendUrl
           GOOGLE_DRIVE_SYNC_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
       Policies:
         - Statement:
             - Effect: Allow
@@ -3140,6 +3146,12 @@ Resources:
                 - dynamodb:Query
               Resource: !GetAtt DriveBackupStateTable.Arn
         - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt GallerySettingsTable.Arn
         - Statement:
             - Effect: Allow
               Action:
@@ -3183,6 +3195,14 @@ Resources:
             ApiId: !Ref Api
             Path: /albums/{albumId}
             Method: PUT
+        # Publishes link-only albums whose scheduled time has passed. A run
+        # reads one small settings item unless something is due.
+        PublishScheduled:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Input: '{"source":"scheduled-publish"}'
+            Enabled: true
 
   UpdateGalleryOrderFunction:
     Type: AWS::Serverless::Function

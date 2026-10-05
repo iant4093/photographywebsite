@@ -6,10 +6,12 @@ import DashboardBackLink from '../components/DashboardBackLink'
 import UploadProgress from '../components/UploadProgress'
 import { useUploadProgress } from '../hooks/useUploadProgress'
 import { useAuth } from '../context/auth'
-import { createAlbum, listUsers, fetchAlbums } from '../utils/api'
+import { createAlbum, listUsers, fetchAllAlbums } from '../utils/api'
 import { createMediaUploadSession, UPLOAD_RETRY_HINT } from '../utils/mediaUpload'
 import { processImage } from '../utils/mediaUtils'
 import { currentLocalDateInputValue } from '../utils/date'
+import PublishSchedule from '../components/PublishSchedule'
+import { defaultPublishValue, formatPublishAt, publishAtIso, publishScheduleError } from '../utils/publishSchedule'
 
 // Upload page — create album for main gallery or specific user
 function Upload() {
@@ -27,6 +29,8 @@ function Upload() {
     const [users, setUsers] = useState([])
     const [usersLoaded, setUsersLoaded] = useState(false)
     const [existingCategories, setExistingCategories] = useState([])
+    const [scheduled, setScheduled] = useState(false)
+    const [publishValue, setPublishValue] = useState(defaultPublishValue)
 
     // File input ref to clear after upload
     const fileInputRef = useRef(null)
@@ -39,37 +43,34 @@ function Upload() {
     const [success, setSuccess] = useState(false)
     const [error, setError] = useState('')
 
-    // Load users and existing albums
-    async function loadInitialData() {
-        if (!usersLoaded) {
-            try {
-                const token = await getIdToken()
-                const data = await listUsers(token)
-                setUsers(data.filter((u) => u.email !== 'iant4093@gmail.com'))
-                setUsersLoaded(true)
-            } catch (err) {
-                console.error('Failed to load users:', err)
-            }
-        }
+    // Category suggestions come from the main gallery's photo albums.
+    useEffect(() => {
+        let active = true
+        fetchAllAlbums({ type: 'photo' })
+            .then((albums) => {
+                if (active) setExistingCategories([...new Set(albums.map(a => a.category).filter(Boolean))])
+            })
+            .catch((err) => console.error('Failed to load categories', err))
+        return () => { active = false }
+    }, [])
 
+    async function loadUsers() {
+        if (usersLoaded) return
         try {
-            // Also fetch public albums to populate category suggestions
-            const albums = await fetchAlbums()
-            const uniqueCategories = [...new Set(albums.map(a => a.category).filter(Boolean))]
-            setExistingCategories(uniqueCategories)
+            const token = await getIdToken()
+            const data = await listUsers(token)
+            setUsers(data.filter((u) => u.email !== 'iant4093@gmail.com'))
+            setUsersLoaded(true)
         } catch (err) {
-            console.error('Failed to load categories', err)
+            console.error('Failed to load users:', err)
         }
     }
 
     // Toggle handler
     function handleVisibilityChange(newVisibility) {
         setVisibility(newVisibility)
-        if (newVisibility === 'private') loadInitialData()
-        if (newVisibility === 'public' || newVisibility === 'unlisted') {
-            setOwnerEmail('')
-            loadInitialData() // Make sure categories load even if public/unlisted
-        }
+        if (newVisibility === 'private') loadUsers()
+        else setOwnerEmail('')
     }
 
     // Upload handler
@@ -77,6 +78,12 @@ function Upload() {
         e.preventDefault()
         setError('')
         setSuccess(false)
+        const scheduling = visibility === 'public' && scheduled
+        if (scheduling && publishScheduleError(publishValue)) {
+            setError(publishScheduleError(publishValue))
+            return
+        }
+        const publishAt = scheduling ? publishAtIso(publishValue) : null
         setUploading(true)
         const transfer = startUpload(photoFiles)
 
@@ -110,14 +117,18 @@ function Upload() {
                 images: finalImages, // Persist specific processed manifest
                 s3Prefix,
                 createdAt: new Date(albumDate + 'T12:00:00').toISOString(),
-                visibility,
+                // A scheduled album stays link-only, with sharing off, until its time.
+                visibility: publishAt ? 'unlisted' : visibility,
                 ownerEmail: visibility === 'private' ? ownerEmail : '',
-                isShared: visibility === 'unlisted',
+                isShared: !publishAt && visibility === 'unlisted',
+                ...(publishAt ? { publishAt } : {}),
                 backupToGoogleDrive,
             }))
             uploadSession.current = null
 
-            if (createdAlbum?.shareCode) {
+            if (publishAt) {
+                setSuccess({ scheduledFor: createdAlbum?.publishAt || publishAt })
+            } else if (createdAlbum?.shareCode) {
                 setSuccess(`${window.location.origin}/sharedalbum/${createdAlbum.shareCode}`)
             } else {
                 setSuccess(true)
@@ -128,6 +139,8 @@ function Upload() {
             setPhotoFiles([])
             setOwnerEmail('')
             setAlbumDate(currentLocalDateInputValue())
+            setScheduled(false)
+            setPublishValue(defaultPublishValue())
             // Reset file input so browser clears the selection display
             if (fileInputRef.current) fileInputRef.current.value = ''
         } catch (err) {
@@ -176,6 +189,8 @@ function Upload() {
                                 <p className="font-medium mb-1">Link Only album created successfully!</p>
                                 <p className="text-sm">Link: <code className="font-mono bg-green-100/50 px-2 py-0.5 rounded border border-green-200 select-all">{success}</code></p>
                             </div>
+                        ) : success.scheduledFor ? (
+                            <p className="font-medium">Album scheduled! It will publish to the main gallery on {formatPublishAt(success.scheduledFor)}.</p>
                         ) : (
                             <p className="font-medium">Album created successfully!</p>
                         )}
@@ -227,6 +242,16 @@ function Upload() {
                             </button>
                         </div>
                     </div>
+
+                    {visibility === 'public' && (
+                        <PublishSchedule
+                            scheduled={scheduled}
+                            value={publishValue}
+                            onScheduledChange={setScheduled}
+                            onValueChange={setPublishValue}
+                            disabled={uploading}
+                        />
+                    )}
 
                     {/* User email (shown only for private) */}
                     {visibility === 'private' && (
