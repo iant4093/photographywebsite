@@ -18,6 +18,7 @@ import { warmVideoHoverRuntime } from '../utils/albumVideoHoverPreview'
 import useAlbumYearFilters from '../hooks/useAlbumYearFilters'
 import usePublishedHero from '../hooks/usePublishedHero'
 import { heroImageSizes } from '../utils/heroImageSizes'
+import { heroStillChoice, heroStillSrcSet, heroStillUrl } from '../utils/heroReel'
 
 const CATALOG_KEY = 'public-videos'
 // The API enforces 100 as its maximum, which keeps today's video catalog to a
@@ -54,6 +55,10 @@ export default function Videos() {
     const [error, setError] = useState(null)
     const [responsiveHeroFailed, setResponsiveHeroFailed] = useState(false)
     const [managedHeroFailed, setManagedHeroFailed] = useState(false)
+    // A returning visitor's random reel-cut still (chosen and preloaded by
+    // theme-init.js); the current still remains the fallback.
+    const [reelStill] = useState(heroStillChoice)
+    const [reelStillFailed, setReelStillFailed] = useState(false)
     const [sectionSort, setSectionSort] = useNavigationState('section-sort', 0)
 
     const savePage = useCallback((items, cursor) => {
@@ -128,7 +133,8 @@ export default function Videos() {
     const managedHeroUrl = cdnUrl('site/hero/video/home')
     const responsiveHeroUrl = currentVideoHeroUrl()
     const usePublishedVersion = publishedHero && (!publishedHero.useAlias || responsiveHeroFailed) && failedHeroVersion !== publishedHero.version
-    const heroSizes = heroImageSizes(usePublishedVersion ? publishedHero.source : null, 'video')
+    const useReelStill = Boolean(reelStill) && !reelStillFailed
+    const heroSizes = heroImageSizes(usePublishedVersion && !useReelStill ? publishedHero.source : null, 'video')
     const useResponsiveHero = usePublishedVersion || (Boolean(responsiveHeroUrl) && !responsiveHeroFailed)
     const useBundledHero = !useResponsiveHero && (!managedHeroUrl || managedHeroFailed)
     const heroSrc = useResponsiveHero
@@ -157,7 +163,12 @@ export default function Videos() {
             <section className="linen-video-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>
-                        {useResponsiveHero ? (
+                        {useReelStill ? (
+                            <>
+                                <source type="image/avif" srcSet={heroStillSrcSet(reelStill.version, reelStill.cut, 'avif')} sizes={heroSizes} />
+                                <source type="image/webp" srcSet={heroStillSrcSet(reelStill.version, reelStill.cut, 'webp')} sizes={heroSizes} />
+                            </>
+                        ) : useResponsiveHero ? (
                             <>
                                 <source type="image/avif" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'avif') : currentVideoHeroSrcSet('avif')} sizes={heroSizes} />
                                 <source type="image/webp" srcSet={usePublishedVersion ? heroManifestSrcSet(publishedHero, 'webp') : currentVideoHeroSrcSet('webp')} sizes={heroSizes} />
@@ -170,17 +181,18 @@ export default function Videos() {
                         ) : null}
                         <img
                             ref={heroRef}
-                            src={heroSrc}
-                            srcSet={heroSrcSet}
+                            src={useReelStill ? heroStillUrl(reelStill.version, reelStill.cut) : heroSrc}
+                            srcSet={useReelStill ? heroStillSrcSet(reelStill.version, reelStill.cut, 'jpg') : heroSrcSet}
                             sizes={heroSizes}
-                            width={useBundledHero ? 6177 : 1280}
-                            height={useBundledHero ? 4118 : 853}
+                            width={useBundledHero && !useReelStill ? 6177 : 1280}
+                            height={useBundledHero && !useReelStill ? 4118 : useReelStill ? 720 : 853}
                             alt="Cinematography"
                             fetchPriority="high"
                             loading="eager"
                             decoding="async"
                             onError={() => {
-                                if (usePublishedVersion) setFailedHeroVersion(publishedHero.version)
+                                if (useReelStill) setReelStillFailed(true)
+                                else if (usePublishedVersion) setFailedHeroVersion(publishedHero.version)
                                 else if (useResponsiveHero) setResponsiveHeroFailed(true)
                                 else if (!useBundledHero) setManagedHeroFailed(true)
                             }}

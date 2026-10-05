@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
-import { chooseHeroReelRendition, chooseHeroReelSource, fetchHeroReel, heroReelAllowed, normalizeHeroReel, pickHeroReelCut } from './heroReel'
+import { chooseHeroReelRendition, chooseHeroReelSource, fetchHeroReel, HERO_REEL_MEMORY_KEY, heroReelAllowed, heroStillChoice, heroStillSrcSet, heroStillUrl, normalizeHeroReel, pickHeroReelCut, rememberHeroReel } from './heroReel'
 import { canPlayHlsNatively, isHlsUrl, loadHlsLibrary } from './hlsSource'
 
 const VERSION = 'a'.repeat(24)
@@ -107,6 +107,41 @@ describe('hero reel pointer', () => {
         expect(older.streams).toBeNull()
         expect(chooseHeroReelSource(older, { width: 1440, height: 780 })).toContain('reel-3-1920x1080.mp4')
         expect(chooseHeroReelSource({ renditions: [] }, { width: 1440, height: 780 })).toBe('')
+    })
+
+    it('remembers which cuts have stills and plays the cut whose still is showing', () => {
+        const master = (cut, orientation) => ({ key: `site/hero/versions/video/reel/v1/${VERSION}/reel-${cut}-${orientation}.m3u8` })
+        const cut = (index, stills) => ({ stills, streams: { landscape: master(index, 'landscape'), portrait: master(index, 'portrait') } })
+        const reel = normalizeHeroReel({
+            schemaVersion: 3,
+            version: VERSION,
+            cuts: [cut(0, true), { streams: {} }, cut(2, true), cut(3, false)],
+        })
+        expect(reel.cuts.map(item => [item.index, item.stills])).toEqual([[0, true], [2, true], [3, false]])
+
+        rememberHeroReel(reel)
+        expect(JSON.parse(localStorage.getItem(HERO_REEL_MEMORY_KEY))).toEqual({ version: VERSION, stills: [0, 2] })
+        rememberHeroReel({ version: VERSION, cuts: [{ index: 0 }] })
+        expect(localStorage.getItem(HERO_REEL_MEMORY_KEY)).toBeNull()
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+        expect(() => rememberHeroReel(reel)).not.toThrow()
+
+        expect(pickHeroReelCut(reel, () => 0, { version: VERSION, cut: 2 }).streams.landscape).toContain('reel-2-landscape')
+        // A still from another version, or a cut no longer published, falls back to random.
+        expect(pickHeroReelCut(reel, () => 0, { version: 'f'.repeat(24), cut: 2 }).streams.landscape).toContain('reel-0-landscape')
+        expect(pickHeroReelCut(reel, () => 0.99, { version: VERSION, cut: 1 }).streams.landscape).toContain('reel-3-landscape')
+
+        expect(heroStillUrl(VERSION, 2)).toBe(`https://media.example.invalid/site/hero/versions/video/reel/v1/${VERSION}/still-2-1280.jpg`)
+        expect(heroStillSrcSet(VERSION, 2, 'avif').split(', ')).toHaveLength(5)
+
+        expect(heroStillChoice()).toBeNull()
+        Object.assign(document.documentElement.dataset, { heroStillVersion: VERSION, heroStillCut: '2' })
+        expect(heroStillChoice()).toEqual({ version: VERSION, cut: 2 })
+        document.documentElement.dataset.heroStillCut = '12'
+        expect(heroStillChoice()).toBeNull()
+        delete document.documentElement.dataset.heroStillVersion
+        delete document.documentElement.dataset.heroStillCut
+        localStorage.clear()
     })
 
     it('recognises HLS playback support', async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import useMediaQuery from '../hooks/useMediaQuery'
-import { chooseHeroReelSource, fetchHeroReel, heroReelAllowed, pickHeroReelCut } from '../utils/heroReel'
+import { chooseHeroReelSource, fetchHeroReel, heroReelAllowed, heroStillChoice, pickHeroReelCut, rememberHeroReel } from '../utils/heroReel'
 import { canPlayHlsNatively, isHlsUrl, loadHlsLibrary } from '../utils/hlsSource'
 import './HeroReel.css'
 
@@ -78,7 +78,10 @@ export default function HeroReel({ videoRef }) {
         const controller = new AbortController()
         const cancel = whenPageSettles(() => {
             fetchHeroReel({ signal: controller.signal })
-                .then((value) => playableCut(pickHeroReelCut(value)))
+                .then((value) => {
+                    rememberHeroReel(value)
+                    return playableCut(pickHeroReelCut(value, Math.random, heroStillChoice()))
+                })
                 .then((cut) => { if (!controller.signal.aborted) setReel(cut) })
                 .catch(() => {})
         })
