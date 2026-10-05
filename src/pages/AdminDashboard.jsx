@@ -62,6 +62,17 @@ function AdminDashboard() {
             color: 'from-blue-600 to-blue-700',
         },
         {
+            title: 'Swipe Favorites',
+            description: 'Go through an album photo by photo: swipe right to favorite, left to skip.',
+            icon: (
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 20.5s-7.5-4.6-9.2-9.4C1.6 7.6 3.9 4.5 7.3 4.5c2 0 3.6 1.1 4.7 2.7 1.1-1.6 2.7-2.7 4.7-2.7 3.4 0 5.7 3.1 4.5 6.6-1.7 4.8-9.2 9.4-9.2 9.4Z" />
+                </svg>
+            ),
+            link: '/admin/favorites',
+            color: 'from-rose-500 to-amber-dark',
+        },
+        {
             title: 'Manage Users',
             description: 'Add, edit, or remove user accounts and manage their access.',
             icon: (

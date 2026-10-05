@@ -41,6 +41,7 @@ const AdminSecurity = lazy(() => import('./pages/AdminSecurity'))
 const Upload = lazy(() => import('./pages/Admin'))
 const UploadVideo = lazy(() => import('./pages/UploadVideo'))
 const ManageHero = lazy(() => import('./pages/ManageHero'))
+const FavoriteSwipe = lazy(() => import('./pages/FavoriteSwipe'))
 const ManageAlbums = lazy(() => import('./pages/ManageAlbums'))
 const ManageUsers = lazy(() => import('./pages/ManageUsers'))
 const AddUser = lazy(() => import('./pages/AddUser'))
@@ -132,6 +133,7 @@ function App() {
                         <Route path="/admin/upload" element={<ProtectedRoute adminOnly><Upload /></ProtectedRoute>} />
                         <Route path="/admin/upload-video" element={<ProtectedRoute adminOnly><UploadVideo /></ProtectedRoute>} />
                         <Route path="/admin/hero" element={<ProtectedRoute adminOnly><ManageHero /></ProtectedRoute>} />
+                        <Route path="/admin/favorites" element={<ProtectedRoute adminOnly><FavoriteSwipe /></ProtectedRoute>} />
                         <Route path="/admin/manage" element={<ProtectedRoute adminOnly><ManageAlbums /></ProtectedRoute>} />
                         <Route path="/admin/users" element={<ProtectedRoute adminOnly><ManageUsers /></ProtectedRoute>} />
                         <Route path="/admin/users/add" element={<ProtectedRoute adminOnly><AddUser /></ProtectedRoute>} />

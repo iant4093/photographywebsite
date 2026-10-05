@@ -17,6 +17,27 @@ function Controlled(props) {
 }
 
 describe('SiteSelect', () => {
+    it('labels consecutive options that share a group and keeps keyboard order across groups', () => {
+        const onChange = vi.fn()
+        render(<SiteSelect aria-label="Album" value="" onChange={onChange} options={[
+            { value: 'a', label: 'Alpha', group: 'With favorites' },
+            { value: 'b', label: 'Beta', group: 'With favorites' },
+            { value: 'c', label: 'Gamma', group: 'Without favorites' },
+            { value: 'd', label: 'Delta' },
+        ]} />)
+        const control = screen.getByRole('combobox', { name: 'Album' })
+        fireEvent.click(control)
+        const groups = screen.getAllByRole('group')
+        expect(groups.map(group => document.getElementById(group.getAttribute('aria-labelledby')).textContent))
+            .toEqual(['With favorites', 'Without favorites'])
+        expect(groups.map(group => group.querySelectorAll('[role="option"]').length)).toEqual([2, 1])
+        expect(screen.getAllByRole('option').map(option => option.id.split('-').at(-1))).toEqual(['0', '1', '2', '3'])
+        fireEvent.keyDown(control, { key: 'End' })
+        fireEvent.keyDown(control, { key: 'ArrowUp' })
+        fireEvent.keyDown(control, { key: 'Enter' })
+        expect(onChange).toHaveBeenCalledWith('c')
+    })
+
     it('renders its own choices and updates selection without native pickers', async () => {
         const user = userEvent.setup()
         const { container } = render(<Controlled />)
