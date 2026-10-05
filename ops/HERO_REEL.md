@@ -60,7 +60,8 @@ copies only the binary into the artifact (about 80 MB unzipped, budgeted in
    playlist `reel-{cut}-{orientation}.m3u8` itself (peak `BANDWIDTH`, measured
    `AVERAGE-BANDWIDTH`, the 720p rung first because Safari starts on the first
    variant). The landscape pass also writes the first frame as
-   `poster-{cut}.jpg` (2560 wide).
+   `poster-{cut}.jpg` (2560 wide) and as responsive stills
+   `still-{cut}-{640,960,1280,1920,2560}.{avif,webp,jpg}` (never upscaled).
 
 Five cuts in two orientations do not fit one 15-minute invocation, so a build
 is a chained batch: the first invocation analyses and plans every cut (each
@@ -115,6 +116,16 @@ returns).
   runs at a time; an unclaimed job stops blocking after 20 minutes.
 
 ## Frontend
+
+The still under the reel rotates per visit. After the pointer loads, the page
+remembers the reel version and which cuts have stills (`localStorage`
+`ian:hero-reel-stills:v1`). On a later visit `public/theme-init.js` picks one of
+those cuts at random, preloads its still before the app bundle arrives, and
+records the choice on the root element (`data-hero-still-version`,
+`data-hero-still-cut`); the Videos page shows that still and the reel then
+plays the same cut, so the still flows straight into the video. A first visit,
+blocked storage, or a still that fails to load (for example a version since
+cleaned up) falls back to the current still.
 
 `src/components/HeroReel.jsx` loads the pointer only after the page `load`
 event and idle time and picks one cut at random. It skips reduced-motion,

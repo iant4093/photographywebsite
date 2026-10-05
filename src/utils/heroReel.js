@@ -6,6 +6,11 @@ const MAX_DIMENSION = 4096
 
 const MAX_CUTS = 8
 const ORIENTATIONS = ['landscape', 'portrait']
+const REEL_FOLDER = 'site/hero/versions/video/reel/v1'
+// The reel last seen, so a later visit can show a random cut's opening still
+// (and then play that cut) before the pointer loads.
+export const HERO_REEL_MEMORY_KEY = 'ian:hero-reel-stills:v1'
+export const HERO_STILL_WIDTHS = [640, 960, 1280, 1920, 2560]
 
 function validRendition(value, version, cut) {
     if (!value || typeof value !== 'object') return null
@@ -29,7 +34,7 @@ function validStreams(value, version, cut) {
     if (!value || typeof value !== 'object') return null
     const streams = {}
     for (const orientation of ORIENTATIONS) {
-        const key = `site/hero/versions/video/reel/v1/${version}/reel-${cut}-${orientation}.m3u8`
+        const key = `${REEL_FOLDER}/${version}/reel-${cut}-${orientation}.m3u8`
         const url = value[orientation]?.key === key ? cdnUrl(key) : ''
         if (!url) return null
         streams[orientation] = url
@@ -50,19 +55,52 @@ export function normalizeHeroReel(value) {
     } else if ([2, 3].includes(value.schemaVersion) && Array.isArray(value.cuts)) {
         cuts = value.cuts.slice(0, MAX_CUTS).map((cut, index) => {
             const streams = value.schemaVersion === 3 ? validStreams(cut?.streams, value.version, index) : null
-            return streams ? { streams, renditions: [] } : { renditions: validRenditions(cut?.renditions, value.version, index) }
+            return streams
+                ? { index, streams, renditions: [], stills: cut.stills === true }
+                : { index, renditions: validRenditions(cut?.renditions, value.version, index) }
         })
     }
     cuts = cuts.filter(cut => cut.streams || cut.renditions.length)
     return cuts.length ? { version: value.version, cuts } : null
 }
 
-// Each page load plays one of the published cuts at random.
-export function pickHeroReelCut(reel, random = Math.random) {
+// Each page load plays one of the published cuts at random, or the cut whose
+// opening still the page is already showing.
+export function pickHeroReelCut(reel, random = Math.random, preferred = null) {
     const cuts = reel?.cuts || []
     if (!cuts.length) return null
-    const index = Math.min(cuts.length - 1, Math.floor(random() * cuts.length))
+    const matching = preferred?.version === reel.version ? cuts.findIndex(cut => cut.index === preferred.cut) : -1
+    const index = matching >= 0 ? matching : Math.min(cuts.length - 1, Math.floor(random() * cuts.length))
     return { version: reel.version, cut: index, renditions: cuts[index].renditions, streams: cuts[index].streams || null }
+}
+
+export function heroStillSrcSet(version, cut, format) {
+    return HERO_STILL_WIDTHS
+        .map(width => `${cdnUrl(`${REEL_FOLDER}/${version}/still-${cut}-${width}.${format}`)} ${width}w`)
+        .join(', ')
+}
+
+export function heroStillUrl(version, cut, format = 'jpg', width = 1280) {
+    return cdnUrl(`${REEL_FOLDER}/${version}/still-${cut}-${width}.${format}`)
+}
+
+export function rememberHeroReel(reel) {
+    const stills = (reel?.cuts || []).filter(cut => cut.stills).map(cut => cut.index)
+    try {
+        if (stills.length) window.localStorage.setItem(HERO_REEL_MEMORY_KEY, JSON.stringify({ version: reel.version, stills }))
+        else window.localStorage.removeItem(HERO_REEL_MEMORY_KEY)
+    } catch {
+        // Without storage every visit shows the default still.
+    }
+}
+
+// The still the early page script chose (and preloaded) for this visit.
+export function heroStillChoice() {
+    const { heroStillVersion: version, heroStillCut } = document.documentElement.dataset
+    const cut = Number(heroStillCut)
+    return VERSION_PATTERN.test(String(version || '')) && Number.isInteger(cut) && cut >= 0 && cut < MAX_CUTS
+        ? { version, cut }
+        : null
 }
 
 export async function fetchHeroReel({ signal } = {}) {

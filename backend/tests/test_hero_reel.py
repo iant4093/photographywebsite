@@ -250,11 +250,19 @@ class FfmpegTests(unittest.TestCase):
         sources = [{"kind": "hls", "path": "concat:a.ts", "offset": 1.5}, {"kind": "hls", "path": "b.ts", "offset": -1}]
         with patch.object(hero_reel, "_run_ffmpeg", side_effect=self.fake_ladder_run(commands)):
             result = hero_reel.encode_ladder(clips, sources, "landscape", 2, workspace, hero_reel.time.monotonic() + 600)
-        self.assertEqual(len(commands), 3)
+        # Two clips, the ladder, then 5 widths x 3 formats of the opening still.
+        self.assertEqual(len(commands), 3 + 15)
         self.assertIn("trim=start=1.500:duration=5.000", " ".join(commands[0][0]))
         self.assertIn("trim=start=0.000:duration=4.000", " ".join(commands[1][0]))
         self.assertIn("crop=2560:1440", " ".join(commands[0][0]))
         final, cwd = commands[2]
+        stills = [arguments for arguments, _ in commands[3:]]
+        self.assertTrue(all(arguments[1] == result["poster"] for arguments in stills))
+        self.assertIn("scale='min(2560,iw)':-2:flags=lanczos", stills[-1])
+        self.assertEqual(sorted(result["stills"]), sorted(
+            (width, extension) for width in hero_reel_plan.STILL_WIDTHS for extension in ("avif", "webp", "jpg")
+        ))
+        self.assertIn("libaom-av1", " ".join(stills[0]))
         self.assertEqual(cwd, os.path.join(workspace, "out"))
         self.assertEqual(final.count("-filter_complex"), 1)
         self.assertEqual(final.count("hls"), 4)
@@ -274,6 +282,7 @@ class FfmpegTests(unittest.TestCase):
         with patch.object(hero_reel, "_run_ffmpeg", side_effect=self.fake_ladder_run(commands)):
             portrait = hero_reel.encode_ladder(clips, sources, "portrait", 0, tempfile.mkdtemp(dir=workspace), hero_reel.time.monotonic() + 600)
         self.assertIsNone(portrait["poster"])
+        self.assertEqual(portrait["stills"], {})
         self.assertEqual(sorted(portrait["files"]), ["reel-0-1080x1920", "reel-0-540x960", "reel-0-720x1280"])
         self.assertNotIn("[poster]", commands[-1][0])
 
@@ -311,6 +320,11 @@ class FfmpegTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, "encode_missing_output")
         with patch.object(hero_reel, "_run_ffmpeg"), self.assertRaises(hero_reel.ReelError):
             hero_reel.normalize_clip(clips[0], sources[0], "24", "portrait", os.path.join(workspace, "none.mp4"), 10)
+
+    def test_a_still_that_fails_to_encode_fails_the_step(self):
+        with patch.object(hero_reel, "_run_ffmpeg"), self.assertRaises(hero_reel.ReelError) as raised:
+            hero_reel.encode_stills("poster.jpg", tempfile.mkdtemp(), hero_reel.time.monotonic() + 60)
+        self.assertEqual(raised.exception.reason, "encode_missing_output")
 
     def test_originals_seek_accurately_over_loopback_and_hdr_is_tone_mapped(self):
         workspace = tempfile.mkdtemp()
@@ -617,6 +631,7 @@ def step_entry(cut, orientation, **extra):
              "rungs": rungs, "duration": "58.2", "fps": "24"}
     if orientation == "landscape":
         entry["posterKey"] = f"{FOLDER}poster-{cut}.jpg"
+        entry["stills"] = True
     return {**entry, **extra}
 
 
@@ -660,20 +675,30 @@ class PublishTests(unittest.TestCase):
         with open(poster, "wb") as handle:
             handle.write(b"jpg")
         s3 = Mock()
-        result = {"files": files, "master": "#EXTM3U\n", "poster": poster, "seconds": 59.456, "rate": "24"}
+        stills = {}
+        for width, extension in ((640, "avif"), (640, "jpg"), (2560, "webp")):
+            stills[(width, extension)] = os.path.join(workspace, f"still-{width}.{extension}")
+            with open(stills[(width, extension)], "wb") as handle:
+                handle.write(b"img")
+        result = {"files": files, "master": "#EXTM3U\n", "poster": poster, "stills": stills, "seconds": 59.456, "rate": "24"}
         with patch.object(hero_reel, "_client", return_value=s3):
             entry = hero_reel.upload_step("b" * 24, 3, "landscape", result)
-            portrait = hero_reel.upload_step("b" * 24, 3, "portrait", {**result, "files": {}, "poster": None})
+            portrait = hero_reel.upload_step("b" * 24, 3, "portrait", {**result, "files": {}, "poster": None, "stills": {}})
         keys = [call.kwargs["Key"].rsplit("/", 1)[1] for call in s3.put_object.call_args_list]
         self.assertEqual(keys[:2], ["reel-3-2560x1440.mp4", "reel-3-2560x1440.m3u8"])
-        self.assertEqual(keys[8:10], ["reel-3-landscape.m3u8", "poster-3.jpg"])
+        self.assertEqual(keys[8:13], [
+            "reel-3-landscape.m3u8", "poster-3.jpg", "still-3-640.avif", "still-3-640.jpg", "still-3-2560.webp",
+        ])
+        self.assertTrue(entry["stills"])
         self.assertEqual(entry["master"], f"{hero_reel.REEL_PREFIX}{'b' * 24}/reel-3-landscape.m3u8")
         self.assertEqual((entry["cut"], entry["orientation"], entry["duration"]), (3, "landscape", "59.46"))
         self.assertTrue(entry["posterKey"].endswith("/poster-3.jpg"))
         self.assertEqual(entry["rungs"][0], {"width": 2560, "height": 1440, "bytes": 5})
         self.assertNotIn("posterKey", portrait)
         types = {call.kwargs["Key"].rsplit(".", 1)[1]: call.kwargs["ContentType"] for call in s3.put_object.call_args_list}
-        self.assertEqual(types, {"mp4": "video/mp4", "m3u8": "application/vnd.apple.mpegurl", "jpg": "image/jpeg"})
+        self.assertEqual(types, {"mp4": "video/mp4", "m3u8": "application/vnd.apple.mpegurl", "jpg": "image/jpeg",
+                                 "avif": "image/avif", "webp": "image/webp"})
+        self.assertNotIn("stills", portrait)
         for call in s3.put_object.call_args_list:
             self.assertEqual(call.kwargs["Tagging"], "visibility=public")
             self.assertIn("immutable", call.kwargs["CacheControl"])
@@ -712,6 +737,9 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(document["schemaVersion"], 3)
         self.assertEqual(document["version"], VERSION_A)
         self.assertEqual([cut["duration"] for cut in document["cuts"]], [58.2, 59.0])
+        self.assertTrue(document["cuts"][0]["stills"])
+        older_stream = hero_reel.pointer_document({**RECORD, "cuts": [{key: value for key, value in CUT.items() if key != "stills"}]})
+        self.assertNotIn("stills", older_stream["cuts"][0])
         self.assertEqual(document["cuts"][0]["streams"], {
             "landscape": {"key": f"{FOLDER}reel-0-landscape.m3u8", "maxWidth": 2560, "maxHeight": 1440},
             "portrait": {"key": f"{FOLDER}reel-0-portrait.m3u8", "maxWidth": 1080, "maxHeight": 1920},

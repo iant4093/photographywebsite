@@ -27,6 +27,49 @@ function themeInitLinks(pathname) {
     return links.filter(link => link.as === 'fetch')
 }
 
+function themeInitHero(pathname, memory, random = 0.6) {
+    const links = []
+    const dataset = {}
+    runInNewContext(readFileSync('public/theme-init.js', 'utf8'), {
+        document: {
+            documentElement: { dataset, style: {} },
+            currentScript: { dataset: { mediaOrigin: 'https://media.example.test' } },
+            querySelector: () => null,
+            createElement: () => ({}),
+            head: { appendChild: link => links.push(link) },
+        },
+        window: {
+            location: { pathname },
+            localStorage: { getItem: key => (key === 'ian:hero-reel-stills:v1' ? memory : null) },
+            sessionStorage: window.sessionStorage,
+        },
+        Math: { ...Math, random: () => random, floor: Math.floor },
+        Number,
+        Array,
+        JSON,
+        Date,
+    })
+    return { image: links.find(link => link.as === 'image'), dataset }
+}
+
+it('preloads a random remembered reel cut still on the Videos page only', () => {
+    const version = 'e'.repeat(24)
+    const memory = JSON.stringify({ version, stills: [0, 2, 4, 'x', 9] })
+    const { image, dataset } = themeInitHero('/videos', memory)
+    expect(dataset).toMatchObject({ heroStillVersion: version, heroStillCut: '2' })
+    expect(image.href).toBe(`https://media.example.test/site/hero/versions/video/reel/v1/${version}/still-2-960.avif`)
+    expect(image.imageSrcset).toContain(`still-2-2560.avif 2560w`)
+
+    for (const bad of [null, 'not json', JSON.stringify({ version: 'nope', stills: [0] }), JSON.stringify({ version, stills: [] })]) {
+        const fallback = themeInitHero('/videos', bad)
+        expect(fallback.image.href).toBe('https://media.example.test/site/hero/video/current/hero-960.avif')
+        expect(fallback.dataset.heroStillCut).toBeUndefined()
+    }
+    const home = themeInitHero('/', memory)
+    expect(home.image.href).toBe('https://media.example.test/site/hero/current/hero-960.avif')
+    expect(home.dataset.heroStillCut).toBeUndefined()
+})
+
 beforeEach(() => {
     clearApiCache()
     clearCatalogSnapshots()

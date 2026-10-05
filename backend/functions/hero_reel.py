@@ -44,6 +44,8 @@ from hero_reel_plan import (
     LADDERS,
     ORIENTATIONS,
     SEGMENT_SECONDS,
+    STILL_FORMATS,
+    STILL_WIDTHS,
     PlaylistError,
     candidate_clips,
     choose_variant,
@@ -463,6 +465,26 @@ def _check_rung_playlist(path, media_name):
         raise ReelError("encode_bad_playlist")
 
 
+def encode_stills(poster, output, deadline):
+    """The poster frame at every still width and format, never upscaled.
+
+    Returns {(width, extension): path}; a width wider than the frame repeats
+    the full frame so every advertised width exists.
+    """
+    stills = {}
+    for width in STILL_WIDTHS:
+        for extension, (_, codec) in STILL_FORMATS.items():
+            path = os.path.join(output, f"still-{width}.{extension}")
+            _run_ffmpeg([
+                "-i", poster, "-vf", f"scale='min({width},iw)':-2:flags=lanczos", *codec,
+                "-frames:v", "1", "-map_metadata", "-1", "-y", path,
+            ], max(5, deadline - time.monotonic()))
+            if not os.path.isfile(path) or os.path.getsize(path) == 0:
+                raise ReelError("encode_missing_output")
+            stills[(width, extension)] = path
+    return stills
+
+
 def encode_ladder(clips, sources, orientation, cut, workspace, deadline):
     """Normalize each clip, then encode the orientation's HLS ladder.
 
@@ -518,8 +540,9 @@ def encode_ladder(clips, sources, orientation, cut, workspace, deadline):
                        "bytes": os.path.getsize(media)}
     if poster is not None and (not os.path.isfile(poster) or os.path.getsize(poster) == 0):
         raise ReelError("encode_missing_output")
+    stills = encode_stills(poster, output, deadline) if poster else {}
     master = master_playlist(cut, orientation, rate, {name: item["bytes"] for name, item in files.items()}, seconds)
-    return {"files": files, "master": master, "poster": poster, "seconds": seconds, "rate": rate}
+    return {"files": files, "master": master, "poster": poster, "stills": stills, "seconds": seconds, "rate": rate}
 
 
 def _remaining_ms(context):
@@ -680,6 +703,11 @@ def upload_step(version, cut, orientation, result):
         with open(result["poster"], "rb") as body:
             _put(poster_key, body, "image/jpeg")
         entry["posterKey"] = poster_key
+    if result.get("stills"):
+        for (width, extension), path in sorted(result["stills"].items()):
+            with open(path, "rb") as body:
+                _put(f"{folder}still-{cut}-{width}.{extension}", body, STILL_FORMATS[extension][0])
+        entry["stills"] = True
     return entry
 
 
@@ -700,6 +728,8 @@ def _cuts_from_steps(results):
         cut[entry["orientation"]] = {"master": entry["master"], "rungs": entry["rungs"]}
         if entry.get("posterKey"):
             cut["posterKey"] = entry["posterKey"]
+        if entry.get("stills"):
+            cut["stills"] = True
     return [cuts[index] for index in sorted(cuts) if all(orientation in cuts[index] for orientation in ORIENTATIONS)]
 
 
@@ -730,6 +760,7 @@ def _pointer_cut(cut):
     if cut.get("landscape"):
         return {
             "duration": float(cut["duration"]),
+            **({"stills": True} if cut.get("stills") else {}),
             "streams": {
                 orientation: {
                     "key": cut[orientation]["master"],

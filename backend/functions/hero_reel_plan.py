@@ -15,7 +15,7 @@ import random
 import urllib.parse
 
 
-BUILDER_VERSION = "hero-reel-v2"
+BUILDER_VERSION = "hero-reel-v3"
 TARGET_SECONDS = 60.0
 MIN_CLIP_SECONDS = 3.0
 MAX_CLIP_SECONDS = 5.0
@@ -67,6 +67,15 @@ LADDERS = {
 # The variant a player without a bandwidth estimate (Safari) starts on.
 START_VARIANT = {"landscape": (1280, 720), "portrait": (720, 1280)}
 SEGMENT_SECONDS = 4
+# Each cut's first frame as a responsive still, so the page can show the
+# opening of a random cut (the one the reel then plays) before it loads.
+STILL_WIDTHS = (640, 960, 1280, 1920, 2560)
+STILL_FORMATS = {
+    "avif": ("image/avif", ["-c:v", "libaom-av1", "-still-picture", "1", "-crf", "32", "-cpu-used", "6",
+                            "-row-mt", "1", "-pix_fmt", "yuv420p"]),
+    "webp": ("image/webp", ["-c:v", "libwebp", "-quality", "78"]),
+    "jpg": ("image/jpeg", ["-q:v", "4"]),
+}
 CODEC_LEVELS = {"4.1": "640029", "5.0": "640032"}
 
 

@@ -28,7 +28,10 @@
   var origin = document.currentScript?.dataset.mediaOrigin
   if (!origin || !/^https:\/\/[a-z0-9.-]+$/i.test(origin)) return
   var video = route === '/videos'
-  var prefix = origin + '/site/hero/' + (video ? 'video/' : '') + 'current/hero-'
+  var still = video ? rememberedReelStill() : null
+  var prefix = still
+    ? origin + '/site/hero/versions/video/reel/v1/' + still.version + '/still-' + still.cut + '-'
+    : origin + '/site/hero/' + (video ? 'video/' : '') + 'current/hero-'
   var preload = document.createElement('link')
   preload.rel = 'preload'
   preload.as = 'image'
@@ -43,6 +46,23 @@
   preload.fetchPriority = 'high'
   document.head.appendChild(preload)
 }())
+
+// A returning Videos visitor sees the opening still of a random reel cut; the
+// page and the reel read the choice back from the root element's dataset.
+function rememberedReelStill() {
+  try {
+    var memory = JSON.parse(window.localStorage.getItem('ian:hero-reel-stills:v1'))
+    if (!memory || !/^[a-f0-9]{24}$/.test(memory.version) || !Array.isArray(memory.stills)) return null
+    var cuts = memory.stills.filter(function (cut) { return Number.isInteger(cut) && cut >= 0 && cut < 8 })
+    if (!cuts.length) return null
+    var cut = cuts[Math.floor(Math.random() * cuts.length)]
+    document.documentElement.dataset.heroStillVersion = memory.version
+    document.documentElement.dataset.heroStillCut = String(cut)
+    return { version: memory.version, cut: cut }
+  } catch {
+    return null
+  }
+}
 
 // Preload the app's first catalog request (fetchAlbumsPage) byte for byte,
 // unless a fresh tab snapshot lets the app skip it.

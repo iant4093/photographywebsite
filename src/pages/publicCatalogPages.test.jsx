@@ -561,6 +561,28 @@ describe('Videos paginated catalog', () => {
     vi.unstubAllGlobals()
   })
 
+  it('shows the reel cut still chosen for this visit, then falls back to the current still', async () => {
+    const version = 'd'.repeat(24)
+    Object.assign(document.documentElement.dataset, { heroStillVersion: version, heroStillCut: '3' })
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })))
+      api.fetchAlbumsPage.mockResolvedValue({ items: [], nextCursor: null })
+      const { container } = routed(<Videos />)
+      await act(async () => {})
+      const hero = screen.getByRole('img', { name: 'Cinematography' })
+      expect(hero).toHaveAttribute('src', expect.stringContaining(`/site/hero/versions/video/reel/v1/${version}/still-3-1280.jpg`))
+      expect(hero.getAttribute('srcset')).toContain(`still-3-2560.jpg 2560w`)
+      expect(container.querySelector('source[type="image/avif"]').getAttribute('srcset')).toContain(`still-3-640.avif 640w`)
+      expect(hero).toHaveAttribute('height', '720')
+      fireEvent.error(hero)
+      await waitFor(() => expect(hero).toHaveAttribute('src', expect.stringContaining('/site/hero/video/current/hero.jpg')))
+    } finally {
+      delete document.documentElement.dataset.heroStillVersion
+      delete document.documentElement.dataset.heroStillCut
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('loads, groups, deduplicates, and loads another page', async () => {
     api.fetchAlbumsPage
       .mockResolvedValueOnce({ items: [{ albumId: 'v1', title: 'First', type: 'video', category: 'Sports' }], nextCursor: 'next' })
