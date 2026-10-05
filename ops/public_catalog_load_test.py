@@ -44,7 +44,9 @@ SUMMARY_OPTIONAL_FIELDS = {
     "coverHlsUrl",
     "coverThumbnailTime",
     "coverMediaId",
+    "slug",
 } | HOVER_PREVIEW_FIELDS
+PUBLIC_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 DETAIL_FIELDS = (SUMMARY_FIELDS - {"imageCount"}) | {"qrCodeUrl"}
 IMAGE_REQUIRED_FIELDS = {"id", "url", "thumbnailUrl"}
 # A public image normally carries downloadUrl. An edge-cached response from the
@@ -339,6 +341,10 @@ def validate_summary(value: object) -> dict:
         not isinstance(item["coverMediaId"], str) or not re.fullmatch(r"[a-f0-9]{24}", item["coverMediaId"])
     ):
         raise ProbeError("album summary has an invalid cover media identifier")
+    if "slug" in item and (
+        not isinstance(item["slug"], str) or len(item["slug"]) > 80 or not PUBLIC_SLUG.fullmatch(item["slug"])
+    ):
+        raise ProbeError("album summary has an invalid readable URL")
     return item
 
 

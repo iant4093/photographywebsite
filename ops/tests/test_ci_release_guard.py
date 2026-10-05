@@ -2431,6 +2431,42 @@ class PublicPostureSmokeTests(unittest.TestCase):
         with self.assertRaises(public_posture_smoke.PostureError):
             public_posture_smoke._require_public_stats(invalid)
 
+    def test_public_stats_accepts_the_shooting_calendar_and_checks_its_shape(self):
+        stats = {
+            "schemaVersion": 1, "generatedAt": "x", "sourceGeneratedAt": "x",
+            "taken": {"photos": 1, "videos": 0},
+            "kept": {"photos": 1, "videos": 0, "photoPercent": 100, "videoPercent": 0},
+            "storage": {"totalBytes": 1}, "albums": {"photos": 1, "videos": 0},
+            "outputByYear": [], "categories": [], "mostActive": {}, "gear": {},
+        }
+        calendar = {"albums": [self.ALBUM_ID], "days": [["2026-10-04", 3, 0, [0]], ["2026-10-05", 0, 1, []]]}
+
+        def checked(payload):
+            return public_posture_smoke._require_public_stats(
+                self.response(200, json.dumps(payload).encode(), cache="public, max-age=300, s-maxage=86400")
+            )
+
+        self.assertTrue(checked(stats))
+        self.assertTrue(checked(stats | {"calendar": calendar}))
+        self.assertTrue(checked(stats | {"calendar": {"albums": [], "days": []}}))
+        invalid = [
+            None,
+            {"albums": [], "days": [], "extra": 1},
+            {"albums": {}, "days": []},
+            {"albums": ["not-an-album"], "days": []},
+            {"albums": [self.ALBUM_ID], "days": [["2026-10-04", 1, 0]]},
+            {"albums": [self.ALBUM_ID], "days": [["Oct 4", 1, 0, [0]]]},
+            {"albums": [self.ALBUM_ID], "days": [["2026-10-04", -1, 0, [0]]]},
+            {"albums": [self.ALBUM_ID], "days": [["2026-10-04", 1, True, [0]]]},
+            {"albums": [self.ALBUM_ID], "days": [["2026-10-04", 1, 0, [1]]]},
+            {"albums": [self.ALBUM_ID], "days": [["2026-10-04", 1, 0, "0"]]},
+        ]
+        for value in invalid:
+            with self.subTest(calendar=value), self.assertRaises(public_posture_smoke.PostureError):
+                checked(stats | {"calendar": value})
+        with self.assertRaises(public_posture_smoke.PostureError):
+            checked(stats | {"privateField": 1})
+
     def test_smoke_retry_is_bounded_and_only_for_availability_failures(self):
         calls = []
         sleeps = []
