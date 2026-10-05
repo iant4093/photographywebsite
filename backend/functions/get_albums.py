@@ -90,11 +90,12 @@ def _needs_full_record(record):
     return not _valid_image_count(record.get("imageCount")) or record.get("type") == "video"
 
 
-def _complete_admin_records(records):
+def _complete_admin_records(records, needs_full=None):
     """Replace projected records whose summary depends on `images` with full items."""
+    needs_full = needs_full or _needs_full_record
     album_ids = list(dict.fromkeys(
         record["albumId"] for record in records
-        if _needs_full_record(record) and isinstance(record.get("albumId"), str)
+        if needs_full(record) and isinstance(record.get("albumId"), str)
     ))
     if not album_ids:
         return records
@@ -113,7 +114,13 @@ def _complete_admin_records(records):
         else:
             raise RuntimeError("Admin catalog record completion remained unprocessed")
     # A record deleted between the scan and this read keeps its projected form.
-    return [full_by_id.get(record.get("albumId"), record) if _needs_full_record(record) else record for record in records]
+    return [full_by_id.get(record.get("albumId"), record) if needs_full(record) else record for record in records]
+
+
+def _favorite_count(record):
+    """Favorited photos, read from the authoritative inline manifest."""
+    images = record.get("images")
+    return sum(1 for image in images if isinstance(image, dict) and image.get("isFavorite") is True) if isinstance(images, list) else 0
 
 
 def _filter_for(visibility, album_type=None, *, owner_sub=None, owner_email=None):
@@ -336,6 +343,9 @@ def handler(event, context):
             "all" if admin_owner_email or admin_owner_sub else "public",
         )
         album_type = validate_album_type(params.get("type"), default=None) if params.get("type") else None
+        # Admin-only: count each album's favorites (the favorites swipe page
+        # groups albums by whether they have any). Costs full-record reads.
+        include_favorites = admin and str(params.get("favorites") or "").lower() in {"1", "true"}
         # Catalog summaries are intentionally small and the public inventory is
         # currently below 100, so one bounded query avoids sequential page RTTs.
         limit = validate_limit(params.get("limit"), maximum=100)
@@ -410,6 +420,8 @@ def handler(event, context):
         )
         if public_summary_only:
             _hydrate_public_summary_fields(records)
+        if include_favorites:
+            records = _complete_admin_records(records, needs_full=lambda record: "images" not in record)
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
         gallery_settings = (
@@ -432,6 +444,8 @@ def handler(event, context):
                 image_count = record.get("imageCount")
                 if "images" not in record and _valid_image_count(image_count):
                     summary["imageCount"] = max(0, int(image_count))
+                if include_favorites:
+                    summary["favoriteCount"] = _favorite_count(record)
                 items.append(apply_gallery_order(summary, gallery_settings))
             except ValidationError:
                 continue

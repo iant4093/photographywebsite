@@ -447,6 +447,27 @@ class AdminCatalogProjectionTests(unittest.TestCase):
         self.assertIn("coverHlsUrl", video)
         self.assertEqual(next(item for item in items if item["albumId"] == self.UNCOUNTED_ID)["imageCount"], 2)
 
+    def test_admins_can_ask_for_each_albums_favorite_count(self):
+        table = get_albums.table
+        record = table.get_item(Key={"albumId": self.PHOTO_ID})["Item"]
+        record["images"][1]["isFavorite"] = True
+        record["images"][0]["isFavorite"] = False
+        table.put_item(Item=record)
+        with patch.object(get_albums.dynamodb, "batch_get_item", wraps=get_albums.dynamodb.batch_get_item) as batch:
+            items = self.admin({"visibility": "all", "type": "photo", "favorites": "1", "limit": "10"})
+        counts = {item["albumId"]: item["favoriteCount"] for item in items}
+        self.assertEqual(counts, {self.PHOTO_ID: 1, self.UNCOUNTED_ID: 0, self.OTHER_OWNER_ID: 0})
+        requested = sorted(key["albumId"] for call in batch.call_args_list
+                           for key in call.kwargs["RequestItems"][table.name]["Keys"])
+        # Counting needs every album's manifest, not only the uncounted one.
+        self.assertEqual(requested, sorted([self.PHOTO_ID, self.UNCOUNTED_ID, self.OTHER_OWNER_ID]))
+        self.assertNotIn("favoriteCount", self.admin({"visibility": "all", "type": "photo", "limit": "10"})[0])
+        self.assertEqual(get_albums._favorite_count({"images": "not-a-list"}), 0)
+        # The flag is admin-only.
+        with patch.object(get_albums, "get_verified_claims", return_value=None):
+            response = get_albums.handler({"queryStringParameters": {"favorites": "1"}}, None)
+        self.assertNotIn("favoriteCount", json.dumps(response))
+
     def test_projection_shares_attribute_names_with_a_type_and_owner_filter(self):
         original_scan = get_albums.table.scan
         with patch.object(get_albums.table, "scan", side_effect=original_scan) as scan:

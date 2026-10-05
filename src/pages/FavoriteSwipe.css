@@ -1,0 +1,175 @@
+/* Swipe Favorites admin module. Lazy (route) CSS only: entry CSS is at its budget. */
+
+.favorite-swipe-picker {
+  display: grid;
+  gap: .5rem;
+  max-width: 34rem;
+  margin: 0 auto 2rem;
+}
+.favorite-swipe-label {
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-warm-gray);
+}
+
+/* Group headings in the album menu (SiteSelect portals it to the body). */
+.site-select-group + .site-select-group { margin-top: .35rem; padding-top: .35rem; border-top: 1px solid var(--color-warm-border); }
+.site-select-group-label {
+  padding: .45rem .7rem .3rem;
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--color-warm-gray);
+}
+
+.favorite-swipe-message {
+  display: grid;
+  justify-items: center;
+  gap: .75rem;
+  padding: 3rem 1rem;
+  color: var(--color-warm-gray);
+  text-align: center;
+}
+.favorite-swipe-text-button {
+  justify-self: center;
+  padding: .55rem 1rem;
+  border: 1px solid var(--color-warm-border);
+  border-radius: .75rem;
+  color: var(--color-charcoal);
+  font-size: .875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color .2s, color .2s;
+}
+.favorite-swipe-text-button:hover { background: var(--color-cream-dark); color: var(--color-amber-dark); }
+
+.favorite-swipe { display: grid; justify-items: center; gap: 1rem; }
+.favorite-swipe-progress { color: var(--color-warm-gray); font-size: .875rem; font-variant-numeric: tabular-nums; text-align: center; }
+
+/* All cards share one grid cell, each sized to its photo's shape within a
+   stack that leaves the action buttons on screen. */
+.favorite-swipe-stack {
+  --stack-height: clamp(15rem, calc(100svh - 32rem), 38rem);
+  display: grid;
+  place-items: center;
+  width: min(100%, 46rem);
+  height: var(--stack-height);
+}
+.favorite-swipe-card {
+  grid-area: 1 / 1;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(100%, calc(var(--stack-height) * var(--ratio, 1.5)));
+  aspect-ratio: var(--ratio, 1.5);
+  overflow: hidden;
+  border: 1px solid var(--color-warm-border);
+  border-radius: 1.25rem;
+  background: var(--color-cream-dark);
+  box-shadow: 0 10px 30px rgb(44 40 37 / .1), 0 4px 8px rgb(44 40 37 / .06);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.favorite-swipe-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+.favorite-swipe-card.is-behind {
+  transform: translateY(calc(var(--depth, 1) * .7rem)) scale(calc(1 - var(--depth, 1) * .04));
+  opacity: .7;
+}
+.favorite-swipe-card.is-behind[data-depth="2"] { --depth: 2; opacity: .4; }
+.favorite-swipe-card.is-top {
+  z-index: 2;
+  cursor: grab;
+  /* Vertical scrolling stays with the page; horizontal drags swipe. */
+  touch-action: pan-y;
+  transform: translate(var(--drag-x, 0), var(--drag-y, 0)) rotate(calc(var(--lean, 0) * 8deg));
+  transition: transform .25s cubic-bezier(.2, .8, .2, 1);
+}
+.favorite-swipe-card.is-dragging { cursor: grabbing; transition: none; }
+.favorite-swipe-card.is-flying {
+  z-index: 3;
+  pointer-events: none;
+  animation: favorite-swipe-fly .32s cubic-bezier(.4, 0, .9, .6) forwards;
+}
+.favorite-swipe-card.is-flying[data-action="skip"] { --fly-to: -130%; --fly-turn: -18deg; }
+.favorite-swipe-card.is-flying[data-action="favorite"] { --fly-to: 130%; --fly-turn: 18deg; }
+@keyframes favorite-swipe-fly {
+  from { transform: translateX(var(--from-x, 0)); opacity: 1; }
+  to { transform: translateX(var(--fly-to)) rotate(var(--fly-turn)); opacity: 0; }
+}
+
+.favorite-swipe-stamp {
+  position: absolute;
+  top: 1.25rem;
+  padding: .3rem .8rem;
+  border: 3px solid currentColor;
+  border-radius: .5rem;
+  background: rgb(255 255 255 / .85);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.favorite-swipe-stamp.is-favorite { left: 1.25rem; color: #b4533c; transform: rotate(-12deg); }
+.favorite-swipe-stamp.is-skip { right: 1.25rem; color: #5f5a54; transform: rotate(12deg); }
+
+.favorite-swipe-done {
+  grid-area: 1 / 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: .75rem;
+  width: min(100%, 30rem);
+  height: 100%;
+  padding: 2rem;
+  border: 1px dashed var(--color-warm-border);
+  border-radius: 1.25rem;
+  color: var(--color-warm-gray);
+  text-align: center;
+}
+
+.favorite-swipe-done-title { font-family: var(--font-serif); font-size: 1.5rem; color: var(--color-charcoal); }
+
+.favorite-swipe-actions { display: flex; align-items: center; gap: 1.25rem; }
+.favorite-swipe-button {
+  display: grid;
+  place-items: center;
+  width: 4rem;
+  height: 4rem;
+  border: 1px solid var(--color-warm-border);
+  border-radius: 999px;
+  background: var(--color-cream);
+  color: var(--color-charcoal);
+  box-shadow: var(--shadow-warm);
+  cursor: pointer;
+  transition: transform .15s, background-color .2s, color .2s;
+}
+.favorite-swipe-button svg { width: 1.6rem; height: 1.6rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.favorite-swipe-button.is-undo { width: 3rem; height: 3rem; }
+.favorite-swipe-button.is-undo svg { width: 1.2rem; height: 1.2rem; }
+.favorite-swipe-button.is-favorite { color: #b4533c; }
+.favorite-swipe-button.is-favorite:hover:not(:disabled) svg { fill: currentColor; }
+.favorite-swipe-button:hover:not(:disabled) { background: var(--color-cream-dark); transform: scale(1.06); }
+.favorite-swipe-button:active:not(:disabled) { transform: scale(.94); }
+.favorite-swipe-button:focus-visible,
+.favorite-swipe-text-button:focus-visible { outline: 2px solid var(--color-amber-dark); outline-offset: 3px; }
+.favorite-swipe-button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
+.favorite-swipe-hint { color: var(--color-warm-gray); font-size: .75rem; text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .favorite-swipe-card.is-top,
+  .favorite-swipe-button { transition: none; }
+  .favorite-swipe-card.is-flying { display: none; }
+}
+@media (forced-colors: active) {
+  .favorite-swipe-stamp { forced-color-adjust: none; }
+}

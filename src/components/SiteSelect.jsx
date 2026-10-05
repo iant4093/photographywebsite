@@ -6,6 +6,17 @@ const PALETTE = ['cream', 'cream-dark', 'charcoal', 'amber', 'amber-dark', 'warm
 
 // Select-only and editable, manual-selection comboboxes share one site-rendered
 // popup. DOM focus stays on the control; aria-activedescendant follows choices.
+// Consecutive options sharing a `group` render under one labelled group.
+function groupItems(items) {
+    const groups = []
+    items.forEach((option, index) => {
+        const group = option.group ? String(option.group) : ''
+        if (!groups.length || groups.at(-1).group !== group) groups.push({ group, entries: [] })
+        groups.at(-1).entries.push({ option, index })
+    })
+    return groups
+}
+
 export default function SiteSelect({
     options = [], value = '', onChange, editable = false, id, name, required = false,
     disabled = false, className = '', placeholder = 'Choose an option', ...props
@@ -218,7 +229,8 @@ export default function SiteSelect({
                 <div ref={menuRef} id={listId} role="listbox"
                     aria-label={props['aria-label']} aria-labelledby={props['aria-labelledby'] || (!props['aria-label'] ? controlId : undefined)}
                     className="site-select-menu" style={{ ...placement, visibility: placement ? 'visible' : 'hidden' }}>
-                    {visibleItems.map((option, index) => (
+                    {groupItems(visibleItems).map(({ group, entries }, groupIndex) => {
+                        const rendered = entries.map(({ option, index }) => (
                         <div key={option.value} id={`${listId}-${index}`} role="option"
                             aria-selected={option.value === currentValue} aria-disabled={option.disabled || undefined}
                             data-active={option.value === activeValue} data-value={option.value} data-camera-cursor="link"
@@ -229,7 +241,16 @@ export default function SiteSelect({
                             <span>{option.label}</span>
                             {option.value === currentValue && <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m3 8 3 3 7-7" /></svg>}
                         </div>
-                    ))}
+                        ))
+                        if (!group) return rendered
+                        const labelId = `${listId}-group-${groupIndex}`
+                        return (
+                            <div key={labelId} role="group" aria-labelledby={labelId} className="site-select-group">
+                                <div id={labelId} role="presentation" className="site-select-group-label">{group}</div>
+                                {rendered}
+                            </div>
+                        )
+                    })}
                     {!visibleItems.length && <div className="site-select-empty">{editable ? 'No matching categories. Keep typing to use a new one.' : 'No options available.'}</div>}
                 </div>, portalRoot,
             )}
