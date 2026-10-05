@@ -10,6 +10,7 @@ import boto3
 from media_mutation import album_lease, enabled as mutation_protocol_enabled, MediaMutationBusy, MediaAlbumMissing
 import drive_backup_jobs
 import scheduled_publish
+import trash_bin
 import visibility_change
 from botocore.exceptions import ClientError
 
@@ -60,6 +61,8 @@ MUTABLE_FIELDS = frozenset({
     "shareCode",
     "qrCodeKey",
     "publishAt",
+    "trashedAt",
+    "trashedFrom",
 })
 _MISSING = object()
 # Scheduled albums published per check; any others wait for the next one.
@@ -109,6 +112,16 @@ def _audit(event, context, outcome, reason_code, *, previous_visibility=None, vi
 
 
 def _updated_album(album, body):
+    if "trash" in body or "restore" in body:
+        # Moving to and from Recently Deleted are whole-album operations, and
+        # repeating one is a no-op so an interrupted save can be retried.
+        if len(body) != 1 or next(iter(body.values())) is not True:
+            raise ValidationError("trash and restore must be sent alone as true")
+        if "trash" in body:
+            return trash_bin.trashed(album)
+        return trash_bin.restored(album, lambda: secrets.token_urlsafe(24))
+    if album.get("trashedAt"):
+        raise ValidationError("Restore this album from Recently Deleted before editing it")
     updated = dict(album)
     if "title" in body:
         updated["title"] = require_string(body["title"], "title", maximum=200)
@@ -175,12 +188,13 @@ def _updated_album(album, body):
 
 
 def _forget_schedule(album, committed):
-    if album.get("publishAt") and not committed.get("publishAt"):
-        try:
-            scheduled_publish.forget(album["albumId"], album["publishAt"])
-        except Exception as error:
-            # The album row is authoritative; the publisher drops stale entries.
-            logger.warning("scheduled_publish_forget_failed error_type=%s", type(error).__name__)
+    for field, index in (("publishAt", scheduled_publish), ("trashedAt", trash_bin)):
+        if album.get(field) and not committed.get(field):
+            try:
+                index.forget(album["albumId"], album[field])
+            except Exception as error:
+                # The album row is authoritative; the index's reader drops stale entries.
+                logger.warning("album_index_forget_failed field=%s error_type=%s", field, type(error).__name__)
 
 
 def _reconcile_album_qr(updated):
@@ -329,6 +343,8 @@ def _update(event, context, album_id=None, body=None):
                 # Index first: an entry without its album time is dropped later,
                 # whereas an album time without an entry would never publish.
                 scheduled_publish.record(album_id, updated["publishAt"])
+            if updated.get("trashedAt") and not album.get("trashedAt"):
+                trash_bin.record(album_id, updated["trashedAt"])
             visibility_changed = old_visibility != new_visibility
             if visibility_changed and mutation_protocol_enabled():
                 # A hover manifest made for the old visibility must not be

@@ -70,7 +70,7 @@ ADMIN_SUMMARY_FIELDS = (
     "createdAt", "uploadedAt", "imageCount", "coverImageUrl", "coverThumbKey",
     "coverBlurhash", "hoverPreviewStatus", "hoverPreviewVersion",
     "hoverPreviewManifestKey", "ownerEmail", "ownerSub", "isShared", "shareCode",
-    "legacyS3Prefix", "publishAt",
+    "legacyS3Prefix", "publishAt", "trashedAt", "trashedFrom",
 )
 # Every field is a placeholder so no current or future reserved word can break
 # the scan. These names never collide with boto3's generated #n0-style names.
@@ -346,6 +346,9 @@ def handler(event, context):
         # Admin-only: count each album's favorites (the favorites swipe page
         # groups albums by whether they have any). Costs full-record reads.
         include_favorites = admin and str(params.get("favorites") or "").lower() in {"1", "true"}
+        # Admin-only: list Recently Deleted instead. Those albums are always
+        # link-only, and every other list leaves them out.
+        trashed_only = admin and str(params.get("trashed") or "").lower() in {"1", "true"}
         # Catalog summaries are intentionally small and the public inventory is
         # currently below 100, so one bounded query avoids sequential page RTTs.
         limit = validate_limit(params.get("limit"), maximum=100)
@@ -435,6 +438,8 @@ def handler(event, context):
             if record.get("status", "active") not in ({"active", "deleting", "updating"} if admin else {"active"}):
                 continue
             if not admin_all and visibility != "all" and record.get("visibility") != visibility:
+                continue
+            if bool(record.get("trashedAt")) != trashed_only:
                 continue
             try:
                 summary = serialize_album_summary(record, include_admin=admin)

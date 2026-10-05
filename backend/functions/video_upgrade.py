@@ -31,7 +31,7 @@ MAX_NEW_PER_RUN = 8
 MAX_IN_FLIGHT = 12
 BUSY_FIELDS = (
     "pendingVisibilityChange", "pendingMediaDeletion", "pendingAlbumDeletion",
-    "pendingMediaUpload", "createdBySub",
+    "pendingMediaUpload", "createdBySub", "trashedAt",
 )
 
 _table = None

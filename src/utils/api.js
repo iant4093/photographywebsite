@@ -207,7 +207,7 @@ export async function apiFetch(path, options = {}, config = {}) {
 
 function normalizeCatalogParams(params = {}) {
     const normalized = {}
-    for (const key of ['visibility', 'ownerEmail', 'ownerSub', 'type', 'favorites', 'limit', 'cursor']) {
+    for (const key of ['visibility', 'ownerEmail', 'ownerSub', 'type', 'favorites', 'trashed', 'limit', 'cursor']) {
         const value = params[key]
         if (value !== undefined && value !== null && value !== '') normalized[key] = String(value)
     }

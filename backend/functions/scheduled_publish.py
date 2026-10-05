@@ -60,25 +60,26 @@ def validate_publish_at(value, now=None):
     return format_time(moment)
 
 
-def record(album_id, publish_at):
+def record(album_id, publish_at, *, index=INDEX_KEY):
+    """Set an album's time in a time-keyed index item (also used by the bin)."""
     table = _settings()
     table.update_item(
-        Key=INDEX_KEY,
+        Key=index,
         UpdateExpression="SET albums = if_not_exists(albums, :empty)",
         ExpressionAttributeValues={":empty": {}},
     )
     table.update_item(
-        Key=INDEX_KEY,
+        Key=index,
         UpdateExpression="SET albums.#album = :at",
         ExpressionAttributeNames={"#album": album_id},
         ExpressionAttributeValues={":at": publish_at},
     )
 
 
-def forget(album_id, publish_at=None):
+def forget(album_id, publish_at=None, *, index=INDEX_KEY):
     """Drop an entry; with ``publish_at``, only while it still holds that time."""
     request = {
-        "Key": INDEX_KEY,
+        "Key": index,
         "UpdateExpression": "REMOVE albums.#album",
         "ExpressionAttributeNames": {"#album": album_id},
         "ConditionExpression": "attribute_exists(albums.#album)",
@@ -93,9 +94,9 @@ def forget(album_id, publish_at=None):
             raise
 
 
-def due(now=None):
+def due(now=None, *, index=INDEX_KEY):
     """Entries whose time has come, earliest first."""
-    item = _settings().get_item(Key=INDEX_KEY, ConsistentRead=True).get("Item") or {}
+    item = _settings().get_item(Key=index, ConsistentRead=True).get("Item") or {}
     limit = format_time(now or _now())
     entries = [
         (at, album_id) for album_id, at in (item.get("albums") or {}).items()

@@ -329,11 +329,13 @@ describe('ManageAlbums', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     confirm.mockReturnValueOnce(false)
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
-    expect(api.deleteAlbum).not.toHaveBeenCalled()
+    expect(api.updateAlbum).toHaveBeenCalledTimes(1)
     confirm.mockReturnValueOnce(true)
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
-    await waitFor(() => expect(api.deleteAlbum).toHaveBeenCalledWith('admin-token', 'photo'))
-    expect(await screen.findByText('Album deleted!')).toBeInTheDocument()
+    await waitFor(() => expect(api.updateAlbum).toHaveBeenLastCalledWith('admin-token', 'photo', { trash: true }))
+    expect(await screen.findByText('Moved to Recently Deleted.')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('Summer Updated')).toBeNull())
+    expect(api.deleteAlbum).not.toHaveBeenCalled()
   })
 
   it('shows, moves, cancels, and publishes scheduled link-only albums', async () => {
