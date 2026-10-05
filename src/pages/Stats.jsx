@@ -9,6 +9,7 @@ import { start as startPhotoHoverPreview } from '../utils/albumHoverPreview'
 import { registerMobileAlbumPreview } from '../utils/mobileAlbumPreview'
 import { start as startVideoHoverPreview, warmVideoHoverRuntime } from '../utils/albumVideoHoverPreview'
 import ProgressiveImage from '../components/ProgressiveImage'
+import ShootingCalendar from '../components/ShootingCalendar'
 import './Stats.css'
 import { albumPath } from '../utils/albumRoutes'
 
@@ -600,8 +601,15 @@ export default function Stats() {
                         </div>
                     </section>
 
+                    {report.calendar?.days?.length > 0 && (
+                        <section className="photo-stats-motion-section" aria-labelledby="shooting-calendar-heading">
+                            <SectionHeading id="shooting-calendar-heading" index={2} eyebrow="Every day out" title="Shooting Calendar" detail="Public work, by capture date" />
+                            <ShootingCalendar calendar={report.calendar} albums={timelineAlbums} routeFor={albumRoute} />
+                        </section>
+                    )}
+
                     <section className="photo-stats-motion-section" aria-labelledby="archive-scale-heading">
-                        <SectionHeading id="archive-scale-heading" index={2} eyebrow="The collection" title="Total Storage Used" />
+                        <SectionHeading id="archive-scale-heading" index={3} eyebrow="The collection" title="Total Storage Used" />
                         <div className="photo-stats-scale-grid">
                             <article className="photo-stats-storage-card">
                                 <p className="photo-stats-eyebrow">Total space taken</p>
@@ -613,7 +621,7 @@ export default function Stats() {
                     </section>
 
                     <section className="photo-stats-motion-section" aria-labelledby="output-heading">
-                        <SectionHeading id="output-heading" index={3} eyebrow="Timeline" title="Output by year" detail="Public work only" />
+                        <SectionHeading id="output-heading" index={4} eyebrow="Timeline" title="Output by year" detail="Public work only" />
                         <div className="photo-stats-table-wrap">
                             <table className="photo-stats-table">
                                 <thead>
@@ -653,7 +661,7 @@ export default function Stats() {
                     </section>
 
                     <section className="photo-stats-motion-section" aria-labelledby="categories-heading">
-                        <SectionHeading id="categories-heading" index={4} eyebrow="Subjects" title="Category distribution" detail="Ranked by work kept" />
+                        <SectionHeading id="categories-heading" index={5} eyebrow="Subjects" title="Category distribution" detail="Ranked by work kept" />
                         <ol className="photo-stats-categories">
                             {(report.categories || []).map((category, index) => {
                                 const mediaCount = Number(category.photos || 0) + Number(category.videos || 0)
@@ -674,7 +682,7 @@ export default function Stats() {
                     </section>
 
                     <section className="photo-stats-motion-section" aria-labelledby="gear-heading">
-                        <SectionHeading id="gear-heading" index={5} eyebrow="Tools of the trade" title="Gear" detail="Based on published-photo EXIF" />
+                        <SectionHeading id="gear-heading" index={6} eyebrow="Tools of the trade" title="Gear" detail="Based on published-photo EXIF" />
                         <div className="photo-stats-gear-grid">
                             <GearList title="Cameras" items={report.gear?.cameras || []} />
                             <GearList title="Lenses" items={report.gear?.lenses || []} />
