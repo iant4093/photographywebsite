@@ -244,6 +244,10 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         Stats
                     </Link>
 
+                    <Link to="/tv" onClick={closeMenu} className={menuLinkClass(false)}>
+                        TV Mode
+                    </Link>
+
                     <Link to="/sharedalbum" onClick={closeMenu} className={menuLinkClass(sharedActive)} aria-current={sharedActive ? 'page' : undefined}>
                         Find Album
                     </Link>

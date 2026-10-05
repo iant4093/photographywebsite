@@ -119,6 +119,7 @@
 .tv-top { top: 1rem; left: 1rem; right: 1rem; justify-content: space-between; }
 .tv-top-buttons { display: flex; gap: 0.5rem; }
 .tv-count { color: var(--tv-muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); }
+.tv-casting { margin-left: 0.75rem; padding: 0.2rem 0.6rem; border-radius: 999px; background: var(--tv-glass); color: var(--tv-ink); font-size: 0.75rem; }
 .tv-transport { left: 50%; bottom: max(3vh, 1.25rem); gap: 0.75rem; transform: translateX(-50%); }
 
 .tv-button {
@@ -136,6 +137,7 @@
   transition: background-color 0.2s, transform 0.15s, border-color 0.2s;
 }
 .tv-button.is-primary { width: 3.4rem; height: 3.4rem; }
+.tv-button.is-on { border-color: rgba(213, 173, 137, 0.7); color: #e9c9a8; }
 .tv-button:hover:not(:disabled) { background: rgba(48, 43, 36, 0.8); border-color: rgba(243, 236, 223, 0.35); }
 .tv-button:active:not(:disabled) { transform: scale(0.94); }
 .tv-button:disabled { opacity: 0.35; cursor: default; }
@@ -184,6 +186,8 @@
 .tv-toggle input:checked + span { background: #b4876a; }
 .tv-toggle input:checked + span::after { transform: translateX(0.9rem); }
 .tv-hint { color: var(--tv-muted); font-size: 0.72rem; }
+.tv-steps { display: grid; gap: 0.5rem; padding-left: 1.2rem; font-size: 0.85rem; line-height: 1.45; list-style: decimal; }
+.tv-steps strong { font-weight: 600; }
 
 .tv-message {
   position: absolute;
