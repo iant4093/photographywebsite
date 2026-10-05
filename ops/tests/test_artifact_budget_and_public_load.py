@@ -467,6 +467,14 @@ class PublicCatalogProbeTests(unittest.TestCase):
     def test_public_schema_rejects_private_fields_signed_urls_and_exif_expansion(self):
         ordered_summary = summary() | {"galleryCategoryOrder": 2}
         self.assertEqual(public_load.validate_summary(ordered_summary), ordered_summary)
+        named_summary = summary() | {"slug": "prague-2026"}
+        self.assertEqual(public_load.validate_summary(named_summary), named_summary)
+        for slug in ("Prague", "prague--2", "-prague", "prague 2", "", 7, "a" * 81):
+            with self.subTest(slug=slug), self.assertRaises(public_load.ProbeError):
+                public_load.validate_summary(summary() | {"slug": slug})
+        named_detail = detail()
+        named_detail["album"]["slug"] = "prague-2026"
+        public_load.validate_detail(named_detail, ALBUM_ONE)
         video_summary = summary() | {
             "type": "video",
             "coverHlsUrl": "https://media.example.test/cover.m3u8",

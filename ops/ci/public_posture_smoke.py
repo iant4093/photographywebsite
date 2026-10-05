@@ -223,6 +223,31 @@ def _require_security_headers(response: RawResponse) -> None:
         raise PostureError("public site route unexpectedly set a cookie")
 
 
+PUBLIC_ALBUM_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+def _count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _valid_public_calendar(calendar: object) -> bool:
+    """{albums: [public album ids], days: [[YYYY-MM-DD, photos, videos, [album indexes]]]}."""
+    if not isinstance(calendar, dict) or set(calendar) != {"albums", "days"}:
+        return False
+    albums, days = calendar["albums"], calendar["days"]
+    if not isinstance(albums, list) or not isinstance(days, list):
+        return False
+    if not all(isinstance(album, str) and PUBLIC_ALBUM_ID.fullmatch(album) for album in albums):
+        return False
+    return all(
+        isinstance(row, list) and len(row) == 4
+        and isinstance(row[0], str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", row[0]) is not None
+        and _count(row[1]) and _count(row[2])
+        and isinstance(row[3], list) and all(_count(index) and index < len(albums) for index in row[3])
+        for row in days
+    )
+
+
 def _require_public_stats(response: RawResponse) -> bool:
     # A brand-new deployment can briefly precede the first daily aggregate.
     # Accept only the endpoint's exact, non-cacheable bootstrap response; once
@@ -243,7 +268,10 @@ def _require_public_stats(response: RawResponse) -> bool:
         "schemaVersion", "generatedAt", "sourceGeneratedAt", "taken", "kept",
         "storage", "albums", "outputByYear", "categories", "mostActive", "gear",
     }
-    if set(payload) != required:
+    # The shooting calendar is optional: snapshots made before it existed lack it.
+    if set(payload) - {"calendar"} != required:
+        raise PostureError("public statistics response is invalid")
+    if "calendar" in payload and not _valid_public_calendar(payload["calendar"]):
         raise PostureError("public statistics response is invalid")
     for group, fields in {
         "taken": ("photos", "videos"),
