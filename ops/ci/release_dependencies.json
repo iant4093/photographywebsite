@@ -62,7 +62,7 @@
     {"logicalId": "AnalyticsIngestFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "AnalyticsTable.Arn", "RateLimitTable.Arn"]},
     {"logicalId": "GetAnalyticsReportFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "AnalyticsTable.Arn"]},
     {"logicalId": "GetGoogleDriveUsageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["DriveUsageCacheTable.Arn"]},
-    {"logicalId": "RefreshGoogleDriveUsageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "DriveUsageCacheTable.Arn"]},
+    {"logicalId": "RefreshGoogleDriveUsageFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["AlbumsTable.Arn", "DriveUsageCacheTable.Arn", "ImagesBucket.Arn"]},
     {"logicalId": "GetGitHubAnalyticsFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["GitHubAnalyticsCacheTable.Arn"]},
     {"logicalId": "GetAuditLogFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["ApplicationLogGroup.Arn"]},
     {"logicalId": "RefreshGitHubAnalyticsFunctionRole", "resourceType": "AWS::IAM::Role", "propertyPath": "Policies", "causingEntities": ["GitHubAnalyticsCacheTable.Arn"]},

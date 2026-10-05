@@ -4634,6 +4634,7 @@ Resources:
           DRIVE_USAGE_CACHE_TABLE: !Ref DriveUsageCacheTable
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
           GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
+          IMAGES_BUCKET: !Ref ImagesBucket
       Policies:
         - Statement:
             - Effect: Allow
@@ -4645,6 +4646,10 @@ Resources:
             - Effect: Allow
               Action: dynamodb:Scan
               Resource: !GetAtt AlbumsTable.Arn
+            # Reads the first 64 KB of public originals once, for their capture day.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub '${ImagesBucket.Arn}/albums/*'
         - !If
           - HasGoogleOAuthSecret
           - Statement:
