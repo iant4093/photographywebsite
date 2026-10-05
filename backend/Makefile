@@ -62,8 +62,8 @@ SOURCES_PreTokenGenerationFunction := pre_token_generation.py
 
 SOURCES_OriginalIndexRefreshFunction := original_index_refresh.py original_comparison_store.py original_comparison_jobs.py original_drive.py original_match.py media_access.py original_comparison_access.py validation_helpers.py aws_request_config.py media_mutation.py
 SOURCES_OriginalComparisonWorkerFunction := original_comparison_worker.py original_comparison_store.py original_drive.py original_match.py media_access.py original_comparison_access.py validation_helpers.py aws_request_config.py media_mutation.py
-DEPS_OriginalIndexRefreshFunction := google-auth==2.56.0 requests==2.34.2 ExifRead==3.5.1
-DEPS_OriginalComparisonWorkerFunction := google-auth==2.56.0 requests==2.34.2 ExifRead==3.5.1 Pillow==12.3.0
+DEPS_OriginalIndexRefreshFunction := google-auth==2.58.0 requests==2.34.2 ExifRead==3.5.1
+DEPS_OriginalComparisonWorkerFunction := google-auth==2.58.0 requests==2.34.2 ExifRead==3.5.1 Pillow==12.3.0
 PIP_PLATFORM_OriginalComparisonWorkerFunction := manylinux_2_28_x86_64
 
 DEPS_GetAlbumFunction := PyJWT==2.15.0 cryptography==50.0.0
@@ -79,9 +79,9 @@ DEPS_ContactFunction := resend==2.34.0
 DEPS_CreateAlbumFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6
 DEPS_UpdateAlbumFunction := segno==1.6.6
 DEPS_AddImagesFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6 cryptography==50.0.0
-DEPS_GoogleDriveBackupFunction := google-api-python-client==2.198.0 google-auth==2.56.0 google-auth-httplib2==0.4.0
-DEPS_GetGoogleDriveUsageFunction := google-auth==2.56.0 requests==2.34.2
-DEPS_RefreshGoogleDriveUsageFunction := google-auth==2.56.0 requests==2.34.2 ExifRead==3.5.1
+DEPS_GoogleDriveBackupFunction := google-api-python-client==2.198.0 google-auth==2.58.0 google-auth-httplib2==0.4.0
+DEPS_GetGoogleDriveUsageFunction := google-auth==2.58.0 requests==2.34.2
+DEPS_RefreshGoogleDriveUsageFunction := google-auth==2.58.0 requests==2.34.2 ExifRead==3.5.1
 
 .PHONY: build-PreviewWorkerFunction
 build-PreviewWorkerFunction:

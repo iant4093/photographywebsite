@@ -1369,7 +1369,7 @@ class MigrationAndPackagingTests(unittest.TestCase):
             "resend==2.34.0",
             "ExifRead==3.5.1",
             "google-api-python-client==2.198.0",
-            "google-auth==2.56.0",
+            "google-auth==2.58.0",
             "google-auth-httplib2==0.4.0",
         ):
             self.assertIn(dependency, MAKEFILE)
