@@ -428,6 +428,15 @@ export function fetchRandomPhotos(options = {}) {
         }))
 }
 
+// Every public favorite, for TV mode (cached at the edge for an hour).
+export function fetchAllFavoritePhotos(options = {}) {
+    return apiFetch('/public/featured-photos?mode=all', { signal: options.signal }, { timeoutMs: 30_000 })
+        .then((payload) => ({
+            ...payload,
+            images: Array.isArray(payload?.images) ? payload.images.map(annotateMediaExpiry) : [],
+        }))
+}
+
 export function fetchFeaturedPhotos(options = {}) {
     const category = typeof options.category === 'string' ? options.category.trim() : ''
     const params = new URLSearchParams(category ? { mode: 'category', value: category } : {})

@@ -52,6 +52,7 @@ vi.mock('./pages/UploadVideo', () => ({ default: () => <h1>Upload video route</h
 vi.mock('./pages/ManageHero', () => ({ default: () => <h1>Hero route</h1> }))
 vi.mock('./pages/FavoriteSwipe', () => ({ default: () => <h1>Swipe favorites route</h1> }))
 vi.mock('./pages/RecentlyDeleted', () => ({ default: () => <h1>Recently deleted route</h1> }))
+vi.mock('./pages/TvMode', () => ({ default: () => <h1>TV mode route</h1> }))
 vi.mock('./pages/ManageAlbums', () => ({ default: () => <h1>Manage route</h1> }))
 vi.mock('./pages/ManageUsers', () => ({ default: () => <h1>Users route</h1> }))
 vi.mock('./pages/AddUser', () => ({ default: () => <h1>Add user route</h1> }))
@@ -153,7 +154,7 @@ describe('App routing shell', () => {
     ['/search', 'Search route'], ['/explore', 'Explore route'], ['/editor', 'Editor route'], ['/stats', 'Stats route'],
     ['/admin', 'Admin route'], ['/admin/security', 'Admin security route'], ['/admin/costs', 'AWS costs route'], ['/admin/analytics', 'Website analytics route'], ['/admin/drive-usage', 'Google Drive usage route'], ['/admin/github-analytics', 'GitHub analytics route'], ['/admin/site-health', 'Site health route'], ['/admin/audit-log', 'Audit log route'],
     ['/admin/upload', 'Upload route'], ['/admin/upload-video', 'Upload video route'],
-    ['/admin/hero', 'Hero route'], ['/admin/favorites', 'Swipe favorites route'], ['/admin/recently-deleted', 'Recently deleted route'],
+    ['/admin/hero', 'Hero route'], ['/admin/favorites', 'Swipe favorites route'], ['/admin/recently-deleted', 'Recently deleted route'], ['/tv', 'TV mode route'],
     ['/admin/manage', 'Manage route'], ['/admin/users', 'Users route'], ['/admin/users/add', 'Add user route'],
     ['/admin/users/delete', 'Delete user route'], ['/admin/users/edit', 'Edit user route'],
     ['/dashboard', 'Dashboard route'], ['/missing', 'Not found route'],

@@ -1467,8 +1467,56 @@ def _materialized_featured_photo_sample(category, limit=RANDOM_PHOTO_LIMIT):
     return sample, pool["totalPhotos"], pool.get("previews", {})
 
 
+# The TV slideshow plays every public favorite; this only bounds the response.
+ALL_FAVORITES_LIMIT = 5000
+
+
+def _all_featured_photos_response():
+    """Every public favorite, newest album first and in album order."""
+    started = time.monotonic()
+    groups = []
+    total = 0
+    for album in _random_photo_albums():
+        if not _active_public_photo_album(album):
+            continue
+        images = featured_images(album)[:ALL_FAVORITES_LIMIT - total]
+        if not images:
+            continue
+        groups.append((album, images))
+        total += len(images)
+        if total >= ALL_FAVORITES_LIMIT:
+            break
+    metadata_by_album = load_preview_metadata_for_albums(groups) if groups else {}
+    photos = []
+    for album, images in groups:
+        serialized = serialize_images(
+            {**album, "images": images},
+            preview_metadata_by_id=metadata_by_album.get(album["albumId"], {}),
+        )
+        photos.extend(
+            {
+                **image,
+                "albumId": album.get("albumId", ""),
+                "albumTitle": album.get("title", ""),
+                "albumCategory": album.get("category", "Uncategorized"),
+            }
+            for image in serialized
+        )
+    logger.info("all_featured_photos_served photos=%d total_ms=%.1f", len(photos), (time.monotonic() - started) * 1000)
+    return json_response(
+        200,
+        {"images": photos, "totalPhotos": len(photos)},
+        cache_control="public, max-age=0, s-maxage=3600, stale-while-revalidate=600",
+    )
+
+
 def _featured_photos_response(event):
     started = time.monotonic()
+    params = (event or {}).get("queryStringParameters") or {}
+    if isinstance(params, dict) and params.get("mode") == "all":
+        if set(params) != {"mode"}:
+            raise ValidationError("Invalid featured photo parameters")
+        return _all_featured_photos_response()
     category = _random_photo_category(event)
     params = (event or {}).get("queryStringParameters") or {}
     limit = _positive_limit(params.get("limit"), RANDOM_PHOTO_LIMIT, RANDOM_PHOTO_LIMIT)
