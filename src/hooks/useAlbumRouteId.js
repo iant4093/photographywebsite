@@ -26,6 +26,8 @@ export default function useAlbumRouteId(handle, kind) {
             const album = data?.album || {}
             if (!isAlbumId(handle)) setResolved({ handle, albumId: isAlbumId(album.albumId) ? album.albumId : handle })
             if (isAlbumSlug(album.slug) && album.slug !== handle) {
+                // Known before the URL changes, so the page stays mounted through the swap.
+                if (isAlbumId(album.albumId)) setResolved({ handle: album.slug, albumId: album.albumId })
                 navigate({ pathname: `/${kind}/${album.slug}`, search, hash }, { replace: true, preventScrollReset: true })
             }
         }, () => {
