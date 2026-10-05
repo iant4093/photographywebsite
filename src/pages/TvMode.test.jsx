@@ -7,6 +7,8 @@ vi.mock('../utils/api', () => api)
 
 import TvMode, { FADE_MS } from './TvMode'
 import { TV_SETTINGS_KEY } from '../utils/tvSlideshow'
+import { resetCastSdk } from '../utils/tvCast'
+import { fakeCastSdk } from '../test/fakeCastSdk'
 
 const srcSet = (name) => [640, 960, 1440, 1920].map((width) => ({ width, url: `https://cdn.test/${name}-${width}.webp` }))
 const photo = (name, extra = {}) => ({
@@ -69,6 +71,10 @@ describe('TV mode', () => {
         localStorage.clear()
         delete document.fullscreenEnabled
         delete document.fullscreenElement
+        delete window.chrome
+        delete window.cast
+        delete window.WebKitPlaybackTargetAvailabilityEvent
+        resetCastSdk()
     })
 
     it('waits for the first decoded photo, then plays through every favorite', async () => {
@@ -248,5 +254,79 @@ describe('TV mode', () => {
         unmount()
         expect(exitFullscreen).toHaveBeenCalledTimes(2)
         delete document.exitFullscreen
+    })
+
+    it('casts each slide to a Chromecast and stops when TV mode closes', async () => {
+        const sdk = fakeCastSdk()
+        Object.assign(window, sdk.win)
+        const { unmount } = mounted()
+        await flush()
+        const castButton = screen.getByRole('button', { name: 'Cast to a TV' })
+        fireEvent.click(castButton)
+        expect(sdk.context.requestSession).toHaveBeenCalled()
+
+        act(() => sdk.context.emit('CONNECTED'))
+        await flush()
+        expect(screen.getByText('Casting to Living Room TV')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Casting: change or stop' })).toHaveAttribute('aria-pressed', 'true')
+        expect(sdk.session.loadMedia).toHaveBeenLastCalledWith(expect.objectContaining({
+            media: expect.objectContaining({ contentId: 'https://cdn.test/a-1920.webp' }),
+        }))
+        fireEvent.click(screen.getByRole('button', { name: 'Next photo' }))
+        await flush()
+        expect(sdk.session.loadMedia.mock.lastCall[0].media.contentId).toBe('https://cdn.test/b-1920.webp')
+        fireEvent.click(screen.getByRole('button', { name: 'Slideshow settings' }))
+        expect(screen.getByText(/Keep this page open while casting/)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Album & camera' }))
+        await flush()
+        expect(sdk.session.loadMedia.mock.lastCall[0].media.metadata.title).toBeUndefined()
+
+        unmount()
+        expect(sdk.context.endCurrentSession).toHaveBeenCalledWith(true)
+    })
+
+    it('offers casting only when a TV is in range', async () => {
+        const sdk = fakeCastSdk({ state: 'NO_DEVICES_AVAILABLE' })
+        Object.assign(window, sdk.win)
+        mounted()
+        await flush()
+        expect(screen.queryByRole('button', { name: 'Cast to a TV' })).not.toBeInTheDocument()
+        act(() => sdk.context.emit('NOT_CONNECTED'))
+        expect(screen.getByRole('button', { name: 'Cast to a TV' })).toBeInTheDocument()
+        act(() => sdk.context.emit('CONNECTING'))
+        expect(screen.getByRole('button', { name: 'Cast to a TV' })).toBeDisabled()
+    })
+
+    it('explains AirPlay mirroring on Safari and hides it with no receiver nearby', async () => {
+        window.WebKitPlaybackTargetAvailabilityEvent = class {}
+        const probes = []
+        const createElement = document.createElement.bind(document)
+        vi.spyOn(document, 'createElement').mockImplementation((tag, options) => {
+            const element = createElement(tag, options)
+            if (tag === 'video') probes.push(element)
+            return element
+        })
+        mounted()
+        await flush()
+        fireEvent.click(screen.getByRole('button', { name: 'Show on Apple TV with AirPlay' }))
+        const dialog = screen.getByRole('dialog', { name: 'Show on Apple TV' })
+        expect(dialog).toHaveTextContent('Click Control Center in the menu bar.')
+        fireEvent.click(screen.getByRole('button', { name: 'Slideshow settings' }))
+        expect(screen.queryByRole('dialog', { name: 'Show on Apple TV' })).not.toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: 'Slideshow settings' })).toBeInTheDocument()
+
+        act(() => probes[0].dispatchEvent(Object.assign(new Event('webkitplaybacktargetavailabilitychanged'), { availability: 'not-available' })))
+        expect(screen.queryByRole('button', { name: 'Show on Apple TV with AirPlay' })).not.toBeInTheDocument()
+    })
+
+    it('gives iPhone and iPad steps on touch devices', async () => {
+        window.WebKitPlaybackTargetAvailabilityEvent = class {}
+        vi.stubGlobal('navigator', { ...navigator, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' })
+        mounted()
+        await flush()
+        fireEvent.click(screen.getByRole('button', { name: 'Show on Apple TV with AirPlay' }))
+        expect(screen.getByRole('dialog', { name: 'Show on Apple TV' })).toHaveTextContent('Open Control Center.')
+        fireEvent.keyDown(window, { key: 'Escape' })
+        expect(screen.queryByRole('dialog', { name: 'Show on Apple TV' })).not.toBeInTheDocument()
     })
 })

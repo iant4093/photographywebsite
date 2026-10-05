@@ -7,6 +7,7 @@ import {
     TV_INTERVALS, backdropUrl, createPreloader, fittedWidth, readTvSettings, saveTvSettings, shuffled,
     sizesFor, slideshowPhotos,
 } from '../utils/tvSlideshow'
+import { CAST_IDLE, canCast, createCastController, hasAirPlay, isAppleTouchDevice, loadCastSdk, watchAirPlay } from '../utils/tvCast'
 import './TvMode.css'
 
 export const FADE_MS = 1400
@@ -22,6 +23,9 @@ const Icon = {
     settings: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>,
     fullscreen: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" /></svg>,
     windowed: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h5V3M21 8h-5V3M8 21v-5H3M16 21v-5h5" /></svg>,
+    cast: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9V6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-6M3 13a8 8 0 0 1 8 8M3 17a4 4 0 0 1 4 4" /><path d="M3 21h.01" /></svg>,
+    casting: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9V6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-6M3 13a8 8 0 0 1 8 8M3 17a4 4 0 0 1 4 4" /><path d="M3 21h.01" /><path d="M7 9h10v6h-2.5" fill="currentColor" /></svg>,
+    airplay: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-2" /><path d="m12 14 5 6H7Z" fill="currentColor" /></svg>,
     close: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>,
 }
 
@@ -72,7 +76,12 @@ export default function TvMode() {
     const [failed, setFailed] = useState(() => new Set())
     const [playing, setPlaying] = useState(true)
     const [controls, setControls] = useState(true)
-    const [panel, setPanel] = useState(false)
+    // '' (closed), 'settings' or 'airplay'.
+    const [panel, setPanel] = useState('')
+    const [cast, setCast] = useState(CAST_IDLE)
+    // Shown on Safari until it reports that no AirPlay receiver is nearby.
+    const [airPlay, setAirPlay] = useState(hasAirPlay)
+    const castController = useRef(null)
     const [fullscreen, setFullscreen] = useState(false)
     const [now, setNow] = useState(() => new Date())
     const idleTimer = useRef(0)
@@ -218,7 +227,7 @@ export default function TvMode() {
             if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
             const key = event.key
             if (key === 'Escape') {
-                if (panel) setPanel(false)
+                if (panel) setPanel('')
                 else if (!document.fullscreenElement) exit()
             } else if (key === ' ' || key === 'k') {
                 if (event.target?.closest?.('button, input')) return
@@ -244,6 +253,30 @@ export default function TvMode() {
             setPosition(Math.max(0, ordered.findIndex((photo) => mediaId(photo) === current?.id)))
         }
     }
+
+    const castReady = Boolean(current)
+    // Load the Cast SDK only once the first photo is up, so it never competes with it.
+    useEffect(() => {
+        if (!castReady || !canCast()) return undefined
+        let active = true
+        loadCastSdk().then((loaded) => {
+            if (loaded && active) castController.current = createCastController(setCast)
+        })
+        return () => {
+            active = false
+            // Leaving TV mode stops the TV too.
+            castController.current?.dispose({ stop: true })
+            castController.current = null
+        }
+    }, [castReady])
+
+    // Chromecast shows whatever this screen shows, in step with it.
+    const castPhoto = cast.connected ? current?.photo : null
+    useEffect(() => {
+        if (castPhoto) castController.current?.show(castPhoto, { caption: settings.caption })
+    }, [castPhoto, settings.caption])
+
+    useEffect(() => watchAirPlay(setAirPlay) || undefined, [])
 
     const showControls = controls || panel || !playing
     const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -345,10 +378,24 @@ export default function TvMode() {
             )}
 
             <div className="tv-top" aria-hidden={showControls ? undefined : 'true'}>
-                <span className="tv-count">{current ? `${position + 1} / ${count}` : ''}</span>
+                <span className="tv-count">
+                    {current ? `${position + 1} / ${count}` : ''}
+                    {cast.connected && <span className="tv-casting">{cast.device ? `Casting to ${cast.device}` : 'Casting'}</span>}
+                </span>
                 <div className="tv-top-buttons">
-                    <button type="button" className="tv-button" aria-label="Slideshow settings" aria-expanded={panel}
-                        onClick={() => setPanel((value) => !value)} tabIndex={showControls ? 0 : -1}>{Icon.settings}</button>
+                    {(cast.available || cast.connected) && (
+                        <button type="button" className={`tv-button${cast.connected ? ' is-on' : ''}`}
+                            aria-label={cast.connected ? 'Casting: change or stop' : 'Cast to a TV'} aria-pressed={cast.connected}
+                            disabled={cast.connecting} onClick={() => castController.current?.open()}
+                            tabIndex={showControls ? 0 : -1}>{cast.connected ? Icon.casting : Icon.cast}</button>
+                    )}
+                    {airPlay && (
+                        <button type="button" className="tv-button" aria-label="Show on Apple TV with AirPlay" aria-expanded={panel === 'airplay'}
+                            onClick={() => setPanel((value) => (value === 'airplay' ? '' : 'airplay'))}
+                            tabIndex={showControls ? 0 : -1}>{Icon.airplay}</button>
+                    )}
+                    <button type="button" className="tv-button" aria-label="Slideshow settings" aria-expanded={panel === 'settings'}
+                        onClick={() => setPanel((value) => (value === 'settings' ? '' : 'settings'))} tabIndex={showControls ? 0 : -1}>{Icon.settings}</button>
                     {document.fullscreenEnabled && (
                         <button type="button" className="tv-button" aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
                             onClick={toggleFullscreen} tabIndex={showControls ? 0 : -1}>{fullscreen ? Icon.windowed : Icon.fullscreen}</button>
@@ -367,7 +414,31 @@ export default function TvMode() {
                     disabled={count < 2} tabIndex={showControls ? 0 : -1}>{Icon.next}</button>
             </div>
 
-            {panel && (
+            {panel === 'airplay' && (
+                <div className="tv-panel" role="dialog" aria-label="Show on Apple TV">
+                    <div className="tv-setting">
+                        <span className="tv-setting-label">Show on Apple TV</span>
+                        <ol className="tv-steps">
+                            {isAppleTouchDevice() ? (
+                                <>
+                                    <li>Open Control Center.</li>
+                                    <li>Tap <strong>Screen Mirroring</strong> and choose your Apple TV or AirPlay TV.</li>
+                                    <li>Hold your iPhone or iPad sideways so the slideshow fills the TV.</li>
+                                </>
+                            ) : (
+                                <>
+                                    <li>Click <strong>Control Center</strong> in the menu bar.</li>
+                                    <li>Click <strong>Screen Mirroring</strong> and choose your Apple TV or AirPlay TV.</li>
+                                    <li>Press <strong>F</strong> for full screen.</li>
+                                </>
+                            )}
+                        </ol>
+                    </div>
+                    <p className="tv-hint">The slideshow keeps this screen awake while it plays.</p>
+                </div>
+            )}
+
+            {panel === 'settings' && (
                 <div className="tv-panel" role="dialog" aria-label="Slideshow settings">
                     <Choice label="Each photo" value={settings.interval} onChange={(value) => change('interval', value)}
                         options={TV_INTERVALS.map((value) => ({ value, label: value < 60 ? `${value}s` : '1m' }))} />
@@ -384,7 +455,10 @@ export default function TvMode() {
                             <Toggle label="Progress bar" checked={settings.progress} onChange={(value) => change('progress', value)} />
                         </div>
                     </div>
-                    <p className="tv-hint">Space pauses · ← → move · F full screen · Esc closes</p>
+                    <p className="tv-hint">
+                        {cast.connected ? 'Keep this page open while casting; the TV follows it. ' : ''}
+                        Space pauses · ← → move · F full screen · Esc closes
+                    </p>
                 </div>
             )}
         </div>
