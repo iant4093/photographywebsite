@@ -468,6 +468,24 @@ class AdminCatalogProjectionTests(unittest.TestCase):
             response = get_albums.handler({"queryStringParameters": {"favorites": "1"}}, None)
         self.assertNotIn("favoriteCount", json.dumps(response))
 
+    def test_recently_deleted_albums_are_listed_only_on_request(self):
+        table = get_albums.table
+        record = table.get_item(Key={"albumId": self.OTHER_OWNER_ID})["Item"]
+        record.update(trashedAt="2026-10-01T00:00:00Z", trashedFrom={
+            "visibility": "private", "ownerEmail": "other@example.com", "ownerSub": "66666666-6666-4666-8666-666666666666",
+        })
+        for field in ("ownerSub",):
+            record.pop(field)
+        table.put_item(Item=record)
+        for query in ({"visibility": "all", "limit": "10"}, {"visibility": "unlisted", "limit": "10"}):
+            with self.subTest(query=query):
+                self.assertNotIn(self.OTHER_OWNER_ID, [item["albumId"] for item in self.admin(query)])
+        items = self.admin({"visibility": "unlisted", "trashed": "1", "limit": "10"})
+        self.assertEqual([item["albumId"] for item in items], [self.OTHER_OWNER_ID])
+        self.assertEqual(items[0]["trashedAt"], "2026-10-01T00:00:00Z")
+        self.assertEqual(items[0]["trashedFrom"], {"visibility": "private", "ownerEmail": "other@example.com", "isShared": False})
+        self.assertEqual(len(self.admin({"visibility": "all", "trashed": "true", "limit": "10"})), 1)
+
     def test_projection_shares_attribute_names_with_a_type_and_owner_filter(self):
         original_scan = get_albums.table.scan
         with patch.object(get_albums.table, "scan", side_effect=original_scan) as scan:

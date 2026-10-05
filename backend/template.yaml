@@ -3254,6 +3254,7 @@ Resources:
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
+          GALLERY_SETTINGS_TABLE: !Ref GallerySettingsTable
       Policies:
         - Statement:
             - Effect: Allow
@@ -3284,6 +3285,12 @@ Resources:
                 - dynamodb:Query
               Resource: !GetAtt DriveBackupStateTable.Arn
         - !Ref FrontDoorOriginSecretReadPolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt GallerySettingsTable.Arn
         - Statement:
             - Effect: Allow
               Action:
@@ -3335,6 +3342,14 @@ Resources:
             ApiId: !Ref Api
             Path: /albums/{albumId}
             Method: DELETE
+        # Permanently deletes albums that have been in Recently Deleted for
+        # 30 days. A run reads one small settings item unless something expired.
+        PurgeRecentlyDeleted:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+            Input: '{"source":"trash-purge"}'
+            Enabled: true
 
   AddImagesFunction:
     Type: AWS::Serverless::Function

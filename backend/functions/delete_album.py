@@ -11,6 +11,7 @@ import boto3
 import drive_backup_jobs
 import cleanup_work
 import comparison_cleanup
+import trash_bin
 import video_cleanup
 from media_mutation import enabled as mutation_protocol_enabled
 
@@ -185,6 +186,49 @@ def delete_album_record(album, context=None, *, event=None, allow_pending=False,
                 request_random_photo_pool_refresh()
 
 
+# Expired albums permanently deleted per daily run; any others wait a day.
+PURGE_BATCH = 3
+
+
+def purge_expired(context, now=None):
+    """Permanently delete albums that have been in Recently Deleted too long."""
+    remaining = getattr(context, "get_remaining_time_in_millis", None)
+    purged = waiting = attempts = 0
+    for album_id, trashed_at in trash_bin.expired(now):
+        if attempts >= PURGE_BATCH or (callable(remaining) and remaining() < 15000):
+            break
+        album = table.get_item(Key={"albumId": album_id}, ConsistentRead=True).get("Item")
+        if not album:
+            trash_bin.forget(album_id, trashed_at)
+            continue
+        if album.get("trashedAt") != trashed_at:
+            # The album is authoritative: repair or drop an entry it disagrees with.
+            if album.get("trashedAt"):
+                trash_bin.record(album_id, album["trashedAt"])
+            else:
+                trash_bin.forget(album_id, trashed_at)
+            continue
+        if album.get("status", "active") not in {"active", "deleting"}:
+            waiting += 1
+            continue
+        attempts += 1
+        try:
+            delete_album_record(album, context)
+        except DeletionPending:
+            # The album's own cleanup continuation finishes it; a later run
+            # then finds the album gone and drops the entry.
+            waiting += 1
+            continue
+        except (DeletionConflict, DeletionTooLargeError, drive_backup_jobs.DriveBackupBusy) as error:
+            waiting += 1
+            logger.warning("trash_purge_deferred error_type=%s", type(error).__name__)
+            continue
+        trash_bin.forget(album_id, trashed_at)
+        purged += 1
+    logger.info("trash_purge_run purged=%d waiting=%d", purged, waiting)
+    return {"purged": purged, "waiting": waiting}
+
+
 def handler(event, context):
     if isinstance(event, dict) and set(event) == {"source", "albumId"} and event.get("source") == "album-deletion":
         album = table.get_item(Key={"albumId": validate_uuid(event["albumId"])}, ConsistentRead=True).get("Item")
@@ -194,6 +238,9 @@ def handler(event, context):
             except DeletionPending:
                 return json_response(202, {"pending": True, "retryAfter": 30})
         return json_response(200, {"complete": True})
+    # The daily purge schedule's EventBridge input; API events always carry more keys.
+    if isinstance(event, dict) and set(event) == {"source"} and event.get("source") == "trash-purge":
+        return purge_expired(context)
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:
         return front_door_denied

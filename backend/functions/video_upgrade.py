@@ -33,7 +33,7 @@ MAX_IN_FLIGHT = 12
 MAX_FRAMES_PER_RUN = 20
 BUSY_FIELDS = (
     "pendingVisibilityChange", "pendingMediaDeletion", "pendingAlbumDeletion",
-    "pendingMediaUpload", "createdBySub",
+    "pendingMediaUpload", "createdBySub", "trashedAt",
 )
 
 _table = None

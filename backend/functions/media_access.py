@@ -631,6 +631,14 @@ def serialize_album_summary(album, *, include_admin=False):
         )
         if visibility == "unlisted" and isinstance(album.get("publishAt"), str):
             summary["publishAt"] = album["publishAt"]
+        former = album.get("trashedFrom")
+        if visibility == "unlisted" and isinstance(album.get("trashedAt"), str) and isinstance(former, dict):
+            summary["trashedAt"] = album["trashedAt"]
+            summary["trashedFrom"] = {
+                "visibility": former.get("visibility") if former.get("visibility") in ALLOWED_VISIBILITIES else "unlisted",
+                "ownerEmail": former.get("ownerEmail", "") if former.get("visibility") == "private" else "",
+                "isShared": former.get("isShared") is True,
+            }
     return summary
 
 

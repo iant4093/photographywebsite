@@ -404,6 +404,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 ("VideoUpgradeFunctionQueueUpgradesPermission", "AWS::Lambda::Permission"),
                 ("UpdateAlbumFunctionPublishScheduled", "AWS::Events::Rule"),
                 ("UpdateAlbumFunctionPublishScheduledPermission", "AWS::Lambda::Permission"),
+                ("DeleteAlbumFunctionPurgeRecentlyDeleted", "AWS::Events::Rule"),
+                ("DeleteAlbumFunctionPurgeRecentlyDeletedPermission", "AWS::Lambda::Permission"),
                 ("ZipPreparationQueue", "AWS::SQS::Queue"),
                 ("ZipPreparationDeadLetterQueue", "AWS::SQS::Queue"),
                 ("ZipPreparationFailureAlarm", "AWS::CloudWatch::Alarm"),

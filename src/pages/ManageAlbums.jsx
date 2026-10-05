@@ -16,7 +16,6 @@ import {
     listUsersPage,
     updateAlbum,
     updateGalleryOrder,
-    deleteAlbum,
     deleteImages,
     requestUploadUrl,
     uploadFileToS3,
@@ -600,14 +599,14 @@ function ManageAlbums() {
 
     // Delete entire album
     async function handleDelete(albumId) {
-        if (!confirm('Delete this website album and its gallery files? Google Drive backups and separate archives are retained. For a privacy deletion request, inventory and review those copies separately before removing the album.')) return
+        if (!confirm('Delete this album? It is hidden right away and moves to Recently Deleted, where you can restore it for 30 days before it is permanently deleted. For a privacy deletion request, delete it permanently from Recently Deleted and review Google Drive backups and archives separately.')) return
         setActionError('')
         setAlbumSaving(albumId, true)
         try {
             const token = await getIdToken()
-            await deleteAlbum(token, albumId)
+            await updateAlbum(token, albumId, { trash: true })
             removeCatalogAlbum(albumId)
-            setActionSuccess('Album deleted!')
+            setActionSuccess('Moved to Recently Deleted.')
             if (expandedAlbumId === albumId) {
                 setExpandedAlbumId(null)
                 setAlbumImages([])
