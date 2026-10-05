@@ -196,8 +196,9 @@ jq -e '.status == "IN_SYNC" and .metadataDocumentCount == 6' \
 }
 
 checked=0
-while IFS=$'\t' read -r region _stack_name detection_id; do
+while IFS=$'\t' read -r region stack_name detection_id; do
   AWS_REGION="$region" \
+  STACK_NAME="$stack_name" \
   DRIFT_DETECTION_ID="$detection_id" \
   DRIFT_MAX_POLLS="${DRIFT_MAX_POLLS:-90}" \
     ./ops/ci/wait_for_drift.sh
