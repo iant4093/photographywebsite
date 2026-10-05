@@ -179,7 +179,8 @@ export default function VideoPlayer({ videoInfo, autoplay = true, controls = tru
                     onError={reportCaptionError} />}
             </video>
             {controls && <VideoControls videoRef={videoRef} playerRef={playerRef} captionKey={captionVtt}
-                quality={useHls && quality?.source === hlsUrl ? quality : null} />}
+                quality={useHls && quality?.source === hlsUrl ? quality : null}
+                frames={useHls ? videoInfo?.scrubFrames : null} />}
             {captionError?.text === captionVtt && <p role="status" className="site-video-notice">{captionError.message}</p>}
             {controls && videoInfo?.transcript && <details className="site-video-transcript">
                 <summary>Transcript & visual description</summary>

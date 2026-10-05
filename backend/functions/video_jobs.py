@@ -6,6 +6,11 @@ reconciled by provider token, never blindly replayed after its dedupe window.
 Upgrade receipts re-convert an already streaming video to the current ladder
 in a new folder. The video keeps its old stream until the new master
 playlist exists (MediaConvert writes manifests last), then switches.
+
+Every conversion also writes timeline preview frames; frames receipts add
+them alone to a video already on the current ladder. Frames are advertised
+once their job is accepted: a frame that is not written yet only means the
+player shows no picture for that moment.
 """
 import hashlib
 import logging
@@ -18,8 +23,11 @@ from botocore.exceptions import ClientError
 from album_media_store import finish_media_sync
 from cache_invalidation import request_public_api_invalidation
 from dynamodb_helpers import ensure_album_item_budget
-from hls_ladder import hls_destination_prefix, hls_is_current, hls_master_playlist_key, receipt_identity
-from media_helpers import get_mediaconvert_client, start_mediaconvert_job
+from hls_ladder import (
+    SCRUB_FRAMES, hls_destination_prefix, hls_is_current, hls_master_playlist_key, receipt_identity,
+    scrub_frames_current, scrub_frames_prefix,
+)
+from media_helpers import get_mediaconvert_client, start_frame_capture_job, start_mediaconvert_job
 from visibility_change import enqueue
 
 logger = logging.getLogger("photography_api.video_dispatch")
@@ -100,9 +108,10 @@ def resume(table, album, context=None):
             break
         image = by_key.get(receipt["key"])
         upgrade = receipt.get("upgrade") is True
-        if not image or (image.get("mediaConvertJobId") and not upgrade) or (
-            upgrade and hls_is_current(receipt["key"], image.get("hlsUrl"))
-        ):
+        frames = receipt.get("frames") is True
+        if not image or (frames and scrub_frames_current(image.get("scrubFrames"))) or (
+            image.get("mediaConvertJobId") and not upgrade and not frames
+        ) or (upgrade and hls_is_current(receipt["key"], image.get("hlsUrl"))):
             del jobs[identity]
             _save(table, album)
             continue
@@ -113,6 +122,7 @@ def resume(table, album, context=None):
             if _master_exists(receipt["key"]):
                 image["hlsUrl"] = hls_master_playlist_key(receipt["key"])
                 image["mediaConvertJobId"] = receipt["jobId"]
+                image["scrubFrames"] = dict(SCRUB_FRAMES)
                 del jobs[identity]
                 _save(table, album, images=True)
                 if album.get("visibility") == "public":
@@ -136,10 +146,15 @@ def resume(table, album, context=None):
             receipt.update(phase="submitting", submittedAt=now)
             _save(table, album)  # Must precede any potentially paid request.
         try:
-            if submitting:
+            frames_destination = f"s3://{os.environ['IMAGES_BUCKET']}/{scrub_frames_prefix(receipt['key'])}"
+            if submitting and frames:
+                job_id = start_frame_capture_job(source, frames_destination, request_token=receipt["token"],
+                    width=image.get("width"), height=image.get("height"))
+            elif submitting:
                 job_id = start_mediaconvert_job(source,
                     f"s3://{os.environ['IMAGES_BUCKET']}/{hls_destination_prefix(receipt['key'])}",
-                    request_token=receipt["token"], width=image.get("width"), height=image.get("height"))
+                    request_token=receipt["token"], width=image.get("width"), height=image.get("height"),
+                    frames_s3_prefix=frames_destination)
             else:
                 job_id = _find(receipt, source)
         except Exception as error:
@@ -157,9 +172,14 @@ def resume(table, album, context=None):
             receipt.update(phase="transcoding", jobId=job_id, transcodeStartedAt=now,
                            checkAfter=now + UPGRADE_FIRST_CHECK_SECONDS, checks=0)
             _save(table, album)
+        elif job_id and frames:
+            image["scrubFrames"] = dict(SCRUB_FRAMES)
+            del jobs[identity]
+            _save(table, album, images=True)
         elif job_id:
             image["mediaConvertJobId"] = job_id
             image["hlsUrl"] = hls_master_playlist_key(receipt["key"])
+            image["scrubFrames"] = dict(SCRUB_FRAMES)
             del jobs[identity]
             _save(table, album, images=True)
         else:

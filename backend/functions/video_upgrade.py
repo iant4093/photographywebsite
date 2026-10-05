@@ -21,7 +21,7 @@ from boto3.dynamodb.conditions import Attr
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from hls_ladder import upgrade_candidates, upgrade_receipt
+from hls_ladder import frames_candidates, frames_receipt, upgrade_candidates, upgrade_receipt
 
 
 logger = logging.getLogger("photography_api.video_upgrade")
@@ -29,6 +29,8 @@ logger = logging.getLogger("photography_api.video_upgrade")
 # New re-conversions per run, and upgrades allowed in flight at once.
 MAX_NEW_PER_RUN = 8
 MAX_IN_FLIGHT = 12
+# Frame-only jobs are short and cheap; they finish on their own.
+MAX_FRAMES_PER_RUN = 20
 BUSY_FIELDS = (
     "pendingVisibilityChange", "pendingMediaDeletion", "pendingAlbumDeletion",
     "pendingMediaUpload", "createdBySub",
@@ -108,7 +110,8 @@ def handler(_event, _context):
     albums = list(_video_albums())
     in_flight = sum(_in_flight(album) for album in albums)
     budget = max(0, min(MAX_NEW_PER_RUN, MAX_IN_FLIGHT - in_flight))
-    remaining = queued = 0
+    frames_budget = MAX_FRAMES_PER_RUN
+    remaining = queued = frames_queued = 0
     for album in albums:
         if not _ready(album):
             continue
@@ -118,9 +121,17 @@ def handler(_event, _context):
         for key in candidates[:budget]:
             if _add_receipt(album["albumId"], *upgrade_receipt(key)):
                 added += 1
-        if added:
+        budget -= added
+        queued += added
+        # Videos already on the current ladder get their timeline frames alone.
+        frames_added = 0
+        for key in frames_candidates(album)[:frames_budget]:
+            if _add_receipt(album["albumId"], *frames_receipt(key)):
+                frames_added += 1
+        frames_budget -= frames_added
+        frames_queued += frames_added
+        if added or frames_added:
             _enqueue_video_jobs(album["albumId"])
-            budget -= added
-            queued += added
-    logger.info("video_upgrade_run queued=%d in_flight=%d waiting=%d", queued, in_flight, remaining - queued)
-    return {"queued": queued, "inFlight": in_flight, "waiting": remaining - queued}
+    logger.info("video_upgrade_run queued=%d frames=%d in_flight=%d waiting=%d",
+                queued, frames_queued, in_flight, remaining - queued)
+    return {"queued": queued, "frames": frames_queued, "inFlight": in_flight, "waiting": remaining - queued}

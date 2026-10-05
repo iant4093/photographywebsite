@@ -22,7 +22,28 @@
 .site-video-controls button svg { width: 1.1rem; height: 1.1rem; fill: currentColor; }
 .site-video-controls .site-select-chevron { fill: none; }
 .site-video-time { font-size: .72rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.site-video-seek { display: block; }
+.site-video-seek { display: block; position: relative; }
+/* Hover/drag preview above the seek bar: a timeline frame when the video has them, and the time. */
+.site-video-preview {
+  position: absolute;
+  bottom: calc(100% + .45rem);
+  left: clamp(2.2rem, var(--preview-at), calc(100% - 2.2rem));
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  gap: .25rem;
+  padding: .25rem;
+  border: 1px solid var(--color-warm-border);
+  border-radius: .45rem;
+  background: rgb(23 22 19 / .92);
+  color: var(--color-charcoal);
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.site-video-preview.has-frame { left: clamp(5.25rem, var(--preview-at), calc(100% - 5.25rem)); }
+.site-video-preview img { display: block; width: 10rem; max-height: 10rem; object-fit: contain; border-radius: .3rem; background: #000; }
 .site-video-seek input { width: 100%; }
 .site-video-volume { width: 5rem; display: flex; }
 .site-video-volume input { width: 100%; }

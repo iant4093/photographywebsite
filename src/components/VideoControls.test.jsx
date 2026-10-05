@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import VideoControls from './VideoControls'
+import { scrubFrameUrl } from '../utils/hlsSource'
 import VideoPlayer from './VideoPlayer'
 import { selectChoice } from '../test/selectChoice'
 
@@ -165,5 +166,86 @@ describe('custom video controls', () => {
         view.rerender(<VideoPlayer videoInfo={{}} controls />)
         expect(view.container.querySelector('video')).not.toHaveAttribute('controls')
         expect(screen.getByRole('combobox', { name: 'Playback speed' })).toBeInTheDocument()
+    })
+
+    describe('seek bar preview', () => {
+        class TestPointerEvent extends MouseEvent {}
+        const frames = { url: 'https://media.test/albums/a/original/movie_hls/frames/v1/movie.', interval: 2 }
+
+        function seekBar(props = {}) {
+            vi.stubGlobal('PointerEvent', TestPointerEvent)
+            const video = document.createElement('video')
+            Object.defineProperty(video, 'duration', { configurable: true, value: 125 })
+            render(<VideoControls videoRef={{ current: video }} playerRef={{ current: document.createElement('div') }} {...props} />)
+            const label = screen.getByLabelText('Video position').closest('label')
+            label.getBoundingClientRect = () => ({ left: 100, width: 500, top: 0, height: 20, right: 600, bottom: 20 })
+            return { video, label, input: screen.getByLabelText('Video position') }
+        }
+        const bubble = () => document.querySelector('.site-video-preview')
+
+        afterEach(() => vi.unstubAllGlobals())
+
+        it('names frames by index and stays inside the video', () => {
+            expect(scrubFrameUrl(frames, 0, 125)).toBe(`${frames.url}0000000.jpg`)
+            expect(scrubFrameUrl(frames, 9.9, 125)).toBe(`${frames.url}0000004.jpg`)
+            expect(scrubFrameUrl(frames, 500, 125)).toBe(`${frames.url}0000062.jpg`)
+            expect(scrubFrameUrl(frames, -3, 125)).toBe(`${frames.url}0000000.jpg`)
+            expect(scrubFrameUrl(frames, 10, 0)).toBe('')
+            expect(scrubFrameUrl({ url: frames.url, interval: 0 }, 10, 125)).toBe('')
+            expect(scrubFrameUrl(null, 10, 125)).toBe('')
+        })
+
+        it('shows the frame and time under the pointer, and hides when it leaves', () => {
+            const { label } = seekBar({ frames })
+            fireEvent.pointerMove(label, { clientX: 350 })
+            expect(bubble()).toHaveTextContent('1:02')
+            expect(bubble().style.getPropertyValue('--preview-at')).toBe('50%')
+            expect(bubble().querySelector('img')).toHaveAttribute('src', `${frames.url}0000031.jpg`)
+            expect(bubble()).toHaveAttribute('aria-hidden', 'true')
+            fireEvent.pointerMove(label, { clientX: 900 })
+            expect(bubble()).toHaveTextContent('2:05')
+            fireEvent.pointerLeave(label)
+            expect(bubble()).toBeNull()
+        })
+
+        it('falls back to the time when frames are missing or not offered', () => {
+            const { label } = seekBar({ frames })
+            fireEvent.pointerMove(label, { clientX: 100 })
+            fireEvent.error(bubble().querySelector('img'))
+            expect(bubble().querySelector('img')).toBeNull()
+            expect(bubble()).toHaveTextContent('0:00')
+            fireEvent.pointerMove(label, { clientX: 400 })
+            expect(bubble().querySelector('img')).toBeNull()
+        })
+
+        it('follows a drag and clears when it ends', () => {
+            const { label, input, video } = seekBar()
+            fireEvent.pointerDown(label)
+            fireEvent.change(input, { target: { value: '25' } })
+            expect(video.currentTime).toBe(25)
+            expect(bubble()).toHaveTextContent('0:25')
+            expect(bubble().querySelector('img')).toBeNull()
+            fireEvent.pointerLeave(label)
+            expect(bubble()).not.toBeNull()
+            fireEvent.pointerUp(label)
+            expect(bubble()).toBeNull()
+            fireEvent.pointerDown(label)
+            fireEvent.change(input, { target: { value: '30' } })
+            fireEvent.pointerCancel(label)
+            expect(bubble()).toBeNull()
+            // A plain change (keyboard) shows nothing.
+            fireEvent.change(input, { target: { value: '40' } })
+            expect(bubble()).toBeNull()
+        })
+
+        it('waits for the duration before previewing', () => {
+            vi.stubGlobal('PointerEvent', TestPointerEvent)
+            const video = document.createElement('video')
+            render(<VideoControls videoRef={{ current: video }} playerRef={{ current: document.createElement('div') }} frames={frames} />)
+            const label = screen.getByLabelText('Video position').closest('label')
+            label.getBoundingClientRect = () => ({ left: 0, width: 0 })
+            fireEvent.pointerMove(label, { clientX: 10 })
+            expect(bubble()).toBeNull()
+        })
     })
 })

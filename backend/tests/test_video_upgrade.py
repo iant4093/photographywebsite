@@ -178,7 +178,7 @@ class ScannerTests(unittest.TestCase):
         ]
         with patch.object(video_upgrade, "MAX_NEW_PER_RUN", 8), patch.object(video_upgrade, "MAX_IN_FLIGHT", 10):
             result = video_upgrade.handler({}, None)
-        self.assertEqual(result, {"queued": 8, "inFlight": 2, "waiting": 3})
+        self.assertEqual(result, {"queued": 8, "frames": 0, "inFlight": 2, "waiting": 3})
         self.assertEqual(self.table.scan.call_args_list[1].kwargs["ExclusiveStartKey"], {"albumId": "busy"})
         queued = self.receipts()
         self.assertEqual([album for album, _ in queued], ["a"] * 5 + ["b"] * 3)
@@ -196,7 +196,7 @@ class ScannerTests(unittest.TestCase):
     def test_nothing_is_queued_while_the_in_flight_limit_is_reached(self):
         jobs = {f"r{index}": {"upgrade": True, "phase": "submitting"} for index in range(video_upgrade.MAX_IN_FLIGHT)}
         self.table.scan.return_value = {"Items": [video_album("a", [stale("v")], videoJobs=jobs)]}
-        self.assertEqual(video_upgrade.handler({}, None), {"queued": 0, "inFlight": video_upgrade.MAX_IN_FLIGHT, "waiting": 1})
+        self.assertEqual(video_upgrade.handler({}, None), {"queued": 0, "frames": 0, "inFlight": video_upgrade.MAX_IN_FLIGHT, "waiting": 1})
         self.table.update_item.assert_not_called()
         self.sqs.send_message.assert_not_called()
 

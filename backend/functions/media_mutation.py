@@ -108,8 +108,8 @@ def object_is_committed(album, key):
         if key in {raw, source.get("thumbKey"), source.get("hlsUrl")}:
             return True
         if album.get("type") == "video" and key.startswith(raw.rsplit(".", 1)[0] + "_hls/"):
-            # Every HLS rendition belongs to this exact committed video prefix.
-            return key.endswith((".m3u8", ".ts", ".m4s", ".mp4"))
+            # Every HLS rendition and timeline frame belongs to this exact committed video prefix.
+            return key.endswith((".m3u8", ".ts", ".m4s", ".mp4", ".jpg"))
         if key in expected_preview_keys(album["albumId"], raw).values():
             return True
     return False

@@ -4,6 +4,7 @@ import urllib.parse
 import uuid
 
 from hls_ladder import hls_destination_prefix, hls_is_current, hls_master_playlist_key  # noqa: F401
+from hls_ladder import SCRUB_FRAME_EDGE, SCRUB_FRAME_INTERVAL
 import boto3
 from botocore.config import Config
 import exifread
@@ -186,31 +187,97 @@ def _hls_output(name_modifier, width, height, max_bitrate, quality=7):
     }
 
 
-def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_token=None, width=None, height=None):
+def _frame_size(width, height):
+    """Even frame dimensions with a long edge of SCRUB_FRAME_EDGE, or None."""
+    try:
+        width, height = int(width), int(height)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    scale = min(1.0, SCRUB_FRAME_EDGE / max(width, height))
+    even = lambda value: max(2, int(round(value * scale / 2)) * 2)
+    return even(width), even(height)
+
+
+def _frames_group(destination_s3_prefix, width, height):
+    """Timeline preview frames: a small JPEG every SCRUB_FRAME_INTERVAL seconds."""
+    video = {
+        "CodecSettings": {
+            "Codec": "FRAME_CAPTURE",
+            "FrameCaptureSettings": {
+                "FramerateNumerator": 1,
+                "FramerateDenominator": SCRUB_FRAME_INTERVAL,
+                # Six hours of frames; longer videos simply stop previewing.
+                "MaxCaptures": 10800,
+                "Quality": 70,
+            },
+        },
+    }
+    size = _frame_size(width, height)
+    if size:
+        video.update(Width=size[0], Height=size[1])
+    else:
+        video["Width"] = SCRUB_FRAME_EDGE
+    return {
+        "Name": "Timeline frames",
+        "OutputGroupSettings": {
+            "Type": "FILE_GROUP_SETTINGS",
+            "FileGroupSettings": {"Destination": destination_s3_prefix},
+        },
+        "Outputs": [{"ContainerSettings": {"Container": "RAW"}, "VideoDescription": video}],
+    }
+
+
+def _job_input(source_s3_url):
+    return {
+        "AudioSelectors": {
+            "Audio Selector 1": {
+                "DefaultSelection": "DEFAULT"
+            }
+        },
+        # Honour rotation metadata (phone footage).
+        "VideoSelector": {"Rotate": "AUTO"},
+        "TimecodeSource": "ZEROBASED",
+        "FileInput": source_s3_url
+    }
+
+
+def _create_job(job_settings, request_token):
+    try:
+        response = get_mediaconvert_client().create_job(
+            Role=os.environ['MEDIACONVERT_ROLE_ARN'],
+            Settings=job_settings,
+            Queue="Default",
+            **({"ClientRequestToken": request_token, "UserMetadata": {"dispatchToken": request_token}} if request_token else {}),
+        )
+        return response['Job']['Id']
+    except Exception as error:
+        logger.error("mediaconvert_job_failed error_type=%s", type(error).__name__)
+        raise
+
+
+def start_frame_capture_job(source_s3_url, frames_s3_prefix, *, request_token=None, width=None, height=None):
+    """Timeline preview frames alone, for a video whose stream already exists."""
+    return _create_job({
+        "Inputs": [_job_input(source_s3_url)],
+        "OutputGroups": [_frames_group(frames_s3_prefix, width, height)],
+        "TimecodeConfig": {"Source": "ZEROBASED"},
+    }, request_token)
+
+
+def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_token=None, width=None, height=None,
+                           frames_s3_prefix=None):
     """
     Submit an adaptive HLS ladder up to 4K so players can match each viewer's
     screen and connection, and viewers can pick a quality.
 
     Every rendition is a single file addressed by byte ranges, so a video is
-    about a dozen objects however long it runs.
+    about a dozen objects however long it runs. With ``frames_s3_prefix`` the
+    same job also writes the timeline preview frames.
     """
-    mc_client = get_mediaconvert_client()
-    role_arn = os.environ['MEDIACONVERT_ROLE_ARN']
-
     job_settings = {
-        "Inputs": [
-            {
-                "AudioSelectors": {
-                    "Audio Selector 1": {
-                        "DefaultSelection": "DEFAULT"
-                    }
-                },
-                # Honour rotation metadata (phone footage).
-                "VideoSelector": {"Rotate": "AUTO"},
-                "TimecodeSource": "ZEROBASED",
-                "FileInput": source_s3_url
-            }
-        ],
+        "Inputs": [_job_input(source_s3_url)],
         "OutputGroups": [
             {
                 "Name": "Apple HLS",
@@ -231,15 +298,6 @@ def start_mediaconvert_job(source_s3_url, destination_s3_prefix, *, request_toke
             "Source": "ZEROBASED"
         }
     }
-
-    try:
-        response = mc_client.create_job(
-            Role=role_arn,
-            Settings=job_settings,
-            Queue="Default",
-            **({"ClientRequestToken": request_token, "UserMetadata": {"dispatchToken": request_token}} if request_token else {}),
-        )
-        return response['Job']['Id']
-    except Exception as error:
-        logger.error("mediaconvert_job_failed error_type=%s", type(error).__name__)
-        raise
+    if frames_s3_prefix:
+        job_settings["OutputGroups"].append(_frames_group(frames_s3_prefix, width, height))
+    return _create_job(job_settings, request_token)
