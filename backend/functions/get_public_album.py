@@ -1657,8 +1657,16 @@ def _social_metadata(album, route_kind):
     )
     route_name = "video" if stored_type == "video" else "album"
     album_id = summary.get("albumId")
+    # Only the stored cover thumbnail (albums/<id>/thumbnail/... or a legacy
+    # albums/<prefix>/thumb_... key), never the full-size original the summary
+    # falls back to without one. og:image:type is image/jpeg.
     cover_url = summary.get("coverThumbnailUrl") or ""
-    if "/thumbnail/" not in cover_url:
+    thumb_key = album.get("coverThumbKey")
+    if (
+        not isinstance(thumb_key, str)
+        or not thumb_key.lower().endswith((".jpg", ".jpeg"))
+        or not cover_url.startswith("https://")
+    ):
         cover_url = hero_url
     return {
         "title": f"{album_title} — {SITE_TITLE}",

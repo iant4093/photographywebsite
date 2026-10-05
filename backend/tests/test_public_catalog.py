@@ -688,6 +688,31 @@ class PublicAlbumDetailTests(unittest.TestCase):
         self.assertNotIn(f"albums/{ALBUM_ID}/original/photo.jpg", response["body"])
         self.assertIn("/site/hero/current/hero.jpg", response["body"])
 
+    def test_social_document_uses_legacy_cover_thumbnails_but_only_jpeg_thumbnails(self):
+        legacy = "albums/day-3-toledo-6f0a48fc/thumb_20260325-4K1A2028.jpg"
+        cases = (
+            (legacy, f"https://media.example.test/{legacy}"),
+            (f"albums/{ALBUM_ID}/thumbnail/photo.webp", "https://media.example.test/site/hero/current/hero.jpg"),
+            (None, "https://media.example.test/site/hero/current/hero.jpg"),
+        )
+        for thumb_key, expected in cases:
+            stored = public_album(
+                coverImageUrl=f"albums/{ALBUM_ID}/original/photo.jpg",
+                legacyS3Prefix="albums/day-3-toledo-6f0a48fc/",
+            )
+            if thumb_key is None:
+                stored.pop("coverThumbKey", None)
+            else:
+                stored["coverThumbKey"] = thumb_key
+            with self.subTest(thumb_key=thumb_key), patch.object(
+                get_public_album, "_base_shell", return_value=self.SHELL
+            ), patch.object(get_public_album.table, "get_item", return_value={"Item": stored}):
+                response = get_public_album.handler(
+                    {"pathParameters": {"albumType": "album", "albumId": ALBUM_ID}}, None
+                )
+            self.assertIn(f'<meta property="og:image" content="{expected}" />', response["body"])
+            self.assertNotIn(f"albums/{ALBUM_ID}/original/photo.jpg", response["body"])
+
     def test_social_document_falls_back_without_disclosing_nonpublic_or_wrong_type_records(self):
         records = (
             public_album(visibility="private", title="Private title"),
