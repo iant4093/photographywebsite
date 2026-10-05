@@ -14,6 +14,8 @@ export const FADE_MS = 1400
 const IDLE_MS = 3000
 const DECODE_AHEAD = 2
 const WARM_AHEAD = 10
+// Preloader keys for the small image behind the soft-glow background.
+const backdropKey = (key) => `backdrop:${key}`
 
 const Icon = {
     play: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5Z" fill="currentColor" /></svg>,
@@ -113,10 +115,15 @@ export default function TvMode() {
     const targetKey = target ? mediaId(target) : ''
     const current = layers.at(-1)
 
+    // With the soft glow, its backdrop must be ready too, or it pops in mid-fade.
+    const glow = settings.background === 'blur'
+    const backdropSettled = !glow || ready.has(backdropKey(targetKey)) || failed.has(backdropKey(targetKey))
+    const failedPhotos = [...failed].filter((key) => !key.startsWith('backdrop:')).length
+
     // Show the target once it is decoded; skip one that cannot load.
-    if (targetKey && ready.has(targetKey) && current?.id !== targetKey) {
+    if (targetKey && ready.has(targetKey) && backdropSettled && current?.id !== targetKey) {
         setLayers([...layers.slice(-1), { id: targetKey, photo: target, serial: (current?.serial || 0) + 1 }])
-    } else if (targetKey && failed.has(targetKey) && failed.size < count) {
+    } else if (targetKey && failed.has(targetKey) && failedPhotos < count) {
         setPosition((position + 1) % count)
     }
 
@@ -131,15 +138,18 @@ export default function TvMode() {
         for (let offset = 1; offset <= DECODE_AHEAD; offset += 1) wanted.push(item(offset, true))
         if (count > 1) wanted.push(item(-1, true))
         for (let offset = DECODE_AHEAD + 1; offset <= WARM_AHEAD; offset += 1) wanted.push(item(offset, false))
-        const unique = [...new Map(wanted.map((entry) => [entry.key, entry])).values()]
         // Keep what is on screen loaded while it fades out.
         for (const layer of layers) {
-            if (!unique.some((entry) => entry.key === layer.id)) {
-                unique.push({ key: layer.id, image: layer.photo, sizes: sizesFor(layer.photo, bounds), decode: true })
-            }
+            wanted.push({ key: layer.id, image: layer.photo, sizes: sizesFor(layer.photo, bounds), decode: true })
         }
-        preloader.want(unique)
-    }, [bounds, count, layers, photos, position, preloader])
+        // Each decoded photo's backdrop is decoded right after it.
+        const withBackdrops = glow
+            ? wanted.flatMap((entry) => (entry.decode
+                ? [entry, { key: backdropKey(entry.key), image: { url: backdropUrl(entry.image) }, sizes: '1px', decode: true }]
+                : [entry]))
+            : wanted
+        preloader.want([...new Map(withBackdrops.map((entry) => [entry.key, entry])).values()])
+    }, [bounds, count, glow, layers, photos, position, preloader])
 
     // Drop the outgoing layer once its fade is over.
     useEffect(() => {
@@ -300,6 +310,11 @@ export default function TvMode() {
             onPointerUp={(event) => {
                 const start = swipe.current
                 swipe.current = null
+                // A click or tap outside an open panel closes it, except on the panel's own toggle.
+                if (panel && !event.target.closest?.('.tv-panel, [aria-expanded]')) {
+                    setPanel('')
+                    return
+                }
                 if (!start || event.target.closest?.('button, input, label, .tv-panel')) return
                 const dx = event.clientX - start.x
                 if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(event.clientY - start.y)) {
@@ -320,7 +335,7 @@ export default function TvMode() {
                     <div key={layer.serial} className={`tv-layer${layer === current ? ' is-current' : ' is-leaving'}`}
                         aria-hidden={layer === current ? undefined : 'true'}>
                         {settings.background === 'blur' && (
-                            <img className="tv-backdrop" src={backdropUrl(layer.photo)} alt="" aria-hidden="true" decoding="async" />
+                            <img className="tv-backdrop" src={backdropUrl(layer.photo)} alt="" aria-hidden="true" decoding="sync" />
                         )}
                         <div className="tv-stage">
                             <div className={`tv-frame tv-drift-${layer.serial % 4}`}>

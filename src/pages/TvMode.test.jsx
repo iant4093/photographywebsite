@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -328,5 +328,67 @@ describe('TV mode', () => {
         expect(screen.getByRole('dialog', { name: 'Show on Apple TV' })).toHaveTextContent('Open Control Center.')
         fireEvent.keyDown(window, { key: 'Escape' })
         expect(screen.queryByRole('dialog', { name: 'Show on Apple TV' })).not.toBeInTheDocument()
+    })
+
+    it('closes an open panel on a click or tap outside it', async () => {
+        const { container } = mounted()
+        await flush()
+        const root = container.querySelector('.tv-mode')
+        const settingsButton = screen.getByRole('button', { name: 'Slideshow settings' })
+        fireEvent.click(settingsButton)
+        const dialog = screen.getByRole('dialog', { name: 'Slideshow settings' })
+        // Inside the panel it stays open.
+        fireEvent.pointerDown(dialog, { clientX: 900, clientY: 100 })
+        fireEvent.pointerUp(dialog, { clientX: 900, clientY: 100 })
+        expect(screen.getByRole('dialog', { name: 'Slideshow settings' })).toBeInTheDocument()
+        // Its own toggle still toggles it.
+        fireEvent.pointerDown(settingsButton, { clientX: 1100, clientY: 20 })
+        fireEvent.pointerUp(settingsButton, { clientX: 1100, clientY: 20 })
+        expect(screen.getByRole('dialog', { name: 'Slideshow settings' })).toBeInTheDocument()
+        // Anywhere else closes it without moving the slideshow.
+        fireEvent.pointerDown(root, { pointerType: 'touch', clientX: 500, clientY: 400 })
+        fireEvent.pointerUp(root, { pointerType: 'touch', clientX: 300, clientY: 400 })
+        expect(screen.queryByRole('dialog', { name: 'Slideshow settings' })).not.toBeInTheDocument()
+        expect(current()).toHaveAttribute('src', 'https://cdn.test/a.jpg')
+        fireEvent.click(settingsButton)
+        fireEvent.pointerDown(root, { clientX: 500, clientY: 400 })
+        fireEvent.pointerUp(root, { clientX: 500, clientY: 400 })
+        expect(screen.queryByRole('dialog', { name: 'Slideshow settings' })).not.toBeInTheDocument()
+    })
+
+    it('waits for the soft-glow backdrop so it never pops in mid-fade', async () => {
+        const held = []
+        class HoldingImage extends FakeImage {
+            set src(value) {
+                this._src = value
+                if (value.endsWith('-640.webp')) held.push(this)
+                else queueMicrotask(() => this.onload?.())
+            }
+            get src() { return this._src }
+        }
+        vi.stubGlobal('Image', HoldingImage)
+        const { container } = mounted()
+        await flush()
+        expect(current()).toBeNull()
+        await act(async () => { held.find((image) => image.src === 'https://cdn.test/a-640.webp').onload() })
+        await flush()
+        expect(current()).toHaveAttribute('src', 'https://cdn.test/a.jpg')
+        const backdrop = container.querySelector('.tv-layer.is-current .tv-backdrop')
+        expect(backdrop).toHaveAttribute('src', 'https://cdn.test/a-640.webp')
+        expect(backdrop).toHaveAttribute('decoding', 'sync')
+    })
+
+    it('shows a photo whose backdrop fails, and loads no backdrops on the dark background', async () => {
+        api.fetchAllFavoritePhotos.mockResolvedValue({ images: [photo('a', { previewSrcSet: srcSet('a-broken') }), photo('b')] })
+        mounted()
+        await flush()
+        expect(current()).toHaveAttribute('src', 'https://cdn.test/a.jpg')
+        cleanup()
+        images = []
+        localStorage.setItem(TV_SETTINGS_KEY, JSON.stringify({ order: 'newest', background: 'dark' }))
+        mounted()
+        await flush()
+        expect(current()).toHaveAttribute('src', 'https://cdn.test/a.jpg')
+        expect(images.some((image) => image.src?.endsWith('-640.webp'))).toBe(false)
     })
 })
