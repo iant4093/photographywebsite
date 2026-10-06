@@ -102,13 +102,13 @@ class ChangeSetGateTests(unittest.TestCase):
             {"Add": 0, "Modify": 0, "Total": 0},
         )
 
-    def test_route_throttle_intent_does_not_authorize_other_stage_changes(self):
+    def test_route_and_timing_log_intent_does_not_authorize_other_stage_changes(self):
         intent = release_guard.load_release_intent(json.loads(
             (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
         ))
         allowed = change(logical_id="ApiStage", resource_type="AWS::ApiGatewayV2::Stage", property_name="RouteSettings")
         self.assertEqual(release_guard.gate_change_set([{"Changes": [allowed]}], release_intent=intent)["Modify"], 1)
-        for updates in ({"property_name": "AccessLogSettings"}, {"replacement": "True"}, {"logical_id": "OtherStage"}):
+        for updates in ({"property_name": "StageVariables"}, {"replacement": "True"}, {"logical_id": "OtherStage"}):
             item = change(**{"logical_id": "ApiStage", "resource_type": "AWS::ApiGatewayV2::Stage", "property_name": "RouteSettings", **updates})
             with self.subTest(updates=updates), self.assertRaises(release_guard.GateError):
                 release_guard.gate_change_set([{"Changes": [item]}], release_intent=intent)
@@ -311,6 +311,11 @@ class ReleaseIntentTests(unittest.TestCase):
                 expected_paths.append("EphemeralStorage")
             if rule["logicalId"] in {"CacheInvalidationWorkerFunction", "AlbumWorkWorkerFunction"}:
                 expected_paths.append("RecursiveLoop")
+            expected_paths.append("Tags")
+            if rule["logicalId"] in {"RandomPhotoPoolBuilderFunction", "ZipArchiveRefreshFunction"}:
+                expected_paths += ["MemorySize", "Architectures"]
+            if rule["logicalId"] == "GetPublicAlbumsFunction":
+                expected_paths.append("Architectures")
             self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertFalse(rule["allowNoDetails"])
 
@@ -342,7 +347,15 @@ class ReleaseIntentTests(unittest.TestCase):
             rule for rule in document["rules"]
             if rule["resourceType"] == "AWS::IAM::Role"
             and rule["action"] == "Modify"
+            and "Policies" in rule["propertyPaths"]
         ]
+        all_role_rules = [rule for rule in document["rules"] if rule["resourceType"] == "AWS::IAM::Role" and rule["action"] == "Modify"]
+        self.assertEqual({rule["logicalId"] for rule in all_role_rules}, {name + "Role" for name in logical_ids})
+        for rule in all_role_rules:
+            if "Policies" not in rule["propertyPaths"]:
+                self.assertEqual(rule["propertyPaths"], ["Tags"])
+                self.assertTrue(rule["allowProtectedModify"])
+                self.assertFalse(rule["allowNoDetails"])
         self.assertEqual(
             {rule["logicalId"] for rule in role_rules},
             {
@@ -387,6 +400,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 if rule["logicalId"] in {"RandomPhotoPoolBuilderFunctionRole", "WorkerZipFunctionRole", "GoogleDriveBackupFunctionRole"}
                 else ["Policies"]
             )
+            expected_paths.append("Tags")
             self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertTrue(rule["allowProtectedModify"])
             self.assertFalse(rule["allowNoDetails"])
@@ -397,7 +411,7 @@ class ReleaseIntentTests(unittest.TestCase):
         ]
         self.assertEqual(len(api_rules), 1)
         self.assertEqual(api_rules[0]["resourceType"], "AWS::ApiGatewayV2::Api")
-        self.assertEqual(api_rules[0]["propertyPaths"], ["Body"])
+        self.assertEqual(api_rules[0]["propertyPaths"], ["Body", "Tags"])
         self.assertTrue(api_rules[0]["allowProtectedModify"])
         self.assertFalse(api_rules[0]["allowNoDetails"])
 

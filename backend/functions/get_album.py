@@ -1,5 +1,7 @@
 """Default-deny album detail endpoint with protected media URLs."""
 
+from performance_observation import measure_handler
+
 import os
 
 import boto3
@@ -72,6 +74,7 @@ def _legacy_images(album):
 from front_door import verify_front_door_request
 
 
+@measure_handler("album_detail")
 def handler(event, context):
     denied = verify_front_door_request(event, context)
     if denied:

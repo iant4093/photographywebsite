@@ -1,5 +1,7 @@
 """Anonymous-only public catalog optimized for edge caching."""
 
+from performance_observation import measure_handler, measure_stage
+
 import logging
 import os
 from decimal import Decimal
@@ -181,7 +183,11 @@ def _hydrate_summary_fields(records):
 
 from front_door import verify_front_door_request
 
+# Keep verification as the first handler operation while measuring its timing.
+verify_front_door_request = measure_stage("front_door")(verify_front_door_request)
 
+
+@measure_handler("public_catalog")
 def handler(event, context):
     denied = verify_front_door_request(event, context)
     if denied:
@@ -208,19 +214,20 @@ def handler(event, context):
         if params != canonical or ('rawQueryString' in (event or {}) and event['rawQueryString'] != query):
             return json_response(307, {'message':'Continue with the canonical public catalog'},
                 headers={'Location':'/api/public/albums' + ('?' + query if query else '')})
-        records, last_key = _fetch_page(
-            album_type=album_type,
-            limit=limit,
-            start_key=start_key,
-        )
-        _hydrate_summary_fields(records)
+        with measure_stage("catalog_read"):
+            records, last_key = _fetch_page(
+                album_type=album_type, limit=limit, start_key=start_key,
+            )
+        with measure_stage("summary_join"):
+            _hydrate_summary_fields(records)
 
         records.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
-        gallery_settings = (
-            load_gallery_settings(settings_table, logger)
-            if album_type in {None, "photo", "video"}
-            else {}
-        )
+        with measure_stage("gallery_settings"):
+            gallery_settings = (
+                load_gallery_settings(settings_table, logger)
+                if album_type in {None, "photo", "video"}
+                else {}
+            )
         items = []
         for record in records:
             if record.get("status", "active") != "active" or record.get("visibility") != "public":

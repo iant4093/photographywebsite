@@ -174,7 +174,7 @@ class PreviewWorkerTests(unittest.TestCase):
             "Handler: random_photo_pool_builder.handler",
             "ReservedConcurrentExecutions: 1",
             "Timeout: 120",
-            "MemorySize: 512",
+            "MemorySize: 1024", "Architectures: [arm64]",
             "PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable",
             "Stream: !GetAtt AlbumsTable.StreamArn",
             "Enabled: false",
