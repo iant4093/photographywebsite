@@ -15,7 +15,8 @@ import {
     PutObjectTaggingCommand,
     S3Client,
 } from '@aws-sdk/client-s3'
-import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront'
+import { CloudFrontClient } from '@aws-sdk/client-cloudfront'
+import { invalidateHeroPublication } from './hero-invalidation.mjs'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import {
     BatchWriteCommand,
@@ -384,22 +385,10 @@ async function publishHero(job, manifest, sourceContentType) {
         Tagging: 'visibility=public',
         ServerSideEncryption: 'AES256',
     }))
-    const invalidationPaths = [...new Set([
-        `/${paths.home}`,
-        `/${paths.manifest}`,
-        ...currentAliases.map((key) => `/${key}`),
-        ...existingAliases.map((key) => `/${key}`),
-    ])]
-    await cloudfront.send(new CreateInvalidationCommand({
-        DistributionId: requiredEnvironment('IMAGES_DISTRIBUTION_ID'),
-        InvalidationBatch: {
-            CallerReference: `responsive-${job.heroType}-hero-v2-${job.version}`,
-            Paths: {
-                Quantity: invalidationPaths.length,
-                Items: invalidationPaths,
-            },
-        },
-    }))
+    await invalidateHeroPublication(cloudfront, {
+        distributionId: requiredEnvironment('IMAGES_DISTRIBUTION_ID'),
+        job, currentAliases, existingAliases,
+    })
     await deleteHeroVersion(oldManifest?.previousVersion, job.heroType)
     if (job.sourceKey === paths.pending) {
         try {
