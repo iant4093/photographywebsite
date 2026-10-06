@@ -77,7 +77,7 @@ CAUSING_ENTITY_RE = re.compile(
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 # This is an introduction-only contract. Once deployed, this parameter follows
 # the same preservation rules as every existing parameter (including false).
-REVIEWED_PARAMETER_ADDITIONS = {"OriginalComparisonsEnabled": "true"}
+REVIEWED_PARAMETER_ADDITIONS = {"OriginalComparisonsEnabled": "true", "AlbumWorkRouting": "legacy"}
 
 
 class GateError(ValueError):
@@ -321,7 +321,7 @@ def _validated_parameter_additions(additions: Any) -> dict[str, str]:
 
 
 def load_parameter_additions(document: Any) -> dict[str, str]:
-    """Load the exact versioned introduction of the original-comparison flag."""
+    """Load only reviewed parameter introductions with their safe initial values."""
 
     if (
         not isinstance(document, dict)

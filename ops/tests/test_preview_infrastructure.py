@@ -13,6 +13,7 @@ TEMPLATE = (ROOT / "backend" / "template.yaml").read_text(encoding="utf-8")
 MAKEFILE = (ROOT / "backend" / "Makefile").read_text(encoding="utf-8")
 RUNBOOK = (ROOT / "ops" / "README.md").read_text(encoding="utf-8")
 WORKER_SOURCE = (ROOT / "backend" / "preview_worker" / "index.mjs").read_text(encoding="utf-8")
+HERO_INVALIDATION_SOURCE = (ROOT / "backend" / "preview_worker" / "hero-invalidation.mjs").read_text(encoding="utf-8")
 
 
 def resource_block(logical_id: str) -> str:
@@ -55,8 +56,9 @@ class PreviewDataProtectionTests(unittest.TestCase):
 
 class PreviewWorkerTests(unittest.TestCase):
     def test_responsive_hero_invalidations_have_a_migration_safe_namespace(self) -> None:
-        self.assertIn("CallerReference: `responsive-${job.heroType}-hero-v2-${job.version}`", WORKER_SOURCE)
-        self.assertNotIn("CallerReference: `hero-${job.version}`", WORKER_SOURCE)
+        self.assertIn("import { invalidateHeroPublication } from './hero-invalidation.mjs'", WORKER_SOURCE)
+        self.assertIn("CallerReference: `responsive-${parsed.heroType}-hero-v3-${parsed.version}-${publicationId}-${shape}`", HERO_INVALIDATION_SOURCE)
+        self.assertNotIn("hero-v2-", HERO_INVALIDATION_SOURCE)
 
     def test_worker_is_reproducibly_packaged_and_concurrency_bounded(self) -> None:
         worker = resource_block("PreviewWorkerFunction")
@@ -81,7 +83,7 @@ class PreviewWorkerTests(unittest.TestCase):
         package = json.loads((ROOT / "backend" / "preview_worker" / "package.json").read_text(encoding="utf-8"))
         lock = json.loads((ROOT / "backend" / "preview_worker" / "package-lock.json").read_text(encoding="utf-8"))
         self.assertEqual(package["engines"]["node"], ">=22 <25")
-        self.assertEqual(package["dependencies"]["sharp"], "0.35.4")
+        self.assertEqual(package["dependencies"]["sharp"], "0.35.5")
         for dependency in (
             "@aws-sdk/client-dynamodb",
             "@aws-sdk/client-s3",

@@ -1,6 +1,7 @@
 """S3 ObjectCreated handler that propagates album visibility to new derivatives."""
 
 import os
+from work_queue import queue_url as work_queue_url
 import urllib.parse
 import uuid
 import time
@@ -71,7 +72,7 @@ def handler(event, context):
             attempt = min(4, max(0, int(event["attempt"]))) if internal else 0
             if now - started >= 86400 or started > now + 60:
                 raise RuntimeError("Tagging continuation expired")
-            queue = os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip()
+            queue = work_queue_url()
             if not queue:
                 raise RuntimeError("Tagging continuation queue is unavailable")
             _queue_client().send_message(QueueUrl=queue, DelaySeconds=min(300, 30 * 2 ** attempt),

@@ -35,14 +35,29 @@ def resource_block(logical_id: str) -> str:
 
 
 class TemplateValidationTests(unittest.TestCase):
+    def test_completed_media_backfill_retains_recovery_resources_without_automatic_wakeups(self) -> None:
+        function = resource_block("AlbumMediaBackfillFunction")
+        self.assertIn("Handler: backfill_album_media.handler", function)
+        self.assertIn("ALBUMS_TABLE: !Ref AlbumsTable", function)
+        self.assertIn("ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable", function)
+        self.assertIn("dynamodb:BatchWriteItem", function)
+        self.assertIn("ContinueAlbumMediaBackfill:", function)
+        self.assertIn("Schedule: rate(15 minutes)", function)
+        self.assertIn("Enabled: false", function)
+        self.assertNotIn("Enabled: true", function)
+        table = resource_block("AlbumMediaTable")
+        self.assertIn("DeletionPolicy: Retain", table)
+        self.assertIn("UpdateReplacePolicy: Retain", table)
+        self.assertIn("DeletionProtectionEnabled: true", table)
+
     def test_only_the_shared_continuation_worker_allows_recursive_steps(self) -> None:
         worker = resource_block("CacheInvalidationWorkerFunction")
         self.assertIn("RecursiveLoop: Allow", worker)
-        self.assertEqual(TEMPLATE.count("RecursiveLoop: Allow"), 1)
+        self.assertEqual(TEMPLATE.count("RecursiveLoop: Allow"), 2)
         self.assertIn("ReservedConcurrentExecutions: 2", worker)
         intent = json.loads((ROOT / "ops" / "ci" / "release_intent.json").read_text())
         allowed = [rule["logicalId"] for rule in intent["rules"] if "RecursiveLoop" in rule["propertyPaths"]]
-        self.assertEqual(allowed, ["CacheInvalidationWorkerFunction"])
+        self.assertEqual(allowed, ["CacheInvalidationWorkerFunction", "AlbumWorkWorkerFunction"])
 
     def test_tagging_worker_can_distinguish_deleted_album_objects(self) -> None:
         policy = resource_block("TagMediaObjectFunction")

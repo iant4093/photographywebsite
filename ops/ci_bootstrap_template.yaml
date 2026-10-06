@@ -821,7 +821,9 @@ Resources:
             Action:
               - lambda:GetFunctionRecursionConfig
               - lambda:PutFunctionRecursionConfig
-            Resource: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-CacheInvalidationWorkerFunction-*'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-CacheInvalidationWorkerFunction-*'
+              - !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-AlbumWorkWorkerFunction-*'
           - Sid: CreateStackEventSourceMappings
             Effect: Allow
             Action: lambda:CreateEventSourceMapping

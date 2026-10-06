@@ -64,6 +64,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         self.assertIn("- lambda:GetFunctionRecursionConfig", recursion)
         self.assertIn("- lambda:PutFunctionRecursionConfig", recursion)
         self.assertIn("function:${ApplicationStackName}-CacheInvalidationWorkerFunction-*'", recursion)
+        self.assertIn("function:${ApplicationStackName}-AlbumWorkWorkerFunction-*'", recursion)
         self.assertNotIn("Resource: '*'", recursion)
         self.assertEqual(TEMPLATE.count("- lambda:PutFunctionRecursionConfig"), 1)
 

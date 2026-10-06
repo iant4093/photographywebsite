@@ -1,6 +1,7 @@
 {
   "version": 1,
   "additions": {
-    "OriginalComparisonsEnabled": "true"
+    "OriginalComparisonsEnabled": "true",
+    "AlbumWorkRouting": "legacy"
   }
 }

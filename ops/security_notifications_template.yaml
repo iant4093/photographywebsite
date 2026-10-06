@@ -53,6 +53,8 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-ApiLatencyAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-FrontDoorDeniedAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AsyncFailureQueueAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AlbumWorkDeadLetterQueueAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AlbumWorkQueueAgeAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewDeadLetterQueueAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewQueueAgeAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewMetadataSystemErrorsAlarm-*'
