@@ -18,6 +18,7 @@ counts only.
 import json
 import logging
 import os
+from work_queue import queue_url as work_queue_url
 import time
 
 import boto3
@@ -57,7 +58,7 @@ def _enqueue_video_jobs(album_id):
     if _sqs is None:
         _sqs = boto3.client("sqs", config=Config(connect_timeout=2, read_timeout=4, retries={"mode": "standard", "max_attempts": 2}))
     _sqs.send_message(
-        QueueUrl=os.environ["CACHE_INVALIDATION_QUEUE_URL"],
+        QueueUrl=work_queue_url(),
         MessageBody=json.dumps({"version": 1, "kind": "album-video-jobs", "albumId": album_id}, separators=(",", ":")),
     )
 

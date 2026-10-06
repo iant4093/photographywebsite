@@ -5,6 +5,7 @@ The table stream delivers job inserts; completed jobs expire, failed jobs stay
 available for admin retry. No media bytes or credentials are stored here.
 """
 import os
+from work_queue import queue_url as work_queue_url
 import json
 import time
 import uuid
@@ -271,7 +272,7 @@ def defer(job):
         raise DriveBackupBusy('Backup needs an administrator retry')
     if int(job.get('deferredUntil', 0)) > now:
         return
-    queue = os.environ.get('CACHE_INVALIDATION_QUEUE_URL', '').strip()
+    queue = work_queue_url()
     if not queue:
         raise DriveBackupBusy('Backup continuation queue is unavailable')
     count = min(4, int(job.get('deferrals', 0)))

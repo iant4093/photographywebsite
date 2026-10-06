@@ -280,6 +280,18 @@
     {"logicalId": "ApiAuthorizationDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
     {"logicalId": "FrontDoorDeniedMetricFilter", "resourceType": "AWS::Logs::MetricFilter", "action": "Modify", "propertyPaths": ["MetricTransformations"], "allowNoDetails": false},
     {"logicalId": "EditUserFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
-    {"logicalId": "OriginalComparisonWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true}
+    {"logicalId": "OriginalComparisonWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "AlbumWorkQueue", "resourceType": "AWS::SQS::Queue", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "AlbumWorkDeadLetterQueue", "resourceType": "AWS::SQS::Queue", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "AlbumWorkWorkerFunction", "resourceType": "AWS::Lambda::Function", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "AlbumWorkWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "AlbumWorkWorkerFunctionAlbumWorkRequests", "resourceType": "AWS::Lambda::EventSourceMapping", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "AlbumWorkDeadLetterQueueAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "AlbumWorkQueueAgeAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
+    {"logicalId": "CacheInvalidationQueue", "resourceType": "AWS::SQS::Queue", "action": "Modify", "propertyPaths": ["VisibilityTimeout"], "allowNoDetails": false},
+    {"logicalId": "AlbumWorkWorkerFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "RecursiveLoop"], "allowNoDetails": false},
+    {"logicalId": "AlbumWorkWorkerFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies"], "allowNoDetails": false, "allowProtectedModify": true},
+    {"logicalId": "AlbumWorkDeadLetterQueueAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false},
+    {"logicalId": "AlbumWorkQueueAgeAlarm", "resourceType": "AWS::CloudWatch::Alarm", "action": "Modify", "propertyPaths": ["AlarmActions"], "allowNoDetails": false}
   ]
 }

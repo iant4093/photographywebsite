@@ -1,6 +1,7 @@
 """Durable cleanup receipts and coalesced continuations on the existing queue."""
 import json
 import os
+from work_queue import queue_url as work_queue_url
 import time
 
 from cache_invalidation import _queue_client, prepare_media_revocation, advance_media_revocation
@@ -42,7 +43,7 @@ def schedule(album_id, pending, save, kind, delay=15):
         raise RuntimeError("Cleanup requires administrator reconciliation")
     if int(pending.get("scheduledUntil", 0)) > now:
         return
-    queue = os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip()
+    queue = work_queue_url()
     if not queue:
         raise RuntimeError("Cleanup continuation queue is unavailable")
     delay = min(900, max(1, int(delay)))

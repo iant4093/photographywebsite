@@ -3,6 +3,11 @@ Transform: AWS::Serverless-2016-10-31
 Description: Ian Truong Photography Portfolio - hardened serverless backend
 
 Parameters:
+  AlbumWorkRouting:
+    Type: String
+    Default: legacy
+    AllowedValues: [legacy, separated]
+    Description: Keep legacy delivery until the dedicated consumer is validated; change only with a reviewed cutover.
   Stage:
     Type: String
     Default: prod
@@ -151,6 +156,7 @@ Rules:
         AssertDescription: The default execute-api endpoint must be disabled when enforcement is enabled.
 
 Conditions:
+  SeparateAlbumWork: !Equals [!Ref AlbumWorkRouting, separated]
   EnableOriginalComparisons: !And
     - !Equals [!Ref OriginalComparisonsEnabled, 'true']
     - !Not [!Equals [!Ref GoogleOAuthSecretArn, '']]
@@ -1970,6 +1976,44 @@ Resources:
         - Key: DataClassification
           Value: OperationalWorkPayloads
 
+  AlbumWorkDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: !Sub 'ian-photography-album-work-dlq-${Stage}'
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 20
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: OperationalFailurePayloads
+
+  AlbumWorkQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: !Sub 'ian-photography-album-work-${Stage}'
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 86400
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AlbumWorkDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Application
+          Value: IanTruongPhotography
+        - Key: Stage
+          Value: !Ref Stage
+        - Key: DataClassification
+          Value: OperationalWorkPayloads
+
   CacheInvalidationQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -1977,7 +2021,7 @@ Resources:
       SqsManagedSseEnabled: true
       MessageRetentionPeriod: 86400
       ReceiveMessageWaitTimeSeconds: 20
-      VisibilityTimeout: 180
+      VisibilityTimeout: 190
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt AsyncFailureQueue.Arn
         maxReceiveCount: 5
@@ -2206,6 +2250,54 @@ Resources:
             BatchSize: 10
             FunctionResponseTypes: [ReportBatchItemFailures]
             MaximumBatchingWindowInSeconds: 10
+
+  AlbumWorkWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      CodeUri: ./
+      Handler: album_work_worker.handler
+      Timeout: 30
+      ReservedConcurrentExecutions: 2
+      # Receipts keep their existing retry deadlines; bounded steps requeue here.
+      RecursiveLoop: Allow
+      Environment:
+        Variables:
+          TAGGING_WORKER_FUNCTION_NAME: !Ref TagMediaObjectFunction
+          MEDIA_DELETION_WORKER_FUNCTION_NAME: !Ref DeleteImagesFunction
+          DELETION_WORKER_FUNCTION_NAME: !Ref DeleteAlbumFunction
+          USER_DELETION_WORKER_FUNCTION_NAME: !Ref DeleteUserFunction
+          USER_EMAIL_WORKER_FUNCTION_NAME: !Ref EditUserFunction
+          VISIBILITY_WORKER_FUNCTION_NAME: !Ref UpdateAlbumFunction
+          UPLOAD_WORKER_FUNCTION_NAME: !Ref AddImagesFunction
+          THUMBNAIL_WORKER_FUNCTION_NAME: !Ref UpdateImageFunction
+          DRIVE_WORKER_FUNCTION_NAME: !Ref GoogleDriveBackupFunction
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !GetAtt TagMediaObjectFunction.Arn
+                - !GetAtt DeleteImagesFunction.Arn
+                - !GetAtt DeleteAlbumFunction.Arn
+                - !GetAtt DeleteUserFunction.Arn
+                - !GetAtt EditUserFunction.Arn
+                - !GetAtt UpdateAlbumFunction.Arn
+                - !GetAtt AddImagesFunction.Arn
+                - !GetAtt UpdateImageFunction.Arn
+                - !GetAtt GoogleDriveBackupFunction.Arn
+        - SQSPollerPolicy:
+            QueueName: !GetAtt AlbumWorkQueue.QueueName
+      Events:
+        AlbumWorkRequests:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AlbumWorkQueue.Arn
+            BatchSize: 4
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            MaximumBatchingWindowInSeconds: 0
+            ScalingConfig:
+              MaximumConcurrency: 2
 
   HoverPreviewManifestBuilderFunction:
     Type: AWS::Serverless::Function
@@ -2606,6 +2698,7 @@ Resources:
         Variables:
           ALBUMS_TABLE: !Ref AlbumsTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
       Policies:
         - Statement:
             - Effect: Allow
@@ -2615,7 +2708,7 @@ Resources:
               Resource: !GetAtt AlbumsTable.Arn
             - Effect: Allow
               Action: sqs:SendMessage
-              Resource: !GetAtt CacheInvalidationQueue.Arn
+              Resource: [!GetAtt CacheInvalidationQueue.Arn, !GetAtt AlbumWorkQueue.Arn]
       Events:
         QueueUpgrades:
           Type: Schedule
@@ -2969,6 +3062,7 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           IMAGES_BUCKET: !Ref ImagesBucket
           GOOGLE_DRIVE_FOLDER_ID: !Ref GoogleDriveFolderId
           GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
@@ -3010,7 +3104,7 @@ Resources:
               Resource: !Sub '${ImagesBucket.Arn}/albums/*'
             - Effect: Allow
               Action: sqs:SendMessage
-              Resource: [!GetAtt AsyncFailureQueue.Arn, !GetAtt CacheInvalidationQueue.Arn]
+              Resource: [!GetAtt AsyncFailureQueue.Arn, !GetAtt CacheInvalidationQueue.Arn, !GetAtt AlbumWorkQueue.Arn]
         - !If
           - HasGoogleOAuthSecret
           - Statement:
@@ -3043,6 +3137,7 @@ Resources:
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           PREVIEW_QUEUE_URL: !Ref PreviewQueue
@@ -3115,6 +3210,7 @@ Resources:
               Action: sqs:SendMessage
               Resource:
                 - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt AlbumWorkQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action: cognito-idp:ListUsers
@@ -3181,6 +3277,7 @@ Resources:
           ALBUMS_TABLE: !Ref AlbumsTable
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           HOVER_PREVIEW_REFRESH_QUEUE_URL: !Ref HoverPreviewRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
@@ -3233,6 +3330,7 @@ Resources:
               Action: sqs:SendMessage
               Resource:
                 - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt AlbumWorkQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
                 - !GetAtt HoverPreviewRefreshQueue.Arn
             - Effect: Allow
@@ -3316,6 +3414,7 @@ Resources:
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
@@ -3378,6 +3477,7 @@ Resources:
               Action: sqs:SendMessage
               Resource:
                 - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt AlbumWorkQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
@@ -3434,6 +3534,7 @@ Resources:
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           PREVIEW_QUEUE_URL: !Ref PreviewQueue
@@ -3499,6 +3600,7 @@ Resources:
               Action: sqs:SendMessage
               Resource:
                 - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt AlbumWorkQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
@@ -3910,6 +4012,7 @@ Resources:
           DRIVE_BACKUP_STATE_TABLE: !Ref DriveBackupStateTable
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           IMAGES_BUCKET: !Ref ImagesBucket
@@ -3963,6 +4066,7 @@ Resources:
               Action: sqs:SendMessage
               Resource:
                 - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt AlbumWorkQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
@@ -4002,6 +4106,7 @@ Resources:
       Environment:
         Variables:
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           ALBUMS_TABLE: !Ref AlbumsTable
           # Avoid a SAM-generated S3 notification cycle; the physical name is deterministic.
           IMAGES_BUCKET: !Sub 'goldenhour-images-${AWS::AccountId}-${Stage}'
@@ -4023,7 +4128,7 @@ Resources:
                   s3:prefix: albums/*
             - Effect: Allow
               Action: sqs:SendMessage
-              Resource: [!GetAtt AsyncFailureQueue.Arn, !GetAtt CacheInvalidationQueue.Arn]
+              Resource: [!GetAtt AsyncFailureQueue.Arn, !GetAtt CacheInvalidationQueue.Arn, !GetAtt AlbumWorkQueue.Arn]
       Events:
         CreatedAlbumObject:
           Type: S3
@@ -4204,6 +4309,7 @@ Resources:
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           IMAGES_BUCKET: !Ref ImagesBucket
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           CLOUDFRONT_DOMAIN: !GetAtt ImagesCloudFront.DomainName
@@ -4240,6 +4346,7 @@ Resources:
               Action: sqs:SendMessage
               Resource:
                 - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt AlbumWorkQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action:
@@ -4825,6 +4932,7 @@ Resources:
           ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable
           PREVIEW_METADATA_TABLE: !Ref PreviewMetadataTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           RANDOM_PHOTO_REFRESH_QUEUE_URL: !Ref RandomPhotoRefreshQueue
           IMAGES_DISTRIBUTION_ID: !Ref ImagesCloudFront
           IMAGES_BUCKET: !Ref ImagesBucket
@@ -4865,6 +4973,7 @@ Resources:
               Action: sqs:SendMessage
               Resource:
                 - !GetAtt CacheInvalidationQueue.Arn
+                - !GetAtt AlbumWorkQueue.Arn
                 - !GetAtt RandomPhotoRefreshQueue.Arn
             - Effect: Allow
               Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
@@ -4925,13 +5034,14 @@ Resources:
           COGNITO_USER_POOL_ID: !Ref UserPool
           ALBUMS_TABLE: !Ref AlbumsTable
           CACHE_INVALIDATION_QUEUE_URL: !Ref CacheInvalidationQueue
+          ALBUM_WORK_QUEUE_URL: !If [SeparateAlbumWork, !Ref AlbumWorkQueue, !Ref CacheInvalidationQueue]
           OWNER_SUB_CREATED_AT_INDEX: OwnerSubCreatedAtIndex
           ALBUM_INDEX_DEPLOYMENT_PHASE: !Ref AlbumIndexDeploymentPhase
       Policies:
         - Statement:
             - Effect: Allow
               Action: sqs:SendMessage
-              Resource: !GetAtt CacheInvalidationQueue.Arn
+              Resource: [!GetAtt CacheInvalidationQueue.Arn, !GetAtt AlbumWorkQueue.Arn]
         - !Ref FrontDoorOriginSecretReadPolicy
         - Statement:
             - Effect: Allow
@@ -5131,6 +5241,44 @@ Resources:
       DatapointsToAlarm: 1
       Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
+
+  AlbumWorkDeadLetterQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A durable album continuation exhausted delivery retries; inspect its receipt before repair.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AlbumWorkDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
+
+  AlbumWorkQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Durable album continuations are more than ten minutes behind.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AlbumWorkQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 600
+      ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
         - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'

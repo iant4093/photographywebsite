@@ -309,7 +309,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 expected_paths.append("MemorySize")
             if rule["logicalId"] == "GoogleDriveBackupFunction":
                 expected_paths.append("EphemeralStorage")
-            if rule["logicalId"] == "CacheInvalidationWorkerFunction":
+            if rule["logicalId"] in {"CacheInvalidationWorkerFunction", "AlbumWorkWorkerFunction"}:
                 expected_paths.append("RecursiveLoop")
             self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertFalse(rule["allowNoDetails"])
@@ -350,6 +350,7 @@ class ReleaseIntentTests(unittest.TestCase):
                 "GoogleDriveBackupFunctionRole",
                 "AddImagesFunctionRole",
                 "CacheInvalidationWorkerFunctionRole",
+                "AlbumWorkWorkerFunctionRole",
                 "DeleteAlbumFunctionRole",
                 "DeleteImagesFunctionRole",
                 "UpdateAlbumFunctionRole",
@@ -422,6 +423,13 @@ class ReleaseIntentTests(unittest.TestCase):
         self.assertEqual(
             add_rules,
             {
+                ("AlbumWorkQueue", "AWS::SQS::Queue"),
+                ("AlbumWorkDeadLetterQueue", "AWS::SQS::Queue"),
+                ("AlbumWorkWorkerFunction", "AWS::Lambda::Function"),
+                ("AlbumWorkWorkerFunctionRole", "AWS::IAM::Role"),
+                ("AlbumWorkWorkerFunctionAlbumWorkRequests", "AWS::Lambda::EventSourceMapping"),
+                ("AlbumWorkDeadLetterQueueAlarm", "AWS::CloudWatch::Alarm"),
+                ("AlbumWorkQueueAgeAlarm", "AWS::CloudWatch::Alarm"),
                 ("HeroReelFunction", "AWS::Lambda::Function"),
                 ("HeroReelFunctionRole", "AWS::IAM::Role"),
                 ("HeroReelFunctionReconcile", "AWS::Events::Rule"),
@@ -2726,7 +2734,7 @@ class WorkflowPolicyTests(unittest.TestCase):
             release_guard.load_parameter_additions(json.loads(
                 (ROOT / parameter_policy).read_text(encoding="utf-8")
             )),
-            {"OriginalComparisonsEnabled": "true"},
+            {"OriginalComparisonsEnabled": "true", "AlbumWorkRouting": "legacy"},
         )
         for helper in (plan, execute, collect):
             self.assertIn(

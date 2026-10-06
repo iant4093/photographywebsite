@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+from work_queue import queue_url as work_queue_url
 import time
 import uuid
 import drive_backup_jobs
@@ -22,7 +23,7 @@ def request_hash(body):
 
 
 def enqueue(album_id, kind="album-visibility", *, delay=0):
-    queue = os.environ.get("CACHE_INVALIDATION_QUEUE_URL", "").strip()
+    queue = work_queue_url()
     if not queue:
         raise RuntimeError("Privacy continuation queue is not configured")
     _queue_client().send_message(

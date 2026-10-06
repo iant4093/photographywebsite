@@ -16,7 +16,7 @@ from audit_helpers import actor_context, emit_audit_event
 from album_media_store import append_album_media, deactivate_album_media, mutation_expression, finish_media_sync
 from auth_helpers import require_admin
 from cache_invalidation import request_public_api_invalidation
-from create_album import _extract_exif, _normalize_images, _start_video_jobs
+from upload_media import extract_exif as _extract_exif, normalize_images as _normalize_images, start_video_jobs as _start_video_jobs
 from media_access import album_known_keys, serialize_album_summary, serialize_images, tag_keys_visibility
 from media_signing import private_media_delivery
 from preview_jobs import enqueue_preview_jobs

@@ -20,7 +20,7 @@ from ops.ci import release_guard  # noqa: E402
 
 
 SHA = "a" * 40
-ADDITION = {"OriginalComparisonsEnabled": "true"}
+ADDITION = {"OriginalComparisonsEnabled": "true", "AlbumWorkRouting": "legacy"}
 DOCUMENT = {"version": 1, "additions": ADDITION}
 
 
@@ -35,7 +35,7 @@ def stack(flag=None):
     return {"Parameters": parameters}
 
 
-def request(flag="true", *, existing=False):
+def request(flag="true", *, existing=False, routing="legacy"):
     values = [
         {"ParameterKey": "Stage", "UsePreviousValue": True},
         {"ParameterKey": "ProtectedParameter", "UsePreviousValue": True},
@@ -43,14 +43,18 @@ def request(flag="true", *, existing=False):
     ]
     if flag is not None:
         values.append({"ParameterKey": "OriginalComparisonsEnabled", **({"UsePreviousValue": True} if existing else {"ParameterValue": flag})})
+    if routing is not None:
+        values.append({"ParameterKey": "AlbumWorkRouting", "ParameterValue": routing})
     return values
 
 
-def resolved(flag="true"):
+def resolved(flag="true", *, routing="legacy"):
     values = copy.deepcopy(stack()["Parameters"])
     values[2]["ParameterValue"] = SHA
     if flag is not None:
         values.append({"ParameterKey": "OriginalComparisonsEnabled", "ParameterValue": flag})
+    if routing is not None:
+        values.append({"ParameterKey": "AlbumWorkRouting", "ParameterValue": routing})
     return values
 
 
@@ -112,9 +116,9 @@ class ParameterAdditionPreservationTests(unittest.TestCase):
         for additions in (None, {}):
             with self.subTest(additions=additions):
                 generated = release_guard.previous_parameter_payload(stack(), release_sha=SHA, parameter_additions=additions)
-                self.assertEqual(generated, request(None))
+                self.assertEqual(generated, request(None, routing=None))
                 release_guard.require_preserved_parameters(stack(), generated, release_sha=SHA, parameter_additions=additions)
-                release_guard.require_preserved_parameters(stack(), resolved(None), release_sha=SHA, resolved_values=True, parameter_additions=additions)
+                release_guard.require_preserved_parameters(stack(), resolved(None, routing=None), release_sha=SHA, resolved_values=True, parameter_additions=additions)
                 with self.assertRaises(release_guard.GateError):
                     release_guard.require_preserved_parameters(stack(), request(), release_sha=SHA, parameter_additions=additions)
 
@@ -135,7 +139,7 @@ class ParameterAdditionPreservationTests(unittest.TestCase):
                     release_guard.require_preserved_parameters(stack(), planned, release_sha=SHA, resolved_values=resolved_mode, parameter_additions=ADDITION)
         for resolved_mode in (False, True):
             explicit_false = resolved() if resolved_mode else request()
-            explicit_false[-1]["UsePreviousValue"] = False
+            next(v for v in explicit_false if v["ParameterKey"] == "OriginalComparisonsEnabled")["UsePreviousValue"] = False
             release_guard.require_preserved_parameters(stack(), explicit_false, release_sha=SHA, resolved_values=resolved_mode, parameter_additions=ADDITION)
             with self.subTest(missing=True, resolved_mode=resolved_mode), self.assertRaises(release_guard.GateError):
                 release_guard.require_preserved_parameters(stack(), resolved(None) if resolved_mode else request(None), release_sha=SHA, resolved_values=resolved_mode, parameter_additions=ADDITION)
