@@ -48,7 +48,9 @@ class FrameLayoutTests(unittest.TestCase):
     def test_frames_are_committed_outputs_of_a_saved_video(self):
         album = {"albumId": ALBUM, "type": "video", "images": [{"rawKey": RAW, "hlsUrl": CURRENT}]}
         self.assertTrue(media_mutation.object_is_committed(album, f"{FRAMES}movie.0000003.jpg"))
+        self.assertTrue(media_mutation.object_is_committed(album, f"{FRAMES}movie_frames-support.mp4"))
         self.assertFalse(media_mutation.object_is_committed(album, f"albums/{ALBUM}/original/other_hls/frames/v1/other.0000003.jpg"))
+        self.assertFalse(media_mutation.object_is_committed(album, f"albums/{ALBUM}/original/other_hls/frames/v1/other_frames-support.mp4"))
         self.assertFalse(media_mutation.object_is_committed({**album, "type": "photo"}, f"{FRAMES}movie.0000003.jpg"))
 
     def test_candidates_are_current_streams_without_frames_or_pending_work(self):
@@ -98,7 +100,7 @@ class FrameJobTests(unittest.TestCase):
             with self.subTest(size=size):
                 self.assertIsNone(media_helpers._frame_size(*size))
 
-    def test_a_conversion_also_writes_frames_and_a_frame_job_writes_only_frames(self):
+    def test_frame_capture_has_the_regular_video_output_required_by_mediaconvert(self):
         request = self.submit(lambda: media_helpers.start_mediaconvert_job(
             f"s3://{BUCKET}/{RAW}", f"s3://{BUCKET}/out/", width=1920, height=1080, frames_s3_prefix=f"s3://{BUCKET}/{FRAMES}",
         ))
@@ -117,6 +119,15 @@ class FrameJobTests(unittest.TestCase):
         self.assertEqual(request["Settings"]["Inputs"][0]["VideoSelector"], {"Rotate": "AUTO"})
         self.assertEqual(request["ClientRequestToken"], "t" * 32)
         self.assertNotIn("Height", frame_group(request)["Outputs"][0]["VideoDescription"])
+        companion = frame_group(request)["Outputs"][1]
+        self.assertEqual(companion["ContainerSettings"]["Container"], "MP4")
+        self.assertEqual(companion["NameModifier"], "_frames-support")
+        video = companion["VideoDescription"]
+        self.assertEqual((video["Width"], video["Height"], video["ScalingBehavior"]), (320, 320, "FIT_NO_UPSCALE"))
+        self.assertEqual(video["CodecSettings"]["Codec"], "H_264")
+        self.assertEqual(video["CodecSettings"]["H264Settings"]["MaxBitrate"], 200000)
+        self.assertEqual(companion["AudioDescriptions"][0]["CodecSettings"]["Codec"], "AAC")
+        self.assertEqual(frame_group(request)["OutputGroupSettings"]["FileGroupSettings"]["Destination"], f"s3://{BUCKET}/{FRAMES}")
 
         # Without a frames destination the job is the stream alone.
         request = self.submit(lambda: media_helpers.start_mediaconvert_job(f"s3://{BUCKET}/{RAW}", f"s3://{BUCKET}/out/"))
@@ -214,7 +225,7 @@ class FrameScanTests(unittest.TestCase):
                 patch.object(video_upgrade, "MAX_FRAMES_PER_RUN", 5), \
                 patch.dict(os.environ, {"CACHE_INVALIDATION_QUEUE_URL": "https://sqs.example/queue"}):
             result = video_upgrade.handler({}, None)
-        self.assertEqual(result, {"queued": 0, "frames": 5, "inFlight": 0, "waiting": 0})
+        self.assertEqual(result, {"queued": 0, "frames": 5, "resumed": 0, "inFlight": 0, "waiting": 0})
         receipts = [call.kwargs["ExpressionAttributeValues"][":receipt"] for call in table.update_item.call_args_list
                     if ":receipt" in call.kwargs["ExpressionAttributeValues"]]
         self.assertEqual(len(receipts), 5)

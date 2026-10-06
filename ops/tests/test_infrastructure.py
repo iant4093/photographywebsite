@@ -35,6 +35,15 @@ def resource_block(logical_id: str) -> str:
 
 
 class TemplateValidationTests(unittest.TestCase):
+    def test_only_the_shared_continuation_worker_allows_recursive_steps(self) -> None:
+        worker = resource_block("CacheInvalidationWorkerFunction")
+        self.assertIn("RecursiveLoop: Allow", worker)
+        self.assertEqual(TEMPLATE.count("RecursiveLoop: Allow"), 1)
+        self.assertIn("ReservedConcurrentExecutions: 2", worker)
+        intent = json.loads((ROOT / "ops" / "ci" / "release_intent.json").read_text())
+        allowed = [rule["logicalId"] for rule in intent["rules"] if "RecursiveLoop" in rule["propertyPaths"]]
+        self.assertEqual(allowed, ["CacheInvalidationWorkerFunction"])
+
     def test_tagging_worker_can_distinguish_deleted_album_objects(self) -> None:
         policy = resource_block("TagMediaObjectFunction")
         self.assertIn("Action: s3:ListBucket", policy)

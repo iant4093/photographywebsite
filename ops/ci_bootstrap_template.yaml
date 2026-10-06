@@ -816,6 +816,12 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-*'
               - !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:ian-photography-security-signal-processor-prod'
+          - Sid: ManageContinuationWorkerRecursion
+            Effect: Allow
+            Action:
+              - lambda:GetFunctionRecursionConfig
+              - lambda:PutFunctionRecursionConfig
+            Resource: !Sub 'arn:${AWS::Partition}:lambda:us-west-2:${AWS::AccountId}:function:${ApplicationStackName}-CacheInvalidationWorkerFunction-*'
           - Sid: CreateStackEventSourceMappings
             Effect: Allow
             Action: lambda:CreateEventSourceMapping

@@ -161,6 +161,18 @@ release-marker, and direct-storage posture failures are never retried.
 
 ## OIDC trust and permissions
 
+The intentional shared album-continuation loop requires CloudFormation's
+execution policy to read and set Lambda recursion configuration. The exact
+`ManageContinuationWorkerRecursion` statement grants these two actions only
+for `${ApplicationStackName}-CacheInvalidationWorkerFunction-*`; it does not
+grant them to the GitHub plan, execute, frontend, or audit sessions. Before
+releasing the first `RecursiveLoop: Allow` change, update the bootstrap through
+a reviewed non-executing change set preserving all live parameters. The only
+expected change is `CloudFormationExecutionIdentityAndComputePolicy`, without
+replacement. Apply this separately approved prerequisite before merging the
+application release. The application release intent permits `RecursiveLoop`
+only on `CacheInvalidationWorkerFunction`.
+
 The retained bootstrap source is `ops/ci_bootstrap_template.yaml`. It creates or
 references the GitHub OIDC provider with audience `sts.amazonaws.com`. Every
 role's trust policy must match the exact repository and the exact `main` ref

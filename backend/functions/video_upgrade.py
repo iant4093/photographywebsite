@@ -7,6 +7,9 @@ switches the video over once the new stream is complete. Pacing keeps the
 MediaConvert queue and spend gradual; once every video is current a run only
 reads the albums table.
 
+The same schedule wakes due existing receipts when a continuation was lost,
+without resetting submission tokens or retry deadlines.
+
 Receipts are added one key at a time with conditions, never by rewriting the
 album's receipt map, so this never races an upload's own receipts. Logs carry
 counts only.
@@ -15,6 +18,7 @@ counts only.
 import json
 import logging
 import os
+import time
 
 import boto3
 from boto3.dynamodb.conditions import Attr
@@ -29,7 +33,7 @@ logger = logging.getLogger("photography_api.video_upgrade")
 # New re-conversions per run, and upgrades allowed in flight at once.
 MAX_NEW_PER_RUN = 8
 MAX_IN_FLIGHT = 12
-# Frame-only jobs are short and cheap; they finish on their own.
+# Frame backfills do not rebuild the published HLS ladder.
 MAX_FRAMES_PER_RUN = 20
 BUSY_FIELDS = (
     "pendingVisibilityChange", "pendingMediaDeletion", "pendingAlbumDeletion",
@@ -80,6 +84,16 @@ def _ready(album):
     return album.get("status", "active") == "active" and not any(album.get(field) for field in BUSY_FIELDS)
 
 
+def _has_due_jobs(album, now):
+    """Recover lost continuations without changing receipts or retry ceilings."""
+    return any(
+        isinstance(receipt, dict)
+        and receipt.get("phase") in {"prepared", "submitting", "transcoding"}
+        and int(receipt.get("checkAfter", 0)) <= now
+        for receipt in (album.get("videoJobs") or {}).values()
+    )
+
+
 def _add_receipt(album_id, identity, receipt):
     """Add one receipt unless the album changed state or already has it."""
     table = _albums()
@@ -111,7 +125,8 @@ def handler(_event, _context):
     in_flight = sum(_in_flight(album) for album in albums)
     budget = max(0, min(MAX_NEW_PER_RUN, MAX_IN_FLIGHT - in_flight))
     frames_budget = MAX_FRAMES_PER_RUN
-    remaining = queued = frames_queued = 0
+    remaining = queued = frames_queued = resumed = 0
+    now = int(time.time())
     for album in albums:
         if not _ready(album):
             continue
@@ -130,8 +145,10 @@ def handler(_event, _context):
                 frames_added += 1
         frames_budget -= frames_added
         frames_queued += frames_added
-        if added or frames_added:
+        due = _has_due_jobs(album, now)
+        if added or frames_added or due:
             _enqueue_video_jobs(album["albumId"])
-    logger.info("video_upgrade_run queued=%d frames=%d in_flight=%d waiting=%d",
-                queued, frames_queued, in_flight, remaining - queued)
-    return {"queued": queued, "frames": frames_queued, "inFlight": in_flight, "waiting": remaining - queued}
+            resumed += int(due)
+    logger.info("video_upgrade_run queued=%d frames=%d resumed=%d in_flight=%d waiting=%d",
+                queued, frames_queued, resumed, in_flight, remaining - queued)
+    return {"queued": queued, "frames": frames_queued, "resumed": resumed, "inFlight": in_flight, "waiting": remaining - queued}

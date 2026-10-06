@@ -286,6 +286,8 @@ class ReleaseIntentTests(unittest.TestCase):
                 expected_paths.append("MemorySize")
             if rule["logicalId"] == "GoogleDriveBackupFunction":
                 expected_paths.append("EphemeralStorage")
+            if rule["logicalId"] == "CacheInvalidationWorkerFunction":
+                expected_paths.append("RecursiveLoop")
             self.assertEqual(rule["propertyPaths"], expected_paths)
             self.assertFalse(rule["allowNoDetails"])
 
