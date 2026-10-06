@@ -2587,7 +2587,9 @@ Resources:
           Type: Schedule
           Properties:
             Schedule: rate(15 minutes)
-            Enabled: true
+            # The one-time migration is complete. Retain its function/state
+            # for guarded recovery; completed state already prevents rescans.
+            Enabled: false
 
   # Re-converts videos published before the current HLS ladder, a few per
   # run, through each album's durable video worker (AddImagesFunction).

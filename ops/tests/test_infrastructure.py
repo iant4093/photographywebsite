@@ -35,6 +35,21 @@ def resource_block(logical_id: str) -> str:
 
 
 class TemplateValidationTests(unittest.TestCase):
+    def test_completed_media_backfill_retains_recovery_resources_without_automatic_wakeups(self) -> None:
+        function = resource_block("AlbumMediaBackfillFunction")
+        self.assertIn("Handler: backfill_album_media.handler", function)
+        self.assertIn("ALBUMS_TABLE: !Ref AlbumsTable", function)
+        self.assertIn("ALBUM_MEDIA_TABLE: !Ref AlbumMediaTable", function)
+        self.assertIn("dynamodb:BatchWriteItem", function)
+        self.assertIn("ContinueAlbumMediaBackfill:", function)
+        self.assertIn("Schedule: rate(15 minutes)", function)
+        self.assertIn("Enabled: false", function)
+        self.assertNotIn("Enabled: true", function)
+        table = resource_block("AlbumMediaTable")
+        self.assertIn("DeletionPolicy: Retain", table)
+        self.assertIn("UpdateReplacePolicy: Retain", table)
+        self.assertIn("DeletionProtectionEnabled: true", table)
+
     def test_only_the_shared_continuation_worker_allows_recursive_steps(self) -> None:
         worker = resource_block("CacheInvalidationWorkerFunction")
         self.assertIn("RecursiveLoop: Allow", worker)

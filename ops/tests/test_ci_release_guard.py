@@ -151,6 +151,29 @@ class ChangeSetGateTests(unittest.TestCase):
 
 
 class ReleaseIntentTests(unittest.TestCase):
+    def test_completed_backfill_schedule_allows_only_in_place_state_updates(self):
+        logical_id = "AlbumMediaBackfillFunctionContinueAlbumMediaBackfill"
+        intent = release_guard.load_release_intent(json.loads(
+            (ROOT / "ops/ci/release_intent.json").read_text(encoding="utf-8")
+        ))
+        allowed = change(logical_id=logical_id, resource_type="AWS::Events::Rule", property_name="State")
+        self.assertEqual(
+            release_guard.gate_change_set([{"Changes": [allowed]}], release_intent=intent),
+            {"Add": 0, "Modify": 1, "Total": 1},
+        )
+        for options in (
+            {"action": "Remove"}, {"replacement": "True"}, {"recreation": "Conditionally"},
+            {"property_name": "Targets"}, {"property_name": "ScheduleExpression"},
+            {"logical_id": "OtherMigrationSchedule"},
+        ):
+            denied = change(**{"logical_id": logical_id, "resource_type": "AWS::Events::Rule", "property_name": "State", **options})
+            with self.subTest(options=options), self.assertRaises(release_guard.GateError):
+                release_guard.gate_change_set([{"Changes": [denied]}], release_intent=intent)
+        no_details = copy.deepcopy(allowed)
+        no_details["ResourceChange"]["Details"] = []
+        with self.assertRaises(release_guard.GateError):
+            release_guard.gate_change_set([{"Changes": [no_details]}], release_intent=intent)
+
     @staticmethod
     def intent(*, action="Modify", allow_no_details=False, property_paths=None):
         return {
