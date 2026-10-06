@@ -1,0 +1,239 @@
+{
+  "reviewed": [
+    {
+      "logicalId": "AdminDriveBackupsFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "DriveBackupStateTable.Arn"
+    },
+    {
+      "logicalId": "AdminDriveBackupsFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "AlbumsTable.Arn"
+    },
+    {
+      "logicalId": "AdminDriveBackupsFunction",
+      "propertyPath": "Role",
+      "cause": "AdminDriveBackupsFunctionRole.Arn"
+    },
+    {
+      "logicalId": "AlbumMediaBackfillFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "AlbumMediaTable.Arn"
+    },
+    {
+      "logicalId": "AlbumMediaBackfillFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "AlbumsTable.Arn"
+    },
+    {
+      "logicalId": "AlbumMediaBackfillFunction",
+      "propertyPath": "Role",
+      "cause": "AlbumMediaBackfillFunctionRole.Arn"
+    },
+    {
+      "logicalId": "AlbumWorkDeadLetterQueueAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "AlbumWorkDeadLetterQueue.QueueName"
+    },
+    {
+      "logicalId": "AlbumWorkQueueAgeAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "AlbumWorkQueue.QueueName"
+    },
+    {
+      "logicalId": "AlbumWorkQueue",
+      "propertyPath": "RedrivePolicy",
+      "cause": "AlbumWorkDeadLetterQueue.Arn"
+    },
+    {
+      "logicalId": "AlbumWorkWorkerFunctionAlbumWorkRequests",
+      "propertyPath": "EventSourceArn",
+      "cause": "AlbumWorkQueue.Arn"
+    },
+    {
+      "logicalId": "AsyncFailureQueueAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "AsyncFailureQueue.QueueName"
+    },
+    {
+      "logicalId": "CacheInvalidationQueue",
+      "propertyPath": "RedrivePolicy",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "GetPhotographyStatsFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "DriveUsageCacheTable.Arn"
+    },
+    {
+      "logicalId": "GetPhotographyStatsFunction",
+      "propertyPath": "Role",
+      "cause": "GetPhotographyStatsFunctionRole.Arn"
+    },
+    {
+      "logicalId": "GoogleDriveBackupFunctionBackupIntents",
+      "propertyPath": "DestinationConfig",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "GoogleDriveBackupFunctionBackupIntents",
+      "propertyPath": "EventSourceArn",
+      "cause": "DriveBackupStateTable.StreamArn"
+    },
+    {
+      "logicalId": "GoogleDriveBackupFunction",
+      "propertyPath": "DeadLetterConfig",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "HoverPreviewManifestBuilderFunctionPreviewMetadataChanged",
+      "propertyPath": "DestinationConfig",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "HoverPreviewManifestBuilderFunctionPreviewMetadataChanged",
+      "propertyPath": "EventSourceArn",
+      "cause": "PreviewMetadataTable.StreamArn"
+    },
+    {
+      "logicalId": "HoverPreviewManifestBuilderFunctionRefreshRequests",
+      "propertyPath": "EventSourceArn",
+      "cause": "HoverPreviewRefreshQueue.Arn"
+    },
+    {
+      "logicalId": "HoverPreviewRefreshQueueAgeAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "HoverPreviewRefreshQueue.QueueName"
+    },
+    {
+      "logicalId": "HoverPreviewRefreshQueue",
+      "propertyPath": "RedrivePolicy",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "OriginalComparisonFailureAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "OriginalComparisonDeadLetterQueue.QueueName"
+    },
+    {
+      "logicalId": "OriginalComparisonQueue",
+      "propertyPath": "RedrivePolicy",
+      "cause": "OriginalComparisonDeadLetterQueue.Arn"
+    },
+    {
+      "logicalId": "OriginalComparisonWorkerFunctionOriginalComparisonJobs",
+      "propertyPath": "EventSourceArn",
+      "cause": "OriginalComparisonQueue.Arn"
+    },
+    {
+      "logicalId": "OriginalIndexRefreshFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "OriginalComparisonTable.Arn"
+    },
+    {
+      "logicalId": "OriginalIndexRefreshFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "OriginalPreviewBucket.Arn"
+    },
+    {
+      "logicalId": "OriginalIndexRefreshFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "AlbumsTable.Arn"
+    },
+    {
+      "logicalId": "OriginalIndexRefreshFunctionRole",
+      "propertyPath": "Policies",
+      "cause": "OriginalComparisonQueue.Arn"
+    },
+    {
+      "logicalId": "OriginalIndexRefreshFunction",
+      "propertyPath": "Role",
+      "cause": "OriginalIndexRefreshFunctionRole.Arn"
+    },
+    {
+      "logicalId": "OriginalPreviewBucketPolicy",
+      "propertyPath": "PolicyDocument",
+      "cause": "OriginalPreviewBucket.Arn"
+    },
+    {
+      "logicalId": "PreviewDeadLetterQueueAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "PreviewDeadLetterQueue.QueueName"
+    },
+    {
+      "logicalId": "PreviewQueueAgeAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "PreviewQueue.QueueName"
+    },
+    {
+      "logicalId": "PreviewQueueDepthAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "PreviewQueue.QueueName"
+    },
+    {
+      "logicalId": "PreviewQueue",
+      "propertyPath": "RedrivePolicy",
+      "cause": "PreviewDeadLetterQueue.Arn"
+    },
+    {
+      "logicalId": "PreviewWorkerFunctionPreviewJobs",
+      "propertyPath": "EventSourceArn",
+      "cause": "PreviewQueue.Arn"
+    },
+    {
+      "logicalId": "RandomPhotoPoolBuilderFunctionAlbumsChanged",
+      "propertyPath": "DestinationConfig",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "RandomPhotoPoolBuilderFunctionAlbumsChanged",
+      "propertyPath": "EventSourceArn",
+      "cause": "AlbumsTable.StreamArn"
+    },
+    {
+      "logicalId": "RandomPhotoPoolBuilderFunctionRefreshRequests",
+      "propertyPath": "EventSourceArn",
+      "cause": "RandomPhotoRefreshQueue.Arn"
+    },
+    {
+      "logicalId": "RandomPhotoRefreshQueue",
+      "propertyPath": "RedrivePolicy",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "TagMediaObjectFunction",
+      "propertyPath": "DeadLetterConfig",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "WorkerZipFunctionArchiveJobs",
+      "propertyPath": "EventSourceArn",
+      "cause": "ZipPreparationQueue.Arn"
+    },
+    {
+      "logicalId": "WorkerZipFunction",
+      "propertyPath": "DeadLetterConfig",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "ZipArchiveRefreshFunctionAlbumsChanged",
+      "propertyPath": "DestinationConfig",
+      "cause": "AsyncFailureQueue.Arn"
+    },
+    {
+      "logicalId": "ZipArchiveRefreshFunctionAlbumsChanged",
+      "propertyPath": "EventSourceArn",
+      "cause": "AlbumsTable.StreamArn"
+    },
+    {
+      "logicalId": "ZipPreparationFailureAlarm",
+      "propertyPath": "Dimensions",
+      "cause": "ZipPreparationDeadLetterQueue.QueueName"
+    },
+    {
+      "logicalId": "ZipPreparationQueue",
+      "propertyPath": "RedrivePolicy",
+      "cause": "ZipPreparationDeadLetterQueue.Arn"
+    }
+  ]
+}
