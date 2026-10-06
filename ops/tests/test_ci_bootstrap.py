@@ -58,6 +58,29 @@ def execution_permissions() -> str:
 
 
 class CiBootstrapTemplateTests(unittest.TestCase):
+    def test_http_api_tag_permission_is_limited_to_the_retained_api_and_prod_stage(self):
+        from samtranslator.yaml_helper import yaml_parse
+
+        template = yaml_parse(TEMPLATE)
+        parameter = template['Parameters']['ApplicationHttpApiId']
+        self.assertEqual(parameter['AllowedValues'], [parameter['Default']])
+        statements = template['Resources']['CloudFormationExecutionEncryptionAndObservabilityPolicy'][
+            'Properties']['PolicyDocument']['Statement']
+        permission = next(s for s in statements if s['Sid'] == 'TagExactProductionHttpApiAndStage')
+        self.assertEqual(permission['Effect'], 'Allow')
+        self.assertEqual(set(permission['Action']), {'apigateway:GET', 'apigateway:POST', 'apigateway:DELETE'})
+        resources = {r['Fn::Sub'].replace('${AWS::Partition}', 'aws').replace(
+            '${ApplicationHttpApiId}', parameter['Default']) for r in permission['Resource']}
+        expected = {
+            'arn:aws:apigateway:us-west-2::/tags/arn%3Aaws%3Aapigateway%3Aus-west-2%3A%3A%2F'
+            + prefix + 'apis%2F' + parameter['Default'] + suffix
+            for prefix in ('', 'v2%2F') for suffix in ('', '%2Fstages%2Fprod')
+        }
+        self.assertEqual(resources, expected)
+        self.assertTrue(all('*' not in arn and '?' not in arn for arn in resources))
+        self.assertTrue(all(parameter['Default'] in arn for arn in resources))
+        self.assertNotIn('TagExactProductionHttpApiAndStage', resource_block('FrontendRole'))
+
     def test_recursion_configuration_is_scoped_to_the_shared_continuation_worker(self):
         policy = resource_block("CloudFormationExecutionIdentityAndComputePolicy")
         recursion = statement_block(policy, "ManageContinuationWorkerRecursion")

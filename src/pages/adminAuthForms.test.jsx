@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetAnalyticsForTests } from '../utils/analytics'
+
+// Contact submissions enqueue analytics; cancel the timer before jsdom teardown.
+afterEach(resetAnalyticsForTests)
 
 const api = vi.hoisted(() => ({
   createUser: vi.fn(), sendContactMessage: vi.fn(), listUsersPage: vi.fn(),
