@@ -108,3 +108,27 @@ class AlbumWorkInfrastructureTests(unittest.TestCase):
             with self.assertRaises(release_guard.GateError): release_guard.load_parameter_additions({'version': 1, 'additions': bad})
         payload = release_guard.previous_parameter_payload({'Parameters': [{'ParameterKey': 'AlbumWorkRouting', 'ParameterValue': 'separated'}]}, parameter_additions=safe)
         self.assertIn({'ParameterKey': 'AlbumWorkRouting', 'UsePreviousValue': True}, payload)
+
+    def test_existing_queue_visibility_dependency_preserves_its_mapping(self):
+        import copy
+        from ops.ci import release_guard as guard
+        intent = guard.load_release_intent(json.loads((ROOT / 'ops/ci/release_intent.json').read_text()))
+        dependencies = guard.load_release_dependencies(json.loads((ROOT / 'ops/ci/release_dependencies.json').read_text()))
+        mapping = {'ResourceChange': {'Action': 'Modify', 'LogicalResourceId': 'CacheInvalidationWorkerFunctionCacheInvalidationRequests',
+            'ResourceType': 'AWS::Lambda::EventSourceMapping', 'Replacement': 'Conditional', 'Details': [
+                {'Target': {'Attribute': 'Properties', 'Name': 'EventSourceArn', 'RequiresRecreation': 'Always'},
+                 'Evaluation': 'Dynamic', 'ChangeSource': 'ResourceAttribute', 'CausingEntity': 'CacheInvalidationQueue.Arn'}]}}
+        queue = {'ResourceChange': {'Action': 'Modify', 'LogicalResourceId': 'CacheInvalidationQueue', 'ResourceType': 'AWS::SQS::Queue',
+            'Replacement': 'False', 'Details': [{'Target': {'Attribute': 'Properties', 'Name': 'VisibilityTimeout', 'RequiresRecreation': 'Never'},
+                'Evaluation': 'Static', 'ChangeSource': 'DirectModification'}]}}
+        self.assertEqual(guard.gate_change_set([{'Changes': [queue, mapping]}], release_intent=intent, release_dependencies=dependencies),
+                         {'Add': 0, 'Modify': 2, 'Total': 2})
+        for field, value in [('Evaluation', 'Static'), ('ChangeSource', 'DirectModification'), ('CausingEntity', 'OtherQueue.Arn'), ('CausingEntity', 'CacheInvalidationQueue.QueueName')]:
+            bad = copy.deepcopy(mapping); bad['ResourceChange']['Details'][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(guard.GateError):
+                guard.gate_change_set([{'Changes': [bad]}], release_intent=intent, release_dependencies=dependencies)
+        for replacement in ('True', 'unknown'):
+            bad = copy.deepcopy(mapping); bad['ResourceChange']['Replacement'] = replacement
+            with self.assertRaises(guard.GateError): guard.gate_change_set([{'Changes': [bad]}], release_intent=intent, release_dependencies=dependencies)
+        bad = copy.deepcopy(queue); bad['ResourceChange']['Details'][0]['Target']['Name'] = 'QueueName'
+        with self.assertRaises(guard.GateError): guard.gate_change_set([{'Changes': [bad, mapping]}], release_intent=intent, release_dependencies=dependencies)

@@ -121,6 +121,7 @@
     {"logicalId": "OriginalComparisonWorkerFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["OriginalComparisonWorkerFunctionRole.Arn"]},
     {"logicalId": "OriginalIndexRefreshFunctionRefreshOriginalIndex", "resourceType": "AWS::Events::Rule", "propertyPath": "Targets", "causingEntities": ["OriginalIndexRefreshFunction.Arn"]},
     {"logicalId": "OriginalIndexRefreshFunctionRefreshOriginalIndexPermission", "resourceType": "AWS::Lambda::Permission", "propertyPath": "SourceArn", "causingEntities": ["OriginalIndexRefreshFunctionRefreshOriginalIndex.Arn"]},
-    {"logicalId": "AlbumWorkWorkerFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["AlbumWorkWorkerFunctionRole.Arn"]}
+    {"logicalId": "AlbumWorkWorkerFunction", "resourceType": "AWS::Lambda::Function", "propertyPath": "Role", "causingEntities": ["AlbumWorkWorkerFunctionRole.Arn"]},
+    {"logicalId": "CacheInvalidationWorkerFunctionCacheInvalidationRequests", "resourceType": "AWS::Lambda::EventSourceMapping", "propertyPath": "EventSourceArn", "causingEntities": ["CacheInvalidationQueue.Arn"]}
   ]
 }
