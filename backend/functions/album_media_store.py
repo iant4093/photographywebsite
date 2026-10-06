@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import os
+from decimal import Decimal
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.types import TypeSerializer
 
 from media_access import media_id_for_key
 
@@ -64,29 +66,65 @@ def normalized_media_item(album_id, image, index):
     return item
 
 
+def _comparison_value(value):
+    """Compare serialized values with BOOL distinct from N; ignore numeric scale."""
+    kind, data = next(iter(value.items()))
+    if kind == "N":
+        data = Decimal(data)
+    elif kind == "NS":
+        data = frozenset(Decimal(number) for number in data)
+    elif kind in {"SS", "BS"}:
+        data = frozenset(data)
+    elif kind == "M":
+        data = {key: _comparison_value(item) for key, item in data.items()}
+    elif kind == "L":
+        data = [_comparison_value(item) for item in data]
+    return kind, data
+
+
 def replace_album_media(album_id, images):
     table = _table()
     if table is None:
         return False
-    existing = []
+    target = {}
+    for index, image in enumerate(images if isinstance(images, list) else []):
+        item = normalized_media_item(album_id, image, index)
+        # The legacy batch writer keeps the last occurrence of a repeated ID.
+        target[item["mediaId"]] = item
+    existing = {}
     cursor = None
+    seen_cursors = set()
     while True:
         params = {
             "KeyConditionExpression": Key("albumId").eq(album_id),
-            "ProjectionExpression": "albumId,mediaId",
+            "ConsistentRead": True,
         }
         if cursor:
             params["ExclusiveStartKey"] = cursor
         response = table.query(**params)
-        existing.extend(response.get("Items", []))
+        for item in response.get("Items", []):
+            if item["albumId"] != album_id:
+                raise RuntimeError("Media repair returned another album")
+            existing[item["mediaId"]] = item
         cursor = response.get("LastEvaluatedKey")
         if not cursor:
             break
-    with table.batch_writer(overwrite_by_pkeys=["albumId", "mediaId"]) as batch:
-        for key in existing:
-            batch.delete_item(Key={"albumId": key["albumId"], "mediaId": key["mediaId"]})
-        for index, image in enumerate(images if isinstance(images, list) else []):
-            batch.put_item(Item=normalized_media_item(album_id, image, index))
+        identity = tuple(sorted(cursor.items()))
+        if identity in seen_cursors:
+            raise RuntimeError("Media repair cursor did not advance")
+        seen_cursors.add(identity)
+    serializer = TypeSerializer()
+    # Validate every target even when an equivalent existing row needs no write.
+    comparisons = {key: _comparison_value(serializer.serialize(item)) for key, item in target.items()}
+    removals = existing.keys() - target.keys()
+    replacements = [item for key, item in target.items()
+                    if key not in existing or _comparison_value(serializer.serialize(existing[key])) != comparisons[key]]
+    if removals or replacements:
+        with table.batch_writer(overwrite_by_pkeys=["albumId", "mediaId"]) as batch:
+            for media_id in sorted(removals):
+                batch.delete_item(Key={"albumId": album_id, "mediaId": media_id})
+            for item in replacements:
+                batch.put_item(Item=item)
     return True
 
 
