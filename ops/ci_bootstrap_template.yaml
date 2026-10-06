@@ -719,7 +719,6 @@ Resources:
         - !Ref CloudFormationExecutionDataAndMessagingPolicy
         - !Ref CloudFormationExecutionEdgeAndIdentityPolicy
         - !Ref CloudFormationExecutionEncryptionAndObservabilityPolicy
-        - !Ref CloudFormationExecutionHttpApiTagPolicy
       Tags:
         - Key: Application
           Value: IanTruongPhotography
@@ -1168,12 +1167,12 @@ Resources:
               - cloudfront:DeleteKeyGroup
               - cloudfront:DeletePublicKey
             Resource: '*'
-  CloudFormationExecutionHttpApiTagPolicy:
+  CloudFormationExecutionEncryptionAndObservabilityPolicy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      Description: Exact production HTTP API and stage billing-tag permissions.
+      Description: Bounded encryption and observability permissions for the application CloudFormation execution role.
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -1188,16 +1187,6 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/tags/arn%3A${AWS::Partition}%3Aapigateway%3Aus-west-2%3A%3A%2Fapis%2F${ApplicationHttpApiId}%2Fstages%2Fprod'
               - !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/tags/arn%3A${AWS::Partition}%3Aapigateway%3Aus-west-2%3A%3A%2Fv2%2Fapis%2F${ApplicationHttpApiId}'
               - !Sub 'arn:${AWS::Partition}:apigateway:us-west-2::/tags/arn%3A${AWS::Partition}%3Aapigateway%3Aus-west-2%3A%3A%2Fv2%2Fapis%2F${ApplicationHttpApiId}%2Fstages%2Fprod'
-
-  CloudFormationExecutionEncryptionAndObservabilityPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: Bounded encryption and observability permissions for the application CloudFormation execution role.
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
           - Sid: CreateTaggedApplicationKey
             Effect: Allow
             Action: kms:CreateKey

@@ -30,7 +30,6 @@ EXECUTION_POLICY_IDS = (
     "CloudFormationExecutionDataAndMessagingPolicy",
     "CloudFormationExecutionEdgeAndIdentityPolicy",
     "CloudFormationExecutionEncryptionAndObservabilityPolicy",
-    "CloudFormationExecutionHttpApiTagPolicy",
 )
 
 
@@ -65,7 +64,7 @@ class CiBootstrapTemplateTests(unittest.TestCase):
         template = yaml_parse(TEMPLATE)
         parameter = template['Parameters']['ApplicationHttpApiId']
         self.assertEqual(parameter['AllowedValues'], [parameter['Default']])
-        statements = template['Resources']['CloudFormationExecutionHttpApiTagPolicy'][
+        statements = template['Resources']['CloudFormationExecutionEncryptionAndObservabilityPolicy'][
             'Properties']['PolicyDocument']['Statement']
         permission = next(s for s in statements if s['Sid'] == 'TagExactProductionHttpApiAndStage')
         self.assertEqual(permission['Effect'], 'Allow')
