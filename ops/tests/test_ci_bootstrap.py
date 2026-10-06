@@ -58,6 +58,15 @@ def execution_permissions() -> str:
 
 
 class CiBootstrapTemplateTests(unittest.TestCase):
+    def test_recursion_configuration_is_scoped_to_the_shared_continuation_worker(self):
+        policy = resource_block("CloudFormationExecutionIdentityAndComputePolicy")
+        recursion = statement_block(policy, "ManageContinuationWorkerRecursion")
+        self.assertIn("- lambda:GetFunctionRecursionConfig", recursion)
+        self.assertIn("- lambda:PutFunctionRecursionConfig", recursion)
+        self.assertIn("function:${ApplicationStackName}-CacheInvalidationWorkerFunction-*'", recursion)
+        self.assertNotIn("Resource: '*'", recursion)
+        self.assertEqual(TEMPLATE.count("- lambda:PutFunctionRecursionConfig"), 1)
+
     def test_template_passes_cfn_lint(self):
         executable = shutil.which("cfn-lint") or str(ROOT / ".venv-ci" / "bin" / "cfn-lint")
         if not pathlib.Path(executable).is_file():

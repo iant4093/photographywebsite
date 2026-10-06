@@ -3,6 +3,7 @@
 import json
 import os
 import unittest
+from copy import deepcopy
 from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError
@@ -110,6 +111,27 @@ class UpgradeJobTests(unittest.TestCase):
         head.assert_not_called()
         enqueue.assert_not_called()
 
+    def test_scanner_recovers_a_lost_poll_without_resubmitting_the_paid_job(self):
+        self.seed()
+        with patch.object(video_jobs, "start_mediaconvert_job", return_value="new-job"):
+            self.resume(1000)
+        before = self.album()["videoJobs"]
+        with patch.object(video_upgrade, "_table", self.table), patch.object(
+            video_upgrade.time, "time", return_value=1300
+        ), patch.object(video_upgrade, "_enqueue_video_jobs") as wake:
+            result = video_upgrade.handler({}, None)
+        self.assertEqual(result["resumed"], 1)
+        self.assertEqual(result["queued"], 0)
+        wake.assert_called_once_with(ALBUM)
+        self.assertEqual(self.album()["videoJobs"], before)
+        with patch.object(video_jobs, "start_mediaconvert_job") as submit, patch.object(
+            video_jobs, "request_public_api_invalidation"
+        ):
+            self.resume(1300, exists=True)
+        submit.assert_not_called()
+        self.assertEqual(self.album()["videoJobs"], {})
+        self.assertEqual(self.album()["images"][0]["hlsUrl"], NEW_MASTER)
+
     def test_upgrades_for_current_or_removed_videos_are_dropped(self):
         self.seed(hlsUrl=NEW_MASTER)
         with patch.object(video_jobs, "start_mediaconvert_job") as submit:
@@ -153,6 +175,7 @@ class ScannerTests(unittest.TestCase):
         for item in (
             patch.object(video_upgrade, "_table", self.table),
             patch.object(video_upgrade, "_sqs", self.sqs),
+            patch.object(video_upgrade.time, "time", return_value=1000),
             patch.dict(os.environ, {"CACHE_INVALIDATION_QUEUE_URL": "https://sqs.example/queue"}),
         ):
             item.start()
@@ -178,7 +201,7 @@ class ScannerTests(unittest.TestCase):
         ]
         with patch.object(video_upgrade, "MAX_NEW_PER_RUN", 8), patch.object(video_upgrade, "MAX_IN_FLIGHT", 10):
             result = video_upgrade.handler({}, None)
-        self.assertEqual(result, {"queued": 8, "frames": 0, "inFlight": 2, "waiting": 3})
+        self.assertEqual(result, {"queued": 8, "frames": 0, "resumed": 1, "inFlight": 2, "waiting": 3})
         self.assertEqual(self.table.scan.call_args_list[1].kwargs["ExclusiveStartKey"], {"albumId": "busy"})
         queued = self.receipts()
         self.assertEqual([album for album, _ in queued], ["a"] * 5 + ["b"] * 3)
@@ -193,12 +216,32 @@ class ScannerTests(unittest.TestCase):
         self.assertIn("attribute_not_exists(videoJobs.#identity)", nested["ConditionExpression"])
         self.assertIn("attribute_not_exists(pendingVisibilityChange)", nested["ConditionExpression"])
 
-    def test_nothing_is_queued_while_the_in_flight_limit_is_reached(self):
+    def test_existing_jobs_are_woken_even_when_all_upgrade_slots_are_in_flight(self):
         jobs = {f"r{index}": {"upgrade": True, "phase": "submitting"} for index in range(video_upgrade.MAX_IN_FLIGHT)}
         self.table.scan.return_value = {"Items": [video_album("a", [stale("v")], videoJobs=jobs)]}
-        self.assertEqual(video_upgrade.handler({}, None), {"queued": 0, "frames": 0, "inFlight": video_upgrade.MAX_IN_FLIGHT, "waiting": 1})
+        self.assertEqual(video_upgrade.handler({}, None), {"queued": 0, "frames": 0, "resumed": 1, "inFlight": video_upgrade.MAX_IN_FLIGHT, "waiting": 1})
         self.table.update_item.assert_not_called()
-        self.sqs.send_message.assert_not_called()
+        self.sqs.send_message.assert_called_once()
+
+    def test_recovery_preserves_due_receipts_and_skips_future_stopped_and_busy_work(self):
+        albums = [video_album("due", [], videoJobs={
+            "upload": {"phase": "prepared", "token": "upload-token", "firstAttemptAt": 10},
+            "frames": {"phase": "submitting", "frames": True, "token": "frames-token", "checkAfter": 1000},
+            "upgrade": {"phase": "transcoding", "upgrade": True, "jobId": "existing-job", "checkAfter": 999},
+        })]
+        albums += [video_album("future", [], videoJobs={"job": {"phase": "transcoding", "checkAfter": 1001}}),
+                   video_album("stopped", [], videoJobs={"job": {"phase": "unresolved"}}),
+                   video_album("unknown", [], videoJobs={"job": {"phase": "unknown"}, "bad": None})]
+        for field in video_upgrade.BUSY_FIELDS:
+            albums.append(video_album(field, [], videoJobs={"job": {"phase": "prepared"}}, **{field: True}))
+        albums.append(video_album("deleted", [], status="deleting", videoJobs={"job": {"phase": "prepared"}}))
+        before = deepcopy(albums)
+        self.table.scan.return_value = {"Items": albums}
+        self.assertEqual(video_upgrade.handler({}, None)["resumed"], 1)
+        self.table.update_item.assert_not_called()
+        self.assertEqual(albums, before)
+        self.sqs.send_message.assert_called_once()
+        self.assertEqual(json.loads(self.sqs.send_message.call_args.kwargs["MessageBody"])["albumId"], "due")
 
     def test_albums_that_changed_meanwhile_are_skipped(self):
         self.table.scan.return_value = {"Items": [video_album("a", [stale("v"), stale("w")])]}

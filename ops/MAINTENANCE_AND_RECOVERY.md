@@ -14,6 +14,33 @@ Weekly scheduled audits remain enabled. Do not introduce a second update bot.
 
 ## Durable work recovery
 
+### Video conversion and timeline frames
+
+The shared `CacheInvalidationWorkerFunction` intentionally returns album work
+to SQS between bounded steps. Its `RecursiveLoop: Allow` configuration prevents
+Lambda from dropping legitimate long polling chains; other functions retain
+the default recursion protection. Reserved concurrency remains two and saved
+video receipts still stop automatic retries after 24 hours.
+
+Every three hours `VideoUpgradeFunction` also wakes active, idle video albums
+with due `prepared`, `submitting`, or `transcoding` receipts, even when all
+upgrade slots are occupied. This recovers a lost continuation without resetting
+timestamps, tokens, accepted job IDs, or `unresolved` receipts. Busy/deleting/
+trashed albums and future checks remain untouched. Its aggregate `resumed`
+count measures albums woken for existing work. After deployment, the next
+scheduled run recovers stranded jobs within their existing retry window.
+
+Frame capture requires a regular audio/video output in the same MediaConvert
+job. Frame backfills include one small H.264/AAC MP4 alongside the JPEGs in the
+existing frames folder; the published HLS stream stays intact. The companion
+shares that folder's privacy tags and deletion lifecycle. New full conversions
+already include HLS and do not need this companion.
+
+`unresolved` receipts still require individual operator investigation. Never
+reset all video timestamps or repeat an ambiguous paid submission. Confirm
+aggregate due-receipt counts fall and provider rejections stop; an empty SQS
+queue alone does not prove all album work completed.
+
 The existing 24-hour retry ceiling remains cost protection. A failure after that
 window needs an operator to identify the cause, verify it is resolved, and inspect
 one exact operation. No bulk timestamp reset or DLQ redrive is authorized by these

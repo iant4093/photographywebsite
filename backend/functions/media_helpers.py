@@ -263,10 +263,19 @@ def _create_job(job_settings, request_token):
 
 
 def start_frame_capture_job(source_s3_url, frames_s3_prefix, *, request_token=None, width=None, height=None):
-    """Timeline preview frames alone, for a video whose stream already exists."""
+    """Add timeline frames without replacing a video's published stream.
+
+    MediaConvert requires a regular audio/video output alongside frame capture.
+    Keep that companion small and in the frames folder so existing visibility
+    tagging and album cleanup also cover it.
+    """
+    group = _frames_group(frames_s3_prefix, width, height)
+    companion = _hls_output("_frames-support", SCRUB_FRAME_EDGE, SCRUB_FRAME_EDGE, 200000, quality=3)
+    companion["ContainerSettings"] = {"Container": "MP4", "Mp4Settings": {}}
+    group["Outputs"].append(companion)
     return _create_job({
         "Inputs": [_job_input(source_s3_url)],
-        "OutputGroups": [_frames_group(frames_s3_prefix, width, height)],
+        "OutputGroups": [group],
         "TimecodeConfig": {"Source": "ZEROBASED"},
     }, request_token)
 

@@ -2164,6 +2164,9 @@ Resources:
       Handler: cache_invalidation_worker.handler
       Timeout: 30
       ReservedConcurrentExecutions: 2
+      # Durable jobs intentionally return to this queue between bounded steps.
+      # Their saved retry deadlines remain the cost/termination boundary.
+      RecursiveLoop: Allow
       Environment:
         Variables:
           TAGGING_WORKER_FUNCTION_NAME: !Ref TagMediaObjectFunction
