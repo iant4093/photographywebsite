@@ -90,7 +90,7 @@ class AlbumWorkInfrastructureTests(unittest.TestCase):
             rules = [r for r in intent['rules'] if r['logicalId'] == name and r['action'] == 'Add']
             self.assertEqual(rules, [{'logicalId': name, 'resourceType': kind, 'action': 'Add', 'propertyPaths': [], 'allowNoDetails': True}])
         change = next(r for r in intent['rules'] if r['logicalId'] == 'CacheInvalidationQueue' and r['action'] == 'Modify')
-        self.assertEqual(change['propertyPaths'], ['VisibilityTimeout']); self.assertFalse(change['allowNoDetails'])
+        self.assertEqual(change['propertyPaths'], ['VisibilityTimeout', 'Tags']); self.assertFalse(change['allowNoDetails'])
         self.assertTrue(callable(release_guard.gate_change_set))
 
     def test_notification_topic_accepts_only_the_two_exact_new_alarm_names(self):

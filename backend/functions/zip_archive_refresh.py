@@ -1,5 +1,7 @@
 """Prepare current ZIPs from album changes; reconcile existing albums in pages."""
 
+from performance_observation import measure_handler
+
 import json
 import logging
 import os
@@ -54,6 +56,7 @@ def _reconcile():
     return {"checked": len(page.get("Items", [])), "hasMore": bool(page.get("LastEvaluatedKey"))}
 
 
+@measure_handler("zip_refresh")
 def handler(event, context):
     if "Records" not in event:
         return _reconcile()

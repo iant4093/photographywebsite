@@ -781,9 +781,20 @@ function eventJobs(event) {
         return event.Records.map((record) => ({
             id: record.messageId,
             body: record.body,
+            sentTimestamp: record.attributes?.SentTimestamp,
         }))
     }
     return [{ id: null, job: event }]
+}
+
+function queueTimings(entry, startedAt) {
+    const completedAt = Date.now()
+    const timings = { processingMs: Math.max(0, completedAt - startedAt) }
+    const raw = entry.sentTimestamp
+    if (typeof raw !== 'string' || !/^\d{13}$/.test(raw)) return timings
+    const sentAt = Number(raw)
+    if (sentAt > startedAt || startedAt - sentAt > 14 * 86400000) return timings
+    return { ...timings, queueWaitMs: startedAt - sentAt, queuedToCompleteMs: completedAt - sentAt }
 }
 
 export async function handler(event, context) {
@@ -812,6 +823,7 @@ async function processEvent(event) {
             continue
         }
         let job
+        const startedAt = Date.now()
         try {
             job = JSON.parse(entry.body)
             const isHero = job?.kind === 'hero'
@@ -820,6 +832,7 @@ async function processEvent(event) {
                 event: isHero ? 'hero_derivatives_completed' : 'preview_job_completed',
                 status: result.status,
                 requestId: entry.id,
+                ...queueTimings(entry, startedAt),
             }))
         } catch (error) {
             if (error instanceof ObsoletePreviewJob) {

@@ -1,5 +1,7 @@
 """Rebuild materialized random-photo decks after public album mutations."""
 
+from performance_observation import measure_handler
+
 import logging
 import os
 
@@ -65,6 +67,7 @@ def _legacy_images(album):
     return images
 
 
+@measure_handler("random_pool_refresh")
 def handler(event, context):
     albums = _public_photo_albums()
     for album in albums:

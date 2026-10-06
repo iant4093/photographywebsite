@@ -227,6 +227,8 @@ Resources:
         - AttributeName: mediaId
           KeyType: RANGE
       Tags:
+        - Key: Feature
+          Value: original-comparisons
         - Key: DataClassification
           Value: PrivateCustomerData
 
@@ -235,6 +237,9 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      Tags:
+        - Key: Feature
+          Value: original-comparisons
       BucketName: !Sub 'goldenhour-originals-${AWS::AccountId}-${Stage}'
       OwnershipControls:
         Rules:
@@ -286,6 +291,9 @@ Resources:
   OriginalComparisonDeadLetterQueue:
     Type: AWS::SQS::Queue
     Properties:
+      Tags:
+        - Key: Feature
+          Value: original-comparisons
       QueueName: !Sub 'ian-photography-original-comparison-failures-${Stage}'
       MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
@@ -293,6 +301,9 @@ Resources:
   OriginalComparisonQueue:
     Type: AWS::SQS::Queue
     Properties:
+      Tags:
+        - Key: Feature
+          Value: original-comparisons
       QueueName: !Sub 'ian-photography-original-comparisons-${Stage}'
       VisibilityTimeout: 1800
       MessageRetentionPeriod: 345600
@@ -306,6 +317,8 @@ Resources:
     Metadata:
       BuildMethod: makefile
     Properties:
+      Tags:
+        Feature: original-comparisons
       CodeUri: ./
       Handler: original_index_refresh.handler
       Timeout: 900
@@ -362,6 +375,8 @@ Resources:
     Metadata:
       BuildMethod: makefile
     Properties:
+      Tags:
+        Feature: original-comparisons
       CodeUri: ./
       Handler: original_comparison_worker.handler
       Timeout: 300
@@ -480,6 +495,8 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
       Tags:
+        - Key: Feature
+          Value: backups
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -578,6 +595,8 @@ Resources:
               ProjectionType: ALL
           - !Ref AWS::NoValue
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -604,6 +623,8 @@ Resources:
         - AttributeName: settingId
           KeyType: HASH
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -646,6 +667,8 @@ Resources:
           Projection:
             ProjectionType: ALL
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -678,6 +701,8 @@ Resources:
         - AttributeName: mediaId
           KeyType: RANGE
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -710,6 +735,8 @@ Resources:
         AttributeName: ttl
         Enabled: true
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -734,6 +761,8 @@ Resources:
         - AttributeName: cacheKey
           KeyType: HASH
       Tags:
+        - Key: Feature
+          Value: observability
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -765,6 +794,8 @@ Resources:
         AttributeName: ttl
         Enabled: true
       Tags:
+        - Key: Feature
+          Value: analytics
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -789,6 +820,8 @@ Resources:
         - AttributeName: cacheKey
           KeyType: HASH
       Tags:
+        - Key: Feature
+          Value: backups
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -813,6 +846,8 @@ Resources:
         - AttributeName: cacheKey
           KeyType: HASH
       Tags:
+        - Key: Feature
+          Value: observability
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -996,6 +1031,8 @@ Resources:
               - Content-Range
             MaxAge: 600
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -1545,6 +1582,8 @@ Resources:
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
       Tags:
+        - Key: Feature
+          Value: observability
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -1684,6 +1723,8 @@ Resources:
           Prefix: media/
         PriceClass: PriceClass_100
       Tags:
+        - Key: Feature
+          Value: public-delivery
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -1810,6 +1851,9 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
+      Tags:
+        - Key: Feature
+          Value: shared-platform
       LogGroupName: !Sub '/aws/apigateway/ian-photography-${Stage}'
       RetentionInDays: !Ref ApiAccessLogRetentionDays
 
@@ -1824,6 +1868,8 @@ Resources:
       LogGroupName: !Sub '/ian-photography/application/${Stage}'
       RetentionInDays: !Ref ApplicationLogRetentionDays
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -1865,7 +1911,7 @@ Resources:
         # detection compares like-for-like without replacing the log group.
         DestinationArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiAccessLogGroup}'
         Format: >-
-          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","integrationLatency":"$context.integrationLatency","responseLatency":"$context.responseLatency","integrationError":"$context.integrationErrorMessage"}
       DefaultRouteSettings:
         DetailedMetricsEnabled: false
         ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
@@ -1916,6 +1962,7 @@ Resources:
           ThrottlingRateLimit: 5
           ThrottlingBurstLimit: 15
       Tags:
+        Feature: shared-platform
         Application: IanTruongPhotography
         Stage: !Ref Stage
       Auth:
@@ -1935,6 +1982,8 @@ Resources:
       MessageRetentionPeriod: 1209600
       SqsManagedSseEnabled: true
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -1950,6 +1999,8 @@ Resources:
       MessageRetentionPeriod: 1209600
       ReceiveMessageWaitTimeSeconds: 20
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -1969,6 +2020,8 @@ Resources:
         deadLetterTargetArn: !GetAtt PreviewDeadLetterQueue.Arn
         maxReceiveCount: 5
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -1986,6 +2039,8 @@ Resources:
       MessageRetentionPeriod: 1209600
       ReceiveMessageWaitTimeSeconds: 20
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -2007,6 +2062,8 @@ Resources:
         deadLetterTargetArn: !GetAtt AlbumWorkDeadLetterQueue.Arn
         maxReceiveCount: 5
       Tags:
+        - Key: Feature
+          Value: shared-platform
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -2026,6 +2083,8 @@ Resources:
         deadLetterTargetArn: !GetAtt AsyncFailureQueue.Arn
         maxReceiveCount: 5
       Tags:
+        - Key: Feature
+          Value: public-delivery
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -2045,6 +2104,8 @@ Resources:
         deadLetterTargetArn: !GetAtt AsyncFailureQueue.Arn
         maxReceiveCount: 5
       Tags:
+        - Key: Feature
+          Value: discovery
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -2064,6 +2125,8 @@ Resources:
         deadLetterTargetArn: !GetAtt AsyncFailureQueue.Arn
         maxReceiveCount: 5
       Tags:
+        - Key: Feature
+          Value: discovery
         - Key: Application
           Value: IanTruongPhotography
         - Key: Stage
@@ -2078,6 +2141,9 @@ Resources:
     Metadata: &SafePythonBuild
       BuildMethod: makefile
     Properties:
+      Tags:
+        Feature: public-delivery
+      Architectures: [arm64]
       CodeUri: ./
       Handler: get_public_albums.handler
       # The home page's catalog is on the critical path; 1024 MB also buys CPU
@@ -2113,6 +2179,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: public-delivery
       CodeUri: ./
       Handler: get_public_album.handler
       # Six-photo startup benchmark: 0.92 s cold / 76 ms warm at 1024 MB.
@@ -2204,6 +2272,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: public-delivery
       CodeUri: ./
       Handler: cache_invalidation_worker.handler
       Timeout: 30
@@ -2255,6 +2325,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: shared-platform
       CodeUri: ./
       Handler: album_work_worker.handler
       Timeout: 30
@@ -2303,6 +2375,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: discovery
       CodeUri: ./
       Handler: hover_preview_manifest_builder.handler
       Timeout: 120
@@ -2394,10 +2468,13 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: discovery
+      Architectures: [arm64]
       CodeUri: ./
       Handler: random_photo_pool_builder.handler
       Timeout: 120
-      MemorySize: 512
+      MemorySize: 1024
       ReservedConcurrentExecutions: 1
       Environment:
         Variables:
@@ -2474,6 +2551,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: get_albums.handler
       ReservedConcurrentExecutions: 20
@@ -2518,6 +2597,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: public-delivery
       CodeUri: ./
       Handler: get_album.handler
       ReservedConcurrentExecutions: 20
@@ -2583,6 +2664,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: get_album_media.handler
       ReservedConcurrentExecutions: 10
@@ -2647,6 +2730,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: backfill_album_media.handler
       Timeout: 300
@@ -2689,6 +2774,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: video
       CodeUri: ./
       Handler: video_upgrade.handler
       Timeout: 120
@@ -2721,6 +2808,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: album_usage.handler
       Timeout: 300
@@ -2771,6 +2860,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: public-delivery
       CodeUri: ./
       Handler: get_shared_album.handler
       ReservedConcurrentExecutions: 10
@@ -2857,6 +2948,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: identity
       CodeUri: ./
       Handler: login.handler
       ReservedConcurrentExecutions: 5
@@ -2910,6 +3003,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: identity
       CodeUri: ./
       Handler: complete_challenge.handler
       ReservedConcurrentExecutions: 5
@@ -2962,6 +3057,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: communications
       CodeUri: ./
       Handler: contact.handler
       ReservedConcurrentExecutions: 3
@@ -3018,6 +3115,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: backups
       CodeUri: ./
       Handler: admin_drive_backups.handler
       Timeout: 30
@@ -3047,6 +3146,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: backups
       CodeUri: ./
       Handler: google_drive_sync.handler
       Timeout: 900
@@ -3124,6 +3225,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: create_album.handler
       Timeout: 60
@@ -3268,6 +3371,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: update_album.handler
       Timeout: 60
@@ -3372,6 +3477,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: update_gallery_order.handler
       ReservedConcurrentExecutions: 2
@@ -3404,6 +3511,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: delete_album.handler
       Environment:
@@ -3521,6 +3630,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: add_images.handler
       Timeout: 60
@@ -3641,6 +3752,8 @@ Resources:
     Metadata:
       BuildMethod: makefile
     Properties:
+      Tags:
+        Feature: media-processing
       CodeUri: ./
       Runtime: nodejs22.x
       Handler: index.handler
@@ -3745,6 +3858,9 @@ Resources:
   ZipPreparationDeadLetterQueue:
     Type: AWS::SQS::Queue
     Properties:
+      Tags:
+        - Key: Feature
+          Value: archives
       QueueName: !Sub 'ian-photography-zip-preparation-dlq-${Stage}.fifo'
       FifoQueue: true
       SqsManagedSseEnabled: true
@@ -3753,6 +3869,9 @@ Resources:
   ZipPreparationQueue:
     Type: AWS::SQS::Queue
     Properties:
+      Tags:
+        - Key: Feature
+          Value: archives
       QueueName: !Sub 'ian-photography-zip-preparation-${Stage}.fifo'
       FifoQueue: true
       SqsManagedSseEnabled: true
@@ -3785,10 +3904,13 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: archives
+      Architectures: [arm64]
       CodeUri: ./
       Handler: zip_archive_refresh.handler
       Timeout: 120
-      MemorySize: 256
+      MemorySize: 512
       ReservedConcurrentExecutions: 1
       Environment:
         Variables:
@@ -3853,6 +3975,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: archives
       CodeUri: ./
       Handler: create_zip.handler
       Timeout: 60
@@ -3928,6 +4052,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: archives
       CodeUri: ./
       Handler: worker_zip.handler
       Timeout: 900
@@ -4002,6 +4128,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: delete_images.handler
       Environment:
@@ -4096,6 +4224,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: tag_media_object.handler
       Timeout: 60
@@ -4145,6 +4275,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: public-delivery
       CodeUri: ./
       Handler: get_download_url.handler
       ReservedConcurrentExecutions: 10
@@ -4228,6 +4360,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: public-delivery
       CodeUri: ./
       Handler: prepare_print.handler
       ReservedConcurrentExecutions: 10
@@ -4301,6 +4435,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: update_image.handler
       Environment:
@@ -4374,6 +4510,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: album-management
       CodeUri: ./
       Handler: get_upload_url.handler
       ReservedConcurrentExecutions: 10
@@ -4401,6 +4539,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: media-processing
       CodeUri: ./
       Handler: hero_cover.handler
       ReservedConcurrentExecutions: 2
@@ -4450,6 +4590,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: video
       CodeUri: ./
       Handler: hero_reel.handler
       Timeout: 900
@@ -4528,6 +4670,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: identity
       CodeUri: ./
       Handler: create_user.handler
       Environment:
@@ -4553,6 +4697,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: identity
       CodeUri: ./
       Handler: list_users.handler
       Environment:
@@ -4576,6 +4722,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: observability
       CodeUri: ./
       Handler: get_cost_report.handler
       Timeout: 30
@@ -4607,6 +4755,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: analytics
       CodeUri: ./
       Handler: analytics.handler
       ReservedConcurrentExecutions: 10
@@ -4647,6 +4797,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: analytics
       CodeUri: ./
       Handler: get_analytics_report.handler
       Environment:
@@ -4675,6 +4827,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: backups
       CodeUri: ./
       Handler: get_google_drive_usage.handler
       Timeout: 60
@@ -4719,6 +4873,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: public-delivery
       CodeUri: ./
       Handler: photography_stats.handler
       ReservedConcurrentExecutions: 5
@@ -4746,6 +4902,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: backups
       CodeUri: ./
       Handler: refresh_google_drive_usage.handler
       Timeout: 300
@@ -4801,6 +4959,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: observability
       CodeUri: ./
       Handler: get_github_analytics.handler
       Timeout: 15
@@ -4826,6 +4986,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: observability
       CodeUri: ./
       Handler: get_site_health.handler
       Timeout: 15
@@ -4858,6 +5020,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: observability
       CodeUri: ./
       Handler: get_audit_log.handler
       Timeout: 15
@@ -4888,6 +5052,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: observability
       CodeUri: ./
       Handler: refresh_github_analytics.handler
       Timeout: 300
@@ -4920,6 +5086,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: identity
       CodeUri: ./
       Handler: delete_user.handler
       Environment:
@@ -5027,6 +5195,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: identity
       CodeUri: ./
       Handler: edit_user.handler
       Environment:
@@ -5077,6 +5247,8 @@ Resources:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild
     Properties:
+      Tags:
+        Feature: identity
       CodeUri: ./
       Handler: pre_token_generation.handler
       # Cognito waits at most five seconds for a synchronous trigger.

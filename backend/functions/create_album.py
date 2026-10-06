@@ -1,5 +1,7 @@
 """Validated, admin-only album creation with pending-to-visible media tagging."""
 
+from performance_observation import measure_handler
+
 import datetime
 import html
 import hashlib
@@ -124,6 +126,7 @@ def _complete_followup(album, context):
         logger.error("album_followup_pending error_type=%s", type(error).__name__)
 
 
+@measure_handler("create_album")
 def handler(event, context):
     front_door_denied = verify_front_door_request(event, context)
     if front_door_denied:

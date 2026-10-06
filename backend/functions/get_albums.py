@@ -1,5 +1,7 @@
 """Secure, paginated album catalog/listing endpoint."""
 
+from performance_observation import measure_handler
+
 import logging
 import os
 import hashlib
@@ -325,6 +327,7 @@ def _legacy_public_items(limit):
         connection.close()
 
 
+@measure_handler("catalog")
 def handler(event, context):
     denied = verify_front_door_request(event, context)
     if denied:

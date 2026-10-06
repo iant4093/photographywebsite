@@ -174,3 +174,35 @@ test('actual preview decoding cannot recreate files or metadata after deletion',
         })
     }
 })
+
+test('queue readiness timing is bounded and never logs message contents or malformed timestamps', async () => {
+    const { readFileSync } = await import('node:fs')
+    const vm = await import('node:vm')
+    const source = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8')
+    const handlerSource = source.slice(source.indexOf('function eventJobs(event)')).replace('export async function handler', 'async function handler')
+    const now = 1791316800000, logs = []
+    let current = now
+    const context = vm.createContext({
+        Date: class extends Date { static now() { return current } },
+        console: { log: message => logs.push(JSON.parse(message)), error() {} },
+        processJob: async () => { current += 25; return { status: 'completed' } },
+        processHeroJob: async () => ({ status: 'completed' }),
+        safePreviewFailureTelemetry: () => ({}),
+        withWorkerBudget, hasWorkerTime, runWorkerJob, ObsoletePreviewJob,
+    })
+    vm.runInContext(handlerSource, context)
+    const timestamps = [String(now - 1000), undefined, 'private-token', 1791316799000, String(now + 1000), String(now - 15 * 86400000)]
+    const result = await context.handler({ Records: timestamps.map((SentTimestamp, index) => ({
+        messageId: String(index), attributes: { SentTimestamp }, body: JSON.stringify({ token: 'private-body' }),
+    })) })
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { batchItemFailures: [] })
+    assert.equal(logs[0].processingMs, 25)
+    assert.equal(logs[0].queueWaitMs, 1000)
+    assert.equal(logs[0].queuedToCompleteMs, 1025)
+    for (const record of logs.slice(1)) {
+        assert.equal(record.processingMs, 25)
+        assert.equal(record.queueWaitMs, undefined)
+        assert.equal(record.queuedToCompleteMs, undefined)
+    }
+    assert.ok(!JSON.stringify(logs).includes('private'))
+})

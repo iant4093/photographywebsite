@@ -1,5 +1,7 @@
 """Validated, idempotent admin append of pending uploads to an album."""
 
+from performance_observation import measure_handler
+
 import json
 import logging
 import os
@@ -61,6 +63,7 @@ def _resume_followup(album_id, context):
     return json_response(200, {"complete": True})
 
 
+@measure_handler("append_images")
 def handler(event, context):
     if isinstance(event, dict) and set(event) == {"source", "albumId"} and event.get("source") in {"album-upload-followup", "album-media-sync", "album-video-jobs"}:
         try:
