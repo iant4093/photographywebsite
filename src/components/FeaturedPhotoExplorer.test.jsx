@@ -14,11 +14,13 @@ vi.mock('../utils/mediaUrls', () => ({
     mediaDisplayUrl: (image) => image.url || image.thumbnailUrl,
     mediaId: (image) => image.id,
     mediaPreviewSrcSet: () => '',
+    mediaBeforeDisplayUrl: () => '',
+    mediaBeforeSrcSet: () => '',
     mediaThumbnailUrl: (image) => image.thumbnailUrl,
     resolveMediaDownloadUrl: vi.fn(),
     startBrowserDownload: vi.fn(),
 }))
-vi.mock('./PhotoLightbox', () => ({
+vi.mock('./ExplorerPhotoLightbox', () => ({
     default: ({ images, index, loading, ariaLabel, emptyMessage, onRetry, onBeforeRefresh, onNext, onClose }) => (
         <div role="dialog" aria-label={ariaLabel}>
             {loading ? 'Loading photographs' : `${images.length} photographs`}

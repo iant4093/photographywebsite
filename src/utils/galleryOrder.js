@@ -1,3 +1,5 @@
+import { compareGalleryTitles } from './galleryFormatting'
+
 function normalizedOrder(value) {
     return Number.isInteger(value) && value >= 0 ? value : null
 }
@@ -5,11 +7,7 @@ function normalizedOrder(value) {
 function compareNewestFirst(left, right) {
     const dateOrder = String(right?.createdAt || '').localeCompare(String(left?.createdAt || ''))
     if (dateOrder !== 0) return dateOrder
-    const titleOrder = String(left?.title || '').localeCompare(
-        String(right?.title || ''),
-        undefined,
-        { sensitivity: 'base', numeric: true },
-    )
+    const titleOrder = compareGalleryTitles(String(left?.title || ''), String(right?.title || ''))
     if (titleOrder !== 0) return titleOrder
     return String(left?.albumId || '').localeCompare(String(right?.albumId || ''))
 }
@@ -50,6 +48,6 @@ export function sortGalleryCategories(categories, groupedAlbums) {
         }
         if (left === 'Uncategorized') return 1
         if (right === 'Uncategorized') return -1
-        return left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true })
+        return compareGalleryTitles(left, right)
     })
 }

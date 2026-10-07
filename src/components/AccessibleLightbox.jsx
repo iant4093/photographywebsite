@@ -24,6 +24,12 @@ export default function AccessibleLightbox({
     onClose,
     onNext,
     onPrevious,
+    explicitTabOrder = false,
+    onFocusCapture,
+    onPointerDownCapture,
+    onPointerUpCapture,
+    onPointerCancelCapture,
+    onKeyDownCapture,
 }) {
     const dialogRef = useRef(null)
     const callbacksRef = useRef({ onClose, onNext, onPrevious })
@@ -73,6 +79,20 @@ export default function AccessibleLightbox({
                 return
             }
 
+            // Safari can skip buttons in its native Tab order. Photo viewers
+            // own only ordinary controls, so traverse them explicitly instead
+            // of allowing a cold-viewer handoff to lose keyboard focus.
+            if (explicitTabOrder) {
+                const controls = focusable.filter(element => element.tabIndex !== -1)
+                event.preventDefault()
+                if (!controls.length) { dialog?.focus(); return }
+                const current = controls.indexOf(document.activeElement)
+                const next = current < 0 ? (event.shiftKey ? controls.length - 1 : 0)
+                    : (current + (event.shiftKey ? -1 : 1) + controls.length) % controls.length
+                controls[next].focus({ preventScroll: true })
+                return
+            }
+
             const first = focusable[0]
             const last = focusable.at(-1)
             if (event.shiftKey && document.activeElement === first) {
@@ -89,7 +109,7 @@ export default function AccessibleLightbox({
             window.removeEventListener('keydown', handleKeyDown)
             releaseLayer()
         }
-    }, [])
+    }, [explicitTabOrder])
 
     if (!portalTarget) return null
 
@@ -101,6 +121,11 @@ export default function AccessibleLightbox({
             aria-label={ariaLabel}
             tabIndex={-1}
             className={`linen-lightbox ${className}`}
+            onFocusCapture={onFocusCapture}
+            onPointerDownCapture={onPointerDownCapture}
+            onPointerUpCapture={onPointerUpCapture}
+            onPointerCancelCapture={onPointerCancelCapture}
+            onKeyDownCapture={onKeyDownCapture}
             onMouseDown={(event) => {
                 if (event.target === event.currentTarget) onClose()
             }}

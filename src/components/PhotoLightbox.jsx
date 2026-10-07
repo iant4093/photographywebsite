@@ -10,9 +10,11 @@ import {
 import LightboxShareButton from './LightboxShareButton'
 import useContainedImageSizes from '../hooks/useContainedImageSizes'
 import PhotoZoomFrame from './PhotoZoomFrame'
+import PhotoLightboxNavigation from './PhotoLightboxNavigation'
 import { photoDescription } from '../utils/mediaAccessibility'
 import { markImageReady } from '../utils/imageReadiness'
 import { prefetchPhoto } from '../utils/photoPrefetch'
+import { afterImageDecode } from '../utils/viewerImageReadiness'
 
 const PHOTO_CROSSFADE_MS = 360
 const ORIGINAL_REFRESH_INTERVAL_MS = 20_000
@@ -23,28 +25,8 @@ function freshComparison(id) {
     return { id, requested: false, returningToEdit: false, attempt: 0, loadedKey: null, failedKey: null }
 }
 
-function afterImageDecode(image, onReady, onError) {
-    if (!image?.isConnected) return
-    const src = image.getAttribute('src')
-    const srcSet = image.getAttribute('srcset')
-    const candidate = image.currentSrc
-    const isCurrent = () => image.isConnected && image.getAttribute('src') === src
-        && image.getAttribute('srcset') === srcSet && image.currentSrc === candidate
-    const ready = () => {
-        if (!isCurrent()) return
-        // Establish the hidden layer's initial style even when a cached image
-        // decodes before the browser's first paint, so its fade still runs.
-        image.getBoundingClientRect()
-        onReady()
-    }
-    const failed = () => {
-        if (isCurrent()) onError?.({ type: 'error', currentTarget: image })
-    }
-    if (typeof image.decode !== 'function') {
-        ready()
-        return
-    }
-    try { image.decode().then(ready, failed) } catch { failed() }
+function LightboxContents({ children }) {
+    return children
 }
 
 function runOriginalRefresh(requestRef, callback, event, image, isCurrent, context = { reason: 'original-status' }) {
@@ -100,17 +82,40 @@ function PhotoLightbox({
     loadingMessage = 'Finding random photos…',
     emptyMessage = '',
     adminControls,
+    initialImageReady = false,
+    initialComparisonRequested = false,
+    initialOriginalReady = false,
+    embedded = false,
+    initialFocusRef,
+    printingState,
 }) {
     const { containerRef, sizesFor, bounds } = useContainedImageSizes()
-    const [printing, setPrinting] = useState(false)
+    const [internalPrinting, setInternalPrinting] = useState(false)
+    const [printing, setPrinting] = printingState || [internalPrinting, setInternalPrinting]
     const activeImage = images[index]
     const activeId = activeImage ? (mediaId(activeImage) || index) : 'pending'
-    const [preview, setPreview] = useState(() => ({ id: activeId, ready: null, outgoing: null }))
+    // An explorer's small loading dialog may already have displayed this exact
+    // photo. Preserve it through the code-loading handoff instead of fading
+    // back to an empty stage while the same cached image reports its load.
+    const [preview, setPreview] = useState(() => ({
+        id: activeId,
+        ready: initialImageReady && activeImage ? {
+            id: activeId,
+            image: activeImage,
+            rawUrl: mediaDisplayUrl(activeImage),
+            previewSrcSet: mediaPreviewSrcSet(activeImage),
+        } : null,
+        outgoing: null,
+    }))
     const loadedImageId = preview.ready?.id
     const outgoingImage = preview.outgoing
     const activeRawUrl = activeImage ? mediaDisplayUrl(activeImage) : ''
     const previewSrcSet = activeImage ? mediaPreviewSrcSet(activeImage) : ''
-    const [comparison, setComparison] = useState(() => freshComparison(activeId))
+    const [comparison, setComparison] = useState(() => ({
+        ...freshComparison(activeId),
+        requested: initialComparisonRequested,
+        loadedKey: initialOriginalReady ? `${JSON.stringify([activeId, mediaBeforeDisplayUrl(activeImage), mediaBeforeSrcSet(activeImage)])}:0` : null,
+    }))
     const refreshedOriginalsRef = useRef(new Set())
     const originalRequestRef = useRef(null)
     const originalRefreshRef = useRef({ callback: onBeforeRefresh, image: activeImage, id: activeId, requested: false })
@@ -262,6 +267,7 @@ function PhotoLightbox({
     const handlePrint = async (event) => {
         event.stopPropagation()
         if (!onPrint || !activeImage || printing) return
+        if (embedded) event.currentTarget?.focus({ preventScroll: true })
         setPrinting(true)
         try {
             await onPrint(event, activeImage, index)
@@ -346,8 +352,10 @@ function PhotoLightbox({
         onClose()
     }
 
+    const Dialog = embedded ? LightboxContents : AccessibleLightbox
     return (
-        <AccessibleLightbox
+        <Dialog
+            explicitTabOrder
             ariaLabel={ariaLabel}
             onClose={onClose}
             onNext={images.length > 1 && !adminControls?.deleting ? onNext : undefined}
@@ -355,6 +363,7 @@ function PhotoLightbox({
             className={`linen-responsive-lightbox linen-photo-lightbox ${adminMode ? 'linen-admin-photo-lightbox' : ''} fixed inset-0 z-[1000] bg-charcoal/90 flex flex-col items-center justify-center p-4 md:p-12 mb-0`}
         >
             <button
+                ref={initialFocusRef}
                 type="button"
                 onClick={onClose}
                 className="linen-lightbox-close fixed z-[1001] w-12 h-12 text-white/80 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
@@ -465,58 +474,8 @@ function PhotoLightbox({
             </div>
 
             <div className="linen-lightbox-footer" onClick={handleBlankSpaceClick}>
-                {(images.length > 1 || hasPhotoMetadata) && (
-                    <nav className={`linen-lightbox-nav ${images.length > 1 ? 'has-navigation' : ''}`} aria-label="Photo navigation">
-                        {images.length > 1 && (
-                            <button
-                                type="button"
-                                onClick={(event) => { event.stopPropagation(); onPrevious?.() }}
-                                disabled={adminControls?.deleting}
-                                className="linen-lightbox-previous absolute left-4 md:left-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                aria-label="Previous photo"
-                                data-camera-cursor="previous"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                                </svg>
-                            </button>
-                        )}
-                        {hasPhotoMetadata && (
-                            <div className="linen-lightbox-metadata shrink-0 mt-4 text-center animate-fade-in max-w-2xl px-4">
-                                {activeImage.exif.model && (
-                                    <p title={activeImage.exif.model} className="text-white font-medium text-sm md:text-base drop-shadow-md">
-                                        {activeImage.exif.model}
-                                    </p>
-                                )}
-                                {activeImage.exif.lens && (
-                                    <p title={activeImage.exif.lens} className="text-white/80 text-xs md:text-sm drop-shadow-md mb-1">
-                                        {activeImage.exif.lens}
-                                    </p>
-                                )}
-                                <div className="flex items-center justify-center gap-4 text-white/70 text-xs md:text-sm font-light tracking-wide italic mt-2">
-                                    {activeImage.exif.focalLength && <span>{activeImage.exif.focalLength}</span>}
-                                    {activeImage.exif.focalRatio && <span>{activeImage.exif.focalRatio}</span>}
-                                    {activeImage.exif.shutterSpeed && <span>{activeImage.exif.shutterSpeed}</span>}
-                                    {activeImage.exif.iso && <span>{activeImage.exif.iso}</span>}
-                                </div>
-                            </div>
-                        )}
-                        {images.length > 1 && (
-                            <button
-                                type="button"
-                                onClick={(event) => { event.stopPropagation(); onNext?.() }}
-                                disabled={adminControls?.deleting}
-                                className="linen-lightbox-next absolute right-4 md:right-8 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white flex items-center justify-center transition-all cursor-pointer z-10"
-                                aria-label="Next photo"
-                                data-camera-cursor="next"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                </svg>
-                            </button>
-                        )}
-                    </nav>
-                )}
+                <PhotoLightboxNavigation image={activeImage} navigable={images.length > 1}
+                    onNext={onNext} onPrevious={onPrevious} disabled={adminControls?.deleting} />
 
                 {activeImage && (
                     <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
@@ -619,7 +578,7 @@ function PhotoLightbox({
                     </div>
                 )}
             </div>
-        </AccessibleLightbox>
+        </Dialog>
     )
 }
 

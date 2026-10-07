@@ -15,7 +15,7 @@ function trustedPrintSource(value) {
     }
 }
 
-export function showPrintOrderModal(value) {
+export function showPrintOrderModal(value, returnFocusTo) {
     const src = trustedPrintSource(value)
     if (!src) return false
     if (!modalRoot) {
@@ -24,6 +24,6 @@ export function showPrintOrderModal(value) {
         document.body.append(host)
         modalRoot = createRoot(host)
     }
-    modalRoot.render(<PrintOrderModal src={src} onClose={() => modalRoot.render(null)} />)
+    modalRoot.render(<PrintOrderModal src={src} returnFocusTo={returnFocusTo} onClose={() => modalRoot.render(null)} />)
     return true
 }

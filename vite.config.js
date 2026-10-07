@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { thirdPartyLicenses } from './scripts/third-party-licenses.mjs'
+import { minifyPublicBootstrap } from './scripts/minify-public-bootstrap.mjs'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -20,7 +21,7 @@ export default defineConfig(({ mode }) => {
     : {}
 
   return {
-    plugins: [react(), tailwindcss(), thirdPartyLicenses()],
+    plugins: [react(), tailwindcss(), thirdPartyLicenses(), minifyPublicBootstrap()],
     define: {
       global: 'globalThis',
     },

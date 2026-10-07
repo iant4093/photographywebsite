@@ -14,7 +14,7 @@ function printOrigin() {
     }
 }
 
-export async function openPrintOrder(requestSession) {
+export async function openPrintOrder(requestSession, returnFocusTo) {
     if (typeof requestSession !== 'function') throw new TypeError('A print session request is required.')
     const response = await requestSession()
     const sessionToken = response?.sessionToken
@@ -24,7 +24,8 @@ export async function openPrintOrder(requestSession) {
 
     const src = `${printOrigin()}/print.html#session=${encodeURIComponent(sessionToken)}`
     const { showPrintOrderModal } = await import('../components/PrintOrderModalHost')
-    showPrintOrderModal(src)
+    if (returnFocusTo) showPrintOrderModal(src, returnFocusTo)
+    else showPrintOrderModal(src)
     return src
 }
 

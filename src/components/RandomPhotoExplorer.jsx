@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import PhotoLightbox from './PhotoLightbox'
+import ExplorerPhotoLightbox from './ExplorerPhotoLightbox'
+import { warmExplorerViewer } from '../utils/explorerViewer'
 import SectionStats from './SectionStats'
 import { fetchRandomPhotos, requestAlbumMediaDownload, requestAlbumPrintSession } from '../utils/api'
 import {
@@ -11,7 +12,6 @@ import {
     startBrowserDownload,
 } from '../utils/mediaUrls'
 import { trackPhotoDownload } from '../utils/analytics'
-import { openPrintOrder } from '../utils/printOrders'
 import { cacheRandomPhotoSession, readRandomPhotoSession } from '../utils/randomPhotoSession'
 import { shareUrlForAlbumPhoto } from '../utils/share'
 import usePhotoOriginalRefresh from '../hooks/usePhotoOriginalRefresh'
@@ -148,7 +148,10 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
         }
     }, [loadSession])
 
-    const handleOpen = useCallback(() => {
+    const handleOpen = useCallback((event) => {
+        // Keep focus restoration consistent on touch and Safari as well.
+        event?.currentTarget?.focus({ preventScroll: true })
+        warmExplorerViewer()
         openRef.current = true
         setOpen(true)
         if (photosRef.current.length) {
@@ -192,8 +195,10 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
 
     const handlePrint = useCallback(async (event, image) => {
         event.stopPropagation()
+        const returnFocusTo = event.currentTarget
         try {
-            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)))
+            const { openPrintOrder } = await import('../utils/printOrders')
+            await openPrintOrder(() => requestAlbumPrintSession(image.albumId, mediaId(image)), returnFocusTo)
         } catch (printError) {
             console.error('Random photo print order failed:', printError)
             alert(printError?.message || 'The print store could not be opened. Please try again.')
@@ -206,8 +211,9 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
                 <button
                     type="button"
                     onClick={handleOpen}
-                    onPointerEnter={() => { void loadSession().catch(() => {}) }}
-                    onFocus={() => { void loadSession().catch(() => {}) }}
+                    onPointerEnter={() => { warmExplorerViewer(); void loadSession().catch(() => {}) }}
+                    onPointerDown={warmExplorerViewer}
+                    onFocus={() => { warmExplorerViewer(); void loadSession().catch(() => {}) }}
                     className="linen-theme-toggle"
                     aria-label={buttonLabel}
                     title={buttonLabel}
@@ -221,8 +227,9 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
                 <button
                     type="button"
                     onClick={handleOpen}
-                    onPointerEnter={() => { void loadSession().catch(() => {}) }}
-                    onFocus={() => { void loadSession().catch(() => {}) }}
+                    onPointerEnter={() => { warmExplorerViewer(); void loadSession().catch(() => {}) }}
+                    onPointerDown={warmExplorerViewer}
+                    onFocus={() => { warmExplorerViewer(); void loadSession().catch(() => {}) }}
                     className="linen-text-link inline-flex cursor-pointer items-center gap-2 px-1 py-2 text-white font-medium transition-all duration-300"
                 >
                     {buttonLabel}
@@ -233,7 +240,7 @@ function RandomPhotoSession({ category = '', variant = 'link', showStats = false
             )}
             {showStats && <SectionStats category={normalizedCategory} showLabel={showLabel} />}
             {open && (
-                <PhotoLightbox
+                <ExplorerPhotoLightbox
                     images={lightboxPhotos}
                     index={index}
                     ariaLabel={lightboxLabel}

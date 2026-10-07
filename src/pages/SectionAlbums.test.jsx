@@ -20,7 +20,7 @@ vi.mock('../utils/api', () => api)
 vi.mock('../utils/sectionStats', () => ({ fetchSectionStats: vi.fn() }))
 vi.mock('../components/AlbumCard', () => ({ default: ({ album }) => <Link to={`/album/${album.albumId}`}>{album.title}</Link> }))
 vi.mock('../components/VideoAlbumCard', () => ({ default: ({ album }) => <Link to={`/video/${album.albumId}`}>{album.title}</Link> }))
-vi.mock('../components/PhotoLightbox', () => ({ default: ({ images, ariaLabel, onClose }) => <div role="dialog" aria-label={ariaLabel}>
+vi.mock('../components/ExplorerPhotoLightbox', () => ({ default: ({ images, ariaLabel, onClose }) => <div role="dialog" aria-label={ariaLabel}>
     {images.length} photographs
     <button onClick={onClose}>Close viewer</button>
 </div> }))

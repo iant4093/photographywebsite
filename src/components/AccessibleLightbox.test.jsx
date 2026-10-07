@@ -46,6 +46,24 @@ function NestedHarness() {
 describe('AccessibleLightbox', () => {
     afterEach(() => document.getElementById('root')?.remove())
 
+    it('traverses photo controls explicitly when native Tab skips buttons', () => {
+        render(<AccessibleLightbox ariaLabel="Photographs" onClose={() => {}} explicitTabOrder>
+            <button data-lightbox-initial-focus>Close</button>
+            <button tabIndex={-1}>Inactive photograph</button>
+            <button>Download</button>
+            <button>Print</button>
+        </AccessibleLightbox>)
+        expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+        fireEvent.keyDown(window, { key: 'Tab' })
+        expect(screen.getByRole('button', { name: 'Download' })).toHaveFocus()
+        fireEvent.keyDown(window, { key: 'Tab' })
+        expect(screen.getByRole('button', { name: 'Print' })).toHaveFocus()
+        fireEvent.keyDown(window, { key: 'Tab' })
+        expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+        fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
+        expect(screen.getByRole('button', { name: 'Print' })).toHaveFocus()
+    })
+
     it('closes only the top dialog and restores album focus without unlocking the page', () => {
         const { container } = render(<NestedHarness />)
         const opener = screen.getByRole('button', { name: 'Open photograph' })
