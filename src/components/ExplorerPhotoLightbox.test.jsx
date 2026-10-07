@@ -101,10 +101,12 @@ it('keeps zoom, download and print available before the viewer code arrives', as
 
 it('preserves an original comparison opened while the viewer code is delayed', async () => {
     const image = { ...props.images[0], before: { status: 'ready', url: '/before.webp', width: 1200, height: 800 } }
-    render(<ExplorerPhotoLightbox {...props} images={[image]} />)
+    render(<ExplorerPhotoLightbox {...props} images={[image]} onDownload={vi.fn()} onPrint={vi.fn()} />)
     fireEvent.load(screen.getByRole('img', { name: 'One' }))
     fireEvent.click(screen.getByRole('button', { name: 'Show original photo' }))
     fireEvent.load(screen.getByRole('img', { name: 'Before editing — One', hidden: true }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Download edited photo' })).toBeEnabled())
+    expect(screen.getByRole('button', { name: 'Order a print of the edited photo' })).toBeEnabled()
     await act(async () => resolveViewer(Viewer))
     expect(await screen.findByRole('dialog', { name: 'Loaded viewer' })).toHaveTextContent('Original remains ready')
 })

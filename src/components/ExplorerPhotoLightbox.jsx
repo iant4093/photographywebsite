@@ -227,13 +227,16 @@ export default function ExplorerPhotoLightbox(props) {
                         </button>}
                         <LightboxShareButton media={image} index={props.index} mediaType="photo" shareUrl={props.shareUrl} />
                         {props.onDownload && <button type="button" onClick={event => props.onDownload(event, image, props.index)}
-                            className={`linen-lightbox-download ${ACTION_CLASS} cursor-pointer touch-manipulation`} aria-label="Download photo">
+                            className={`linen-lightbox-download ${ACTION_CLASS} cursor-pointer touch-manipulation`}
+                            title={showingBefore ? 'Download Edited Photo' : 'Download Photo'}
+                            aria-label={showingBefore ? 'Download edited photo' : 'Download photo'}>
                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg><span>Download</span>
                         </button>}
                         {props.onPrint && <button type="button" disabled={printing} onClick={async event => {
                             event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); setPrinting(true)
                             try { await props.onPrint(event, image, props.index) } finally { setPrinting(false) }
-                        }} className={`linen-lightbox-print ${ACTION_CLASS} disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation`} aria-label="Order a print of this photo">
+                        }} className={`linen-lightbox-print ${ACTION_CLASS} disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation`}
+                            aria-label={showingBefore ? 'Order a print of the edited photo' : 'Order a print of this photo'}>
                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" /></svg><span>{printing ? 'Preparing…' : 'Order a Print'}</span>
                         </button>}
                     </div>
