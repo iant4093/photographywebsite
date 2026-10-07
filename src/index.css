@@ -286,19 +286,14 @@ html.editorial-scrollbar-active body::-webkit-scrollbar {
    browser can reveal these synchronously on fast swipes without remounting
    cards or changing scroll geometry. Observers keep their existing preload
    distances; titles, links, keyboard focus and find-in-page stay available. */
-.visitor-photo-catalog .catalog-section .album-card-image {
-  content-visibility: auto;
-}
-
-/* Individual tiles have a fixed aspect ratio, so skipping their offscreen
-   contents preserves gallery geometry, focus targets, and browser search. */
+.visitor-photo-catalog .album-card-image,
 .album-photo-tile {
   content-visibility: auto;
 }
 
 @media print {
   .album-photo-tile,
-  .visitor-photo-catalog .catalog-section .album-card-image {
+  .visitor-photo-catalog .album-card-image {
     content-visibility: visible;
   }
 }

@@ -11,6 +11,9 @@ import { markImageReady } from '../utils/imageReadiness'
 import { afterImageDecode } from '../utils/viewerImageReadiness'
 import { prefetchPhoto } from '../utils/photoPrefetch'
 
+const PHOTO_STYLE = { width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }
+const ACTION_CLASS = 'inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98]'
+
 // The small dialog remains usable while a cold tap downloads the viewer code.
 // Photo data and code load in parallel; it can show the warmed photo and accept
 // close/next/previous immediately instead of replacing the page with a spinner.
@@ -175,13 +178,13 @@ export default function ExplorerPhotoLightbox(props) {
                             src={mediaDisplayUrl(preview.outgoing.image)} srcSet={mediaPreviewSrcSet(preview.outgoing.image) || undefined}
                             sizes={sizesFor(preview.outgoing.image)} width={preview.outgoing.image.width} height={preview.outgoing.image.height}
                             alt="" aria-hidden="true" decoding="async" className="linen-lightbox-photo linen-lightbox-photo-outgoing object-contain relative z-20"
-                            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }} />}
+                            style={PHOTO_STYLE} />}
                         <PhotoZoomFrame key={imageId} bounds={bounds} loaded={readyImage === imageId} visible={!showingBefore}
                             src={mediaDisplayUrl(image)} srcSet={mediaPreviewSrcSet(image) || undefined}
                             sizes={sizesFor(image)} width={image.width} height={image.height} decoding="async" fetchPriority="high"
                             alt={photoDescription(image, props.ariaLabel, props.index, props.images.length)}
                             className={`linen-lightbox-photo linen-lightbox-edited object-contain relative z-30 ${readyImage === imageId ? 'is-loaded' : ''}`}
-                            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
+                            style={PHOTO_STYLE}
                             onLoad={event => {
                                 const element = event.currentTarget
                                 afterImageDecode(element, () => {
@@ -194,7 +197,7 @@ export default function ExplorerPhotoLightbox(props) {
                             sizes={sizesFor(image.before)} width={image.before.width} height={image.before.height} decoding="async"
                             alt={`Before editing — ${photoDescription(image, props.ariaLabel, props.index, props.images.length)}`}
                             className={`linen-lightbox-photo linen-lightbox-original object-contain relative z-30 ${originalReady ? 'is-loaded' : ''}`}
-                            style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
+                            style={PHOTO_STYLE}
                             onLoad={event => afterImageDecode(event.currentTarget, () => setComparison(current => ({ ...current, ready: beforeKey })))}
                             onError={event => { void Promise.resolve(props.onBeforeRefresh?.(event, image, { reason: 'media-error' })).catch(() => {}) }} />}
                         </div>
@@ -209,7 +212,7 @@ export default function ExplorerPhotoLightbox(props) {
                 <PhotoLightboxNavigation image={image} navigable={props.images.length > 1} onPrevious={props.onPrevious} onNext={props.onNext} />
                 {image && <div className="linen-lightbox-actions shrink-0 mt-6 flex flex-col items-center gap-2 z-10">
                     <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
-                        {hasComparison && <button type="button" className="linen-lightbox-before inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
+                        {hasComparison && <button type="button" className={`linen-lightbox-before ${ACTION_CLASS} cursor-pointer touch-manipulation`}
                             aria-label={comparisonRequested ? showingBefore ? 'Show edited photo' : unavailable ? 'Unable to locate original' : 'Cancel loading original' : 'Show original photo'} aria-pressed={showingBefore}
                             onClick={event => {
                                 event.stopPropagation()
@@ -221,20 +224,20 @@ export default function ExplorerPhotoLightbox(props) {
                         </button>}
                         <LightboxShareButton media={image} index={props.index} mediaType="photo" shareUrl={props.shareUrl} />
                         {props.onDownload && <button type="button" onClick={event => props.onDownload(event, image, props.index)}
-                            className="linen-lightbox-download inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation" aria-label="Download photo">
+                            className={`linen-lightbox-download ${ACTION_CLASS} cursor-pointer touch-manipulation`} aria-label="Download photo">
                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg><span>Download</span>
                         </button>}
                         {props.onPrint && <button type="button" disabled={printing} onClick={async event => {
                             event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); setPrinting(true)
                             try { await props.onPrint(event, image, props.index) } finally { setPrinting(false) }
-                        }} className="linen-lightbox-print inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation" aria-label="Order a print of this photo">
+                        }} className={`linen-lightbox-print ${ACTION_CLASS} disabled:cursor-wait disabled:opacity-60 cursor-pointer touch-manipulation`} aria-label="Order a print of this photo">
                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12-4h12v7H6v-7z" /></svg><span>{printing ? 'Preparing…' : 'Order a Print'}</span>
                         </button>}
                     </div>
                     {hasComparison && <span className="linen-lightbox-before-status" role="status" aria-live="polite">{showingBefore ? 'Before — Camera JPG' : 'After — Edited'}{beforeMessage ? `. ${beforeMessage}` : ''}</span>}
                     <span className="linen-lightbox-counter text-white/70 text-sm font-medium drop-shadow-md">{props.index + 1} / {props.images.length}</span>
                 </div>}
-                {state.error && <p role="alert" className="fixed top-4 left-4 right-20 z-[1002] text-white text-center">
+                {state.error && <p role="alert" className="fixed top-4 left-4 text-white text-center" style={{ right: '5rem', zIndex: 1002 }}>
                     Photo controls could not be loaded.{' '}
                     <button type="button" className="underline" onClick={() => setState(current => ({ ...current, error: false, attempt: current.attempt + 1 }))}>Try again</button>
                 </p>}

@@ -80,6 +80,8 @@ jobs:
           VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA' }}
           VITE_RELEASE_SHA: ${{ github.sha }}
         run: npm run build
+      - name: Verify built theme, hero and catalog bootstrap behavior
+        run: node scripts/test-theme-bootstrap.mjs
       - name: Install browser for deterministic release journeys
         run: npx playwright install --with-deps chromium
       - name: Exercise built frontend browser recovery and administration
