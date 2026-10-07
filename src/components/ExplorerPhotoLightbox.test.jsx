@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 const loader = vi.hoisted(() => ({ loadExplorerViewer: vi.fn(), readExplorerViewer: vi.fn() }))
+const sharing = vi.hoisted(() => ({ sharePage: vi.fn() }))
 vi.mock('../utils/explorerViewer', () => loader)
+vi.mock('../utils/share', () => sharing)
 vi.mock('../utils/mediaUrls', () => ({ mediaDisplayUrl: image => image.url, mediaId: image => image.id, mediaPreviewSrcSet: () => '', mediaBeforeDisplayUrl: image => image?.before?.url || '', mediaBeforeSrcSet: () => '' }))
 vi.mock('../utils/mediaAccessibility', () => ({ photoDescription: image => image.title }))
 import ExplorerPhotoLightbox from './ExplorerPhotoLightbox'
@@ -19,6 +21,26 @@ function Viewer({ initialImageReady, initialComparisonRequested, initialOriginal
 beforeEach(() => {
     loader.readExplorerViewer.mockReturnValue(null)
     loader.loadExplorerViewer.mockImplementation(() => new Promise((resolve, reject) => { resolveViewer = resolve; rejectViewer = reject }))
+    sharing.sharePage.mockResolvedValue('copied')
+})
+
+it('enhances after copied-link feedback resets without another visitor interaction', async () => {
+    vi.useFakeTimers()
+    const view = render(<ExplorerPhotoLightbox {...props} />)
+    try {
+        fireEvent.load(screen.getByRole('img', { name: 'One' }))
+        await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Share photo' })))
+        expect(screen.getByText('Link Copied')).toBeVisible()
+        await act(async () => resolveViewer(Viewer))
+        await act(async () => vi.advanceTimersByTime(400))
+        expect(screen.queryByRole('dialog', { name: 'Loaded viewer' })).not.toBeInTheDocument()
+        await act(async () => vi.advanceTimersByTime(2200))
+        await act(async () => vi.advanceTimersByTime(300))
+        expect(screen.getByRole('dialog', { name: 'Loaded viewer' })).toHaveTextContent('Photo remains ready')
+    } finally {
+        view.unmount()
+        vi.useRealTimers()
+    }
 })
 
 it('keeps the selected photo, navigation, escape and focus trap available while code is delayed', async () => {

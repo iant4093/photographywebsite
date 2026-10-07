@@ -91,7 +91,10 @@ export default function ExplorerPhotoLightbox(props) {
         }
         const schedule = () => { window.clearTimeout(timer); timer = window.setTimeout(promote, 200) }
         const observer = new MutationObserver(schedule)
-        observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'inert'] })
+        // React updates the copied-link label's existing text node. Watch
+        // character data too so its reset can release the delayed handoff
+        // without requiring another click or keypress from the visitor.
+        observer.observe(dialog, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class', 'inert'] })
         dialog.addEventListener('transitionend', schedule)
         dialog.addEventListener('pointerup', schedule)
         dialog.addEventListener('keyup', schedule)
