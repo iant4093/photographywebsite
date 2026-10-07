@@ -341,7 +341,11 @@ async function viewerCase(width, failModule = false, kind = 'random') {
             await page.waitForTimeout(3250)
             assert.equal(await page.getByRole('dialog', { name: 'Print options', exact: true }).isVisible(), true)
             await page.getByRole('button', { name: 'Close print options', exact: true }).click()
-            assert.equal(await page.getByRole('button', { name: 'Order a print of this photo', exact: true }).evaluate(node => node === document.activeElement), true)
+            // The host closes through a separate React root. Check the
+            // completed close and its focus restoration, rather than racing
+            // that root's effect cleanup immediately after the click.
+            await page.getByRole('dialog', { name: 'Print options', exact: true }).waitFor({ state: 'hidden' })
+            await page.waitForFunction(() => document.querySelector('.linen-lightbox-print') === document.activeElement, null, { timeout: 2000 })
             assert.equal(traffic.filter(request => request.path.endsWith('/print')).length, 1)
         }
         if (failModule) {
