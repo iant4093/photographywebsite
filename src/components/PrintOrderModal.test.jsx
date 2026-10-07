@@ -14,6 +14,21 @@ describe('PrintOrderModal', () => {
         document.documentElement.removeAttribute('data-lightbox-scroll-lock')
     })
 
+    it('restores the equivalent print control if viewer loading replaced the original', async () => {
+        const owner = document.createElement('div')
+        owner.setAttribute('role', 'dialog')
+        const original = document.createElement('button')
+        original.setAttribute('aria-label', 'Order a print of this photo')
+        owner.append(original); document.body.append(owner)
+        original.focus(); openPrintModal()
+        await screen.findByRole('dialog', { name: 'Print options' })
+        const replacement = original.cloneNode(true)
+        original.replaceWith(replacement)
+        fireEvent.click(screen.getByRole('button', { name: 'Close print options' }))
+        expect(replacement).toHaveFocus()
+        owner.remove()
+    })
+
     it('embeds the isolated print bridge and closes back to the invoking control', async () => {
         const trigger = document.createElement('button')
         trigger.textContent = 'Order a Print'

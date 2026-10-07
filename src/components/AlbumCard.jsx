@@ -8,6 +8,7 @@ import { isWithinRecentDays } from '../utils/date'
 import { registerMobileAlbumPreview } from '../utils/mobileAlbumPreview'
 import { canRunAlbumPreview, MOBILE_PREVIEW_QUERY } from '../utils/albumPreviewPolicy'
 import { albumPath } from '../utils/albumRoutes'
+import { formatAlbumDate } from '../utils/galleryFormatting'
 
 // Shared album card used by public, video, and signed-in catalogs.
 function AlbumCard({
@@ -115,7 +116,7 @@ function AlbumCard({
     const content = (
         <>
             {/* Cover image with warm overlay on hover */}
-            <div ref={imageContainer} className="album-card-image relative aspect-[4/3] overflow-hidden bg-cream-dark">
+            <div ref={imageContainer} data-image-visibility-root="" className="album-card-image relative aspect-[4/3] overflow-hidden bg-cream-dark">
                 {albumCoverUrl(album) ? (
                     <ProgressiveImage
                         src={albumCoverUrl(album)}
@@ -174,11 +175,7 @@ function AlbumCard({
                 )}
                 {album.createdAt && (
                     <p className="mt-auto pt-4 text-xs text-warm-gray/70">
-                        {new Date(album.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                        })}
+                        {formatAlbumDate(album.createdAt)}
                     </p>
                 )}
             </div>

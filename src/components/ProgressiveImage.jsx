@@ -76,7 +76,10 @@ export default function ProgressiveImage({
 
     useEffect(() => {
         if (!src || (eager && !viewportFirst)) return undefined
-        const element = containerRef.current
+        // A fixed-ratio card may skip its offscreen contents. Observe its
+        // stable outer box so that skipped child layout cannot delay the
+        // existing preload window until the image is already on screen.
+        const element = containerRef.current?.closest('[data-image-visibility-root]') || containerRef.current
         if (!element) return undefined
         const retained = observeRetainedImage(element, (visible) => {
             setVisibleSrc(visible ? src : null)

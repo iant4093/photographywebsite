@@ -17,7 +17,8 @@
     "preview": "vite preview",
     "build:raw-decoder": "python3 scripts/build-raw-decoder.py",
     "test:raw-decoder": "node scripts/test-raw-decoder.mjs",
-    "test:browser": "node tests/browser/release-checks.mjs"
+    "test:browser": "node tests/browser/release-checks.mjs",
+    "test:browser:visitors": "node tests/browser/visitor-gallery-checks.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",

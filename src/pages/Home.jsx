@@ -178,7 +178,7 @@ function Home() {
     const { sections: photoSections, setCategoryYear } = useAlbumYearFilters(groupedPhotoAlbums)
 
     return (
-        <div ref={pageRef} aria-busy={catalogPending}>
+        <div ref={pageRef} aria-busy={catalogPending} className="visitor-photo-catalog">
             <section className="home-hero linen-hero relative overflow-hidden">
                 <div className="absolute inset-0 overflow-hidden">
                     <picture>

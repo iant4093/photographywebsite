@@ -86,6 +86,11 @@ jobs:
         env:
           VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID || 'example-client-id' }}
         run: npm run test:browser
+      - name: Exercise visitor gallery swipes, viewer loading and navigation
+        env:
+          VISITOR_MEDIA_DOMAIN: ${{ vars.VITE_CLOUDFRONT_DOMAIN || 'media.example.invalid' }}
+          VISITOR_API_BASE: ${{ vars.VITE_API_BASE_URL || 'https://api.example.invalid/prod' }}
+        run: npm run test:browser:visitors
       - name: Create exact frontend artifact
         run: |
           mkdir -p release-frontend

@@ -4,18 +4,22 @@ import './PrintOrderModal.css'
 
 const FOCUSABLE_SELECTOR = 'button:not([disabled]), iframe, [href], [tabindex]:not([tabindex="-1"])'
 
-export default function PrintOrderModal({ src, onClose }) {
+export default function PrintOrderModal({ src, onClose, returnFocusTo }) {
     const [loaded, setLoaded] = useState(false)
     const dialogRef = useRef(null)
     const frameRef = useRef(null)
     const restoreFocusRef = useRef(null)
+    const restoreDialogRef = useRef(null)
+    const restoreLabelRef = useRef(null)
     const portalTarget = typeof document === 'undefined' ? null : document.body
 
     useEffect(() => {
         if (!src) return undefined
-        restoreFocusRef.current = document.activeElement instanceof HTMLElement
+        restoreFocusRef.current = returnFocusTo instanceof HTMLElement && returnFocusTo.isConnected ? returnFocusTo : document.activeElement instanceof HTMLElement
             ? document.activeElement
             : null
+        restoreDialogRef.current = restoreFocusRef.current?.closest('[role="dialog"]')
+        restoreLabelRef.current = restoreFocusRef.current?.getAttribute('aria-label')
         const dialog = dialogRef.current
         const previousOverflow = document.body.style.overflow
         const alreadyLocked = document.documentElement.hasAttribute('data-lightbox-scroll-lock')
@@ -75,9 +79,17 @@ export default function PrintOrderModal({ src, onClose }) {
                 if (ariaHidden === null) element.removeAttribute('aria-hidden')
                 else element.setAttribute('aria-hidden', ariaHidden)
             })
-            restoreFocusRef.current?.focus({ preventScroll: true })
+            if (restoreFocusRef.current?.isConnected) restoreFocusRef.current.focus({ preventScroll: true })
+            else if (restoreDialogRef.current?.isConnected && restoreLabelRef.current) {
+                // The explorer can finish loading its controls while checkout
+                // is open. Restore the equivalent new control in the same
+                // persistent dialog rather than focusing a detached button.
+                const replacement = [...restoreDialogRef.current.querySelectorAll(FOCUSABLE_SELECTOR)]
+                    .find(element => element.getAttribute('aria-label') === restoreLabelRef.current)
+                replacement?.focus({ preventScroll: true })
+            }
         }
-    }, [onClose, src])
+    }, [onClose, src, returnFocusTo])
 
     if (!portalTarget || !src) return null
 
