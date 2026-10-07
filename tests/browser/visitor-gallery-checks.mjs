@@ -318,7 +318,9 @@ async function viewerCase(width, failModule = false, kind = 'random') {
             await page.locator('.linen-lightbox-photo-frame.is-zoomed').click()
             await page.getByRole('button', { name: 'Share photo', exact: true }).click()
             await page.waitForFunction(() => window.__visitor.sharedUrl?.includes('?photo='))
-            await page.getByText('Link Copied', { exact: true }).waitFor()
+            // Mobile intentionally hides the toolbar's text labels; the
+            // copied feedback state still must hold enhancement until reset.
+            await page.waitForFunction(() => document.querySelector('.linen-lightbox-share')?.textContent.includes('Link Copied'))
             // No download, checkout or keyboard event should be needed to
             // enhance the viewer once copied-link feedback has finished.
             await page.locator('.explorer-viewer-pending').waitFor({ state: 'hidden' })
