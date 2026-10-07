@@ -311,6 +311,20 @@ async function viewerCase(width, failModule = false, kind = 'random') {
         const pendingBounds = await page.getByRole('img', { name: 'Fixture photograph 1', exact: true }).boundingBox()
         assert.equal(await page.getByRole('button', { name: 'Close photo viewer', exact: true }).evaluate(node => node === document.activeElement), true)
         await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowLeft')
+        if (!failModule && kind === 'featured') {
+            await page.locator('.linen-lightbox-photo-frame:not(.is-outgoing)').first().click()
+            await page.waitForTimeout(2200)
+            assert.equal(await page.locator('.linen-lightbox-photo-frame.is-zoomed').count(), 1)
+            await page.locator('.linen-lightbox-photo-frame.is-zoomed').click()
+            await page.getByRole('button', { name: 'Share photo', exact: true }).click()
+            await page.waitForFunction(() => window.__visitor.sharedUrl?.includes('?photo='))
+            // Mobile intentionally hides the toolbar's text labels; the
+            // copied feedback state still must hold enhancement until reset.
+            await page.waitForFunction(() => document.querySelector('.linen-lightbox-share')?.textContent.includes('Link Copied'))
+            // No download, checkout or keyboard event should be needed to
+            // enhance the viewer once copied-link feedback has finished.
+            await page.locator('.explorer-viewer-pending').waitFor({ state: 'hidden' })
+        }
         if (exerciseActions) {
             await page.locator('.linen-lightbox-photo-frame:not(.is-outgoing)').first().click()
             await page.waitForTimeout(3250)
@@ -327,7 +341,11 @@ async function viewerCase(width, failModule = false, kind = 'random') {
             await page.waitForTimeout(3250)
             assert.equal(await page.getByRole('dialog', { name: 'Print options', exact: true }).isVisible(), true)
             await page.getByRole('button', { name: 'Close print options', exact: true }).click()
-            assert.equal(await page.getByRole('button', { name: 'Order a print of this photo', exact: true }).evaluate(node => node === document.activeElement), true)
+            // The host closes through a separate React root. Check the
+            // completed close and its focus restoration, rather than racing
+            // that root's effect cleanup immediately after the click.
+            await page.getByRole('dialog', { name: 'Print options', exact: true }).waitFor({ state: 'hidden' })
+            await page.waitForFunction(() => document.querySelector('.linen-lightbox-print') === document.activeElement, null, { timeout: 2000 })
             assert.equal(traffic.filter(request => request.path.endsWith('/print')).length, 1)
         }
         if (failModule) {
@@ -355,6 +373,10 @@ async function viewerCase(width, failModule = false, kind = 'random') {
 try {
     const widths = engine === 'firefox' ? [1440] : [1440, 390]
     for (const width of widths) {
+        if (process.env.VISITOR_SHARE_HANDOFF_ONLY === '1') {
+            await viewerCase(width, false, 'featured')
+            continue
+        }
         if (process.env.VISITOR_VIEWERS_ONLY === '1') {
             await viewerCase(width)
             await viewerCase(width, true)
