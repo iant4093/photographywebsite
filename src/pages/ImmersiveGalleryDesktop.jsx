@@ -80,6 +80,16 @@ import {
     resetMuseumJump,
 } from '../utils/museumMovement'
 
+import MuseumWheelchairs from '../components/museum/MuseumWheelchairs'
+import {
+    createMuseumWheelchairs,
+    focusedMuseumWheelchair,
+    MUSEUM_WHEELCHAIR,
+    museumWheelchairCollisionLayout,
+    museumWheelchairExitPosition,
+    museumWheelchairPathClear,
+} from '../utils/museumWheelchairs'
+
 const SESSION_KEY = 'ian-photography-museum-position-v2'
 const RETURN_KEY = 'ian-photography-museum-return'
 const PREFERENCES_KEY = 'ian-photography-museum-preferences-v3'
@@ -4205,7 +4215,7 @@ function focusedPainting(layout, camera, direction = new THREE.Vector3()) {
     return best
 }
 
-function MuseumTouchControls({ input, onPause }) {
+function MuseumTouchControls({ input, onPause, riding }) {
     const stick = useRef(null)
     const knob = useRef(null)
     const lastLook = useRef({ x: 0, y: 0 })
@@ -4280,7 +4290,7 @@ function MuseumTouchControls({ input, onPause }) {
                 <div ref={knob} className="museum-joystick-knob" />
                 <span>Move</span>
             </div>
-            <button
+            {!riding && <button
                 className="museum-touch-jump"
                 type="button"
                 aria-label="Jump"
@@ -4302,7 +4312,7 @@ function MuseumTouchControls({ input, onPause }) {
             >
                 <span aria-hidden="true">↑</span>
                 Jump
-            </button>
+            </button>}
             <button className="museum-touch-pause" type="button" onClick={onPause}>Pause</button>
         </div>
     )
@@ -4447,8 +4457,9 @@ function playMuseumFootstep(audio, stepIndex, speedRatio, volume = 1, surface = 
     source.stop(now + 0.09)
 }
 
-function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchInput, preferences, motionSuppressed, developmentJump, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchInput, preferences, motionSuppressed, developmentJump, chairs, ride, onWheelchairStatus, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
     const { camera } = useThree()
+    const wheelchairStatus = useRef('')
     const keys = useRef(new Set())
     const lastRoom = useRef(null)
     const lastNearbyRooms = useRef('')
@@ -4538,18 +4549,19 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             touchInput.current.lookX = 0
             touchInput.current.lookY = 0
             keys.current.clear()
+            touchInput.current.wheelchairAction = false
             resetMuseumJump(touchInput.current.jump)
             velocity.set(0, 0, 0)
             previousSpeed.current = 0
             cameraPitchOffset.current = 0
             cameraYawOffset.current = 0
             cameraRoll.current = 0
-            camera.position.y = layout.spawn[1]
+            camera.position.y = ride.current ? MUSEUM_WHEELCHAIR.eyeHeight : layout.spawn[1]
             return
         }
         touchEuler.setFromQuaternion(camera.quaternion, 'YXZ')
         lookYaw.current = touchEuler.y
-        lookPitch.current = THREE.MathUtils.clamp(touchEuler.x, -0.58, 0.58)
+        lookPitch.current = THREE.MathUtils.clamp(touchEuler.x, ride.current ? -1.2 : -0.58, 0.58)
         cameraRoll.current = 0
         cameraPitchOffset.current = 0
         cameraYawOffset.current = 0
@@ -4559,14 +4571,19 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         touchInput.current.lookX = 0
         touchInput.current.lookY = 0
         lookReady.current = true
-    }, [camera, enabled, layout.spawn, touchEuler, touchInput, velocity])
+    }, [camera, enabled, layout.spawn, ride, touchEuler, touchInput, velocity])
 
     useEffect(() => {
         const onKeyDown = (event) => {
             if (!enabled || event.defaultPrevented || event.isComposing || museumKeyboardTargetsControl(event)) return
             keys.current.add(event.code)
+            if (event.code === 'KeyF' && !event.repeat) {
+                event.preventDefault()
+                touchInput.current.wheelchairAction = true
+            }
             if (event.code === 'Space') {
                 event.preventDefault()
+                if (ride.current) return
                 if (!event.repeat) {
                     pressMuseumJump(touchInput.current.jump)
                     markMuseumInteractionBusy()
@@ -4588,7 +4605,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             window.removeEventListener('keydown', onKeyDown)
             window.removeEventListener('keyup', onKeyUp)
         }
-    }, [camera, enabled, focusDirection, layout, onOpenAlbum, touchInput])
+    }, [camera, enabled, focusDirection, layout, onOpenAlbum, ride, touchInput])
 
     useFrame((state, frameDelta) => {
         if (!enabled) return
@@ -4607,11 +4624,50 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             if (pressed) pressMuseumJump(jump)
             else releaseMuseumJump(jump)
         }
-        advanceMuseumJump(jump, delta)
+        if (touchInput.current.wheelchairAction) {
+            touchInput.current.wheelchairAction = false
+            const occupied = chairs.find(chair => chair.id === ride.current)
+            if (occupied) {
+                const exit = museumWheelchairExitPosition(layout, chairs, occupied, passableRoomIds.current)
+                if (exit) {
+                    camera.position.x = exit.x
+                    camera.position.z = exit.z
+                    ride.current = null
+                } else {
+                    onWheelchairStatus({ riding: true, blocked: true })
+                    wheelchairStatus.current = 'blocked'
+                }
+            } else if (jump.grounded) {
+                forward.set(0, 0, -1).applyQuaternion(camera.quaternion)
+                const chair = focusedMuseumWheelchair(chairs, camera.position, forward)
+                if (chair && isMuseumPositionWalkable(
+                    museumWheelchairCollisionLayout(layout, chairs, chair.id),
+                    chair.position[0], chair.position[2], MUSEUM_WHEELCHAIR.radius,
+                ) && museumWheelchairPathClear(layout, chairs, chair, camera.position,
+                    { x: chair.position[0], z: chair.position[2] }, passableRoomIds.current)) {
+                    ride.current = chair.id
+                    camera.position.x = chair.position[0]
+                    camera.position.z = chair.position[2]
+                    // Face the parked chair's direction when sitting down.
+                    lookYaw.current = chair.rotationY
+                    lookPitch.current = -0.12
+                    camera.rotation.set(lookPitch.current, lookYaw.current, 0, 'YXZ')
+                }
+            }
+            resetMuseumJump(jump)
+            velocity.set(0, 0, 0)
+            previousSpeed.current = 0
+            cameraRoll.current = 0
+            cameraPitchOffset.current = 0
+            cameraYawOffset.current = 0
+        }
+        const riding = Boolean(ride.current)
+        if (riding) resetMuseumJump(jump)
+        else advanceMuseumJump(jump, delta)
         if (!lookReady.current) {
             touchEuler.setFromQuaternion(camera.quaternion, 'YXZ')
             lookYaw.current = touchEuler.y
-            lookPitch.current = THREE.MathUtils.clamp(touchEuler.x, -0.58, 0.58)
+            lookPitch.current = THREE.MathUtils.clamp(touchEuler.x, ride.current ? -1.2 : -0.58, 0.58)
             lookReady.current = true
         }
         const lookSensitivity = (touchMode ? 0.003 : 0.0024) * preferences.sensitivity
@@ -4621,7 +4677,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         lookYaw.current = THREE.MathUtils.euclideanModulo(lookYaw.current + Math.PI, Math.PI * 2) - Math.PI
         lookPitch.current = THREE.MathUtils.clamp(
             lookPitch.current - (frameLookY * lookSensitivity),
-            -0.58,
+            riding ? -1.2 : -0.58,
             0.58,
         )
         touchInput.current.lookX = 0
@@ -4630,7 +4686,8 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         const touchMagnitude = touchMode
             ? Math.min(1, Math.hypot(touchInput.current.moveX, touchInput.current.moveY))
             : 0
-        const speed = keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') || touchMagnitude > 0.9 ? 5.3 : 3.25
+        const boosting = keys.current.has('ShiftLeft') || keys.current.has('ShiftRight') || touchMagnitude > 0.9
+        const speed = riding ? (boosting ? MUSEUM_WHEELCHAIR.boostSpeed : MUSEUM_WHEELCHAIR.speed) : (boosting ? 5.3 : 3.25)
         forward.set(0, 0, -1).applyQuaternion(camera.quaternion)
         forward.y = 0
         forward.normalize()
@@ -4650,7 +4707,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         // A slightly heavier acceleration curve keeps first-person movement
         // from reading as a frictionless camera dolly while preserving precise
         // stopping at paintings and portal thresholds.
-        const response = moving ? (touchMode ? 8.8 : 9.2) : 11.2
+        const response = riding ? (moving ? 6 : 18) : (moving ? (touchMode ? 8.8 : 9.2) : 11.2)
         velocity.x = THREE.MathUtils.damp(velocity.x, moving ? movement.x : 0, response, delta)
         velocity.z = THREE.MathUtils.damp(velocity.z, moving ? movement.z : 0, response, delta)
         const frameMovementX = velocity.x * delta
@@ -4659,10 +4716,10 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         const previousPositionZ = camera.position.z
         if (Math.abs(frameMovementX) + Math.abs(frameMovementZ) > 0.0001) {
             const next = moveMuseumPosition(
-                layout,
+                museumWheelchairCollisionLayout(layout, chairs, ride.current),
                 { x: camera.position.x, z: camera.position.z },
                 { x: frameMovementX, z: frameMovementZ },
-                0.35,
+                riding ? MUSEUM_WHEELCHAIR.radius : 0.35,
                 passableRoomIds.current,
             )
             if (Math.abs(next.x - camera.position.x - frameMovementX) > 0.001) velocity.x *= 0.24
@@ -4677,11 +4734,20 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         if (actualSpeed > 0.12 || !jump.grounded || Math.abs(frameLookX) + Math.abs(frameLookY) > 0.5) {
             markMuseumInteractionBusy()
         }
-        const gaitStrength = motionSuppressed || !jump.grounded ? 0 : THREE.MathUtils.clamp(actualSpeed / 3.25, 0, 1.35)
+        const occupied = chairs.find(chair => chair.id === ride.current)
+        if (occupied) {
+            occupied.position[0] = camera.position.x
+            occupied.position[2] = camera.position.z
+            occupied.rotationY = lookYaw.current
+            const travelDirection = (camera.position.x - previousPositionX) * forward.x
+                + (camera.position.z - previousPositionZ) * forward.z
+            occupied.wheelAngle -= Math.sign(travelDirection) * actualSpeed * delta / 0.36
+        }
+        const gaitStrength = riding || motionSuppressed || !jump.grounded ? 0 : THREE.MathUtils.clamp(actualSpeed / 3.25, 0, 1.35)
         const motionStrength = gaitStrength * preferences.bobStrength
         if (jump.grounded) gaitPhase.current += actualSpeed * delta * 2.35
         const footstepIndex = Math.floor(gaitPhase.current / Math.PI)
-        if (jump.grounded && (jump.landed || (actualSpeed > 0.48 && footstepIndex !== lastFootstep.current))) {
+        if (!riding && jump.grounded && (jump.landed || (actualSpeed > 0.48 && footstepIndex !== lastFootstep.current))) {
             lastFootstep.current = footstepIndex
             playMuseumFootstep(
                 footstepAudio.current,
@@ -4695,14 +4761,14 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
         const stepWave = Math.sin(gaitPhase.current * 2)
         const heelStrike = Math.pow(Math.max(0, stepWave), 8)
         const headBob = ((stepWave * 0.052) - (heelStrike * 0.018)) * motionStrength
-        const breathing = motionSuppressed || !jump.grounded
+        const breathing = riding || motionSuppressed || !jump.grounded
             ? 0
             : Math.sin(state.clock.elapsedTime * 1.45) * 0.004 * preferences.bobStrength
         const landing = museumLandingOffset(jump, motionSuppressed ? 0 : preferences.bobStrength)
-        camera.position.y = layout.spawn[1] + jump.height + headBob + breathing + landing
+        camera.position.y = riding ? MUSEUM_WHEELCHAIR.eyeHeight : layout.spawn[1] + jump.height + headBob + breathing + landing
         const lateralVelocity = (velocity.x * right.x) + (velocity.z * right.z)
         const lateralLean = THREE.MathUtils.clamp(lateralVelocity / Math.max(1, speed), -1, 1)
-        const targetRoll = moving && jump.grounded && !motionSuppressed
+        const targetRoll = moving && !riding && jump.grounded && !motionSuppressed
             ? ((Math.sin(gaitPhase.current) * 0.019 * gaitStrength) - (lateralLean * 0.013)) * preferences.bobStrength
             : 0
         cameraRoll.current = THREE.MathUtils.damp(cameraRoll.current, targetRoll, 9.5, delta)
@@ -4710,7 +4776,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             ? THREE.MathUtils.clamp((actualSpeed - previousSpeed.current) / delta, -8, 8)
             : 0
         previousSpeed.current = actualSpeed
-        const targetPitch = moving && jump.grounded && !motionSuppressed
+        const targetPitch = moving && !riding && jump.grounded && !motionSuppressed
             ? ((Math.sin((gaitPhase.current * 2) + 0.7) * 0.012 * gaitStrength) - (acceleration * 0.00115))
                 * preferences.bobStrength
             : 0
@@ -4720,7 +4786,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             moving ? 12 : 8,
             delta,
         )
-        const targetYaw = moving && jump.grounded && !motionSuppressed
+        const targetYaw = moving && !riding && jump.grounded && !motionSuppressed
             ? ((Math.sin(gaitPhase.current) * 0.011) + (lateralLean * 0.0055))
                 * gaitStrength
                 * preferences.bobStrength
@@ -4732,7 +4798,7 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             delta,
         )
         camera.rotation.set(
-            THREE.MathUtils.clamp(lookPitch.current + cameraPitchOffset.current, -0.58, 0.58),
+            THREE.MathUtils.clamp(lookPitch.current + cameraPitchOffset.current, riding ? -1.2 : -0.58, 0.58),
             lookYaw.current + cameraYawOffset.current,
             cameraRoll.current,
             'YXZ',
@@ -4780,6 +4846,13 @@ function PlayerController({ layout, enabled, passableRoomIds, touchMode, touchIn
             if (nearbyKey !== lastNearbyRooms.current) {
                 lastNearbyRooms.current = nearbyKey
                 onNearbyRooms(nearbyRooms)
+            }
+            forward.set(0, 0, -1).applyQuaternion(camera.quaternion)
+            const nearbyChair = riding ? null : focusedMuseumWheelchair(chairs, camera.position, forward)
+            const statusKey = riding ? 'riding' : (nearbyChair?.id || '')
+            if (statusKey !== wheelchairStatus.current && !(wheelchairStatus.current === 'blocked' && riding && !moving)) {
+                wheelchairStatus.current = statusKey
+                onWheelchairStatus({ riding, nearby: Boolean(nearbyChair) })
             }
             const nextFocused = focusedPainting(layout, camera, focusDirection)
             if (nextFocused?.id !== lastFocused.current?.id) {
@@ -5500,7 +5573,9 @@ function RendererHealth({ input, onPause, onStatus }) {
     return null
 }
 
-const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, albumOpen, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onSceneReady, onSceneProgress, onRendererStatus, onResolutionChange, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneReady, albumOpen, touchMode, touchInput, preferences, motionSuppressed, visualPreview, developmentTour, developmentJump, developmentPerf, previewMode, previewRoomIndex, onWheelchairStatus, onSceneReady, onSceneProgress, onRendererStatus, onResolutionChange, onPause, onLock, onUnlock, onActiveRoom, onNearbyRooms, onFocusedPainting, onOpenAlbum }) {
+    const chairs = useMemo(() => createMuseumWheelchairs(layout), [layout])
+    const ride = useRef(null)
     const materials = useMuseumMaterials()
     const { gl, scene, camera } = useThree()
     const prepareRoom = useCallback(async (room, signal) => {
@@ -5611,6 +5686,9 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                         preferences={preferences}
                         motionSuppressed={motionSuppressed}
                         developmentJump={developmentJump}
+                        chairs={chairs}
+                        ride={ride}
+                        onWheelchairStatus={onWheelchairStatus}
                         onActiveRoom={onActiveRoom}
                         onNearbyRooms={onNearbyRooms}
                         onFocusedPainting={onFocusedPainting}
@@ -5619,6 +5697,7 @@ const MuseumScene = memo(function MuseumScene({ layout, controlsEnabled, sceneRe
                     {!touchMode && !developmentJump && <NativePointerLockControls input={touchInput} onLock={onLock} onUnlock={onUnlock} />}
                 </>
             )}
+            <MuseumWheelchairs chairs={chairs} ride={ride} />
         </>
     )
 })
@@ -5650,6 +5729,7 @@ export default function ImmersiveGalleryDesktop() {
     const [activeRoomId, setActiveRoomId] = useState(null)
     const [activeRoomIds, setActiveRoomIds] = useState(null)
     const [focused, setFocused] = useState(null)
+    const [wheelchairStatus, setWheelchairStatus] = useState({ riding: false, nearby: false })
     const [sceneReady, setSceneReady] = useState(false)
     const [sceneVeilVisible, setSceneVeilVisible] = useState(true)
     const [sceneProgress, setSceneProgress] = useState(0.02)
@@ -5932,6 +6012,7 @@ export default function ImmersiveGalleryDesktop() {
                         developmentPerf={developmentPerf}
                         previewMode={previewMode}
                         previewRoomIndex={previewRoomIndex}
+                        onWheelchairStatus={setWheelchairStatus}
                         onSceneReady={handleSceneReady}
                         onSceneProgress={setSceneProgress}
                         onRendererStatus={setRendererStatus}
@@ -5975,6 +6056,15 @@ export default function ImmersiveGalleryDesktop() {
                 </div>
             </div>
             {sceneReady && <div className="museum-crosshair" aria-hidden="true" />}
+            {sceneReady && locked && (wheelchairStatus.riding || wheelchairStatus.nearby) && (
+                <div className="museum-wheelchair-hud" role="status">
+                    {wheelchairStatus.riding && <strong>{touchMode ? 'Turbo wheelchair · Joystick to roll · Full tilt to boost' : 'Turbo wheelchair · WASD to roll · Shift to boost'}</strong>}
+                    {touchMode ? <button type="button" onClick={() => { touchInput.current.wheelchairAction = true }}>
+                        {wheelchairStatus.riding ? 'Get out' : 'Ride wheelchair'}
+                    </button> : <span><kbd>F</kbd> {wheelchairStatus.riding ? 'Get out' : 'Ride wheelchair'}</span>}
+                    {wheelchairStatus.blocked && <span>Move to an open spot to get out.</span>}
+                </div>
+            )}
             {sceneReady && focused && locked && (touchMode ? (
                 <button className="museum-interaction museum-interaction--touch" type="button" onClick={() => openAlbum(focused.album)}>
                     Open <strong>{focused.album.title}</strong>
@@ -5989,20 +6079,21 @@ export default function ImmersiveGalleryDesktop() {
                 <div className="museum-controls-legend" aria-hidden="true">
                     <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span>
                     <span><kbd>Mouse</kbd> Look</span>
-                    <span><kbd>Shift</kbd> Walk faster</span>
-                    <span><kbd>Space</kbd> Jump</span>
+                    <span><kbd>Shift</kbd> {wheelchairStatus.riding ? 'Turbo boost' : 'Walk faster'}</span>
+                    <span><kbd>F</kbd> Ride / get out</span>
+                    {!wheelchairStatus.riding && <span><kbd>Space</kbd> Jump</span>}
                     <span><kbd>Esc</kbd> Pause</span>
                 </div>
             )}
             {sceneReady && touchMode && locked && !visualPreview && !developmentJump && (
-                <MuseumTouchControls input={touchInput} onPause={() => setLocked(false)} />
+                <MuseumTouchControls input={touchInput} riding={wheelchairStatus.riding} onPause={() => setLocked(false)} />
             )}
             {sceneReady && !locked && !openGalleryAlbum && !visualPreview && !developmentTour && !developmentJump && (
                 <div className="museum-entry-panel">
                     <span className="museum-entry-number">The virtual archive</span>
                     <h1>{activeRoomId ? 'Gallery paused' : 'Enter the gallery'}</h1>
                     <p>
-                        Walk through rooms generated from the live photography archive. Look toward a framed album and {touchMode ? 'tap Open to enter it.' : 'press E to open it.'}
+                        Explore rooms from the live photography archive. Four turbo wheelchairs are parked just behind reception; {touchMode ? 'tap Ride' : 'press F'} nearby to hop in. Look toward a framed album and {touchMode ? 'tap Open to enter it.' : 'press E to open it.'}
                     </p>
                     <button
                         id="museum-enter"
