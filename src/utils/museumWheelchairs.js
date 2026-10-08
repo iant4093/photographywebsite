@@ -9,7 +9,7 @@ export const MUSEUM_WHEELCHAIR = Object.freeze({
 })
 
 export function createMuseumWheelchairs(layout) {
-    return [-2.85, -0.95, 0.95, 2.85].map((x, index) => ({
+    return [-0.95, 0.95].map((x, index) => ({
         id: `wheelchair-${index + 1}`,
         kind: 'wheelchair',
         position: [x, 0, layout.desk.position[2] - 2.7],

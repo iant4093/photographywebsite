@@ -17,7 +17,7 @@ function boxes(parts) {
 }
 
 const SIDES = [-1, 1]
-// Shared, merged geometry keeps four detailed chairs inexpensive to render.
+// Shared, merged geometry keeps the detailed chairs inexpensive to render.
 const SEAT = boxes([
     [[0, 0.55, 0], [0.7, 0.11, 0.65]],
     [[0, 0.91, 0.3], [0.7, 0.64, 0.1]],
