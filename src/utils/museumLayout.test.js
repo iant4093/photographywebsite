@@ -146,7 +146,9 @@ describe('museum layout', () => {
         }
 
         const stopped = moveMuseumPosition(layout, { x: 4, z: 8 }, { x: 2, z: 0 })
-        expect(stopped.x).toBe(4)
+        expect(stopped.x).toBeGreaterThanOrEqual(4)
+        expect(stopped.x).toBeLessThanOrEqual(MUSEUM_DIMENSIONS.hallHalfWidth - 0.35)
+        expect(isMuseumPositionWalkable(layout, stopped.x, stopped.z)).toBe(true)
     })
 
     it('keeps every doorway physically connected to its hallway and room', () => {
@@ -213,7 +215,9 @@ describe('museum layout', () => {
             // specifically proves the raised panel collider owns the stop.
             { x: 0.03, z: 0.2 },
         )
-        expect(slid.x).toBe(4.13)
+        expect(slid.x).toBeGreaterThanOrEqual(4.13)
+        expect(slid.x).toBeLessThan(4.156)
+        expect(isMuseumPositionWalkable(layout, slid.x, slid.z)).toBe(true)
         expect(slid.z).toBeCloseTo(panelZ + 0.2)
     })
 
@@ -399,19 +403,22 @@ describe('museum layout', () => {
         const layout = buildMuseumLayout(buildMuseumCatalog([album('a', 'Hikes')]))
         const room = layout.rooms[0]
         const start = {
-            x: room.innerX - (room.side * 0.7),
-            z: room.centerZ + 2.05,
+            x: room.innerX - (room.side * 1.2),
+            z: room.centerZ + 3,
         }
         const result = moveMuseumPosition(
             layout,
             start,
-            { x: room.side * 4.5, z: -2.05 },
+            { x: room.side * 4.5, z: -0.5 },
             0.35,
             new Set([room.id]),
         )
 
         expect((result.x - room.innerX) * room.side).toBeLessThanOrEqual(-0.35)
-        expect(result.z).toBeCloseTo(room.centerZ)
+        // Every collision substep remains outside the solid wall beside the portal.
+        expect(result.z).toBeGreaterThanOrEqual(room.centerZ)
+        expect(result.z).toBeLessThanOrEqual(start.z)
+        expect(isMuseumPositionWalkable(layout, result.x, result.z)).toBe(true)
     })
 
     it('reserves the category end wall for its title', () => {

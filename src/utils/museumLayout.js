@@ -452,7 +452,7 @@ function crossesMuseumRoomBoundary(layout, current, proposed, passableRoomIds, r
     })
 }
 
-export function moveMuseumPosition(layout, current, delta, radius = 0.35, passableRoomIds = null) {
+function stepMuseumPosition(layout, current, delta, radius, passableRoomIds) {
     const next = { x: current.x, z: current.z }
     const proposedX = current.x + delta.x
     if (
@@ -467,6 +467,18 @@ export function moveMuseumPosition(layout, current, delta, radius = 0.35, passab
     ) next.x = proposedX
     const proposedZ = current.z + delta.z
     if (isMuseumPositionWalkable(layout, next.x, proposedZ, radius)) next.z = proposedZ
+    return next
+}
+
+// Bound each collision step even at wheelchair boost speed or after a slow
+// frame. Endpoint-only tests can otherwise tunnel through thin furniture.
+export function moveMuseumPosition(layout, current, delta, radius = 0.35, passableRoomIds = null) {
+    const steps = Math.max(1, Math.ceil(Math.hypot(delta.x, delta.z) / 0.12))
+    const step = { x: delta.x / steps, z: delta.z / steps }
+    let next = current
+    for (let index = 0; index < steps; index += 1) {
+        next = stepMuseumPosition(layout, next, step, radius, passableRoomIds)
+    }
     return next
 }
 
