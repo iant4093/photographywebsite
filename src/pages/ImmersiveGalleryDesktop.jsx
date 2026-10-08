@@ -6093,7 +6093,7 @@ export default function ImmersiveGalleryDesktop() {
                     <span className="museum-entry-number">The virtual archive</span>
                     <h1>{activeRoomId ? 'Gallery paused' : 'Enter the gallery'}</h1>
                     <p>
-                        Explore rooms from the live photography archive. Four turbo wheelchairs are parked just behind reception; {touchMode ? 'tap Ride' : 'press F'} nearby to hop in. Look toward a framed album and {touchMode ? 'tap Open to enter it.' : 'press E to open it.'}
+                        Explore rooms from the live photography archive. Two turbo wheelchairs are parked just behind reception; {touchMode ? 'tap Ride' : 'press F'} nearby to hop in. Look toward a framed album and {touchMode ? 'tap Open to enter it.' : 'press E to open it.'}
                     </p>
                     <button
                         id="museum-enter"

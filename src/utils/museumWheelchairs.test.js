@@ -9,11 +9,12 @@ function gallery() {
 }
 
 describe('museum wheelchairs', () => {
-    it('parks four chairs behind reception with clearance for their full collision footprint', () => {
+    it('parks the two center chairs behind reception with clearance for their full collision footprint', () => {
         const layout = gallery()
         const chairs = createMuseumWheelchairs(layout)
-        expect(chairs).toHaveLength(4)
-        expect(new Set(chairs.map(chair => chair.id)).size).toBe(4)
+        expect(chairs).toHaveLength(2)
+        expect(chairs.map(chair => chair.position[0])).toEqual([-0.95, 0.95])
+        expect(new Set(chairs.map(chair => chair.id)).size).toBe(2)
         for (const chair of chairs) {
             expect(chair.position[2]).toBeLessThan(layout.desk.position[2] - layout.desk.size[2])
             expect(isMuseumPositionWalkable(museumWheelchairCollisionLayout(layout, chairs, chair.id),

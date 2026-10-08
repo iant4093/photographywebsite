@@ -1,6 +1,6 @@
 # Immersive gallery wheelchairs
 
-- Add four procedural wheelchairs just beyond reception, with visible wheels, footrests, armrests and seated first-person details.
+- Add two procedural wheelchairs in the center just beyond reception, with visible wheels, footrests, armrests and seated first-person details.
 - Add `src/utils/museumWheelchairs.js` for spawn state, interaction targeting, safe dismount and shared collision footprints.
 - Add `src/components/museum/MuseumWheelchairs.jsx` for lightweight chair geometry and animated wheels.
 - Integrate riding into `src/pages/ImmersiveGalleryDesktop.jsx`: F/touch interaction, fast movement, lowered seated camera, no walking bob/jump/footsteps while riding, retained chair state through pause and album viewing.
