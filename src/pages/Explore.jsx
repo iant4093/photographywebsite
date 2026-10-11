@@ -1222,6 +1222,7 @@ function SettingsGameBoard({ images }) {
                     blurhash={activeRound.image.blurhash}
                     eager
                     className="explore-game-image"
+                    style={{ aspectRatio: `${activeRound.image.width || 4} / ${activeRound.image.height || 3}` }}
                 />
                 <span>{activeRound.image.albumTitle}</span>
             </div>
