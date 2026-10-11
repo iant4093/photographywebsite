@@ -42,12 +42,21 @@ describe('small presentational and routing components', () => {
     expect(container.querySelector('.linen-footer-links')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Stats' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy')
+    expect(screen.getByRole('link', { name: 'Contact me' })).toHaveAttribute('href', '/contact')
     for (const name of ['Instagram', 'Source Code']) {
       const link = screen.getByRole('link', { name })
       expect(link).toHaveAttribute('target', '_blank')
       expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     }
     expect(screen.getByText(new RegExp(String(new Date().getFullYear())))).toBeInTheDocument()
+  })
+
+  it.each([false, true])('returns to the top with reduced motion set to %s', (reducedMotion) => {
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: reducedMotion })
+    routed(<Footer />)
+    fireEvent.click(screen.getByRole('button', { name: 'Back to top' }))
+    expect(window.matchMedia).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)')
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: reducedMotion ? 'instant' : 'smooth' })
   })
 
   it('keeps the non-editorial footer content compact for admin routes', () => {
