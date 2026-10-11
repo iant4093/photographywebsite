@@ -1055,9 +1055,15 @@
   }
 
   .linen-site .explore-game-photo {
-    min-height: 20rem;
+    min-height: 0;
+    padding: 0;
     border-right: 0;
     border-bottom: 1px solid var(--color-warm-border);
+  }
+
+  .linen-site .explore-game-image {
+    height: auto;
+    max-height: none;
   }
 
   .linen-site .explore-grid {
