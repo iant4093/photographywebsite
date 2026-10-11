@@ -78,7 +78,7 @@ describe('App routing shell', () => {
   it('renders the home route and persistent shell after startup', async () => {
     const { container } = render(<MemoryRouter><App /></MemoryRouter>)
     expect(await screen.findByRole('heading', { name: 'Home route' })).toBeInTheDocument()
-    expect(screen.getByText('Footer')).toBeInTheDocument()
+    expect(await screen.findByText('Footer')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content')
     expect(container.querySelector('main')).toHaveAttribute('id', 'main-content')
     expect(window.history.scrollRestoration).toBe('manual')

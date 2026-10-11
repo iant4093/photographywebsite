@@ -3,7 +3,7 @@ import RecoveryBoundary from './components/RecoveryBoundary'
 import { Suspense, useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router'
 import Navbar from './components/Navbar'
-import Footer from './components/Footer'
+const Footer = lazy(() => import('./components/Footer'))
 import ProtectedRoute from './components/ProtectedRoute'
 const BackToTop = lazy(() => import('./components/BackToTop'))
 import DocumentMetadata from './components/DocumentMetadata'
@@ -151,8 +151,15 @@ function App() {
                 </RecoveryBoundary>
             </main>
             {!isImmersiveRoute && <RecoveryBoundary optional><Suspense fallback={null}><BackToTop /></Suspense></RecoveryBoundary>}
-            {!isImmersiveRoute && <Footer />}
-            <RecoveryBoundary optional><Suspense fallback={null}><MistyEcho key={location.pathname} /></Suspense></RecoveryBoundary>
+            {!isImmersiveRoute && (
+                <RecoveryBoundary optional>
+                    <Suspense fallback={<div aria-hidden="true" style={{ minHeight: 210 }} />}>
+                        <Footer />
+                        {/* Attach the scroll observer after the real footer replaces the placeholder. */}
+                        <RecoveryBoundary optional><Suspense fallback={null}><MistyEcho key={location.pathname} /></Suspense></RecoveryBoundary>
+                    </Suspense>
+                </RecoveryBoundary>
+            )}
             {!isImmersiveRoute && <RecoveryBoundary optional><Suspense fallback={null}><MotionExperience /></Suspense></RecoveryBoundary>}
         </div>
     )
