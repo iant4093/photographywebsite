@@ -4,6 +4,9 @@ import { useLocation } from 'react-router'
 const SITE_ORIGIN = 'https://iantruongphotography.com'
 const PAGE_TITLES = {
     '/editor': 'Photo Editor',
+    '/utilities': 'Utilities',
+    '/utilities/truongroom': 'TruongRoom — Coming Soon',
+    '/utilities/truongcam': 'TruongCam — Coming Soon',
     '/privacy': 'Privacy Notice',
     '/terms': 'Terms & Photo Use',
     '/print-policy': 'Print Orders & Returns',

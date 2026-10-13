@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import useNavSections from '../hooks/useNavSections'
 import { EXPLORE_MODULES } from '../utils/exploreModules'
+import { UTILITY_MODULES } from '../utils/utilityModules'
 import NavDropdown from './NavDropdown'
 import './NavDropdowns.css'
 
@@ -39,7 +40,7 @@ function SectionLinks({ mediaType, sections, failed, pathname }) {
 
 // Hover dropdowns for the desktop masthead. Loaded on its own only where a
 // hover-capable desktop layout can use it, keeping the entry bundle lean.
-export default function NavDropdowns({ pathname, photoActive, videoActive, exploreActive }) {
+export default function NavDropdowns({ pathname, photoActive, videoActive, exploreActive, utilitiesActive }) {
     const [dropdown, setDropdown] = useState(null)
     const photoSections = useNavSections('photo')
     const videoSections = useNavSections('video')
@@ -71,6 +72,25 @@ export default function NavDropdowns({ pathname, photoActive, videoActive, explo
                 </div>
                 <ul className="linen-nav-dropdown-list linen-nav-dropdown-list--modules">
                     {EXPLORE_MODULES.map(module => {
+                        const current = pathname === module.path
+                        return (
+                            <li key={module.id}>
+                                <Link to={module.path} className={current ? 'is-active' : undefined} aria-current={current ? 'page' : undefined}>
+                                    <span>{module.title}</span>
+                                    <small>{module.summary}</small>
+                                </Link>
+                            </li>
+                        )
+                    })}
+                </ul>
+            </NavDropdown>
+            <NavDropdown {...dropdownProps('utilities')} label="Utilities" to="/utilities" active={utilitiesActive}>
+                <div className="linen-nav-dropdown-head">
+                    <span>Utilities modules</span>
+                    <Link to="/utilities">All modules →</Link>
+                </div>
+                <ul className="linen-nav-dropdown-list linen-nav-dropdown-list--utilities">
+                    {UTILITY_MODULES.map(module => {
                         const current = pathname === module.path
                         return (
                             <li key={module.id}>

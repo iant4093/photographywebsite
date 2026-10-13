@@ -24,7 +24,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/') || pathname.startsWith('/sections/video/')
     const searchActive = pathname === '/search'
     const exploreActive = pathname === '/explore' || pathname.startsWith('/explore/')
-    const editorActive = pathname === '/editor'
+    const utilitiesActive = pathname === '/editor' || pathname === '/utilities' || pathname.startsWith('/utilities/')
     const statsActive = pathname === '/stats'
     const sharedActive = pathname.startsWith('/sharedalbum')
     const contactActive = pathname === '/contact'
@@ -40,6 +40,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
             <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
             <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
             <Link to="/explore" {...activeAttributes(exploreActive)}>Explore</Link>
+            <Link to="/utilities" {...activeAttributes(utilitiesActive)}>Utilities</Link>
         </>
     )
 
@@ -178,10 +179,9 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         <div className="linen-desktop-links hidden" aria-label="Primary navigation">
                             {hoverDropdowns ? (
                                 <Suspense fallback={primaryLinks}>
-                                    <NavDropdowns pathname={pathname} photoActive={photoActive} videoActive={videoActive} exploreActive={exploreActive} />
+                                    <NavDropdowns pathname={pathname} photoActive={photoActive} videoActive={videoActive} exploreActive={exploreActive} utilitiesActive={utilitiesActive} />
                                 </Suspense>
                             ) : primaryLinks}
-                            <Link to="/editor" {...activeAttributes(editorActive)}>Editor</Link>
                             <Link to="/stats" {...activeAttributes(statsActive)}>Stats</Link>
                             <Link to="/sharedalbum" {...activeAttributes(sharedActive)}>Find Album</Link>
                             <Link to="/contact" {...activeAttributes(contactActive)}>Contact</Link>
@@ -240,8 +240,8 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         Explore
                     </Link>
 
-                    <Link to="/editor" onClick={closeMenu} className={menuLinkClass(editorActive)} aria-current={editorActive ? 'page' : undefined}>
-                        Editor
+                    <Link to="/utilities" onClick={closeMenu} className={menuLinkClass(utilitiesActive)} aria-current={utilitiesActive ? 'page' : undefined}>
+                        Utilities
                     </Link>
 
                     <Link to="/stats" onClick={closeMenu} className={menuLinkClass(statsActive)} aria-current={statsActive ? 'page' : undefined}>

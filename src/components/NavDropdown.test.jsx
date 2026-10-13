@@ -20,7 +20,7 @@ const renderNavbar = (path) => render(
 // The dropdowns load lazily, so wait until they replace the plain links.
 const routed = async (path = '/') => {
   const view = renderNavbar(path)
-  await waitFor(() => expect(view.container.querySelectorAll('.linen-nav-dropdown')).toHaveLength(3))
+  await waitFor(() => expect(view.container.querySelectorAll('.linen-nav-dropdown')).toHaveLength(4))
   return view
 }
 const stubHoverDesktop = (matches) => {
@@ -49,6 +49,7 @@ describe('desktop navigation dropdowns', () => {
     const { container } = renderNavbar('/')
     expect(trigger(container, 'Photographs')).not.toHaveAttribute('aria-expanded')
     expect(container.querySelector('.linen-nav-dropdown')).toBeNull()
+    expect(trigger(container, 'Utilities')).toHaveAttribute('href', '/utilities')
   })
 
   it('groups the public catalog into curated sections with album counts', () => {
@@ -188,9 +189,43 @@ describe('desktop navigation dropdowns', () => {
     expect(explore).toHaveFocus()
   })
 
-  it('leaves Editor, Stats, Find Album, and Contact as plain links', async () => {
+  it.each(['/editor', '/utilities/truongroom', '/utilities/truongcam'])('opens Utilities on %s with all three modules', async path => {
+    const { container } = await routed(path)
+    const utilities = trigger(container, 'Utilities')
+    expect(utilities).toHaveAttribute('href', '/utilities')
+    expect(utilities).toHaveAttribute('aria-current', 'page')
+    utilities.focus()
+    fireEvent.keyDown(utilities, { key: 'ArrowDown' })
+    const panel = panelFor(utilities)
+    expect(utilities).toHaveAttribute('aria-expanded', 'true')
+    expect(within(panel).getByRole('link', { name: /All modules/ })).toHaveFocus()
+    expect(within(panel).getByRole('link', { name: /Web Editor/ })).toHaveAttribute('href', '/editor')
+    expect(within(panel).getByRole('link', { name: /TruongRoom Coming soon/ })).toHaveAttribute('href', '/utilities/truongroom')
+    expect(within(panel).getByRole('link', { name: /TruongCam Coming soon/ })).toHaveAttribute('href', '/utilities/truongcam')
+    expect(panel.querySelector('[aria-current="page"]')).toHaveAttribute('href', path)
+    fireEvent.keyDown(document.activeElement, { key: 'Escape' })
+    expect(utilities).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.pointerEnter(utilities.parentElement)
+    expect(utilities).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(within(panel).getByRole('link', { name: /TruongRoom/ }))
+    expect(utilities).toHaveAttribute('aria-expanded', 'false')
+    expect(fetchAlbumsPage).not.toHaveBeenCalled()
+  })
+
+  it('links the mobile menu to the Utilities landing page and closes it on navigation', () => {
+    stubHoverDesktop(false)
+    const { container } = renderNavbar('/editor')
+    fireEvent.click(within(container).getByRole('button', { name: 'Open menu' }))
+    const utilities = within(container.querySelector('#site-menu')).getByRole('link', { name: 'Utilities' })
+    expect(utilities).toHaveAttribute('href', '/utilities')
+    expect(utilities).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(utilities)
+    expect(container.querySelector('#site-menu')).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('leaves Stats, Find Album, and Contact as plain links', async () => {
     const { container } = await routed()
-    for (const name of ['Editor', 'Stats', 'Find Album', 'Contact', 'Sign In']) {
+    for (const name of ['Stats', 'Find Album', 'Contact', 'Sign In']) {
       const link = trigger(container, name)
       expect(link).not.toHaveAttribute('aria-expanded')
       expect(link.parentElement).toBe(desktop(container))
