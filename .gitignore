@@ -67,3 +67,8 @@ cf-etag.txt
 
 # Local website audit artifacts
 /website_review/
+
+# Local-only benchmarks, prototypes and architecture tooling
+/benchmarks/
+/demos/
+/ops/architecture/

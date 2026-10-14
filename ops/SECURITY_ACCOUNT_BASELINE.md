@@ -476,7 +476,7 @@ operations remain gated and reviewed in AWS Backup.
 
 ### 6. Cost budget and notification ownership
 
-Follow [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md). The source-controlled budget
+Use `security_budget_preflight.py` with `security_budget_template.yaml`. The source-controlled budget
 has no default spending amount, email address, subscription, resource action,
 or automatic security-control disablement. Its read-only preflight recommends
 creation only when the exact budget name is absent and the owner confirms the

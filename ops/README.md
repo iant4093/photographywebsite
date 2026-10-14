@@ -45,8 +45,8 @@ are **dry-run by default** and require multiple exact production guards to apply
   standard is treated as drift because targeted Config rules provide the
   approved, cost-bounded checks. It never prints
   provider identifiers, tags, Region names, or findings.
-- `security_budget_template.yaml`, `security_budget_preflight.py`, and
-  [`COST_GOVERNANCE.md`](COST_GOVERNANCE.md) define an optional retained,
+- `security_budget_template.yaml` and `security_budget_preflight.py` define an
+  optional retained,
   console-only account budget. It has no notification route and is not part of
   website incident delivery.
 - Migration helpers cover existing album ownership, GSIs, media visibility
@@ -69,8 +69,7 @@ KMS stack must be deployed in `us-east-1`.
 
 ## Responsive preview V3 rollout
 
-The exact canary, dispatch, reconciliation, monitoring, and rollback sequence is
-documented in [`PREVIEW_V3.md`](PREVIEW_V3.md). Preserve its stable eligible
+When running a canary, dispatch, or reconciliation, preserve the stable eligible
 inventory digest across canary and full reconciliation; do not use a sorted
 `--max-jobs` slice as the production canary.
 
@@ -111,10 +110,8 @@ An absent, delayed, or failed V3 never removes or modifies the raw image or
 current 800px JPEG.
 
 Historical-media backfill is dry-run by default and may only dispatch the exact
-digest-bound plan reviewed by an operator. The complete canary, apply,
-reconciliation, monitoring, partial-batch, and rollback procedure lives only in
-[`PREVIEW_V3.md`](PREVIEW_V3.md); do not duplicate or abbreviate its guards in a
-change ticket. The online path remains additive, and the existing JPEG is the
+digest-bound plan reviewed by an operator (`ops/backfill_preview_v3.py`, verified
+read-only with `ops/reconcile_preview_v3.py`). The online path remains additive, and the existing JPEG is the
 fallback whenever a complete ready V3 record is unavailable. Dispatch uses
 bounded `SendMessageBatch` calls and requires the reviewed
 `--expected-plan-digest` plus `--confirm backfill-preview-v3` guards.
