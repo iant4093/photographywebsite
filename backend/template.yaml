@@ -1736,6 +1736,10 @@ Resources:
           IncludeCookies: false
           Prefix: media/
         PriceClass: PriceClass_100
+        # Shares the retained front-door web ACL (ops/waf_front_door_template.yaml,
+        # us-east-1) with the frontend distribution, so it adds no second ACL fee.
+        # Managed threat rules and MediaPerIpRateLimit apply to media requests.
+        WebACLId: !Sub 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/IanPhotography-FrontDoor-${Stage}/f65f8e2d-edf5-4853-9b16-64e43cd0554a'
       Tags:
         - Key: Feature
           Value: public-delivery

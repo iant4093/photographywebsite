@@ -354,11 +354,11 @@ traffic, privacy, and cost after 30 days.
 
 - Route 53 DNSSEC is prepared but deferred until the registrar ceremony is
   scheduled. Its required customer-managed KMS key has ongoing key/request cost.
-- The retained CloudFront WAF rollout runs known-bad input, IP reputation,
-  per-IP API/Explore limits, and distributed API/Explore circuit breakers in
-  BLOCK, with request sampling disabled and sensitive fields redacted. The
-  circuit breakers intentionally preserve bounded origin spend over API
-  availability. Return an individual rule to COUNT only for a verified false
+- The retained CloudFront WAF, shared by the frontend and media CDN, runs
+  known-bad input, IP reputation, and per-IP API/Explore/media limits in BLOCK,
+  with request sampling disabled and sensitive fields redacted. Aggregate API
+  spend is bounded by API Gateway stage and route throttles rather than WAF
+  circuit breakers. Return an individual rule to COUNT only for a verified false
   positive with a documented rollback.
 - Guarded CloudTrail, scoped Config, GuardDuty, Security Hub, Access Analyzer,
   and AWS Backup controls are active and source controlled separately from the

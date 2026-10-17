@@ -866,6 +866,24 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/${ApplicationStackName}-*'
               - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/ian-photography-waf-alarm-prod'
+          # The media distribution's WebACLId names the retained front-door ACL
+          # (ops/waf_front_door_template.yaml). Changing a distribution's WebACLId
+          # can be authorized against WAF association permissions, so grant them
+          # for that one ACL only, plus CloudFront's own association actions.
+          - Sid: AttachFrontDoorWebAclToApplicationDistributions
+            Effect: Allow
+            Action:
+              - wafv2:AssociateWebACL
+              - wafv2:DisassociateWebACL
+              - wafv2:GetWebACL
+            Resource: !Sub 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/IanPhotography-FrontDoor-prod/*'
+          - Sid: AssociateApplicationDistributionWebAcl
+            Effect: Allow
+            Action:
+              - cloudfront:AssociateDistributionWebACL
+              - cloudfront:DisassociateDistributionWebACL
+            Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*'
+
   CloudFormationExecutionDataAndMessagingPolicy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: RetainExceptOnCreate

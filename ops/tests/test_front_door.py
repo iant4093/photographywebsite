@@ -306,24 +306,6 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             },
                         },
                         {
-                            "Name": "ExploreGlobalCircuitBreaker",
-                            "Action": {"Block": {}},
-                            "Statement": {
-                                "RateBasedStatement": {
-                                    "Limit": 5000,
-                                    "EvaluationWindowSec": 300,
-                                    "AggregateKeyType": "CONSTANT",
-                                    "ScopeDownStatement": {
-                                        "ByteMatchStatement": {
-                                            "SearchString": "/api/public/explore",
-                                            "FieldToMatch": {"UriPath": {}},
-                                            "PositionalConstraint": "EXACTLY",
-                                        }
-                                    },
-                                }
-                            },
-                        },
-                        {
                             "Name": "ApiPerIpRateLimit",
                             "Action": {"Block": {}},
                             "Statement": {
@@ -342,18 +324,18 @@ class CloudFrontFrontDoorTests(unittest.TestCase):
                             },
                         },
                         {
-                            "Name": "ApiGlobalCircuitBreaker",
+                            "Name": "MediaPerIpRateLimit",
                             "Action": {"Block": {}},
                             "Statement": {
                                 "RateBasedStatement": {
-                                    "Limit": 15000,
+                                    "Limit": 4000,
                                     "EvaluationWindowSec": 300,
-                                    "AggregateKeyType": "CONSTANT",
+                                    "AggregateKeyType": "IP",
                                     "ScopeDownStatement": {
                                         "ByteMatchStatement": {
-                                            "SearchString": "/api/",
-                                            "FieldToMatch": {"UriPath": {}},
-                                            "PositionalConstraint": "STARTS_WITH",
+                                            "SearchString": "d1twwtwfz1yeo4.cloudfront.net",
+                                            "FieldToMatch": {"SingleHeader": {"Name": "host"}},
+                                            "PositionalConstraint": "EXACTLY",
                                         }
                                     },
                                 }
@@ -426,25 +408,28 @@ class WafAndPreflightTests(unittest.TestCase):
     def test_waf_is_retained_selectively_blocking_and_privacy_safe(self) -> None:
         self.assertIn("Scope: CLOUDFRONT", WAF_TEMPLATE)
         self.assertIn("DefaultAction:\n        Allow: {}", WAF_TEMPLATE)
-        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 7)
+        self.assertEqual(WAF_TEMPLATE.count("SampledRequestsEnabled: false"), 6)
         self.assertEqual(WAF_TEMPLATE.count("Count: {}"), 0)
         self.assertEqual(WAF_TEMPLATE.count("None: {}"), 2)
         for rate_rule, aggregate_key, limit_parameter in (
             ("ExplorePerIpRateLimit", "IP", "ExplorePerIpRequestLimit"),
-            ("ExploreGlobalCircuitBreaker", "CONSTANT", "ExploreGlobalRequestLimit"),
             ("ApiPerIpRateLimit", "IP", "ApiPerIpRequestLimit"),
-            ("ApiGlobalCircuitBreaker", "CONSTANT", "ApiGlobalRequestLimit"),
+            ("MediaPerIpRateLimit", "IP", "MediaPerIpRequestLimit"),
         ):
             self.assertIn(rate_rule, WAF_TEMPLATE)
             self.assertIn(f"AggregateKeyType: {aggregate_key}", WAF_TEMPLATE)
             self.assertIn(f"Limit: !Ref {limit_parameter}", WAF_TEMPLATE)
-        self.assertEqual(WAF_TEMPLATE.count("EvaluationWindowSec: 300"), 4)
-        self.assertEqual(len(re.findall(r"(?m)^\s+SearchString: /api/$", WAF_TEMPLATE)), 2)
+        # Aggregate floods are capped by API Gateway stage/route throttles, so the
+        # ACL carries no constant-key circuit breakers.
+        self.assertNotIn("AggregateKeyType: CONSTANT", WAF_TEMPLATE)
+        self.assertEqual(WAF_TEMPLATE.count("EvaluationWindowSec: 300"), 3)
+        self.assertEqual(len(re.findall(r"(?m)^\s+SearchString: /api/$", WAF_TEMPLATE)), 1)
         self.assertEqual(
             len(re.findall(r"(?m)^\s+SearchString: /api/public/explore$", WAF_TEMPLATE)),
-            2,
+            1,
         )
-        self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: STARTS_WITH"), 2)
+        self.assertEqual(len(re.findall(r"(?m)^\s+SearchString: !Ref MediaHostName$", WAF_TEMPLATE)), 1)
+        self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: STARTS_WITH"), 1)
         self.assertEqual(WAF_TEMPLATE.count("PositionalConstraint: EXACTLY"), 2)
         for managed_group in (
             "AWSManagedRulesKnownBadInputsRuleSet",
@@ -458,6 +443,16 @@ class WafAndPreflightTests(unittest.TestCase):
         self.assertIn("DeletionPolicy: Retain", WAF_TEMPLATE)
         self.assertIn("WafAlarmCrossRegionRule", WAF_TEMPLATE)
         self.assertIn("events:PutEvents", WAF_TEMPLATE)
+
+    def test_media_distribution_shares_the_front_door_web_acl(self) -> None:
+        sam = (ROOT / "backend" / "template.yaml").read_text(encoding="utf-8")
+        media = sam.split("\n  ImagesCloudFront:\n", 1)[1].split("\n  MediaConvertRole:\n", 1)[0]
+        self.assertIn(
+            "WebACLId: !Sub 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/"
+            "IanPhotography-FrontDoor-${Stage}/",
+            media,
+        )
+        self.assertIn("Name: !Sub 'IanPhotography-FrontDoor-${Stage}'", WAF_TEMPLATE)
         self.assertNotIn("AlarmTopicArn", WAF_TEMPLATE)
         self.assertNotIn("AlarmActions:", WAF_TEMPLATE)
         # WAF blocks mean the WAF is working; they are never alarmed or forwarded.
@@ -607,11 +602,14 @@ class WafRateLimitContractTests(unittest.TestCase):
         }
         expected = {
             "ExplorePerIpRateLimit": defaults["ExplorePerIpRequestLimit"],
-            "ExploreGlobalCircuitBreaker": defaults["ExploreGlobalRequestLimit"],
             "ApiPerIpRateLimit": defaults["ApiPerIpRequestLimit"],
-            "ApiGlobalCircuitBreaker": defaults["ApiGlobalRequestLimit"],
+            "MediaPerIpRateLimit": defaults["MediaPerIpRequestLimit"],
         }
         self.assertEqual(
-            {name: limit for name, _key, limit, _path, _constraint in cloudfront_frontend.WAF_RATE_LIMIT_CONTRACT},
+            {name: limit for name, _key, limit, _field, _search, _constraint in cloudfront_frontend.WAF_RATE_LIMIT_CONTRACT},
             expected,
         )
+        media_host = re.search(r"(?m)^  MediaHostName:\n    Type: String\n    Default: (\S+)$", template)
+        self.assertIsNotNone(media_host)
+        media_rule = next(rule for rule in cloudfront_frontend.WAF_RATE_LIMIT_CONTRACT if rule[0] == "MediaPerIpRateLimit")
+        self.assertEqual(media_rule[4], media_host.group(1))

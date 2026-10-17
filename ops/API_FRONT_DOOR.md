@@ -38,12 +38,12 @@ WAF is defense in depth.
   `us-east-1` Region. Sampling is
   disabled, sensitive fields are redacted, and every rule stays in its reviewed
   BLOCK mode. Managed rules block known-bad inputs and reputation-listed sources.
-  A per-IP `/api/` rate rule limits single-source floods, and a separate constant-
-  key `/api/` circuit breaker bounds distributed origin traffic. The circuit
-  breaker intentionally favors bounded AWS origin spend over API availability;
-  static pages remain outside both rate scopes. The Explore route has lower,
-  dedicated per-IP and global limits so arbitrary filter values cannot turn
-  repeated requests into unbounded DynamoDB usage.
+  A per-IP `/api/` rate rule limits single-source floods; static pages remain
+  outside it. The Explore route has a lower dedicated per-IP limit so arbitrary
+  filter values cannot let one caller turn repeated requests into heavy DynamoDB
+  usage. Distributed origin traffic is bounded by the API Gateway throttles below,
+  which sit under the old constant-key WAF circuit breakers (15,000 and 5,000 per
+  five minutes), so those two rules were removed on 2026-10-16.
 
 ## No-additional-fee API controls
 
@@ -61,16 +61,19 @@ Other routes retain the stage default, including gallery lists/details and
 uploads. Detailed route metrics stay disabled. Browser retry delays and ZIP
 polling already respect cooldowns; these overrides add no paid resource.
 
-The six WAF rules (two managed groups and four rate rules) remain attached only
-to the frontend distribution. Within each 300-second window, the API per-IP
-target is 3,000 and the API global target is 15,000. Explore has targets of 600
-per IP and 5,000 globally. These are the limits deployed on 2026-09-30, and
-they are the parameter defaults in `ops/waf_front_door_template.yaml`. The
+The five WAF rules (two managed groups and three per-IP rate rules) are attached
+to both the frontend distribution and the media CDN (`ImagesCloudFront` names the
+same ACL as its `WebACLId`, so there is no second ACL fee). Within each 300-second
+window, the API per-IP target is 3,000, Explore is 600 per IP, and media CDN
+requests (matched by the media `Host` header) are 4,000 per IP. The media limit
+leaves about 2x headroom over the busiest real viewer in the 2026-09-16 to
+2026-10-16 access logs. These are the parameter defaults in
+`ops/waf_front_door_template.yaml`. The
 same values are `WAF_RATE_LIMIT_CONTRACT` in `ops/cloudfront_frontend.py`,
 which refuses to run when the live ACL differs; a test pins the two together.
 Rules retain BLOCK actions and privacy-safe logging. These are approximate
-request-rate targets, not hard ceilings. A shared IP or global limit can also
-affect legitimate callers.
+request-rate targets, not hard ceilings. A shared IP can also affect
+legitimate callers.
 
 Download and original-comparison handlers validate their bounded request body
 and media identifier before database or identity lookup. Valid requests retain
@@ -84,8 +87,8 @@ shared limiter, not a replacement for it.
 The normal release deploys the API stage and handler changes; CI never deploys
 the WAF stack. WAF parameter tuning requires a separate CloudFormation UPDATE
 change set for the existing WAF stack: explicitly set the changed
-`ApiPerIpRequestLimit`, `ApiGlobalRequestLimit`, `ExplorePerIpRequestLimit`, or
-`ExploreGlobalRequestLimit` values, and use previous values for every other
+`ApiPerIpRequestLimit`, `ExplorePerIpRequestLimit`, or `MediaPerIpRequestLimit`
+values, and use previous values for every other
 parameter. Update the template defaults and `WAF_RATE_LIMIT_CONTRACT` in the
 same reviewed change. Review that only the existing web ACL's rules change,
 with no ACL replacement or new resource. CloudFormation may also report

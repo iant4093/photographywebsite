@@ -32,11 +32,12 @@ FRONT_DOOR_CONFIRMATION = "ADD-SINGLE-API-FRONT-DOOR"
 # values are the parameter defaults in ops/waf_front_door_template.yaml (a test
 # pins the two together); update both when the WAF stack is re-deployed with
 # new limits, or every later frontend distribution run refuses.
+WAF_URI_PATH = {"UriPath": {}}
+WAF_HOST_HEADER = {"SingleHeader": {"Name": "host"}}
 WAF_RATE_LIMIT_CONTRACT = (
-    ("ExplorePerIpRateLimit", "IP", 600, "/api/public/explore", "EXACTLY"),
-    ("ExploreGlobalCircuitBreaker", "CONSTANT", 5000, "/api/public/explore", "EXACTLY"),
-    ("ApiPerIpRateLimit", "IP", 3000, "/api/", "STARTS_WITH"),
-    ("ApiGlobalCircuitBreaker", "CONSTANT", 15000, "/api/", "STARTS_WITH"),
+    ("ExplorePerIpRateLimit", "IP", 600, WAF_URI_PATH, "/api/public/explore", "EXACTLY"),
+    ("ApiPerIpRateLimit", "IP", 3000, WAF_URI_PATH, "/api/", "STARTS_WITH"),
+    ("MediaPerIpRateLimit", "IP", 4000, WAF_HOST_HEADER, "d1twwtwfz1yeo4.cloudfront.net", "EXACTLY"),
 )
 LEGACY_SPA_ERROR_CODES = frozenset({403, 404})
 # Shared with backend/template.yaml: the SAM stack owns the key group, cache and
@@ -743,9 +744,8 @@ def validate_front_door_resources(
     }
     expected_actions = {
         "ExplorePerIpRateLimit": ("Action", "Block"),
-        "ExploreGlobalCircuitBreaker": ("Action", "Block"),
         "ApiPerIpRateLimit": ("Action", "Block"),
-        "ApiGlobalCircuitBreaker": ("Action", "Block"),
+        "MediaPerIpRateLimit": ("Action", "Block"),
         "AWSManagedKnownBadInputs": ("OverrideAction", "None"),
         "AWSManagedAmazonIpReputation": ("OverrideAction", "None"),
     }
@@ -754,18 +754,18 @@ def validate_front_door_resources(
         for name, (container, action) in expected_actions.items()
     ):
         raise SystemExit("Refusing front door: WAF selective-block rule contract differs")
-    for name, aggregate_key, limit, path, positional_constraint in WAF_RATE_LIMIT_CONTRACT:
+    for name, aggregate_key, limit, field, search, positional_constraint in WAF_RATE_LIMIT_CONTRACT:
         rate = actual_rules[name].get("Statement", {}).get("RateBasedStatement", {})
         scope = rate.get("ScopeDownStatement", {}).get("ByteMatchStatement", {})
         if (
             rate.get("AggregateKeyType") != aggregate_key
             or rate.get("EvaluationWindowSec") != 300
             or rate.get("Limit") != limit
-            or not waf_search_string_matches(scope.get("SearchString"), path)
+            or not waf_search_string_matches(scope.get("SearchString"), search)
             or scope.get("PositionalConstraint") != positional_constraint
-            or scope.get("FieldToMatch") != {"UriPath": {}}
+            or scope.get("FieldToMatch") != field
         ):
-            raise SystemExit("Refusing front door: WAF API rate-limit contract differs")
+            raise SystemExit("Refusing front door: WAF rate-limit contract differs")
 
     api_domain = aws_json(
         ["apigatewayv2", "get-domain-name", "--domain-name", domain, "--region", region],

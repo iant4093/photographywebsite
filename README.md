@@ -115,7 +115,7 @@ The board reads left to right in three frames. Numbered circles follow the steps
 - **Media never passes through Lambda.** Admins upload straight to S3 with presigned URLs. Visitors load previews and video from a dedicated media CDN, and protected originals use signed cookies or short-lived URLs.
 - **Asynchronous by default.** Preview generation, video transcoding (MediaConvert), ZIP building, cache invalidation, hover manifests, Drive backup and original-file comparisons all run on queues or streams with bounded concurrency, dead-letter queues and alarms.
 - **Defense in depth.** Authorization is enforced at the API (Cognito JWT), again in each handler (owner and `Admins` checks), at S3 (Block Public Access, origin access control only, visibility tags), and at the CDN (non-public objects denied).
-- **Bounded cost.** Per-route API throttles, WAF circuit breakers, reserved Lambda concurrency, object-size limits and an AWS Budgets guard keep a personal project's bill predictable under abuse.
+- **Bounded cost.** Per-route API throttles, per-IP WAF rate limits on the API and media CDN, reserved Lambda concurrency, object-size limits and an AWS Budgets guard keep a personal project's bill predictable under abuse.
 
 ## Tech stack
 

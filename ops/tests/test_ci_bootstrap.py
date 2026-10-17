@@ -991,6 +991,25 @@ fi
             ],
         })
 
+    def test_media_web_acl_grant_is_limited_to_the_front_door_acl(self):
+        from cfnlint.decode import decode
+
+        template, errors = decode(str(TEMPLATE_PATH))
+        self.assertEqual(errors, [])
+        statements = template['Resources']['CloudFormationExecutionIdentityAndComputePolicy'][
+            'Properties']['PolicyDocument']['Statement']
+        by_sid = {s['Sid']: s for s in statements}
+        self.assertEqual(by_sid['AttachFrontDoorWebAclToApplicationDistributions'], {
+            'Sid': 'AttachFrontDoorWebAclToApplicationDistributions',
+            'Effect': 'Allow',
+            'Action': ['wafv2:AssociateWebACL', 'wafv2:DisassociateWebACL', 'wafv2:GetWebACL'],
+            'Resource': {'Fn::Sub': 'arn:${AWS::Partition}:wafv2:us-east-1:${AWS::AccountId}:global/webacl/IanPhotography-FrontDoor-prod/*'},
+        })
+        self.assertEqual(by_sid['AssociateApplicationDistributionWebAcl']['Action'],
+                         ['cloudfront:AssociateDistributionWebACL', 'cloudfront:DisassociateDistributionWebACL'])
+        self.assertEqual(by_sid['AssociateApplicationDistributionWebAcl']['Resource'],
+                         {'Fn::Sub': 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*'})
+
     def test_execution_permissions_use_bounded_managed_policies(self):
         from cfnlint.decode import decode
 
