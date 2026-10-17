@@ -90,6 +90,7 @@
 
 .aws-cost-content {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2rem;
     animation: slide-up 0.5s ease-out;
 }
@@ -267,6 +268,7 @@
 
 .aws-cost-services {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 1.25rem;
 }
 
