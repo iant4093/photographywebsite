@@ -4,7 +4,7 @@ The website distributes the full license and copyright notices in [`public/licen
 
 ## LibRaw and rawconvert-wasm
 
-The editor uses the MIT-licensed JavaScript worker/client from `rawconvert-wasm@0.1.1`. Its npm prebuilt native core is **not shipped**. The site instead builds a compatible core from unmodified **LibRaw 0.22.2** under **CDDL-1.0**, using the site's MIT-licensed `scripts/raw-decoder-bindings.cpp` adapter and Emscripten 4.0.18. The former JavaScript CSP patch is no longer run: the core is compiled with `DYNAMIC_EXECUTION=0`.
+The editor uses the MIT-licensed JavaScript worker/client from `rawconvert-wasm@0.1.1`. Its npm prebuilt native core is **not shipped**. The site instead builds a compatible core from unmodified **LibRaw 0.22.2** under **CDDL-1.0**, using the site's MIT-licensed `scripts/raw-decoder-bindings.cpp` adapter and Emscripten 4.0.18. The core is compiled with `-sDYNAMIC_EXECUTION=0`, so it needs no post-build CSP patch.
 
 - [LibRaw upstream](https://www.libraw.org/) and [matching redistributed source](public/licenses/libraw-source.tar.gz).
 - [Build script](scripts/build-raw-decoder.py), [adapter source](scripts/raw-decoder-bindings.cpp), and [compiler flags and artifact checksums](public/licenses/raw-decoder-build.json).

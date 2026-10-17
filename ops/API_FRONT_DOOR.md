@@ -22,16 +22,20 @@ WAF is defense in depth.
   the site never sets; allowlisting any cookie is what lets CloudFront
   pass the API's private-media `Set-Cookie` headers through (see
   [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md)).
-- CloudFront reaches the TLS 1.2 regional custom domain through the fixed `api`
-  mapping and adds the secret `X-Origin-Verify` header. Every application route
-  verifies that value before authentication, validation, or business work.
-- The retained secret contains `current` and optional `previous` values so a
-  rotation can overlap Lambda caching and CloudFront propagation safely. Secret
-  values never belong in source, arguments, output, logs, fixtures, or release
-  artifacts.
+- CloudFront reaches the TLS 1.2 regional custom domain
+  (`origin-api.iantruongphotography.com`) through the fixed `api` mapping and
+  adds the secret `X-Origin-Verify` header. Every application route verifies
+  that value before authentication, validation, or business work.
+- The value lives in the retained encrypted SSM parameter
+  `/ian-website/<stage>/front-door-config`, which the stack never writes. It
+  contains `current` and optional `previous` values so a rotation can overlap
+  Lambda caching (`FrontDoorSecretCacheTtlSeconds`, default 300 seconds) and
+  CloudFront propagation safely. Secret values never belong in source,
+  arguments, output, logs, fixtures, or release artifacts.
 - The default execute-api endpoint is disabled. Direct custom-domain requests
   lack the CloudFront-only header and receive the fixed, no-store denial.
-- The separate WAF stack remains in the CloudFront home Region. Sampling is
+- The separate `ian-photography-front-door-waf` stack remains in CloudFront's
+  `us-east-1` Region. Sampling is
   disabled, sensitive fields are redacted, and every rule stays in its reviewed
   BLOCK mode. Managed rules block known-bad inputs and reputation-listed sources.
   A per-IP `/api/` rate rule limits single-source floods, and a separate constant-
@@ -57,12 +61,16 @@ Other routes retain the stage default, including gallery lists/details and
 uploads. Detailed route metrics stay disabled. Browser retry delays and ZIP
 polling already respect cooldowns; these overrides add no paid resource.
 
-The existing six WAF rules remain attached only to the frontend distribution.
-Within each 300-second window, the configured API per-IP target is 900 and
-the API global target remains 3,000. Explore has targets of 120 per IP and
-1,200 globally. Rules retain BLOCK actions, privacy-safe logging, and the same
-scope and evaluation window. These are approximate request-rate targets, not
-hard ceilings. A shared IP or global limit can also affect legitimate callers.
+The six WAF rules (two managed groups and four rate rules) remain attached only
+to the frontend distribution. Within each 300-second window, the API per-IP
+target is 3,000 and the API global target is 15,000. Explore has targets of 600
+per IP and 5,000 globally. These are the limits deployed on 2026-09-30, and
+they are the parameter defaults in `ops/waf_front_door_template.yaml`. The
+same values are `WAF_RATE_LIMIT_CONTRACT` in `ops/cloudfront_frontend.py`,
+which refuses to run when the live ACL differs; a test pins the two together.
+Rules retain BLOCK actions and privacy-safe logging. These are approximate
+request-rate targets, not hard ceilings. A shared IP or global limit can also
+affect legitimate callers.
 
 Download and original-comparison handlers validate their bounded request body
 and media identifier before database or identity lookup. Valid requests retain
@@ -73,27 +81,29 @@ caches permission to proceed or database failures, and falls back to DynamoDB
 on misses, expiry, eviction, or a changed policy. It is an optimization of the
 shared limiter, not a replacement for it.
 
-The normal release deploys the API stage and handler changes. WAF parameter
-tuning requires a separate CloudFormation UPDATE change set for the existing
-WAF stack: explicitly set `ApiPerIpRequestLimit=900`,
-`ExplorePerIpRequestLimit=120`, and `ExploreGlobalRequestLimit=1200`, and use
-previous values for every other parameter. Review that only the existing web
-ACL's rules change, with no ACL replacement or new resource. CloudFormation may
-also report conditional reevaluation of the unchanged logging configuration's
+The normal release deploys the API stage and handler changes; CI never deploys
+the WAF stack. WAF parameter tuning requires a separate CloudFormation UPDATE
+change set for the existing WAF stack: explicitly set the changed
+`ApiPerIpRequestLimit`, `ApiGlobalRequestLimit`, `ExplorePerIpRequestLimit`, or
+`ExploreGlobalRequestLimit` values, and use previous values for every other
+parameter. Update the template defaults and `WAF_RATE_LIMIT_CONTRACT` in the
+same reviewed change. Review that only the existing web ACL's rules change,
+with no ACL replacement or new resource. CloudFormation may also report
+conditional reevaluation of the unchanged logging configuration's
 `ResourceArn` reference; require its definition to be identical and the ACL's
 physical ARN to remain unchanged. Changing defaults in the template alone does
-not update live parameter values. Rate-rule updates
-can briefly reset counting; deploy and verify one controlled update.
+not update live parameter values. Rate-rule updates can briefly reset counting;
+deploy and verify one controlled update.
 
-For rollback, restore WAF parameter values 1,200 / 300 / 1,500 respectively
-through another reviewed change set, and use the previous attested backend
-release to restore the stage and handlers. Keep origin verification enforced.
+For rollback, restore the previous WAF parameter values through another
+reviewed change set, and use the previous attested backend release to restore
+the stage and handlers. Keep origin verification enforced.
 These changes do not add media WAF inspection, alarms, budgets, paid bot
 controls, or an automatic cutoff, and do not cap bandwidth charges.
 
 ## Application hardening
 
-Manual Cognito JWT verification uses PyJWT 2.14.0, a ten-minute JWKS cache,
+Manual Cognito JWT verification uses PyJWT 2.15.0, a ten-minute JWKS cache,
 and a 30-second cooldown for unknown-key refreshes. Unsupported algorithms and
 missing or oversized key IDs are rejected before fetching keys. The unbounded
 per-key cache is disabled so retired keys are no longer trusted after a set
@@ -125,10 +135,10 @@ Normal `main` releases preserve the deployed front-door parameters. A front-
 door change is a separate reviewed operation:
 
 1. Run the complete repository tests and infrastructure validation.
-2. Run `front_door_preflight.py` with the exact stack, account, certificate,
-   secret, and WAF guards. It reads metadata only and never reads the secret
-   value.
-3. Run `cloudfront_frontend.py --include-api-front-door` without `--apply`.
+2. Run `ops/front_door_preflight.py` with the exact stack, account, certificate,
+   SSM parameter name, and WAF guards. It reads metadata only and never decrypts
+   the parameter.
+3. Run `ops/cloudfront_frontend.py --include-api-front-door` without `--apply`.
    Supply the exact current resource guards and review the proposed distribution
    changes and current ETag.
 4. Apply only the unchanged dry-run plan with the exact ETag, account, resource
@@ -146,9 +156,11 @@ endpoint re-enablement, or unexplained viewer-request association blocks apply.
 ## Zero-downtime origin-secret rotation
 
 1. In a protected operator process, create a new random value and update the
-   secret so `previous` is the old `current` and `current` is the new value.
-2. Keep CloudFront on the old value for longer than the maximum Lambda secret
-   cache TTL plus margin; keep canonical canaries running during this drain.
+   SSM parameter so `previous` is the old `current` and `current` is the new
+   value.
+2. Keep CloudFront on the old value for longer than the Lambda cache TTL
+   (`FrontDoorSecretCacheTtlSeconds`) plus margin; keep canonical canaries
+   running during this drain.
 3. Apply the reviewed CloudFront plan so its origin header uses the new
    `current`, then wait for `Deployed` and run positive and negative canaries.
 4. Keep both values for an additional propagation and rollback window. Then
@@ -169,7 +181,7 @@ distribution. Do not disable origin verification as a rollback shortcut.
 - Re-enabling execute-api or disabling origin enforcement reopens the bypass and
   is an emergency, time-bounded, separately reviewed backend change.
 - Never delete the retained certificate, custom domain, mapping, DNS record,
-  secret, WAF ACL, or security logs as a rollback.
+  origin-verification parameter, WAF ACL, or security logs as a rollback.
 
 Review WAF metrics over representative traffic before promoting a rule. Record
 every exclusion with an owner, reason, evidence, expiry, test, and rollback.

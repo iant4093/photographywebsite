@@ -1,7 +1,13 @@
 # Alarm registry and privacy-safe response map
 
 The machine-readable inventory is `ops/alarm_registry.json`. It is the source
-of truth for alarm-to-runbook coverage. Notification endpoints are deliberately
+of truth for alarm-to-runbook coverage: each group lists exact logical resource
+IDs, a severity, a route (`security-notification-topic`, the cross-Region
+validated signal queue, or `cloudwatch-audit-only`), and the `## ` heading below
+that answers it. `ops/tests/test_security_baseline.py` fails if an alarm or
+signal rule in `backend/template.yaml` or the notification, backup, budget,
+observability, or WAF templates is unregistered, or if a registered runbook
+heading is missing here. Notification endpoints are deliberately
 not stored in Git. One owner-controlled human destination is confirmed on the
 central topic, which is the complete delivery requirement for this personal
 website. A synthetic end-to-end delivery test should still be recorded
@@ -36,8 +42,9 @@ query logging to diagnose an API failure.
 
 ## Front-door denial
 
-Confirm the API custom origin, disabled default endpoint, expected secret
-version, and CloudFront origin-header path. Treat unexpected direct-origin
+Confirm the API custom origin, disabled default endpoint, the expected
+`current`/`previous` values in the origin-verification SSM parameter (by
+version metadata only), and the CloudFront origin-header path. Treat unexpected direct-origin
 acceptance as critical. Rotate the origin verifier only through its explicit
 dual-version runbook; provider credential rotation is unrelated.
 
@@ -45,7 +52,10 @@ dual-version runbook; provider credential rotation is unrelated.
 
 Inspect queue depth, oldest age, DLQ depth, worker aggregate reason codes, and
 metadata conflict counts. Stop dispatch or the event mapping when failures are
-systematic. Never purge or bulk-redrive; select only proven idempotent messages.
+systematic. The preview queue-depth, worker failure/error/duration/throttle,
+and metadata-throttle alarms share this procedure but are audit-only
+diagnostics. For `ZipPreparationFailureAlarm` and the album-work DLQ and
+queue-age alarms, apply the same rules to their queues. Never purge or bulk-redrive; select only proven idempotent messages.
 For hover-preview signals, also compare the builder's native errors with the
 privacy-safe `ManifestBuildFailure` metric, inspect only aggregate reconciliation
 state, and verify one immutable manifest through the public alias. Keep the
@@ -96,7 +106,7 @@ remains confirmed without recording its endpoint.
 ## Security service change
 
 Check home-Region recorder/delivery status, the exact detector feature map and
-publishing frequency, both Security Hub standards, CI security coverage,
+publishing frequency, the standards-free Security Hub hub, CI security coverage,
 and Access Analyzer state. Restore only through the owning templates, rerun the
 fail-closed home posture audit, and record why the service changed. This
 account-wide alarm is audit-only.
@@ -110,8 +120,7 @@ investigate that signal rather than treating it as expected drift.
 
 Verify S3 public access, TLS policy, encryption, versioning, and access logging;
 DynamoDB PITR/deletion protection; backup vault lock/recovery points; and the
-approved backup plan/selection/lifecycle/access policy; and the latest successful
-copies. Planned changes still require a disposition because CloudFormation can
+approved backup plan/selection/lifecycle/access policy. Planned changes still require a disposition because CloudFormation can
 transiently toggle a protection.
 
 ## Infrastructure protection change
@@ -146,10 +155,12 @@ posture smoke test for release verification.
 
 ## WAF observation
 
-Use aggregate rule labels/actions and the redacted count/block log. Email is
-reserved for sustained known-bad or rate-limit blocking; the common managed
-group remains in count mode and audit-only. Return only an affected
-high-confidence rule to count mode after a verified false positive. Any
+Use aggregate rule labels/actions and the redacted block log. Email is
+reserved for sustained blocking: `ian-photography-waf-blocked-<stage>` needs at
+least 25 blocked requests in two of three five-minute periods across the two
+managed groups (known-bad inputs, IP reputation) and the four API/Explore rate
+rules. Return only an affected rule to count mode after a verified false
+positive. Any
 exclusion needs an owner, reason, expiry, regression fixture, and rollback
 record.
 

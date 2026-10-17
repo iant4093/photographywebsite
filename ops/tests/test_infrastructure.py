@@ -958,21 +958,6 @@ class BrowserBoundaryTests(unittest.TestCase):
             "https://example.test/album/public-id?view=grid&label=golden%20hour",
         )
         self.assertEqual(results[7]["uri"], "/api/public/social/video/prague-2026")
-    def test_private_frontend_origin_migration_is_staged_and_guarded(self) -> None:
-        script = (ROOT / "ops" / "migrate_frontend_origin.py").read_text(encoding="utf-8")
-        for expected in (
-            "--expected-etag",
-            "--expected-account-id",
-            "--expected-bucket",
-            "--rollback-file",
-            "create-origin-access-control",
-            "OriginAccessControlId",
-            "put-public-access-block",
-            "BlockPublicPolicy",
-            "wait_deployed",
-            "smoke_check",
-        ):
-            self.assertIn(expected, script)
 
 
 PRIVATE_MEDIA_SIGNERS = (
@@ -1422,7 +1407,6 @@ class MigrationAndPackagingTests(unittest.TestCase):
             "cloudfront_frontend.py",
             "dns_hardening.py",
             "invalidate_media_cache.py",
-            "migrate_frontend_origin.py",
             "set_lambda_log_retention.py",
             "tag_existing_media.py",
         ):

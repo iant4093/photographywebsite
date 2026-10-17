@@ -15,8 +15,9 @@ store is ready to accept paid orders.
 
 ## Security and data flow
 
-1. The lightbox opens an empty window during the user's click and asks the API
-   for a five-minute capability scoped to one album and one photograph.
+1. **Order a Print** asks the API for a five-minute capability scoped to one
+   album and one photograph, then opens an in-page dialog that frames
+   `print.html` on the isolated origin with the capability in the URL fragment.
 2. The API authorizes the current public, Cognito-owner/admin, or exact active
    share-code access before issuing the capability. It contains no S3 path,
    user identity, album title, or share code.

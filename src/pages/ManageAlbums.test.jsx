@@ -21,7 +21,6 @@ vi.mock('../utils/mediaUrls', () => ({
   mediaBeforeSrcSet: () => '',
   uploadOriginalFilename: name => name,
 }))
-vi.mock('../utils/concurrency', () => ({ mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)) }))
 
 import ManageAlbums from './ManageAlbums'
 

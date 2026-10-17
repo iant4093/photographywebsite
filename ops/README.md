@@ -8,6 +8,23 @@ The files in this directory implement the security, privacy, reliability, and
 performance baseline for `iantruongphotography.com`. All mutating helper scripts
 are **dry-run by default** and require multiple exact production guards to apply.
 
+## Runbook index
+
+| Runbook | Covers |
+| --- | --- |
+| [`CI_CD.md`](CI_CD.md) | Tested `main` release workflow, OIDC bootstrap, release guards |
+| [`API_FRONT_DOOR.md`](API_FRONT_DOOR.md) | Same-origin API, origin verification, WAF, rotation, rollback |
+| [`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md) | Signed-cookie delivery of protected album media |
+| [`FOTOMOTO_PRINTS.md`](FOTOMOTO_PRINTS.md) | Isolated print-store origin and manual print-file delivery |
+| [`PHOTO_ORIGINAL_COMPARISONS.md`](PHOTO_ORIGINAL_COMPARISONS.md) | Drive original matching and private Before/After previews |
+| [`HOVER_PREVIEW_MANIFESTS.md`](HOVER_PREVIEW_MANIFESTS.md) | Album-card hover manifests, reconciliation, rollback |
+| [`MAINTENANCE_AND_RECOVERY.md`](MAINTENANCE_AND_RECOVERY.md) | Dependency updates, durable-work repair, comparison cleanup, restore drills |
+| [`PRIVACY_REQUESTS.md`](PRIVACY_REQUESTS.md) | Privacy request intake, inventory, erasure, retention review |
+| [`SECURITY_ACCOUNT_BASELINE.md`](SECURITY_ACCOUNT_BASELINE.md) | Account-security stacks, singleton inventory, backup restore gate |
+| [`SECURITY_OBSERVABILITY.md`](SECURITY_OBSERVABILITY.md) | Structured audit logging, alert ownership, triage |
+| [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) | Alarm-to-runbook map and notification delivery |
+| [`OBSERVABILITY.md`](OBSERVABILITY.md) | Paid CloudFront metrics, dashboard, edge alarms |
+
 ## What is source controlled
 
 - `backend/template.yaml` owns the API, Lambda functions, Cognito, DynamoDB,
@@ -49,9 +66,10 @@ are **dry-run by default** and require multiple exact production guards to apply
   optional retained,
   console-only account budget. It has no notification route and is not part of
   website incident delivery.
-- Migration helpers cover existing album ownership, GSIs, media visibility
-  tags, media-cache invalidation, and Lambda log retention.
-- `SECURITY_OBSERVABILITY.md` defines the structured audit contract, centralized
+- Migration helpers cover existing album ownership, legacy media prefixes, GSIs,
+  media visibility tags, media-cache invalidation, and Lambda log retention (see
+  [Operator scripts](#operator-scripts)).
+- [`SECURITY_OBSERVABILITY.md`](SECURITY_OBSERVABILITY.md) defines the structured audit contract, centralized
   Lambda log group, alert ownership, privacy rules, triage, and rollback steps.
 - [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) and `alarm_registry.json` map every
   declared application, WAF, observability, account-security, and backup
@@ -273,8 +291,8 @@ the existing public API origin with server-visible, public-only social metadata;
 private, unlisted, missing, or malformed identifiers receive the generic shell
 without record details. The homepage metadata uses the stable current-hero alias.
 The
-completed S3-website-origin migration is not a routine operation and must not be
-replayed.
+migration from the legacy S3 website origin to this private REST origin is
+complete; it is not a routine operation and must not be replayed.
 
 For a reviewed edge update, run `cloudfront_frontend.py` without `--apply`, bind
 the apply to the exact current ETag/account/origin guards, wait for `Deployed`,
@@ -307,7 +325,8 @@ active chain of trust.
 
 The SAM stack creates privacy-minimized API access logs, media origin/CDN access
 logs, an encrypted async-failure queue, and alarms for API 5xx, API p95 latency,
-DLQ depth, and login throttling. The separate account-security and observability
+front-door denials, queue/DLQ depth and age, preview and hover-manifest workers,
+and login throttling (full map in [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md)). The separate account-security and observability
 stacks add retained audit logs and privacy-safe detection alarms. No request or
 response bodies, tokens, email addresses, album IDs, share codes, object keys,
 or query strings should be added to log or notification formats.
@@ -316,7 +335,7 @@ SAM-created Lambda log groups already in production need an explicit retention
 update because Lambda created them outside CloudFormation. Preview, then apply:
 
 ```bash
-python3 ops/set_lambda_log_retention.py --stack-name STACK_NAME
+python3 ops/set_lambda_log_retention.py --stack-name STACK_NAME  # --days defaults to 30
 python3 ops/set_lambda_log_retention.py \
   --stack-name STACK_NAME \
   --apply \
@@ -324,11 +343,10 @@ python3 ops/set_lambda_log_retention.py \
   --confirm-stack-name STACK_NAME
 ```
 
-The alarm registry currently records notification delivery as degraded: the
-site owner and one owner-controlled human destination are confirmed, while a
-backup owner, second independent destination, and controlled privacy-safe
-end-to-end test are still outstanding. Do not call the route fully redundant
-until those remaining checks succeed. Periodically
+The alarm registry records one confirmed owner-controlled notification
+destination, which is the complete delivery requirement for this personal site;
+a synthetic end-to-end delivery test should still be recorded quarterly and
+after routing changes. Periodically
 test DLQ replay procedures with synthetic, non-sensitive payloads; never blindly
 redrive old messages into production. Review log and media-log retention against
 traffic, privacy, and cost after 30 days.
@@ -349,7 +367,7 @@ traffic, privacy, and cost after 30 days.
   already performs source, dependency, workflow, and credential scans. Use the
   home-Region singleton inventory, scheduled posture
   audit, and reviewed change sets in
-  `SECURITY_ACCOUNT_BASELINE.md`; centralized multi-account archival remains a
+  [`SECURITY_ACCOUNT_BASELINE.md`](SECURITY_ACCOUNT_BASELINE.md); centralized multi-account archival remains a
   future organization-level decision.
 - CloudFront standard logs, CloudWatch logs/metrics/alarms, SSM SecureString API
   usage, DynamoDB PITR, S3 version storage, invalidations above the free allowance, and
@@ -377,3 +395,57 @@ traffic, privacy, and cost after 30 days.
 
 Do not treat a successful infrastructure deployment as proof of privacy. The
 authorization matrix and live CDN cache tests are required release gates.
+
+## Operator scripts
+
+Each Python script supports `--help`. Mutating scripts are dry-run by default and print
+aggregate counts only; apply needs the exact guards their dry run reports.
+
+| Script | Purpose |
+| --- | --- |
+| `validate_infrastructure.sh` | Local gate: compile, ops tests, template lint, SAM validate; `--build` also checks Lambda artifacts for credential-like JSON |
+| `aws_stack.py` | Shared read-only AWS CLI discovery helpers (not run directly) |
+| `cloudfront_frontend.py` | Frontend distribution baseline, front door, print store, private media |
+| `cloudfront_www_redirect.js`, `cloudfront_social_router.js` | CloudFront viewer-request functions bound by `cloudfront_frontend.py` |
+| `dns_hardening.py` | CAA and `www` alias records |
+| `front_door_preflight.py` | Read-only CloudFront/WAF/API boundary check |
+| `ci_bootstrap_preflight.py` | Read-only OIDC bootstrap stack check ([`CI_CD.md`](CI_CD.md)) |
+| `observability_preflight.py` | Read-only CloudFront monitoring-subscription ownership check |
+| `security_preflight.py`, `security_budget_preflight.py` | Read-only account-security and budget stack inventory |
+| `disable_inspector_lambda_scanning.py` | Guarded removal of paid Inspector Lambda scanning |
+| `backfill_preview_v3.py`, `reconcile_preview_v3.py` | Responsive-preview backfill and read-only verification |
+| `backfill_explore_metadata.py`, `backfill_explore_index.py` | Explore metadata jobs and materialized-index reconciliation |
+| `backfill_album_qr_codes.py` | Historical album QR-code repair |
+| `backfill_album_owner_sub.py`, `backfill_legacy_media_prefix.py`, `tag_existing_media.py` | Retained migration/audit tools for owner IDs, legacy prefixes, and visibility tags |
+| `check_album_indexes.py` | Read-only album GSI readiness |
+| `invalidate_media_cache.py` | Guarded full media-CDN invalidation |
+| `set_lambda_log_retention.py` | Retention on Lambda-created log groups |
+| `reconcile_durable_work.py`, `sweep_comparison_previews.py`, `recovery_reconstruction.py` | Durable-work repair, comparison-orphan cleanup, offline restore filter ([`MAINTENANCE_AND_RECOVERY.md`](MAINTENANCE_AND_RECOVERY.md)) |
+| `public_catalog_load_test.py` | Bounded nonproduction load test; refuses the production account and domain |
+| `feature_costs.py` | Per-feature cost labels and reports (below) |
+
+CloudFormation templates kept here (`ci_bootstrap_template.yaml`,
+`dnssec-key-template.yaml`, `observability_template.yaml`,
+`waf_front_door_template.yaml`, and the `security_*_template.yaml` stacks) are
+linted by `validate_infrastructure.sh` and deployed only through their runbooks.
+`ops/ci/` holds the release and scheduled-audit tooling described in
+[`CI_CD.md`](CI_CD.md).
+
+### Feature cost reporting
+
+`feature_costs.json` maps each SAM logical resource to a `Feature` tag value
+(for example `album-management`, `discovery`, `original-comparisons`, or
+`shared-platform`); the template applies those tags. `feature_costs.py` needs
+`--expected-account-id` and one command:
+
+- `tag-frontend --distribution-id ID` and `tag-frontend-storage --bucket-name
+  NAME` add `Application`/`Feature` (and optional `--stage`) tags to the
+  frontend distribution and bucket, which live outside CloudFormation;
+- `activate` turns on the `Application`, `Stage`, and `Feature` cost-allocation
+  tags, and `status` reports them; and
+- `report --start YYYY-MM-DD --end YYYY-MM-DD` (1–31 days, end exclusive) prints
+  the Cost Explorer request, grouped by feature and service.
+
+Every command is a dry run until `--apply` is added; `report --apply` makes one
+billable Cost Explorer query. Shared tables, buckets, queues, and logs stay
+`shared-platform`: tags do not apportion their usage among callers.

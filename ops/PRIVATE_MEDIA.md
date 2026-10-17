@@ -1,9 +1,9 @@
 # Private media through the frontend CDN
 
 Protected album media (private, unlisted, and shared-album photos, responsive
-previews, and HLS video) can be delivered same-origin from
+previews, and HLS video) is delivered same-origin from
 `https://iantruongphotography.com/private-media/albums/<albumId>/...` instead of
-per-object presigned S3 URLs. CloudFront authorizes each request with
+per-object presigned S3 URLs. Delivery has been enabled since 2026-09-30. CloudFront authorizes each request with
 album-scoped signed cookies; S3 stays private behind origin access control.
 Public albums keep their existing media CDN URLs and are unaffected.
 
@@ -58,10 +58,15 @@ itself is outside CloudFormation, so `ops/cloudfront_frontend.py` binds them.
 | `PrivateMediaResponseHeadersPolicy` | `AWS::CloudFront::ResponseHeadersPolicy` | Private browser caching and hardening headers |
 | `PrivateMediaRewriteFunction` | `AWS::CloudFront::Function` | Strict path validation and prefix rewrite |
 
-The stack also exports `PrivateMediaRewriteFunctionArn`, which the helper
-prefers when resolving the function association. `PRIVATE_MEDIA_DELIVERY`
-(a literal in each album handler's environment, default `'false'`) selects
-presigned URLs or signed cookies at runtime.
+Stack outputs expose each identifier (`PrivateMediaPublicKeyId`,
+`PrivateMediaKeyGroupId`, `PrivateMediaOriginAccessControlId`,
+`PrivateMediaCachePolicyId`, `PrivateMediaResponseHeadersPolicyId`,
+`PrivateMediaRewriteFunctionArn`); the helper prefers the function ARN output
+when resolving the association. `PRIVATE_MEDIA_DELIVERY` is a literal in each
+album handler's environment that selects signed cookies (`'true'`, current) or
+presigned URLs (any other value, or unset) at runtime. Handlers also receive
+`PRIVATE_MEDIA_BASE_URL`, `PRIVATE_MEDIA_KEY_PAIR_ID`, and
+`PRIVATE_MEDIA_SIGNING_KEY_PARAMETER`.
 
 ## Frontend distribution behavior
 
@@ -85,6 +90,10 @@ rewrite function as an unmanaged viewer-request association and refuses, rather
 than replacing it with the `www` redirect.
 
 ## Rollout
+
+This rollout was completed on 2026-09-30. Keep it as the procedure for
+rebinding the behavior (for example on a replacement distribution); routine
+edge runs only need to keep passing `--include-private-media`.
 
 1. **SAM first, delivery off.** Release the backend template with
    `PRIVATE_MEDIA_DELIVERY: 'false'`. Confirm the stack contains every resource
@@ -226,9 +235,10 @@ edge contract stays valid.
 
 Revoking album access (visibility change, share disabled, account removed)
 stops new cookies immediately. Cookies already issued remain valid until they
-expire, at most `MEDIA_URL_TTL_SECONDS` (600 s by default); bytes a viewer
-already downloaded may stay in that viewer's private browser cache for up to a
-day. This matches the presigned-URL bound. For an emergency cutoff of every
+expire, at most `MEDIA_URL_TTL_SECONDS` (600 s by default). Bytes a viewer
+already downloaded may be reused from that viewer's private browser cache for
+up to 600 s (`max-age=600, must-revalidate`) before revalidating. This matches
+the presigned-URL bound. For an emergency cutoff of every
 cookie, remove the compromised public key from the key group and deploy; that
 invalidates all cookies signed with it at once.
 

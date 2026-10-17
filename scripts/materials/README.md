@@ -4,7 +4,8 @@ The gallery's new material family uses real, matching CC0 wood scans and a small
 set of original procedural response maps. Existing photography and authored
 wallpaper remain untouched. Nothing is synthesized in the frame loop.
 
-Run with Python and Pillow (the repository's Python CI environment includes it):
+Run with Python and Pillow (pinned in `backend/functions/requirements.txt`, which
+the repository's Python CI environment installs):
 
 ```sh
 python scripts/materials/prepare_gallery_materials.py

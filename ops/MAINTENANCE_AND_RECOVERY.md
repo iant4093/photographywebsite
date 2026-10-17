@@ -16,11 +16,14 @@ Weekly scheduled audits remain enabled. Do not introduce a second update bot.
 
 ### Video conversion and timeline frames
 
-The shared `CacheInvalidationWorkerFunction` intentionally returns album work
-to SQS between bounded steps. Its `RecursiveLoop: Allow` configuration prevents
-Lambda from dropping legitimate long polling chains; other functions retain
-the default recursion protection. Reserved concurrency remains two and saved
-video receipts still stop automatic retries after 24 hours.
+Album work runs on the shared `CacheInvalidationWorkerFunction` while the
+`AlbumWorkRouting` parameter is `legacy` (the default), or on the dedicated
+`AlbumWorkWorkerFunction`/`AlbumWorkQueue` after a reviewed `separated` cutover.
+Both workers intentionally return album work to SQS between bounded steps. Their
+`RecursiveLoop: Allow` configuration prevents Lambda from dropping legitimate
+long polling chains; other functions retain the default recursion protection.
+Reserved concurrency remains two and saved video receipts still stop automatic
+retries after 24 hours.
 
 Every three hours `VideoUpgradeFunction` also wakes active, idle video albums
 with due `prepared`, `submitting`, or `transcoding` receipts, even when all
@@ -63,7 +66,9 @@ An operator can allow at most three additional 24-hour windows for one operation
 python ops/reconcile_durable_work.py --table EXISTING_ALBUMS_TABLE --key EXACT_KEY --operation EXACT_OPERATION --expected-snapshot REVIEWED_SHA --pool EXISTING_POOL
 ```
 
-After reviewing that exact result, add `--apply --queue-url EXISTING_QUEUE_URL`.
+After reviewing that exact result, add `--apply --queue-url EXISTING_QUEUE_URL`
+(the queue the active album-work consumer polls). `--region` defaults to
+`us-west-2`.
 Save both dry-run and apply output with operator identity, root cause, time and
 outcome. Use available CloudTrail records as additional evidence; retain the operator JSON independently. Confirm the receipt reaches
 completion and existing alarms clear. If enqueue succeeds but CAS fails, the
@@ -125,5 +130,6 @@ link revocation, and Cognito identity mapping; reconstruct derived indexes with
 publication disabled; test application reads against the isolated copy; record
 actual RTO/RPO and cleanup evidence. Never replay pending jobs or old authorization
 state automatically. Retain current privacy decisions and deletion fences across
-cutover. Consult SECURITY_ACCOUNT_BASELINE.md's restore gate for existing controls.
+cutover. Consult the restore gate in [`SECURITY_ACCOUNT_BASELINE.md`](SECURITY_ACCOUNT_BASELINE.md)
+for existing controls.
 No live AWS restore drill is included in this release.

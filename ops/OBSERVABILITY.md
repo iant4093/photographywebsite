@@ -32,24 +32,33 @@ paid CloudFront or API route metrics.
 
 ## Validation and rollout
 
-Run `cfn-lint` on the affected templates, the operations suite, backend health
-and audit tests, and frontend checks. The read-only `observability_preflight.py`
-update mode accepts confirmed absence after retirement. Before retirement it
-accepts enabled or disabled subscriptions only when both exact resources are
-owned by the existing stack. Create mode requires confirmed absence. It never
-mutates AWS resources.
+CI never deploys the observability or WAF stacks; update them through separately
+reviewed change sets. Run `cfn-lint` on the affected templates, the operations
+suite, backend health and audit tests, and frontend checks. Then run the
+read-only preflight:
 
-Deploy notification forwarding before the new us-east-1 alarms. Confirm the
-new alarms read real CloudFront data and have their exact EventBridge route,
-then update the home observability stack to remove the two obsolete alarms and
-paid subscriptions. For legacy subscriptions, first change only their
-`DeletionPolicy` from `Retain` to `Delete`, then remove their resources in a second
-reviewed change set. The deployed CloudFormation resource provider has no update
-handler and rejects changing an existing subscription to `Disabled`. Deleting a
+```bash
+python3 ops/observability_preflight.py \
+  --deployment-mode update \
+  --frontend-distribution-id FRONTEND_DISTRIBUTION_ID \
+  --media-distribution-id MEDIA_DISTRIBUTION_ID \
+  --expected-account-id EXPECTED_ACCOUNT_ID
+```
+
+`observability_preflight.py` update mode accepts confirmed absence of paid
+monitoring subscriptions (the current state). Before retirement it accepted
+them only when both exact resources were owned by the existing stack. Create
+mode requires confirmed absence. It calls only STS, CloudFront GET, and
+CloudFormation describe APIs and never mutates AWS resources.
+
+The retirement used two reviewed change sets: first only each legacy
+subscription's `DeletionPolicy` changed from `Retain` to `Delete`, then the
+resources were removed. The CloudFormation resource provider has no update
+handler and rejects changing an existing subscription to `Disabled`; deleting a
 monitoring subscription disables additional metrics without changing its
-distribution. Deploy the application metric/health changes
-and UI copy. Review each CloudFormation change set, preserve live secret
-parameters and unrelated resources, and verify final drift and public health.
+distribution. For any change, preserve live secret parameters and unrelated resources, and verify
+final drift and public health. [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) maps
+the edge alarms to their response procedure.
 
 The August 2026 bill attributed $2.26 to API route metrics and $1.83 to additional
 CloudFront metrics. These are historical savings estimates, not fixed quotes.

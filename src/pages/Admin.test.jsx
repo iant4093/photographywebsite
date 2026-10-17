@@ -14,9 +14,6 @@ vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => api)
 vi.mock('../utils/mediaUtils', () => media)
 vi.mock('../utils/date', () => dates)
-vi.mock('../utils/concurrency', () => ({
-  mapWithConcurrency: async (items, _limit, mapper) => Promise.all(items.map(mapper)),
-}))
 vi.mock('uuid', () => ({ v4: () => '12345678-abcd-4567-8901-123456789012' }))
 vi.mock('framer-motion', () => ({
   motion: new Proxy({}, { get: (target, tag) => target[tag] ||= (({ children, ...props }) => {

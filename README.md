@@ -1,408 +1,202 @@
+<div align="center">
+
 # Ian Truong Photography
 
-Production source for [iantruongphotography.com](https://iantruongphotography.com): a public photography portfolio, private client galleries, and an administration portal. The frontend is React/Vite; the application backend is primarily Python 3.12 on AWS Lambda, with a Node.js/Sharp image-preview worker.
+**A serverless photography platform on AWS: public portfolio, private client galleries, an in-browser RAW editor, and a full admin portal.**
 
-The production design is serverless and edge-first. Public HTML, JavaScript, CSS, API catalog responses, and media previews are served through CloudFront where appropriate; protected operations use API Gateway, Cognito, Lambda, DynamoDB, and short-lived S3 capabilities. Large uploads and background work do not pass through the browser API.
+[**iantruongphotography.com**](https://iantruongphotography.com) · [Architecture board](https://miro.com/app/board/uXjVEYlOMic=/) · [Operations docs](ops/README.md)
 
-## What the site provides
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![Three.js](https://img.shields.io/badge/Three.js-r185-000000?logo=threedotjs&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-24_%7C_22-5FA04E?logo=nodedotjs&logoColor=white)
+![AWS SAM](https://img.shields.io/badge/AWS-SAM_%7C_Lambda_%7C_CloudFront-FF9900?logo=amazonwebservices&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub_Actions_%2B_OIDC-2088FF?logo=githubactions&logoColor=white)
+![Coverage](https://img.shields.io/badge/coverage_gate-80%25-success)
 
-- Responsive public photo and video albums with progressive previews, exploration, social metadata, and random-photo discovery.
-- Private client accounts, owner-scoped galleries, and unlisted shared albums protected by server-side authorization and Turnstile/rate-limit controls.
-- Administrative album, media, gallery-order, user, hero, analytics, cost, Google Drive, GitHub, audit, and site-health management.
-- Direct presigned media uploads, EXIF extraction, responsive preview generation, HLS video processing, ZIP downloads, print handoff, and optional Google Drive backup.
-- Structured application/security audit logging, CloudWatch alarms and dashboards, WAF controls, drift audits, GuardDuty, Config, Security Hub, IAM Access Analyzer, AWS Backup, and cross-Region backup infrastructure.
+</div>
 
-## High-level AWS architecture
+---
 
-The following diagram maps the browser edge, API front door, application handlers, data stores, media pipeline, asynchronous workers, third-party providers, CI/CD, security services, observability, and recovery paths. Solid arrows represent normal request/data flow. Dashed arrows represent scheduled, control-plane, invalidation, monitoring, or failure-routing relationships.
+## Overview
 
-```mermaid
-flowchart TB
-  classDef actor fill:#e8f1ff,stroke:#2563eb,color:#0f172a
-  classDef edge fill:#e9d5ff,stroke:#7e22ce,color:#2e1065
-  classDef compute fill:#dcfce7,stroke:#16a34a,color:#14532d
-  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
-  classDef security fill:#fee2e2,stroke:#dc2626,color:#450a0a
-  classDef ops fill:#e0f2fe,stroke:#0284c7,color:#082f49
-  classDef provider fill:#f3f4f6,stroke:#6b7280,color:#111827
+This repository is the complete production source for a working photography business site. It runs entirely on managed AWS services, with no servers to patch and no long-lived credentials. Every change ships through a gated CI/CD pipeline that tests, scans, signs and verifies the release before and after it reaches production.
 
-  visitor["Public visitor"]:::actor
-  client["Authenticated client<br/>private gallery user"]:::actor
-  admin["Administrator<br/>browser portal"]:::actor
-  github["GitHub Actions<br/>PR, main release, manual recovery,<br/>scheduled audit"]:::actor
-
-  subgraph dns_layer["DNS and certificates"]
-    route53["Route 53<br/>iantruongphotography.com<br/>www, prints, origin-api"]:::edge
-    acm["ACM certificates<br/>CloudFront/global and regional API"]:::security
-  end
-
-  subgraph edge_layer["Global edge and browser delivery"]
-    frontend_cf["Frontend CloudFront distribution<br/>static site, /api behavior, print.html<br/>canonical + optional www/prints aliases"]:::edge
-    frontend_bucket["Existing frontend S3 bucket<br/>private, OAC-backed, no public writes"]:::data
-    frontend_functions["CloudFront Functions<br/>www redirect and social-route handling"]:::compute
-    edge_waf["CloudFront WAFv2<br/>managed threat rules<br/>API per-IP and global circuit breakers<br/>lower Explore limits"]:::security
-    api_edge["Same-origin /api behavior<br/>public GET cache allowlist<br/>private API no cache/cookies<br/>adds X-Origin-Verify"]:::edge
-    print_page["print.html<br/>isolated Fotomoto CSP and permissions"]:::edge
-    media_cf["Media CloudFront distribution<br/>HTTPS, HTTP/2/3, cache policies<br/>public previews and protected media paths"]:::edge
-    preview_rewrite["CloudFront Function<br/>strict public-preview UUID/version rewrite"]:::compute
-  end
-
-  subgraph api_front_door["Regional API front door — us-west-2"]
-    api_domain["Regional API custom domain<br/>origin-api.iantruongphotography.com<br/>CloudFront-only origin header required"]:::edge
-    api_gateway["API Gateway HTTP API / prod<br/>Cognito JWT default authorizer<br/>25 requests/sec, 50 burst default"]:::compute
-    cognito["Amazon Cognito<br/>admin-created users, email verification<br/>optional TOTP MFA, Admins group"]:::security
-    app_iam["Per-function IAM roles<br/>least privilege and resource-scoped access<br/>dedicated MediaConvert role"]:::security
-  end
-
-  subgraph api_handlers["API handlers — Python 3.12 unless noted"]
-    public_handlers["Public reads<br/>GetPublicAlbums<br/>GetPublicAlbum<br/>GetPhotographyStats"]:::compute
-    identity_handlers["Identity and shared access<br/>Login<br/>CompleteChallenge<br/>GetSharedAlbum"]:::compute
-    admin_read_handlers["Protected reads and administration<br/>GetAlbums, GetAlbum<br/>GetAdminAlbumMedia, ListUsers<br/>GetSiteHealth, GetAuditLog"]:::compute
-    admin_write_handlers["Protected content/user writes<br/>CreateAlbum, UpdateAlbum<br/>UpdateGalleryOrder, DeleteAlbum<br/>AddImages, DeleteImages, UpdateImage<br/>HeroCover, CreateUser, EditUser, DeleteUser"]:::compute
-    media_handlers["Media capabilities<br/>GetUploadUrl, GetDownloadUrl<br/>CreateZip, PreparePrint"]:::compute
-    report_handlers["Reports and integrations<br/>GetCostReport, GetAnalyticsReport<br/>GetGoogleDriveUsage, GetGitHubAnalytics"]:::compute
-    public_ingest_handlers["Anonymous bounded writes<br/>Contact, AnalyticsIngest"]:::compute
-  end
-
-  subgraph data_plane["Application data and media plane"]
-    albums_table["DynamoDB AlbumsTable<br/>public/private/unlisted state<br/>ShareCode, visibility, summary,<br/>owner and ordering indexes; PITR"]:::data
-    settings_table["DynamoDB GallerySettingsTable<br/>gallery order/settings"]:::data
-    album_media_table["DynamoDB AlbumMediaTable<br/>normalized paginated media<br/>AlbumOrderIndex"]:::data
-    preview_table["DynamoDB PreviewMetadataTable<br/>preview status/keys/manifests<br/>TTL and active stream"]:::data
-    rate_table["DynamoDB RateLimitTable<br/>HMAC-scoped fixed-window limits<br/>TTL and PITR"]:::data
-    analytics_table["DynamoDB AnalyticsTable<br/>aggregate counters only<br/>TTL"]:::data
-    cache_tables["DynamoDB cache tables<br/>CostReportCache<br/>DriveUsageCache<br/>GitHubAnalyticsCache"]:::data
-    secrets["Managed secrets and parameters<br/>SSM: front-door, rate-limit, Resend,<br/>Turnstile, Google OAuth<br/>Secrets Manager: print-session HMAC"]:::security
-    image_bucket["Private S3 ImagesBucket<br/>Block Public Access, versioning,<br/>BucketOwnerEnforced, TLS-only<br/>object visibility tags and lifecycle"]:::data
-    media_logs["S3 media access-log bucket<br/>retained CloudFront logs"]:::data
-  end
-
-  subgraph async_plane["Queues, streams, and background workers"]
-    preview_queue["SQS PreviewQueue<br/>SSE, long polling, bounded worker concurrency"]:::ops
-    preview_dlq["SQS PreviewDeadLetterQueue"]:::ops
-    cache_queue["SQS CacheInvalidationQueue"]:::ops
-    random_queue["SQS RandomPhotoRefreshQueue"]:::ops
-    hover_queue["SQS HoverPreviewRefreshQueue"]:::ops
-    async_failure["SQS AsyncFailureQueue<br/>shared failure destination"]:::ops
-    cache_worker["CacheInvalidationWorker<br/>Python"]:::compute
-    hover_worker["HoverPreviewManifestBuilder<br/>Python; stream + queue + reconciliation"]:::compute
-    random_worker["RandomPhotoPoolBuilder<br/>Python; queue + hourly reconciliation"]:::compute
-    preview_worker["PreviewWorker<br/>Node.js 22 + Sharp<br/>3 GB memory, concurrency 2"]:::compute
-    zip_worker["WorkerZip<br/>Python; streamed multipart ZIP<br/>900-second timeout, concurrency 2"]:::compute
-    drive_worker["GoogleDriveBackup<br/>Python; idempotent S3-to-Drive worker"]:::compute
-    tag_worker["TagMediaObject<br/>visibility/tag transition worker"]:::compute
-    media_backfill["AlbumMediaBackfill<br/>normalized-media migration worker"]:::compute
-    drive_refresh["RefreshGoogleDriveUsage<br/>daily EventBridge entry point"]:::compute
-    github_refresh["RefreshGitHubAnalytics<br/>hourly EventBridge entry point"]:::compute
-  end
-
-  subgraph media_processing["Media processing"]
-    mediaconvert["AWS Elemental MediaConvert<br/>HLS/video transcode jobs<br/>restricted service role"]:::compute
-    temp_objects["S3 temporary objects<br/>ZIPs, hero staging, pending media<br/>short lifecycle/visibility"]:::data
-  end
-
-  subgraph external_providers["External providers"]
-    turnstile["Cloudflare Turnstile<br/>server-side hostname/action verification"]:::provider
-    resend["Resend<br/>transactional contact/admin email"]:::provider
-    google_drive["Google Drive<br/>optional album backup and usage report"]:::provider
-    github_api["GitHub API<br/>cached repository analytics"]:::provider
-    fotomoto["Fotomoto<br/>isolated print-store experience"]:::provider
-  end
-
-  subgraph ops_plane["Operations, security, observability, and recovery"]
-    ci_bootstrap["CI bootstrap stack<br/>GitHub OIDC provider<br/>plan, execute, frontend, and audit roles<br/>release bucket + KMS"]:::ops
-    sam_release["SAM/CloudFormation release path<br/>immutable artifacts, checksums/SBOM/provenance,<br/>guarded change sets and invariant checks"]:::ops
-    waf_stack["ian-photography-front-door-waf<br/>us-east-1 CloudFront-scope WAF stack"]:::security
-    audit_stack["ian-photography-security-audit<br/>CloudTrail, retained audit S3/Object Lock,<br/>KMS, security log group"]:::security
-    managed_security["ian-photography-security-managed<br/>Config rules, GuardDuty, Security Hub,<br/>IAM Access Analyzer, Config delivery"]:::security
-    notifications["ian-photography-security-notifications<br/>EventBridge, SNS, security signal SQS,<br/>DLQ, privacy-safe processor"]:::security
-    observability["ian-photography-observability<br/>CloudFront monitoring, application alarms,<br/>dashboard, latency/5xx/queue signals"]:::ops
-    cloudwatch["CloudWatch application/API logs,<br/>metric filters, alarms, X-Ray traces"]:::ops
-    backup_primary["ian-photography-backup-primary<br/>us-west-2 AWS Backup vault and daily<br/>DynamoDB metadata protection"]:::ops
-    backup_replica["ian-photography-backup-replica<br/>us-east-2 encrypted destination vault<br/>for planned/explicit recovery copies"]:::ops
-  end
-
-  visitor --> route53
-  client --> route53
-  admin --> route53
-  route53 --> frontend_cf
-  route53 --> api_domain
-  acm -. certificate .-> frontend_cf
-  acm -. certificate .-> api_domain
-  frontend_cf --> frontend_bucket
-  frontend_functions -. viewer routing .-> frontend_cf
-  edge_waf -. attached to frontend distribution .-> frontend_cf
-  frontend_cf --> api_edge
-  frontend_cf --> print_page
-  api_edge --> api_domain
-  frontend_cf -. media URLs .-> media_cf
-  preview_rewrite -. viewer request .-> media_cf
-  media_cf --> image_bucket
-  media_cf -. access logs .-> media_logs
-
-  api_domain --> api_gateway
-  api_gateway --> public_handlers
-  api_gateway --> identity_handlers
-  api_gateway --> admin_read_handlers
-  api_gateway --> admin_write_handlers
-  api_gateway --> media_handlers
-  api_gateway --> report_handlers
-  api_gateway --> public_ingest_handlers
-  api_gateway --> cognito
-  app_iam -. execution permissions .-> api_handlers
-
-  public_handlers --> albums_table
-  public_handlers --> album_media_table
-  public_handlers --> preview_table
-  public_handlers --> settings_table
-  public_handlers -. public CDN URLs .-> media_cf
-  identity_handlers --> cognito
-  identity_handlers --> albums_table
-  identity_handlers --> preview_table
-  identity_handlers --> rate_table
-  admin_read_handlers --> cognito
-  admin_read_handlers --> albums_table
-  admin_read_handlers --> album_media_table
-  admin_read_handlers --> preview_table
-  admin_read_handlers --> cache_tables
-  admin_write_handlers --> cognito
-  admin_write_handlers --> albums_table
-  admin_write_handlers --> settings_table
-  admin_write_handlers --> album_media_table
-  admin_write_handlers --> preview_table
-  admin_write_handlers --> image_bucket
-  media_handlers --> albums_table
-  media_handlers --> rate_table
-  media_handlers --> image_bucket
-  media_handlers -. protected presigned URLs .-> image_bucket
-  report_handlers --> cache_tables
-  report_handlers --> albums_table
-  public_ingest_handlers --> rate_table
-  public_ingest_handlers --> analytics_table
-  public_ingest_handlers -. bot verification .-> turnstile
-  identity_handlers -. bot verification .-> turnstile
-  public_ingest_handlers -. email .-> resend
-  admin_write_handlers -. email .-> resend
-  api_handlers -. secret reads .-> secrets
-
-  admin --> cognito
-  client --> cognito
-  admin_write_handlers --> preview_queue
-  admin_write_handlers --> cache_queue
-  admin_write_handlers --> random_queue
-  admin_write_handlers --> hover_queue
-  admin_write_handlers -. async Drive backup .-> drive_worker
-  admin_write_handlers -. tag transitions .-> tag_worker
-  admin_write_handlers -. video jobs .-> mediaconvert
-  media_handlers -. ZIP job .-> zip_worker
-  media_handlers --> temp_objects
-  admin_write_handlers --> temp_objects
-
-  preview_queue --> preview_worker
-  preview_queue -. failed messages .-> preview_dlq
-  preview_worker --> image_bucket
-  preview_worker --> preview_table
-  preview_worker -. CDN invalidation .-> media_cf
-  preview_worker -. failure .-> async_failure
-  cache_queue --> cache_worker
-  cache_worker -. frontend invalidation .-> frontend_cf
-  cache_worker -. failure .-> async_failure
-  hover_queue --> hover_worker
-  preview_table -. DynamoDB Stream .-> hover_worker
-  hover_worker --> preview_table
-  hover_worker --> image_bucket
-  hover_worker -. failure .-> async_failure
-  random_queue --> random_worker
-  random_worker --> preview_table
-  random_worker --> albums_table
-  random_worker -. failure .-> async_failure
-  zip_worker --> image_bucket
-  zip_worker --> temp_objects
-  zip_worker -. failure .-> async_failure
-  drive_worker --> image_bucket
-  drive_worker --> albums_table
-  drive_worker -. provider backup .-> google_drive
-  drive_worker -. failure .-> async_failure
-  tag_worker --> image_bucket
-  tag_worker -. failure .-> async_failure
-  media_backfill --> albums_table
-  media_backfill --> album_media_table
-  media_backfill -. failure .-> async_failure
-  drive_refresh --> cache_tables
-  drive_refresh --> albums_table
-  drive_refresh -. provider report .-> google_drive
-  github_refresh --> cache_tables
-  github_refresh -. provider report .-> github_api
-  image_bucket --> mediaconvert
-  mediaconvert --> image_bucket
-
-  subgraph schedules["EventBridge schedules and database triggers"]
-    schedule["Schedules<br/>hover reconciliation: 15 min<br/>media backfill: 15 min<br/>random pool: hourly<br/>Drive usage: daily<br/>GitHub analytics: hourly"]:::ops
-    preview_stream["PreviewMetadataTable stream<br/>active trigger"]:::ops
-    album_stream["AlbumsTable stream mapping<br/>retained for compatibility; disabled"]:::ops
-  end
-  schedule -. scheduled invokes .-> hover_worker
-  schedule -. scheduled invokes .-> random_worker
-  schedule -. scheduled invokes .-> media_backfill
-  schedule -. scheduled invokes .-> drive_refresh
-  schedule -. scheduled invokes .-> github_refresh
-  preview_stream --> hover_worker
-  album_stream -. retained mapping .-> random_worker
-
-  print_page --> fotomoto
-  media_handlers -. five-minute print capability .-> fotomoto
-
-  github --> ci_bootstrap
-  ci_bootstrap --> sam_release
-  sam_release -. deploys .-> api_front_door
-  sam_release -. deploys .-> api_handlers
-  sam_release -. deploys .-> data_plane
-  sam_release -. deploys .-> async_plane
-  sam_release -. deploys .-> media_processing
-  sam_release -. deploys .-> observability
-  sam_release -. deploys .-> backup_primary
-  sam_release -. deploys .-> backup_replica
-  sam_release -. guarded association .-> waf_stack
-  waf_stack -. owns/updates .-> edge_waf
-
-  api_gateway -. access logs/metrics .-> cloudwatch
-  api_handlers -. structured logs/X-Ray .-> cloudwatch
-  async_plane -. queue age/failure metrics .-> cloudwatch
-  frontend_cf -. edge metrics .-> observability
-  media_cf -. edge metrics .-> observability
-  edge_waf -. WAF logs/alarms .-> observability
-  cloudwatch --> notifications
-  observability --> notifications
-  backup_primary --> notifications
-  managed_security --> notifications
-  audit_stack --> notifications
-  albums_table -. protected metadata backup .-> backup_primary
-  preview_table -. protected metadata backup .-> backup_primary
-  backup_primary -. recovery-copy destination .-> backup_replica
-  audit_stack -. CloudTrail records .-> cloudwatch
-  managed_security -. posture findings .-> notifications
-```
-
-An editable companion architecture board is available in [Miro](https://miro.com/app/board/uXjVHsf6LH0=/). It is organized as a six-zone overview plus a detailed resource-inventory appendix.
-
-### Architecture notes
-
-1. **Two CloudFront paths serve different purposes.** The existing frontend distribution serves the React application and same-origin `/api` requests. The separate media distribution serves public derivatives and selected media paths from a private S3 origin. The browser never uses the regional API hostname as its normal API base.
-2. **The API front door is defense in depth.** CloudFront adds `X-Origin-Verify`; Lambda handlers verify it before authentication, validation, or business work. Production has the front-door enforcement switch enabled and the default `execute-api` endpoint disabled. The regional custom domain intentionally returns a fixed denial when called without the CloudFront header.
-3. **Large media bypasses the API data path.** Administrators obtain short-lived upload capabilities, upload directly to S3, and then commit metadata through protected API routes. Public media uses CDN URLs; protected downloads and print handoffs use short-lived capabilities.
-4. **Visibility is enforced at multiple layers.** Cognito/API authorization controls routes and album access; S3 blocks direct public access; CloudFront origin access is restricted to the distribution; object visibility tags gate non-public media; and public-preview paths are validated and rewritten to canonical derivative keys.
-5. **Writes are intentionally asynchronous.** Preview generation, cache invalidation, random pools, hover manifests, ZIP creation, Google Drive backup, and video processing are decoupled with SQS, DynamoDB Streams, EventBridge schedules, bounded concurrency, and failure queues.
-6. **The application and operations stacks are separate.** `backend/template.yaml` owns the API, Lambda functions, Cognito, application DynamoDB tables, private media bucket, media CloudFront distribution, application logs, queues, and application alarms. `ops/` owns the existing frontend edge configuration, WAF, security services, observability, backups, notifications, DNS hardening, and guarded operational tooling.
-
-## Current production topology
-
-| Area | Current configuration |
+| | |
 |---|---|
-| Application Region | `us-west-2`, stage `prod`, CloudFormation stack `ian-website` |
-| Browser API base | Same-origin `/api` through the frontend CloudFront distribution |
-| Regional API origin | `origin-api.iantruongphotography.com`; not the browser API base |
-| API bypass protection | Front-door verification enabled; default `execute-api` endpoint disabled |
-| Media privacy guard | CloudFront non-public object denial enabled; direct S3 access denied |
-| WAF | CloudFront-scope WAF in `us-east-1`, attached to the frontend distribution |
-| Backup recovery | Primary backup stack in `us-west-2`; encrypted recovery-copy destination vault in `us-east-2` |
-| Public caching | Reviewed public API query-string allowlist and CDN caching; protected responses are no-store |
+| **52** Lambda functions | Python 3.12 handlers plus a Node.js/Sharp image worker |
+| **11** DynamoDB tables | Point-in-time recovery, deletion protection, streams |
+| **12** SQS queues | Every background workload is buffered, with dead-letter queues |
+| **2** CloudFront distributions | One for the app and `/api`, one for media, both behind private S3 origins |
+| **~290** test files | 80% line and branch coverage enforced on frontend, backend, worker and ops code |
 
-The production release guard requires the private-media, front-door, disabled-execute-api, and completed-index invariants before deployment. The live public-posture smoke verifies canonical API success, direct-origin denial, disabled execute-api behavior, protected `401` behavior, security headers, and direct S3 denial.
+## Features
+
+### For visitors
+- **Photo and video albums** with blurhash placeholders, responsive WebP previews from 640 to 1920 px, and adaptive HLS video streaming.
+- **Explore hub**: a 3D "living museum" gallery built with react-three-fiber, color, lens, exposure, time-of-day and season explorers, and a *Guess the Settings* game.
+- **Discovery tools**: search, a stats page with a shooting calendar, random and featured photos, and a TV slideshow mode with Chromecast support.
+- **Print store** delivered on an isolated `prints.` origin, plus a Turnstile-protected contact form.
+- **Installable PWA** with a service worker, and social-preview routing so shared album links unfurl with the right image.
+
+### For clients
+- Cognito sign-in with optional **TOTP multi-factor authentication** and a personal dashboard of owned galleries.
+- **Unlisted share links** for albums, with rate limiting and responses that reveal nothing about whether an album exists.
+- Full-resolution downloads through **CloudFront signed cookies** and short-lived presigned URLs, plus one-click full-album ZIP archives.
+- Before-and-after comparisons against the original files.
+
+### For the admin
+- Direct-to-S3 uploads, album management, custom gallery ordering, **scheduled publishing**, and a Recently Deleted bin with automatic purge.
+- An auto-generated hero reel for the Videos page, built server-side with ffmpeg.
+- User management, Google Drive backups, and dashboards for AWS cost (Cost Explorer plus per-album storage and bandwidth), first-party analytics with Core Web Vitals, GitHub activity, site health, and the audit log.
+
+### Creative tooling
+- **In-browser RAW editor**: LibRaw compiled to WebAssembly with Emscripten, decoding camera RAW files locally in Web Workers, with presets, adjustments and IndexedDB session recovery.
+- A **Utilities hub** that hosts the editor and upcoming tools.
+
+## Architecture
+
+> **[Open the interactive architecture board on Miro](https://miro.com/app/board/uXjVEYlOMic=/)**
+
+The board reads left to right in three frames:
+
+| Frame | What it shows |
+|---|---|
+| **1. Request path** | Browser → Route 53 → WAF → CloudFront → API Gateway → Lambda → DynamoDB, S3 and third-party services. Media goes straight from S3 through its own CDN. |
+| **2. Media and background pipeline** | Uploads, S3 events, DynamoDB Streams and EventBridge schedules feed SQS queues and workers that produce previews, HLS video, ZIPs, cache invalidations and Drive backups. |
+| **3. Delivery, security and recovery** | GitHub Actions → quality gate → OIDC → release guard → SAM stack and frontend deploy, plus the AWS security, monitoring and backup layer. |
+
+### Design principles
+
+- **Edge-first.** Browsers only ever talk to CloudFront. The SPA calls the same-origin `/api` path, CloudFront adds a secret origin header, and every Lambda rejects requests that don't carry it. The default `execute-api` endpoint is disabled.
+- **Media never passes through Lambda.** Admins upload straight to S3 with presigned URLs. Visitors load previews and video from a dedicated media CDN, and protected originals use signed cookies or short-lived URLs.
+- **Asynchronous by default.** Preview generation, video transcoding (MediaConvert), ZIP building, cache invalidation, hover manifests, Drive backup and original-file comparisons all run on queues or streams with bounded concurrency, dead-letter queues and alarms.
+- **Defense in depth.** Authorization is enforced at the API (Cognito JWT), again in each handler (owner and `Admins` checks), at S3 (Block Public Access, origin access control only, visibility tags), and at the CDN (non-public objects denied).
+- **Bounded cost.** Per-route API throttles, WAF circuit breakers, reserved Lambda concurrency, object-size limits and an AWS Budgets guard keep a personal project's bill predictable under abuse.
+
+## Tech stack
+
+| Layer | Technologies |
+|---|---|
+| **Frontend** | React 19, React Router 8, Vite 7, Tailwind CSS 4, Three.js with react-three-fiber and drei, Framer Motion, hls.js, blurhash, exifr, web-vitals |
+| **In-browser imaging** | LibRaw → WebAssembly (Emscripten), Web Workers, IndexedDB |
+| **Backend** | Python 3.12 on AWS Lambda via AWS SAM, boto3, PyJWT, Pillow, Google API client; Node.js 22 with Sharp for image previews; ffmpeg for the hero reel |
+| **AWS** | API Gateway (HTTP API), Lambda, Cognito, DynamoDB, S3, CloudFront and CloudFront Functions, WAF, Route 53 with DNSSEC, ACM, SQS, EventBridge, MediaConvert, SSM Parameter Store, Secrets Manager, KMS |
+| **Observability and security** | CloudWatch alarms and dashboards, X-Ray, SNS, CloudTrail, AWS Config, GuardDuty, Security Hub, IAM Access Analyzer, AWS Backup with freshness alarms, AWS Budgets |
+| **Integrations** | Cloudflare Turnstile, Resend, Google Drive API, GitHub REST API, Fotomoto, Google Cast |
+| **Quality and delivery** | Vitest, Testing Library, Playwright, Python `unittest` with moto and coverage.py, ESLint, cfn-lint, actionlint, zizmor, CodeQL, pip-audit, npm audit, CycloneDX SBOMs, GitHub artifact attestations |
+
+## Engineering highlights
+
+- **Zero-trust origin.** A rotating `X-Origin-Verify` secret, checked in [`front_door.py`](backend/functions/front_door.py), means the regional API is unusable without passing the WAF and CloudFront first. The release guard refuses to deploy unless the front door, the disabled `execute-api` endpoint and the private-media deny are all enforced.
+- **Least-privilege packaging.** Each Lambda is built from an explicit per-function source allowlist ([`backend/Makefile`](backend/Makefile)), and the built artifact is scanned for credentials before it can ship.
+- **Guarded deployments.** CloudFormation change sets are planned by one OIDC role and executed by another. The plan rejects unexplained replacements, removals or protected-resource changes. Every artifact is checksummed, gets an SBOM, and carries signed build provenance.
+- **Supply-chain hygiene.** GitHub Actions are pinned to commit SHAs, workflows are linted against a custom policy, and pull requests run dependency review, CodeQL and a full git-history secret scan.
+- **Performance.** Every route is lazy-loaded, vendor bundles are split (Three.js, HLS, auth, motion, imaging), and public catalog responses are cached at the edge. Hover-preview manifests and versioned WebP derivatives keep galleries fast, and real-user Core Web Vitals are reported back.
+- **Operability.** Weekly read-only drift and posture audits cover all nine CloudFormation stacks. The release pipeline ends with a production smoke test, and the [runbooks](ops/README.md) cover every alarm, recovery path and maintenance task.
 
 ## Repository layout
 
 ```text
-├── .github/                 # Main-branch release, PR, rollback, and scheduled audit workflows
+.
+├── src/                 React app: pages, components (incl. 3D museum), RAW editor, hooks, utils, tests
+├── public/              Service worker, web manifest, security.txt, open-source license bundle
 ├── backend/
-│   ├── functions/           # Python Lambda handlers and shared security/business helpers
-│   ├── preview_worker/      # Node.js/Sharp preview worker and contract tests
-│   ├── tests/               # Backend unit and integration-style tests
-│   ├── Makefile             # Explicit per-function source/dependency build allowlists
-│   └── template.yaml        # AWS SAM application infrastructure
+│   ├── functions/       Python Lambda handlers and shared security/business helpers
+│   ├── preview_worker/  Node.js + Sharp image-preview worker
+│   ├── tests/           Backend unit and integration-style tests
+│   ├── Makefile         Per-function build allowlists
+│   └── template.yaml    AWS SAM application stack
 ├── ops/
-│   ├── ci/                  # Guarded deployment, audit, posture, and release-policy tooling
-│   ├── tests/               # Infrastructure and operations tests
-│   ├── *.yaml               # Reviewed supporting CloudFormation templates
-│   └── README.md            # Production operations entry point
-├── public/                  # Static public assets and security contact metadata
-├── scripts/                 # Frontend build-time compatibility patches
-├── src/                     # React components, pages, contexts, utilities, and tests
-├── .env.example             # Public configuration contract; real .env files stay local
-├── print.html               # Isolated print-store entry page
-├── package.json             # Frontend development and verification commands
-└── THIRD_PARTY_NOTICES.md   # Third-party dependency notices
+│   ├── ci/              Release guard, deploy, drift-audit and posture tooling
+│   ├── tests/           Infrastructure and operations tests
+│   ├── *.yaml           Security, WAF, backup, observability, DNSSEC and CI-bootstrap stacks
+│   └── *.md             Production runbooks (start at ops/README.md)
+├── scripts/             RAW decoder build, license generator and bootstrap-asset tooling
+├── tests/browser/       Playwright release and visitor checks
+├── legal/               Third-party license texts bundled into the build
+├── .github/workflows/   Pull-request, release, manual-release and scheduled-audit pipelines
+├── index.html           Main app entry
+└── print.html           Isolated print-store entry
 ```
 
-Local security and performance review evidence may exist in the ignored `website_review/` directory and is intentionally not committed.
+## Getting started
 
-## Technology
-
-- React 19, React Router 7, Vite 7, Tailwind CSS 4, Vitest, and Node.js 24 for frontend tooling.
-- Python 3.12 Lambda functions managed with AWS SAM.
-- Node.js 22/Sharp for the isolated image-preview worker.
-- API Gateway HTTP API, Cognito, DynamoDB, S3, CloudFront, MediaConvert, Route 53, ACM, WAF, IAM, AWS Backup, CloudTrail, Config, GuardDuty, Security Hub, IAM Access Analyzer, CloudWatch, X-Ray, KMS, SQS, EventBridge, and SSM Parameter Store.
-- Resend for transactional email, Cloudflare Turnstile for bot protection, Google Drive for optional media backup/reporting, GitHub for repository analytics, and Fotomoto for isolated print-store handoff.
-
-## Local development
-
-Use the Node version declared in `.node-version` and copy only public development values from `.env.example` into a local `.env`. Production uses the relative `/api` base so browser traffic cannot bypass the frontend edge controls.
+**Prerequisites:** Node.js 24 (see [`.node-version`](.node-version)) and Python 3.12.
 
 ```bash
 npm ci
+cp .env.example .env   # fill in public, non-secret values only
 npm run dev
 ```
 
-Never commit `.env`, provider credential JSON, media, build output, or locally generated evidence.
+By default, the dev server does not proxy `/api`, so UI work never touches live data. Set `VITE_DEV_PROXY_PROD=1` in `.env` to proxy `/api` and `/private-media` to production. Admin actions taken with it enabled change real data.
 
-## Verification
+Never commit `.env`, provider credential files, media, build output or local evidence. The [`.gitignore`](.gitignore) blocks all of these.
 
-The same core checks run before a production release:
+## Testing
+
+The commands below run the same gates CI runs before every release:
 
 ```bash
+# Frontend: lint, tests with coverage thresholds, production build
 npm run verify:ci
+
+# Backend (Python 3.12)
 python3 -m pip install -r backend/requirements-dev.txt
-(cd backend && PYTHONPATH=functions python3 -m coverage run --rcfile=.coveragerc -m unittest discover -s tests -p 'test_*.py' -v)
-(cd backend && python3 -m coverage json --rcfile=.coveragerc && python3 ../ops/ci/coverage_gate.py coverage/backend/coverage.json)
+(cd backend && PYTHONPATH=functions python3 -m coverage run --rcfile=.coveragerc -m unittest discover -s tests -p 'test_*.py')
+
+# Image-preview worker
 npm --prefix backend/preview_worker ci
 npm --prefix backend/preview_worker run test:coverage
-python3 -m coverage run --rcfile=ops/.coveragerc -m unittest discover -s ops/tests -p 'test_*.py' -v
-python3 -m coverage json --rcfile=ops/.coveragerc
-python3 ops/ci/coverage_gate.py coverage/ops/coverage.json
+
+# Infrastructure and operations tooling
+python3 -m coverage run --rcfile=ops/.coveragerc -m unittest discover -s ops/tests -p 'test_*.py'
+
+# CloudFormation lint and SAM build
 bash ops/validate_infrastructure.sh --build
 ```
 
-For live production posture, the credential-free smoke test is run through the configured CI variables:
+Other checks: `npm run test:browser` and `npm run test:browser:visitors` (Playwright), and `npm run test:raw-decoder` (WASM decoder).
 
-```bash
-./ops/ci/public_smoke.sh
-```
+## Deployment
 
-The smoke test is not a load test. Capacity changes should also measure API `429`/`5xx` rates, Lambda throttles and concurrency, DynamoDB throttles, queue age/depth, CloudFront cache hit rate, WAF blocks, latency, and cost.
+`main` is the only deployment branch. Every push to `main`:
 
-Additional workflow policy, artifact budgets, credential-history scanning, dependency checks, drift audits, public-posture checks, and deployment guards are documented in [`ops/CI_CD.md`](ops/CI_CD.md).
+1. runs the full quality and security gate
+2. builds immutable frontend and backend artifacts, with checksums, SBOMs and provenance attestations
+3. assumes short-lived AWS roles through GitHub OIDC, scoped to this repository and `main`
+4. plans the backend change set, checks it against the release guard, then executes it
+5. deploys the frontend to S3 and invalidates CloudFront
+6. runs a public posture smoke test against production
 
-## Deployment model
+The supporting ops stacks (WAF, security services, backups, observability, DNSSEC) are deployed separately and drift-audited weekly. The full pipeline is documented in [`ops/CI_CD.md`](ops/CI_CD.md).
 
-`main` is the only deployment branch. Every push to `main` runs the full quality and security gate, builds immutable frontend and backend artifacts, records checksums/SBOM/provenance, plans the backend change set, deploys it only when the guarded plan is valid, deploys the frontend, and verifies public health. AWS access uses short-lived GitHub OIDC sessions restricted to the exact repository and `main` ref; no long-lived AWS credentials belong in GitHub.
+## Documentation
 
-The deployment path preserves the live stack parameters, binds packaged `CodeUri` values to immutable artifacts, rejects unexplained removals/replacements and protected-resource changes, and rechecks security/migration invariants after deployment. Manual release recovery and scheduled read-only security/drift audits remain available without introducing additional application branches or environments.
+| Topic | Document |
+|---|---|
+| Operations index and maintenance scripts | [`ops/README.md`](ops/README.md) |
+| CI/CD pipeline and release guard | [`ops/CI_CD.md`](ops/CI_CD.md) |
+| API front door (origin verification) | [`ops/API_FRONT_DOOR.md`](ops/API_FRONT_DOOR.md) |
+| Private media and signed access | [`ops/PRIVATE_MEDIA.md`](ops/PRIVATE_MEDIA.md) |
+| Observability and alarms | [`ops/OBSERVABILITY.md`](ops/OBSERVABILITY.md), [`ops/ALARM_REGISTRY.md`](ops/ALARM_REGISTRY.md) |
+| Account security baseline | [`ops/SECURITY_ACCOUNT_BASELINE.md`](ops/SECURITY_ACCOUNT_BASELINE.md), [`ops/SECURITY_OBSERVABILITY.md`](ops/SECURITY_OBSERVABILITY.md) |
+| Maintenance and recovery | [`ops/MAINTENANCE_AND_RECOVERY.md`](ops/MAINTENANCE_AND_RECOVERY.md) |
+| Feature deep dives | [`ops/PHOTO_ORIGINAL_COMPARISONS.md`](ops/PHOTO_ORIGINAL_COMPARISONS.md), [`ops/HOVER_PREVIEW_MANIFESTS.md`](ops/HOVER_PREVIEW_MANIFESTS.md), [`ops/FOTOMOTO_PRINTS.md`](ops/FOTOMOTO_PRINTS.md) |
+| Privacy requests | [`ops/PRIVACY_REQUESTS.md`](ops/PRIVACY_REQUESTS.md) |
+| Third-party notices | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) |
 
-Operational runbooks begin at [`ops/README.md`](ops/README.md). The API front-door contract, rotation procedure, negative tests, and rollback process are in [`ops/API_FRONT_DOOR.md`](ops/API_FRONT_DOOR.md).
+## Security
 
-## Security boundary
+To report a vulnerability, use the contact in [`/.well-known/security.txt`](public/.well-known/security.txt). Please don't open a public issue.
 
-- **Browser/API edge:** the browser uses `/api` on the canonical CloudFront distribution. The frontend WAF applies managed threat rules plus per-IP and distributed API rate limits. Public API caching is allowlisted by route, method, and query string; private requests forward authorization headers, never cookies, and are not cached.
-- **Authentication:** Cognito issues the user tokens. API Gateway validates the issuer/audience, and protected handlers perform defense-in-depth claim validation and exact `Admins`-group/owner checks. Client-side route guards are only a user-experience layer.
-- **Album authorization:** public albums require active public state; private albums require the owner or administrator; unlisted albums require an exact active share code plus abuse controls. Invalid/revoked shared access is intentionally indistinguishable from not found.
-- **Media authorization:** the S3 bucket has Block Public Access, OAC-only CloudFront access, TLS-only policies, versioning, lifecycle controls, and visibility tags. Public previews are canonical, validated derivatives. Protected downloads and uploads use short-lived presigned capabilities and server-generated object keys.
-- **Input and abuse controls:** request bodies, fields, identifiers, MIME types, extensions, object sizes, ZIP sizes, batch sizes, share codes, and analytics events are bounded and allowlisted. Turnstile and HMAC-scoped DynamoDB rate limits protect sensitive anonymous flows.
-- **Secrets and logging:** provider credentials and origin/rate-limit secrets are loaded from managed AWS storage; logs omit tokens, bodies, query strings, paths, keys, and personal data. Application audit events use a fixed aggregate schema.
-- **Deployment and account security:** IAM is split by function and deployment role. GitHub OIDC trust is exact-repository/exact-branch. CloudTrail, Config, GuardDuty, Security Hub, Access Analyzer, retained audit storage, WAF logs, backup alerts, CloudWatch alarms, and scheduled drift/posture checks provide independent operational controls.
+---
 
-For changes to authentication, storage, logging, backups, edge controls, or deployment policy, update the corresponding tests and runbooks in the same commit. Do not treat a successful infrastructure deployment as proof of privacy; the authorization matrix and live CDN/direct-storage tests remain required release gates.
+<div align="center">
 
-## Operations and recovery
+Designed, built and operated by **Ian Truong**.
 
-The application is deliberately bounded rather than unlimited: API throttles, WAF circuit breakers, reserved Lambda concurrency, SQS buffering, worker limits, object-size limits, and provider pagination limits protect availability and spend. This is appropriate for the portfolio/private-gallery workload, but high-load changes should be validated with representative traffic and media sizes.
-
-DynamoDB point-in-time recovery, S3 versioning, AWS Backup, retained audit storage, and the `us-east-2` encrypted backup destination reduce recovery risk. The replica vault is a recovery destination, not proof that every backup is continuously copied there; verify the copy policy and perform a restore test before treating it as regional DR. Regional disaster recovery is still a restore/failover procedure rather than active-active serving; maintain tested restore steps and explicit RPO/RTO targets.
+</div>

@@ -17,7 +17,7 @@ Those remain explicit owner decisions after inventory and a reviewed change set.
 | Notifications | `security_notifications_template.yaml` | Regional SNS routing for privacy-safe website alarms, encrypted SQS delivery guards, and audit-only account alarms. It preserves the owner-approved subscriber without a dedicated monthly KMS key. |
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
 | Home detection posture | `ci/home_security_posture.py` | Aggregate-only, read-only verification of the exact home-Region GuardDuty and Security Hub contract. It fails closed and never prints provider identifiers, tags, findings, or Region names. |
-| Backups | `security_backup_template.yaml` | Daily backup of both metadata tables into a retained AWS-managed-key vault. S3 relies on versioning and the existing external media backup. Creation and Vault Lock default off. |
+| Backups | `security_backup_template.yaml`, `security_backup_replica_template.yaml` | Daily backup of both metadata tables into a retained AWS-managed-key vault, plus the historical `us-east-2` replica vault kept only until its recovery points age out. S3 relies on versioning and the existing external media backup. Creation and Vault Lock default off. |
 | Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One optional retained, console-only account budget. Creation defaults off and requires an owner-approved amount; it has no notification route. |
 | Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Complete source signal inventory, privacy contract, runbook routing, response ownership, and quarterly delivery-test state. |
 | Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors become `skip-inventory-incomplete`, never “absent.” |
@@ -45,6 +45,8 @@ The focused checks are:
 python3 -m unittest \
   ops.tests.test_config_delivery_orchestrator \
   ops.tests.test_home_security_posture \
+  ops.tests.test_security_baseline \
+  ops.tests.test_security_budget \
   ops.tests.test_security_operations \
   -v
 cfn-lint \
@@ -52,6 +54,7 @@ cfn-lint \
   ops/security_notifications_template.yaml \
   ops/security_managed_services_template.yaml \
   ops/security_backup_template.yaml \
+  ops/security_backup_replica_template.yaml \
   ops/security_budget_template.yaml
 ```
 
@@ -196,15 +199,16 @@ precompute the generated bucket name.
 ### 2. Notifications and alarms
 
 Pass the foundation log-group output to
-`security_notifications_template.yaml`. The topic uses a retained rotating
-customer KMS key. Native CloudWatch publishing is restricted to exact website
-alarm name patterns and the topic encryption context. EventBridge never
-publishes directly to the responder topic: only exact website backup and WAF
-rules may send fixed signals to the encrypted SQS ingress queue. A bounded
-Lambda validates the complete signal contract before publishing through its
-exact IAM role.
+`security_notifications_template.yaml`. The `ian-photography-security-<stage>`
+topic carries only privacy-safe operational signals, so it deliberately has no
+dedicated customer-managed KMS key. Native CloudWatch publishing is restricted
+by topic policy to the account and exact website alarm name patterns.
+EventBridge never publishes directly to the responder topic: only the exact
+website backup-failure and edge/WAF alarm rules may send fixed signals to the
+SQS-managed-SSE ingress queue. A bounded Lambda validates the complete signal
+contract before publishing through its exact IAM role.
 
-Website EventBridge targets use bounded retries and an encrypted 14-day SQS
+Website EventBridge targets use bounded retries and an SQS-managed-SSE 14-day
 DLQ. A DLQ-depth alarm alerts on the first visible failed delivery. Audit-only
 account alarms cover KMS key, routing, root, IAM, CloudTrail,
 managed-security-service, data-protection, and infrastructure configuration
@@ -386,8 +390,10 @@ requires the hub to remain standards-free; the managed-services template also
 sets `EnableDefaultStandards: false`. Enable a broad standard only through a
 separately reviewed cost and control-coverage decision that updates this
 contract and its tests.
-The Config layer also checks public S3 writes, default S3 encryption, public
-Lambda function access, and customer-managed KMS key rotation. These rules use
+The Config layer's rules check that CloudTrail is enabled, S3 public read and
+write are prohibited, S3 default encryption and TLS-only requests are enforced,
+DynamoDB PITR is enabled, no Lambda function is publicly accessible,
+customer-managed KMS keys rotate, and the root user has no access key. These rules use
 the scoped recorder, except the daily Lambda policy audit, which reads current
 Lambda APIs directly and does not require Lambda configuration items. The
 rollout deliberately omits the us-east-1-only CloudFront HTTPS managed rule and
@@ -476,12 +482,21 @@ operations remain gated and reviewed in AWS Backup.
 
 ### 6. Cost budget and notification ownership
 
-Use `security_budget_preflight.py` with `security_budget_template.yaml`. The source-controlled budget
-has no default spending amount, email address, subscription, resource action,
-or automatic security-control disablement. Its read-only preflight recommends
-creation only when the exact budget name is absent and the owner confirms the
-name and amount. It remains console-only and never publishes to the website
-responder topic.
+Use `security_budget_preflight.py` with `security_budget_template.yaml`:
+
+```bash
+python3 ops/security_budget_preflight.py \
+  --expected-account-id EXPECTED_12_DIGIT_ACCOUNT \
+  --monthly-limit-usd OWNER_APPROVED_AMOUNT \
+  --confirm-budget-name ian-photography-monthly-prod
+```
+
+The source-controlled budget has no default spending amount, email address,
+subscription, resource action, or automatic security-control disablement. Its
+read-only preflight recommends `BudgetDeploymentMode=create-confirmed-absent`
+only when the exact budget name is absent and the owner confirms the name and
+amount. It remains console-only and never publishes to the website responder
+topic.
 
 The current checked-in alarm registry is
 `active-one-confirmed-owner-destination`: the site owner has one confirmed
@@ -514,8 +529,6 @@ AWS behavior references:
 - [AWS Config delivery channel](https://docs.aws.amazon.com/config/latest/developerguide/manage-delivery-channel.html)
 - [GuardDuty Regions](https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_regions.html)
 - [EventBridge resource policies](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-use-resource-based.html)
-- [SNS encrypted-topic key management](https://docs.aws.amazon.com/sns/latest/dg/sns-key-management.html)
 - [CloudFormation RetainExceptOnCreate](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-attribute-deletionpolicy.html)
 - [AWS Backup Vault Lock](https://docs.aws.amazon.com/backup/latest/devguide/vault-lock.html)
-- [AWS Budgets SNS policy and encrypted-topic permissions](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-sns-policy.html)
 - [CloudFormation AWS Budgets resource](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-budgets-budget.html)

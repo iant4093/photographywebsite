@@ -35,19 +35,22 @@ in this parameter.
 
 The stack owns privacy-safe metrics in `IanTruongPhotography/Security`:
 
-| Metric | Source | Initial alarm | Meaning |
-|---|---|---:|---|
-| `AuditDenied` | all application audit denials | dashboard/query only | Normal at low volume; investigate changes in baseline. |
-| `AuditFailure` | audit records with failure outcome | 1 in 5 minutes | A security-sensitive operation or provider dispatch failed. |
-| `LoginDenied` | denied `auth.login` records | 10 in 5 minutes | Possible credential attack, CAPTCHA issue, or client regression. |
-| `ApiAuthorizationDenied` | API 401, 403, and 429 access logs | 25 in 5 minutes | JWT/authorization/rate-limit failures, including denials before Lambda. |
+| Metric | Source | Alarm (route) | Meaning |
+|---|---|---|---|
+| `AuditDenied` | all application audit denials | none; dashboard/query only | Normal at low volume; investigate changes in baseline. |
+| `AuditFailure` | audit records with failure outcome | `AuditFailureAlarm`, 1 in 5 minutes (notifies) | A security-sensitive operation or provider dispatch failed. |
+| `LoginDenied` | denied `auth.login` records | `LoginDeniedAlarm`, 10 in 5 minutes (audit-only) | Possible credential attack, CAPTCHA issue, or client regression. |
+| `ApiAuthorizationDenied` | API 401, 403, and 429 access logs | `ApiAuthorizationDeniedAlarm`, 25 in 5 minutes (audit-only) | JWT/authorization/rate-limit failures, including denials before Lambda. |
+| `FrontDoorDenied` | `front_door_request_denied` log records | `FrontDoorDeniedAlarm`, 10 in 5 minutes (notifies) | Requests reached the origin without a valid CloudFront origin header. |
 
-All application alarms publish to the encrypted central
-`ian-photography-security-<stage>` topic owned by the separate notification
-stack. The application stack does not create a second topic or subscription.
-One site-owner destination is confirmed; add a separately monitored backup
-destination and record quarterly delivery tests. A topic ARN without a confirmed
-subscription is not an operational alert path.
+Notifying alarms publish to the central `ian-photography-security-<stage>`
+topic owned by the separate notification stack; audit-only alarms have no
+action so routine internet scanning never sends email. The application stack
+does not create a second topic or subscription. `alarm_registry.json` is the
+source of truth for each alarm's route. One site-owner destination is
+confirmed, which is the complete requirement for this personal site; record
+quarterly delivery tests. A topic ARN without a confirmed subscription is not
+an operational alert path.
 
 Tune thresholds only from at least two representative traffic cycles. Record
 the old/new value, evidence, owner, review date, and rollback. Do not lower a
@@ -136,9 +139,6 @@ an `admin_mfa_required` denial shows which role was refused.
   ID tokens last one hour.
 - Enrolling TOTP signs the session out globally, so the next sign-in carries an
   `enabled` token.
-- After this first deploys, existing admin sessions lack the claim and have no
-  admin privilege until their ID token refreshes (at most one hour) or they sign
-  in again.
 - The stack creates `PreTokenGenerationInvokePermission` before the pool's
   `LambdaConfig` references the trigger (`UserPool` `DependsOn` it, and the
   permission's `SourceArn` is the account/Region pool pattern rather than the
@@ -158,8 +158,9 @@ media, add-images, and update-image handlers attach CloudFront signed cookies
 prefix, `Path=/private-media/albums/<segment>`) after authorizing the album, and
 emit protected media URLs under `/private-media/`. The cookie policy expires
 with the same TTL as a presigned URL (`MEDIA_URL_TTL_SECONDS`), so revoking a
-share or making an album private takes effect within one TTL, exactly as
-before. Covers in list views, QR codes, and downloads stay presigned.
+share or making an album private takes effect within one TTL. Covers in list
+views, QR codes, and downloads stay presigned. See
+[`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md) for the edge and key setup.
 
 - A signing failure (missing or unreadable
   `/ian-website/<stage>/private-media-signing-key`, SSM error, bad key ID) never
@@ -177,17 +178,20 @@ before. Covers in list views, QR codes, and downloads stay presigned.
 
 ## Deployment and rollback checks
 
-Before execution:
+Normal releases go through the guarded CI/CD plan in [`CI_CD.md`](CI_CD.md),
+which already preserves every live parameter and rejects protected changes.
+For any separately reviewed change set:
 
 1. run the complete backend and infrastructure test suites;
 2. run `sam validate --lint` and `sam build`;
-3. create a non-executing change set using the current encrypted SSM parameter names,
-   `AlbumIndexDeploymentPhase`, and `EnforcePrivateMediaCloudFrontDeny` values;
+3. create a non-executing change set that preserves the current SSM parameter
+   names, `AlbumIndexDeploymentPhase`, and `EnforcePrivateMediaCloudFrontDeny`
+   values;
 4. pass the exact tested `ReleaseSha` and approved retention parameters;
 5. reject replacements/removals of data, identity, API, bucket, distribution,
    or retained log resources;
-6. confirm `ApplicationLogGroup` is an additive resource and Lambda logging
-   configuration changes in place.
+6. confirm Lambda logging configuration changes in place and the retained
+   `ApplicationLogGroup` is unchanged.
 
 After execution, create one synthetic safe audit success and denial, verify both
 reach the centralized group, verify the metrics advance, and confirm the alarm

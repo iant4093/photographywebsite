@@ -5,6 +5,32 @@ Actions release path. They are deliberately fail-closed: a production release
 remains blocked until the four independent coverage domains meet 80%, and
 deployment cannot begin until the AWS/GitHub bootstrap described below exists.
 
+## Workflows
+
+| Workflow | Trigger | Jobs |
+|---|---|---|
+| `pull-request.yml` | Pull request to `main` | Reusable quality gate plus `dependency-review` (fails on any severity from `low`). |
+| `release-production.yml` | Push to `main` | `quality` → `attest` → `backend-plan` → `backend-deploy` (skipped for an empty change set) → `backend-smoke` → `frontend-deploy` (deploy, then smoke with the release SHA) → `release-storage-cleanup` → `release-record`. |
+| `manual-release.yml` | `workflow_dispatch` | Verified redeploy or forward rollback of `frontend`, `backend`, or `both` from an earlier successful production run. |
+| `scheduled-security.yml` | Mondays 09:23 UTC and `workflow_dispatch` | Quality gate, `release-idle`, `history-and-public-posture`, `production-drift`. |
+
+The reusable `_quality.yml` gate has five independent domains, joined by a
+final `quality-gate` job that fails unless every domain succeeded:
+
+- `frontend-unit-build`: ESLint, the RAW-decoder exercise, Vitest coverage, the
+  preview worker's coverage, the production build, the built theme/bootstrap
+  check, Playwright release and visitor-gallery journeys, and the frontend
+  artifact budget.
+- `backend-unit`: all backend tests with branch coverage.
+- `infrastructure`: ops tests with branch coverage, `validate_infrastructure.sh
+  --build`, the Lambda environment policy, the SAM credential-artifact scan, and
+  the SAM artifact budget.
+- `dependency-workflow-security`: `npm audit` and `pip-audit`, CycloneDX SBOMs,
+  `workflow_policy.py`, checksum-pinned `actionlint`, `zizmor`, independent
+  `cfn-lint` of every CloudFormation template, and the full-history credential
+  scan.
+- `codeql`: JavaScript/TypeScript and Python analysis.
+
 ## Workflow contract
 
 - Pull requests run frontend, backend, operations, SAM, dependency, workflow,
@@ -19,8 +45,9 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   entry JavaScript/CSS, the largest chunk, and every Lambda's unpacked bytes
   and file count. SAM artifacts are also checked against the explicit
   `backend/Makefile` source allowlists so one function cannot silently acquire
-  another function's local modules. Google Drive and the Sharp preview worker
-  have explicit larger ceilings; they do not inherit an unlimited exception.
+  another function's local modules. A few heavier functions, such as Google
+  Drive and the Sharp preview worker, have explicit larger ceilings; none
+  inherits an unlimited exception.
 - Both artifact checks write aggregate-only JSON evidence and upload it even
   when a budget fails. Reports contain logical IDs, counts, byte totals, limits,
   and violation codes—not runner paths, source content, object keys, album IDs,
@@ -42,7 +69,8 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   bytes. Deployment never rebuilds source.
 - SAM code and the packaged CloudFormation template are uploaded beneath the
   exact release SHA plus unique run/attempt with the bootstrap KMS key. Every
-  packaged `CodeUri` is rewritten to its exact S3 `Version`, the template is
+  packaged `CodeUri` is rewritten to its exact S3 `Version` (the object count
+  must equal `codeUriCount` in `ops/ci/release_artifact_contract.json`), the template is
   uploaded with `If-None-Match`, and its versioned URL plus SHA-256 is bound to
   the guarded change set.
 - Backend planning detects CloudFormation drift, retains every current stack
@@ -60,12 +88,13 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   reviewed rule. Wildcards, duplicate rules, unknown properties, and
   unexplained detail-free changes fail closed.
 - The exact `ops/ci/release_parameter_additions.json` contract permits
-  `OriginalComparisonsEnabled=true` only when introducing that parameter for
-  the first time. Planning and execution both validate it. Once present, its
-  current value is preserved like every other parameter, including `false`.
-  Other additions or changes to existing values remain rejected.
-- Backend execution uses a separate role and must reach `UPDATE_COMPLETE` before
-  frontend deployment. Empty backend changes are an explicit safe no-op.
+  `OriginalComparisonsEnabled=true` and `AlbumWorkRouting=legacy` only when
+  introducing those parameters for the first time. Planning and execution both
+  validate it. Once present, each current value is preserved like every other
+  parameter. Other additions or changes to existing values remain rejected.
+- Backend execution uses a separate role and must reach `UPDATE_COMPLETE`, and
+  the credential-free public smoke must pass, before frontend deployment. Empty
+  backend changes are an explicit safe no-op.
 - Frontend deployment never deletes S3 objects. The uploader compares object
   content and cache metadata and uploads only changed files, with `index.html`
   last. Fingerprinted assets retain immutable caching; other static files use
@@ -85,16 +114,19 @@ deployment cannot begin until the AWS/GitHub bootstrap described below exists.
   successful `main` production workflow path whose exact SHA remains in `main`
   history. Guard, deploy, and smoke scripts stay at the current trusted control
   SHA; the selected historical SHA is never executed as CI code.
-- The weekly workflow runs the complete quality suite, scans every reachable
-  Git blob without printing values or paths, runs the credential-free public
-  posture smoke, and detects drift for the versioned application, CI bootstrap,
-  security, WAF, backup, and observability stack inventory in `us-west-2`,
-  `us-east-1`, and `us-east-2`, plus exact secret-redacted frontend edge and
-  bucket posture. It also verifies the exact GuardDuty detector and the
-  standards-free Security Hub contract in the home Region; any enabled standard
-  fails the audit because targeted Config rules are the approved cost-bounded
-  checks. It does not claim managed
-  detector or hub coverage in other Regions, and it never remediates drift.
+- The weekly workflow runs the complete quality suite, waits for any production
+  release to finish (`wait_for_release_idle.py`), scans every reachable Git blob
+  without printing values or paths, runs the credential-free public posture
+  smoke against the latest successful release SHA, and runs
+  `audit_stack_drift.sh`. That script detects drift for the versioned
+  application, CI bootstrap, security, WAF, backup, and observability stack
+  inventory in `us-west-2`, `us-east-1`, and `us-east-2`, plus exact
+  secret-redacted frontend edge and bucket posture (`audit_frontend_edge.sh`).
+  It also verifies the exact GuardDuty detector and the standards-free Security
+  Hub contract in the home Region (`home_security_posture.py`); any enabled
+  standard fails the audit because targeted Config rules are the approved
+  cost-bounded checks. It does not claim managed detector or hub coverage in
+  other Regions, and it never remediates drift.
 
 ## Required GitHub settings
 
@@ -140,19 +172,25 @@ therefore require no GitHub configuration maintenance.
 All variables above are repository-scoped so the reusable quality, deployment,
 and credential-free smoke jobs share one reviewed configuration. The AWS role
 ARNs still identify four independently least-privileged roles; removing GitHub
-Environment gates does not combine their permissions.
+Environment gates does not combine their permissions. The fifth GitHub role,
+`ian-website-release-storage-cleanup`, has a fixed name and is addressed from
+`AWS_ACCOUNT_ID`, so it needs no variable.
 
 The reusable quality workflow always injects the exact tested `github.sha` as
 `VITE_RELEASE_SHA`; do not create a mutable GitHub variable for the release SHA.
 
-The public posture helper paginates the complete anonymous catalog with a hard
-bound, requires its reviewed aggregate count, validates DTO allowlists and CDN-only media URLs, samples album details
-and one ranged CDN object, proves direct S3 remains denied, requires the custom
-origin and execute-api bypasses to stay closed (including API Gateway's exact
-JSON 404 response for its disabled default endpoint), checks hostile-origin CORS and
-the protected-user 401 boundary, and checks sensitive SPA routes under DNT/GPC
-headers for security headers and cookies. It emits only
-aggregate counts. The protected response must never show cache-hit evidence;
+`ops/ci/public_smoke.sh` wraps `ops/ci/public_posture_smoke.py`. The helper
+paginates the complete anonymous catalog with a hard bound, requires it to be
+nonempty and complete, validates DTO allowlists and CDN-only media URLs, samples
+album details and one ranged CDN object, proves direct S3 remains denied, and,
+when a ready original-comparison preview is present, proves its signed URL works
+and its unsigned URL is denied. It requires the custom origin and execute-api
+bypasses to stay closed (including API Gateway's exact JSON 404 response for its
+disabled default endpoint), checks hostile-origin CORS, the public stats
+response, and the protected-user 401 boundary, and checks sensitive SPA routes
+under DNT/GPC headers for security headers and cookies. When
+`EXPECTED_RELEASE_SHA` is set it also requires the deployed release marker. It
+emits only aggregate counts. The protected response must never show cache-hit evidence;
 when it carries a cache directive, that directive must be `private, no-store`.
 CI permits one five-second retry only for an allowlisted transport, HTTP
 429/5xx, content-type/status, or CDN availability failure and logs the safe
@@ -161,17 +199,18 @@ release-marker, and direct-storage posture failures are never retried.
 
 ## OIDC trust and permissions
 
-The intentional shared album-continuation loop requires CloudFormation's
-execution policy to read and set Lambda recursion configuration. The exact
+The intentional album-continuation loops require CloudFormation's execution
+policy to read and set Lambda recursion configuration. The exact
 `ManageContinuationWorkerRecursion` statement grants these two actions only
-for `${ApplicationStackName}-CacheInvalidationWorkerFunction-*`; it does not
-grant them to the GitHub plan, execute, frontend, or audit sessions. Before
-releasing the first `RecursiveLoop: Allow` change, update the bootstrap through
+for `${ApplicationStackName}-CacheInvalidationWorkerFunction-*` and
+`${ApplicationStackName}-AlbumWorkWorkerFunction-*`; it does not grant them to
+the GitHub plan, execute, frontend, audit, or cleanup sessions. Before
+releasing a new `RecursiveLoop: Allow` function, update the bootstrap through
 a reviewed non-executing change set preserving all live parameters. The only
 expected change is `CloudFormationExecutionIdentityAndComputePolicy`, without
 replacement. Apply this separately approved prerequisite before merging the
 application release. The application release intent permits `RecursiveLoop`
-only on `CacheInvalidationWorkerFunction`.
+only on `CacheInvalidationWorkerFunction` and `AlbumWorkWorkerFunction`.
 
 The retained bootstrap source is `ops/ci_bootstrap_template.yaml`. It creates or
 references the GitHub OIDC provider with audience `sts.amazonaws.com`. Every
@@ -222,9 +261,10 @@ The scheduled audit does not ignore the detector: `home_security_posture.py`
 requires exactly one enabled detector in the home Region, the exact combined
 12-feature map, 15-minute publishing, and the required application/stage tags.
 It also requires the home Security Hub default hub, the `SECURITY_CONTROL`
-finding generator, required application/stage tags, and exactly the two reviewed
-standards. Each must be `READY`, or provider-reconciling `PENDING` with controls
-still `READY_FOR_UPDATES` and no status reason. Extra AWS- or
+finding generator, required application/stage tags, and zero enabled standards
+(`EXPECTED_SECURITY_HUB_STANDARDS` is empty). If a standard is ever added to
+that contract, each must be `READY`, or provider-reconciling `PENDING` with
+controls still `READY_FOR_UPDATES` and no status reason. Extra AWS- or
 CloudFormation-managed tags are allowed, but missing required tags or any
 detector, feature, hub, generator, standard, or updatability difference fails
 closed. Output contains aggregate counts only, including the number of provider
@@ -271,10 +311,9 @@ commit. When the edge differs from the contract, the failure names the drifted
 documents (`distribution`, `publicAccessBlock`, `encryption`, `ownership`,
 `versioning`, `policyStatus`), never their values. Every reviewed edge change
 must record its new hashes in the contract, or each later weekly run fails.
-After this source update, deploy the reviewed, non-executing bootstrap stack
-UPDATE change set before enabling or manually running the scheduled workflow;
-the existing audit role does not gain the new exact stack ARNs until that update
-is executed.
+When the stack inventory grows, execute the reviewed bootstrap UPDATE change set
+before the next scheduled or manual audit; the audit role does not gain a new
+exact stack ARN until that update is executed.
 
 The CloudFormation execution role is scoped to resources owned by the
 application stack and explicitly denies deletion of protected tables, buckets,
@@ -350,7 +389,8 @@ aws cloudformation update-termination-protection \
 
 For a genuinely absent provider, use `GitHubOidcProviderMode=create` and omit
 the existing ARN. The provider, KMS key and alias, versioned artifact bucket and
-policy, four GitHub roles, CloudFormation execution role, and its four managed
+policy, five GitHub roles (plan, execute, frontend, audit, and release-storage
+cleanup), CloudFormation execution role, and its four managed
 policies all use `DeletionPolicy: RetainExceptOnCreate` with
 `UpdateReplacePolicy: Retain`. This keeps established resources and replaced
 resources recoverable while allowing CloudFormation to clean up resources it
@@ -358,8 +398,13 @@ created during a failed initial stack create. Always confirm a failed bootstrap
 reaches `ROLLBACK_COMPLETE` without newly orphaned named roles, providers,
 buckets, aliases, or policies before retrying. The bucket has full public-access
 block, bucket-owner-enforced ownership, a rotating customer-managed KMS key,
-incomplete multipart cleanup, and noncurrent-version expiration. Retention is a
-recovery control, so deleting the bootstrap stack is not a cleanup procedure.
+and incomplete multipart cleanup; version retirement belongs to
+`release_storage_cleanup.py` (see below). Retention is a recovery control, so
+deleting the bootstrap stack is not a cleanup procedure.
+
+The template pins its application identifiers (stack name, API domain, HTTP
+API, hosted zone, frontend bucket, and distribution) as single-value parameter
+defaults, so the deploy command overrides only the provider mode.
 
 Copy the stack outputs into the matching GitHub variables:
 
@@ -435,9 +480,11 @@ reviewed stack configuration, its
 API Gateway domain/mapping/tag paths, application-tagged regional ACM
 certificates, and A/CNAME changes at that hostname or its validation-record
 subtree. The Route53 change-status ARN necessarily contains a change-ID
-wildcard, but is not a `Resource: '*'` grant. The generated front-door secret
-uses only its `ian-photography/front-door/*` ARN family, and its read-only IAM
-managed policy uses only the application stack's policy-name family. Retained
+wildcard, but is not a `Resource: '*'` grant. The origin-verification value is
+an encrypted SSM parameter that the stack never writes; its read-only IAM
+managed policy uses only the application stack's policy-name family. The only
+Secrets Manager family the execution role may create or update is
+`ian-photography/prod/fotomoto-print-session-*`. Retained
 resources remain protected by explicit destructive denies. When changing these
 policies, run IAM Access Analyzer validation and a sandboxed change-set
 test against the current `backend/template.yaml`; extend only the specific
@@ -459,21 +506,21 @@ Keep automatic production deployment enabled only while all of these are true:
    and branch gates independently pass at 80%.
 2. A bounded production drift audit reports `IN_SYNC` and all direct changes
    have been reconciled into reviewed infrastructure ownership.
-3. IAM Access Analyzer validates all four OIDC role policies and the execution
-   role policy/boundary.
+3. IAM Access Analyzer validates all five OIDC role policies and the execution
+   role's managed policies.
 4. A plan-only test proves the roles can perform only their intended actions.
 5. Frontend and backend rollback artifacts are retained and a synthetic recovery
    drill has passed.
 
-## Local parity
-
-### Release archive retention
+## Release archive retention
 
 The `release-storage-cleanup` job runs after each successful production
 deployment, inside its existing concurrency lock with manual rollbacks. It uses a
-separate main-only OIDC role with permission to list and delete exact versions
-only in the release bucket's `releases/` prefix. It cannot read application data,
-decrypt secrets, upload artifacts, or change the application stack.
+separate main-only OIDC role (`ian-website-release-storage-cleanup`) with
+permission to read the application and bootstrap stacks and to list and delete
+exact versions only in the release bucket's `releases/` prefix. It cannot read
+application data, decrypt secrets, upload artifacts, or change any stack. The
+job first reruns `ops.tests.test_release_storage_cleanup`.
 
 `ops/ci/release_storage_cleanup.py` retains every artifact referenced by the live
 processed stack template, the current release SHA, and the five latest distinct
@@ -492,18 +539,24 @@ is left for later releases. If deployments stop, storage stops growing and
 cleanup resumes on the next release. Keep releases and rollbacks inside the production lock;
 out-of-band manual stack deployments must not overlap cleanup.
 
-The bucket's old blanket noncurrent-version expiration is removed because it
-could delete a version still referenced by a retained release. Multipart-upload
-cleanup remains enabled. The Python command defaults to dry-run; the workflow
-supplies `--apply`. Its logs contain aggregate counts and bytes only.
+The bucket has no blanket noncurrent-version expiration because it could delete
+a version still referenced by a retained release. Multipart-upload cleanup
+remains enabled. The Python command defaults to dry-run; the workflow supplies
+`--apply`. Its logs contain aggregate counts and bytes only.
+
+## Local parity
 
 Run these before pushing to `main`:
 
 ```bash
 npm ci
 npm run verify
+npm run test:raw-decoder
 npm run test:coverage
+npm ci --prefix backend/preview_worker
 npm run test:coverage --prefix backend/preview_worker
+npm run test:browser
+npm run test:browser:visitors
 python3 -m venv .venv-ci
 .venv-ci/bin/pip install -r backend/requirements-dev.txt
 (cd backend && PYTHONPATH=functions ../.venv-ci/bin/coverage run --rcfile=.coveragerc -m unittest discover -s tests -p 'test_*.py')
@@ -513,20 +566,27 @@ PYTHONPATH=. .venv-ci/bin/coverage run --rcfile=ops/.coveragerc -m unittest disc
 .venv-ci/bin/coverage json --rcfile=ops/.coveragerc --fail-under=0
 .venv-ci/bin/python ops/ci/coverage_gate.py coverage/ops/coverage.json
 ./ops/validate_infrastructure.sh --build
+python3 ops/ci/release_guard.py template-environment-policy backend/template.yaml ops/ci/template_environment_policy.json --template-kind source
+python3 ops/ci/release_guard.py template-environment-policy backend/.aws-sam/build/template.yaml ops/ci/template_environment_policy.json --template-kind built
+python3 ops/ci/credential_artifact_scan.py backend/.aws-sam/build
 python3 ops/ci/artifact_budget.py --output evidence/frontend-artifact-budget.json frontend --root dist
 python3 ops/ci/artifact_budget.py --output evidence/backend-artifact-budget.json sam --build-root backend/.aws-sam/build
 python3 ops/ci/workflow_policy.py .github/workflows/*.yml
 python3 ops/ci/git_history_credential_scan.py .
 ```
 
-Coverage output is transient and ignored. Never commit reports containing test
-fixtures or runner paths.
+The browser journeys need `npx playwright install chromium` once and exercise
+the built `dist`; a local `.env` API base baked into that build makes
+`test:browser` diverge from CI's deterministic configuration. Coverage output is transient and ignored. Never commit reports
+containing test fixtures or runner paths.
 
 ## Release-intent maintenance
 
 `ops/ci/release_intent.json` is part of the production authorization boundary,
-not generated evidence. Its current rules allow only `Code` and `Environment`
-modifications for the exact current Lambda logical IDs. If a reviewed release
+not generated evidence. Each rule names one exact logical ID, resource type,
+action, and the property paths it may change (for example Lambda `Code` and
+`Environment`, alarm `AlarmActions`, or the reviewed `Add` of a new function,
+role, queue, or table). If a reviewed release
 intentionally changes another unprotected resource or property, add the exact
 logical ID, CloudFormation resource type, action, and property paths in the same
 reviewed change. A new resource may set `allowNoDetails` only when its exact
@@ -562,9 +622,10 @@ diagnostic artifacts, not deployable inputs.
 
 The frontend check measures every deployed file with deterministic per-file
 gzip, all JavaScript and CSS referenced by `index.html`, and the largest
-JavaScript/CSS chunk. The SAM check applies a default limit to every Python
-Lambda and explicit, still-bounded overrides to `GoogleDriveBackupFunction`
-and `PreviewWorkerFunction`. It requires every allowlisted local source file to
+JavaScript/CSS chunk. The SAM check applies a default limit to every Lambda
+and explicit, still-bounded overrides to the heavier functions named in the
+config's `sam.overrides` (Google Drive, the Sharp preview worker, hero reel,
+original-comparison, and image-upload functions). It requires every allowlisted local source file to
 be present and rejects any other module from `backend/functions` at artifact
 root. A newly added Lambda must have a `SOURCES_<LogicalId>` entry before the
 quality gate can pass.
@@ -572,8 +633,9 @@ quality gate can pass.
 ## Nonproduction public-catalog load validation
 
 `ops/public_catalog_load_test.py` is intentionally manual and dry-run by
-default. It is not referenced by any workflow and therefore cannot target
-production automatically. A dry run performs no AWS or HTTP call:
+default. No workflow invokes its CLI, so it cannot load-test production
+automatically; the public posture smoke imports only its bounded read-only
+catalog probe. A dry run performs no AWS or HTTP call:
 
 ```bash
 python3 ops/public_catalog_load_test.py \

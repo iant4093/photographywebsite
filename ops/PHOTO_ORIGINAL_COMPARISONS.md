@@ -8,32 +8,26 @@ button; descriptive status is available to assistive technology and in its
 tooltip. Navigation resets to the edit. Video lightboxes and video album files
 are excluded.
 
-While a requested original is still pending, viewers with a status-refresh
-callback check again automatically while visible, backing off for longer waits.
-Checks stop on navigation, cancellation, or completion. A verified share-code
-viewer retains its existing access boundary: it needs a fresh security check to
-reread that protected album, so a pending status never triggers its media-error
-or re-verification flow automatically.
+Album, shared-album, and Explore responses carry only a lightweight
+`unresolved` comparison hint; cached edited-photo DTOs never contain original
+URLs. The first Before request resolves one photo through
+`POST /albums/{albumId}/original-comparison` or
+`POST /shared/{shareCode}/original-comparison`. That endpoint reapplies the
+album's current owner/admin/public/share authorization (a share code is
+rechecked against the current album record), is rate limited per IP and album,
+and responds `no-store`. A ready toggle does not contact Google Drive.
 
-Forced album refreshes bypass the browser cache. Public photo details containing
-pending or failed originals are served with `private, no-store` so processing
-updates are visible on the next check; completed details retain normal caching.
+While a requested original is still pending, the lightbox checks again only
+while the page is visible: every 20 seconds for the first three checks, then
+every minute, for at most 15 minutes. Checks stop on navigation, cancellation,
+or completion.
 
-Ready previews load only when Before is first requested. The browser chooses a
-WebP variant using the image's fitted display width and its pixel density. A
-ready toggle does not fetch album metadata or contact Google Drive. Preview
-responses use `Cache-Control: private, max-age=1800`; the signed URLs also expire
-after 30 minutes. The current original remains mounted after its first successful
-load so repeated toggles can reuse it immediately. Navigation or a changed
-preview source releases that retained image. Other originals are not prefetched.
-
-Background album refreshes can preserve an existing preview URL only when the
-fresh authorized response confirms the same album, photo, dimensions, variants,
-and storage assets. Reuse requires at least one minute of remaining validity,
-keeps the earlier expiry, and never extends access. An actual image-load error
-forces fresh URLs. Discovery views apply one album response to every matching
-photo already in their deck, reducing repeated status lookups while preserving
-the current selection and ignoring results for replaced source data.
+The browser chooses a WebP variant using the image's fitted display width and
+its pixel density. Preview responses use `Cache-Control: private, max-age=1800`;
+the signed URLs also expire after 30 minutes. The current original remains
+mounted after its first successful load so repeated toggles can reuse it
+immediately. Navigation or a changed preview source releases that retained
+image. Other originals are not prefetched.
 
 ## Implementation and validation status
 
@@ -121,9 +115,10 @@ renames, edits, moves, trashes, deletes, or changes permissions on the archive.
    bucket. Existing derivatives are not overwritten. The ready record is
    published only while the worker owns its lease and the image still belongs
    to the active photo album. The edited S3 object must also be unchanged.
-7. Existing album authorization controls access to comparison DTOs. APIs may
-   read comparison records and sign only the `before/` prefix; they cannot read
-   the Drive credentials or private index. URLs expire after 1,800 seconds.
+7. Existing album authorization controls access to comparison DTOs through the
+   `original-comparison` endpoints above (served by the download-URL function).
+   APIs may read comparison records and sign only the `before/` prefix; they
+   cannot read the Drive credentials or private index. URLs expire after 1,800 seconds.
    A ready DTO contains only status, dimensions, responsive URLs, and expiry.
    Drive IDs, camera filenames, and evidence are not exposed.
 
@@ -187,8 +182,10 @@ Never place secret values in commands, reports, or this runbook.
 
 Populate the task-specific shell variables below from the reviewed current
 metadata, including the current frontend origin and distribution ETag. The
-examples preserve the existing `www`, print-store, API, and social-router
-features. Confirm the live aliases and feature set before running them. If a
+examples preserve the existing `www`, print-store, API, social-router, and
+signed-cookie private-media features ([`PRIVATE_MEDIA.md`](PRIVATE_MEDIA.md):
+once that behavior is live, the helper refuses an `--include-www` run that omits
+`--include-private-media`). Confirm the live aliases and feature set before running them. If a
 named AWS profile is needed, supply the same `--profile` on both invocations.
 
 ```bash
@@ -210,6 +207,7 @@ originals_edge_args=(
   --expected-origin-parameter-name "$originals_origin_parameter_name"
   --expected-web-acl-arn "$originals_web_acl_arn"
   --confirm-front-door ADD-SINGLE-API-FRONT-DOOR
+  --include-private-media
 )
 
 .venv-ci/bin/python ops/cloudfront_frontend.py "${originals_edge_args[@]}"
@@ -285,8 +283,10 @@ while keeping the edited gallery available.
 
 The table and bucket are retained and the table has deletion protection and
 point-in-time recovery. Old private index snapshots expire after seven days;
-before-preview objects have no automatic expiration or deletion path. Removing
-a gallery photo stops its authorization/membership path but does not delete its
-retained private derivative. Source replacements use a new checksum namespace.
-Any future derivative cleanup must be a separately reviewed website-storage
-operation. Recovery and cleanup never modify the Drive raw archive.
+before-preview objects have no lifecycle expiration. Normal album and media
+deletion removes the matching `before/<album>/<media>/` previews and comparison
+records once no worker lease is active. Source replacements use a new checksum
+namespace. Historical orphans are cleaned one reviewed prefix at a time with
+`ops/sweep_comparison_previews.py` (see
+[`MAINTENANCE_AND_RECOVERY.md`](MAINTENANCE_AND_RECOVERY.md#generated-original-comparison-cleanup)).
+Recovery and cleanup never modify the Drive raw archive.
