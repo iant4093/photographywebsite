@@ -59,6 +59,172 @@ def inline_python(template: str, logical_id: str) -> str:
     return textwrap.dedent(match.group("code"))
 
 
+ALERT_TOPIC_NAME = "ian-photography-security-${Stage}"
+# Every template that can declare a CloudWatch alarm, with the stack name used
+# for CloudFormation-generated alarm names and the Region it deploys to.
+ALARM_TEMPLATE_STACKS = {
+    "backend/template.yaml": ("ian-website", "us-west-2"),
+    "ops/security_notifications_template.yaml": ("ian-photography-security-notifications", "us-west-2"),
+    "ops/security_backup_template.yaml": ("ian-photography-backup-primary", "us-west-2"),
+    "ops/waf_front_door_template.yaml": ("ian-photography-front-door-waf", "us-east-1"),
+    "ops/observability_template.yaml": ("ian-photography-observability", "us-west-2"),
+}
+ALARM_ACTION_PROPERTIES = ("AlarmActions", "OKActions", "InsufficientDataActions")
+
+
+def decoded_template(relative_path: str) -> dict:
+    from cfnlint.decode import decode
+
+    template, errors = decode(str(ROOT / relative_path))
+    if errors or template is None:
+        raise AssertionError(f"Cannot decode {relative_path}")
+    return json.loads(json.dumps(template))
+
+
+def topic_policy_alarm_patterns() -> list[str]:
+    template = decoded_template("ops/security_notifications_template.yaml")
+    policy = template["Resources"]["SecurityNotificationsPolicy"]["Properties"]
+    (statement,) = [
+        item
+        for item in policy["PolicyDocument"]["Statement"]
+        if item["Principal"] == {"Service": "cloudwatch.amazonaws.com"}
+    ]
+    patterns = []
+    for arn in statement["Condition"]["ArnLike"]["AWS:SourceArn"]:
+        prefix = "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:"
+        if not (isinstance(arn, dict) and set(arn) == {"Fn::Sub"} and arn["Fn::Sub"].startswith(prefix)):
+            raise AssertionError("topic policy alarm source must be a home-Region alarm ARN")
+        patterns.append(arn["Fn::Sub"][len(prefix):])
+    return patterns
+
+
+def _action_values(value):
+    if isinstance(value, list):
+        for item in value:
+            yield from _action_values(item)
+    elif isinstance(value, dict) and set(value) == {"Fn::If"}:
+        for branch in value["Fn::If"][1:]:
+            yield from _action_values(branch)
+    elif value != {"Ref": "AWS::NoValue"}:
+        yield value
+
+
+def _targets_alert_topic(action, resources: dict) -> bool:
+    if isinstance(action, dict) and set(action) == {"Ref"}:
+        target = resources.get(action["Ref"], {})
+        if target.get("Type") == "AWS::SNS::Topic":
+            return target.get("Properties", {}).get("TopicName") == {"Fn::Sub": ALERT_TOPIC_NAME}
+    if isinstance(action, dict) and set(action) == {"Fn::Sub"} and isinstance(action["Fn::Sub"], str):
+        arn = action["Fn::Sub"]
+        if arn.startswith("arn:${AWS::Partition}:sns:"):
+            return arn.endswith(":${AWS::AccountId}:" + ALERT_TOPIC_NAME)
+    raise AssertionError(f"Unrecognized alarm action {action!r}")
+
+
+def alert_topic_alarm_names() -> dict[str, str]:
+    """Map each alarm that targets the alert topic to a concrete example name."""
+
+    emailing = {}
+    for path, (stack_name, region) in ALARM_TEMPLATE_STACKS.items():
+        resources = decoded_template(path)["Resources"]
+        for logical_id, resource in resources.items():
+            if resource.get("Type") != "AWS::CloudWatch::Alarm":
+                continue
+            properties = resource.get("Properties", {})
+            actions = [
+                action
+                for key in ALARM_ACTION_PROPERTIES
+                for action in _action_values(properties.get(key, []))
+            ]
+            if not any(_targets_alert_topic(action, resources) for action in actions):
+                continue
+            if region != "us-west-2":
+                raise AssertionError(f"{logical_id} targets the home-Region topic from {region}")
+            name = properties.get("AlarmName")
+            if name is None:
+                # CloudFormation generates <stack>-<logicalId>-<random suffix>.
+                name = f"{stack_name}-{logical_id}-AbCd1234EfGh"
+            elif isinstance(name, dict) and set(name) == {"Fn::Sub"}:
+                name = name["Fn::Sub"]
+            emailing[logical_id] = name.replace("${Stage}", "prod")
+    return emailing
+
+
+class AlertTopicPolicyCoverageTests(unittest.TestCase):
+    """Every alarm wired to the alert topic must be allowed to publish to it."""
+
+    def test_every_emailing_alarm_matches_the_topic_policy_allowlist(self) -> None:
+        import fnmatch
+
+        patterns = [item.replace("${Stage}", "prod") for item in topic_policy_alarm_patterns()]
+        emailing = alert_topic_alarm_names()
+        self.assertTrue(emailing)
+        for logical_id, name in emailing.items():
+            with self.subTest(alarm=logical_id):
+                self.assertTrue(
+                    any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns),
+                    f"{logical_id} emails but the topic policy rejects {name}",
+                )
+        # No dead allowlist entries: each pattern admits exactly one emailing alarm.
+        for pattern in patterns:
+            with self.subTest(pattern=pattern):
+                matches = [n for n in emailing.values() if fnmatch.fnmatchcase(n, pattern)]
+                self.assertEqual(len(matches), 1, pattern)
+
+    def test_emailing_alarm_set_is_the_reviewed_page_worthy_set(self) -> None:
+        self.assertEqual(
+            set(alert_topic_alarm_names()),
+            {
+                "ApiServerErrorAlarm",
+                "AsyncFailureQueueAlarm",
+                "AlbumWorkDeadLetterQueueAlarm",
+                "PreviewDeadLetterQueueAlarm",
+                "ZipPreparationFailureAlarm",
+                "OriginalComparisonFailureAlarm",
+                "BackupFreshnessAlarm",
+                "SecurityEventDlqAlarm",
+                "RootActivityAlarm",
+            },
+        )
+
+    def test_registry_routes_match_template_alarm_actions(self) -> None:
+        registry = json.loads((OPS / "alarm_registry.json").read_text(encoding="utf-8"))
+        emailing = set(alert_topic_alarm_names())
+        topic_routed = {
+            logical_id
+            for group in registry["groups"]
+            if group["route"] == "security-notification-topic"
+            for logical_id in group["logicalResourceIds"]
+            if logical_id.endswith("Alarm")
+        }
+        self.assertSetEqual(topic_routed, emailing)
+
+    def test_edge_forwarding_names_match_the_us_east_1_alarms(self) -> None:
+        waf = decoded_template("ops/waf_front_door_template.yaml")["Resources"]
+        waf_alarms = {
+            resource["Properties"]["AlarmName"]["Fn::Sub"]
+            for resource in waf.values()
+            if resource["Type"] == "AWS::CloudWatch::Alarm"
+        }
+        cross_region = waf["WafAlarmCrossRegionRule"]["Properties"]["EventPattern"]
+        home = decoded_template("ops/security_notifications_template.yaml")["Resources"]
+        forward = home["WafAlarmForwardRule"]["Properties"]["EventPattern"]
+        expected = {
+            "ian-photography-frontend-5xx-${Stage}",
+            "ian-photography-media-5xx-${Stage}",
+        }
+        self.assertSetEqual(waf_alarms, expected)
+        for names in (
+            cross_region["detail"]["alarmName"],
+            forward["detail"]["alarmName"],
+        ):
+            self.assertSetEqual({item["Fn::Sub"] for item in names}, expected)
+        self.assertEqual(len(cross_region["resources"]), len(expected))
+        processor = inline_python(NOTIFICATIONS, "SecuritySignalProcessor")
+        self.assertNotIn("waf-blocked", processor)
+        self.assertNotIn("waf.alarm", processor)
+
+
 class SecurityTemplateTests(unittest.TestCase):
     def test_all_staged_templates_pass_cfn_lint(self) -> None:
         if shutil.which("cfn-lint"):
@@ -151,13 +317,21 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("MetricName: SecurityRoutingConfigurationChange", NOTIFICATIONS)
         self.assertIn("MetricName: SecurityServiceConfigurationChange", NOTIFICATIONS)
         self.assertIn("MetricName: DataProtectionConfigurationChange", NOTIFICATIONS)
-        self.assertIn("MetricName: InfrastructureProtectionConfigurationChange", NOTIFICATIONS)
+        # Every deploy updates stacks and edge config, so these never alarm.
+        self.assertNotIn("InfrastructureProtectionConfigurationChange", NOTIFICATIONS)
+        for removed in (
+            "InfrastructureProtectionChangeMetric",
+            "InfrastructureExecutionChangeMetric",
+            "InfrastructureProtectionChangeAlarm",
+        ):
+            self.assertNotRegex(NOTIFICATIONS, rf"(?m)^  {removed}:$")
+        for event_name in ("ExecuteChangeSet", "UpdateStack", "UpdateDistribution"):
+            self.assertNotIn(f'eventName = "{event_name}"', NOTIFICATIONS)
         for logical_id in (
             "DetectionTopologyChangeMetric",
             "ManagedSecurityOrganizationChangeMetric",
             "BackupProtectionChangeMetric",
             "DataRetentionAndOwnershipChangeMetric",
-            "InfrastructureExecutionChangeMetric",
         ):
             self.assertIn("Type: AWS::Logs::MetricFilter", resource_block(NOTIFICATIONS, logical_id))
         for event_name in (
@@ -172,20 +346,25 @@ class SecurityTemplateTests(unittest.TestCase):
             "UpdateOrganizationConfiguration",
             "DeleteBucketOwnershipControls",
             "UpdateTimeToLive",
-            "ExecuteChangeSet",
-            "DisassociateWebACL",
         ):
             self.assertIn(f'eventName = "{event_name}"', NOTIFICATIONS)
         self.assertNotIn("budgets.amazonaws.com", NOTIFICATIONS)
         self.assertIn("AllowExactWebsiteCloudWatchAlarms", NOTIFICATIONS)
         self.assertNotIn(":alarm:*", NOTIFICATIONS)
-        for alarm_pattern in (
-            "ian-website-ApiServerErrorAlarm-*",
-            "ian-website-PreviewDeadLetterQueueAlarm-*",
-            "ian-photography-frontend-5xx-${Stage}",
-            "ian-photography-backup-freshness-${Stage}",
-        ):
-            self.assertIn(alarm_pattern, NOTIFICATIONS)
+        self.assertEqual(
+            topic_policy_alarm_patterns(),
+            [
+                "ian-website-ApiServerErrorAlarm-*",
+                "ian-website-AsyncFailureQueueAlarm-*",
+                "ian-website-AlbumWorkDeadLetterQueueAlarm-*",
+                "ian-website-PreviewDeadLetterQueueAlarm-*",
+                "ian-website-ZipPreparationFailureAlarm-*",
+                "ian-website-OriginalComparisonFailureAlarm-*",
+                "ian-photography-backup-freshness-${Stage}",
+                "ian-photography-security-events-dlq-${Stage}",
+                "ian-photography-root-activity-${Stage}",
+            ],
+        )
         for logical_id in (
             "GuardDutyFindingRule",
             "GuardDutyCriticalFindingRule",
@@ -200,20 +379,19 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertIn("aws:SourceArn:", queue_policy)
         self.assertIn("ArnEquals:\n                aws:SourceArn:", NOTIFICATIONS)
         for logical_id in (
-            "RootActivityAlarm",
             "CloudTrailChangeAlarm",
             "IamChangeAlarm",
             "KmsChangeAlarm",
             "SecurityRoutingChangeAlarm",
             "SecurityServiceChangeAlarm",
             "DataProtectionChangeAlarm",
-            "InfrastructureProtectionChangeAlarm",
         ):
             self.assertNotIn("AlarmActions:", resource_block(NOTIFICATIONS, logical_id))
-        self.assertIn(
-            "AlarmActions: [!Ref SecurityNotifications]",
-            resource_block(NOTIFICATIONS, "SecurityEventDlqAlarm"),
-        )
+        for logical_id in ("RootActivityAlarm", "SecurityEventDlqAlarm"):
+            self.assertIn(
+                "AlarmActions: [!Ref SecurityNotifications]",
+                resource_block(NOTIFICATIONS, logical_id),
+            )
         waf_forward = resource_block(NOTIFICATIONS, "WafAlarmForwardRule")
         self.assertIn("InputTransformer:", waf_forward)
         self.assertIn("$.detail.alarmName", waf_forward)
@@ -475,13 +653,16 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertEqual(len(published), 1)
         self.assertEqual(json.loads(published[0]["Message"]), valid)
 
-        for name, expected in (("frontend-5xx", "edge.alarm"), ("media-5xx", "edge.alarm"), ("waf-blocked", "waf.alarm")):
+        for name, expected in (("frontend-5xx", "edge.alarm"), ("media-5xx", "edge.alarm")):
             signal = {"schemaVersion": 1, "alarmName": "ian-photography-" + name + "-prod", "stage": "prod"}
             result = namespace["_validated"](json.dumps(signal))
             self.assertEqual(result["eventName"], expected)
             self.assertNotIn("alarmName", result)
+        for unknown in ("unrelated-account-alarm", "ian-photography-waf-blocked-prod"):
+            with self.subTest(alarm_name=unknown), self.assertRaises(ValueError):
+                namespace["_validated"](json.dumps({"schemaVersion": 1, "alarmName": unknown, "stage": "prod"}))
         with self.assertRaises(ValueError):
-            namespace["_validated"](json.dumps({"schemaVersion": 1, "alarmName": "unrelated-account-alarm", "stage": "prod"}))
+            namespace["_validated"](json.dumps({**valid, "eventName": "waf.alarm", "runbook": "ops/ALARM_REGISTRY.md#waf-observation"}))
 
         tampered = {**valid, "severity": "high", "private": "must-not-forward"}
         with self.assertRaisesRegex(ValueError, "invalid security signal shape"):

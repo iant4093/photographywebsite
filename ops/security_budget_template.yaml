@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Guarded console-only monthly cost budget for photography security and
-  observability services. It creates no email, SNS, or other notification route.
+  Guarded monthly cost budget for photography security and observability
+  services. An optional owner email receives free AWS Budgets alerts when actual
+  or forecasted spend exceeds the limit; it creates no SNS or other route.
 
 Parameters:
   Stage:
@@ -24,6 +25,16 @@ Parameters:
     MinValue: 0
     MaxValue: 100000
     Description: Owner-approved monthly USD limit; zero is valid only in skip mode.
+  BudgetAlertEmail:
+    Type: String
+    Default: ''
+    NoEcho: true
+    MaxLength: 254
+    AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: >-
+      Optional owner email for ACTUAL and FORECASTED over-100-percent alerts.
+      Empty creates no notification. Supply it only at deploy time; notifications
+      are create-only, so a later change requires replacing the budget.
 Rules:
   ExpectedAccountMustMatch:
     Assertions:
@@ -41,6 +52,7 @@ Rules:
 
 Conditions:
   CreateBudget: !Equals [!Ref BudgetDeploymentMode, create-confirmed-absent]
+  HasBudgetAlertEmail: !Not [!Equals [!Ref BudgetAlertEmail, '']]
 
 Resources:
   MonthlySecurityAndObservabilityBudget:
@@ -68,6 +80,25 @@ Resources:
           IncludeUpfront: true
           UseAmortized: false
           UseBlended: false
+      NotificationsWithSubscribers: !If
+        - HasBudgetAlertEmail
+        - - Notification:
+              NotificationType: ACTUAL
+              Threshold: 100
+              ComparisonOperator: GREATER_THAN
+              ThresholdType: PERCENTAGE
+            Subscribers:
+              - SubscriptionType: EMAIL
+                Address: !Ref BudgetAlertEmail
+          - Notification:
+              NotificationType: FORECASTED
+              Threshold: 100
+              ComparisonOperator: GREATER_THAN
+              ThresholdType: PERCENTAGE
+            Subscribers:
+              - SubscriptionType: EMAIL
+                Address: !Ref BudgetAlertEmail
+        - !Ref AWS::NoValue
       ResourceTags:
         - Key: Application
           Value: IanTruongPhotography
@@ -82,3 +113,6 @@ Outputs:
   BudgetName:
     Condition: CreateBudget
     Value: !Ref MonthlySecurityAndObservabilityBudget
+  BudgetEmailAlerts:
+    Condition: CreateBudget
+    Value: !If [HasBudgetAlertEmail, ACTUAL_AND_FORECASTED_OVER_100_PERCENT, DISABLED]

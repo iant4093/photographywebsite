@@ -263,9 +263,10 @@ This runbook records the required operation; it does not claim it was executed.
 
 ## Failure recovery and retention
 
-`OriginalComparisonFailureAlarm` reports a nonempty comparison DLQ.
-`OriginalIndexRefreshErrorsAlarm` reports indexer errors. Both use the existing
-website security-notification route. Investigate aggregate errors, durations,
+`OriginalComparisonFailureAlarm` reports a nonempty comparison DLQ and emails
+through the existing website security-notification route.
+`OriginalIndexRefreshErrorsAlarm` reports indexer errors and is record-only,
+because existing comparisons stay available. Investigate aggregate errors, durations,
 throttles, queue age, and index freshness before changing configuration.
 
 For indexing failure, check access to the exact SSM parameter, optional KMS

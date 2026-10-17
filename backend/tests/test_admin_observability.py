@@ -69,12 +69,12 @@ class SiteHealthTests(unittest.TestCase):
         with patch.object(get_site_health, 'cloudwatch', home), patch.object(get_site_health, 'edge_cloudwatch', edge), patch.dict(get_site_health.os.environ, {'STACK_NAME': 'ian-website-test', 'APPLICATION_STAGE': 'test'}):
             alarms, error = get_site_health._alarms()
         self.assertIsNone(error)
-        self.assertEqual(len(alarms), 7)
+        self.assertEqual(len(alarms), 6)
         self.assertIn('Backup Freshness', {a['name'] for a in alarms})
         self.assertIn('Website Edge Server Errors', {a['name'] for a in alarms})
         self.assertNotIn('unrelated-account-alarm', str(alarms))
         self.assertEqual(home.describe_alarms.call_count, 3)
-        self.assertEqual(edge.describe_alarms.call_args.kwargs['AlarmNames'], ['ian-photography-frontend-5xx-test', 'ian-photography-media-5xx-test', 'ian-photography-waf-blocked-test'])
+        self.assertEqual(edge.describe_alarms.call_args.kwargs['AlarmNames'], ['ian-photography-frontend-5xx-test', 'ian-photography-media-5xx-test'])
 
     def test_partial_failure_or_missing_expected_alarm_degrades_health(self):
         home, edge = Mock(), Mock()
@@ -82,7 +82,7 @@ class SiteHealthTests(unittest.TestCase):
         edge.describe_alarms.side_effect = PermissionError('private-provider-detail')
         with patch.object(get_site_health, 'cloudwatch', home), patch.object(get_site_health, 'edge_cloudwatch', edge), patch.dict(get_site_health.os.environ, {'STACK_NAME': 'ian-website-test', 'APPLICATION_STAGE': 'test'}):
             alarms, error = get_site_health._alarms()
-        self.assertEqual(len(alarms), 5)
+        self.assertEqual(len(alarms), 4)
         self.assertTrue(all(a['state'] == 'INSUFFICIENT_DATA' for a in alarms))
         self.assertEqual(get_site_health._overall([{'status': 'healthy'}], alarms, error), 'degraded')
         self.assertNotIn('private-provider-detail', str((alarms, error)))

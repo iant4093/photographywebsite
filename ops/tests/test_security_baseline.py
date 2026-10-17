@@ -68,7 +68,10 @@ class AccountSecurityBaselineTests(unittest.TestCase):
     def test_security_notifications_are_owner_opt_in_and_privacy_safe(self):
         self.assertNotIn("AWS::SNS::Subscription", SECURITY_TEMPLATES)
         self.assertNotIn("NotificationEmail", SECURITY_TEMPLATES)
-        self.assertNotIn("@", SECURITY_TEMPLATES)
+        # Owner addresses are deploy-time parameters, never literals in Git.
+        self.assertNotRegex(
+            SECURITY_TEMPLATES, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}"
+        )
         self.assertIn("owner-approved monitored subscriber", SECURITY_TEMPLATES)
 
     def test_alarm_registry_covers_every_declared_signal_exactly_once(self):

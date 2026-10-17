@@ -14,11 +14,11 @@ Those remain explicit owner decisions after inventory and a reviewed change set.
 | Layer | File | Ownership and guard |
 | --- | --- | --- |
 | Audit foundation | `security_audit_foundation_template.yaml` | One home-region stack. The Object-Locked CloudTrail evidence bucket, bucket policy, log group, role, and multi-region trail are retained together. After Config is healthy, an opt-in parameter adds exact-bucket Config delivery object events. |
-| Notifications | `security_notifications_template.yaml` | Regional SNS routing for privacy-safe website alarms, encrypted SQS delivery guards, and audit-only account alarms. It preserves the owner-approved subscriber without a dedicated monthly KMS key. |
+| Notifications | `security_notifications_template.yaml` | Regional SNS routing for privacy-safe website alarms and the root-activity alarm, encrypted SQS delivery guards, and audit-only account alarms. It preserves the owner-approved subscriber without a dedicated monthly KMS key. |
 | Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub, and account Access Analyzer. Every singleton defaults to `skip`. |
 | Home detection posture | `ci/home_security_posture.py` | Aggregate-only, read-only verification of the exact home-Region GuardDuty and Security Hub contract. It fails closed and never prints provider identifiers, tags, findings, or Region names. |
 | Backups | `security_backup_template.yaml`, `security_backup_replica_template.yaml` | Daily backup of both metadata tables into a retained AWS-managed-key vault, plus the historical `us-east-2` replica vault kept only until its recovery points age out. S3 relies on versioning and the existing external media backup. Creation and Vault Lock default off. |
-| Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One optional retained, console-only account budget. Creation defaults off and requires an owner-approved amount; it has no notification route. |
+| Cost governance | `security_budget_template.yaml`, `security_budget_preflight.py` | One optional retained account budget. Creation defaults off and requires an owner-approved amount; an optional deploy-time owner email receives free actual/forecast over-100% alerts. |
 | Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Complete source signal inventory, privacy contract, runbook routing, response ownership, and quarterly delivery-test state. |
 | Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors become `skip-inventory-incomplete`, never “absent.” |
 | Inspector | `disable_inspector_lambda_scanning.py` | Dry-run-by-default removal of the redundant paid Lambda scanners with exact apply guards. CI remains the code/dependency scanning control. |
@@ -202,17 +202,20 @@ Pass the foundation log-group output to
 `security_notifications_template.yaml`. The `ian-photography-security-<stage>`
 topic carries only privacy-safe operational signals, so it deliberately has no
 dedicated customer-managed KMS key. Native CloudWatch publishing is restricted
-by topic policy to the account and exact website alarm name patterns.
+by topic policy to the account and exact emailing alarm name patterns (a test
+fails if any alarm targeting the topic is missing from that allowlist).
 EventBridge never publishes directly to the responder topic: only the exact
-website backup-failure and edge/WAF alarm rules may send fixed signals to the
+website backup-failure and edge 5xx alarm rules may send fixed signals to the
 SQS-managed-SSE ingress queue. A bounded Lambda validates the complete signal
 contract before publishing through its exact IAM role.
 
 Website EventBridge targets use bounded retries and an SQS-managed-SSE 14-day
-DLQ. A DLQ-depth alarm alerts on the first visible failed delivery. Audit-only
-account alarms cover KMS key, routing, root, IAM, CloudTrail,
-managed-security-service, data-protection, and infrastructure configuration
-activity without publishing email. GuardDuty and Security Hub remain enabled,
+DLQ. A DLQ-depth alarm alerts on the first visible failed delivery. The
+root-activity alarm emails because routine work never uses the root identity.
+Audit-only account alarms cover KMS key, routing, IAM, CloudTrail,
+managed-security-service, and data-protection activity without publishing
+email. Routine stack, CloudFront, and WAF updates are not alarmed because every
+deploy performs them; CloudTrail and drift audits remain the evidence. GuardDuty and Security Hub remain enabled,
 queryable, and posture-checked in their source services, but their account-wide
 findings are not website notifications.
 
@@ -492,11 +495,19 @@ python3 ops/security_budget_preflight.py \
 ```
 
 The source-controlled budget has no default spending amount, email address,
-subscription, resource action, or automatic security-control disablement. Its
-read-only preflight recommends `BudgetDeploymentMode=create-confirmed-absent`
-only when the exact budget name is absent and the owner confirms the name and
-amount. It remains console-only and never publishes to the website responder
-topic.
+resource action, or automatic security-control disablement. Its read-only
+preflight recommends `BudgetDeploymentMode=create-confirmed-absent` only when
+the exact budget name is absent and the owner confirms the name and amount.
+
+Set the optional `BudgetAlertEmail` parameter (NoEcho, default empty) at deploy
+time to email the owner directly from AWS Budgets when actual or forecasted
+monthly spend exceeds 100% of the limit. Empty creates no notification. The
+address is never committed or printed by the preflight, and the budget never
+publishes to the website responder topic. This stays free: the account's first
+two budgets and their email notifications have no charge. AWS treats budget
+notifications as create-only, so changing or removing the address later
+requires replacing the budget (or editing the alert in the Budgets console and
+accepting drift).
 
 The current checked-in alarm registry is
 `active-one-confirmed-owner-destination`: the site owner has one confirmed

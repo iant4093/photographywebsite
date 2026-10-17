@@ -95,7 +95,10 @@ def inventory(
         "region": region,
         "budgetNameConfirmed": confirmed_name,
         "targetBudgetCount": target_budget_count,
-        "notificationRoute": "none-console-only",
+        # The owner email is a deploy-time NoEcho parameter and is never read,
+        # accepted, or printed here.
+        "notificationRoute": "optional-owner-email-via-BudgetAlertEmail",
+        "notificationThresholds": ["ACTUAL>100%", "FORECASTED>100%"],
         "inventoryDigest": digest,
         "recommendedParameters": {
             "BudgetDeploymentMode": "create-confirmed-absent" if ready else "skip",

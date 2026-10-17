@@ -1,4 +1,4 @@
-"""Tests for the guarded, console-only AWS Budget baseline."""
+"""Tests for the guarded AWS Budget baseline and its optional owner email alerts."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,7 @@ TEMPLATE = TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
 class SecurityBudgetTemplateTests(unittest.TestCase):
-    def test_template_is_guarded_retained_and_has_no_notification_route(self) -> None:
+    def test_template_is_guarded_retained_and_has_no_sns_route(self) -> None:
         for expected in (
             "Type: AWS::Budgets::Budget",
             "Default: skip",
@@ -41,13 +42,41 @@ class SecurityBudgetTemplateTests(unittest.TestCase):
             self.assertIn(expected, TEMPLATE)
         for forbidden in (
             "SecurityNotificationTopicArn",
-            "NotificationsWithSubscribers",
-            "NotificationType:",
-            "SubscriptionType:",
+            "SubscriptionType: SNS",
             "AWS::SNS::",
             "NotificationEmail",
+            "AWS::Budgets::BudgetsAction",
         ):
             self.assertNotIn(forbidden, TEMPLATE)
+        # The owner address is a deploy-time parameter, never a literal.
+        self.assertNotRegex(TEMPLATE, r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}")
+
+    def test_optional_email_alerts_cover_actual_and_forecast_over_limit(self) -> None:
+        parameter = TEMPLATE.split("  BudgetAlertEmail:\n", 1)[1].split("\nRules:", 1)[0]
+        for expected in ("Type: String", "Default: ''", "NoEcho: true"):
+            self.assertIn(expected, parameter)
+        self.assertIn(
+            "HasBudgetAlertEmail: !Not [!Equals [!Ref BudgetAlertEmail, '']]", TEMPLATE
+        )
+        notifications = TEMPLATE.split("      NotificationsWithSubscribers: !If\n", 1)[1].split(
+            "      ResourceTags:", 1
+        )[0]
+        self.assertTrue(notifications.startswith("        - HasBudgetAlertEmail\n"))
+        self.assertTrue(notifications.rstrip().endswith("- !Ref AWS::NoValue"))
+        found = re.findall(
+            r"(?m)^\s+NotificationType: (\w+)\n\s+Threshold: (\d+)\n"
+            r"\s+ComparisonOperator: (\w+)\n\s+ThresholdType: (\w+)$",
+            notifications,
+        )
+        self.assertEqual(
+            found,
+            [
+                ("ACTUAL", "100", "GREATER_THAN", "PERCENTAGE"),
+                ("FORECASTED", "100", "GREATER_THAN", "PERCENTAGE"),
+            ],
+        )
+        self.assertEqual(notifications.count("- SubscriptionType: EMAIL"), 2)
+        self.assertEqual(notifications.count("Address: !Ref BudgetAlertEmail"), 2)
 
     def test_template_passes_cfn_lint(self) -> None:
         if not shutil.which("cfn-lint"):
@@ -93,19 +122,26 @@ class SecurityBudgetPreflightTests(unittest.TestCase):
             **overrides,
         )
 
-    def test_ready_inventory_recommends_console_only_budget(self) -> None:
+    def test_ready_inventory_recommends_budget_without_reading_email(self) -> None:
         report, blocked = self.inventory()
         self.assertFalse(blocked)
         self.assertEqual(
             report["recommendedParameters"]["BudgetDeploymentMode"],
             "create-confirmed-absent",
         )
-        self.assertEqual(report["notificationRoute"], "none-console-only")
+        self.assertEqual(
+            report["notificationRoute"], "optional-owner-email-via-BudgetAlertEmail"
+        )
+        self.assertEqual(
+            report["notificationThresholds"], ["ACTUAL>100%", "FORECASTED>100%"]
+        )
+        self.assertNotIn("BudgetAlertEmail", report["recommendedParameters"])
         self.assertRegex(report["inventoryDigest"], r"^[0-9a-f]{64}$")
         serialized = json.dumps(report)
         self.assertNotIn("topic", serialized.lower())
         self.assertNotIn("subscription", serialized.lower())
         self.assertNotIn("endpoint", serialized.lower())
+        self.assertNotIn("@", serialized)
 
     def test_existing_budget_or_missing_confirmation_fails_closed(self) -> None:
         report, blocked = security_budget_preflight.inventory(

@@ -25,7 +25,7 @@ Parameters:
     Type: String
     Default: ''
     AllowedPattern: '^(|arn:[A-Za-z0-9-]+:events:us-west-2:[0-9]{12}:event-bus/default)$'
-    Description: Optional same-account us-west-2 default event bus for privacy-safe WAF alarm forwarding.
+    Description: Optional same-account us-west-2 default event bus for privacy-safe edge 5xx alarm forwarding.
   LogsKmsKeyArn:
     Type: String
     Default: ''
@@ -246,28 +246,6 @@ Resources:
               - ActionCondition:
                   Action: BLOCK
 
-  WafBlockedRequestAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-waf-blocked-${Stage}'
-      AlarmDescription: Front-door WAF emitted a sustained burst of terminating block actions.
-      Namespace: AWS/WAFV2
-      MetricName: BlockedRequests
-      Dimensions:
-        - Name: WebACL
-          Value: !Sub 'IanPhotography-FrontDoor-${Stage}'
-        - Name: Region
-          Value: Global
-        - Name: Rule
-          Value: ALL
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 3
-      DatapointsToAlarm: 2
-      Threshold: 25
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-
   FrontendFiveXxAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasFrontendDistribution
@@ -283,8 +261,8 @@ Resources:
           Value: Global
       Statistic: Average
       Period: 300
-      EvaluationPeriods: 2
-      DatapointsToAlarm: 2
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
       Threshold: 5
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
@@ -304,8 +282,8 @@ Resources:
           Value: Global
       Statistic: Average
       Period: 300
-      EvaluationPeriods: 2
-      DatapointsToAlarm: 2
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
       Threshold: 5
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
@@ -335,17 +313,15 @@ Resources:
     Condition: HasSecurityEventBus
     Properties:
       Name: !Sub 'ian-photography-waf-cross-region-${Stage}'
-      Description: Forwards exact website edge and WAF alarm states to the home-region security event bus.
+      Description: Forwards exact website edge 5xx alarm states to the home-region security event bus.
       EventPattern:
         source: [aws.cloudwatch]
         detail-type: [CloudWatch Alarm State Change]
         resources:
-          - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-waf-blocked-${Stage}'
           - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-frontend-5xx-${Stage}'
           - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-media-5xx-${Stage}'
         detail:
           alarmName:
-            - !Sub 'ian-photography-waf-blocked-${Stage}'
             - !Sub 'ian-photography-frontend-5xx-${Stage}'
             - !Sub 'ian-photography-media-5xx-${Stage}'
       State: ENABLED
@@ -367,5 +343,5 @@ Outputs:
     Description: Managed threat rules plus per-IP and distributed API rate limits block.
     Value: SELECTIVE_BLOCK_AND_API_RATE_LIMIT
   WafAlarmCrossRegionRouting:
-    Description: Whether exact WAF alarm transitions are forwarded to the home-region security bus.
+    Description: Whether exact edge 5xx alarm transitions are forwarded to the home-region security bus.
     Value: !If [HasSecurityEventBus, ENABLED, DISABLED]

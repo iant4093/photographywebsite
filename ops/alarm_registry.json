@@ -12,23 +12,31 @@
   "groups": [
     {
       "id": "application-api-health",
-      "logicalResourceIds": ["ApiServerErrorAlarm", "ApiLatencyAlarm"],
+      "logicalResourceIds": ["ApiServerErrorAlarm"],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-api-health",
       "autoClose": "CloudWatch metric state only"
     },
     {
+      "id": "application-api-latency",
+      "logicalResourceIds": ["ApiLatencyAlarm"],
+      "severity": "diagnostic",
+      "route": "cloudwatch-audit-only",
+      "runbook": "ops/ALARM_REGISTRY.md#application-api-health",
+      "autoClose": "CloudWatch metric state only"
+    },
+    {
       "id": "front-door-denial",
       "logicalResourceIds": ["FrontDoorDeniedAlarm"],
-      "severity": "critical",
-      "route": "security-notification-topic",
+      "severity": "audit",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#front-door-denial",
       "autoClose": "CloudWatch metric state only"
     },
     {
       "id": "application-async-and-preview",
-      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "PreviewQueueAgeAlarm", "PreviewMetadataSystemErrorsAlarm", "HoverPreviewRefreshQueueAgeAlarm", "HoverPreviewManifestBuilderErrorsAlarm", "HoverPreviewManifestFailureAlarm", "OriginalComparisonFailureAlarm", "OriginalIndexRefreshErrorsAlarm", "ZipPreparationFailureAlarm", "AlbumWorkDeadLetterQueueAlarm", "AlbumWorkQueueAgeAlarm"],
+      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "OriginalComparisonFailureAlarm", "ZipPreparationFailureAlarm", "AlbumWorkDeadLetterQueueAlarm"],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
@@ -36,7 +44,7 @@
     },
     {
       "id": "application-operational-diagnostics",
-      "logicalResourceIds": ["PreviewQueueDepthAlarm", "PreviewWorkerFailureAlarm", "PreviewWorkerErrorsAlarm", "PreviewWorkerDurationAlarm", "PreviewWorkerThrottleAlarm", "PreviewMetadataThrottleAlarm"],
+      "logicalResourceIds": ["PreviewQueueAgeAlarm", "PreviewQueueDepthAlarm", "PreviewWorkerFailureAlarm", "PreviewWorkerErrorsAlarm", "PreviewWorkerDurationAlarm", "PreviewWorkerThrottleAlarm", "PreviewMetadataSystemErrorsAlarm", "PreviewMetadataThrottleAlarm", "HoverPreviewRefreshQueueAgeAlarm", "HoverPreviewManifestBuilderErrorsAlarm", "HoverPreviewManifestFailureAlarm", "OriginalIndexRefreshErrorsAlarm", "AlbumWorkQueueAgeAlarm"],
       "severity": "diagnostic",
       "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
@@ -53,14 +61,22 @@
     {
       "id": "application-audit-failure",
       "logicalResourceIds": ["AuditFailureAlarm"],
-      "severity": "critical",
-      "route": "security-notification-topic",
+      "severity": "audit",
+      "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#application-audit-failure",
       "autoClose": "CloudWatch metric state only; incident disposition remains open until logging is proven"
     },
     {
+      "id": "account-root-activity",
+      "logicalResourceIds": ["RootActivityAlarm"],
+      "severity": "critical",
+      "route": "security-notification-topic",
+      "runbook": "ops/ALARM_REGISTRY.md#account-identity-and-encryption-change",
+      "autoClose": "Never auto-close without an approved change or incident record"
+    },
+    {
       "id": "account-identity-and-encryption-change",
-      "logicalResourceIds": ["RootActivityAlarm", "IamChangeAlarm", "KmsChangeAlarm"],
+      "logicalResourceIds": ["IamChangeAlarm", "KmsChangeAlarm"],
       "severity": "audit",
       "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#account-identity-and-encryption-change",
@@ -99,14 +115,6 @@
       "autoClose": "Never auto-close without live S3, DynamoDB, backup, and logging checks"
     },
     {
-      "id": "infrastructure-protection-change",
-      "logicalResourceIds": ["InfrastructureProtectionChangeAlarm"],
-      "severity": "audit",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#infrastructure-protection-change",
-      "autoClose": "Close only after change-set and drift evidence agree"
-    },
-    {
       "id": "backup-job-failure",
       "logicalResourceIds": ["BackupJobFailureRule"],
       "severity": "high",
@@ -124,19 +132,19 @@
     },
     {
       "id": "edge-health",
-      "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm"],
+      "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm", "WafAlarmForwardRule"],
       "severity": "high",
-      "route": "security-notification-topic",
+      "route": "security-notification-topic-via-cross-region-validated-signal-queue",
       "runbook": "ops/ALARM_REGISTRY.md#edge-health",
       "autoClose": "CloudWatch metric state only"
     },
     {
-      "id": "waf-observation",
-      "logicalResourceIds": ["WafBlockedRequestAlarm", "WafAlarmForwardRule"],
+      "id": "monthly-spend",
+      "logicalResourceIds": ["MonthlySecurityAndObservabilityBudget.Actual100Percent", "MonthlySecurityAndObservabilityBudget.Forecasted100Percent"],
       "severity": "high",
-      "route": "security-notification-topic-via-cross-region-validated-signal-queue",
-      "runbook": "ops/ALARM_REGISTRY.md#waf-observation",
-      "autoClose": "CloudWatch metric state only; rule promotion or exclusions require review"
+      "route": "aws-budgets-owner-email-when-configured",
+      "runbook": "ops/ALARM_REGISTRY.md#monthly-spend",
+      "autoClose": "AWS Budgets state only; close after the cost driver is identified and the limit or spend is corrected"
     }
   ]
 }

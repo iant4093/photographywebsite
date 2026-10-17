@@ -460,15 +460,25 @@ class WafAndPreflightTests(unittest.TestCase):
         self.assertIn("events:PutEvents", WAF_TEMPLATE)
         self.assertNotIn("AlarmTopicArn", WAF_TEMPLATE)
         self.assertNotIn("AlarmActions:", WAF_TEMPLATE)
-        blocked_alarm = WAF_TEMPLATE.split("  WafBlockedRequestAlarm:", 1)[1].split(
-            "  WafAlarmForwardRole:", 1
-        )[0]
+        # WAF blocks mean the WAF is working; they are never alarmed or forwarded.
+        self.assertNotIn("WafBlockedRequestAlarm", WAF_TEMPLATE)
+        self.assertNotIn("MetricName: BlockedRequests", WAF_TEMPLATE)
+        self.assertNotIn("ian-photography-waf-blocked-", WAF_TEMPLATE)
         forward_rule = WAF_TEMPLATE.split("  WafAlarmCrossRegionRule:", 1)[1]
-        self.assertIn("EvaluationPeriods: 3", blocked_alarm)
-        self.assertIn("DatapointsToAlarm: 2", blocked_alarm)
-        self.assertIn("Threshold: 25", blocked_alarm)
-        self.assertIn("ian-photography-waf-blocked-${Stage}", forward_rule)
         self.assertNotIn("ian-photography-waf-rate-${Stage}", forward_rule)
+        for edge, next_resource in (
+            ("Frontend", "  MediaFiveXxAlarm:"),
+            ("Media", "  WafAlarmForwardRole:"),
+        ):
+            alarm = WAF_TEMPLATE.split(f"  {edge}FiveXxAlarm:", 1)[1].split(
+                next_resource, 1
+            )[0]
+            self.assertIn("Period: 300", alarm)
+            self.assertIn("EvaluationPeriods: 3", alarm)
+            self.assertIn("DatapointsToAlarm: 3", alarm)
+            self.assertIn("Threshold: 5", alarm)
+            name = f"ian-photography-{edge.lower()}-5xx-${{Stage}}"
+            self.assertEqual(forward_rule.count(name), 2)
 
     def test_preflight_never_reads_or_returns_secret_value(self) -> None:
         account = "000000000000"

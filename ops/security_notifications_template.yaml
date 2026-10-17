@@ -50,19 +50,14 @@ Resources:
               ArnLike:
                 AWS:SourceArn:
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-ApiServerErrorAlarm-*'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-ApiLatencyAlarm-*'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-FrontDoorDeniedAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AsyncFailureQueueAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AlbumWorkDeadLetterQueueAlarm-*'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AlbumWorkQueueAgeAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewDeadLetterQueueAlarm-*'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewQueueAgeAlarm-*'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-PreviewMetadataSystemErrorsAlarm-*'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-AuditFailureAlarm-*'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-frontend-5xx-${Stage}'
-                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-media-5xx-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-ZipPreparationFailureAlarm-*'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-website-OriginalComparisonFailureAlarm-*'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-backup-freshness-${Stage}'
                   - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-${Stage}'
+                  - !Sub 'arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ian-photography-root-activity-${Stage}'
 
   SecuritySignalQueue:
     Type: AWS::SQS::Queue
@@ -223,7 +218,6 @@ Resources:
           STAGE = os.environ["STAGE"]
           CONTRACTS = {
               "backup.job.failed": ("high", "backup-job-failure"),
-              "waf.alarm": ("high", "waf-observation"),
               "edge.alarm": ("high", "edge-health"),
           }
           KEYS = {"schemaVersion", "eventName", "severity", "stage", "runbook"}
@@ -236,7 +230,6 @@ Resources:
                   raise ValueError("invalid security signal json") from error
               if isinstance(value, dict) and set(value) == {"schemaVersion", "alarmName", "stage"}:
                   names = {
-                      "ian-photography-waf-blocked-" + STAGE: "waf.alarm",
                       "ian-photography-frontend-5xx-" + STAGE: "edge.alarm",
                       "ian-photography-media-5xx-" + STAGE: "edge.alarm",
                   }
@@ -297,7 +290,7 @@ Resources:
       - SecurityEventDlqPolicy
     Properties:
       Name: !Sub 'ian-photography-waf-alarm-${Stage}'
-      Description: Converts exact us-east-1 website edge and WAF alarms into validated fixed signals.
+      Description: Converts exact us-east-1 website edge 5xx alarms into validated fixed signals.
       EventPattern:
         source: [aws.cloudwatch]
         detail-type: [CloudWatch Alarm State Change]
@@ -305,7 +298,6 @@ Resources:
         region: [us-east-1]
         detail:
           alarmName:
-            - !Sub 'ian-photography-waf-blocked-${Stage}'
             - !Sub 'ian-photography-frontend-5xx-${Stage}'
             - !Sub 'ian-photography-media-5xx-${Stage}'
           state:
@@ -456,30 +448,6 @@ Resources:
           MetricName: DataProtectionConfigurationChange
           MetricValue: '1'
 
-  InfrastructureProtectionChangeMetric:
-    Type: AWS::Logs::MetricFilter
-    Properties:
-      LogGroupName: !Ref SecurityAuditLogGroupName
-      FilterName: !Sub 'ian-photography-infrastructure-protection-change-${Stage}'
-      FilterPattern: >-
-        { (($.eventSource = "cloudformation.amazonaws.com") && (($.eventName = "DeleteStack") || ($.eventName = "SetStackPolicy") || ($.eventName = "UpdateTerminationProtection"))) || (($.eventSource = "cloudfront.amazonaws.com") && (($.eventName = "DeleteDistribution") || ($.eventName = "UpdateDistribution"))) || (($.eventSource = "wafv2.amazonaws.com") && (($.eventName = "DeleteWebACL") || ($.eventName = "UpdateWebACL") || ($.eventName = "DeleteLoggingConfiguration"))) }
-      MetricTransformations:
-        - MetricNamespace: IanTruongPhotography/Security
-          MetricName: InfrastructureProtectionConfigurationChange
-          MetricValue: '1'
-
-  InfrastructureExecutionChangeMetric:
-    Type: AWS::Logs::MetricFilter
-    Properties:
-      LogGroupName: !Ref SecurityAuditLogGroupName
-      FilterName: !Sub 'ian-photography-infrastructure-execution-change-${Stage}'
-      FilterPattern: >-
-        { (($.eventSource = "cloudformation.amazonaws.com") && (($.eventName = "UpdateStack") || ($.eventName = "ExecuteChangeSet") || ($.eventName = "RollbackStack"))) || (($.eventSource = "wafv2.amazonaws.com") && (($.eventName = "AssociateWebACL") || ($.eventName = "DisassociateWebACL") || ($.eventName = "PutLoggingConfiguration"))) || (($.eventSource = "cloudfront.amazonaws.com") && (($.eventName = "CreateContinuousDeploymentPolicy") || ($.eventName = "UpdateContinuousDeploymentPolicy") || ($.eventName = "DeleteContinuousDeploymentPolicy"))) }
-      MetricTransformations:
-        - MetricNamespace: IanTruongPhotography/Security
-          MetricName: InfrastructureProtectionConfigurationChange
-          MetricValue: '1'
-
   RootActivityAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -494,6 +462,7 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions: [!Ref SecurityNotifications]
 
   CloudTrailChangeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -585,26 +554,11 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
-  InfrastructureProtectionChangeAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'ian-photography-infrastructure-protection-change-${Stage}'
-      AlarmDescription: A protected stack, edge distribution, or web ACL was changed or weakened.
-      Namespace: IanTruongPhotography/Security
-      MetricName: InfrastructureProtectionConfigurationChange
-      Statistic: Sum
-      Period: 300
-      EvaluationPeriods: 1
-      DatapointsToAlarm: 1
-      Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-
   SecurityEventDlqAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'
-      AlarmDescription: EventBridge could not deliver one or more website backup or WAF signals.
+      AlarmDescription: EventBridge could not deliver one or more website backup or edge signals.
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:

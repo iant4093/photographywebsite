@@ -8,10 +8,12 @@ not recreate them.
 The existing `ian-photography-front-door-waf` stack owns the frontend and media
 5xx alarms in **us-east-1**, where CloudFront publishes its metrics. Pass the
 exact `FrontendDistributionId` and `MediaDistributionId` when updating that stack.
-The alarms use the free `5xxErrorRate` metric. Exact edge and WAF state events
-cross to the home EventBridge bus; the notification stack converts ALARM states
-to fixed `edge.alarm`/`waf.alarm` signals through the existing encrypted queue,
-retry/DLQ, validation Lambda, and owner notification route.
+The alarms use the free `5xxErrorRate` metric and fire when the rate exceeds 5%
+for three of three five-minute periods. Exact edge alarm state events cross to
+the home EventBridge bus; the notification stack converts ALARM states to the
+fixed `edge.alarm` signal through the existing encrypted queue, retry/DLQ,
+validation Lambda, and owner notification route. WAF blocks are not alarmed;
+review them in the redacted WAF log and per-rule metrics.
 
 API Gateway detailed route metrics are disabled. Stage-level latency and `5xx`
 metrics remain available; the HTTP API error alarm must use `5xx`, not the REST
@@ -22,8 +24,8 @@ alarms; backup freshness explicitly treats missing data as a failure.
 ## Admin dependencies
 
 Site Health reads the application-stack alarm prefix in the home region plus
-five exact website alarms: backup freshness, alert-delivery DLQ, frontend 5xx,
-media 5xx, and WAF blocks. It paginates application alarms and returns degraded
+four exact website alarms: backup freshness, alert-delivery DLQ, frontend 5xx,
+and media 5xx. It paginates application alarms and returns degraded
 health if an expected alarm is missing or a regional lookup fails. It does not
 include account-wide identity/security-change alarms or expose AWS identifiers.
 The live website/API latency checks are direct HTTP probes. Audit Log queries

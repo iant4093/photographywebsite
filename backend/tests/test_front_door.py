@@ -288,7 +288,9 @@ class FrontDoorCoverageContractTests(unittest.TestCase):
         self.assertIn("Namespace: IanTruongPhotography/Security", alarm)
         self.assertIn("MetricName: FrontDoorDenied", alarm)
         self.assertIn("Threshold: 10", alarm)
-        self.assertIn("ian-photography-security-${Stage}", alarm)
+        # Record-only: a denied direct-origin request means the guard works.
+        self.assertNotIn("AlarmActions:", alarm)
+        self.assertNotIn("ian-photography-security-${Stage}", alarm)
 
 
 if __name__ == "__main__":

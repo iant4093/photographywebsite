@@ -455,8 +455,6 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmDescription: Original-photo archive indexing failed; existing comparisons remain available.
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:
@@ -5397,8 +5395,6 @@ Resources:
       Threshold: 5000
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   FrontDoorDeniedAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5413,8 +5409,6 @@ Resources:
       Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   AlbumWorkDeadLetterQueueAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5451,8 +5445,6 @@ Resources:
       Threshold: 600
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   AsyncFailureQueueAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5508,8 +5500,6 @@ Resources:
       Threshold: 600
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   HoverPreviewManifestBuilderErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5527,8 +5517,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   HoverPreviewManifestFailureAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5543,8 +5531,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewQueueAgeAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5562,8 +5548,6 @@ Resources:
       Threshold: 600
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewQueueDepthAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5663,8 +5647,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   PreviewMetadataThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -5713,8 +5695,6 @@ Resources:
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
-      AlarmActions:
-        - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ian-photography-security-${Stage}'
 
   LoginDeniedAlarm:
     Type: AWS::CloudWatch::Alarm

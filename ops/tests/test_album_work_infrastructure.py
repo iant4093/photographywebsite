@@ -77,7 +77,9 @@ class AlbumWorkInfrastructureTests(unittest.TestCase):
         registered = {name for group in registry['groups'] for name in group['logicalResourceIds']}
         for alarm in ('AlbumWorkDeadLetterQueueAlarm', 'AlbumWorkQueueAgeAlarm'):
             self.assertIn(alarm, registered)
-            self.assertEqual(self.resources[alarm]['Properties']['AlarmActions'], self.resources['AsyncFailureQueueAlarm']['Properties']['AlarmActions'])
+        # Only the DLQ (data at risk) emails; queue age is a record-only diagnostic.
+        self.assertEqual(self.resources['AlbumWorkDeadLetterQueueAlarm']['Properties']['AlarmActions'], self.resources['AsyncFailureQueueAlarm']['Properties']['AlarmActions'])
+        self.assertNotIn('AlarmActions', self.resources['AlbumWorkQueueAgeAlarm']['Properties'])
 
     def test_new_release_rules_allow_only_exact_adds_and_queue_timeout_change(self):
         from ops.ci import release_guard
@@ -93,12 +95,12 @@ class AlbumWorkInfrastructureTests(unittest.TestCase):
         self.assertEqual(change['propertyPaths'], ['VisibilityTimeout', 'Tags']); self.assertFalse(change['allowNoDetails'])
         self.assertTrue(callable(release_guard.gate_change_set))
 
-    def test_notification_topic_accepts_only_the_two_exact_new_alarm_names(self):
+    def test_notification_topic_accepts_only_the_exact_album_work_dlq_alarm_name(self):
         template, errors = decode(str(ROOT / 'ops/security_notifications_template.yaml'))
         self.assertFalse(errors)
         source = json.dumps(template)
-        for alarm in ('AlbumWorkDeadLetterQueueAlarm', 'AlbumWorkQueueAgeAlarm'):
-            self.assertIn('alarm:ian-website-' + alarm + '-*', source)
+        self.assertIn('alarm:ian-website-AlbumWorkDeadLetterQueueAlarm-*', source)
+        self.assertNotIn('alarm:ian-website-AlbumWorkQueueAgeAlarm-*', source)
         self.assertNotIn('alarm:ian-website-*', source)
 
     def test_parameter_guard_rejects_automatic_cutover_and_preserves_existing_routing(self):

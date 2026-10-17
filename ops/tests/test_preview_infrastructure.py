@@ -249,7 +249,8 @@ class PreviewWorkerTests(unittest.TestCase):
         ):
             alarm = resource_block(logical_id)
             self.assertIn("TreatMissingData: notBreaching", alarm)
-            self.assertIn("ian-photography-security-${Stage}", alarm)
+            # Record-only: the refresh queue's DLQ is the emailing data-loss signal.
+            self.assertNotIn("AlarmActions:", alarm)
 
         self.assertIn("Album hover-preview manifests", RUNBOOK)
         self.assertIn("HOVER_PREVIEW_MANIFESTS.md", RUNBOOK)
@@ -340,15 +341,12 @@ class PreviewDeliveryAndOperationsTests(unittest.TestCase):
     def test_failures_are_metricized_and_alarmable(self) -> None:
         self.assertIn("preview_job_failed", resource_block("PreviewJobFailureMetricFilter"))
         self.assertIn("hero_derivatives_failed", resource_block("PreviewJobFailureMetricFilter"))
+        block = resource_block("PreviewDeadLetterQueueAlarm")
+        self.assertIn("ian-photography-security-${Stage}", block)
+        self.assertIn("TreatMissingData: notBreaching", block)
         for logical_id in (
-            "PreviewDeadLetterQueueAlarm",
             "PreviewQueueAgeAlarm",
             "PreviewMetadataSystemErrorsAlarm",
-        ):
-            block = resource_block(logical_id)
-            self.assertIn("ian-photography-security-${Stage}", block)
-            self.assertIn("TreatMissingData: notBreaching", block)
-        for logical_id in (
             "PreviewQueueDepthAlarm",
             "PreviewWorkerFailureAlarm",
             "PreviewWorkerErrorsAlarm",

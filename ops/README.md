@@ -63,9 +63,8 @@ are **dry-run by default** and require multiple exact production guards to apply
   approved, cost-bounded checks. It never prints
   provider identifiers, tags, Region names, or findings.
 - `security_budget_template.yaml` and `security_budget_preflight.py` define an
-  optional retained,
-  console-only account budget. It has no notification route and is not part of
-  website incident delivery.
+  optional retained account budget with an optional deploy-time owner email for
+  actual/forecast over-100% alerts. It is not part of website incident delivery.
 - Migration helpers cover existing album ownership, legacy media prefixes, GSIs,
   media visibility tags, media-cache invalidation, and Lambda log retention (see
   [Operator scripts](#operator-scripts)).
@@ -74,7 +73,7 @@ are **dry-run by default** and require multiple exact production guards to apply
 - [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) and `alarm_registry.json` map every
   declared application, WAF, observability, account-security, and backup
   failure/freshness signal to a privacy-safe runbook, separating website email
-  delivery from audit-only account signals.
+  delivery (site down, data at risk, root activity, spend) from record-only signals.
 - `observability_template.yaml`, `observability_preflight.py`, and
   [`OBSERVABILITY.md`](OBSERVABILITY.md) define the retained, privacy-controlled
   paid CloudFront metrics, dashboard, and edge-alarm operations.
@@ -372,9 +371,9 @@ traffic, privacy, and cost after 30 days.
 - CloudFront standard logs, CloudWatch logs/metrics/alarms, SSM SecureString API
   usage, DynamoDB PITR, S3 version storage, invalidations above the free allowance, and
   retained backup/log objects all have usage or storage costs. Budget creation
-  requires an owner-approved monthly amount. The budget remains console-only;
-  it never creates a subscriber, sends website incident email, or automatically
-  disables a security control.
+  requires an owner-approved monthly amount. Its only notification is the
+  optional direct AWS Budgets owner email; it never creates an SNS subscriber,
+  sends website incident email, or automatically disables a security control.
 
 ## Post-release checks
 

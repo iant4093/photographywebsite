@@ -38,14 +38,18 @@ The stack owns privacy-safe metrics in `IanTruongPhotography/Security`:
 | Metric | Source | Alarm (route) | Meaning |
 |---|---|---|---|
 | `AuditDenied` | all application audit denials | none; dashboard/query only | Normal at low volume; investigate changes in baseline. |
-| `AuditFailure` | audit records with failure outcome | `AuditFailureAlarm`, 1 in 5 minutes (notifies) | A security-sensitive operation or provider dispatch failed. |
+| `AuditFailure` | audit records with failure outcome | `AuditFailureAlarm`, 1 in 5 minutes (record-only) | A security-sensitive operation or provider dispatch failed. |
 | `LoginDenied` | denied `auth.login` records | `LoginDeniedAlarm`, 10 in 5 minutes (audit-only) | Possible credential attack, CAPTCHA issue, or client regression. |
 | `ApiAuthorizationDenied` | API 401, 403, and 429 access logs | `ApiAuthorizationDeniedAlarm`, 25 in 5 minutes (audit-only) | JWT/authorization/rate-limit failures, including denials before Lambda. |
-| `FrontDoorDenied` | `front_door_request_denied` log records | `FrontDoorDeniedAlarm`, 10 in 5 minutes (notifies) | Requests reached the origin without a valid CloudFront origin header. |
+| `FrontDoorDenied` | `front_door_request_denied` log records | `FrontDoorDeniedAlarm`, 10 in 5 minutes (record-only) | Requests reached the origin without a valid CloudFront origin header. |
 
+None of these security metrics email: denials mean the guards are working and
+an audit failure never blocks the user action. Email is reserved for site down,
+data at risk, account compromise (root activity), and spend; see the routing
+table in [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md#email-routing-policy).
 Notifying alarms publish to the central `ian-photography-security-<stage>`
-topic owned by the separate notification stack; audit-only alarms have no
-action so routine internet scanning never sends email. The application stack
+topic owned by the separate notification stack, whose policy admits only the
+exact emailing alarm names; record-only alarms have no action. The application stack
 does not create a second topic or subscription. `alarm_registry.json` is the
 source of truth for each alarm's route. One site-owner destination is
 confirmed, which is the complete requirement for this personal site; record

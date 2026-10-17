@@ -329,8 +329,8 @@ bootstrap instead restricts role management and `iam:PassRole` to the exact
 `backend/template.yaml`; requiring one only in the execution policy would break
 the current deployment. EventBridge rule lifecycle access is likewise limited
 to the application stack's `ian-website-*` rule family and the existing exact
-`ian-photography-waf-alarm-prod` notification rule, which also carries the
-website's CloudFront alarms. The execution role has
+`ian-photography-waf-alarm-prod` notification rule, which carries the
+website's CloudFront 5xx alarms. The execution role has
 no event-bus publishing access. Bootstrap OIDC, roles, and release storage through the
 separately protected stack with termination protection. The application stack
 must never create the role that can deploy it.

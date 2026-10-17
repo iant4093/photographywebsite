@@ -3,8 +3,9 @@
 The machine-readable inventory is `ops/alarm_registry.json`. It is the source
 of truth for alarm-to-runbook coverage: each group lists exact logical resource
 IDs, a severity, a route (`security-notification-topic`, the cross-Region
-validated signal queue, or `cloudwatch-audit-only`), and the `## ` heading below
-that answers it. `ops/tests/test_security_baseline.py` fails if an alarm or
+validated signal queue, `cloudwatch-audit-only`, or the budget's optional owner
+email), and the `## ` heading below that answers it.
+`ops/tests/test_security_baseline.py` fails if an alarm, budget notification, or
 signal rule in `backend/template.yaml` or the notification, backup, budget,
 observability, or WAF templates is unregistered, or if a registered runbook
 heading is missing here. Notification endpoints are deliberately
@@ -13,14 +14,31 @@ central topic, which is the complete delivery requirement for this personal
 website. A synthetic end-to-end delivery test should still be recorded
 quarterly and after routing changes.
 
-Only exact website backup and WAF events pass through the rule-scoped security
-signal queue and strict allowlist validator. Native CloudWatch notifications
-are restricted by topic policy to exact website alarm name patterns. Account
-identity, managed-security, configuration, and cost signals remain available in
-their source services and audit-only CloudWatch alarms but never route to this
-email topic. Never copy raw events, request or response bodies, emails, album or
-media identifiers, object keys, request URLs, credentials, provider errors, or
-log messages into notifications, tickets, or chat.
+## Email routing policy
+
+Email is reserved for four outcomes: the site is down, data is at risk, the
+account may be compromised, or spend exceeds the budget. Everything else stays
+in CloudWatch as a record-only (`cloudwatch-audit-only`) alarm to review on the
+dashboard or during an investigation. Adding a route must not add AWS cost (no
+composite alarms, health checks, or extra metric alarms).
+
+| Outcome | Emailing signals |
+| --- | --- |
+| Site down | `ApiServerErrorAlarm`; frontend and media CloudFront 5xx rate (3 of 3 five-minute periods, via the edge signal queue) |
+| Data at risk | `AsyncFailureQueueAlarm`, `PreviewDeadLetterQueueAlarm`, `ZipPreparationFailureAlarm`, `OriginalComparisonFailureAlarm`, `AlbumWorkDeadLetterQueueAlarm`, `BackupFreshnessAlarm`, `BackupJobFailureRule`, `SecurityEventDlqAlarm` |
+| Account compromised | `RootActivityAlarm` |
+| Spend | `ian-photography-monthly-<stage>` budget, actual or forecasted spend over 100% (direct AWS Budgets email when `BudgetAlertEmail` is set) |
+
+Only exact website backup and edge 5xx events pass through the rule-scoped
+security signal queue and strict allowlist validator. Native CloudWatch
+notifications are restricted by topic policy to the exact alarm name patterns
+above; `ops/tests/test_security_operations.py` fails if any alarm that targets
+the topic is missing from that allowlist. Other account identity,
+managed-security, and configuration signals remain available in their source
+services and audit-only CloudWatch alarms. Never copy raw events, request or
+response bodies, emails, album or media identifiers, object keys, request URLs,
+credentials, provider errors, or log messages into notifications, tickets, or
+chat.
 
 ## Common first five minutes
 
@@ -38,7 +56,8 @@ log messages into notifications, tickets, or chat.
 
 Compare API 5xx/latency with Lambda errors, throttles, duration, and the exact
 release. Verify a bounded public request before rollback. Never enable body or
-query logging to diagnose an API failure.
+query logging to diagnose an API failure. Only the 5xx alarm emails; the p95
+latency alarm is record-only.
 
 ## Front-door denial
 
@@ -46,16 +65,20 @@ Confirm the API custom origin, disabled default endpoint, the expected
 `current`/`previous` values in the origin-verification SSM parameter (by
 version metadata only), and the CloudFront origin-header path. Treat unexpected direct-origin
 acceptance as critical. Rotate the origin verifier only through its explicit
-dual-version runbook; provider credential rotation is unrelated.
+dual-version runbook; provider credential rotation is unrelated. The alarm is
+record-only: denied direct-origin requests mean the guard is working.
 
 ## Application async and preview
 
 Inspect queue depth, oldest age, DLQ depth, worker aggregate reason codes, and
 metadata conflict counts. Stop dispatch or the event mapping when failures are
-systematic. The preview queue-depth, worker failure/error/duration/throttle,
-and metadata-throttle alarms share this procedure but are audit-only
-diagnostics. For `ZipPreparationFailureAlarm` and the album-work DLQ and
-queue-age alarms, apply the same rules to their queues. Never purge or bulk-redrive; select only proven idempotent messages.
+systematic. Only the dead-letter alarms email (async failure, preview, ZIP,
+original-comparison, and album-work DLQs). Queue-age, preview queue-depth,
+worker failure/error/duration/throttle, metadata system-error/throttle,
+hover-preview, and original-index alarms share this procedure but are
+record-only diagnostics: retries and DLQs catch anything that is actually lost.
+For `ZipPreparationFailureAlarm` and the album-work alarms, apply the same rules
+to their queues. Never purge or bulk-redrive; select only proven idempotent messages.
 For hover-preview signals, also compare the builder's native errors with the
 privacy-safe `ManifestBuildFailure` metric, inspect only aggregate reconciliation
 state, and verify one immutable manifest through the public alias. Keep the
@@ -81,13 +104,15 @@ alarms are audit-only to avoid emailing on routine internet scanning.
 Prove the central log group and metric filters are accepting a synthetic safe
 success and denial. Audit logging must not break the user action, but a silent
 audit outage remains open until event delivery and forbidden-field tests pass.
+The alarm is record-only; review it with the audit log when investigating.
 
 ## Account identity and encryption change
 
 Correlate root, IAM, and KMS changes to an approved operator/session. For an
 unapproved change, contain the identity, preserve CloudTrail, and verify keys
 remain enabled and unscheduled for deletion before restoring policy via IaC.
-These are account-wide audit alarms and do not publish to the website topic.
+`RootActivityAlarm` emails because routine work never uses the root identity.
+The IAM and KMS change alarms are record-only.
 
 ## Trail and notification change
 
@@ -98,7 +123,7 @@ alarms are audit-only.
 
 ## Website notification delivery
 
-Inspect the website security-event DLQ and the exact backup/WAF EventBridge
+Inspect the website security-event DLQ and the exact backup/edge EventBridge
 targets. Do not purge or redrive messages in bulk. Confirm the fixed signal
 contract, retry only proven idempotent events, and verify the owner subscription
 remains confirmed without recording its endpoint.
@@ -123,13 +148,6 @@ DynamoDB PITR/deletion protection; backup vault lock/recovery points; and the
 approved backup plan/selection/lifecycle/access policy. Planned changes still require a disposition because CloudFormation can
 transiently toggle a protection.
 
-## Infrastructure protection change
-
-Compare CloudFormation change set, termination protection, stack policy, drift,
-CloudFront configuration, and WAF association/logging. Reject unexplained
-replacement, deletion, public access, direct-origin bypass, or blocking-rule
-promotion.
-
 ## Backup job failure
 
 Use aggregate AWS Backup job state and resource type. Confirm the protected
@@ -147,22 +165,26 @@ completed recovery point inside the approved age window in the source vault.
 ## Edge health
 
 Compare frontend and media 5xx rates and request volume by release. Both alarms
-are owned by the us-east-1 WAF stack and forwarded through the exact edge event
-rule to the existing home-region notification pipeline. Paid origin-latency and
+are owned by the us-east-1 WAF stack, require more than 5% 5xx in three of three
+five-minute periods, and are forwarded through the exact edge event rule to the
+existing home-region notification pipeline. Paid origin-latency and
 cache-hit metrics are disabled. The observability stack intentionally collects no browser
 telemetry and runs no synthetic browser probe; use the credential-free public
 posture smoke test for release verification.
 
-## WAF observation
-
-Use aggregate rule labels/actions and the redacted block log. Email is
-reserved for sustained blocking: `ian-photography-waf-blocked-<stage>` needs at
-least 25 blocked requests in two of three five-minute periods across the two
-managed groups (known-bad inputs, IP reputation) and the four API/Explore rate
-rules. Return only an affected rule to count mode after a verified false
-positive. Any
+WAF blocks are not alarmed: a block means the WAF is working. Review the
+redacted block log and per-rule WAF metrics after a reported false positive.
+Return only an affected rule to count mode after a verified false positive. Any
 exclusion needs an owner, reason, expiry, regression fixture, and rollback
 record.
+
+## Monthly spend
+
+The optional `ian-photography-monthly-<stage>` AWS Budget emails the owner
+directly (no SNS) when actual or forecasted monthly spend exceeds 100% of the
+limit. Use Cost Explorer by service and usage type to find the driver, compare
+it with the latest release and the WAF circuit-breaker metrics, and correct the
+cause before raising the limit. The budget never disables a control.
 
 ## Delivery test and review record
 

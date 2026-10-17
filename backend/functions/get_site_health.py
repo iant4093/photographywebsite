@@ -91,7 +91,6 @@ def _alarms():
     edge_names = {
         f"ian-photography-frontend-5xx-{stage}": "Website Edge Server Errors",
         f"ian-photography-media-5xx-{stage}": "Media Edge Server Errors",
-        f"ian-photography-waf-blocked-{stage}": "Firewall Blocked Requests",
     }
     groups = (
         (cloudwatch, {"AlarmNamePrefix": f"{os.environ['STACK_NAME']}-"}, {}),

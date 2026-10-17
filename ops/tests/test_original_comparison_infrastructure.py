@@ -270,6 +270,8 @@ class OriginalInfrastructureTests(unittest.TestCase):
         groups = [group for group in registry["groups"] if "OriginalComparisonFailureAlarm" in group["logicalResourceIds"]]
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["route"], "security-notification-topic")
+        policy = (OPS / "security_notifications_template.yaml").read_text(encoding="utf-8")
+        self.assertIn("alarm:ian-website-OriginalComparisonFailureAlarm-*'", policy)
 
     def test_index_failures_have_a_scoped_native_alarm_and_documented_recovery(self):
         alarm = self.resources["OriginalIndexRefreshErrorsAlarm"]["Properties"]
@@ -280,11 +282,12 @@ class OriginalInfrastructureTests(unittest.TestCase):
         self.assertLessEqual(alarm["Period"], 900)
         self.assertEqual(alarm["Threshold"], 1)
         self.assertEqual(alarm["TreatMissingData"], "notBreaching")
-        self.assertEqual(alarm["AlarmActions"], self.resources["OriginalComparisonFailureAlarm"]["Properties"]["AlarmActions"])
+        # Record-only: a failed index refresh leaves existing comparisons available.
+        self.assertNotIn("AlarmActions", alarm)
         registry = json.loads((OPS / "alarm_registry.json").read_text(encoding="utf-8"))
         groups = [group for group in registry["groups"] if "OriginalIndexRefreshErrorsAlarm" in group["logicalResourceIds"]]
         self.assertEqual(len(groups), 1)
-        self.assertEqual(groups[0]["route"], "security-notification-topic")
+        self.assertEqual(groups[0]["route"], "cloudwatch-audit-only")
         recovery = (OPS / "ALARM_REGISTRY.md").read_text(encoding="utf-8")
         self.assertIn("OriginalIndexRefreshErrorsAlarm", recovery)
         self.assertIn("PHOTO_ORIGINAL_COMPARISONS.md#failure-recovery-and-retention", recovery)
