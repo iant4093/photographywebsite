@@ -1259,8 +1259,21 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:${ApplicationStackName}-*'
           - Sid: UpdateExactSecurityEventMetricFilters
             Effect: Allow
-            Action: logs:PutMetricFilter
+            Action:
+              - logs:DeleteMetricFilter
+              - logs:PutMetricFilter
             Resource: !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'
+          - Sid: ManageExactSecurityNotificationAlarms
+            Effect: Allow
+            Action:
+              - cloudwatch:DeleteAlarms
+              - cloudwatch:PutMetricAlarm
+              - cloudwatch:TagResource
+              - cloudwatch:UntagResource
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-root-activity-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-infrastructure-protection-change-prod'
           - Sid: ReadExactNotificationStackDriftResources
             Effect: Allow
             Action:

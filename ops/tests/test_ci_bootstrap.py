@@ -962,8 +962,33 @@ fi
         self.assertEqual(grant, {
             'Sid': 'UpdateExactSecurityEventMetricFilters',
             'Effect': 'Allow',
-            'Action': 'logs:PutMetricFilter',
+            'Action': ['logs:DeleteMetricFilter', 'logs:PutMetricFilter'],
             'Resource': {'Fn::Sub': 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'},
+        })
+
+    def test_security_notification_alarm_grant_is_limited_to_exact_alarms(self):
+        from cfnlint.decode import decode
+
+        template, errors = decode(str(TEMPLATE_PATH))
+        self.assertEqual(errors, [])
+        statements = template['Resources']['CloudFormationExecutionEncryptionAndObservabilityPolicy'][
+            'Properties']['PolicyDocument']['Statement']
+        grant = next(s for s in statements if s['Sid'] == 'ManageExactSecurityNotificationAlarms')
+        alarm = 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:'
+        self.assertEqual(grant, {
+            'Sid': 'ManageExactSecurityNotificationAlarms',
+            'Effect': 'Allow',
+            'Action': [
+                'cloudwatch:DeleteAlarms',
+                'cloudwatch:PutMetricAlarm',
+                'cloudwatch:TagResource',
+                'cloudwatch:UntagResource',
+            ],
+            'Resource': [
+                {'Fn::Sub': alarm + 'ian-photography-root-activity-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-security-events-dlq-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-infrastructure-protection-change-prod'},
+            ],
         })
 
     def test_execution_permissions_use_bounded_managed_policies(self):
