@@ -32,6 +32,47 @@ This repository is the complete production source for a working photography busi
 | **2** CloudFront distributions | One for the app and `/api`, one for media, both behind private S3 origins |
 | **~290** test files | 80% line and branch coverage enforced on frontend, backend, worker and ops code |
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.webp" width="100%" alt="Home page with a full-bleed hero photo of a hiker on a snowy summit and the Ian Truong Photography title">
+  <br>
+  <sub><b>Home</b> · full-bleed hero with quick links into photos, videos, featured and random picks</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/album.webp" width="100%" alt="Smith Rock album page showing album details, share, QR code and download buttons above a grid of landscape photos">
+      <p align="center"><sub><b>Album with progressive previews</b></sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/immersive-gallery.webp" width="100%" alt="3D museum hallway with a reception desk, chandeliers, framed album doorways and a red carpet">
+      <p align="center"><sub><b>3D living museum</b> (react-three-fiber)</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/explore-colors.webp" width="100%" alt="Color Explorer with color swatches and photo counts above a grid of blue-toned photographs">
+      <p align="center"><sub><b>Explore by color</b></sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/stats-calendar.webp" width="100%" alt="Stats page shooting calendar heatmap for 2026 with days shooting, longest streak and published totals">
+      <p align="center"><sub><b>Stats</b> · shooting calendar heatmap</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/editor.webp" width="100%" alt="In-browser photo editor with a drop zone for photos and RAW files and a panel of film presets">
+      <p align="center"><sub><b>In-browser RAW editor</b> (LibRaw → WebAssembly)</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/mobile.webp" width="100%" alt="Three mobile screens side by side: home page, an album page and the Color Explorer">
+      <p align="center"><sub><b>Mobile</b> · home, album and color explorer</sub></p>
+    </td>
+  </tr>
+</table>
+
 ## Features
 
 ### For visitors
@@ -60,13 +101,13 @@ This repository is the complete production source for a working photography busi
 
 > **[Open the interactive architecture board on Miro](https://miro.com/app/board/uXjVEYlOMic=/)**
 
-The board reads left to right in three frames:
+The board reads left to right in three frames. Numbered circles follow the steps listed beside each diagram.
 
 | Frame | What it shows |
 |---|---|
-| **1. Request path** | Browser → Route 53 → WAF → CloudFront → API Gateway → Lambda → DynamoDB, S3 and third-party services. Media goes straight from S3 through its own CDN. |
-| **2. Media and background pipeline** | Uploads, S3 events, DynamoDB Streams and EventBridge schedules feed SQS queues and workers that produce previews, HLS video, ZIPs, cache invalidations and Drive backups. |
-| **3. Delivery, security and recovery** | GitHub Actions → quality gate → OIDC → release guard → SAM stack and frontend deploy, plus the AWS security, monitoring and backup layer. |
+| **1. Request path** | Browser → CloudFront (behind AWS WAF) → API Gateway (Cognito sign-in) → Lambda → DynamoDB and third-party APIs. Photos and video take a separate path from S3 through a dedicated media CDN. |
+| **2. Background jobs** | One row per job: what triggers it, its SQS queue, the worker, and the stored result. Covers previews, ZIPs, video transcoding, visibility tagging, cache refresh, Drive backup, original comparisons and failure alerts. |
+| **3. Delivery and operations** | The seven-step release pipeline from push to production smoke test, plus the always-on security, monitoring, backup and budget services and what sends an email. |
 
 ### Design principles
 
