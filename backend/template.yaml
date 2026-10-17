@@ -983,6 +983,22 @@ Resources:
               NoncurrentDays: 30
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
+          # Intelligent-Tiering has no retrieval fee or minimum duration and
+          # serves every tier at millisecond latency, so full-resolution
+          # lightbox originals load exactly as before. Rarely opened files
+          # (most album zips and older originals) drift to cheaper tiers.
+          - Id: TierAlbumArchives
+            Status: Enabled
+            Prefix: album-zips/
+            Transitions:
+              - StorageClass: INTELLIGENT_TIERING
+                TransitionInDays: 0
+          - Id: TierAlbumMedia
+            Status: Enabled
+            Prefix: albums/
+            Transitions:
+              - StorageClass: INTELLIGENT_TIERING
+                TransitionInDays: 0
           - Id: ExpireAbandonedPendingUploads
             Status: Enabled
             Prefix: albums/

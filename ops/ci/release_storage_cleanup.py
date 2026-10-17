@@ -155,8 +155,8 @@ def inventory(bucket, account):
 
 
 def plan_cleanup(versions, markers, protected, now, days):
-    if not 180 <= days <= 3650 or now.tzinfo is None:
-        raise CleanupError("retention must be at least 180 days")
+    if not 30 <= days <= 3650 or now.tzinfo is None:
+        raise CleanupError("retention must be at least 30 days")
     cutoff = now - dt.timedelta(days=days)
     groups = defaultdict(list)
     blocked = set()

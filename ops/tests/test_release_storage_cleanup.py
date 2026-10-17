@@ -69,7 +69,10 @@ class ReleaseCleanupTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(cleanup.CleanupError):
                 cleanup.plan_cleanup([version(**changes)], [], set(), NOW, 180)
         with self.assertRaises(cleanup.CleanupError):
-            cleanup.plan_cleanup([], [], set(), NOW, 90)
+            cleanup.plan_cleanup([], [], set(), NOW, 29)
+        recent = version(LastModified=(NOW - dt.timedelta(days=45)).isoformat())
+        self.assertEqual(cleanup.plan_cleanup([recent], [], set(), NOW, 60)[0], [])
+        self.assertEqual(len(cleanup.plan_cleanup([recent], [], set(), NOW, 30)[0]), 1)
 
     def test_known_good_metadata_requires_trusted_successes(self):
         runs = [good_run(s) for s in SHAS]

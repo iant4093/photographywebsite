@@ -49,8 +49,8 @@ Parameters:
     AllowedValues: [EIOCCNR8XGQ1B]
   ReleaseArtifactNoncurrentRetentionDays:
     Type: Number
-    Default: 180
-    MinValue: 180
+    Default: 60
+    MinValue: 30
     MaxValue: 3650
     Description: Minimum age for guarded cleanup of unprotected release attempts, including current versions.
   CentralAccessLogBucketName:

@@ -525,7 +525,7 @@ job first reruns `ops.tests.test_release_storage_cleanup`.
 `ops/ci/release_storage_cleanup.py` retains every artifact referenced by the live
 processed stack template, the current release SHA, and the five latest distinct
 successful production release SHAs. All other recognized backend release
-attempts remain for at least `ReleaseArtifactNoncurrentRetentionDays` (180 days
+attempts remain for at least `ReleaseArtifactNoncurrentRetentionDays` (60 days
 by default). An attempt with any recent or unknown object is retained. Both
 current and noncurrent versions are considered, fixing indefinite accumulation
 under unique release paths. Unrecognized paths, website media, audit evidence,
