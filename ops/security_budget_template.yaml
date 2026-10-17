@@ -47,7 +47,7 @@ Rules:
   CreationRequiresApprovedLimit:
     RuleCondition: !Equals [!Ref BudgetDeploymentMode, create-confirmed-absent]
     Assertions:
-      - Assert: !Not [!Equals [!Ref MonthlyLimitUsd, 0]]
+      - Assert: !Not [!Equals [!Ref MonthlyLimitUsd, '0']]
         AssertDescription: An owner-approved positive monthly limit is required.
 
 Conditions:
