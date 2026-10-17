@@ -6,7 +6,7 @@
     "requiredConfirmedDestinations": 1,
     "primaryOwner": "site-owner",
     "backupOwner": "not-required-for-personal-site",
-    "lastEndToEndTestDate": null,
+    "lastEndToEndTestDate": "2026-10-17",
     "testIntervalDays": 90
   },
   "groups": [
