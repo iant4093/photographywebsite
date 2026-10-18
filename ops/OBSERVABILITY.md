@@ -1,43 +1,56 @@
 # Website monitoring and cost controls
 
-The home-region `ian-photography-observability` stack owns a dashboard containing
-only free request/error metrics. The two paid CloudFront monitoring subscriptions
-have been removed from both AWS and the template, so future stack deployments do
-not recreate them.
+I keep monitoring on free metrics. The home-region `ian-photography-observability`
+stack owns one dashboard, and it only shows free request and error metrics. I
+used to pay for two CloudFront monitoring subscriptions. They're gone from AWS
+and from the template, so a future stack deploy won't bring them back.
 
-The existing `ian-photography-front-door-waf` stack owns the frontend and media
-5xx alarms in **us-east-1**, where CloudFront publishes its metrics. Pass the
-exact `FrontendDistributionId` and `MediaDistributionId` when updating that stack.
-The alarms use the free `5xxErrorRate` metric and fire when the rate exceeds 5%
-for three of three five-minute periods. Exact edge alarm state events cross to
-the home EventBridge bus; the notification stack converts ALARM states to the
-fixed `edge.alarm` signal through the existing encrypted queue, retry/DLQ,
-validation Lambda, and owner notification route. WAF blocks are not alarmed;
-review them in the redacted WAF log and per-rule metrics.
+## Edge alarms
 
-API Gateway detailed route metrics are disabled. Stage-level latency and `5xx`
-metrics remain available; the HTTP API error alarm must use `5xx`, not the REST
-API metric name `5XXError`. Application custom metrics, operational alarms, and
-audit logs remain enabled. Quiet windows remain non-breaching for traffic/error
-alarms; backup freshness explicitly treats missing data as a failure.
+CloudFront publishes its metrics in **us-east-1**, so the frontend and media
+5xx alarms live there, in the existing `ian-photography-front-door-waf` stack.
+When you update that stack, pass the correct `FrontendDistributionId` and
+`MediaDistributionId`.
 
-## Admin dependencies
+Both alarms use the free `5xxErrorRate` metric and fire when the rate is above
+5% for three of three five-minute periods. State changes for just these alarms
+cross over to the home EventBridge bus. From there the notification stack turns
+ALARM states into the fixed `edge.alarm` signal and sends it through the
+existing encrypted queue, retry/DLQ, validation Lambda, and owner notification
+route.
 
-Site Health reads the application-stack alarm prefix in the home region plus
-four exact website alarms: backup freshness, alert-delivery DLQ, frontend 5xx,
-and media 5xx. It paginates application alarms and returns degraded
-health if an expected alarm is missing or a regional lookup fails. It does not
-include account-wide identity/security-change alarms or expose AWS identifiers.
-The live website/API latency checks are direct HTTP probes. Audit Log queries
-CloudWatch Logs; Website Analytics reads DynamoDB aggregates. Neither relies on
-paid CloudFront or API route metrics.
+I don't alarm on WAF blocks. If I need to look at them, they're in the redacted
+WAF log and the per-rule metrics.
 
-## Validation and rollout
+## API and application metrics
 
-CI never deploys the observability or WAF stacks; update them through separately
-reviewed change sets. Run `cfn-lint` on the affected templates, the operations
-suite, backend health and audit tests, and frontend checks. Then run the
-read-only preflight:
+API Gateway detailed route metrics are off. Stage-level latency and `5xx`
+metrics are still there. One gotcha: the HTTP API error alarm has to use `5xx`.
+`5XXError` is the REST API metric name.
+
+Application custom metrics, operational alarms, and audit logs all stay on.
+Traffic and error alarms treat quiet windows as not breaching. Backup freshness
+is the exception, where missing data counts as a failure.
+
+## What Site Health reads
+
+The admin Site Health page reads the application-stack alarm prefix in the home
+region plus four specific website alarms: backup freshness, alert-delivery DLQ,
+frontend 5xx, and media 5xx. It pages through the application alarms and
+reports degraded health if an expected alarm is missing or a regional lookup
+fails. It doesn't include the account-wide identity/security-change alarms, and
+it doesn't expose AWS identifiers.
+
+The live website and API latency checks are plain HTTP probes. Audit Log queries
+CloudWatch Logs, and Website Analytics reads DynamoDB aggregates. None of them
+depend on paid CloudFront or API route metrics.
+
+## Updating these stacks
+
+CI never deploys the observability or WAF stacks. I update them by hand through
+change sets that I look over first. Run `cfn-lint` on the affected templates,
+the operations suite, the backend health and audit tests, and the frontend
+checks. Then run the read-only preflight:
 
 ```bash
 python3 ops/observability_preflight.py \
@@ -47,23 +60,32 @@ python3 ops/observability_preflight.py \
   --expected-account-id EXPECTED_ACCOUNT_ID
 ```
 
-`observability_preflight.py` update mode accepts confirmed absence of paid
-monitoring subscriptions (the current state). Before retirement it accepted
-them only when both exact resources were owned by the existing stack. Create
-mode requires confirmed absence. It calls only STS, CloudFront GET, and
-CloudFormation describe APIs and never mutates AWS resources.
+In update mode, `observability_preflight.py` accepts a confirmed absence of the
+paid monitoring subscriptions, which is the current state. Before I retired
+them, it only accepted them when both specific resources belonged to the
+existing stack. Create mode requires them to be absent. The script only calls
+STS, CloudFront GET, and CloudFormation describe APIs, and it never changes
+anything in AWS.
 
-The retirement used two reviewed change sets: first only each legacy
-subscription's `DeletionPolicy` changed from `Retain` to `Delete`, then the
-resources were removed. The CloudFormation resource provider has no update
-handler and rejects changing an existing subscription to `Disabled`; deleting a
-monitoring subscription disables additional metrics without changing its
-distribution. For any change, preserve live secret parameters and unrelated resources, and verify
-final drift and public health. [`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) maps
-the edge alarms to their response procedure.
+## How I retired the paid subscriptions
 
-The August 2026 bill attributed $2.26 to API route metrics and $1.83 to additional
-CloudFront metrics. These are historical savings estimates, not fixed quotes.
-No browser telemetry, synthetic browser probes, or new notification destination
-is introduced. Rollback should restore a prior reviewed template; keeping paid
-metrics disabled does not affect basic error metrics or application logging.
+It took two change sets. The first only changed each legacy subscription's
+`DeletionPolicy` from `Retain` to `Delete`. The second removed the resources. I
+couldn't just set them to `Disabled`, because the CloudFormation resource
+provider has no update handler and rejects that change. Deleting a monitoring
+subscription turns off the additional metrics and leaves its distribution
+alone.
+
+For any change here, keep the live secret parameters and unrelated resources as
+they are, then check final drift and public health.
+[`ALARM_REGISTRY.md`](ALARM_REGISTRY.md) maps the edge alarms to what to do when
+they fire.
+
+## What it saves
+
+The August 2026 bill put $2.26 on API route metrics and $1.83 on additional
+CloudFront metrics. Treat those as historical savings estimates, not fixed
+quotes. None of this adds browser telemetry, synthetic browser probes, or a new
+notification destination. To roll back, restore an earlier approved template.
+Leaving the paid metrics off doesn't affect basic error metrics or application
+logging.

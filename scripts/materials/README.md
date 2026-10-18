@@ -1,24 +1,27 @@
 # Gallery material preparation
 
-The gallery's new material family uses real, matching CC0 wood scans and a small
-set of original procedural response maps. Existing photography and authored
-wallpaper remain untouched. Nothing is synthesized in the frame loop.
+The 3D gallery's newer materials use real, matching CC0 wood scans plus a few
+procedural response maps I generate myself. None of this touches the existing
+photography or the authored wallpaper, and nothing gets generated per frame at
+runtime.
 
-Run with Python and Pillow (pinned in `backend/functions/requirements.txt`, which
-the repository's Python CI environment installs):
+You need Python and Pillow. Pillow is pinned in
+`backend/functions/requirements.txt`, which the repo's Python CI environment
+installs.
 
 ```sh
 python scripts/materials/prepare_gallery_materials.py
 python scripts/materials/prepare_gallery_materials.py --check
 ```
 
-The first command downloads only missing source JPEGs into the operating system's
-temporary `museum-material-sources` directory. `--source-dir PATH` can use an
-existing source cache. Sources are pinned by SHA-256 and fetched only from the
-official Poly Haven CDN. Delivery is deterministic with Pillow 12.3.0. The second
-command is offline and does not write any files.
+The first command downloads any source JPEGs it doesn't have yet into a
+`museum-material-sources` folder in the OS temp directory. Pass
+`--source-dir PATH` to reuse a source cache you already have. Every source is
+pinned by SHA-256 and only fetched from the official Poly Haven CDN. With
+Pillow 12.3.0 the output is deterministic. The second command
+works offline and doesn't write anything.
 
-## Source and interpretation
+## Sources and how to use them
 
 | Material | Resolution | Source / role | Physical tile | Roughness mean |
 | --- | --- | --- | --- | --- |
@@ -29,44 +32,61 @@ command is offline and does not write any files.
 | Glazed ceramic | 256² × 1 | Subtle periodic glaze roughness, material color | 0.25 m | 0.898 multiplier |
 | Woven textile | 256² × 2 | Soft periodic warp/weft normal / roughness | 0.12 m | 0.937 multiplier |
 
-Poly Haven assets are [CC0](https://polyhaven.com/license). Complete provenance is
+Poly Haven assets are [CC0](https://polyhaven.com/license). Full provenance is
 in `public/assets/museum/textures/SOURCES.txt`.
 
-Only albedo textures use sRGB. Normal and roughness textures must use linear data
-interpretation. Three.js reads roughness from the green channel; the delivered
-monochrome files expand equally across RGB, so that channel remains correct.
-Keep normal strengths modest: floor around 0.22–0.30, joinery 0.16–0.24, fine
-plaster 0.18–0.25, and woven textile 0.20–0.30. The texture maps already contain
-shallow surface detail. Metallic roughness maps do not change metalness.
+Only albedo textures are sRGB. Normal and roughness textures have to be read as
+linear data. Three.js reads roughness from the green channel, and the
+monochrome files I ship are copied equally into R, G and B, so that channel is
+right.
 
-The scans contain surface color, not exhibition lighting. Light material tints
-preserve their response: the floor's mean sRGB is approximately 128/96/66 and the
-walnut's is 115/110/106. Dark brown multipliers would darken those colors again.
-Roughness maps multiply the material scalar; source scans use an approximately
-1.0 scalar, while the generated near-white response maps vary the chosen base
-roughness only slightly. Use mipmaps and bounded anisotropy for distant detail.
+Keep normal strengths modest, since the maps already carry shallow surface
+detail:
 
-## Cost and checks
+- floor: around 0.22–0.30
+- joinery: 0.16–0.24
+- fine plaster: 0.18–0.25
+- woven textile: 0.20–0.30
 
-All twelve new-family delivery images total 886,652 bytes (0.85 MiB). This
-replaces the old ~100 KiB floor family and can replace the old ~150 KiB plaster
-family. The conservative full RGBA8+mipmap footprint is 24 MiB; replacing the old
-512² floor/plaster family gives about 16 MiB additional storage when texture
-uploads are shared across repeated materials. No geometry, extra draw calls,
-runtime lights, or shadow passes are required by these assets. Superseded legacy
-maps are no longer packaged in the frontend artifact; upload-only deployment
-retains their existing CDN objects for older cached clients.
+Metallic roughness maps don't change metalness.
 
-The fine-plaster normal retains its full 512² analytic detail in a 67,352-byte,
-quality-92 JPEG with 4:4:4 sampling, saving 151,681 bytes against the former PNG.
-Its decoded channel RMS error is 2.37/1.66/1.07 out of 255 against the lossless
-normal field. At the recommended 0.2 normal strength this corresponds to about
-0.26 degrees RMS angular error. Compression does not change the field, physical
-scale, or material normal strength. Other generated maps remain lossless PNG.
+The scans hold surface color, not gallery lighting. Keep the material tints
+light so that color comes through: the floor's mean sRGB is about 128/96/66 and
+the walnut's is about 115/110/106. A dark brown multiplier would darken them a
+second time. Roughness maps multiply the material's roughness value. The scans
+expect a value of about 1.0, while the generated near-white response maps only
+nudge the base roughness you pick. Use mipmaps and capped anisotropy for detail
+in the distance.
 
-`--check` verifies exact image sizes, no embedded ICC transforms for data maps,
-normal-channel averages and unit lengths, exact lossless generated seam samples,
-bounded JPEG seam/channel error against the original analytic field, a 1 MiB
-family transfer ceiling, and a 26 MiB conservative texture-memory ceiling. All
-source channels undergo the same resize, and normal JPEG delivery disables
-chroma subsampling.
+## Size and checks
+
+All twelve delivered images for the new materials add up to 886,652 bytes
+(0.85 MiB). They replace the old ~100 KiB floor set and can replace the old
+~150 KiB plaster set. A conservative full RGBA8-plus-mipmaps estimate is
+24 MiB of texture memory. Replacing the old 512² floor/plaster set, that's about
+16 MiB more, assuming texture uploads are shared across repeated materials.
+These assets don't need any extra geometry, draw calls, runtime lights or
+shadow passes. The old maps they replace are no longer packaged in the
+frontend build, but because deploys only upload, their existing CDN objects
+stay put for older cached clients.
+
+The fine-plaster normal keeps its full 512² analytic detail as a 67,352-byte,
+quality-92 JPEG with 4:4:4 sampling. That's 151,681 bytes smaller than the PNG
+it replaced. Its decoded per-channel RMS error is 2.37/1.66/1.07 out of 255
+against the lossless normal field, which at the recommended 0.2 normal strength
+works out to about 0.26 degrees RMS angular error. Compression doesn't change
+the field, the physical scale or the normal strength. The other generated maps
+are still lossless PNG.
+
+`--check` verifies:
+
+- image sizes, and that data maps have no embedded ICC transforms;
+- normal-channel averages and unit lengths;
+- seam samples on the lossless generated maps, which must be identical;
+- JPEG seam and channel error against the original analytic field, within a
+  set limit;
+- a 1 MiB ceiling on the total download for these materials;
+- a 26 MiB ceiling on the conservative texture-memory estimate.
+
+All source channels go through the same resize, and the normal JPEG is saved
+without chroma subsampling.

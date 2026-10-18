@@ -1,195 +1,220 @@
-# Alarm registry and privacy-safe response map
+# Alarm registry and response notes
 
-The machine-readable inventory is `ops/alarm_registry.json`. It is the source
-of truth for alarm-to-runbook coverage: each group lists exact logical resource
-IDs, a severity, a route (`security-notification-topic`, the cross-Region
-validated signal queue, `cloudwatch-audit-only`, or the budget's optional owner
-email), and the `## ` heading below that answers it.
-`ops/tests/test_security_baseline.py` fails if an alarm, budget notification, or
-signal rule in `backend/template.yaml` or the notification, backup, budget,
-observability, or WAF templates is unregistered, or if a registered runbook
-heading is missing here. Notification endpoints are deliberately
-not stored in Git. One owner-controlled human destination is confirmed on the
-central topic, which is the complete delivery requirement for this personal
-website. A synthetic end-to-end delivery test should still be recorded
-quarterly and after routing changes.
+Every alarm, budget notification and signal rule I run is listed in
+`ops/alarm_registry.json`. Each group there names its logical resource IDs, a
+severity, a route and the `## ` heading below that tells me what to do about it.
+The route is one of `security-notification-topic`, the cross-Region signal queue
+that validates edge events, `cloudwatch-audit-only`, or the budget's optional
+owner email.
+
+`ops/tests/test_security_baseline.py` keeps the two files in sync. It fails if
+an alarm, budget notification or signal rule in `backend/template.yaml` or the
+notification, backup, budget, observability or WAF templates isn't registered,
+or if a runbook heading the registry points to is missing from this page.
+
+Notification endpoints aren't stored in Git. One destination that I control is
+confirmed on the central topic, and for a personal site that's all the delivery
+I need. I still record a synthetic end-to-end delivery test every quarter and
+after any routing change.
 
 ## Email routing policy
 
-Email is reserved for four outcomes: the site is down, data is at risk, the
-account may be compromised, or spend exceeds the budget. Everything else stays
-in CloudWatch as a record-only (`cloudwatch-audit-only`) alarm to review on the
-dashboard or during an investigation. Adding a route must not add AWS cost (no
-composite alarms, health checks, or extra metric alarms).
+I only want email when I have to do something. That comes down to four cases:
+the site is down, data is at risk, the account may be compromised, or spend is
+over budget. Everything else (25 alarms today) is record-only
+(`cloudwatch-audit-only`). Those sit in CloudWatch for the dashboard or for
+when I'm already investigating. Adding a route must not add AWS cost, so no
+composite alarms, health checks or extra metric alarms.
 
-| Outcome | Emailing signals |
+| Outcome | Signals that email |
 | --- | --- |
 | Site down | `ApiServerErrorAlarm`; frontend and media CloudFront 5xx rate (3 of 3 five-minute periods, via the edge signal queue) |
 | Data at risk | `AsyncFailureQueueAlarm`, `PreviewDeadLetterQueueAlarm`, `ZipPreparationFailureAlarm`, `OriginalComparisonFailureAlarm`, `AlbumWorkDeadLetterQueueAlarm`, `BackupFreshnessAlarm`, `BackupJobFailureRule`, `SecurityEventDlqAlarm` |
 | Account compromised | `RootActivityAlarm` |
 | Spend | `ian-photography-monthly-<stage>` budget, actual or forecasted spend over 100% (direct AWS Budgets email when `BudgetAlertEmail` is set) |
 
-Only exact website backup and edge 5xx events pass through the rule-scoped
-security signal queue and strict allowlist validator. Native CloudWatch
-notifications are restricted by topic policy to the exact alarm name patterns
-above; `ops/tests/test_security_operations.py` fails if any alarm that targets
-the topic is missing from that allowlist. Other account identity,
-managed-security, and configuration signals remain available in their source
-services and audit-only CloudWatch alarms. Never copy raw events, request or
-response bodies, emails, album or media identifiers, object keys, request URLs,
-credentials, provider errors, or log messages into notifications, tickets, or
-chat.
+Only the website's own backup and edge 5xx events go through the security
+signal queue, which is scoped to those rules and checked against a strict
+allowlist. The topic policy only accepts native CloudWatch notifications from
+the alarm name patterns above. `ops/tests/test_security_operations.py` fails if
+an alarm targets the topic without being on that allowlist. Other account
+identity, managed-security and configuration signals stay in their own services
+and in record-only CloudWatch alarms.
 
-## Common first five minutes
+Never copy any of these into a notification, ticket or chat: raw events,
+request or response bodies, emails, album or media identifiers, object keys,
+request URLs, credentials, provider errors or log messages.
 
-1. Confirm Region, signal name, transition time, current release, and whether a
-   reviewed deployment or recovery drill was active.
-2. Check the exact stack status and aggregate service metrics. Do not begin by
-   deleting, redriving, suppressing, unlocking, or broadening access.
+## First five minutes on any alarm
+
+1. Note the Region, signal name, transition time and current release, and
+   whether I was in the middle of a deploy or a recovery drill.
+2. Check the stack status and the aggregate service metrics. Don't start by
+   deleting, redriving, suppressing, unlocking or widening access.
 3. Correlate only by generated request/trace ID or CloudTrail role session.
-4. If an approved release caused the signal, use its reviewed rollback path.
-   Preserve evidence and retained resources.
-5. Record owner, acknowledgment time, severity, safe evidence location,
-   containment decision, closure proof, and follow-up due date.
+4. If an approved release caused it, roll back the way that release's plan
+   says to. Keep the evidence and any retained resources.
+5. Write down the owner, when I acknowledged it, severity, where the safe
+   evidence lives, what I did to contain it, how I proved it closed, and a
+   follow-up date.
 
 ## Application API health
 
-Compare API 5xx/latency with Lambda errors, throttles, duration, and the exact
-release. Verify a bounded public request before rollback. Never enable body or
-query logging to diagnose an API failure. Only the 5xx alarm emails; the p95
-latency alarm is record-only.
+Compare API 5xx and latency with Lambda errors, throttles and duration for the
+release that's live. Check a small public request before rolling back. Don't
+turn on body or query logging to debug an API failure. Only the 5xx alarm
+emails. The p95 latency alarm is record-only.
 
 ## Front-door denial
 
-Confirm the API custom origin, disabled default endpoint, the expected
-`current`/`previous` values in the origin-verification SSM parameter (by
-version metadata only), and the CloudFront origin-header path. Treat unexpected direct-origin
-acceptance as critical. Rotate the origin verifier only through its explicit
-dual-version runbook; provider credential rotation is unrelated. The alarm is
-record-only: denied direct-origin requests mean the guard is working.
+Check the API custom origin and that the default endpoint is still disabled.
+Look at the `current`/`previous` values in the origin-verification SSM parameter
+by version metadata only, and check the CloudFront origin-header path. If the
+origin is accepting requests that bypass CloudFront, treat that as critical.
+Rotate the origin verifier only with its dual-version runbook. That has nothing
+to do with provider credential rotation.
+
+This alarm is record-only. Denied direct-origin requests mean the check is
+doing its job.
 
 ## Application async and preview
 
-Inspect queue depth, oldest age, DLQ depth, worker aggregate reason codes, and
-metadata conflict counts. Stop dispatch or the event mapping when failures are
-systematic. Only the dead-letter alarms email (async failure, preview, ZIP,
-original-comparison, and album-work DLQs). Queue-age, preview queue-depth,
-worker failure/error/duration/throttle, metadata system-error/throttle,
-hover-preview, and original-index alarms share this procedure but are
-record-only diagnostics: retries and DLQs catch anything that is actually lost.
-For `ZipPreparationFailureAlarm` and the album-work alarms, apply the same rules
-to their queues. Never purge or bulk-redrive; select only proven idempotent messages.
+Look at queue depth, oldest message age, DLQ depth, the workers' aggregate
+reason codes and metadata conflict counts. If failures are systematic, stop
+dispatch or the event mapping.
+
+Only the dead-letter alarms email: async failure, preview, ZIP,
+original-comparison and album-work DLQs. A message there has failed for good.
+The rest share this procedure but are record-only diagnostics: queue age,
+preview queue depth, worker failure/error/duration/throttle, metadata
+system-error/throttle, hover-preview and original-index alarms. Retries and the
+DLQs catch anything that actually gets lost.
+
+The same rules apply to the queues behind `ZipPreparationFailureAlarm` and the
+album-work alarms. Never purge or bulk-redrive. Pick out only messages I know
+are safe to replay.
+
 For hover-preview signals, also compare the builder's native errors with the
-privacy-safe `ManifestBuildFailure` metric, inspect only aggregate reconciliation
-state, and verify one immutable manifest through the public alias. Keep the
-album-detail compatibility path enabled until the catalog reconciliation is
-complete and the refresh queue has no old messages.
+privacy-safe `ManifestBuildFailure` metric. Look only at aggregate
+reconciliation state, and check one immutable manifest through the public alias.
+Leave the album-detail compatibility path on until catalog reconciliation is
+done and the refresh queue has no old messages.
 
 For `OriginalComparisonFailureAlarm` and `OriginalIndexRefreshErrorsAlarm`,
-compare comparison DLQ depth and worker errors with private index freshness.
-Follow [photo-original failure recovery](PHOTO_ORIGINAL_COMPARISONS.md#failure-recovery-and-retention)
-to check the read-only Drive boundary and retry only proven idempotent website
-jobs. Preserve the published index, retained private previews, and raw archive;
-an unavailable original is a matching result rather than an indexing outage.
+compare comparison DLQ depth and worker errors with how fresh the private index
+is. Follow [photo-original failure recovery](PHOTO_ORIGINAL_COMPARISONS.md#failure-recovery-and-retention)
+to check the read-only Drive boundary, and retry only website jobs I know are
+safe to replay. Keep the published index, the retained private previews and the
+raw archive. An original that can't be found is a matching result, not an
+indexing outage.
 
 ## Authentication and authorization
 
-Group denials by stable reason, route template, status, and release. Separate a
-client/session regression from abuse without enumerating accounts. Preserve
-CAPTCHA, rate limits, JWT validation, and owner/admin/share boundaries. These
-alarms are audit-only to avoid emailing on routine internet scanning.
+Group denials by stable reason, route template, status and release. Work out
+whether it's a client or session regression or abuse, without enumerating
+accounts. Leave CAPTCHA, rate limits, JWT validation and the
+owner/admin/share boundaries alone. These alarms are record-only because the
+internet scans login pages all day and I don't want email for that.
 
 ## Application audit failure
 
-Prove the central log group and metric filters are accepting a synthetic safe
-success and denial. Audit logging must not break the user action, but a silent
-audit outage remains open until event delivery and forbidden-field tests pass.
-The alarm is record-only; review it with the audit log when investigating.
+Send one synthetic safe success and one denial, and check that the central log
+group and metric filters pick them up. Audit logging must never break the user's
+action, but a silent audit outage stays open until event delivery and the
+forbidden-field tests pass. The alarm is record-only. I look at it alongside the
+audit log when I'm investigating something.
 
 ## Account identity and encryption change
 
-Correlate root, IAM, and KMS changes to an approved operator/session. For an
-unapproved change, contain the identity, preserve CloudTrail, and verify keys
-remain enabled and unscheduled for deletion before restoring policy via IaC.
-`RootActivityAlarm` emails because routine work never uses the root identity.
-The IAM and KMS change alarms are record-only.
+Match root, IAM and KMS changes to an operator session I approved. If a change
+wasn't approved, contain the identity, keep CloudTrail intact, and check that
+keys are still enabled and not scheduled for deletion before restoring policy
+through IaC.
+
+`RootActivityAlarm` emails because I never use the root identity for routine
+work. The IAM and KMS change alarms are record-only.
 
 ## Trail and notification change
 
-Verify trail logging, S3 and CloudWatch delivery, digest creation, topic policy,
-EventBridge targets, retries, and DLQ depth. Never delete evidence or a failed
-delivery message merely to make the dashboard green. The control-plane change
-alarms are audit-only.
+Check trail logging, S3 and CloudWatch delivery, digest creation, topic policy,
+EventBridge targets, retries and DLQ depth. Never delete evidence or a failed
+delivery message just to make the dashboard green. The control-plane change
+alarms are record-only.
 
 ## Website notification delivery
 
-Inspect the website security-event DLQ and the exact backup/edge EventBridge
-targets. Do not purge or redrive messages in bulk. Confirm the fixed signal
-contract, retry only proven idempotent events, and verify the owner subscription
-remains confirmed without recording its endpoint.
+Look at the website security-event DLQ and the backup/edge EventBridge targets.
+Don't purge or redrive in bulk. Confirm the fixed signal format, retry only
+events that are safe to replay, and check the owner subscription is still
+confirmed without writing its endpoint down anywhere.
 
 ## Security service change
 
-Check home-Region recorder/delivery status, the exact detector feature map and
-publishing frequency, the standards-free Security Hub hub, CI security coverage,
-and Access Analyzer state. Restore only through the owning templates, rerun the
-fail-closed home posture audit, and record why the service changed. This
-account-wide alarm is audit-only.
+Check the home-Region recorder and delivery status, the detector's feature map
+and publishing frequency, that Security Hub still has no standards enabled, CI
+security coverage, and Access Analyzer state. Restore only through the templates
+that own them, rerun the home check (`ops/ci/home_security_posture.py`,
+which exits non-zero on any mismatch), and note why the service changed. This
+alarm covers the whole account and is record-only.
 
-The configuration-change metric intentionally continues to flag creation,
-update, or deletion of a Security Hub finding aggregator as unauthorized
-security-topology activity. This repository does not manage an aggregator;
-investigate that signal rather than treating it as expected drift.
+The configuration-change metric still flags any create, update or delete of a
+Security Hub finding aggregator as unauthorized. I don't manage an aggregator in
+this repo, so if that fires, investigate it. It isn't expected drift.
 
 ## Data protection change
 
-Verify S3 public access, TLS policy, encryption, versioning, and access logging;
-DynamoDB PITR/deletion protection; backup vault lock/recovery points; and the
-approved backup plan/selection/lifecycle/access policy. Planned changes still require a disposition because CloudFormation can
-transiently toggle a protection.
+Check S3 public access, TLS policy, encryption, versioning and access logging;
+DynamoDB PITR and deletion protection; backup vault lock and recovery points;
+and the approved backup plan, selection, lifecycle and access policy. Planned
+changes still need a note on what happened, because CloudFormation can briefly
+toggle a protection off and on during an update.
 
 ## Backup job failure
 
-Use aggregate AWS Backup job state and resource type. Confirm the protected
-selection still has exactly the approved resource count, role access, vault
+Work from aggregate AWS Backup job state and resource type. Check that the
+protected selection still has the approved resource count, role access, vault
 encryption, and start/completion windows. Retry only after the cause is fixed.
 
 ## Backup freshness
 
-Treat missing metric data as a failed control. Verify the scheduled freshness
-function ran, then compare aggregate expected, healthy, and failed counts. The
-expected count is exactly two source resources. Do not print recovery-point
-ARNs or resource ARNs. Close only after both exact metadata tables have a
-completed recovery point inside the approved age window in the source vault.
+Missing metric data counts as a failure. Check that the scheduled freshness
+function ran, then compare the aggregate expected, healthy and failed counts.
+The expected count is two source resources. Don't print recovery-point ARNs or
+resource ARNs. Close it only once both metadata tables have a completed recovery
+point inside the approved age window in the source vault.
 
 ## Edge health
 
-Compare frontend and media 5xx rates and request volume by release. Both alarms
-are owned by the us-east-1 WAF stack, require more than 5% 5xx in three of three
-five-minute periods, and are forwarded through the exact edge event rule to the
-existing home-region notification pipeline. Paid origin-latency and
-cache-hit metrics are disabled. The observability stack intentionally collects no browser
-telemetry and runs no synthetic browser probe; use the credential-free public
-posture smoke test for release verification.
+Compare frontend and media 5xx rates and request volume by release. The us-east-1
+WAF stack owns both alarms. Each fires on more than 5% 5xx in three of three
+five-minute periods, and the edge event rule forwards it to the notification
+pipeline in the home Region. Paid origin-latency and cache-hit metrics are off.
+The observability stack collects no browser telemetry and runs no synthetic
+browser probe. For release checks, use the credential-free public smoke test.
 
-WAF blocks are not alarmed: a block means the WAF is working. Review the
-redacted block log and per-rule WAF metrics after a reported false positive.
-Return only an affected rule to count mode after a verified false positive. Any
-exclusion needs an owner, reason, expiry, regression fixture, and rollback
-record.
+The web ACL has five rules: per-IP rate limits for Explore (600), the API
+(3000) and media (4000), each per 5 minutes, plus two AWS managed rule groups.
+The frontend and the media CDN share it. There are no global circuit breakers.
+
+I don't alarm on WAF blocks, because a block means the WAF is working. After a
+reported false positive, look at the redacted block log and the per-rule WAF
+metrics. Put only the affected rule back into count mode, and only once the
+false positive is confirmed. Any exclusion needs an owner, a reason, an expiry,
+a regression fixture and a rollback record.
 
 ## Monthly spend
 
-The optional `ian-photography-monthly-<stage>` AWS Budget emails the owner
-directly (no SNS) when actual or forecasted monthly spend exceeds 100% of the
-limit. Use Cost Explorer by service and usage type to find the driver, compare
-it with the latest release and the WAF circuit-breaker metrics, and correct the
-cause before raising the limit. The budget never disables a control.
+The optional `ian-photography-monthly-<stage>` AWS Budget emails me directly
+(no SNS) when actual or forecasted monthly spend goes over 100% of the limit.
+The limit is a deploy-time parameter and is $60 today. Use Cost Explorer by
+service and usage type to find what's driving it, compare that with the latest
+release and the WAF rule metrics, and fix the cause before raising the limit.
+The budget never turns off a control.
 
-## Delivery test and review record
+## Testing delivery
 
-Quarterly and after routing changes, send synthetic messages containing only a
-test marker, signal ID, timestamp, and release. Confirm owner receipt, record
-acknowledgment latency, verify the delivery DLQ remains empty, and update
-`lastEndToEndTestDate` in the JSON registry. A topic ARN or pending subscription
-is not successful delivery.
+Every quarter, and after any routing change, send synthetic messages that carry
+only a test marker, signal ID, timestamp and release. Confirm I got them, note
+how long acknowledgment took, check the delivery DLQ is still empty, and update
+`lastEndToEndTestDate` in the JSON registry. A topic ARN or a pending
+subscription doesn't count as working delivery.
