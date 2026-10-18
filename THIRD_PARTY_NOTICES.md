@@ -1,6 +1,6 @@
 # Third-party notices
 
-The website distributes the full license and copyright notices in [`public/licenses/THIRD_PARTY_NOTICES.txt`](public/licenses/THIRD_PARTY_NOTICES.txt), linked from `/licenses`. The production build generates this file from the packages included in the browser bundles, including fonts and native runtime components. `dist/licenses/packages.json` records their names and versions.
+The website distributes the full license and copyright notices in [`public/licenses/THIRD_PARTY_NOTICES.txt`](public/licenses/THIRD_PARTY_NOTICES.txt), linked from `/licenses`. The production build generates this file from the packages included in the browser bundles, including fonts and native runtime components. `dist/licenses/packages.json` records their names, versions and declared licenses.
 
 ## LibRaw and rawconvert-wasm
 

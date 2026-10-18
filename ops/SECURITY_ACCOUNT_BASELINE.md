@@ -1,37 +1,37 @@
 # AWS account security stacks
 
-These templates set up the account-level security baseline. I split them by
-lifecycle and by who owns what, so a failed update or a stack deletion can't
-leave a retained CloudTrail behind after deleting its bucket policy, log group
-or delivery role.
+These templates set up the account-level security baseline. They are split by
+lifecycle and ownership. The CloudTrail trail, its bucket, bucket policy, log
+group, delivery role and KMS key live in one small stack and are retained
+together, so a failed update or a stack deletion cannot leave a trail without
+its delivery chain.
 
-Reading or validating this repo never creates an SNS subscription, sends
-email, deploys a stack, imports a resource or turns on a paid account service.
-I make each of those calls myself, after an inventory and a change set I've
-looked over.
+Reading or validating this repo does not create an SNS subscription, send
+email, deploy a stack, import a resource or turn on a paid account service.
+Each of those is a separate operator action, taken after an inventory and a
+reviewed change set.
 
 ## What's in each file
 
-| Layer | File | What it owns and what stops it doing damage |
+| Layer | File | What it owns |
 | --- | --- | --- |
-| Audit foundation | `security_audit_foundation_template.yaml` | One home-Region stack. The Object-Locked CloudTrail evidence bucket, bucket policy, log group, role and multi-region trail are retained together. Once Config is healthy, an opt-in parameter adds Config delivery object events for that one bucket. |
-| Notifications | `security_notifications_template.yaml` | Regional SNS routing for privacy-safe website alarms and the root-activity alarm, encrypted SQS delivery queues, and record-only account alarms. It keeps the subscriber I approved without paying for a dedicated KMS key every month. |
-| Managed services | `security_managed_services_template.yaml` | Config, GuardDuty, Security Hub and the account Access Analyzer. Every singleton defaults to `skip`. |
-| Home detection check | `ci/home_security_posture.py` | Read-only check of the home-Region GuardDuty and Security Hub setup that reports aggregates only. Any mismatch fails it, and it never prints provider identifiers, tags, findings or Region names. |
-| Backups | `security_backup_template.yaml`, `security_backup_replica_template.yaml` | Daily backup of both metadata tables into a retained vault using the AWS-managed key, plus the old `us-east-2` replica vault, kept only until its recovery points age out. S3 relies on versioning and the existing external media backup. Creation and Vault Lock are off by default. |
-| Cost | `security_budget_template.yaml`, `security_budget_preflight.py` | One optional retained account budget. Creation is off by default and needs an amount I've approved. An optional owner email, set at deploy time, gets free alerts when actual or forecast spend goes over 100%. |
-| Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Every source signal, the privacy rules, which runbook handles it, who responds, and when delivery was last tested (quarterly). |
-| Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors show up as `skip-inventory-incomplete`, never as “absent.” |
-| Inspector | `disable_inspector_lambda_scanning.py` | Turns off the redundant paid Lambda scanners. It's a dry run unless every apply flag matches. CI stays the code and dependency scanner. |
+| Audit foundation | `security_audit_foundation_template.yaml` | One home-Region stack: the CloudTrail evidence bucket (Object Lock, governance mode, 365-day default retention, SSE-KMS), its bucket policy, the customer-managed KMS key and alias, the `/aws/security/ian-photography-<stage>` log group (365-day retention), the CloudTrail delivery role and the multi-region trail. All are retained. An optional parameter adds S3 object data events for the Config delivery bucket. |
+| Notifications | `security_notifications_template.yaml` | The `ian-photography-security-<stage>` SNS topic (no customer-managed KMS key), the signal queue and delivery DLQ (SQS-managed SSE), the signal-processor Lambda, the edge alarm forwarding rule, CloudTrail metric filters, the root-activity alarm and the record-only account alarms. It creates no subscription. |
+| Managed services | `security_managed_services_template.yaml` | AWS Config (recorder, delivery bucket, delivery channel, rules), the GuardDuty detector, the Security Hub hub and the account Access Analyzer. Every singleton defaults to `skip`. |
+| Home detection check | `ci/home_security_posture.py` | Read-only check of the home-Region GuardDuty detector and Security Hub hub. It prints counts only and exits `2` on any mismatch. |
+| Backups | `security_backup_template.yaml`, `security_backup_replica_template.yaml` | A daily backup of the Albums and PreviewMetadata tables into a retained vault that uses the AWS-managed Backup key, a backup-job failure rule and a freshness check. The replica template defines a retained `us-east-2` vault with its own KMS key; no backup plan copies to it. S3 relies on bucket versioning and the external media backup. Creation and Vault Lock are off by default. |
+| Cost | `security_budget_template.yaml`, `security_budget_preflight.py` | One optional retained monthly cost budget. Creation is off by default and needs an approved amount. An optional deploy-time email gets AWS Budgets alerts when actual or forecasted spend goes over 100%. |
+| Alarm map | `alarm_registry.json`, `ALARM_REGISTRY.md` | Every alarm, budget notification and signal rule, its route and runbook heading, and the date of the last end-to-end delivery test (90-day interval). |
+| Inventory | `security_preflight.py` | Read-only AWS inventory. Access errors show up as `skip-inventory-incomplete`, never as absent. |
+| Inspector | `disable_inspector_lambda_scanning.py` | Turns off Inspector Lambda and Lambda code scanning. It is a dry run unless every apply flag matches. |
 
-`us-west-2` is the home Region. The foundation trail already records
-multi-region and global management events, so don't deploy a second copy of the
-foundation anywhere else. Config delivery, the managed GuardDuty detector,
-Security Hub and Access Analyzer only run in the home Region. They stay
-queryable and audited, but their account-wide findings don't go to the website
-email topic. I don't claim GuardDuty or Security Hub coverage in any other
-Region, and this repo doesn't deploy or manage a Security Hub finding
-aggregator.
+`us-west-2` is the home Region. The foundation trail records multi-region and
+global service management events, so a second copy of the foundation is not
+needed in another Region. Config, the GuardDuty detector, Security Hub and
+Access Analyzer are managed only in the home Region. Their findings are not
+routed to the website email topic. This repo makes no GuardDuty or Security Hub
+coverage claims for other Regions, and it does not deploy or manage a Security
+Hub finding aggregator.
 
 ## Validate before touching AWS
 
@@ -84,7 +84,7 @@ Run this as the same identity that would deploy:
 python3 ops/security_preflight.py --region us-west-2 --stage prod
 ```
 
-Once the foundation exists, pass its log group so the metric filters get
+Once the foundation exists, pass its log group so the metric filters are
 inventoried too:
 
 ```bash
@@ -95,49 +95,51 @@ python3 ops/security_preflight.py \
   --details
 ```
 
-The normal report hides AWS identifiers. `--details` shows only the AWS names
-and identifiers I need to work out ownership or plan an import. It never shows
-log events, findings, table items or backup content. Exit status `2` means the
-inventory is incomplete. While `inventoryErrors` has anything in it, leave every
+The default report hides AWS identifiers. `--details` adds the AWS names and
+identifiers needed for an ownership or import review. Exit status `2` means the
+inventory is incomplete. While `inventoryErrors` is not empty, leave every
 create mode at `skip`.
 
-If a singleton already exists, or something already has one of the fixed names,
-stop and find out who owns it:
+If a singleton already exists, or a resource already uses one of the fixed
+names, stop and find its owner:
 
 - Existing recorder or channel: `ConfigDeploymentMode=skip`.
 - Existing detector: `GuardDutyDeploymentMode=skip`, but only after
-  `get-detector` shows it's enabled and all 12 reported feature states match
-  the inventory I signed off on. CloudFormation can configure six of them: S3
-  and Lambda on; EKS audit, EBS malware, RDS login and runtime monitoring off.
-  GuardDuty's service-managed CloudTrail, DNS and flow-log sources must be on,
-  and AI analyst, AI protection and legacy EKS runtime monitoring must be off.
-  Any feature that's missing, extra, suspended, drifted or new blocks the
-  rollout. Check Organizations and delegated-administrator ownership before
-  changing features.
+  `get-detector` shows it is enabled and all 12 reported feature states match
+  the expected map. CloudFormation configures six of them: S3 data events and
+  Lambda network logs on; EKS audit logs, EBS malware protection, RDS login
+  events and runtime monitoring off. The home check also expects the
+  CloudTrail, DNS and flow-log sources on, and AI analyst, AI protection and
+  EKS runtime monitoring off. Any missing, extra or different feature blocks
+  the rollout. Check Organizations and delegated-administrator ownership
+  before changing features.
 - Existing hub: `SecurityHubDeploymentMode=skip`, but only after the home hub
   shows zero enabled standards, the `SECURITY_CONTROL` finding generator and
-  the required tags. I keep the broad standards off because their paid Config
-  evaluations cost far too much for an account this size. The targeted Config
-  rules further down are the control set I actually use. Check central
-  configuration and delegated administration before changing the hub.
+  the required tags. Standards stay off; the template comment notes that broad
+  standards add many paid Config rule evaluations. The Config rules listed
+  below are the control set in use. Check central configuration and delegated
+  administration before changing the hub.
 - Existing account analyzer: `AccessAnalyzerDeploymentMode=skip`, and keep its
   archive rules.
 - Existing trail, log group, topic, KMS alias, queue, rule, alarm, vault or plan
-  with a matching name: manage it from the stack it's already in, do a separate
-  supported import, or leave it managed outside this repo. Never deploy over a
-  name I can't explain.
+  with a matching name: manage it from the stack that already owns it, run a
+  separate supported import, or leave it managed outside this repo. Do not
+  deploy over a name whose owner is unknown.
 
-Imports don't happen on their own. First check that the resource type supports
-import, capture its identifier and current configuration, set it to retain in
-the template, create an import change set, and check drift afterwards. Never
-delete an account security service just so this template can create a fresh
-one.
+Imports are manual. Check that the resource type supports import, capture its
+identifier and current configuration, set it to retain in the template, create
+an import change set, and check drift afterwards. Do not delete an account
+security service so that this template can create a new one.
 
-Every managed-services stack operation has to pass `ExpectedAccountId` and
-`ExpectedRegion`. CloudFormation rules compare them to `AWS::AccountId` and
-`AWS::Region` before any resource is evaluated, even on an all-`skip` deploy.
-Never guess these values, and never reuse one Region's parameter file in
-another Region.
+Every managed-services stack operation passes `ExpectedAccountId` and
+`ExpectedRegion`. A CloudFormation rule compares them to `AWS::AccountId` and
+`AWS::Region` before any resource is evaluated, including on an all-`skip`
+deploy. Do not reuse one Region's parameter file in another Region.
+
+The live managed-services stack runs with `ConfigDeploymentMode`,
+`GuardDutyDeploymentMode` and `AccessAnalyzerDeploymentMode` set to
+`create-confirmed-absent` and `SecurityHubDeploymentMode=skip`. The home
+Security Hub hub exists outside that stack.
 
 ### Checking GuardDuty and Security Hub in the home Region
 
@@ -147,181 +149,165 @@ Run the read-only home check:
 python3 ops/ci/home_security_posture.py --region us-west-2
 ```
 
-It only accepts a well-formed Region name. It then requires exactly one enabled
-GuardDuty detector with 15-minute publishing, the full 12-feature map I signed
-off on, and the required application/stage tags. Extra tags added by AWS or
-CloudFormation are fine. Missing or changed required tags, unknown features,
-duplicate features or any difference in feature state fail the check.
+It accepts only a well-formed Region name. It requires one enabled GuardDuty
+detector with `FIFTEEN_MINUTES` publishing, the 12-feature map above, and the
+`Application=IanTruongPhotography` and `Stage=prod` tags. Extra tags are
+allowed. Missing or changed required tags, unknown features, duplicate features
+or a different feature state fail the check.
 
-It also requires the home Security Hub default hub, the `SECURITY_CONTROL`
-finding generator, the required application/stage tags and zero enabled
-standards. An enabled standard counts as drift from the low-cost setup I chose.
-A missing hub, an enabled standard, a malformed provider response, an access
-failure or a timeout all return exit status `2`. Errors are generic. A passing
-report only contains detector, hub, standard and provider-transition counts
-plus `IN_SYNC`. It never shows detector IDs, ARNs, account identity, tags,
-findings or provider responses.
+It also requires the default Security Hub hub in that Region, the
+`SECURITY_CONTROL` finding generator, the same required tags and zero enabled
+standards. A missing hub, an enabled standard, a malformed response, an access
+failure or a timeout returns exit status `2` with a generic error. A passing
+report contains only detector, hub, standard and provider-transition counts and
+`"status":"IN_SYNC"`. It does not print detector IDs, ARNs, account identity,
+tags, findings or provider responses.
 
-The check changes nothing, and it doesn't inventory or vouch for anything
-outside the home Region. Create or update the managed-services stack only
-through its own CloudFormation change set with the right account and home-Region
-parameters. Don't accept a replacement or deletion I can't explain, turn on
-stack termination protection, and rerun the home check once the stack is stable.
-The multi-region CloudTrail foundation doesn't mean GuardDuty or Security Hub
-cover other Regions.
+The check changes nothing and does not cover any Region other than the one
+passed. Create or update the managed-services stack only through its own
+change set with the correct account and Region parameters. Reject any
+replacement or deletion that is not explained, keep termination protection on,
+and rerun the home check once the stack is stable.
 
 ## Stack operations, in order
 
 ### 1. Audit foundation
 
-Create `security_audit_foundation_template.yaml` only from a change set I've
-read, after confirming the trail and log-group names are free and that I don't
-already have another multi-region management trail I'd rather keep. As soon as
-it's created, turn on termination protection for the foundation stack.
+Create `security_audit_foundation_template.yaml` only from a reviewed change
+set, after confirming the trail and log-group names are free and that no other
+multi-region management trail should be kept instead. Turn on termination
+protection for the stack as soon as it is created.
 
-All five resources in the delivery chain use `RetainExceptOnCreate` and
-retained replacements. A normal rollback during initial creation cleans up, and
-after a successful create the whole evidence path survives. S3 Object Lock can
-still hold on to objects written during an odd failed create. That's why this
-stack is small and foundation-only, and why the trail depends on the bucket
-policy. Never force-delete the bucket or policy to get a stack operation
-unstuck.
+Every resource in the template uses `DeletionPolicy: RetainExceptOnCreate` and
+`UpdateReplacePolicy: Retain`. A rollback during the initial create cleans up;
+after a successful create the evidence path survives a stack deletion. The
+trail has `DependsOn: SecurityAuditBucketPolicy`. S3 Object Lock can keep
+objects written during a failed create. Do not force-delete the bucket or
+policy to unblock a stack operation.
 
-Check trail logging, digest validation, CloudWatch delivery, versioning, Object
-Lock governance retention, the public access block and the TLS deny. Confirm the
-bucket policy and role trust limit CloudTrail to this trail's ARN and this
-account. Confirm termination protection is on.
+After creation, check trail logging, log file validation, CloudWatch delivery,
+versioning, Object Lock governance retention, the public access block and the
+TLS deny. Confirm the bucket policy, KMS key policy and role trust limit
+CloudTrail to this trail's ARN and this account. Confirm termination protection
+is on.
 
 Leave `ConfigDeliveryBucketName` empty when first creating the foundation. The
-Config delivery bucket doesn't exist until the managed-services stack has been
-created. An empty value keeps management-event logging and doesn't turn on any
-S3 object data-event selector. Don't guess or precompute the generated bucket
-name.
+Config delivery bucket does not exist until the managed-services stack has
+created it. An empty value keeps management-event logging and adds no S3 object
+data-event selector. Do not guess or precompute the generated bucket name.
 
 ### 2. Notifications and alarms
 
-Pass the foundation's log-group output to
-`security_notifications_template.yaml`. The `ian-photography-security-<stage>`
-topic only carries privacy-safe operational signals, so it doesn't get its own
-customer-managed KMS key. The topic policy only lets native CloudWatch publish
-from this account and from the name patterns of alarms that are meant to email.
-A test fails if any alarm that targets the topic is missing from that
-allowlist.
+Pass the foundation's log-group name to `security_notifications_template.yaml`
+as `SecurityAuditLogGroupName`. The `ian-photography-security-<stage>` topic
+carries only fixed operational signals and has no customer-managed KMS key.
+The topic policy lets CloudWatch publish only from this account and only from
+the names of alarms that are meant to email. A test fails if an alarm that
+targets the topic is missing from that allowlist.
 
-EventBridge never publishes straight to the responder topic. Only the website
-backup-failure and edge 5xx alarm rules can send fixed signals to the ingress
-queue, which uses SQS-managed SSE. A small Lambda checks every field of the
-signal before publishing with its own IAM role.
+EventBridge does not publish to the topic directly. Only the
+`ian-photography-backup-job-failed-<stage>` and
+`ian-photography-waf-alarm-<stage>` rules can send to the signal queue. The
+signal-processor Lambda checks every field of each signal against a fixed
+contract before publishing with its own IAM role.
 
-Website EventBridge targets have a retry limit and a 14-day DLQ, also with
-SQS-managed SSE. A DLQ-depth alarm fires on the first failed delivery that
-shows up. The root-activity alarm emails because I never use the root identity
-for routine work. Record-only account alarms cover KMS key, routing, IAM,
-CloudTrail, managed security service and data-protection activity without
-sending email. Routine stack, CloudFront and WAF updates aren't alarmed, since
-every deploy makes them; CloudTrail and drift checks are the record for those.
-GuardDuty and Security Hub stay enabled, queryable and checked in their own
-services, but their account-wide findings aren't website notifications.
+The EventBridge targets retry for up to 10 attempts or one hour, then send to a
+DLQ with 14-day retention. `SecurityEventDlqAlarm` fires when one message is
+visible in that DLQ. `RootActivityAlarm` emails. The record-only account alarms
+cover CloudTrail, IAM, KMS, notification routing, managed security service and
+data-protection changes. There are no alarms for routine CloudFormation,
+CloudFront or WAF updates; CloudTrail and drift checks record those. GuardDuty
+and Security Hub findings stay in their own services and are not website
+notifications.
 
-The template creates no subscriber. I attach a monitored destination only after
-I've approved it and finished its confirmation flow. Once routing exists, test
-one controlled alarm and one EventBridge event. Look only at aggregate DLQ
-counts, and don't print finding messages.
+The template creates no subscriber. Attach a monitored destination only after
+it is approved and has completed confirmation. Once routing exists, test one
+controlled alarm and one EventBridge event. Look only at aggregate DLQ counts,
+and do not print message bodies.
 
 ### 3. Managed security services
 
-For a new account, or when re-creating on purpose, first deploy
-`security_managed_services_template.yaml` with every mode at `skip`. That gives
-a singleton layer that does nothing yet. Routine updates keep the current live
-parameters. Only switch a service to `create-confirmed-absent` when a fresh,
-complete inventory shows it doesn't exist.
+For a new account, or a planned re-creation, first deploy
+`security_managed_services_template.yaml` with every mode at `skip`. Routine
+updates keep the current live parameters. Switch a service to
+`create-confirmed-absent` only when a fresh, complete inventory shows it does
+not exist.
 
-Config doesn't use the audit-foundation bucket any more. AWS Config can't
-deliver to an S3 bucket with Object Lock default retention, so this stack
-creates its own retained Config-history bucket. It's private, SSE-S3
-encrypted, versioned, TLS-only, lifecycle-managed, and has no Object Lock
-default retention. Its three Config service grants only allow this account and
-this Region's Config source ARN. The recorder role is scoped to the same bucket
-and object prefix as a backstop. The CloudTrail evidence bucket policy has no
-Config grant.
+Config delivers to its own retained bucket created by this stack, not to the
+audit-foundation bucket. The bucket is private, SSE-S3 encrypted, versioned and
+TLS-only, moves objects to Glacier Instant Retrieval after 90 days, expires them
+after 2555 days, and has no Object Lock. Its three Config service statements
+allow only this account and this Region's Config source ARN. The recorder uses
+the `AWSServiceRoleForConfig` service-linked role. The CloudTrail evidence
+bucket policy has no Config grant.
 
-#### Why the delivery channel is a custom resource
+#### Delivery channel custom resource
 
-Config's startup order is awkward. The native
-`AWS::Config::ConfigurationRecorder` provider calls `PutConfigurationRecorder`
-and then waits for a delivery channel before it stabilizes. `PutDeliveryChannel`
-rejects requests until that recorder record exists. So the native recorder and
-channel handlers can both sit in `CREATE_IN_PROGRESS` forever, with the channel
-handler never calling `PutDeliveryChannel`.
+The recorder is a native `AWS::Config::ConfigurationRecorder`. The delivery
+channel is a `Custom::ConfigDeliveryChannel` backed by the
+`ian-photography-config-delivery-<stage>` Lambda. The custom channel depends on
+the delivery bucket policy and the recorder. The recorder does not depend on
+the channel. `ops/tests/test_security_operations.py` checks both. The Config
+rules depend on the recorder and the channel.
 
-I keep the native recorder but swap the native delivery channel for a tightly
-scoped `Custom::ConfigDeliveryChannel`. The custom resource starts alongside the
-native recorder and polls only the aggregate recorder description until the
-expected recorder shows up. It rejects any other recorder or channel, then calls
-`PutDeliveryChannel` for the bucket this stack created. That unblocks the native
-provider, which starts and stabilizes the recorder as normal. Config rules
-depend on both finished resources. Don't add a recorder dependency to the custom
-channel or a channel dependency to the recorder. Either one brings the deadlock
-back.
+On create or update, the handler waits for the expected recorder, rejects any
+other recorder or channel, and then calls `PutDeliveryChannel` for the bucket
+this stack created.
 
-The orchestration Lambda can only:
+The orchestration Lambda's role can only:
 
-- describe Config state
-- put or delete the one regional delivery channel
-- stop the expected recorder during a rollback of the initial create
-- get, put or delete one fixed regional SSM ownership parameter
+- describe Config recorders, recorder status and delivery channels
+- put or delete a delivery channel
+- stop a configuration recorder
+- get, put or delete the one SSM ownership parameter
 
-IAM applies the active-Region condition, and the SSM statement is also limited
-to this account, stage and parameter ARN. Before changing anything, the handler
-checks for itself the expected account, Region, names, bucket, frequency,
-recorder role ARN, resource-type set, old update state, stack ARN and
-CloudFormation physical ownership. It logs only the request type, aggregate
-outcome and exception class. It never logs a CloudFormation event, response
-URL, bucket name, marker token or service response.
+The Config and SSM statements have an `aws:RequestedRegion` condition for the
+stack's Region, and the SSM statement is limited to the ownership parameter's ARN. Before
+changing anything, the handler checks the expected account, Region, names,
+bucket, frequency, recorder role ARN, resource-type set, the old properties on
+update, the stack ARN and the physical resource ID. It logs only the request
+type, outcome and exception class.
 
 Create and update are safe to retry. Before `PutDeliveryChannel`, the handler
 creates `/ian-photography/config-delivery/ian-photography-STAGE/owner` with
-overwrite disabled. Its value is a one-way SHA-256 token derived from the stack
-ID, not the stack ID itself. A retry from the same stack finds that marker and
-the matching channel. The handler refuses to continue if it finds a different
-token, a matching channel with no marker, no marker during an update, or a
-channel that has drifted. The custom resource has no way to adopt an existing
-channel.
+overwrite disabled. Its value is a SHA-256 token derived from the stack ID. A
+retry from the same stack finds that marker and the matching channel. The
+handler refuses to continue if it finds a different token, a matching channel
+with no marker on create, no marker on update, or a channel that has drifted.
+The custom resource cannot adopt an existing channel.
 
-If a create fails, the callback returns the deterministic owned physical ID as
-soon as the account, Region and properties check out, even if the failure came
-after AWS accepted `PutDeliveryChannel`. During the initial rollback it deletes
-a channel only if the physical ID, the StackId-derived marker, the channel
-definition, the recorder role ARN and the recorder resource-type set all still
-match. It never stops or deletes anything with a missing or mismatched marker, a
-channel that was there before, or a drifted recorder or channel. If the channel
-never existed, rollback removes only its own matching marker. The recorder wait
-is capped at 420 seconds inside a 600-second Lambda and a 660-second
-custom-resource timeout. That leaves at least 90 seconds for verification and a
-three-attempt CloudFormation callback.
+If a create fails, the callback returns the deterministic physical ID once the
+account, Region and properties pass validation. During the initial rollback,
+the handler deletes the channel only if the physical ID, the marker token, the
+channel definition, the recorder role ARN and the recorder resource-type set
+all still match. It retains anything with a missing or mismatched marker or a
+drifted recorder or channel. If the channel never existed, rollback removes only
+its own matching marker. The recorder wait is capped at 420 seconds (and at
+least 90 seconds below the remaining Lambda time) inside a 600-second Lambda
+timeout and a 660-second custom-resource `ServiceTimeout`. The CloudFormation
+callback is tried up to three times.
 
 After a successful create, `RetainExceptOnCreate` keeps the recorder, the
-channel and its ownership marker, the delivery bucket, the bucket policy and the
-recorder role when the stack is deleted normally. That matches the retention
-rules for the rest of the account security stacks.
+custom channel and its ownership marker, the delivery bucket and the bucket
+policy when the stack is deleted. The detector, hub and analyzer use the same
+policy.
 
 #### What Config records and checks
 
-The recorder only covers CloudTrail trails, DynamoDB tables, KMS keys and S3
-buckets. Lambda deployments aren't recorded. The periodic root-access-key and
-key-rotation rules still run without broad configuration-item recording.
-`ConfigLambdaPermissionsDaily` invokes a restricted Lambda once every 24 hours
-that reads live function, alias and version policies. It reports one
-account-level compliance result with counts only. Public grants or an incomplete
-inventory are NON_COMPLIANT. It logs no function environment, policy body or
-identifier. Detection can take up to a day. Deploy and verify the daily rule
-before retiring the change-triggered Lambda rule.
+The recorder covers only `AWS::CloudTrail::Trail`, `AWS::DynamoDB::Table`,
+`AWS::KMS::Key` and `AWS::S3::Bucket`, with global resource types off. Lambda
+functions are not recorded. The root-access-key and KMS rotation rules run on a
+24-hour schedule. `ConfigLambdaPermissionsDaily` invokes the
+`ian-photography-lambda-permissions-<stage>` Lambda once every 24 hours. It
+reads live function, alias and version policies and reports one account-level
+compliance result with counts only. Public grants or an incomplete inventory
+are `NON_COMPLIANT`. Detection can take up to a day.
 
 #### Before and after an enabled deploy
 
 Before an enabled deploy, the inventory has to show no recorder and no delivery
-channel. The fixed SSM ownership parameter must also be absent. Check its name
-only, and never print its value:
+channel. The SSM ownership parameter must also be absent. Check its name only,
+and do not print its value:
 
 ```bash
 aws ssm get-parameter \
@@ -331,18 +317,18 @@ aws ssm get-parameter \
   --output text
 ```
 
-`ParameterNotFound` is what I expect before the create. If the parameter comes
-back, find out who owns it. Don't delete it just to get a deploy through.
+`ParameterNotFound` is the expected result before the create. If the parameter
+exists, find its owner. Do not delete it to get a deploy through.
 
-If an earlier failed native rollout is still `CREATE_IN_PROGRESS`, don't create
-a channel by hand or update the in-progress stack. Let that stack reach
-rollback. Confirm it no longer owns a recorder or channel and that the marker is
-gone. Delete only the failed stack, through CloudFormation, if needed. Rerun
+If an earlier failed rollout is still `CREATE_IN_PROGRESS`, do not create a
+channel by hand or update the in-progress stack. Let that stack reach rollback.
+Confirm it no longer owns a recorder or channel and that the marker is gone.
+Delete only the failed stack, through CloudFormation, if needed. Rerun
 preflight, then use a new create change set. If either singleton or the marker
 survives or belongs to someone else, keep `ConfigDeploymentMode=skip` and plan a
-separate import or adoption. The template won't take it over.
+separate import. The template does not take it over.
 
-Once the stack completes, verify without printing any configuration content:
+Once the stack completes, verify without printing configuration content:
 
 ```bash
 aws configservice describe-configuration-recorders \
@@ -364,22 +350,22 @@ aws ssm get-parameter \
   --output text
 ```
 
-There should be one recorder, the expected one, with `recording=true`, one
-expected channel pointing at the `ConfigDeliveryBucketName` stack output, and no failed
-delivery status. The SSM command should return only the expected parameter
-name. Never query its value. Confirm the delivery bucket still has versioning,
-encryption and public access blocks, and no Object Lock configuration. Don't
-print delivered configuration objects in deploy or CI logs.
+Expect one recorder, `ian-photography-prod`, with `recording=true`; one channel
+of the same name pointing at the `ConfigDeliveryBucketName` stack output with
+`TwentyFour_Hours` frequency; and no failed delivery status. The SSM command
+should return only the parameter name. Do not query its value. Confirm the
+delivery bucket still has versioning, encryption and the public access block,
+and no Object Lock configuration. Do not print delivered configuration objects
+in deploy or CI logs.
 
 #### Adding Config bucket events to the trail
 
-Only once those checks pass, update the audit-foundation stack through its own
+Only after those checks pass, update the audit-foundation stack through its own
 change set. Pass the managed-services stack's `ConfigDeliveryBucketName` output
-into the audit foundation parameter of the same name. The resulting basic event
-selector keeps all read/write management, multi-region and global-service
-coverage, and adds one `AWS::S3::Object` data resource for that bucket's ARN
-with a trailing slash. It doesn't audit any other application, media, release or
-audit bucket.
+into the foundation parameter of the same name. The resulting event selector
+keeps read/write management events and adds one `AWS::S3::Object` data
+resource for that bucket's ARN with a trailing slash. No other bucket gets
+object data events.
 
 Check the selector shape without querying or printing events:
 
@@ -391,50 +377,56 @@ aws cloudtrail get-event-selectors \
 ```
 
 Management events must stay on with `ReadWriteType=All`, and there should be
-exactly one data resource of type `AWS::S3::Object` whose only value is
-`arn:aws:s3:::EXACT_CONFIG_DELIVERY_BUCKET/`. If I later remove the managed
-Config stack or move it outside this repo, I'll update this parameter only after
-checking ownership. An empty value drops the Config object selector but leaves
-management-event coverage alone.
+one data resource of type `AWS::S3::Object` whose only value is
+`arn:aws:s3:::CONFIG_DELIVERY_BUCKET_NAME/`. If the Config stack is later removed
+or moved outside this repo, update this parameter after checking ownership. An
+empty value drops the Config object selector and keeps management events.
 
 #### GuardDuty, Security Hub and the Config rules
 
-Every GuardDuty feature state is spelled out. CloudFormation configures six
-protection plans: S3 data events and Lambda network logs on; EKS audit logs,
-EBS malware protection, RDS login events and runtime monitoring off. The home
-check also requires the service-managed CloudTrail, DNS and flow-log sources to
-be on, and AI analyst, AI protection and legacy EKS runtime monitoring to be
-off. Turn on other protection plans only with a written threat model, an
-inventory of supported resources, and a cost sign-off.
+The template sets every GuardDuty protection plan it manages: S3 data events
+and Lambda network logs on; EKS audit logs, EBS malware protection, RDS login
+events and runtime monitoring off. The home check also expects the CloudTrail,
+DNS and flow-log sources on, and AI analyst, AI protection and EKS runtime
+monitoring off. Turn on other protection plans only with a written threat
+model, an inventory of supported resources and a cost sign-off.
 
 Confirm Security Hub and organization ownership before creating the hub. The
-home check requires the hub to have no standards, and the managed-services
-template also sets `EnableDefaultStandards: false`. Turning on a broad standard
-needs its own cost and coverage decision, and that change has to update the
-home check and its tests.
+home check requires the hub to have no enabled standards, and the template
+sets `EnableDefaultStandards: false`. Enabling a standard needs its own cost
+and coverage decision, and that change has to update the home check and its
+tests.
 
-The Config rules check that CloudTrail is enabled, S3 public read and write are
-blocked, S3 default encryption and TLS-only requests are enforced, DynamoDB PITR
-is on, no Lambda function is publicly accessible, customer-managed KMS keys
-rotate, and the root user has no access key. They use the scoped recorder,
-except the daily Lambda policy audit, which calls the Lambda APIs directly and
-doesn't need Lambda configuration items. I left out the us-east-1-only
-CloudFront HTTPS managed rule, and the blanket versioning and
-deletion-protection rules, which would flag short-lived and log resources that
-are set up that way on purpose.
+The Config rules are:
+
+| Rule | Source |
+| --- | --- |
+| `ian-photography-cloudtrail-enabled-<stage>` | `CLOUD_TRAIL_ENABLED` |
+| `ian-photography-s3-public-read-prohibited-<stage>` | `S3_BUCKET_PUBLIC_READ_PROHIBITED` |
+| `ian-photography-s3-public-write-prohibited-<stage>` | `S3_BUCKET_PUBLIC_WRITE_PROHIBITED` |
+| `ian-photography-s3-encryption-enabled-<stage>` | `S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED` |
+| `ian-photography-s3-ssl-only-<stage>` | `S3_BUCKET_SSL_REQUESTS_ONLY` |
+| `ian-photography-dynamodb-pitr-<stage>` | `DYNAMODB_PITR_ENABLED` |
+| `ian-photography-cmk-rotation-enabled-<stage>` | `CMK_BACKING_KEY_ROTATION_ENABLED` (24 hours) |
+| `ian-photography-root-access-key-<stage>` | `IAM_ROOT_ACCESS_KEY_CHECK` (24 hours) |
+| `ian-photography-lambda-permissions-daily-<stage>` | Custom Lambda, scheduled every 24 hours |
+
+The managed rules use the scoped recorder. The daily Lambda rule calls the
+Lambda APIs directly. The template does not include the CloudFront
+viewer-HTTPS managed rule or blanket S3 versioning or deletion-protection rules.
 
 ### 4. Inspector Lambda scanning
 
-CI already scans dependencies, source, workflows and credentials before every
-deploy, so I turned off the recurring paid Inspector Lambda and Lambda code
-scanners. Inventory first, without `--apply`:
+Inspector Lambda and Lambda code scanning are off. CI covers dependencies
+(`npm audit` and `pip_audit`), source (CodeQL), workflows and
+committed credentials. Inventory first, without `--apply`:
 
 ```bash
 python3 ops/disable_inspector_lambda_scanning.py --region us-west-2
 ```
 
-It only reports status and never touches EC2 or ECR scanning. Apply only when
-both Lambda modes are `ENABLED`:
+The dry run only reports status and does not change EC2 or ECR scanning. Apply
+only when both Lambda modes are `ENABLED`:
 
 ```bash
 python3 ops/disable_inspector_lambda_scanning.py \
@@ -447,28 +439,28 @@ python3 ops/disable_inspector_lambda_scanning.py \
   --confirm disable-inspector-lambda-scanning
 ```
 
-The helper refuses partial or unexpected enrollment instead of changing a
-configuration it doesn't recognize. After an approved apply, it waits up to five
-minutes by default for both modes to go through `DISABLING` and land on
-`DISABLED`. Any other state, or running out of time, fails the operation. If I
-need a different wait, `--wait-timeout-seconds` takes 30 to 900 seconds and
-`--poll-interval-seconds` takes 1 to 30 seconds. Review findings without
-exporting code or secrets. If cost or compatibility turns out to be a problem,
-write up the rollback decision separately.
+The helper refuses partial or unexpected enrollment. After an approved apply, it
+waits up to 300 seconds by default for both modes to reach `DISABLED`. Any state
+other than `ENABLED`, `DISABLING` or `DISABLED`, or a timeout, fails the
+operation. `--wait-timeout-seconds` accepts 30 to 900 seconds and
+`--poll-interval-seconds` accepts 1 to 30 seconds (default 5). Review findings
+without exporting code or secrets. Record any rollback decision separately.
 
 ### 5. Scheduled backup and the restore test
 
-Pass the names of both the Albums and PreviewMetadata DynamoDB tables. The
-template builds their ARNs from the active partition, Region and account, so
-index, stream, cross-account and cross-Region ARNs can't be passed in. Use
+Pass the names of the Albums and PreviewMetadata DynamoDB tables. The template
+builds their ARNs from the active partition, Region and account, so index,
+stream, cross-account and cross-Region ARNs cannot be passed in. A
+CloudFormation rule requires `us-west-2`. Use
 `BackupDeploymentMode=create-confirmed-no-conflict` only after inventory.
 
-The retained metadata vault uses the AWS-managed Backup key, which avoids a
-monthly customer-managed key charge. The scheduled role has the backup-only
-managed policy and can't restore. Its trust policy pins `aws:SourceAccount` and
-the home-Region Backup source ARN. The old source and replica vaults, keys and
-recovery points stay until their existing lifecycle dates. New backups don't
-extend them.
+The plan `ian-photography-protected-data-<stage>` runs daily at 08:00 UTC
+(`cron(0 8 * * ? *)`) with a 60-minute start window and a 180-minute completion
+window, and deletes recovery points after 35 days. The retained
+`ian-photography-metadata-<stage>` vault uses the AWS-managed Backup key. The
+backup role has only the `AWSBackupServiceRolePolicyForBackup` managed policy
+and cannot restore. Its trust policy pins `aws:SourceAccount` and the
+home-Region Backup source ARN.
 
 Keep `VaultLockMode=unlocked` until a scheduled recovery point exists. Then
 test a restore:
@@ -481,34 +473,35 @@ test a restore:
 5. Record how long recovery took.
 6. Remove the test tables through the approved cleanup.
 
-Only after that can an update set `governance-confirmed-after-restore-test`.
-Governance mode can still be undone by identities with enough privilege.
-Compliance mode needs its own legal and retention decision, because it can
-become permanent.
+Only after that can an update set `governance-confirmed-after-restore-test`,
+which adds a governance-mode Vault Lock with 35-day minimum and 365-day maximum
+retention. The live stack uses that value. Identities with enough privilege
+can still remove a governance lock. Compliance mode is not used by this
+template and needs its own legal and retention decision.
 
-The primary backup stack also owns a privacy-safe EventBridge failure signal for
-the website's backup jobs. Restore operations stay visible in AWS Backup and
-CloudTrail but don't trigger website email for the whole account. Each routed
-target gets a fixed signal/stage/runbook payload, not the AWS event, resource
-ARN, job ID, object key, provider error or table/media identifier.
+The backup stack also owns `BackupJobFailureRule`. It matches Backup job
+state changes to `ABORTED`, `EXPIRED`, `FAILED` or `PARTIAL` for the metadata
+vault only. Restore jobs stay visible in AWS Backup and CloudTrail and do not
+send website email. The rule's target gets a fixed
+schemaVersion/eventName/severity/stage/runbook payload, not the AWS event,
+resource ARN, job ID or provider error.
 
-The existing security topic, the signal queue scoped to these rules, and the
-delivery DLQ are required whenever the backup plan is created. Their ARNs
-aren't inputs. The backup template derives the same same-account, `us-west-2`,
-stage-owned names that the notification stack uses. Update the notification
-stack first, so both queue policies trust the two backup rules before they're
-turned on.
+The notification stack's topic, signal queue and delivery DLQ must exist before
+the backup plan is created. Their ARNs are not inputs: the backup template
+builds the same account-local `us-west-2` names from the stage. Update the
+notification stack first, so both queue policies trust the
+`ian-photography-backup-job-failed-<stage>` rule before it is turned on.
 
-A verifier runs every six hours. It reads recovery-point metadata only and
-publishes aggregate expected, healthy and failed counts. It requires a fresh
-completed recovery point for both metadata tables in the source vault. The
-alarm treats missing metrics as breaching, so a stopped verifier or a stopped
-backup schedule can't quietly stay green. Neither the logs nor the metrics
-include resource or recovery-point ARNs.
+A freshness Lambda runs every six hours. It reads recovery-point metadata only
+and publishes aggregate expected, healthy and failed counts. It requires a
+completed recovery point for both tables in the metadata vault within
+`FreshnessMaximumAgeHours` (default 36). The alarm treats missing data as
+breaching, so a stopped verifier or backup schedule turns it red. Neither the
+logs nor the metrics include resource or recovery-point ARNs.
 
-The old `us-east-2` replica vault isn't a copy destination any more. I keep it
-only so its existing recovery points can age out normally. Restores from it
-still go through the same restore gate in AWS Backup.
+The `us-east-2` replica vault (`ian-photography-replica-<stage>`) is not a copy
+destination. The backup plan has no copy actions. Restores from any vault go
+through the same restore test.
 
 ### 6. Cost budget and who gets notified
 
@@ -521,47 +514,46 @@ python3 ops/security_budget_preflight.py \
   --confirm-budget-name ian-photography-monthly-prod
 ```
 
-The budget in Git has no default amount, email address, resource action or
-automatic disabling of security controls. The read-only preflight only
-recommends `BudgetDeploymentMode=create-confirmed-absent` when the budget name
-doesn't exist yet and I've confirmed both the name and the amount.
+The budget template has no default amount, email address or budget action, and
+it does not turn off any control. The read-only preflight recommends
+`BudgetDeploymentMode=create-confirmed-absent` only when the budget name does
+not exist yet and `--confirm-budget-name` matches it. Both the preflight and the
+template are limited to `us-west-2`.
 
 Set the optional `BudgetAlertEmail` parameter (NoEcho, empty by default) at
-deploy time to have AWS Budgets email me directly when actual or forecast
+deploy time to have AWS Budgets email that address when actual or forecasted
 monthly spend goes over 100% of the limit. Leaving it empty creates no
-notification. The address is never committed or printed by the preflight, and
-the budget never publishes to the website responder topic. It's free: the
-account's first two budgets and their email notifications cost nothing. AWS
-treats budget notifications as create-only, so changing or removing the address
-later means replacing the budget (or editing the alert in the Budgets console
-and living with the drift).
+notification. The address is not committed or printed by the preflight, and the
+budget does not publish to the website topic. Budget notifications are
+create-only in CloudFormation, so changing or removing the address later
+requires replacing the budget. The live budget is
+`ian-photography-monthly-prod` with a 60 USD limit and both notifications set.
 
-The alarm registry in Git is set to `active-one-confirmed-owner-destination`. I
-have one confirmed destination, and that's all this personal site needs. Record
-a sanitized end-to-end delivery test every quarter and after any routing change.
+The alarm registry's delivery state is `active-one-confirmed-owner-destination`,
+and the topic has one confirmed subscription. Record a sanitized end-to-end
+delivery test every 90 days and after any routing change.
 
 ## Cost, upkeep and evidence
 
-Before turning on a paid service, write down its owner, Region scope, estimated
-monthly cost, retention and alert destination. CloudTrail S3 object data events
-are billed and can push up CloudTrail, S3 and CloudWatch ingestion, so I limit
-them to the small Config delivery bucket. Data-event records can include Config
-object keys and request metadata, but not the delivered object body. Treat them
-as security evidence: don't print event payloads or object keys in CI, deploy
-output, tickets or chat.
+Before turning on a paid service, record its owner, Region scope, estimated
+monthly cost, retention and alert destination. CloudTrail S3 object data
+events are limited to the Config delivery bucket. Data-event records can
+include Config object keys and request metadata, but not object bodies. Treat
+them as security evidence: do not print event payloads or object keys in CI,
+deploy output, tickets or chat.
 
-Costs to keep an eye on: CloudTrail and CloudWatch ingestion and retention,
-Config items and rules, GuardDuty plans, Security Hub checks, CI security
-coverage, KMS/SNS/SQS requests, AWS Backup storage and restore tests, and S3
-archive and retrieval.
+Costs to watch: CloudTrail and CloudWatch ingestion and retention, Config items
+and rules, GuardDuty plans, Security Hub checks, KMS, SNS and SQS requests, AWS
+Backup storage and restore tests, and S3 archive storage and retrieval.
 
 Every quarter, rerun preflight and drift detection. Check trail delivery and
-digest validation, Config status, detector/hub/analyzer ownership, CI scan
-results, KMS rotation, DLQ depth, alarms, backup jobs and a sample restore.
-Never put event payloads, finding bodies, tokens, table items, contact content,
-object keys, code findings or backup contents in CI or runbook output.
+log file validation, Config status, detector, hub and analyzer ownership, CI
+scan results, KMS rotation, DLQ depth, alarms, backup jobs and a sample
+restore. Do not put event payloads, finding bodies, tokens, table items,
+contact content, object keys, code findings or backup contents in CI or runbook
+output.
 
-AWS docs I relied on:
+AWS references:
 
 - [CloudTrail S3 bucket policy](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/create-s3-bucket-policy-for-cloudtrail.html)
 - [AWS Config delivery channel](https://docs.aws.amazon.com/config/latest/developerguide/manage-delivery-channel.html)

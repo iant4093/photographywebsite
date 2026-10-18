@@ -20,13 +20,13 @@ Source code for [iantruongphotography.com](https://iantruongphotography.com): a 
 
 ---
 
-The frontend is a React single-page app served through CloudFront. The API is a set of Python Lambda functions behind API Gateway, with data in DynamoDB and media in S3. Image previews, video transcoding, ZIP archives, backups and cache refreshes run in the background on SQS queues. Pushes to `main` are tested, deployed through GitHub Actions and smoke-tested against production.
+The frontend is a React single-page app served through CloudFront. The API is a set of Python Lambda functions behind API Gateway, with data in DynamoDB and media in S3. Image previews, ZIP archives and cache refreshes run in the background from SQS queues; video transcoding runs on MediaConvert, and Google Drive backups run from a DynamoDB stream. Pushes to `main` are tested, deployed through GitHub Actions and smoke-tested against production.
 
 | | |
 |---|---|
-| 52 | Lambda functions (Python 3.12, plus a Node.js image preview worker) |
+| 52 | Lambda functions in the main SAM stack (51 Python 3.12, plus a Node.js 22 image preview worker) |
 | 11 | DynamoDB tables |
-| 12 | SQS queues |
+| 12 | SQS queues in the main SAM stack |
 | 2 | CloudFront distributions (app and API, media) |
 | ~290 | test files, with an 80% coverage minimum on frontend, backend, worker and ops code |
 
@@ -80,7 +80,7 @@ The frontend is a React single-page app served through CloudFront. The API is a 
 - Explore section: a walkable 3D gallery (react-three-fiber), browsing by color, lens, exposure, time of day and season, and a "Guess the Settings" game
 - Search, a stats page with a shooting-day calendar, random and featured photos, and a TV slideshow mode with Chromecast support
 - Print store, and a contact form protected by Cloudflare Turnstile
-- Installable PWA, and link previews for shared albums
+- Installable PWA, and link previews for public photo and video albums
 
 **Clients**
 
@@ -106,9 +106,9 @@ The [Miro architecture board](https://miro.com/app/board/uXjVEYlOMic=/) has thre
 ### Requests
 
 - Browsers only connect to CloudFront. The app calls the API at `/api` on the same domain.
-- CloudFront adds a secret origin header to API requests. Every Lambda checks it ([`front_door.py`](backend/functions/front_door.py)) and rejects requests without it. The default `execute-api` endpoint is disabled.
+- CloudFront adds a secret origin header to API requests. Every API Lambda checks it ([`front_door.py`](backend/functions/front_door.py)) and rejects requests without it. The default `execute-api` endpoint is disabled.
 - AWS WAF sits in front of both CloudFront distributions, with managed rule groups and per-IP rate limits on the API, the Explore endpoints and the media CDN.
-- API Gateway validates the Cognito token, and each handler checks album ownership or `Admins` group membership.
+- API Gateway validates the Cognito token on signed-in routes, and each handler checks album ownership or `Admins` group membership.
 
 ### Media
 
@@ -118,14 +118,14 @@ The [Miro architecture board](https://miro.com/app/board/uXjVEYlOMic=/) has thre
 
 ### Background jobs
 
-- Preview generation (Node.js and Sharp), MediaConvert video transcoding, ZIP building, cache invalidation, hover-preview manifests, Google Drive backup and original-file comparisons run from SQS queues, DynamoDB Streams, S3 events or EventBridge schedules.
+- Preview generation (Node.js and Sharp), MediaConvert video transcoding, ZIP building, cache invalidation, hover-preview manifests, Google Drive backup and original-file comparisons run from SQS queues, DynamoDB Streams, S3 events, EventBridge schedules or direct Lambda calls.
 - Queues retry failed jobs and move them to dead-letter queues after repeated failures.
 
 ### Monitoring and alerts
 
-- CloudWatch alarms that send email: server errors on the site, API or media CDN; background jobs in dead-letter queues; stale or failed backups; root account activity. AWS Budgets sends an email when monthly spend goes over its limit.
+- CloudWatch alarms that send email: server errors on the site, API or media CDN; background jobs in dead-letter queues; stale or failed backups; root account activity. AWS Budgets sends an email when actual or forecasted monthly spend goes over its limit.
 - About 25 other alarms are recorded on dashboards without sending email.
-- CloudTrail, AWS Config, GuardDuty, Security Hub and IAM Access Analyzer cover the account. AWS Backup takes daily backups of the main DynamoDB tables and keeps them for 35 days.
+- CloudTrail, AWS Config, GuardDuty, Security Hub and IAM Access Analyzer cover the account. AWS Backup takes daily backups of the albums and preview metadata DynamoDB tables and keeps them for 35 days. All DynamoDB tables have point-in-time recovery enabled.
 
 ### Cost controls
 
@@ -135,21 +135,21 @@ The [Miro architecture board](https://miro.com/app/board/uXjVEYlOMic=/) has thre
 
 | Area | Technologies |
 |---|---|
-| Frontend | React 19, React Router 8, Vite 7, Tailwind CSS 4, Three.js with react-three-fiber and drei, Framer Motion, hls.js, blurhash, exifr, web-vitals |
+| Frontend | React 19, React Router 8, Vite 7, Tailwind CSS 4, Three.js with react-three-fiber, Framer Motion, hls.js, blurhash, exifr, web-vitals |
 | In-browser imaging | LibRaw compiled to WebAssembly with Emscripten, Web Workers, IndexedDB |
 | Backend | Python 3.12 on Lambda (AWS SAM), boto3, PyJWT, Pillow, Google API client; Node.js 22 and Sharp for previews; ffmpeg for the hero reel |
 | AWS | API Gateway, Lambda, Cognito, DynamoDB, S3, CloudFront and CloudFront Functions, WAF, Route 53, ACM, SQS, EventBridge, MediaConvert, SSM Parameter Store, Secrets Manager, KMS |
 | Monitoring and security | CloudWatch, X-Ray, SNS, CloudTrail, AWS Config, GuardDuty, Security Hub, IAM Access Analyzer, AWS Backup, AWS Budgets |
 | Third-party services | Cloudflare Turnstile, Resend, Google Drive, GitHub API, Fotomoto, Google Cast |
-| Testing and CI | Vitest, Testing Library, Playwright, Python `unittest` with moto and coverage.py, ESLint, cfn-lint, actionlint, zizmor, CodeQL, pip-audit, npm audit, CycloneDX SBOMs, GitHub artifact attestations |
+| Testing and CI | Vitest, Testing Library, Playwright, Node.js test runner, Python `unittest` with moto and coverage.py, ESLint, cfn-lint, actionlint, zizmor, CodeQL, pip-audit, npm audit, CycloneDX SBOMs, GitHub artifact attestations |
 
 ## Build and release
 
 - GitHub Actions authenticates to AWS with OIDC. Only the `main` branch of this repository can assume the deploy roles, and no AWS keys are stored in GitHub.
-- One role plans the CloudFormation change set and a separate role executes it. A release guard checks the plan and stops the release on unlisted resource removals, replacements or changes to protected resources.
+- One role plans the CloudFormation change set and a separate role executes it. A release guard checks the plan and stops the release on any resource removal or replacement, and on changes to protected resources that are not approved in [`ops/ci/release_intent.json`](ops/ci/release_intent.json).
 - Each Lambda is packaged from an explicit list of source files ([`backend/Makefile`](backend/Makefile)), and build output is scanned for credentials.
 - Release artifacts get checksums, CycloneDX SBOMs and signed build provenance.
-- GitHub Actions are pinned to commit SHAs. Pull requests run CodeQL, dependency review and a scan of the full git history for secrets.
+- GitHub Actions are pinned to commit SHAs. The quality gate on pull requests and releases runs CodeQL and a scan of the full git history for secrets. Pull requests also run dependency review.
 - Routes are lazy-loaded, large libraries (Three.js, hls.js, auth, animation, imaging) are split into separate bundles, and public API responses are cached at the edge.
 - A weekly workflow checks all nine CloudFormation stacks for drift.
 
@@ -165,7 +165,7 @@ npm run dev
 
 The dev server does not proxy `/api` by default, so UI work does not touch live data. Setting `VITE_DEV_PROXY_PROD=1` in `.env` proxies `/api` and private media to production; admin actions then change real data.
 
-`.env`, credential files, media and build output are git-ignored.
+`.env`, credential files and build output are git-ignored.
 
 ## Tests
 
@@ -199,9 +199,9 @@ Also available: Playwright browser checks (`npm run test:browser`, `npm run test
 1. Runs the test and security suite.
 2. Builds the frontend and backend artifacts and records checksums, SBOMs and build provenance.
 3. Gets temporary AWS credentials through GitHub OIDC.
-4. Plans the backend change set, checks it against the release guard, then applies it.
-5. Uploads the frontend to S3 and invalidates the CloudFront cache.
-6. Runs a smoke test against production.
+4. Plans the backend change set, checks it against the release guard, then executes it.
+5. Runs a smoke test against production.
+6. Uploads the frontend to S3, invalidates the CloudFront cache and runs the smoke test again.
 
 The supporting stacks (WAF, security services, backups, monitoring) are deployed manually and checked for drift weekly. See [`ops/CI_CD.md`](ops/CI_CD.md).
 
