@@ -2,7 +2,7 @@
 
 # Ian Truong Photography
 
-The code behind [iantruongphotography.com](https://iantruongphotography.com), my photography site.
+Source code for [iantruongphotography.com](https://iantruongphotography.com): a photography portfolio, private client galleries and an admin portal, running serverless on AWS.
 
 [Live site](https://iantruongphotography.com) · [Architecture board](https://miro.com/app/board/uXjVEYlOMic=/) · [Ops docs](ops/README.md)
 
@@ -20,19 +20,15 @@ The code behind [iantruongphotography.com](https://iantruongphotography.com), my
 
 ---
 
-This is where I publish my work, deliver private galleries to clients, and try out ideas that don't fit on a normal portfolio site, like a walkable 3D gallery and a RAW photo editor that runs entirely in the browser.
-
-Everything runs on AWS without a server to look after. The frontend is React, the API is about fifty small Python functions on Lambda, and anything slow (image resizing, video transcoding, ZIP downloads, backups) happens in the background on queues. Every push to `main` goes through tests and security checks before it deploys, and gets smoke-tested against the live site afterward.
-
-A few numbers to give a sense of size:
+The frontend is a React single-page app served through CloudFront. The API is a set of Python Lambda functions behind API Gateway, with data in DynamoDB and media in S3. Image previews, video transcoding, ZIP archives, backups and cache refreshes run in the background on SQS queues. Pushes to `main` are tested, deployed through GitHub Actions and smoke-tested against production.
 
 | | |
 |---|---|
-| 52 | Lambda functions, mostly Python, plus a Node.js worker that makes image previews |
+| 52 | Lambda functions (Python 3.12, plus a Node.js image preview worker) |
 | 11 | DynamoDB tables |
-| 12 | SQS queues for background work |
-| 2 | CloudFront distributions, one for the app and API and one for media |
-| ~290 | test files, with an 80% coverage floor on every part of the codebase |
+| 12 | SQS queues |
+| 2 | CloudFront distributions (app and API, media) |
+| ~290 | test files, with an 80% coverage minimum on frontend, backend, worker and ops code |
 
 ## Screenshots
 
@@ -76,58 +72,68 @@ A few numbers to give a sense of size:
 </table>
 
 
-## What it does
+## Features
 
-**For visitors**
+**Visitors**
 
-- Photo and video albums. Images show a blurred placeholder right away, then load sized WebP previews (640 to 1920 px wide). Video streams over HLS and adjusts to the connection.
-- An Explore section: a 3D museum you can walk through (built with react-three-fiber), ways to browse by color, lens, exposure, time of day and season, and a game where you guess the camera settings.
-- Search, a stats page with a calendar of shooting days, random and featured photos, and a TV slideshow mode that can cast to a Chromecast.
-- A print store and a contact form.
-- It installs as an app on phones, and album links show a proper preview image when shared in messages or on social media.
+- Photo and video albums with blurhash placeholders, responsive WebP previews from 640 to 1920 px, and adaptive HLS video
+- Explore section: a walkable 3D gallery (react-three-fiber), browsing by color, lens, exposure, time of day and season, and a "Guess the Settings" game
+- Search, a stats page with a shooting-day calendar, random and featured photos, and a TV slideshow mode with Chromecast support
+- Print store, and a contact form protected by Cloudflare Turnstile
+- Installable PWA, and link previews for shared albums
 
-**For clients**
+**Clients**
 
-- Sign-in with optional two-factor authentication, and a dashboard of the galleries that belong to them.
-- Private share links for an album. A wrong or expired link looks exactly like an album that doesn't exist.
-- Full-resolution downloads, either one photo at a time or the whole album as a ZIP.
-- A before-and-after view that compares my edit with the original file.
+- Cognito sign-in with optional TOTP two-factor authentication and a dashboard of owned galleries
+- Unlisted share links; invalid or revoked links return the same response as a missing album
+- Full-resolution downloads through CloudFront signed cookies or short-lived presigned URLs, and full-album ZIP downloads
+- Before-and-after comparison against the original file
 
-**For me, as the admin**
+**Admin**
 
-- Uploads go straight from the browser to S3. From there I can organize albums, set the gallery order, schedule an album to publish later, and restore things from a Recently Deleted bin.
-- The Videos page has a hero reel that the server assembles with ffmpeg.
-- Dashboards for AWS costs (down to storage and bandwidth per album), site analytics including Core Web Vitals, GitHub activity, site health and an audit log.
+- Direct browser-to-S3 uploads, album management, gallery ordering, scheduled publishing and a Recently Deleted bin with automatic purge
+- Videos page hero reel generated server-side with ffmpeg
+- Dashboards for AWS cost (including per-album storage and bandwidth), analytics with Core Web Vitals, GitHub activity, site health and the audit log
 
-**Creative tools**
+**Tools**
 
-- A RAW editor that runs in the browser. I compiled LibRaw to WebAssembly, so camera RAW files are decoded on your own machine in a Web Worker and never uploaded. It has presets, adjustments, and recovers your session if the tab closes.
+- In-browser RAW editor: LibRaw compiled to WebAssembly with Emscripten, decoding in a Web Worker, with presets, adjustments and session recovery in IndexedDB
 
-## How it's put together
+## Architecture
 
-The [architecture board on Miro](https://miro.com/app/board/uXjVEYlOMic=/) has the full picture, read left to right:
+The [Miro architecture board](https://miro.com/app/board/uXjVEYlOMic=/) has three diagrams: the request path, the background jobs, and delivery and operations.
 
-1. **Request path.** How a page or API call gets from the browser to the data, and how photos and video take their own shorter path.
-2. **Background jobs.** One row per job, showing what starts it, its queue, the worker, and what it produces.
-3. **Delivery and operations.** The release pipeline, plus the monitoring, backups and alerts that run all the time.
+### Requests
 
-### Why I built it this way
+- Browsers only connect to CloudFront. The app calls the API at `/api` on the same domain.
+- CloudFront adds a secret origin header to API requests. Every Lambda checks it ([`front_door.py`](backend/functions/front_door.py)) and rejects requests without it. The default `execute-api` endpoint is disabled.
+- AWS WAF sits in front of both CloudFront distributions, with managed rule groups and per-IP rate limits on the API, the Explore endpoints and the media CDN.
+- API Gateway validates the Cognito token, and each handler checks album ownership or `Admins` group membership.
 
-Traffic to a photography site is spiky. It's quiet most days, then busy when I share an album. Serverless fits that well: I pay for what's used, and there's no server to patch.
+### Media
 
-The browser only ever talks to CloudFront. API calls go to `/api` on the same domain, and CloudFront adds a secret header before passing them on. Every Lambda checks that header ([`front_door.py`](backend/functions/front_door.py)), so the API simply doesn't respond to anyone who tries to skip the CDN and its firewall.
+- Uploads go from the browser straight to S3 using presigned URLs.
+- Public previews and video are served by the media CloudFront distribution from a private S3 bucket.
+- Private originals are served with CloudFront signed cookies. S3 Block Public Access, origin access control and object visibility tags keep non-public files off the CDN.
 
-Big files never go through Lambda. Uploads use presigned URLs straight to S3, public images come from a separate media CDN, and private originals are served with CloudFront signed cookies. That keeps functions small and fast, and avoids Lambda's payload limits.
+### Background jobs
 
-Anything slow goes on a queue. Generating previews, transcoding video and building ZIPs all run in the background with retries. If a job keeps failing it lands in a dead-letter queue and I get an email.
+- Preview generation (Node.js and Sharp), MediaConvert video transcoding, ZIP building, cache invalidation, hover-preview manifests, Google Drive backup and original-file comparisons run from SQS queues, DynamoDB Streams, S3 events or EventBridge schedules.
+- Queues retry failed jobs and move them to dead-letter queues after repeated failures.
 
-Access is checked in more than one place. The API checks the sign-in token, each function checks that you own the album (or are an admin), and the S3 bucket and CDN refuse to hand out private files directly.
+### Monitoring and alerts
 
-And because this is a personal project, I care about the bill. Per-route API rate limits, a per-IP firewall on the API and media CDN, caps on how many copies of a function can run at once, and a monthly budget alert keep an abuse spike from turning into a surprise invoice.
+- CloudWatch alarms that send email: server errors on the site, API or media CDN; background jobs in dead-letter queues; stale or failed backups; root account activity. AWS Budgets sends an email when monthly spend goes over its limit.
+- About 25 other alarms are recorded on dashboards without sending email.
+- CloudTrail, AWS Config, GuardDuty, Security Hub and IAM Access Analyzer cover the account. AWS Backup takes daily backups of the main DynamoDB tables and keeps them for 35 days.
+
+### Cost controls
+
+- Per-route API Gateway throttles, per-IP WAF rate limits, reserved Lambda concurrency, upload size limits and a monthly AWS Budgets alert.
 
 ## Tech stack
 
-| Area | What I used |
+| Area | Technologies |
 |---|---|
 | Frontend | React 19, React Router 8, Vite 7, Tailwind CSS 4, Three.js with react-three-fiber and drei, Framer Motion, hls.js, blurhash, exifr, web-vitals |
 | In-browser imaging | LibRaw compiled to WebAssembly with Emscripten, Web Workers, IndexedDB |
@@ -137,37 +143,33 @@ And because this is a personal project, I care about the bill. Per-route API rat
 | Third-party services | Cloudflare Turnstile, Resend, Google Drive, GitHub API, Fotomoto, Google Cast |
 | Testing and CI | Vitest, Testing Library, Playwright, Python `unittest` with moto and coverage.py, ESLint, cfn-lint, actionlint, zizmor, CodeQL, pip-audit, npm audit, CycloneDX SBOMs, GitHub artifact attestations |
 
-## Parts I'm happy with
+## Build and release
 
-- Deploys are careful without being slow. GitHub Actions gets short-lived AWS credentials through OIDC, so there are no stored keys. One role plans the CloudFormation change and a different one applies it, and the plan is checked first: the release stops if it would delete or replace something important that I didn't say should change.
-- Each Lambda is built from a list of exactly the source files it needs ([`backend/Makefile`](backend/Makefile)), and the build output is scanned for credentials, so a stray secret file can't end up in a deploy.
-- GitHub Actions are pinned to commit hashes, and pull requests get CodeQL, dependency review and a scan of the whole git history for secrets.
-- Pages load fast. Routes are lazy-loaded, heavy libraries like Three.js and hls.js are split into their own bundles, public API responses are cached at the edge, and real-user performance numbers get reported back so I can see regressions.
-- Ops are written down. The [ops docs](ops/README.md) cover every alarm, how to recover from failures, and the maintenance scripts. A weekly job also checks that all nine CloudFormation stacks still match their templates.
+- GitHub Actions authenticates to AWS with OIDC. Only the `main` branch of this repository can assume the deploy roles, and no AWS keys are stored in GitHub.
+- One role plans the CloudFormation change set and a separate role executes it. A release guard checks the plan and stops the release on unlisted resource removals, replacements or changes to protected resources.
+- Each Lambda is packaged from an explicit list of source files ([`backend/Makefile`](backend/Makefile)), and build output is scanned for credentials.
+- Release artifacts get checksums, CycloneDX SBOMs and signed build provenance.
+- GitHub Actions are pinned to commit SHAs. Pull requests run CodeQL, dependency review and a scan of the full git history for secrets.
+- Routes are lazy-loaded, large libraries (Three.js, hls.js, auth, animation, imaging) are split into separate bundles, and public API responses are cached at the edge.
+- A weekly workflow checks all nine CloudFormation stacks for drift.
 
-## Things I learned along the way
+## Running locally
 
-- Too many alerts is the same as none. I had 18 alarms set up to email me, and most of the emails came from my own uploads making a queue back up for a few minutes. I started ignoring them. Now only things that need action send an email (the site returning errors, jobs that failed for good, stale backups, root account activity, the budget), and everything else stays on the dashboards.
-- Check that your alarms can actually reach you. While cleaning that up I found six alarms that had been quietly failing to send, because the SNS topic's access policy didn't list them. There's now a test that fails if any alarm meant to email me isn't allowed to.
-- CloudFormation compares templates very literally. A stack that was last deployed from JSON showed changes to resources I hadn't touched when I updated it from the YAML in the repo. Deploying the live template with only the real edits applied gave a clean, minimal change set.
-
-## Running it locally
-
-You'll need Node.js 24 (see [`.node-version`](.node-version)) and Python 3.12.
+Requires Node.js 24 (see [`.node-version`](.node-version)) and Python 3.12.
 
 ```bash
 npm ci
-cp .env.example .env   # only public, non-secret values go here
+cp .env.example .env   # public, non-secret values only
 npm run dev
 ```
 
-By default the dev server doesn't connect to the real API, so you can work on the UI without touching live data. If you set `VITE_DEV_PROXY_PROD=1` in `.env`, `/api` and private media are proxied to production. Be careful with that one: admin actions will change real data.
+The dev server does not proxy `/api` by default, so UI work does not touch live data. Setting `VITE_DEV_PROXY_PROD=1` in `.env` proxies `/api` and private media to production; admin actions then change real data.
 
-`.env`, credential files, media and build output are all git-ignored and should stay that way.
+`.env`, credential files, media and build output are git-ignored.
 
 ## Tests
 
-These are the same checks CI runs before a release:
+The same checks CI runs before a release:
 
 ```bash
 # Frontend: lint, tests with coverage, production build
@@ -188,39 +190,39 @@ python3 -m coverage run --rcfile=ops/.coveragerc -m unittest discover -s ops/tes
 bash ops/validate_infrastructure.sh --build
 ```
 
-There are also Playwright browser checks (`npm run test:browser` and `npm run test:browser:visitors`) and a test for the WebAssembly RAW decoder (`npm run test:raw-decoder`).
+Also available: Playwright browser checks (`npm run test:browser`, `npm run test:browser:visitors`) and a WebAssembly RAW decoder test (`npm run test:raw-decoder`).
 
-## Deploying
+## Deployment
 
-There's one branch, `main`, and every push to it deploys. The pipeline:
+`main` is the only deployment branch. Each push to `main`:
 
-1. Runs the full test and security suite.
-2. Builds the frontend and backend once, then records checksums, a software bill of materials and signed build provenance for them.
-3. Gets temporary AWS credentials through GitHub OIDC. Only this repo's `main` branch can assume the roles.
-4. Plans the backend change, checks the plan, then applies it.
-5. Uploads the frontend to S3 and clears the CloudFront cache.
-6. Runs a smoke test against the live site.
+1. Runs the test and security suite.
+2. Builds the frontend and backend artifacts and records checksums, SBOMs and build provenance.
+3. Gets temporary AWS credentials through GitHub OIDC.
+4. Plans the backend change set, checks it against the release guard, then applies it.
+5. Uploads the frontend to S3 and invalidates the CloudFront cache.
+6. Runs a smoke test against production.
 
-The supporting stacks (firewall, security services, backups, monitoring) change rarely, so I deploy those by hand. A weekly job checks them for drift. [`ops/CI_CD.md`](ops/CI_CD.md) has the details.
+The supporting stacks (WAF, security services, backups, monitoring) are deployed manually and checked for drift weekly. See [`ops/CI_CD.md`](ops/CI_CD.md).
 
-## Repo layout
+## Repository layout
 
 ```text
 .
-├── src/                 React app: pages, components (including the 3D museum), RAW editor, hooks, utils, tests
+├── src/                 React app: pages, components (including the 3D gallery), RAW editor, hooks, utils, tests
 ├── public/              Service worker, web manifest, security.txt, open-source license files
 ├── backend/
 │   ├── functions/       Python Lambda handlers and shared helpers
 │   ├── preview_worker/  Node.js + Sharp image preview worker
 │   ├── tests/           Backend tests
-│   ├── Makefile         Which files go into each Lambda build
-│   └── template.yaml    The main AWS SAM stack
+│   ├── Makefile         Source file list for each Lambda build
+│   └── template.yaml    Main AWS SAM stack
 ├── ops/
 │   ├── ci/              Release checks, deploy and drift-audit scripts
-│   ├── tests/           Tests for the infrastructure and ops tooling
-│   ├── *.yaml           Firewall, security, backup, monitoring, DNSSEC and CI stacks
+│   ├── tests/           Infrastructure and ops tooling tests
+│   ├── *.yaml           WAF, security, backup, monitoring, DNSSEC and CI stacks
 │   └── *.md             Ops docs (start with ops/README.md)
-├── scripts/             RAW decoder build, license generator, small build helpers
+├── scripts/             RAW decoder build, license generator, build helpers
 ├── tests/browser/       Playwright checks
 ├── legal/               Third-party license texts bundled into the build
 ├── .github/workflows/   Pull request, release, manual release and weekly audit workflows
@@ -228,21 +230,21 @@ The supporting stacks (firewall, security services, backups, monitoring) change 
 └── print.html           Print store entry
 ```
 
-## More docs
+## Documentation
 
-| If you want to know about... | Read |
+| Topic | Document |
 |---|---|
-| The ops docs in general, and the maintenance scripts | [`ops/README.md`](ops/README.md) |
-| The deploy pipeline | [`ops/CI_CD.md`](ops/CI_CD.md) |
-| How the API rejects traffic that skips CloudFront | [`ops/API_FRONT_DOOR.md`](ops/API_FRONT_DOOR.md) |
-| Private photos and signed downloads | [`ops/PRIVATE_MEDIA.md`](ops/PRIVATE_MEDIA.md) |
-| Monitoring and what each alarm means | [`ops/OBSERVABILITY.md`](ops/OBSERVABILITY.md), [`ops/ALARM_REGISTRY.md`](ops/ALARM_REGISTRY.md) |
-| AWS account security setup | [`ops/SECURITY_ACCOUNT_BASELINE.md`](ops/SECURITY_ACCOUNT_BASELINE.md), [`ops/SECURITY_OBSERVABILITY.md`](ops/SECURITY_OBSERVABILITY.md) |
-| Recovering from problems | [`ops/MAINTENANCE_AND_RECOVERY.md`](ops/MAINTENANCE_AND_RECOVERY.md) |
-| Specific features | [`ops/PHOTO_ORIGINAL_COMPARISONS.md`](ops/PHOTO_ORIGINAL_COMPARISONS.md), [`ops/HOVER_PREVIEW_MANIFESTS.md`](ops/HOVER_PREVIEW_MANIFESTS.md), [`ops/FOTOMOTO_PRINTS.md`](ops/FOTOMOTO_PRINTS.md) |
-| Handling privacy requests | [`ops/PRIVACY_REQUESTS.md`](ops/PRIVACY_REQUESTS.md) |
+| Ops overview and maintenance scripts | [`ops/README.md`](ops/README.md) |
+| Release pipeline | [`ops/CI_CD.md`](ops/CI_CD.md) |
+| API origin verification and WAF | [`ops/API_FRONT_DOOR.md`](ops/API_FRONT_DOOR.md) |
+| Private media and signed downloads | [`ops/PRIVATE_MEDIA.md`](ops/PRIVATE_MEDIA.md) |
+| Monitoring and alarms | [`ops/OBSERVABILITY.md`](ops/OBSERVABILITY.md), [`ops/ALARM_REGISTRY.md`](ops/ALARM_REGISTRY.md) |
+| AWS account security | [`ops/SECURITY_ACCOUNT_BASELINE.md`](ops/SECURITY_ACCOUNT_BASELINE.md), [`ops/SECURITY_OBSERVABILITY.md`](ops/SECURITY_OBSERVABILITY.md) |
+| Maintenance and recovery | [`ops/MAINTENANCE_AND_RECOVERY.md`](ops/MAINTENANCE_AND_RECOVERY.md) |
+| Feature notes | [`ops/PHOTO_ORIGINAL_COMPARISONS.md`](ops/PHOTO_ORIGINAL_COMPARISONS.md), [`ops/HOVER_PREVIEW_MANIFESTS.md`](ops/HOVER_PREVIEW_MANIFESTS.md), [`ops/FOTOMOTO_PRINTS.md`](ops/FOTOMOTO_PRINTS.md) |
+| Privacy requests | [`ops/PRIVACY_REQUESTS.md`](ops/PRIVACY_REQUESTS.md) |
 | Open-source licenses | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) |
 
 ## Security
 
-If you find a vulnerability, please email the address in [`security.txt`](public/.well-known/security.txt) rather than opening a public issue.
+Report vulnerabilities to the contact in [`security.txt`](public/.well-known/security.txt) instead of opening a public issue.

@@ -1,13 +1,10 @@
 # Ops notes for iantruongphotography.com
 
-This folder is how I run the site in production: the runbooks, the helper
-scripts, and the CloudFormation templates that sit outside the main app stack.
-I wrote it mostly for future me, so it leans toward the things I'd otherwise
-forget.
+This folder holds the production runbooks, the helper scripts, and the
+CloudFormation templates that sit outside the main app stack.
 
-If you're new here, start with [`CI_CD.md`](CI_CD.md) to see how a release
-ships. Then skim the index below and open whichever runbook matches what you're
-about to do.
+[`CI_CD.md`](CI_CD.md) explains how a release ships. The index below lists the
+runbook for each area.
 
 ## What CI deploys and what I deploy by hand
 
@@ -80,7 +77,7 @@ reference, so they have to keep matching the release guards in `CI_CD.md`.
   detector and one Security Hub hub with no standards enabled, and both match
   the expected features, frequency, tags and control generator. Any enabled
   Security Hub standard counts as drift, because targeted Config rules already
-  cover the checks I want at a cost I'm happy with. It never prints provider
+  cover the required checks at lower cost. It never prints provider
   identifiers, tags, Region names or findings.
 - `security_budget_template.yaml` and `security_budget_preflight.py` define an
   optional retained account budget. You can pass an owner email at deploy time
