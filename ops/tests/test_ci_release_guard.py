@@ -1940,7 +1940,7 @@ class CredentialArtifactScanTests(unittest.TestCase):
         payload = Path(ImageFont.__file__).read_bytes()
         self.assertEqual(
             hashlib.sha256(payload).hexdigest(),
-            "24fa5feeb91b4bf63eaad0ebba08a8161e9c889d9fd056a37c928134097b9649",
+            "9182befa0e4047e8df244ca9e8534fdb52312bcf10219629c608c91efe8a6821",
         )
         self.assertTrue(credential_artifact_scan.AWS_ACCESS_KEY_ID.search(payload))
         with tempfile.TemporaryDirectory() as directory:

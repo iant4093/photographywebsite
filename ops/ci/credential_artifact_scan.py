@@ -34,14 +34,14 @@ PRIVATE_KEY_METADATA_LINE = re.compile(
     rb"(?:Proc-Type:[ \t]*4,ENCRYPTED|DEK-Info:[ \t]*[A-Z0-9-]+,[0-9A-Fa-f]+)"
 )
 AWS_DOCUMENTATION_ACCESS_KEY_IDS = {b"AKIA" + b"IOSFODNN7EXAMPLE"}
-# Pillow 12.3.0's public embedded default font happens to contain an AWS-shaped
+# Pillow 13.0.0's public embedded default font happens to contain an AWS-shaped
 # substring. Trust only the exact, independently verified upstream source bytes
 # at their package path, and only for this detector. Any edit (including an
 # appended credential) invalidates the exception; all other detectors still run.
-# https://github.com/python-pillow/Pillow/blob/12.3.0/src/PIL/ImageFont.py
+# https://github.com/python-pillow/Pillow/blob/13.0.0/src/PIL/ImageFont.py
 VERIFIED_PUBLIC_AWS_LIKE_ASSETS = {
     ("PIL", "ImageFont.py"): frozenset({
-        "24fa5feeb91b4bf63eaad0ebba08a8161e9c889d9fd056a37c928134097b9649",
+        "9182befa0e4047e8df244ca9e8534fdb52312bcf10219629c608c91efe8a6821",
     }),
 }
 FORBIDDEN_FILENAMES = (

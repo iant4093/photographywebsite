@@ -7,7 +7,7 @@ script runs offline and writes only these files to
 `public/assets/museum/textures/`. It does not modify photographs or the
 authored wallpaper.
 
-Requirements: Python and Pillow. Pillow is pinned to 12.3.0 in
+Requirements: Python and Pillow. Pillow is pinned to 13.0.0 in
 `backend/functions/requirements.txt`, which the CI Python environment installs
 through `backend/requirements-dev.txt`. Use the pinned version to reproduce the
 committed files.

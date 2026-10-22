@@ -64,7 +64,7 @@ SOURCES_PreTokenGenerationFunction := pre_token_generation.py
 SOURCES_OriginalIndexRefreshFunction := original_index_refresh.py original_comparison_store.py original_comparison_jobs.py original_drive.py original_match.py media_access.py original_comparison_access.py validation_helpers.py aws_request_config.py media_mutation.py
 SOURCES_OriginalComparisonWorkerFunction := original_comparison_worker.py original_comparison_store.py original_drive.py original_match.py media_access.py original_comparison_access.py validation_helpers.py aws_request_config.py media_mutation.py
 DEPS_OriginalIndexRefreshFunction := google-auth==2.58.0 requests==2.34.2 ExifRead==3.5.1
-DEPS_OriginalComparisonWorkerFunction := google-auth==2.58.0 requests==2.34.2 ExifRead==3.5.1 Pillow==12.3.0
+DEPS_OriginalComparisonWorkerFunction := google-auth==2.58.0 requests==2.34.2 ExifRead==3.5.1 Pillow==13.0.0
 PIP_PLATFORM_OriginalComparisonWorkerFunction := manylinux_2_28_x86_64
 
 DEPS_GetAlbumFunction := PyJWT==2.15.0 cryptography==50.0.0
