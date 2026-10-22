@@ -15,15 +15,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import mimetypes
 from pathlib import Path
-import re
-import subprocess
 import sys
-import tempfile
 import uuid
+
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from ops.ci.release_guard import frontend_upload_plan, sha256_file  # noqa: E402
+from ops.ci.aws_requests import client, parallel_map  # noqa: E402
 
 PUBLISHED_KEY = "_deployment/frontend-manifest.json"
 PURGE_PATHS = ("/*",)
@@ -58,37 +59,56 @@ def matches_object(path, item, metadata):
                  or metadata.get("ContentType") == "text/html; charset=utf-8"))
 
 
-def aws(arguments, *, missing_ok=False, json_output=False):
-    result = subprocess.run(["aws", *arguments], capture_output=True, text=True, timeout=180)
-    if result.returncode:
-        # Without ListBucket, S3 can report a missing marker as AccessDenied.
-        # Fall back to a full upload; never infer that deployment succeeded.
-        if missing_ok and re.search(r"\((NoSuchKey|404|AccessDenied|403)\)", result.stderr):
-            return {} if json_output else False
-        raise RuntimeError("frontend storage request failed")
-    return json.loads(result.stdout) if json_output else True
+def missing(error):
+    # Without ListBucket, S3 may report a missing object as AccessDenied.
+    return error.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "AccessDenied", "403"}
+
+
+def previous_manifest(storage, bucket):
+    try:
+        response = storage.get_object(Bucket=bucket, Key=PUBLISHED_KEY)
+    except ClientError as error:
+        if missing(error):
+            return {}
+        raise
+    with response["Body"] as body:
+        content = body.read(2_000_001)
+    if len(content) > 2_000_000:
+        raise ValueError("published frontend manifest exceeds bound")
+    return json.loads(content)
 
 
 def prepare(root, bucket, region, output):
-    with tempfile.TemporaryDirectory() as directory:
-        marker = Path(directory) / "published.json"
-        found = aws(["s3api", "get-object", "--bucket", bucket, "--key", PUBLISHED_KEY,
-                     "--region", region, str(marker)], missing_ok=True)
-        if found and marker.stat().st_size > 2_000_000:
-            raise ValueError("published frontend manifest exceeds bound")
-        previous = json.loads(marker.read_text()) if found else {}
-    live = {item["path"]: aws(["s3api", "head-object", "--bucket", bucket, "--key", item["path"],
-                                "--region", region, "--output", "json"], missing_ok=True, json_output=True)
-            for item in frontend_upload_plan(root)}
+    storage = client("s3", region)
+    previous = previous_manifest(storage, bucket)
+
+    def head(item):
+        try:
+            metadata = storage.head_object(Bucket=bucket, Key=item["path"])
+        except ClientError as error:
+            if not missing(error):
+                raise
+            metadata = {}
+        return item["path"], metadata
+
+    live = dict(parallel_map(head, frontend_upload_plan(root)))
     plan = plan_changes(root, previous, live)
     # A rollback/history cycle must not reuse an old completed invalidation.
     plan["invalidation"]["CallerReference"] += "-" + uuid.uuid4().hex
+    def upload(item):
+        path = item["path"]
+        content_type = ("text/html; charset=utf-8" if path in {"index.html", "print.html"}
+                        else mimetypes.guess_type(path)[0] or "application/octet-stream")
+        # Bounded single-object puts; the artifact budget keeps these small.
+        with (root / path).open("rb") as body:
+            storage.put_object(Bucket=bucket, Key=path, Body=body,
+                               CacheControl=item["cache_control"], ContentType=content_type)
+
+    parallel_map(upload, [item for item in plan["uploads"] if item["path"] not in {"index.html", "print.html"}])
+    # Publish entrypoints only after every dependency succeeded, index last.
     for item in plan["uploads"]:
-        args = ["s3", "cp", str(root / item["path"]), f"s3://{bucket}/{item['path']}",
-                "--region", region, "--cache-control", item["cache_control"], "--only-show-errors"]
-        if item["path"] in {"index.html", "print.html"}:
-            args += ["--content-type", "text/html; charset=utf-8"]
-        aws(args)
+        if item["path"] in {"print.html", "index.html"}:
+            upload(item)
     output.write_text(json.dumps(plan))
     output.with_suffix(".invalidation.json").write_text(json.dumps(plan["invalidation"]))
     print(json.dumps({"uploadedFiles": len(plan["uploads"]),
@@ -97,11 +117,11 @@ def prepare(root, bucket, region, output):
 
 def publish(plan_path, bucket, region):
     plan = json.loads(plan_path.read_text())
-    with tempfile.TemporaryDirectory() as directory:
-        marker = Path(directory) / "published.json"
-        marker.write_text(json.dumps(plan["manifest"], sort_keys=True))
-        aws(["s3", "cp", str(marker), f"s3://{bucket}/{PUBLISHED_KEY}", "--region", region,
-             "--cache-control", "private,no-store", "--content-type", "application/json", "--only-show-errors"])
+    client("s3", region).put_object(
+        Bucket=bucket, Key=PUBLISHED_KEY,
+        Body=json.dumps(plan["manifest"], sort_keys=True).encode(),
+        CacheControl="private,no-store", ContentType="application/json",
+    )
 
 
 def main(argv=None):
@@ -119,4 +139,9 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # Provider failures can contain object names or signed request details.
+        print("frontend storage publication failed closed", file=sys.stderr)
+        raise SystemExit(2) from None

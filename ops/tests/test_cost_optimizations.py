@@ -75,32 +75,30 @@ class FrontendChangesTests(unittest.TestCase):
             self.assertEqual([x['path'] for x in frontend.plan_changes(self.root, self.first['manifest'], live)['uploads']], ['index.html'])
 
     def test_prepare_and_publish_commit_marker_separately_and_keep_html_last(self):
-        calls = []
-        def aws(args, **kwargs):
-            calls.append(args)
-            if 'get-object' in args:
-                return False
-            if 'head-object' in args:
-                return {}
-            return True
+        from unittest.mock import Mock
+        from botocore.exceptions import ClientError
+        storage = Mock()
+        storage.get_object.side_effect = ClientError({'Error': {'Code': 'NoSuchKey'}}, 'GetObject')
+        storage.head_object.side_effect = ClientError({'Error': {'Code': '404'}}, 'HeadObject')
         output = self.root / 'plan.json'
-        with patch.object(frontend, 'aws', side_effect=aws):
+        with patch.object(frontend, 'client', return_value=storage):
             frontend.prepare(self.root, 'test-bucket', 'us-west-2', output)
-            self.assertFalse(any(frontend.PUBLISHED_KEY in str(a) for a in calls if 'cp' in a))
-            uploads = [a for a in calls if 'cp' in a]
-            self.assertTrue(uploads[-1][2].endswith('index.html'))
+            keys = [c.kwargs['Key'] for c in storage.put_object.call_args_list]
+            self.assertNotIn(frontend.PUBLISHED_KEY, keys)
+            self.assertEqual(keys[-2:], ['print.html', 'index.html'])
             frontend.publish(output, 'test-bucket', 'us-west-2')
-        self.assertIn(frontend.PUBLISHED_KEY, calls[-1][3])
+        self.assertEqual(storage.put_object.call_args.kwargs['Key'], frontend.PUBLISHED_KEY)
 
     def test_provider_errors_fail_closed_except_missing_marker_or_object(self):
+        from unittest.mock import Mock
+        from botocore.exceptions import ClientError
+        storage = Mock()
         for code in ['NoSuchKey', '403']:
-            with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', f'({code})')):
-                self.assertFalse(frontend.aws([], missing_ok=True))
-        with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', '(Timeout)')):
-            with self.assertRaises(RuntimeError):
-                frontend.aws([], missing_ok=True)
-        with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '{}', '')):
-            self.assertEqual(frontend.aws([], json_output=True), {})
+            storage.get_object.side_effect = ClientError({'Error': {'Code': code}}, 'GetObject')
+            self.assertEqual(frontend.previous_manifest(storage, 'bucket'), {})
+        storage.get_object.side_effect = ClientError({'Error': {'Code': 'SlowDown'}}, 'GetObject')
+        with self.assertRaises(ClientError):
+            frontend.previous_manifest(storage, 'bucket')
 
     def test_manifest_type_is_checked_and_cli_routes_to_exact_phase(self):
         with self.assertRaises(ValueError):

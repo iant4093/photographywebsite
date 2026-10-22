@@ -32,7 +32,9 @@ Conditions:
     - !Equals [!Ref VaultLockMode, governance-confirmed-after-restore-test]
 
 Resources:
-  ReplicaVaultKey:
+  # The original key was deleted in October 2026. A new logical identity makes
+  # CloudFormation create a key rather than trying to update the missing one.
+  ReplicaVaultKeyV2:
     Type: AWS::KMS::Key
     Condition: CreateReplica
     DeletionPolicy: RetainExceptOnCreate
@@ -88,14 +90,14 @@ Resources:
         - Key: DataClassification
           Value: RecoveryCopies
 
-  ReplicaVaultKeyAlias:
+  ReplicaVaultKeyAliasV2:
     Type: AWS::KMS::Alias
     Condition: CreateReplica
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      AliasName: !Sub 'alias/ian-photography-backup-replica-${Stage}'
-      TargetKeyId: !Ref ReplicaVaultKey
+      AliasName: !Sub 'alias/ian-photography-backup-replica-${Stage}-v2'
+      TargetKeyId: !Ref ReplicaVaultKeyV2
 
   ReplicaBackupVault:
     Type: AWS::Backup::BackupVault
@@ -103,8 +105,10 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
-      BackupVaultName: !Sub 'ian-photography-replica-${Stage}'
-      EncryptionKeyArn: !GetAtt ReplicaVaultKey.Arn
+      # Encryption keys cannot be changed on an existing vault. Retain the
+      # original vault during replacement; enable locking only after testing.
+      BackupVaultName: !Sub 'ian-photography-replica-${Stage}-v2'
+      EncryptionKeyArn: !GetAtt ReplicaVaultKeyV2.Arn
       LockConfiguration: !If
         - EnableGovernanceLock
         - MinRetentionDays: 35
@@ -126,4 +130,4 @@ Outputs:
     Value: !GetAtt ReplicaBackupVault.BackupVaultArn
   ReplicaBackupVaultKeyArn:
     Condition: CreateReplica
-    Value: !GetAtt ReplicaVaultKey.Arn
+    Value: !GetAtt ReplicaVaultKeyV2.Arn

@@ -11,23 +11,26 @@ frontend, backend, operations, and the preview worker.
 | Workflow | Trigger | Jobs |
 |---|---|---|
 | `pull-request.yml` | Pull request to `main` | Reusable quality gate plus `dependency-review` (fails on severity `low` and above). |
-| `release-production.yml` | Push to `main` | `quality` → `attest` → `backend-plan` → `backend-deploy` (skipped for an empty change set) → `backend-smoke` → `frontend-deploy` (deploy, then smoke with the release SHA) → `release-storage-cleanup` → `release-record`. |
+| `release-production.yml` | Push to `main` | `quality` → `attest` → `backend-plan` → `backend-deploy` (skipped for unchanged backend inputs or an empty change set) → `backend-smoke` → `frontend-deploy` (deploy, then smoke with the release SHA) → `release-storage-cleanup` → `release-record`. |
 | `manual-release.yml` | `workflow_dispatch` | `prepare`, then `backend-plan`, `backend-deploy`, `frontend-deploy`, or `backend-only-smoke` to redeploy `frontend`, `backend`, or `both` from an earlier successful production run. |
 | `scheduled-security.yml` | Mondays 09:23 UTC and `workflow_dispatch` | `quality`, `release-idle`, then `history-and-public-posture` and `production-drift`. |
 
 `release-production.yml` and `manual-release.yml` share the concurrency group
 `iantruongphotography-production` and never cancel a run in progress.
 
-The reusable `_quality.yml` gate runs five jobs. A final `quality-gate` job fails
+The reusable `_quality.yml` gate runs six job groups. A final `quality-gate` job fails
 unless all of them succeeded:
 
 - `frontend-unit-build`: ESLint, the RAW-decoder test, Vitest coverage, the
   preview worker's coverage, the production build, the built theme/bootstrap
-  check, the Playwright release and visitor-gallery journeys, and the frontend
-  artifact budget.
+  check, and the frontend artifact budget. It uploads the manifested build for
+  the browser jobs, including on pull requests and scheduled checks.
+- `frontend-browser`: independent administration and visitor-gallery runners
+  verify and exercise the exact same built artifact in parallel. Both must pass;
+  neither rebuilds the app. Browser failures block artifact attestation.
 - `backend-unit`: all backend tests with branch coverage.
 - `infrastructure`: ops tests with branch coverage,
-  `validate_infrastructure.sh --build`, the Lambda environment policy, the SAM
+  `validate_infrastructure.sh --build --tests-already-passed`, the Lambda environment policy, the SAM
   credential-artifact scan, and the SAM artifact budget.
 - `dependency-workflow-security`: `npm audit` and `pip-audit`, CycloneDX SBOMs,
   `workflow_policy.py`, checksum-pinned `actionlint`, `zizmor`, a separate
@@ -90,6 +93,16 @@ frontend artifacts once. The `attest` job verifies their checksums and creates
 build-provenance and SBOM attestations. Later jobs deploy those same bytes and
 never rebuild from source.
 
+Before downloading or packaging backend artifacts, `backend_scope.py` reads the
+stable, protected production stack and compares its actual `ReleaseSha` with
+the target commit, using full Git history. Only changes confined to the explicit
+frontend path allowlist skip backend deployment. Unknown paths, release-control
+changes, missing history, or a non-ancestor deployed revision require the full
+guarded backend release. This comparison includes changes from earlier failed
+releases rather than assuming the preceding push reached production. All
+quality domains and public smoke checks still run for frontend-only releases;
+the deployed backend retains its own release identity.
+
 `backend_plan.sh` packages SAM code under
 `releases/<sha>/<run>-<attempt>/backend/` in the release bucket, encrypted with
 the bootstrap KMS key. `bind_s3_versions.py` rewrites every packaged `CodeUri` to
@@ -133,6 +146,11 @@ Frontend deployment never deletes S3 objects. `frontend_deploy.sh` verifies the
 bucket's public-access block and that the distribution is deployed, enabled, and
 OAC-backed. `frontend_changes.py` compares object content and cache metadata,
 uploads only changed files, and uploads `print.html` and `index.html` last.
+Metadata reads and asset uploads share an SDK client with at most eight requests
+in flight, bounded retries, and request timeouts. Every asset upload must finish
+successfully before either HTML entrypoint is published. Exact backend object
+versions are also read in parallel, with complete template validation before
+requests start. Production and manual rollback jobs install the same pinned SDK.
 Files under `assets/` get `public,max-age=31536000,immutable`. Other static
 files get `public,max-age=300,must-revalidate`, and the HTML entrypoints get
 `no-cache,max-age=0,must-revalidate`.

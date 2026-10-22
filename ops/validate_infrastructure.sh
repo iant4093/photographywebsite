@@ -5,7 +5,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 python3 -m compileall -q ops backend/functions
-python3 -m unittest discover -s ops/tests -p 'test_*.py' -v
+if [[ "${2:-}" != "--tests-already-passed" ]]; then
+  python3 -m unittest discover -s ops/tests -p 'test_*.py' -v
+fi
 
 if command -v cfn-lint >/dev/null 2>&1; then
   cfn-lint \

@@ -1,0 +1,2 @@
+# Same SDK pin as backend/requirements.txt; release jobs need only this SDK.
+boto3==1.43.51

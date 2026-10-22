@@ -499,9 +499,19 @@ completed recovery point for both tables in the metadata vault within
 breaching, so a stopped verifier or backup schedule turns it red. Neither the
 logs nor the metrics include resource or recovery-point ARNs.
 
-The `us-east-2` replica vault (`ian-photography-replica-<stage>`) is not a copy
+The `us-east-2` replica vault (`ian-photography-replica-<stage>-v2`) is not a copy
 destination. The backup plan has no copy actions. Restores from any vault go
 through the same restore test.
+
+On October 22, 2026, the replica stack was repaired after its original KMS key
+and alias had been deleted. The key deletion had been scheduled September 12
+with a 30-day window. The replacement uses new key and alias logical IDs and a
+new vault name because an existing vault's encryption key cannot be changed.
+`UpdateReplacePolicy: Retain` preserves the original empty vault, which still
+references the deleted key and is no longer owned by the stack. The replacement
+vault uses `VaultLockMode=unlocked`; restore testing is required before enabling
+governance lock. Primary metadata backups and the absence of replica copy actions
+are unchanged. Do not use the retained original vault as a copy destination.
 
 ### 6. Cost budget and who gets notified
 

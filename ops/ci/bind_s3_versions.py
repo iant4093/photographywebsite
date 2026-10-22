@@ -8,10 +8,12 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
 from typing import Callable
 import urllib.parse
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from ops.ci.aws_requests import client, parallel_map  # noqa: E402
 
 
 class BindingError(ValueError):
@@ -64,21 +66,21 @@ def bind_versions(
     return "\n".join(output) + "\n", count
 
 
-def aws_version(bucket: str, key: str, region: str) -> str:
+def object_versions(source: str, bucket: str, region: str, expected_count: int) -> dict[str, str]:
+    keys = []
+    # Validate the complete input before making requests, including count,
+    # bucket and paths. Reuse exactly the same validation as the final binding.
+    bind_versions(source, expected_bucket=bucket, expected_count=expected_count,
+                  resolve_version=lambda key: keys.append(key) or "validation")
+    storage = client("s3", region)
+
+    def resolve(key):
+        return key, storage.head_object(Bucket=bucket, Key=key).get("VersionId")
+
     try:
-        completed = subprocess.run(
-            [
-                "aws", "s3api", "head-object", "--region", region,
-                "--bucket", bucket, "--key", key, "--query", "VersionId", "--output", "text",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        raise BindingError("unable to resolve an exact package object version") from error
-    return completed.stdout.strip()
+        return dict(parallel_map(resolve, sorted(set(keys))))
+    except Exception:
+        raise BindingError("unable to resolve an exact package object version") from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,11 +93,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         source = args.input.read_text(encoding="utf-8")
+        versions = object_versions(source, args.bucket, args.region, args.expected_object_count)
         bound, count = bind_versions(
             source,
             expected_bucket=args.bucket,
             expected_count=args.expected_object_count,
-            resolve_version=lambda key: aws_version(args.bucket, key, args.region),
+            resolve_version=versions.__getitem__,
         )
         args.output.write_text(bound, encoding="utf-8")
     except (BindingError, OSError, UnicodeError):
