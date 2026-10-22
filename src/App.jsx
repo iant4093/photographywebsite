@@ -22,6 +22,7 @@ const Search = lazy(() => import('./pages/Search'))
 const TvMode = lazy(() => import('./pages/TvMode'))
 const Explore = lazy(() => import('./pages/Explore'))
 const Editor = lazy(() => import('./pages/Editor'))
+const TruongCam = lazy(() => import('./pages/TruongCam'))
 const Utilities = lazy(() => import('./pages/Utilities'))
 const UtilityComingSoon = lazy(() => import('./pages/Utilities').then(module => ({ default: module.UtilityComingSoon })))
 const Stats = lazy(() => import('./pages/Stats'))
@@ -116,7 +117,9 @@ function App() {
                         <Route path="/editor" element={<Editor />} />
                         <Route path="/utilities" element={<Utilities />} />
                         <Route path="/utilities/truongroom" element={<UtilityComingSoon moduleId="truongroom" />} />
-                        <Route path="/utilities/truongcam" element={<UtilityComingSoon moduleId="truongcam" />} />
+                        <Route path="/utilities/truongcam" element={<TruongCam />} />
+                        <Route path="/utilities/truongnoiser" element={<UtilityComingSoon moduleId="truongnoiser" />} />
+                        <Route path="/utilities/truongscaler" element={<UtilityComingSoon moduleId="truongscaler" />} />
                         <Route path="/stats" element={<Stats />} />
                         <Route path="/album/:albumId" element={<AlbumGallery />} />
                         <Route path="/video/:albumId" element={<VideoGallery />} />

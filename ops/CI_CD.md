@@ -713,6 +713,10 @@ resource's definition has not changed.
 
 ## Artifact budget maintenance
 
+The frontend gzip ceiling is 8.2 MB. This includes about 152 KB of optimized
+TruongCam screenshots and its app icon added to the Utilities launch page; the
+other frontend limits are unchanged.
+
 `ops/ci/artifact_budgets.json` holds the size limits. Raise a limit only in the
 same commit that explains the dependency or bundle growth behind it. Do not
 derive limits from a local `.aws-sam` directory; CI always does a clean SAM

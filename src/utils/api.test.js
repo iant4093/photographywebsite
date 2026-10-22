@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     clearApiCache,
+    fetchGitHubAnalytics,
     fetchAlbum,
     fetchAlbumForViewing,
     fetchAlbumsPage,
@@ -623,5 +624,19 @@ describe('mutation continuation boundary', () => {
         await vi.advanceTimersByTimeAsync(1000)
         await rejected
         expect(request).toHaveBeenCalledTimes(1)
+    })
+})
+
+
+describe('GitHub analytics repository requests', () => {
+    afterEach(() => { clearApiCache(); vi.unstubAllGlobals() })
+    it('keeps the default endpoint and passes an encoded repo selection with authentication', async () => {
+        const request = vi.fn().mockImplementation(async () => jsonResponse({ repository: {} }))
+        vi.stubGlobal('fetch', request)
+        await fetchGitHubAnalytics('admin-token')
+        await fetchGitHubAnalytics('admin-token', { repo: 'TruongCam' })
+        expect(request.mock.calls[0][0]).toMatch(/\/admin\/github-analytics$/)
+        expect(request.mock.calls[1][0]).toMatch(/\/admin\/github-analytics\?repo=TruongCam$/)
+        expect(request.mock.calls[1][1].headers.Authorization).toBe('Bearer admin-token')
     })
 })

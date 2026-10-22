@@ -2,6 +2,23 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+/* Keep the arrow in its own row so descriptions can wrap at any width. */
+.linen-site .utility-modules .explore-module-card {
+  grid-template-rows: auto minmax(8rem, 1fr) auto auto;
+  row-gap: 1rem;
+}
+
+.linen-site .utility-modules .explore-module-arrow {
+  position: static;
+  justify-self: end;
+  line-height: 1;
+}
+
+.linen-site .utility-modules .explore-module-card h2 {
+  font-size: clamp(1.8rem, 3.2vw, 2.6rem);
+  overflow-wrap: anywhere;
+}
+
 .linen-site .utility-module-art {
   display: grid;
   place-items: center;

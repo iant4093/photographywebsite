@@ -476,7 +476,17 @@ def serialize_image(
         result["freshDownloadRequired"] = True
     for field in ("width", "height", "blurhash", "exif", "thumbnailTime", "altText", "captionVtt", "captionLanguage", "transcript"):
         if field in source:
-            result[field] = source[field]
+            if field == "exif" and visibility == "public" and not include_internal:
+                # Upload metadata also contains internal calendar fields. Public
+                # album responses expose only the documented camera settings.
+                stored_exif = source[field] if isinstance(source[field], dict) else {}
+                result[field] = {
+                    name: str(stored_exif[name])[:160]
+                    for name in ("model", "lens", "focalLength", "focalRatio", "shutterSpeed", "iso")
+                    if isinstance(stored_exif.get(name), (str, int, float))
+                }
+            else:
+                result[field] = source[field]
 
     # Relative HLS manifests cannot propagate an S3 signature to segment requests.
     # Protected videos therefore use the signed raw URL unless this response

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
+import SiteSelect from '../components/SiteSelect'
 import DashboardBackLink from '../components/DashboardBackLink'
 import { useAuth } from '../context/auth'
 import { fetchGitHubAnalytics } from '../utils/api'
 import './GitHubAnalytics.css'
+
+const REPOSITORIES = [{ name: 'photographywebsite', label: 'Photography Website' }, { name: 'TruongCam', label: 'TruongCam' }]
 
 const number = (value) => Number(value || 0).toLocaleString()
 
@@ -77,6 +80,7 @@ function Status({ conclusion, status }) {
 
 export default function GitHubAnalytics() {
     const { getIdToken } = useAuth()
+    const [selectedRepo, setSelectedRepo] = useState('photographywebsite')
     const [report, setReport] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
@@ -85,14 +89,24 @@ export default function GitHubAnalytics() {
     useEffect(() => {
         const controller = new AbortController()
         Promise.resolve(getIdToken())
-            .then((token) => fetchGitHubAnalytics(token, { signal: controller.signal }))
-            .then(setReport)
+            .then((token) => {
+                if (controller.signal.aborted) return null
+                return fetchGitHubAnalytics(token, { signal: controller.signal, repo: selectedRepo })
+            })
+            .then((data) => { if (!controller.signal.aborted) setReport(data) })
             .catch((requestError) => {
-                if (requestError?.name !== 'AbortError') setError(requestError?.message || 'GitHub analytics could not be loaded.')
+                if (!controller.signal.aborted && requestError?.name !== 'AbortError') setError(requestError?.message || 'GitHub analytics could not be loaded.')
             })
             .finally(() => { if (!controller.signal.aborted) setLoading(false) })
         return () => controller.abort()
-    }, [getIdToken, requestVersion])
+    }, [getIdToken, requestVersion, selectedRepo])
+
+    const selectRepository = (value) => {
+        setLoading(true)
+        setError('')
+        setReport(null)
+        setSelectedRepo(value)
+    }
 
     const loc = report?.loc || {}
     const workflow = report?.workflow || {}
@@ -103,6 +117,11 @@ export default function GitHubAnalytics() {
 
     return (
         <div className="github-page">
+            <div className="github-repo-picker">
+                <label htmlFor="github-repository">Repository</label>
+                <SiteSelect id="github-repository" value={selectedRepo} onChange={selectRepository}
+                    options={REPOSITORIES.map((repo) => ({ value: repo.name, label: `${repo.label} · ${repo.name}` }))} />
+            </div>
             <DashboardBackLink className="github-back">← <span>Back to Dashboard</span></DashboardBackLink>
             <header className="linen-admin-heading github-heading">
                 <span>Repository intelligence</span>
@@ -158,6 +177,7 @@ export default function GitHubAnalytics() {
                     <section className="github-panel" aria-labelledby="github-runs-heading">
                         <div className="github-panel-heading"><p className="github-eyebrow">Automation</p><h2 id="github-runs-heading">Recent Actions runs</h2></div>
                         <div className="github-list">
+                            {!report.recentRuns?.length && <p className="github-empty">No recent Actions runs for this repository.</p>}
                             {(report.recentRuns || []).map((run) => (
                                 <a className="github-list-row" href={run.url} target="_blank" rel="noreferrer" key={run.id}>
                                     <div><strong>{run.title || run.name}</strong><p>{run.name} · {run.branch || 'detached'} · {dateLabel(run.createdAt)}</p></div>

@@ -8,6 +8,7 @@ vi.mock('../context/auth', () => ({ useAuth: () => auth }))
 vi.mock('../utils/api', () => ({ fetchGitHubAnalytics: api.fetchGitHubAnalytics }))
 
 import GitHubAnalytics from './GitHubAnalytics'
+import { selectChoice } from '../test/selectChoice'
 
 const REPORT = {
   schemaVersion: 1, generatedAt: '2026-08-26T12:00:00Z', nextRefreshAt: '2026-08-26T13:20:00Z', cacheStatus: 'fresh',
@@ -35,7 +36,35 @@ describe('GitHub analytics admin page', () => {
     expect(screen.getByText('Add GitHub analytics')).toBeInTheDocument()
     expect(screen.getByText('Add analytics')).toBeInTheDocument()
     expect(screen.getByText('iant4093/photographywebsite')).toBeInTheDocument()
-    expect(api.fetchGitHubAnalytics).toHaveBeenCalledWith('admin-token', { signal: expect.any(AbortSignal) })
+    expect(api.fetchGitHubAnalytics).toHaveBeenCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: 'photographywebsite' })
+  })
+
+  it('switches snapshots and defaults to the website on every fresh visit', async () => {
+    const first = render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
+    await screen.findByText('24,000')
+    api.fetchGitHubAnalytics.mockResolvedValueOnce({ ...REPORT, repository: { ...REPORT.repository, fullName: 'iant4093/TruongCam' }, loc: { ...REPORT.loc, total: 8000 } })
+    selectChoice(screen.getByRole('combobox', { name: 'Repository' }), 'TruongCam')
+    expect(screen.queryByText('24,000')).not.toBeInTheDocument()
+    expect(await screen.findByText('8,000')).toBeInTheDocument()
+    expect(screen.getByText('iant4093/TruongCam')).toBeInTheDocument()
+    expect(api.fetchGitHubAnalytics).toHaveBeenLastCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: 'TruongCam' })
+    first.unmount()
+    render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
+    expect(screen.getByRole('combobox', { name: 'Repository' })).toHaveValue('photographywebsite')
+    await screen.findByText('24,000')
+  })
+
+  it('ignores a late response from the previously selected repository', async () => {
+    let resolveWebsite
+    api.fetchGitHubAnalytics.mockImplementationOnce(() => new Promise(resolve => { resolveWebsite = resolve }))
+    render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
+    await waitFor(() => expect(api.fetchGitHubAnalytics).toHaveBeenCalledOnce())
+    api.fetchGitHubAnalytics.mockResolvedValueOnce({ ...REPORT, loc: { ...REPORT.loc, total: 8000 } })
+    selectChoice(screen.getByRole('combobox'), 'TruongCam')
+    await screen.findByText('8,000')
+    resolveWebsite(REPORT)
+    await waitFor(() => expect(screen.queryByText('24,000')).not.toBeInTheDocument())
+    expect(screen.getByText('8,000')).toBeInTheDocument()
   })
 
   it('shows stale snapshots and retries safe errors', async () => {

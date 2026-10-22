@@ -58,6 +58,25 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
         self.assertEqual(response["headers"]["Cache-Control"], "no-store")
         self.assertEqual(audit.call_args.kwargs["reason_code"], "fresh_report")
 
+    def test_repository_selection_is_allowlisted_and_scopes_cache_reads(self):
+        for repository in github_analytics.REPOSITORIES:
+            event = {**ADMIN_EVENT, "queryStringParameters": {"repo": repository}}
+            with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(
+                get_github_analytics, "require_admin", return_value=None
+            ), patch.object(get_github_analytics, "load_cached_report", return_value=sample_report()) as cache, patch.object(
+                get_github_analytics, "emit_audit_event"
+            ):
+                response = get_github_analytics.handler(event, CONTEXT)
+            self.assertEqual(response["statusCode"], 200)
+            cache.assert_called_once_with(repository)
+        for repository in ("other", "../TruongCam", "https://example.com", ""):
+            with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(
+                get_github_analytics, "require_admin", return_value=None
+            ), patch.object(get_github_analytics, "load_cached_report") as cache:
+                response = get_github_analytics.handler({**ADMIN_EVENT, "queryStringParameters": {"repo": repository}}, CONTEXT)
+            self.assertEqual(response["statusCode"], 400)
+            cache.assert_not_called()
+
     def test_missing_and_failed_cache_are_safe(self):
         common = (
             patch.object(get_github_analytics, "verify_front_door_request", return_value=None),
@@ -83,10 +102,37 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
         ) as build, patch.object(refresh_github_analytics, "store_report") as store:
             result = refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
         self.assertTrue(result["refreshed"])
-        build.assert_called_once()
-        store.assert_called_once()
+        self.assertEqual(build.call_count, len(github_analytics.REPOSITORIES))
+        self.assertEqual(store.call_count, len(github_analytics.REPOSITORIES))
+        self.assertEqual(result["repositories"], list(github_analytics.REPOSITORIES))
         with self.assertRaises(ValueError):
             refresh_github_analytics.handler({"source": "untrusted"}, CONTEXT)
+
+    def test_failed_repository_preserves_cache_and_does_not_block_other_refreshes(self):
+        with patch.object(refresh_github_analytics, "load_cached_report", return_value=sample_report()), patch.object(
+            refresh_github_analytics, "build_report", side_effect=[RuntimeError("provider down"), sample_report()]
+        ) as build, patch.object(refresh_github_analytics, "store_report") as store, self.assertLogs(level="ERROR"):
+            with self.assertRaises(RuntimeError):
+                refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
+        self.assertEqual(build.call_count, 2)
+        store.assert_called_once_with(sample_report(), "TruongCam")
+
+    def test_cache_entries_are_independent_and_website_key_is_preserved(self):
+        with patch.object(github_analytics.cache_table, "put_item") as put, patch.object(
+            github_analytics.cache_table, "get_item", return_value={}
+        ) as get:
+            for repository in github_analytics.REPOSITORIES:
+                github_analytics.store_report(sample_report(), repository)
+                github_analytics.load_cached_report(repository)
+        keys = [call.kwargs["Item"]["cacheKey"] for call in put.call_args_list]
+        self.assertEqual(keys, [github_analytics.CACHE_KEY, github_analytics.CACHE_KEY + ":iant4093/TruongCam"])
+        self.assertEqual([call.kwargs["Key"]["cacheKey"] for call in get.call_args_list], keys)
+        self.assertEqual(github_analytics.validate_repository(), "photographywebsite")
+
+    def test_swift_app_and_native_tests_are_counted_for_truongcam(self):
+        self.assertEqual(github_analytics._source_extension("src/TruongCam/Camera.swift"), (".swift", "Swift"))
+        self.assertEqual(github_analytics._source_area("src/TruongCam/Camera.swift"), "iPhone App")
+        self.assertEqual(github_analytics._source_area("src/TruongCamTests/CameraTests.swift"), "Tests")
 
     def test_archive_count_excludes_dependencies_locks_generated_and_blank_lines(self):
         raw = io.BytesIO()

@@ -9,7 +9,7 @@ import logging
 from audit_helpers import actor_context, emit_audit_event
 from auth_helpers import require_admin
 from front_door import verify_front_door_request
-from github_analytics import load_cached_report
+from github_analytics import OWNER, REPOSITORIES, load_cached_report, validate_repository
 from response_helpers import error_response, json_response
 
 
@@ -38,11 +38,19 @@ def handler(event, context):
     if denied:
         return denied
     try:
-        report = load_cached_report()
+        repository = validate_repository((event.get("queryStringParameters") or {}).get("repo"))
+    except ValueError:
+        return error_response(400, "Choose a supported GitHub repository.", code="invalid_repository")
+    try:
+        report = load_cached_report(repository)
         if report is None:
             return error_response(503, "The GitHub analytics snapshot is being prepared. Please try again shortly.", code="github_analytics_preparing")
         status = _cache_status(report)
         result = copy.deepcopy(report)
+        result["repositories"] = [
+            {"name": name, "fullName": f"{OWNER}/{name}", "label": config["label"]}
+            for name, config in REPOSITORIES.items()
+        ]
         result["cacheStatus"] = status
         result["nextRefreshAt"] = _next_refresh()
         actor_type, auth_method = actor_context(event)

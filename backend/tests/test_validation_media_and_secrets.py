@@ -47,6 +47,18 @@ class ValidationTests(unittest.TestCase):
 
 
 class MediaAccessTests(unittest.TestCase):
+    def test_public_exif_excludes_internal_calendar_and_location_fields(self):
+        exif = {"model": "Camera", "iso": "ISO 100", "takenOn": "2026-10-22", "gps": "private"}
+        original_exif = dict(exif)
+        image = {"rawKey": f"albums/{ALBUM_ID}/original/photo.jpg", "exif": exif}
+        result = media_access.serialize_image(image, "public")
+        self.assertEqual(result["exif"], {"model": "Camera", "iso": "ISO 100"})
+        self.assertEqual(image["exif"], original_exif)
+        internal = media_access.serialize_image(image, "public", include_internal=True)
+        self.assertEqual(internal["exif"], original_exif)
+        for malformed in (None, "invalid", ["private"]):
+            self.assertEqual(media_access.serialize_image({**image, "exif": malformed}, "public")["exif"], {})
+
     def test_favorite_serialization_is_optional_boolean_and_excludes_identity(self):
         source = {"rawKey": f"albums/{ALBUM_ID}/original/photo.jpg", "ownerEmail": "private@example.test"}
         for visibility in ("public", "private", "unlisted"):

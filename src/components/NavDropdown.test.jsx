@@ -189,7 +189,7 @@ describe('desktop navigation dropdowns', () => {
     expect(explore).toHaveFocus()
   })
 
-  it.each(['/editor', '/utilities/truongroom', '/utilities/truongcam'])('opens Utilities on %s with all three modules', async path => {
+  it.each(['/editor', '/utilities/truongroom', '/utilities/truongcam', '/utilities/truongnoiser', '/utilities/truongscaler'])('opens Utilities on %s with all five modules', async path => {
     const { container } = await routed(path)
     const utilities = trigger(container, 'Utilities')
     expect(utilities).toHaveAttribute('href', '/utilities')
@@ -201,7 +201,7 @@ describe('desktop navigation dropdowns', () => {
     expect(within(panel).getByRole('link', { name: /All modules/ })).toHaveFocus()
     expect(within(panel).getByRole('link', { name: /Web Editor/ })).toHaveAttribute('href', '/editor')
     expect(within(panel).getByRole('link', { name: /TruongRoom Coming soon/ })).toHaveAttribute('href', '/utilities/truongroom')
-    expect(within(panel).getByRole('link', { name: /TruongCam Coming soon/ })).toHaveAttribute('href', '/utilities/truongcam')
+    expect(within(panel).getByRole('link', { name: /TruongCam RAW camera for iPhone/ })).toHaveAttribute('href', '/utilities/truongcam')
     expect(panel.querySelector('[aria-current="page"]')).toHaveAttribute('href', path)
     fireEvent.keyDown(document.activeElement, { key: 'Escape' })
     expect(utilities).toHaveAttribute('aria-expanded', 'false')

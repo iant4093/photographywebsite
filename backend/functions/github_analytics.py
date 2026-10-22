@@ -36,6 +36,12 @@ SCHEDULED_REFRESH_EVENT = {
 OWNER = os.environ.get("GITHUB_REPOSITORY_OWNER", "iant4093").strip()
 REPOSITORY = os.environ.get("GITHUB_REPOSITORY_NAME", "photographywebsite").strip()
 BRANCH = os.environ.get("GITHUB_REPOSITORY_BRANCH", "main").strip()
+# Explicit allowlist shared by the API and scheduled collector. Each repo has
+# its own cache entry; the website retains its original key across the rollout.
+REPOSITORIES = {
+    REPOSITORY: {"branch": BRANCH, "label": "Photography Website"},
+    "TruongCam": {"branch": "main", "label": "TruongCam"},
+}
 API_BASE = "https://api.github.com"
 ARCHIVE_BASE = "https://codeload.github.com"
 
@@ -47,7 +53,7 @@ _SOURCE_EXTENSIONS = {
     ".js": "JavaScript", ".jsx": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript",
     ".ts": "TypeScript", ".tsx": "TypeScript", ".py": "Python", ".css": "CSS",
     ".scss": "SCSS", ".html": "HTML", ".sh": "Shell", ".yaml": "YAML", ".yml": "YAML",
-    ".json": "JSON", ".toml": "TOML",
+    ".json": "JSON", ".toml": "TOML", ".swift": "Swift",
 }
 _EXCLUDED_PARTS = {
     ".git", ".aws-sam", "node_modules", "dist", "build", "coverage", "vendor",
@@ -70,8 +76,21 @@ def _iso(value):
     return value.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _validate_configuration():
-    if not all(_SAFE_NAME_RE.fullmatch(value or "") for value in (OWNER, REPOSITORY, BRANCH)):
+def validate_repository(repository=None):
+    repository = REPOSITORY if repository is None else repository
+    if not isinstance(repository, str) or repository not in REPOSITORIES:
+        raise ValueError("Unsupported GitHub repository")
+    return repository
+
+
+def _cache_key(repository):
+    repository = validate_repository(repository)
+    return CACHE_KEY if repository == REPOSITORY else f"{CACHE_KEY}:{OWNER}/{repository}"
+
+
+def _validate_configuration(repository):
+    branch = REPOSITORIES[repository]["branch"]
+    if not all(_SAFE_NAME_RE.fullmatch(value or "") for value in (OWNER, repository, branch)):
         raise ProviderContractError("GitHub repository configuration is invalid")
 
 
@@ -246,8 +265,10 @@ def _activity(payload, previous):
 def _source_area(path):
     normalized = path.lower()
     name = normalized.rsplit("/", 1)[-1]
-    if "/tests/" in f"/{normalized}" or ".test." in name or name.startswith("test_") or name.endswith("_test.py"):
+    if any(part.endswith("tests") for part in normalized.split("/")[:-1]) or ".test." in name or name.startswith("test_") or name.endswith("_test.py"):
         return "Tests"
+    if normalized.endswith(".swift"):
+        return "iPhone App"
     if normalized.startswith("src/"):
         return "Frontend"
     if normalized.startswith("ops/") or normalized.startswith(".github/") or normalized in {"backend/template.yaml", "backend/makefile"}:
@@ -267,10 +288,11 @@ def _source_extension(path):
     return None
 
 
-def _count_archive(sha):
+def _count_archive(sha, repository=None):
+    repository = validate_repository(repository)
     if not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
         raise ProviderContractError("GitHub archive revision was invalid")
-    url = f"{ARCHIVE_BASE}/{OWNER}/{REPOSITORY}/zip/{sha}"
+    url = f"{ARCHIVE_BASE}/{OWNER}/{repository}/zip/{sha}"
     request = urllib.request.Request(url, headers={"User-Agent": "IanTruongPhotography-GitHubAnalytics"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -280,7 +302,7 @@ def _count_archive(sha):
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
         raise ProviderContractError("GitHub archive could not be read") from None
 
-    areas = {name: 0 for name in ("Frontend", "Backend", "Infrastructure & Ops", "Tests", "Other")}
+    areas = {name: 0 for name in ("Frontend", "Backend", "iPhone App", "Infrastructure & Ops", "Tests", "Other")}
     languages = {}
     files = 0
     expanded = 0
@@ -323,17 +345,19 @@ def _count_archive(sha):
     }
 
 
-def build_report(previous=None):
-    _validate_configuration()
+def build_report(previous=None, repository=None):
+    repository = validate_repository(repository)
+    _validate_configuration(repository)
+    branch = REPOSITORIES[repository]["branch"]
     previous = previous if isinstance(previous, dict) else {}
-    prefix = f"/repos/{OWNER}/{REPOSITORY}"
+    prefix = f"/repos/{OWNER}/{repository}"
     _, repo_payload, _ = _request(prefix)
-    _, commits_payload, _ = _request(f"{prefix}/commits?sha={BRANCH}&per_page=10")
-    _, count_payload, count_headers = _request(f"{prefix}/commits?sha={BRANCH}&per_page=1")
+    _, commits_payload, _ = _request(f"{prefix}/commits?sha={branch}&per_page=10")
+    _, count_payload, count_headers = _request(f"{prefix}/commits?sha={branch}&per_page=1")
     since = _iso(_utc_now() - dt.timedelta(days=30))
-    _, recent_count_payload, recent_count_headers = _request(f"{prefix}/commits?sha={BRANCH}&since={since}&per_page=1")
+    _, recent_count_payload, recent_count_headers = _request(f"{prefix}/commits?sha={branch}&since={since}&per_page=1")
     _, languages_payload, _ = _request(f"{prefix}/languages")
-    _, runs_payload, _ = _request(f"{prefix}/actions/runs?branch={BRANCH}&per_page=30")
+    _, runs_payload, _ = _request(f"{prefix}/actions/runs?branch={branch}&per_page=30")
     activity_status, activity_payload, _ = _request(f"{prefix}/stats/code_frequency", accepted_statuses=(200, 202))
 
     repo = _dict(repo_payload, "repository")
@@ -342,7 +366,7 @@ def build_report(previous=None):
         raise ProviderContractError("GitHub returned no branch commits")
     head_sha = commits[0]["sha"]
     previous_loc = previous.get("loc") if isinstance(previous.get("loc"), dict) else None
-    loc = previous_loc if previous_loc and previous_loc.get("revision") == head_sha else _count_archive(head_sha)
+    loc = previous_loc if previous_loc and previous_loc.get("revision") == head_sha else _count_archive(head_sha, repository)
     runs = _recent_runs(runs_payload)
     activity = _activity(activity_payload if activity_status == 200 else None, previous.get("activity"))
     now = _utc_now()
@@ -375,8 +399,8 @@ def build_report(previous=None):
     }
 
 
-def load_cached_report():
-    response = cache_table.get_item(Key={"cacheKey": CACHE_KEY}, ConsistentRead=True)
+def load_cached_report(repository=None):
+    response = cache_table.get_item(Key={"cacheKey": _cache_key(repository)}, ConsistentRead=True)
     item = response.get("Item")
     if not isinstance(item, dict):
         return None
@@ -392,12 +416,13 @@ def load_cached_report():
     return report
 
 
-def store_report(report):
+def store_report(report, repository=None):
+    key = _cache_key(repository)
     payload = json.dumps(report, separators=(",", ":"), sort_keys=True)
     if len(payload.encode("utf-8")) > MAX_CACHE_PAYLOAD_BYTES:
         raise ValueError("GitHub analytics cache payload exceeded the safe limit")
     cache_table.put_item(Item={
-        "cacheKey": CACHE_KEY,
+        "cacheKey": key,
         "schemaVersion": CACHE_SCHEMA_VERSION,
         "generatedAt": report["generatedAt"],
         "payload": payload,

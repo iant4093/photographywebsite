@@ -20,6 +20,18 @@ function UtilityArt({ id }) {
                     <path d="M35 132V28h170v104H35Zm0-104 32 25h106l32-25M67 53v55h106V53M35 132l32-24m106 0 32 24" />
                     <rect x="85" y="66" width="70" height="28" /><path d="m85 94 21-19 17 14 13-10 19 15" />
                 </svg>
+            ) : id === 'truongnoiser' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <rect x="32" y="28" width="176" height="104" rx="2" />
+                    <path d="M120 28v104m-78-18 26-27 22 14 20-22m20 35 26-27 22 14 20-22M45 46h2m12 11h2m18-12h2m18 19h2M48 77h2m45 38h2m-28 9h2" />
+                    <circle cx="166" cy="58" r="10" />
+                </svg>
+            ) : id === 'truongscaler' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <rect x="32" y="76" width="70" height="56" rx="2" />
+                    <path d="m32 121 21-21 17 14 13-10 19 17M124 28h84v84m-84 0 84-84M167 28h41v41" />
+                    <circle cx="81" cy="91" r="6" />
+                </svg>
             ) : (
                 <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
                     <path d="M34 53h42l12-19h64l12 19h42v79H34V53Z" />
@@ -41,7 +53,7 @@ export function UtilityComingSoon({ moduleId }) {
                     <UtilityArt id={module.id} />
                     <span className="utility-status">Coming soon</span>
                     <h1 id="utility-title" className="font-serif text-4xl md:text-6xl text-charcoal">{module.title}</h1>
-                    <p>{module.title} is in development. Check back here for updates.</p>
+                    <p>{module.detail}</p>
                     <Link to="/editor" className="utility-editor-link">Try Web Editor →</Link>
                 </div>
             </section>
@@ -54,9 +66,9 @@ export default function Utilities() {
         <div className="explore-page utilities-page animate-fade-in pt-[74px]">
             <header className="explore-header max-w-7xl mx-auto px-6 pt-14 pb-8 md:pt-20 md:pb-12">
                 <div className="linen-section-heading editorial-motion-frame">
-                    <span>Creative toolkit</span>
+                    <span>Photography tools</span>
                     <h1 className="font-serif text-4xl md:text-6xl font-normal text-charcoal">Utilities</h1>
-                    <p>Tools for your photography, with more on the way.</p>
+                    <p>Photo apps and browser tools.</p>
                 </div>
             </header>
             <section className="explore-modules utility-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Utilities modules">

@@ -1,0 +1,36 @@
+.linen-site .cam-shell { max-width: 1240px; margin: auto; padding: 2.5rem 2rem 4rem; }
+.linen-site .cam-hero { display: grid; grid-template-columns: 1.1fr 1fr; align-items: center; gap: 4rem; padding: 1rem 0 3rem; }
+.linen-site .cam-title { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
+.linen-site .cam-title img { border-radius: 12px; flex-shrink: 0; }
+.linen-site .cam-title h1 { color: var(--color-charcoal); font: 400 clamp(3rem, 5.5vw, 5rem)/1.1 var(--font-serif); letter-spacing: -.04em; }
+.linen-site .cam-intro { max-width: 31rem; margin-top: 1.7rem; color: var(--color-warm-gray); font-size: 1rem; line-height: 1.85; }
+.linen-site .cam-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 2rem; }
+.linen-site .cam-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 1rem 1.2rem; border: 1px solid var(--color-charcoal); color: var(--color-charcoal); font-size: .78rem; transition: background-color .2s, color .2s; }
+.linen-site .cam-button:hover { background: var(--color-warm-border); }
+.linen-site .cam-button-primary { color: var(--color-cream); background: var(--color-charcoal); }
+.linen-site .cam-button-primary:hover { background: var(--color-amber-dark); border-color: var(--color-amber-dark); color: var(--color-cream); }
+.linen-site .cam-install-note { margin-top: 1rem; color: var(--color-warm-gray); font-size: .72rem; line-height: 1.9; }
+.linen-site .cam-install-note a, .linen-site .cam-guide { text-decoration: underline; text-underline-offset: 4px; }
+.linen-site .cam-hero-visual { padding: 2.4rem 2.5rem 1.1rem; background: color-mix(in srgb, var(--color-amber-dark) 9%, var(--color-cream)); border: 1px solid var(--color-warm-border); }
+.linen-site .cam-phone { width: min(100%, 245px); margin: auto; padding: 5px; background: #171714; border-radius: 34px; box-shadow: 12px 18px 35px #0003; }
+.linen-site .cam-phone img { display: block; width: 100%; height: auto; border-radius: 29px; }
+.linen-site .cam-hero-visual figcaption { margin-top: 1.75rem; color: var(--color-warm-gray); font-size: .75rem; }
+.linen-site .cam-features, .linen-site .cam-install { display: grid; grid-template-columns: 1fr 1.2fr; gap: 5rem; padding: 5rem 0; border-top: 1px solid var(--color-warm-border); }
+.linen-site .cam-shell h2 { color: var(--color-charcoal); font: 400 clamp(2.2rem, 3.8vw, 3.3rem)/1.15 var(--font-serif); letter-spacing: -.035em; }
+.linen-site .cam-feature-list { list-style: none; padding: 0; }
+.linen-site .cam-feature-list li { display: flex; gap: 1.25rem; padding: 1.5rem 0; border-top: 1px solid var(--color-warm-border); }
+.linen-site .cam-feature-list li:first-child { padding-top: 0; border-top: 0; }
+.linen-site .cam-feature-list li > span { padding-top: .35rem; color: var(--color-amber-dark); font-size: .6rem; }
+.linen-site .cam-feature-list p, .linen-site .cam-install li { color: var(--color-warm-gray); font-size: .9rem; line-height: 1.8; }
+.linen-site .cam-screenshots { padding-bottom: 4rem; }
+.linen-site .cam-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2rem; margin-top: 2rem; }
+.linen-site .cam-screen-mat { display: flex; justify-content: center; padding: 2rem; background: color-mix(in srgb, var(--color-amber-dark) 6%, var(--color-cream)); border: 1px solid var(--color-warm-border); }
+.linen-site .cam-screen-mat img { display: block; width: min(100%, 225px); height: auto; border: 4px solid #171714; border-radius: 28px; box-shadow: 5px 10px 20px #0002; }
+.linen-site .cam-gallery figcaption { padding-top: 1rem; color: var(--color-warm-gray); font-size: .85rem; }
+.linen-site .cam-install { scroll-margin-top: 110px; }
+.linen-site .cam-install ol { list-style: decimal; padding-left: 1.25rem; }
+.linen-site .cam-install li { padding-left: .25rem; margin-bottom: 1rem; }
+.linen-site .cam-guide { display: inline-block; margin-top: .5rem; color: var(--color-charcoal); font-size: .8rem; }
+@media (max-width: 900px) { .linen-site .cam-hero { gap: 2rem; } .linen-site .cam-features, .linen-site .cam-install { gap: 2.5rem; } .linen-site .cam-gallery { gap: 1rem; } .linen-site .cam-screen-mat { padding: 1.2rem; } }
+@media (max-width: 650px) { .linen-site .cam-shell { padding: 2rem 1.25rem 3rem; } .linen-site .cam-hero, .linen-site .cam-features, .linen-site .cam-install { grid-template-columns: 1fr; gap: 2.5rem; } .linen-site .cam-title { gap: .75rem; } .linen-site .cam-title h1 { font-size: clamp(2.5rem, 10vw, 3.5rem); } .linen-site .cam-title img { width: 48px; height: 48px; } .linen-site .cam-hero-visual { padding-inline: 2rem; } .linen-site .cam-phone { max-width: 220px; } .linen-site .cam-features, .linen-site .cam-install { padding-block: 3rem; } .linen-site .cam-gallery { grid-template-columns: 1fr; gap: 2.5rem; } .linen-site .cam-screen-mat { padding: 2rem; } }
+@media (prefers-reduced-motion: reduce) { .linen-site .cam-button { transition: none; } }

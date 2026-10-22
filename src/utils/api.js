@@ -926,7 +926,8 @@ export function fetchGoogleDriveUsage(token, options = {}) {
 }
 
 export function fetchGitHubAnalytics(token, options = {}) {
-    return apiFetch('/admin/github-analytics', {
+    const query = options.repo ? `?repo=${encodeURIComponent(options.repo)}` : ''
+    return apiFetch(`/admin/github-analytics${query}`, {
         headers: authHeaders(token),
         signal: options.signal,
     }, { timeoutMs: 30_000, retries: 0 })
