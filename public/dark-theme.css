@@ -47,7 +47,8 @@ html[data-theme="dark"] body {
   background: rgba(39, 36, 31, 0.8);
 }
 
-.linen-site[data-theme="dark"] :is(input, textarea)::placeholder {
+/* Floating-label inputs hide their placeholder on purpose; keep it hidden. */
+.linen-site[data-theme="dark"] :is(input, textarea):not(.placeholder-transparent)::placeholder {
   color: var(--color-warm-gray);
 }
 
