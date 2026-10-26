@@ -354,6 +354,14 @@ describe('public API client behavior', () => {
       signal: expect.any(AbortSignal),
     }))
     expect(fetchMock.mock.calls[6][1].headers).toEqual({})
+    await expect(api.fetchRawPhotoFolder('admin-token', '', { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[7][0]).toMatch(/\/admin\/raw-photos$/)
+    expect(fetchMock.mock.calls[7][1]).toEqual(expect.objectContaining({
+      headers: { Authorization: 'Bearer admin-token' },
+      signal: expect.any(AbortSignal),
+    }))
+    await expect(api.fetchRawPhotoFolder('admin-token', 'folder_Id-1', { signal })).resolves.toEqual(report)
+    expect(fetchMock.mock.calls[8][0]).toMatch(/\/admin\/raw-photos\?folder=folder_Id-1$/)
   })
 
   it('submits anonymous analytics without credentials or retries', async () => {

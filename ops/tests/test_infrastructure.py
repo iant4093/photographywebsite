@@ -205,6 +205,7 @@ expected_routes = {
     ("POST", "/analytics/events"),
     ("GET", "/admin/analytics"),
     ("GET", "/admin/drive-usage"),
+    ("GET", "/admin/raw-photos"),
     ("POST", "/admin/drive-backups"),
     ("GET", "/admin/github-analytics"),
     ("GET", "/admin/site-health"),
@@ -526,6 +527,23 @@ class DataProtectionTests(unittest.TestCase):
         self.assertIn("SOURCES_RefreshGoogleDriveUsageFunction :=", MAKEFILE)
         self.assertIn("DEPS_RefreshGoogleDriveUsageFunction := google-auth==", MAKEFILE)
 
+    def test_raw_photo_viewer_is_admin_only_read_only_and_stores_nothing(self) -> None:
+        function = resource_block("GetRawPhotosFunction")
+        self.assertIn("Handler: admin_raw_photos.handler", function)
+        self.assertIn("Path: /admin/raw-photos", function)
+        self.assertIn("Method: GET", function)
+        self.assertNotIn("Authorizer: NONE", function)
+        self.assertIn("GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn", function)
+        self.assertIn("Action: ssm:GetParameter", function)
+        self.assertIn("Action: kms:Decrypt", function)
+        for forbidden in ("dynamodb:", "s3:", "sqs:", "lambda:", "secretsmanager:", "ssm:PutParameter", "kms:*", "Resource: '*'"):
+            self.assertNotIn(forbidden, function)
+        self.assertIn("SOURCES_GetRawPhotosFunction :=", MAKEFILE)
+        self.assertIn("DEPS_GetRawPhotosFunction := google-auth==", MAKEFILE)
+        source = (ROOT / "backend" / "functions" / "original_drive.py").read_text(encoding="utf-8")
+        self.assertIn('READ_ONLY_SCOPES = ("https://www.googleapis.com/auth/drive.readonly",)', source)
+        self.assertNotRegex(source, r'method="(?!GET)')
+
     def test_github_analytics_is_hourly_cached_admin_only_and_least_privilege(self) -> None:
         table = resource_block("GitHubAnalyticsCacheTable")
         function = resource_block("GetGitHubAnalyticsFunction")
@@ -701,6 +719,20 @@ class BrowserBoundaryTests(unittest.TestCase):
             BASELINE["cache_policies"]["html"],
             "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
         )
+
+    def test_raw_photo_thumbnails_are_the_only_google_image_origin(self) -> None:
+        directives = {
+            tokens[0]: tokens[1:]
+            for part in BASELINE["content_security_policy_template"].split(";")
+            if (tokens := part.split())
+        }
+        google = {
+            directive: [source for source in sources if "google" in source and "gstatic" not in source]
+            for directive, sources in directives.items()
+        }
+        # The admin raw photo viewer loads Drive's resized thumbnails as plain
+        # images only; Google may not be fetched, scripted, or framed.
+        self.assertEqual({key: value for key, value in google.items() if value}, {"img-src": ["https://lh3.googleusercontent.com"]})
 
     def test_frontend_policy_renders_exact_s3_presigned_origins(self) -> None:
         csp = cloudfront_frontend.render_csp(
@@ -1161,8 +1193,9 @@ class IdentityAndSecretTests(unittest.TestCase):
             TEMPLATE.count("RATE_LIMIT_HASH_PARAMETER: !Sub '/ian-website/${Stage}/rate-limit-hash'"),
             8,
         )
-        # 20 pre-existing reads plus the five private-media cookie signers.
-        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 25)
+        # 20 pre-existing reads, the five private-media cookie signers, and the
+        # read-only raw photo viewer's Google credential.
+        self.assertEqual(TEMPLATE.count("Action: ssm:GetParameter"), 26)
 
     def test_free_print_plan_has_no_vendor_credential_or_original_staging_path(self) -> None:
         print_function = resource_block("PreparePrintFunction")

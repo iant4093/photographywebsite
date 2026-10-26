@@ -4886,6 +4886,46 @@ Resources:
             Path: /admin/drive-usage
             Method: GET
 
+  # Admin-only, live and read-only browsing of the camera raw photo backup.
+  # Drive tokens are minted with drive.readonly; no data is stored.
+  GetRawPhotosFunction:
+    Type: AWS::Serverless::Function
+    Metadata: *SafePythonBuild
+    Properties:
+      Tags:
+        Feature: backups
+      CodeUri: ./
+      Handler: admin_raw_photos.handler
+      Timeout: 28
+      MemorySize: 512
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          GOOGLE_OAUTH_PARAMETER: !Ref GoogleOAuthSecretArn
+      Policies:
+        - !Ref FrontDoorOriginSecretReadPolicy
+        - !If
+          - HasGoogleOAuthSecret
+          - Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GoogleOAuthSecretArn}'
+          - !Ref AWS::NoValue
+        - !If
+          - HasApplicationSecretsKmsKey
+          - Statement:
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ApplicationSecretsKmsKeyArn
+          - !Ref AWS::NoValue
+      Events:
+        GetRawPhotos:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/raw-photos
+            Method: GET
+
   GetPhotographyStatsFunction:
     Type: AWS::Serverless::Function
     Metadata: *SafePythonBuild

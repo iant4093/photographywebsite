@@ -51,6 +51,7 @@ SOURCES_GetCostReportFunction := audit_helpers.py auth_helpers.py front_door.py 
 SOURCES_AnalyticsIngestFunction := analytics.py front_door.py response_helpers.py secret_helpers.py security_helpers.py validation_helpers.py aws_request_config.py
 SOURCES_GetAnalyticsReportFunction := audit_helpers.py auth_helpers.py front_door.py get_analytics_report.py response_helpers.py aws_request_config.py
 SOURCES_GetGoogleDriveUsageFunction := audit_helpers.py auth_helpers.py front_door.py get_google_drive_usage.py response_helpers.py aws_request_config.py
+SOURCES_GetRawPhotosFunction := admin_raw_photos.py audit_helpers.py auth_helpers.py front_door.py original_drive.py response_helpers.py aws_request_config.py
 SOURCES_GetPhotographyStatsFunction := front_door.py photography_stats.py response_helpers.py aws_request_config.py capture_calendar.py
 SOURCES_RefreshGoogleDriveUsageFunction := audit_helpers.py auth_helpers.py front_door.py get_google_drive_usage.py photography_stats.py refresh_google_drive_usage.py response_helpers.py aws_request_config.py capture_calendar.py
 SOURCES_GetGitHubAnalyticsFunction := audit_helpers.py auth_helpers.py front_door.py get_github_analytics.py github_analytics.py response_helpers.py aws_request_config.py
@@ -82,6 +83,7 @@ DEPS_UpdateAlbumFunction := segno==1.6.6
 DEPS_AddImagesFunction := ExifRead==3.5.1 resend==2.34.0 segno==1.6.6 cryptography==50.0.0
 DEPS_GoogleDriveBackupFunction := google-api-python-client==2.198.0 google-auth==2.58.1 google-auth-httplib2==0.4.0
 DEPS_GetGoogleDriveUsageFunction := google-auth==2.58.1 requests==2.34.2
+DEPS_GetRawPhotosFunction := google-auth==2.58.1 requests==2.34.2
 DEPS_RefreshGoogleDriveUsageFunction := google-auth==2.58.1 requests==2.34.2 ExifRead==3.5.1
 
 .PHONY: build-PreviewWorkerFunction

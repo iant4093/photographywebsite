@@ -45,6 +45,7 @@
     "GetPhotographyStatsFunction": "public-delivery",
     "GetPublicAlbumFunction": "public-delivery",
     "GetPublicAlbumsFunction": "public-delivery",
+    "GetRawPhotosFunction": "backups",
     "GetSharedAlbumFunction": "public-delivery",
     "GetSiteHealthFunction": "observability",
     "GetUploadUrlFunction": "album-management",

@@ -24,6 +24,10 @@
         "uncompressedBytes": 25000000,
         "fileCount": 650
       },
+      "GetRawPhotosFunction": {
+        "uncompressedBytes": 25000000,
+        "fileCount": 650
+      },
       "RefreshGoogleDriveUsageFunction": {
         "uncompressedBytes": 25000000,
         "fileCount": 650

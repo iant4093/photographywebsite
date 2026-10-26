@@ -925,6 +925,14 @@ export function fetchGoogleDriveUsage(token, options = {}) {
     }, { timeoutMs: 60_000, retries: 0 })
 }
 
+export function fetchRawPhotoFolder(token, folderId = '', options = {}) {
+    const query = folderId ? `?folder=${encodeURIComponent(folderId)}` : ''
+    return apiFetch(`/admin/raw-photos${query}`, {
+        headers: authHeaders(token),
+        signal: options.signal,
+    }, { timeoutMs: 30_000, retries: 0 })
+}
+
 export function fetchGitHubAnalytics(token, options = {}) {
     const query = options.repo ? `?repo=${encodeURIComponent(options.repo)}` : ''
     return apiFetch(`/admin/github-analytics${query}`, {

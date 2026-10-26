@@ -159,7 +159,8 @@ html[data-theme="dark"] .linen-site.linen-admin :is(
   .aws-cost-summary-card,
   .aws-cost-panel,
   .drive-usage-summary-card,
-  .drive-usage-panel
+  .drive-usage-panel,
+  .raw-photos-folder
 ) {
   color: var(--color-charcoal);
   background-color: rgba(38, 35, 30, 0.92);
@@ -245,7 +246,7 @@ html[data-theme="dark"] .linen-site.linen-admin [class~="bg-red-50"] {
   border-color: #7f3b3b;
 }
 
-html[data-theme="dark"] .linen-site.linen-admin :is(.aws-cost-error, .drive-usage-error) {
+html[data-theme="dark"] .linen-site.linen-admin :is(.aws-cost-error, .drive-usage-error, .raw-photos-error) {
   color: #fecaca;
   background: #3b2020;
   border-color: #7f3b3b;

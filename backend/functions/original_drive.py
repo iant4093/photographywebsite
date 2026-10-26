@@ -44,6 +44,10 @@ class DriveCursorExpired(OriginalDriveError):
     """The saved change cursor expired; rebuild the full inventory."""
 
 
+class DriveItemNotFound(OriginalDriveError):
+    """The requested item does not exist or is outside the configured archive."""
+
+
 class _NoRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, _request, _file_pointer, _code, _message, _headers, _new_url):
         return None
@@ -228,6 +232,8 @@ class OriginalDrive:
                 error.close()
                 if code == 410 and resource == "changes":
                     raise DriveCursorExpired("Drive change cursor has expired") from None
+                if code == 404 and resource.startswith("files/"):
+                    raise DriveItemNotFound("Drive item is unavailable") from None
                 if code not in {429, 500, 502, 503, 504} or attempt + 1 == MAX_ATTEMPTS:
                     raise OriginalDriveError("Drive read request failed") from None
             except (TimeoutError, URLError, OSError):
@@ -326,6 +332,77 @@ class OriginalDrive:
         if len(body) != int(item["size"]) or hashlib.md5(body, usedforsecurity=False).hexdigest() != checksum:
             raise OriginalDriveError("Drive downloaded original failed integrity verification")
         return body
+
+    def folder_path(self, folder_id, known=None):
+        """Return [{id, name}] from the archive root down to an untrashed folder.
+
+        ``known`` maps already-verified folder IDs to their paths so warm
+        callers can skip repeated ancestry reads. Anything that is not a
+        folder under the configured root raises DriveItemNotFound.
+        """
+        folder_id = _id(folder_id)
+        known = known if known is not None else {}
+        chain = []
+        current = folder_id
+        for _ in range(64):
+            if current in known:
+                return [*known[current], *reversed(chain)]
+            item = self.file(current)
+            if item["mimeType"] != FOLDER_MIME_TYPE or item.get("trashed"):
+                raise DriveItemNotFound("Drive item is not an archive folder")
+            chain.append({"id": item["id"], "name": item["name"]})
+            if current == self.root_id:
+                return list(reversed(chain))
+            parents = item["parents"]
+            if len(parents) != 1 or any(entry["id"] == parents[0] for entry in chain):
+                raise DriveItemNotFound("Drive folder is outside the configured archive")
+            current = parents[0]
+        raise DriveItemNotFound("Drive folder ancestry exceeds the permitted depth")
+
+    def list_folder(self, folder_id, maximum_items=10_000):
+        """List the direct, untrashed children of one folder in Drive's name order."""
+        folder_id = _id(folder_id)
+        children = []
+        seen_ids = set()
+        seen_tokens = set()
+        token = None
+        for _ in range(max(1, maximum_items // 1000)):
+            parameters = {
+                "q": f"'{folder_id}' in parents and trashed=false", "pageSize": 1000,
+                "orderBy": "folder,name_natural", "supportsAllDrives": "true", "includeItemsFromAllDrives": "true",
+                "fields": "nextPageToken,incompleteSearch,files(id,name,mimeType,thumbnailLink,imageMediaMetadata(width,height,rotation,time))",
+            }
+            if token:
+                parameters["pageToken"] = token
+            document = self._json("files", parameters)
+            if document.get("incompleteSearch", False) is not False:
+                raise OriginalDriveError("Drive folder listing is incomplete")
+            page = document.get("files")
+            if not isinstance(page, list) or len(page) > 1000:
+                raise OriginalDriveError("Drive folder page is invalid")
+            for value in page:
+                if not isinstance(value, dict):
+                    raise OriginalDriveError("Drive folder item is invalid")
+                item = {
+                    "id": _id(value.get("id")),
+                    "name": _string(value.get("name"), 4096),
+                    "mimeType": _string(value.get("mimeType"), 256),
+                }
+                if item["id"] in seen_ids:
+                    raise OriginalDriveError("Drive folder listing repeated an item")
+                seen_ids.add(item["id"])
+                if isinstance(value.get("thumbnailLink"), str):
+                    item["thumbnailLink"] = value["thumbnailLink"]
+                if isinstance(value.get("imageMediaMetadata"), dict):
+                    item["imageMediaMetadata"] = value["imageMediaMetadata"]
+                children.append(item)
+            if "nextPageToken" not in document:
+                return children, False
+            token = _token(document["nextPageToken"])
+            if token in seen_tokens:
+                raise OriginalDriveError("Drive folder pagination repeated")
+            seen_tokens.add(token)
+        return children, True
 
     def start_page_token(self):
         return _token(self._json("changes/startPageToken", {"supportsAllDrives": "true", "fields": "startPageToken"}).get("startPageToken"))

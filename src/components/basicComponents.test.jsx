@@ -85,11 +85,11 @@ describe('small presentational and routing components', () => {
 
     const admin = routed(<AdminDashboard />)
     expect(screen.getByText('Studio controls')).toBeInTheDocument()
-    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(14)
+    expect(admin.container.querySelectorAll('.linen-admin-card')).toHaveLength(15)
     expect(Array.from(
       admin.container.querySelectorAll('.linen-admin-card-index'),
       (index) => index.textContent,
-    )).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14'])
+    )).toEqual(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15'])
     expect(screen.getByRole('link', { name: /Upload Photos/ })).toHaveAttribute('href', '/admin/upload')
     expect(screen.getByRole('link', { name: /Upload Videos/ })).toHaveAttribute('href', '/admin/upload-video')
     expect(screen.getByRole('link', { name: /Change Hero Cover/ })).toHaveAttribute('href', '/admin/hero')
@@ -103,9 +103,10 @@ describe('small presentational and routing components', () => {
     expect(screen.getByRole('link', { name: /Website Analytics/ })).toHaveAttribute('href', '/admin/analytics')
     expect(screen.getByRole('link', { name: /AWS Costs/ })).toHaveAttribute('href', '/admin/costs')
     expect(screen.getByRole('link', { name: /Google Drive Usage/ })).toHaveAttribute('href', '/admin/drive-usage')
+    expect(screen.getByRole('link', { name: /Raw Photo Viewer/ })).toHaveAttribute('href', '/admin/raw-photos')
     expect(screen.getByRole('link', { name: /GitHub Analytics/ })).toHaveAttribute('href', '/admin/github-analytics')
-    expect(Array.from(admin.container.querySelectorAll('.linen-admin-card h2'), (heading) => heading.textContent).slice(-6)).toEqual([
-      'Site Health', 'Audit Log', 'Website Analytics', 'AWS Costs', 'Google Drive Usage', 'GitHub Analytics',
+    expect(Array.from(admin.container.querySelectorAll('.linen-admin-card h2'), (heading) => heading.textContent).slice(-7)).toEqual([
+      'Site Health', 'Audit Log', 'Website Analytics', 'AWS Costs', 'Google Drive Usage', 'Raw Photo Viewer', 'GitHub Analytics',
     ])
     expect(screen.queryByRole('link', { name: /Admin Security/ })).toBeNull()
   })
