@@ -5,6 +5,10 @@ Description: >-
   stack with termination protection; this template never changes GitHub settings.
 
 Parameters:
+  ReleaseArtifactManagedKeyArn:
+    Type: String
+    AllowedPattern: '^arn:aws:kms:us-west-2:[0-9]{12}:key/[a-f0-9-]{36}$'
+    Description: Exact account-local AWS-managed alias/aws/s3 key ARN, verified before deployment.
   GitHubOidcProviderMode:
     Type: String
     Default: use-existing
@@ -95,39 +99,6 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormationCiBootstrap
 
-  ReleaseArtifactKey:
-    Type: AWS::KMS::Key
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: GitHub Actions immutable release artifact encryption
-      EnableKeyRotation: true
-      PendingWindowInDays: 30
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: EnableAccountIamPolicies
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
-            Action: kms:*
-            Resource: '*'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: DataClassification
-          Value: ReleaseArtifacts
-        - Key: ManagedBy
-          Value: CloudFormationCiBootstrap
-
-  ReleaseArtifactKeyAlias:
-    Type: AWS::KMS::Alias
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      AliasName: alias/ian-photography-ci-releases
-      TargetKeyId: !Ref ReleaseArtifactKey
-
   ReleaseArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: RetainExceptOnCreate
@@ -138,7 +109,7 @@ Resources:
           - BucketKeyEnabled: true
             ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
-              KMSMasterKeyID: !GetAtt ReleaseArtifactKey.Arn
+              KMSMasterKeyID: !Ref ReleaseArtifactManagedKeyArn
       VersioningConfiguration:
         Status: Enabled
       PublicAccessBlockConfiguration:
@@ -208,7 +179,7 @@ Resources:
               'Null':
                 s3:x-amz-server-side-encryption-aws-kms-key-id: 'false'
               StringNotEquals:
-                s3:x-amz-server-side-encryption-aws-kms-key-id: !GetAtt ReleaseArtifactKey.Arn
+                s3:x-amz-server-side-encryption-aws-kms-key-id: !Ref ReleaseArtifactManagedKeyArn
 
   ReleaseStorageCleanupRole:
     Type: AWS::IAM::Role
@@ -368,7 +339,7 @@ Resources:
                   - kms:GenerateDataKey
                   - kms:ReEncryptFrom
                   - kms:ReEncryptTo
-                Resource: !GetAtt ReleaseArtifactKey.Arn
+                Resource: !Ref ReleaseArtifactManagedKeyArn
                 Condition:
                   StringEquals:
                     kms:ViaService: !Sub 's3.us-west-2.${AWS::URLSuffix}'
@@ -866,6 +837,8 @@ Resources:
             Resource:
               - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/${ApplicationStackName}-*'
               - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/ian-photography-waf-alarm-prod'
+              - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/ian-photography-guardduty-findings-prod'
+              - !Sub 'arn:${AWS::Partition}:events:us-west-2:${AWS::AccountId}:rule/ian-photography-public-availability-prod'
           # The media distribution's WebACLId names the retained front-door ACL
           # (ops/waf_front_door_template.yaml). Changing a distribution's WebACLId
           # can be authorized against WAF association permissions, so grant them
@@ -893,6 +866,24 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
+          - Sid: ManageExactSecurityNotificationAlarms
+            Effect: Allow
+            Action:
+              - cloudwatch:DeleteAlarms
+              - cloudwatch:PutMetricAlarm
+              - cloudwatch:TagResource
+              - cloudwatch:UntagResource
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-root-activity-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-public-availability-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-security-control-disabled-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-cloudtrail-change-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-iam-change-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-kms-change-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-security-routing-change-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-security-service-change-prod'
+              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-data-protection-change-prod'
           - Sid: ManageApplicationBuckets
             Effect: Allow
             Action:
@@ -948,13 +939,15 @@ Resources:
               - s3:GetEncryptionConfiguration
               - s3:GetLifecycleConfiguration
               - s3:PutLifecycleConfiguration
+              - s3:PutEncryptionConfiguration
+              - s3:PutBucketPolicy
             Resource: !GetAtt ReleaseArtifactBucket.Arn
           - Sid: DecryptReleasePackagesThroughS3
             Effect: Allow
             Action:
               - kms:Decrypt
               - kms:DescribeKey
-            Resource: !GetAtt ReleaseArtifactKey.Arn
+            Resource: !Ref ReleaseArtifactManagedKeyArn
             Condition:
               StringEquals:
                 kms:ViaService: !Sub 's3.us-west-2.${AWS::URLSuffix}'
@@ -974,6 +967,10 @@ Resources:
             # This pattern intentionally matches the application's retained
             # legacy physical table namespace.
             Resource: !Sub 'arn:${AWS::Partition}:dynamodb:us-west-2:${AWS::AccountId}:table/GoldenHour-*'
+          - Sid: DeleteOnlyNotificationDeduplicationCache
+            Effect: Allow
+            Action: dynamodb:DeleteTable
+            Resource: !Sub 'arn:${AWS::Partition}:dynamodb:us-west-2:${AWS::AccountId}:table/GoldenHour-SecurityNotifications-prod'
           - Sid: ManageApplicationQueuesAndTopics
             Effect: Allow
             Action:
@@ -1281,17 +1278,6 @@ Resources:
               - logs:DeleteMetricFilter
               - logs:PutMetricFilter
             Resource: !Sub 'arn:${AWS::Partition}:logs:us-west-2:${AWS::AccountId}:log-group:/aws/security/ian-photography-prod:*'
-          - Sid: ManageExactSecurityNotificationAlarms
-            Effect: Allow
-            Action:
-              - cloudwatch:DeleteAlarms
-              - cloudwatch:PutMetricAlarm
-              - cloudwatch:TagResource
-              - cloudwatch:UntagResource
-            Resource:
-              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-root-activity-prod'
-              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-security-events-dlq-prod'
-              - !Sub 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:ian-photography-infrastructure-protection-change-prod'
           - Sid: ReadExactNotificationStackDriftResources
             Effect: Allow
             Action:
@@ -1341,12 +1327,15 @@ Resources:
             Action:
               - cloudfront:DeleteDistribution
               - cognito-idp:DeleteUserPool
-              - dynamodb:DeleteTable
               - kms:DisableKey
               - kms:ScheduleKeyDeletion
               - s3:DeleteBucket
               - secretsmanager:DeleteSecret
             Resource: '*'
+          - Sid: ProtectDurableApplicationTables
+            Effect: Deny
+            Action: dynamodb:DeleteTable
+            NotResource: !Sub 'arn:${AWS::Partition}:dynamodb:us-west-2:${AWS::AccountId}:table/GoldenHour-SecurityNotifications-prod'
 Outputs:
   GitHubOidcProviderArn:
     Description: Existing or newly created GitHub Actions OIDC provider ARN.
@@ -1357,7 +1346,8 @@ Outputs:
   ReleaseArtifactBucketName:
     Value: !Ref ReleaseArtifactBucket
   ReleaseArtifactKeyArn:
-    Value: !GetAtt ReleaseArtifactKey.Arn
+    Description: AWS-managed S3 key; no monthly customer-managed key charge.
+    Value: !Ref ReleaseArtifactManagedKeyArn
   PlanRoleArn:
     Value: !GetAtt PlanRole.Arn
   ExecuteRoleArn:

@@ -1,5 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
+  RETIRED 2026-10-25: keep ReplicaDeploymentMode=skip. Empty vaults were deleted
+  and the unused replica key scheduled for deletion. The empty stack preserves
+  deployment history for older audit workflows.
   Retained us-east-2 destination vault for cross-Region copies of Ian Truong
   Photography backups. Deploy and restore-test before enabling governance lock.
 
@@ -20,6 +23,10 @@ Parameters:
     AllowedValues: [unlocked, governance-confirmed-after-restore-test]
 
 Rules:
+  RetiredReplicaMustRemainDisabled:
+    Assertions:
+      - Assert: !Equals [!Ref ReplicaDeploymentMode, skip]
+        AssertDescription: This unused replica infrastructure was retired; keep it disabled.
   MustDeployInReplicaRegion:
     Assertions:
       - Assert: !Equals [!Ref AWS::Region, us-east-2]

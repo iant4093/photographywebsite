@@ -184,6 +184,8 @@ class AlertTopicPolicyCoverageTests(unittest.TestCase):
                 "BackupFreshnessAlarm",
                 "SecurityEventDlqAlarm",
                 "RootActivityAlarm",
+                "PublicAvailabilityAlarm",
+                "SecurityControlDisabledAlarm",
             },
         )
 
@@ -226,6 +228,12 @@ class AlertTopicPolicyCoverageTests(unittest.TestCase):
 
 
 class SecurityTemplateTests(unittest.TestCase):
+    def test_audit_stacks_cannot_recreate_the_retired_legacy_key(self) -> None:
+        foundation = decoded_template("ops/security_audit_foundation_template.yaml")
+        self.assertNotIn("LegacyAuditKeyRequired", foundation["Parameters"])
+        self.assertFalse(any(resource["Type"].startswith("AWS::KMS::") for resource in foundation["Resources"].values()))
+        self.assertNotIn("SecurityAuditKeyArn", foundation["Outputs"])
+
     def test_all_staged_templates_pass_cfn_lint(self) -> None:
         if shutil.which("cfn-lint"):
             subprocess.run(
@@ -250,8 +258,6 @@ class SecurityTemplateTests(unittest.TestCase):
 
     def test_foundation_retains_the_complete_cloudtrail_dependency_chain(self) -> None:
         for logical_id in (
-            "SecurityAuditKey",
-            "SecurityAuditKeyAlias",
             "SecurityAuditBucket",
             "SecurityAuditBucketPolicy",
             "SecurityAuditLogGroup",
@@ -261,17 +267,13 @@ class SecurityTemplateTests(unittest.TestCase):
             block = resource_block(FOUNDATION, logical_id)
             self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
-        self.assertGreaterEqual(FOUNDATION.count("aws:SourceArn:"), 4)
+        self.assertGreaterEqual(FOUNDATION.count("aws:SourceArn:"), 3)
         self.assertIn("cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/", FOUNDATION)
-        key = resource_block(FOUNDATION, "SecurityAuditKey")
-        self.assertIn("EnableKeyRotation: true", key)
-        self.assertIn("Service: cloudtrail.amazonaws.com", key)
-        self.assertIn("kms:GenerateDataKey*", key)
         bucket = resource_block(FOUNDATION, "SecurityAuditBucket")
-        self.assertIn("SSEAlgorithm: aws:kms", bucket)
-        self.assertIn("KMSMasterKeyID: !GetAtt SecurityAuditKey.Arn", bucket)
+        self.assertIn("SSEAlgorithm: AES256", bucket)
+        self.assertNotIn("KMSMasterKeyID:", bucket)
         trail = resource_block(FOUNDATION, "SecurityTrail")
-        self.assertIn("KMSKeyId: !GetAtt SecurityAuditKey.Arn", trail)
+        self.assertNotRegex(trail, r"(?m)^      KMSKeyId:")
         bucket_policy = resource_block(FOUNDATION, "SecurityAuditBucketPolicy")
         self.assertNotIn("config.amazonaws.com", bucket_policy)
         self.assertNotIn("ConfigLogDelivery", bucket_policy)
@@ -308,8 +310,8 @@ class SecurityTemplateTests(unittest.TestCase):
         self.assertNotIn("KmsMasterKeyId", NOTIFICATIONS)
         self.assertIn("events.amazonaws.com", NOTIFICATIONS)
         self.assertIn("cloudwatch.amazonaws.com", NOTIFICATIONS)
-        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 1)
-        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 1)
+        self.assertEqual(NOTIFICATIONS.count("DeadLetterConfig:"), 2)
+        self.assertEqual(NOTIFICATIONS.count("RetryPolicy:"), 3)
         self.assertIn("SqsManagedSseEnabled: true", NOTIFICATIONS)
         self.assertIn("MetricName: ApproximateNumberOfMessagesVisible", NOTIFICATIONS)
         self.assertIn("AlarmName: !Sub 'ian-photography-security-events-dlq-${Stage}'", NOTIFICATIONS)
@@ -363,10 +365,11 @@ class SecurityTemplateTests(unittest.TestCase):
                 "ian-photography-backup-freshness-${Stage}",
                 "ian-photography-security-events-dlq-${Stage}",
                 "ian-photography-root-activity-${Stage}",
+                "ian-photography-public-availability-${Stage}",
+                "ian-photography-security-control-disabled-${Stage}",
             ],
         )
         for logical_id in (
-            "GuardDutyFindingRule",
             "GuardDutyCriticalFindingRule",
             "SecurityHubFindingRule",
             "SecurityHubCriticalFindingRule",
@@ -386,7 +389,7 @@ class SecurityTemplateTests(unittest.TestCase):
             "SecurityServiceChangeAlarm",
             "DataProtectionChangeAlarm",
         ):
-            self.assertNotIn("AlarmActions:", resource_block(NOTIFICATIONS, logical_id))
+            self.assertNotRegex(NOTIFICATIONS, rf"(?m)^  {logical_id}:$")
         for logical_id in ("RootActivityAlarm", "SecurityEventDlqAlarm"):
             self.assertIn(
                 "AlarmActions: [!Ref SecurityNotifications]",

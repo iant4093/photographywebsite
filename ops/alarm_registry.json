@@ -6,13 +6,16 @@
     "requiredConfirmedDestinations": 1,
     "primaryOwner": "site-owner",
     "backupOwner": "not-required-for-personal-site",
-    "lastEndToEndTestDate": "2026-10-17",
-    "testIntervalDays": 90
+    "lastEndToEndTestDate": "2026-10-25",
+    "testIntervalDays": 90,
+    "lastEndToEndTestMethod": "GuardDuty sample -> EventBridge -> SQS -> validated SNS -> owner-confirmed email"
   },
   "groups": [
     {
       "id": "application-api-health",
-      "logicalResourceIds": ["ApiServerErrorAlarm"],
+      "logicalResourceIds": [
+        "ApiServerErrorAlarm"
+      ],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-api-health",
@@ -20,7 +23,9 @@
     },
     {
       "id": "application-api-latency",
-      "logicalResourceIds": ["ApiLatencyAlarm"],
+      "logicalResourceIds": [
+        "ApiLatencyAlarm"
+      ],
       "severity": "diagnostic",
       "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#application-api-health",
@@ -28,7 +33,9 @@
     },
     {
       "id": "front-door-denial",
-      "logicalResourceIds": ["FrontDoorDeniedAlarm"],
+      "logicalResourceIds": [
+        "FrontDoorDeniedAlarm"
+      ],
       "severity": "audit",
       "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#front-door-denial",
@@ -36,7 +43,13 @@
     },
     {
       "id": "application-async-and-preview",
-      "logicalResourceIds": ["AsyncFailureQueueAlarm", "PreviewDeadLetterQueueAlarm", "OriginalComparisonFailureAlarm", "ZipPreparationFailureAlarm", "AlbumWorkDeadLetterQueueAlarm"],
+      "logicalResourceIds": [
+        "AsyncFailureQueueAlarm",
+        "PreviewDeadLetterQueueAlarm",
+        "OriginalComparisonFailureAlarm",
+        "ZipPreparationFailureAlarm",
+        "AlbumWorkDeadLetterQueueAlarm"
+      ],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
@@ -44,7 +57,21 @@
     },
     {
       "id": "application-operational-diagnostics",
-      "logicalResourceIds": ["PreviewQueueAgeAlarm", "PreviewQueueDepthAlarm", "PreviewWorkerFailureAlarm", "PreviewWorkerErrorsAlarm", "PreviewWorkerDurationAlarm", "PreviewWorkerThrottleAlarm", "PreviewMetadataSystemErrorsAlarm", "PreviewMetadataThrottleAlarm", "HoverPreviewRefreshQueueAgeAlarm", "HoverPreviewManifestBuilderErrorsAlarm", "HoverPreviewManifestFailureAlarm", "OriginalIndexRefreshErrorsAlarm", "AlbumWorkQueueAgeAlarm"],
+      "logicalResourceIds": [
+        "PreviewQueueAgeAlarm",
+        "PreviewQueueDepthAlarm",
+        "PreviewWorkerFailureAlarm",
+        "PreviewWorkerErrorsAlarm",
+        "PreviewWorkerDurationAlarm",
+        "PreviewWorkerThrottleAlarm",
+        "PreviewMetadataSystemErrorsAlarm",
+        "PreviewMetadataThrottleAlarm",
+        "HoverPreviewRefreshQueueAgeAlarm",
+        "HoverPreviewManifestBuilderErrorsAlarm",
+        "HoverPreviewManifestFailureAlarm",
+        "OriginalIndexRefreshErrorsAlarm",
+        "AlbumWorkQueueAgeAlarm"
+      ],
       "severity": "diagnostic",
       "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#application-async-and-preview",
@@ -52,7 +79,11 @@
     },
     {
       "id": "authentication-and-authorization",
-      "logicalResourceIds": ["LoginThrottleAlarm", "LoginDeniedAlarm", "ApiAuthorizationDeniedAlarm"],
+      "logicalResourceIds": [
+        "LoginThrottleAlarm",
+        "LoginDeniedAlarm",
+        "ApiAuthorizationDeniedAlarm"
+      ],
       "severity": "diagnostic",
       "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#authentication-and-authorization",
@@ -60,7 +91,9 @@
     },
     {
       "id": "application-audit-failure",
-      "logicalResourceIds": ["AuditFailureAlarm"],
+      "logicalResourceIds": [
+        "AuditFailureAlarm"
+      ],
       "severity": "audit",
       "route": "cloudwatch-audit-only",
       "runbook": "ops/ALARM_REGISTRY.md#application-audit-failure",
@@ -68,55 +101,29 @@
     },
     {
       "id": "account-root-activity",
-      "logicalResourceIds": ["RootActivityAlarm"],
+      "logicalResourceIds": [
+        "RootActivityAlarm"
+      ],
       "severity": "critical",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#account-identity-and-encryption-change",
       "autoClose": "Never auto-close without an approved change or incident record"
     },
     {
-      "id": "account-identity-and-encryption-change",
-      "logicalResourceIds": ["IamChangeAlarm", "KmsChangeAlarm"],
-      "severity": "audit",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#account-identity-and-encryption-change",
-      "autoClose": "Never auto-close without an approved change or incident record"
-    },
-    {
-      "id": "trail-and-notification-change",
-      "logicalResourceIds": ["CloudTrailChangeAlarm", "SecurityRoutingChangeAlarm"],
-      "severity": "audit",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#trail-and-notification-change",
-      "autoClose": "Never auto-close without delivery and evidence verification"
-    },
-    {
       "id": "website-notification-delivery",
-      "logicalResourceIds": ["SecurityEventDlqAlarm"],
+      "logicalResourceIds": [
+        "SecurityEventDlqAlarm"
+      ],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#website-notification-delivery",
       "autoClose": "CloudWatch metric state only; messages are never automatically deleted"
     },
     {
-      "id": "security-service-change",
-      "logicalResourceIds": ["SecurityServiceChangeAlarm"],
-      "severity": "audit",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#security-service-change",
-      "autoClose": "Never auto-close without Config, GuardDuty, Security Hub, Inspector, and analyzer verification"
-    },
-    {
-      "id": "data-protection-change",
-      "logicalResourceIds": ["DataProtectionChangeAlarm"],
-      "severity": "audit",
-      "route": "cloudwatch-audit-only",
-      "runbook": "ops/ALARM_REGISTRY.md#data-protection-change",
-      "autoClose": "Never auto-close without live S3, DynamoDB, backup, and logging checks"
-    },
-    {
       "id": "backup-job-failure",
-      "logicalResourceIds": ["BackupJobFailureRule"],
+      "logicalResourceIds": [
+        "BackupJobFailureRule"
+      ],
       "severity": "high",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#backup-job-failure",
@@ -124,7 +131,9 @@
     },
     {
       "id": "backup-freshness",
-      "logicalResourceIds": ["BackupFreshnessAlarm"],
+      "logicalResourceIds": [
+        "BackupFreshnessAlarm"
+      ],
       "severity": "critical",
       "route": "security-notification-topic",
       "runbook": "ops/ALARM_REGISTRY.md#backup-freshness",
@@ -132,7 +141,11 @@
     },
     {
       "id": "edge-health",
-      "logicalResourceIds": ["FrontendFiveXxAlarm", "MediaFiveXxAlarm", "WafAlarmForwardRule"],
+      "logicalResourceIds": [
+        "FrontendFiveXxAlarm",
+        "MediaFiveXxAlarm",
+        "WafAlarmForwardRule"
+      ],
       "severity": "high",
       "route": "security-notification-topic-via-cross-region-validated-signal-queue",
       "runbook": "ops/ALARM_REGISTRY.md#edge-health",
@@ -140,11 +153,45 @@
     },
     {
       "id": "monthly-spend",
-      "logicalResourceIds": ["MonthlySecurityAndObservabilityBudget.Actual100Percent", "MonthlySecurityAndObservabilityBudget.Forecasted100Percent"],
+      "logicalResourceIds": [
+        "MonthlySecurityAndObservabilityBudget.Actual100Percent",
+        "MonthlySecurityAndObservabilityBudget.Forecasted100Percent"
+      ],
       "severity": "high",
       "route": "aws-budgets-owner-email-when-configured",
       "runbook": "ops/ALARM_REGISTRY.md#monthly-spend",
       "autoClose": "AWS Budgets state only; close after the cost driver is identified and the limit or spend is corrected"
+    },
+    {
+      "id": "guardduty-findings",
+      "logicalResourceIds": [
+        "GuardDutyFindingRule"
+      ],
+      "severity": "high",
+      "route": "security-notification-topic-via-validated-signal-queue",
+      "runbook": "ops/ALARM_REGISTRY.md#security-service-change",
+      "autoClose": "One notification per finding and severity tier for 90 days; investigate before archiving"
+    },
+    {
+      "id": "public-availability",
+      "logicalResourceIds": [
+        "PublicAvailabilitySchedule",
+        "PublicAvailabilityAlarm"
+      ],
+      "severity": "high",
+      "route": "security-notification-topic",
+      "runbook": "ops/ALARM_REGISTRY.md#application-api-health",
+      "autoClose": "CloudWatch state only; confirm homepage and API recovery"
+    },
+    {
+      "id": "security-control-disabled",
+      "logicalResourceIds": [
+        "SecurityControlDisabledAlarm"
+      ],
+      "severity": "critical",
+      "route": "security-notification-topic",
+      "runbook": "ops/ALARM_REGISTRY.md#trail-and-notification-change",
+      "autoClose": "Never auto-close without verifying the approved change or restoring the control"
     }
   ]
 }

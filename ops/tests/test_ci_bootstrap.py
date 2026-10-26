@@ -527,13 +527,14 @@ fi
                 self.assertEqual(completed.stderr, "Drift inventory is invalid.\n")
 
     def test_release_bucket_and_key_are_private_encrypted_versioned_lifecycle_managed_and_retained(self):
-        key = resource_block("ReleaseArtifactKey")
         bucket = resource_block("ReleaseArtifactBucket")
         policy = resource_block("ReleaseArtifactBucketPolicy")
-        for block in (key, bucket, policy):
+        for block in (bucket, policy):
             self.assertIn("DeletionPolicy: RetainExceptOnCreate", block)
             self.assertIn("UpdateReplacePolicy: Retain", block)
-        self.assertIn("EnableKeyRotation: true", key)
+        self.assertNotRegex(TEMPLATE, r"(?m)^  ReleaseArtifactKey:$")
+        self.assertNotRegex(TEMPLATE, r"(?m)^  ReleaseArtifactKeyAlias:$")
+        self.assertIn("KMSMasterKeyID: !Ref ReleaseArtifactManagedKeyArn", bucket)
         self.assertIn("SSEAlgorithm: aws:kms", bucket)
         self.assertIn("BucketKeyEnabled: true", bucket)
         self.assertIn("VersioningConfiguration:\n        Status: Enabled", bucket)
@@ -971,7 +972,7 @@ fi
 
         template, errors = decode(str(TEMPLATE_PATH))
         self.assertEqual(errors, [])
-        statements = template['Resources']['CloudFormationExecutionEncryptionAndObservabilityPolicy'][
+        statements = template['Resources']['CloudFormationExecutionDataAndMessagingPolicy'][
             'Properties']['PolicyDocument']['Statement']
         grant = next(s for s in statements if s['Sid'] == 'ManageExactSecurityNotificationAlarms')
         alarm = 'arn:${AWS::Partition}:cloudwatch:us-west-2:${AWS::AccountId}:alarm:'
@@ -987,9 +988,33 @@ fi
             'Resource': [
                 {'Fn::Sub': alarm + 'ian-photography-root-activity-prod'},
                 {'Fn::Sub': alarm + 'ian-photography-security-events-dlq-prod'},
-                {'Fn::Sub': alarm + 'ian-photography-infrastructure-protection-change-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-public-availability-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-security-control-disabled-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-cloudtrail-change-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-iam-change-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-kms-change-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-security-routing-change-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-security-service-change-prod'},
+                {'Fn::Sub': alarm + 'ian-photography-data-protection-change-prod'},
             ],
         })
+
+    def test_only_the_ephemeral_notification_cache_can_be_deleted(self):
+        from cfnlint.decode import decode
+
+        template, errors = decode(str(TEMPLATE_PATH))
+        self.assertEqual(errors, [])
+        resources = template['Resources']
+        data = resources['CloudFormationExecutionDataAndMessagingPolicy']['Properties']['PolicyDocument']['Statement']
+        allow = next(s for s in data if s['Sid'] == 'DeleteOnlyNotificationDeduplicationCache')
+        guard = next(s for s in resources['CloudFormationExecutionEncryptionAndObservabilityPolicy'][
+            'Properties']['PolicyDocument']['Statement'] if s['Sid'] == 'ProtectDurableApplicationTables')
+        self.assertEqual(allow['Action'], 'dynamodb:DeleteTable')
+        self.assertEqual(guard['Effect'], 'Deny')
+        self.assertEqual(guard['Action'], 'dynamodb:DeleteTable')
+        self.assertEqual(guard['NotResource'], allow['Resource'])
+        self.assertEqual(allow['Resource']['Fn::Sub'],
+            'arn:${AWS::Partition}:dynamodb:us-west-2:${AWS::AccountId}:table/GoldenHour-SecurityNotifications-prod')
 
     def test_media_web_acl_grant_is_limited_to_the_front_door_acl(self):
         from cfnlint.decode import decode
@@ -1036,8 +1061,6 @@ fi
     def test_bootstrap_resources_clean_up_failed_creates_but_retain_replacements(self):
         retained_ids = (
             "GitHubOidcProvider",
-            "ReleaseArtifactKey",
-            "ReleaseArtifactKeyAlias",
             "ReleaseArtifactBucket",
             "ReleaseArtifactBucketPolicy",
             "PlanRole",

@@ -36,52 +36,6 @@ Conditions:
       - ''
 
 Resources:
-  SecurityAuditKey:
-    Type: AWS::KMS::Key
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      Description: Encryption for immutable CloudTrail audit evidence
-      EnableKeyRotation: true
-      PendingWindowInDays: 30
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: EnableAccountIamPolicies
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
-            Action: kms:*
-            Resource: '*'
-          - Sid: AllowCloudTrailEncryption
-            Effect: Allow
-            Principal:
-              Service: cloudtrail.amazonaws.com
-            Action:
-              - kms:GenerateDataKey*
-              - kms:DescribeKey
-            Resource: '*'
-            Condition:
-              StringEquals:
-                aws:SourceArn: !Sub 'arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/ian-photography-security-${Stage}'
-              StringLike:
-                kms:EncryptionContext:aws:cloudtrail:arn: !Sub 'arn:${AWS::Partition}:cloudtrail:*:${AWS::AccountId}:trail/*'
-      Tags:
-        - Key: Application
-          Value: IanTruongPhotography
-        - Key: Stage
-          Value: !Ref Stage
-        - Key: DataClassification
-          Value: SecurityAuditEvidence
-
-  SecurityAuditKeyAlias:
-    Type: AWS::KMS::Alias
-    DeletionPolicy: RetainExceptOnCreate
-    UpdateReplacePolicy: Retain
-    Properties:
-      AliasName: !Sub 'alias/ian-photography-security-audit-${Stage}'
-      TargetKeyId: !Ref SecurityAuditKey
-
   SecurityAuditBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: RetainExceptOnCreate
@@ -90,9 +44,7 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: aws:kms
-              KMSMasterKeyID: !GetAtt SecurityAuditKey.Arn
-            BucketKeyEnabled: true
+              SSEAlgorithm: AES256
       ObjectLockEnabled: true
       ObjectLockConfiguration:
         ObjectLockEnabled: Enabled
@@ -231,7 +183,8 @@ Resources:
     Properties:
       TrailName: !Sub 'ian-photography-security-${Stage}'
       S3BucketName: !Ref SecurityAuditBucket
-      KMSKeyId: !GetAtt SecurityAuditKey.Arn
+      # No KMSKeyId: records use S3-managed encryption. The owner approved
+      # retiring the legacy historical key on October 25, 2026.
       IncludeGlobalServiceEvents: true
       IsMultiRegionTrail: true
       EnableLogFileValidation: true
@@ -265,5 +218,3 @@ Outputs:
     Value: !GetAtt SecurityTrail.Arn
   CloudTrailName:
     Value: !Ref SecurityTrail
-  SecurityAuditKeyArn:
-    Value: !GetAtt SecurityAuditKey.Arn

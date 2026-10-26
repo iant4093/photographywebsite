@@ -131,7 +131,7 @@ class SparseMonitoringTests(unittest.TestCase):
                             self.assertEqual(ap['TreatMissingData'], 'notBreaching')
                             self.assertEqual(ap['Statistic'], 'Sum')
                             self.assertEqual(ap['EvaluationPeriods'], 1)
-        self.assertEqual(count, 19)
+        self.assertEqual(count, 20)
         self.assertIn('TreatMissingData: breaching', (ROOT / 'ops/security_backup_template.yaml').read_text())
         intent = load_release_intent(json.loads((ROOT / 'ops/ci/release_intent.json').read_text()))
         for resource in ['PreviewJobCompletedMetricFilter', 'AuditFailureMetricFilter']:
