@@ -2,7 +2,9 @@ import { memo, useId } from 'react'
 import ProgressiveImage from './ProgressiveImage'
 import { mediaId, mediaPreviewSrcSet, mediaThumbnailUrl } from '../utils/mediaUrls'
 
-const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTitle, onOpen, onMediaError, eagerImageCount = 0, itemLabel = 'Item', prioritizeViewport = false }) {
+// `onIntent(image, immediate)` lets a page warm the viewer image before a click:
+// hover is a weak signal, while focus and press are about to open the photo.
+const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTitle, onOpen, onIntent, onMediaError, eagerImageCount = 0, itemLabel = 'Item', prioritizeViewport = false }) {
     const id = useId()
     return <div className="space-y-12">
         {sections.map((section, sectionIndex) => <section key={section.key} aria-labelledby={section.title ? `${id}-${section.key}` : undefined}>
@@ -18,6 +20,9 @@ const AlbumPhotoSections = memo(function AlbumPhotoSections({ sections, albumTit
                     key={mediaId(img) || index}
                     className="album-photo-tile linen-media-frame linen-photo-frame group cursor-pointer rounded-xl overflow-hidden transition-shadow duration-500 aspect-[4/3] relative text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber"
                     onClick={() => onOpen(img)}
+                    onPointerEnter={onIntent ? () => onIntent(img, false) : undefined}
+                    onPointerDown={onIntent ? () => onIntent(img, true) : undefined}
+                    onFocus={onIntent ? () => onIntent(img, true) : undefined}
                     aria-label={`Open item ${index + 1} from ${albumTitle}${section.title ? ` — ${section.title}` : ''}${img.altText ? ` — ${img.altText}` : ''}`}
                 >
                     <div className="linen-photo-viewport">

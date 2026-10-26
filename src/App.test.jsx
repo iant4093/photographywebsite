@@ -141,6 +141,13 @@ describe('App routing shell', () => {
     expect(screen.getByRole('button', { name: 'Theme' })).toBeInTheDocument()
   })
 
+  it('renders the raw photo viewer with public gallery styling instead of admin chrome', async () => {
+    const { container } = render(<MemoryRouter initialEntries={['/admin/raw-photos']}><App /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Raw photo viewer route' })).toBeInTheDocument())
+    expect(container.firstElementChild).toHaveClass('linen-site')
+    expect(container.firstElementChild).not.toHaveClass('linen-admin')
+  })
+
   it('defaults to light mode and persists an explicit public dark preference', () => {
     const first = render(<MemoryRouter><App /></MemoryRouter>)
     expect(first.container.firstElementChild).toHaveAttribute('data-theme', 'light')

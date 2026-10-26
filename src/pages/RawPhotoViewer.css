@@ -1,6 +1,3 @@
-.raw-photos-back-link { display: inline-flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; color: var(--color-warm-gray); font-size: 0.875rem; font-weight: 500; transition: color 200ms ease; }
-.raw-photos-back-link:hover { color: var(--color-amber); }
-.raw-photos-back-icon { width: 1rem; height: 1rem; }
 .raw-photos-path { margin-bottom: 2rem; color: var(--color-warm-gray); font-size: 0.875rem; }
 .raw-photos-path ol { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }
 .raw-photos-path li { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
@@ -9,9 +6,9 @@
 .raw-photos-path a:hover { color: var(--color-amber); }
 .raw-photos-path [aria-current="page"] { color: var(--color-charcoal); font-weight: 500; }
 .raw-photos-eyebrow { margin-bottom: 0.5rem; color: var(--color-warm-gray); font-size: 0.75rem; letter-spacing: 0.14em; text-transform: uppercase; }
-.raw-photos-loading { display: flex; min-height: 16rem; align-items: center; justify-content: center; }
-.raw-photos-spinner { width: 2.5rem; height: 2.5rem; border: 3px solid var(--color-amber); border-top-color: transparent; border-radius: 999px; animation: raw-photos-spin 1s linear infinite; }
-@keyframes raw-photos-spin { to { transform: rotate(360deg); } }
+/* The current folder stays until the next is ready; dim it only for slow loads. */
+.raw-photos-content { transition: opacity 200ms ease; }
+.raw-photos-content.is-pending { opacity: 0.55; transition-delay: 150ms; }
 .raw-photos-error { padding: 1.5rem; border: 1px solid #fecaca; color: #991b1b; background: #fef2f2; }
 .raw-photos-error-title { font-weight: 500; }
 .raw-photos-error-message { margin-top: 0.5rem; font-size: 0.875rem; }
@@ -19,11 +16,14 @@
 .raw-photos-retry:hover { background: var(--color-amber-dark); }
 .raw-photos-notice { margin-bottom: 1.5rem; padding: 1rem; border: 1px solid var(--color-amber); color: var(--color-charcoal); background: color-mix(in srgb, var(--color-amber) 10%, transparent); font-size: 0.875rem; }
 .raw-photos-folders { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; margin-bottom: 3rem; }
-.raw-photos-folder { display: flex; align-items: center; gap: 0.875rem; min-height: 4.5rem; padding: 1rem 1.25rem; border: 1px solid var(--color-warm-border); border-radius: 0.75rem; color: var(--color-charcoal); background: white; box-shadow: var(--shadow-warm-sm); transition: border-color 200ms ease, box-shadow 300ms ease, color 200ms ease; }
+/* Every tile is the same size; long names wrap to two lines, then truncate. */
+.raw-photos-folder { display: flex; align-items: center; gap: 0.875rem; height: 5.25rem; padding: 0 1.25rem; overflow: hidden; border: 1px solid var(--color-warm-border); border-radius: 0.75rem; color: var(--color-charcoal); background: white; box-shadow: var(--shadow-warm-sm); transition: border-color 200ms ease, box-shadow 300ms ease, color 200ms ease; }
 .raw-photos-folder:hover { border-color: color-mix(in srgb, var(--color-amber) 40%, transparent); box-shadow: var(--shadow-warm); color: var(--color-amber-dark); }
 .raw-photos-folder:focus-visible { outline: 2px solid var(--color-amber); outline-offset: 2px; }
 .raw-photos-folder-icon { width: 1.5rem; height: 1.5rem; flex: none; color: var(--color-amber); }
-.raw-photos-folder-name { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-serif); font-size: 1.125rem; }
+.raw-photos-folder-name { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; font-family: var(--font-serif); font-size: 1.125rem; line-height: 1.35; }
+html[data-theme="dark"] .raw-photos-folder { color: var(--color-charcoal); background-color: rgba(38, 35, 30, 0.92); border-color: var(--color-warm-border); }
+html[data-theme="dark"] .raw-photos-error { color: #fecaca; background: #3b2020; border-color: #7f3b3b; }
 @media (min-width: 40rem) { .raw-photos-folders { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 64rem) { .raw-photos-folders { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (prefers-reduced-motion: reduce) { .raw-photos-spinner { animation-duration: 2.5s; } }
+@media (prefers-reduced-motion: reduce) { .raw-photos-content, .raw-photos-content.is-pending { transition: none; } }

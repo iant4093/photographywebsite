@@ -13,6 +13,7 @@ import RouteScrollRestoration from './components/RouteScrollRestoration'
 import AlbumLoadingSkeleton from './components/AlbumLoadingSkeleton'
 import { loadAlbumGalleryRoute, loadVideoGalleryRoute } from './utils/routePreload'
 import { applyDocumentTheme, readStoredTheme, storeTheme } from './utils/theme'
+import { usesAdminChrome } from './utils/adminRoutes'
 
 const AlbumGallery = lazy(loadAlbumGalleryRoute)
 const CameraCursor = lazy(() => import('./components/CameraCursor'))
@@ -75,7 +76,7 @@ function PageLoading() {
 
 function App() {
     const location = useLocation()
-    const isAdminRoute = location.pathname.startsWith('/admin')
+    const isAdminRoute = usesAdminChrome(location.pathname)
     const isImmersiveRoute = location.pathname === '/explore/immersive-gallery' || location.pathname === '/tv'
     const [preferredTheme, setPreferredTheme] = useState(readStoredTheme)
     const theme = preferredTheme

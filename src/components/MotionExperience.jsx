@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router'
 import useMediaQuery from '../hooks/useMediaQuery'
+import { usesAdminChrome } from '../utils/adminRoutes'
 import './MotionExperience.css'
 
 const TARGET_CLASSES = ['linen-section-heading', 'photo-stats-hero', 'photo-stats-motion-section', 'album-card']
@@ -58,7 +59,7 @@ function setTimelinePose(target, isMedia, position, catalog) {
 
 export default function MotionExperience() {
     const { pathname } = useLocation()
-    const isAdmin = pathname.startsWith('/admin')
+    const isAdmin = usesAdminChrome(pathname)
     const usesCatalogMotion = ['/', '/search', '/videos', '/stats'].includes(pathname)
     const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
     const progressRef = useRef(null)

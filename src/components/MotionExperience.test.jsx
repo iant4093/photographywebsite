@@ -267,6 +267,13 @@ describe('MotionExperience film-strip scrollbar', () => {
     expect(document.documentElement).not.toHaveClass('editorial-scrollbar-active')
   })
 
+  it('gives the admin raw photo viewer the public gallery motion', () => {
+    const view = renderExperience('/admin/raw-photos')
+    expect(screen.getByRole('scrollbar', { name: 'Page scroll position' })).toBeInTheDocument()
+    expect(document.documentElement).toHaveClass('editorial-scrollbar-active')
+    expect(view.container.querySelector('.linen-gallery-page [data-page-scroll-media]')).toHaveClass('editorial-motion-frame', 'editorial-motion-media')
+  })
+
   it('keeps row cards moving vertically before and after horizontal entry without extra layout reads', () => {
     let notify
     const observe = vi.fn()
