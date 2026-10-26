@@ -37,14 +37,21 @@
 .tv-layer.is-current { z-index: 1; }
 @keyframes tv-fade-in { to { opacity: 1; } }
 
+/* Bleeds past the screen by more than the blur's reach so its faded edges
+   never show, and sits on its own layer so the drifting photo never forces
+   the blur to repaint. */
 .tv-backdrop {
   position: absolute;
-  inset: -8%;
-  width: 116%;
-  height: 116%;
+  top: -160px;
+  left: -160px;
+  width: calc(100% + 320px);
+  height: calc(100% + 320px);
+  max-width: none;
   object-fit: cover;
   filter: blur(48px) saturate(1.15) brightness(0.42);
-  transform: scale(1.05);
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 /* The lightbox's ivory border and soft offset shadow. */
@@ -66,20 +73,33 @@
   -webkit-user-drag: none;
 }
 
-/* Slow zoom, in a different direction for each slide. */
-.has-motion .tv-frame { animation: tv-drift calc(var(--tv-interval) + var(--tv-fade)) linear both; }
-.has-motion .tv-drift-1 { animation-name: tv-drift-out; }
-.has-motion .tv-drift-2 { --tv-drift-x: -0.8%; }
-.has-motion .tv-drift-3 { animation-name: tv-drift-out; --tv-drift-x: 0.8%; }
+/* Slow zoom, in a different direction for each slide. Keyframes use plain
+   values (no custom properties) so the animation stays on the compositor. */
+.has-motion .tv-frame {
+  animation: tv-drift-0 calc(var(--tv-interval) + var(--tv-fade)) linear both;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.has-motion .tv-drift-1 { animation-name: tv-drift-1; }
+.has-motion .tv-drift-2 { animation-name: tv-drift-2; }
+.has-motion .tv-drift-3 { animation-name: tv-drift-3; }
 .is-paused .tv-frame,
 .is-paused .tv-progress span { animation-play-state: paused; }
-@keyframes tv-drift {
-  from { transform: scale(1) translateX(0); }
-  to { transform: scale(1.045) translateX(var(--tv-drift-x, 0.6%)); }
+@keyframes tv-drift-0 {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(0.6%, 0, 0) scale(1.045); }
 }
-@keyframes tv-drift-out {
-  from { transform: scale(1.045) translateX(var(--tv-drift-x, -0.6%)); }
-  to { transform: scale(1) translateX(0); }
+@keyframes tv-drift-1 {
+  from { transform: translate3d(-0.6%, 0, 0) scale(1.045); }
+  to { transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes tv-drift-2 {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-0.8%, 0, 0) scale(1.045); }
+}
+@keyframes tv-drift-3 {
+  from { transform: translate3d(0.8%, 0, 0) scale(1.045); }
+  to { transform: translate3d(0, 0, 0) scale(1); }
 }
 
 .tv-clock,
