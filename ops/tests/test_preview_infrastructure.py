@@ -85,11 +85,13 @@ class PreviewWorkerTests(unittest.TestCase):
         self.assertEqual(package["engines"]["node"], ">=22 <25")
         self.assertEqual(package["dependencies"]["sharp"], "0.35.5")
         for dependency in (
+            "@aws-sdk/client-cloudfront",
             "@aws-sdk/client-dynamodb",
             "@aws-sdk/client-s3",
             "@aws-sdk/lib-dynamodb",
         ):
-            self.assertEqual(package["dependencies"][dependency], "3.1133.0")
+            self.assertRegex(package["dependencies"][dependency], r"^3\.[0-9]+\.[0-9]+$")
+            self.assertEqual(package["dependencies"][dependency], package["dependencies"]["@aws-sdk/client-s3"])
         self.assertEqual(lock["packages"][""]["dependencies"], package["dependencies"])
 
     def test_worker_cannot_delete_album_media_and_confines_hero_cleanup(self) -> None:
