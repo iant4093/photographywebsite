@@ -93,7 +93,7 @@ The frontend is a React single-page app served through CloudFront. The API is a 
 
 - Direct browser-to-S3 uploads, album management, gallery ordering, scheduled publishing and a Recently Deleted bin with automatic purge
 - Videos page hero reel generated server-side with ffmpeg
-- Dashboards for AWS cost (including per-album storage and bandwidth), analytics with Core Web Vitals, GitHub activity, site health and the audit log
+- Dashboards for AWS cost (including per-album storage and bandwidth), analytics with Core Web Vitals, GitHub activity for this website, TruongCam, TruongNoiser and TruongScaler, site health and the audit log
 
 **Tools**
 

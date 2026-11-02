@@ -27,15 +27,13 @@ export const UTILITY_MODULES = Object.freeze([
         path: '/utilities/truongnoiser',
         title: 'TruongNoiser',
         detail: 'Denoise photos locally on your iPhone.',
-        summary: 'Coming soon',
-        comingSoon: true,
+        summary: 'Photo denoising for iPhone',
     },
     {
         id: 'truongscaler',
         path: '/utilities/truongscaler',
         title: 'TruongScaler',
-        detail: 'Upscale photos locally on your iPhone.',
-        summary: 'Coming soon',
-        comingSoon: true,
+        detail: 'Upscale photos to 2× locally on your iPhone.',
+        summary: '2× photo upscaling for iPhone',
     },
 ])

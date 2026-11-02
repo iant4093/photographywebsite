@@ -5,7 +5,12 @@ import { useAuth } from '../context/auth'
 import { fetchGitHubAnalytics } from '../utils/api'
 import './GitHubAnalytics.css'
 
-const REPOSITORIES = [{ name: 'photographywebsite', label: 'Photography Website' }, { name: 'TruongCam', label: 'TruongCam' }]
+const REPOSITORIES = [
+    { name: 'photographywebsite', label: 'Photography Website' },
+    { name: 'TruongCam', label: 'TruongCam' },
+    { name: 'TruongNoiser', label: 'TruongNoiser' },
+    { name: 'TruongScaler', label: 'TruongScaler' },
+]
 
 const number = (value) => Number(value || 0).toLocaleString()
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import io
 import json
 import logging
@@ -10,6 +12,7 @@ import os
 import re
 import statistics
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -41,6 +44,9 @@ BRANCH = os.environ.get("GITHUB_REPOSITORY_BRANCH", "main").strip()
 REPOSITORIES = {
     REPOSITORY: {"branch": BRANCH, "label": "Photography Website"},
     "TruongCam": {"branch": "main", "label": "TruongCam"},
+    "TruongNoiser": {"branch": "main", "label": "TruongNoiser"},
+    # Bundled Core ML weights exceed the ZIP limit; fetch only counted sources.
+    "TruongScaler": {"branch": "main", "label": "TruongScaler", "source": "tree"},
 }
 API_BASE = "https://api.github.com"
 ARCHIVE_BASE = "https://codeload.github.com"
@@ -288,10 +294,95 @@ def _source_extension(path):
     return None
 
 
+def _summarize_sources(sha, sources):
+    areas = {name: 0 for name in ("Frontend", "Backend", "iPhone App", "Infrastructure & Ops", "Tests", "Other")}
+    languages = {}
+    files = 0
+    for relative, content in sources:
+        if b"\x00" in content[:4096]:
+            continue
+        nonblank = sum(bool(line.strip()) for line in content.decode("utf-8", errors="ignore").splitlines())
+        if not nonblank:
+            continue
+        files += 1
+        areas[_source_area(relative)] += nonblank
+        language = _source_extension(relative)[1]
+        languages[language] = languages.get(language, 0) + nonblank
+    return {
+        "revision": sha,
+        "method": "Nonblank source lines; generated, dependency, lock, build, and media files excluded",
+        "total": sum(areas.values()),
+        "files": files,
+        "areas": [{"name": name, "lines": value} for name, value in areas.items()],
+        "languages": [{"name": name, "lines": value} for name, value in sorted(languages.items(), key=lambda item: (-item[1], item[0]))],
+    }
+
+
+def _count_source_tree(sha, repository):
+    """Read immutable, size-bounded sources without downloading bundled models."""
+    _, payload, _ = _request(f"/repos/{OWNER}/{repository}/git/trees/{sha}?recursive=1")
+    payload = _dict(payload, "source tree")
+    if payload.get("truncated") is not False:
+        raise ProviderContractError("GitHub source tree was incomplete")
+    tree = _list(payload.get("tree"), "source tree entries")
+    if len(tree) > MAX_ARCHIVE_FILES:
+        raise ProviderContractError("GitHub source tree contained too many files")
+    sources = []
+    seen = set()
+    total = 0
+    for entry in tree:
+        entry = _dict(entry, "source tree entry")
+        if entry.get("type") != "blob" or entry.get("mode") not in {"100644", "100755"}:
+            continue
+        path = entry.get("path")
+        if (
+            not isinstance(path, str)
+            or not path
+            or len(path) > 4096
+            or any(char in path for char in "\\\r\n\x00")
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            or path in seen
+        ):
+            raise ProviderContractError("GitHub source path was invalid")
+        seen.add(path)
+        size = entry.get("size")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ProviderContractError("GitHub source size was invalid")
+        if set(path.lower().split("/")) & _EXCLUDED_PARTS or not _source_extension(path) or size > MAX_SOURCE_FILE_BYTES:
+            continue
+        if not re.fullmatch(r"[0-9a-f]{40}", str(entry.get("sha", ""))):
+            raise ProviderContractError("GitHub source revision was invalid")
+        total += size
+        if total > MAX_ARCHIVE_EXPANDED_BYTES:
+            raise ProviderContractError("GitHub sources exceeded the safe size limit")
+        sources.append(entry)
+
+    def fetch_source(entry):
+        path = entry["path"]
+        url = f"https://raw.githubusercontent.com/{OWNER}/{repository}/{sha}/{urllib.parse.quote(path, safe='/')}"
+        request = urllib.request.Request(url, headers={"User-Agent": "IanTruongPhotography-GitHubAnalytics"})
+        try:
+            with urllib.request.urlopen(request, timeout=12) as response:
+                if response.geturl() != url:
+                    raise ProviderContractError("GitHub source redirect was rejected")
+                content = _read_bounded(response, entry["size"])
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise ProviderContractError("GitHub source could not be read") from None
+        digest = hashlib.sha1(f"blob {len(content)}\0".encode() + content, usedforsecurity=False).hexdigest()
+        if len(content) != entry["size"] or digest != entry["sha"]:
+            raise ProviderContractError("GitHub source bytes did not match the tree")
+        return path, content
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        return _summarize_sources(sha, executor.map(fetch_source, sources))
+
+
 def _count_archive(sha, repository=None):
     repository = validate_repository(repository)
     if not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
         raise ProviderContractError("GitHub archive revision was invalid")
+    if REPOSITORIES[repository].get("source") == "tree":
+        return _count_source_tree(sha, repository)
     url = f"{ARCHIVE_BASE}/{OWNER}/{repository}/zip/{sha}"
     request = urllib.request.Request(url, headers={"User-Agent": "IanTruongPhotography-GitHubAnalytics"})
     try:
@@ -302,12 +393,8 @@ def _count_archive(sha, repository=None):
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
         raise ProviderContractError("GitHub archive could not be read") from None
 
-    areas = {name: 0 for name in ("Frontend", "Backend", "iPhone App", "Infrastructure & Ops", "Tests", "Other")}
-    languages = {}
-    files = 0
-    expanded = 0
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(raw))
+    def source_files(archive):
+        expanded = 0
         members = archive.infolist()
         if len(members) > MAX_ARCHIVE_FILES:
             raise ProviderContractError("GitHub archive contained too many files")
@@ -316,33 +403,18 @@ def _count_archive(sha, repository=None):
                 continue
             relative = member.filename.split("/", 1)[-1] if "/" in member.filename else member.filename
             parts = set(relative.lower().split("/"))
-            extension = _source_extension(relative)
-            if parts & _EXCLUDED_PARTS or not extension or member.file_size > MAX_SOURCE_FILE_BYTES:
+            if parts & _EXCLUDED_PARTS or not _source_extension(relative) or member.file_size > MAX_SOURCE_FILE_BYTES:
                 continue
             expanded += member.file_size
             if expanded > MAX_ARCHIVE_EXPANDED_BYTES:
                 raise ProviderContractError("GitHub archive expanded beyond the safe limit")
-            content = archive.read(member)
-            if b"\x00" in content[:4096]:
-                continue
-            nonblank = sum(bool(line.strip()) for line in content.decode("utf-8", errors="ignore").splitlines())
-            if not nonblank:
-                continue
-            files += 1
-            area = _source_area(relative)
-            areas[area] += nonblank
-            language = extension[1]
-            languages[language] = languages.get(language, 0) + nonblank
+            yield relative, archive.read(member)
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            return _summarize_sources(sha, source_files(archive))
     except (zipfile.BadZipFile, RuntimeError):
         raise ProviderContractError("GitHub archive was invalid") from None
-    return {
-        "revision": sha,
-        "method": "Nonblank source lines; generated, dependency, lock, build, and media files excluded",
-        "total": sum(areas.values()),
-        "files": files,
-        "areas": [{"name": name, "lines": value} for name, value in areas.items()],
-        "languages": [{"name": name, "lines": value} for name, value in sorted(languages.items(), key=lambda item: (-item[1], item[0]))],
-    }
 
 
 def build_report(previous=None, repository=None):

@@ -1,0 +1,91 @@
+{
+  "repository": "https://github.com/iant4093/TruongNoiser",
+  "revision": "9ff01998096274788fc952053e170c5232a23e54",
+  "upstreamScreenshotProvenance": {
+    "capture": "Actual production SwiftUI/UIKit screens in an iOS simulator, 402×874 points at 3×; private temporary libraries",
+    "detailComparison": {
+      "canvasHeight": 256,
+      "canvasWidth": 256,
+      "comparison": "Left: unchanged noisy input; right: saved CGNet (Better) output; shared native viewer transform",
+      "relativeToFit": 2,
+      "requestedCanvasRect": {
+        "height": 128,
+        "width": 128,
+        "x": 64,
+        "y": 80
+      },
+      "zoomScale": 3.140625
+    },
+    "fixtureProvenance": "Tests/TruongNoiserHostTests/Fixtures/README/fixture-provenance.json",
+    "fixtureSHA256": {
+      "official-noisy-demo.png": "403034182fa320130dae0d75b92e85e0850771378e674d65455c403a4958e29c"
+    },
+    "photographSources": [
+      {
+        "bytes": 170716,
+        "downloadURL": "https://raw.githubusercontent.com/megvii-research/NAFNet/2b4af71ebe098a92a75910c233a3965a3e93ede4/demo/noisy.png",
+        "file": "official-noisy-demo.png",
+        "license": "Upstream repository MIT license and bundled BasicSR Apache-2.0 notices; not a CC0 assertion",
+        "licenseURL": "https://github.com/megvii-research/NAFNet/blob/2b4af71ebe098a92a75910c233a3965a3e93ede4/LICENSE",
+        "note": "Exact upstream noisy PNG, with no added noise, filtering or resizing. The screenshot output is freshly processed by the app, not copied from the upstream denoised example.",
+        "noticePath": "ModelConversionTools/official/NAFNet/LICENSE",
+        "pixelHeight": 256,
+        "pixelWidth": 256,
+        "repository": "https://github.com/megvii-research/NAFNet",
+        "revision": "2b4af71ebe098a92a75910c233a3965a3e93ede4",
+        "sha256": "403034182fa320130dae0d75b92e85e0850771378e674d65455c403a4958e29c",
+        "suppliedBy": "NAFNet authors / megvii-research",
+        "title": "Official NAFNet noisy denoising demonstration",
+        "upstreamPath": "demo/noisy.png",
+        "url": "https://github.com/megvii-research/NAFNet/blob/2b4af71ebe098a92a75910c233a3965a3e93ede4/demo/noisy.png"
+      }
+    ],
+    "processing": "Real StudioViewModel production initializer (.requireProductionModels), CGNet (Better), native 1× with luminance/color strengths 80%/100%; the exact upstream 256×256 noisy demo is saved as a 256×256 TIFF result and reopened through its portable before/after record",
+    "qualityScope": "Screenshots illustrate the interface; they do not establish physical-phone performance or image-quality superiority",
+    "screenshots": [
+      "input-library.png",
+      "processed-viewer.png",
+      "detail-comparison.png",
+      "output-library.png",
+      "model-settings.png"
+    ],
+    "settings": "Current three-choice production form with CGNet (Better) selected for the next job and luminance/color controls"
+  },
+  "assets": [
+    {
+      "file": "input-library.webp",
+      "source": "docs/screenshots/input-library.png",
+      "sourceSHA256": "9db47fdbee43a097c514b55866137f987032a3cbe0d09278342029da0aa7e18a",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "processed-viewer.webp",
+      "source": "docs/screenshots/processed-viewer.png",
+      "sourceSHA256": "88dd330bbfb9ed8b19f517de018334cebc05db47dde7a2949780e045f8dcbd46",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "output-library.webp",
+      "source": "docs/screenshots/output-library.png",
+      "sourceSHA256": "82bc46b1653218ebb7e7ca097184433a0ab53caa075c12b8633ca683cf207468",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "model-settings.webp",
+      "source": "docs/screenshots/model-settings.png",
+      "sourceSHA256": "36861003dedaea12f241b862289845ede2f641979b7bcd0c76cc48c3765b3506",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "detail-comparison.webp",
+      "source": "docs/screenshots/detail-comparison.png",
+      "sourceSHA256": "a601367d01a54770efb162ae96a2272601de462df39917e8e1c393bf9cf9e06d",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "icon.png",
+      "source": "Targets/TruongNoiserApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "transformation": "Resized to 112 × 112; PNG."
+    }
+  ]
+}

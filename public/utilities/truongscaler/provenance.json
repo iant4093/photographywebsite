@@ -1,0 +1,102 @@
+{
+  "repository": "https://github.com/iant4093/TruongScaler",
+  "revision": "1f81dca9d3be5de59bb7ec5f4fb372233ec01624",
+  "upstreamScreenshotProvenance": {
+    "capture": "Actual production SwiftUI/UIKit screens in an iOS simulator, 402×874 points at 3×; private temporary libraries",
+    "detailComparison": {
+      "afterSide": "Right: reopened saved native 2× HAT-S result",
+      "beforeSide": "Left: original input projected into the shared output canvas",
+      "capture": "Actual native shared before/after viewer at 4× fitted zoom; no post-capture crop or enhancement",
+      "focusOutputPixel": [
+        410,
+        290
+      ],
+      "outputCanvasPixels": [
+        1024,
+        768
+      ],
+      "visibleOutputPixelRect": {
+        "height": 556.5771144278607,
+        "width": 256,
+        "x": 281.89718076285243,
+        "y": 11.67495854063018
+      },
+      "zoomRelativeToFit": 4,
+      "zoomScale": 1.5703125
+    },
+    "fixtureProvenance": "Tests/TiledInferenceEngineTests/Fixtures/quality/fixture-provenance.json",
+    "fixtureSHA256": {
+      "photo_flower_lr_512x384.png": "c491d8dc73fa3bc22cbc566a32926c576da2406ee514bbcd5dbeffe850b775ab",
+      "photo_landscape_lr_512x384.png": "d7a2301a4872edbc158eb510891ad57cbc514bf6755132a0d14b4b14a3a0052a"
+    },
+    "photographSources": [
+      {
+        "author": "W.carter",
+        "bytes": 4592572,
+        "file": "common-blue-sow-thistle.jpg",
+        "license": "CC0 1.0",
+        "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "sha256": "c59bbee0feafedf0d1cf839d19ea35986a0966ca6483b36a49c97a7ab034ce3f",
+        "title": "Common Blue-Sow-Thistle in a patch of sunlight",
+        "url": "https://commons.wikimedia.org/wiki/File:Common_Blue-Sow-Thistle_in_a_patch_of_sunlight.jpg"
+      },
+      {
+        "author": "Julian Lupyan",
+        "bytes": 14383656,
+        "file": "urbino-sunset.jpg",
+        "license": "CC0 1.0",
+        "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "sha256": "7cb5693ec47a37c16f6f39323e4b7ad2b313c50a2fe0901e0cf49a20f65c3079",
+        "title": "Landscape South of Urbino, Taken from Parco della Resistenza at Late Sunset",
+        "url": "https://commons.wikimedia.org/wiki/File:Landscape_South_of_Urbino,_Taken_from_Parco_della_Resistenza_at_Late_Sunset.jpg"
+      }
+    ],
+    "processing": "Real StudioViewModel production initializer (.requireProductionModels), HAT-S flower and QuickSRNet-Large landscape, native 2× and denoise off; two 512×384 inputs saved as 1024×768 TIFF results; the HAT-S comparison is reopened through its portable record",
+    "qualityScope": "Screenshots illustrate the interface; they do not establish physical-phone performance or image-quality superiority",
+    "screenshots": [
+      "input-library.png",
+      "processed-viewer.png",
+      "detail-comparison.png",
+      "output-library.png",
+      "model-settings.png"
+    ],
+    "settings": "Current three-model production form with HAT-S (Best) selected for the next job"
+  },
+  "assets": [
+    {
+      "file": "input-library.webp",
+      "source": "docs/screenshots/input-library.png",
+      "sourceSHA256": "629b324c92d84059861bb9202ff3bc4140dc317c5cd407bfcaea085560cfe8d2",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "processed-viewer.webp",
+      "source": "docs/screenshots/processed-viewer.png",
+      "sourceSHA256": "de01fc916567830d3ef736c5080bf5e57f0e3b8f6ab25664f4b1bfc62fa955fe",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "output-library.webp",
+      "source": "docs/screenshots/output-library.png",
+      "sourceSHA256": "22803ad510f64a56a188fd9a2eaaeeef89f425b1952e143f6b2290159d6ec530",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "model-settings.webp",
+      "source": "docs/screenshots/model-settings.png",
+      "sourceSHA256": "1157f48acf504e466a0b719410a6dcca4ef60d968599b2b10af497e68b6023cf",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "detail-comparison.webp",
+      "source": "docs/screenshots/detail-comparison.png",
+      "sourceSHA256": "5065e97618aa2062e08a3a45ea75a8fa8c215c6818ae4997cea56308224f9fce",
+      "transformation": "Resized to 720 × 1565; WebP quality 83. No crop or image enhancement."
+    },
+    {
+      "file": "icon.png",
+      "source": "Targets/TruongScalerApp/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "transformation": "Resized to 112 × 112; PNG."
+    }
+  ]
+}

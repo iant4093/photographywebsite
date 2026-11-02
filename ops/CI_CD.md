@@ -731,9 +731,12 @@ resource's definition has not changed.
 
 ## Artifact budget maintenance
 
-The frontend gzip ceiling is 8.2 MB. This includes about 152 KB of optimized
-TruongCam screenshots and its app icon added to the Utilities launch page; the
-other frontend limits are unchanged.
+The frontend ceilings are 11.9 MB uncompressed and 8.7 MB gzipped. These include
+about 152 KB of optimized TruongCam screenshots and its app icon, plus about
+461 KB for the TruongNoiser and TruongScaler screenshots, icons, and attribution
+records. Each new app page uses five resized WebP screenshots and a small PNG
+icon from its repository. The total ceilings each increased by 500 KB for these
+two launches; the entry and chunk limits are unchanged.
 
 `ops/ci/artifact_budgets.json` holds the size limits. Raise a limit only in the
 same commit that explains the dependency or bundle growth behind it. Do not

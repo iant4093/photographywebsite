@@ -39,15 +39,15 @@ describe('GitHub analytics admin page', () => {
     expect(api.fetchGitHubAnalytics).toHaveBeenCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: 'photographywebsite' })
   })
 
-  it('switches snapshots and defaults to the website on every fresh visit', async () => {
+  it.each(['TruongCam', 'TruongNoiser', 'TruongScaler'])('switches to %s and defaults to the website on every fresh visit', async (repository) => {
     const first = render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
     await screen.findByText('24,000')
-    api.fetchGitHubAnalytics.mockResolvedValueOnce({ ...REPORT, repository: { ...REPORT.repository, fullName: 'iant4093/TruongCam' }, loc: { ...REPORT.loc, total: 8000 } })
-    selectChoice(screen.getByRole('combobox', { name: 'Repository' }), 'TruongCam')
+    api.fetchGitHubAnalytics.mockResolvedValueOnce({ ...REPORT, repository: { ...REPORT.repository, fullName: `iant4093/${repository}` }, loc: { ...REPORT.loc, total: 8000 } })
+    selectChoice(screen.getByRole('combobox', { name: 'Repository' }), repository)
     expect(screen.queryByText('24,000')).not.toBeInTheDocument()
     expect(await screen.findByText('8,000')).toBeInTheDocument()
-    expect(screen.getByText('iant4093/TruongCam')).toBeInTheDocument()
-    expect(api.fetchGitHubAnalytics).toHaveBeenLastCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: 'TruongCam' })
+    expect(screen.getByText(`iant4093/${repository}`)).toBeInTheDocument()
+    expect(api.fetchGitHubAnalytics).toHaveBeenLastCalledWith('admin-token', { signal: expect.any(AbortSignal), repo: repository })
     first.unmount()
     render(<MemoryRouter><GitHubAnalytics /></MemoryRouter>)
     expect(screen.getByRole('combobox', { name: 'Repository' })).toHaveValue('photographywebsite')

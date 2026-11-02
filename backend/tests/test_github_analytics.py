@@ -1,8 +1,9 @@
 import io
+import hashlib
 import json
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 import zipfile
 
 from test_support import claims, gateway_event, response_body
@@ -59,6 +60,7 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs["reason_code"], "fresh_report")
 
     def test_repository_selection_is_allowlisted_and_scopes_cache_reads(self):
+        self.assertEqual(set(github_analytics.REPOSITORIES), {"photographywebsite", "TruongCam", "TruongNoiser", "TruongScaler"})
         for repository in github_analytics.REPOSITORIES:
             event = {**ADMIN_EVENT, "queryStringParameters": {"repo": repository}}
             with patch.object(get_github_analytics, "verify_front_door_request", return_value=None), patch.object(
@@ -96,6 +98,85 @@ class GitHubAnalyticsApiTests(unittest.TestCase):
 
 
 class GitHubAnalyticsCollectorTests(unittest.TestCase):
+    def test_large_model_repo_fetches_only_counted_sources_at_the_requested_revision(self):
+        sha = "b" * 40
+        contents = {"Sources/Engine.swift": b"let one = 1\n\nlet two = 2\n", "Tests/EngineTests/Engine Tests.swift": b"func testEngine() {}\n"}
+        tree = [
+            {"path": path, "type": "blob", "mode": "100644", "size": len(content), "sha": hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()}
+            for path, content in contents.items()
+        ]
+        tree.extend([
+            {"path": "Models/weights.bin", "type": "blob", "mode": "100644", "size": 100_000_000},
+            {"path": "node_modules/ignored.swift", "type": "blob", "mode": "100644", "size": 100},
+            {"path": "package-lock.json", "type": "blob", "mode": "100644", "size": 100},
+            {"path": "linked.swift", "type": "blob", "mode": "120000", "size": 100},
+        ])
+
+        class Response(io.BytesIO):
+            def __init__(self, url, content):
+                super().__init__(content)
+                self.url = url
+                self.headers = {"Content-Length": str(len(content))}
+            def geturl(self): return self.url
+
+        def open_source(request, **_kwargs):
+            prefix = f"https://raw.githubusercontent.com/iant4093/TruongScaler/{sha}/"
+            self.assertTrue(request.full_url.startswith(prefix))
+            path = github_analytics.urllib.parse.unquote(request.full_url[len(prefix):])
+            return Response(request.full_url, contents[path])
+
+        with patch.object(github_analytics, "_request", return_value=(200, {"truncated": False, "tree": tree}, {})) as api, patch.object(
+            github_analytics.urllib.request, "urlopen", side_effect=open_source
+        ) as raw:
+            result = github_analytics._count_archive(sha, "TruongScaler")
+        api.assert_called_once_with(f"/repos/iant4093/TruongScaler/git/trees/{sha}?recursive=1")
+        self.assertEqual(raw.call_count, 2)
+        self.assertEqual(result["revision"], sha)
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["files"], 2)
+        areas = {item["name"]: item["lines"] for item in result["areas"]}
+        self.assertEqual(areas["iPhone App"], 2)
+        self.assertEqual(areas["Tests"], 1)
+
+    def test_source_tree_refuses_incomplete_unsafe_or_oversized_inventories_before_download(self):
+        valid = {"path": "App.swift", "type": "blob", "mode": "100644", "size": 10, "sha": "a" * 40}
+        cases = [
+            {"truncated": True, "tree": []},
+            {"tree": []},
+            {"truncated": False, "tree": [{**valid, "path": "../App.swift"}]},
+            {"truncated": False, "tree": [{**valid, "path": "/App.swift"}]},
+            {"truncated": False, "tree": [{**valid, "path": "App\n.swift"}]},
+            {"truncated": False, "tree": [{**valid, "sha": "invalid"}]},
+            {"truncated": False, "tree": [{**valid, "size": -1}]},
+            {"truncated": False, "tree": [{**valid, "size": True}]},
+            {"truncated": False, "tree": [valid, valid]},
+        ]
+        for payload in cases:
+            with self.subTest(payload=payload), patch.object(github_analytics, "_request", return_value=(200, payload, {})), patch.object(
+                github_analytics.urllib.request, "urlopen"
+            ) as raw, self.assertRaises(github_analytics.ProviderContractError):
+                github_analytics._count_archive("b" * 40, "TruongScaler")
+            raw.assert_not_called()
+        payload = {"truncated": False, "tree": [valid]}
+        for limit in ("MAX_ARCHIVE_FILES", "MAX_ARCHIVE_EXPANDED_BYTES"):
+            with self.subTest(limit=limit), patch.object(github_analytics, limit, 0), patch.object(
+                github_analytics, "_request", return_value=(200, payload, {})
+            ), self.assertRaises(github_analytics.ProviderContractError):
+                github_analytics._count_archive("b" * 40, "TruongScaler")
+
+    def test_source_tree_refuses_changed_bytes_redirects_and_oversized_responses(self):
+        sha = "b" * 40
+        url = f"https://raw.githubusercontent.com/iant4093/TruongScaler/{sha}/App.swift"
+        payload = {"truncated": False, "tree": [{"path": "App.swift", "type": "blob", "mode": "100644", "size": 3, "sha": "a" * 40}]}
+        for content, final_url, length in ((b"bad", url, "3"), (b"x", url, "1"), (b"bad", "https://example.com/file", "3"), (b"bad!", url, "4")):
+            response = io.BytesIO(content)
+            response.headers = {"Content-Length": length}
+            response.geturl = lambda: final_url
+            with self.subTest(content=content, url=final_url), patch.object(github_analytics, "_request", return_value=(200, payload, {})), patch.object(
+                github_analytics.urllib.request, "urlopen", return_value=response
+            ), self.assertRaises(github_analytics.ProviderContractError):
+                github_analytics._count_archive(sha, "TruongScaler")
+
     def test_refresh_requires_the_exact_trusted_event(self):
         with patch.object(refresh_github_analytics, "load_cached_report", return_value=sample_report()), patch.object(
             refresh_github_analytics, "build_report", return_value=sample_report()
@@ -110,12 +191,12 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
 
     def test_failed_repository_preserves_cache_and_does_not_block_other_refreshes(self):
         with patch.object(refresh_github_analytics, "load_cached_report", return_value=sample_report()), patch.object(
-            refresh_github_analytics, "build_report", side_effect=[RuntimeError("provider down"), sample_report()]
+            refresh_github_analytics, "build_report", side_effect=[RuntimeError("provider down")] + [sample_report()] * 3
         ) as build, patch.object(refresh_github_analytics, "store_report") as store, self.assertLogs(level="ERROR"):
             with self.assertRaises(RuntimeError):
                 refresh_github_analytics.handler(github_analytics.SCHEDULED_REFRESH_EVENT, CONTEXT)
-        self.assertEqual(build.call_count, 2)
-        store.assert_called_once_with(sample_report(), "TruongCam")
+        self.assertEqual(build.call_count, 4)
+        self.assertEqual(store.call_args_list, [call(sample_report(), repository) for repository in ("TruongCam", "TruongNoiser", "TruongScaler")])
 
     def test_cache_entries_are_independent_and_website_key_is_preserved(self):
         with patch.object(github_analytics.cache_table, "put_item") as put, patch.object(
@@ -125,7 +206,7 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
                 github_analytics.store_report(sample_report(), repository)
                 github_analytics.load_cached_report(repository)
         keys = [call.kwargs["Item"]["cacheKey"] for call in put.call_args_list]
-        self.assertEqual(keys, [github_analytics.CACHE_KEY, github_analytics.CACHE_KEY + ":iant4093/TruongCam"])
+        self.assertEqual(keys, [github_analytics.CACHE_KEY] + [github_analytics.CACHE_KEY + f":iant4093/{repository}" for repository in ("TruongCam", "TruongNoiser", "TruongScaler")])
         self.assertEqual([call.kwargs["Key"]["cacheKey"] for call in get.call_args_list], keys)
         self.assertEqual(github_analytics.validate_repository(), "photographywebsite")
 
@@ -133,6 +214,10 @@ class GitHubAnalyticsCollectorTests(unittest.TestCase):
         self.assertEqual(github_analytics._source_extension("src/TruongCam/Camera.swift"), (".swift", "Swift"))
         self.assertEqual(github_analytics._source_area("src/TruongCam/Camera.swift"), "iPhone App")
         self.assertEqual(github_analytics._source_area("src/TruongCamTests/CameraTests.swift"), "Tests")
+        for app in ("TruongNoiser", "TruongScaler"):
+            self.assertEqual(github_analytics._source_area(f"Targets/{app}App/App.swift"), "iPhone App")
+            self.assertEqual(github_analytics._source_area("Sources/TiledInferenceEngine/Engine.swift"), "iPhone App")
+            self.assertEqual(github_analytics._source_area("Tests/TiledInferenceEngineTests/EngineTests.swift"), "Tests")
 
     def test_archive_count_excludes_dependencies_locks_generated_and_blank_lines(self):
         raw = io.BytesIO()

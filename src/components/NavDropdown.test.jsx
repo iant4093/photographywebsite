@@ -202,6 +202,8 @@ describe('desktop navigation dropdowns', () => {
     expect(within(panel).getByRole('link', { name: /Web Editor/ })).toHaveAttribute('href', '/editor')
     expect(within(panel).getByRole('link', { name: /TruongRoom Coming soon/ })).toHaveAttribute('href', '/utilities/truongroom')
     expect(within(panel).getByRole('link', { name: /TruongCam RAW camera for iPhone/ })).toHaveAttribute('href', '/utilities/truongcam')
+    expect(within(panel).getByRole('link', { name: /TruongNoiser Photo denoising for iPhone/ })).toHaveAttribute('href', '/utilities/truongnoiser')
+    expect(within(panel).getByRole('link', { name: /TruongScaler 2× photo upscaling for iPhone/ })).toHaveAttribute('href', '/utilities/truongscaler')
     expect(panel.querySelector('[aria-current="page"]')).toHaveAttribute('href', path)
     fireEvent.keyDown(document.activeElement, { key: 'Escape' })
     expect(utilities).toHaveAttribute('aria-expanded', 'false')
