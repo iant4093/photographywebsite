@@ -697,6 +697,34 @@ describe('PhotoLightbox', () => {
     expect(onBeforeRefresh).toHaveBeenCalledOnce()
   })
 
+  it('starts an unresolved lookup on hover or focus and lets the click share it', async () => {
+    let finish
+    const onBeforeRefresh = vi.fn(() => new Promise(resolve => { finish = resolve }))
+    const photo = { ...landscape, before: { status: 'unresolved' } }
+    const props = { index: 0, ariaLabel: 'Viewer', onClose: vi.fn(), onBeforeRefresh }
+    const first = render(<PhotoLightbox {...props} images={[photo]} />)
+    const toggle = screen.getByRole('button', { name: 'Show original photo' })
+    fireEvent.pointerEnter(toggle)
+    fireEvent.focus(toggle)
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    expect(onBeforeRefresh).toHaveBeenCalledWith(expect.objectContaining({ type: 'pointerenter' }), photo, { reason: 'original-status' })
+    fireEvent.click(toggle)
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading original…')
+    await act(async () => finish())
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Cancel loading original' }))
+    expect(onBeforeRefresh).toHaveBeenCalledOnce()
+    first.unmount()
+
+    // Ready and pending originals are not looked up on intent.
+    onBeforeRefresh.mockClear()
+    const { rerender } = render(<PhotoLightbox {...props} images={[comparisonPhoto]} />)
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Show original photo' }))
+    rerender(<PhotoLightbox {...props} images={[{ ...landscape, before: { status: 'pending' } }]} />)
+    fireEvent.focus(screen.getByRole('button', { name: 'Show original photo' }))
+    expect(onBeforeRefresh).not.toHaveBeenCalled()
+  })
+
   it.each([false, true])('waits for an obsolete status request before resolving refreshed gallery data (cancelled: %s)', async (cancelled) => {
     let finish
     const onBeforeRefresh = vi.fn()

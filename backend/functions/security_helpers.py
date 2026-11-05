@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import html
 import json
+import logging
 import os
 import time
 import urllib.parse
@@ -18,6 +19,7 @@ from botocore.exceptions import ClientError
 from secret_helpers import resolve_secret
 
 
+logger = logging.getLogger("photography_api.security_helpers")
 _rate_table = None
 _denied_requests = OrderedDict()
 _denied_requests_lock = Lock()
@@ -62,13 +64,29 @@ def _get_rate_table():
     return _rate_table
 
 
-def _identifier_hash(identifier, action):
-    normalized = str(identifier or "unknown").strip().lower().encode("utf-8")
-    secret = resolve_secret(
+def _hash_secret():
+    return resolve_secret(
         direct_env="RATE_LIMIT_HASH_SECRET",
         parameter_env="RATE_LIMIT_HASH_PARAMETER",
         json_keys=("secret", "hashSecret", "RATE_LIMIT_HASH_SECRET"),
-    ).encode("utf-8")
+    )
+
+
+def prepare_rate_limits():
+    """Create the table client and cache the hash secret before the first request.
+
+    Best effort: on failure, rate limiting creates or reads them on demand.
+    """
+    try:
+        _get_rate_table()
+        _hash_secret()
+    except Exception as error:
+        logger.warning("rate_limit_prepare_failed error_type=%s", type(error).__name__)
+
+
+def _identifier_hash(identifier, action):
+    normalized = str(identifier or "unknown").strip().lower().encode("utf-8")
+    secret = _hash_secret().encode("utf-8")
     message = action.encode("utf-8") + b"\x00" + normalized
     digest = hmac.new(secret, message, hashlib.sha256).hexdigest()
     return f"{action}#{digest}"

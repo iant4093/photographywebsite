@@ -4296,6 +4296,9 @@ Resources:
         Feature: public-delivery
       CodeUri: ./
       Handler: get_download_url.handler
+      # The first Before comparison after idle waits for a cold start; 1024 MB
+      # buys the CPU for its setup (the global default is 256 MB).
+      MemorySize: 1024
       ReservedConcurrentExecutions: 10
       Environment:
         Variables:

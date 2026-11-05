@@ -1,5 +1,6 @@
 """Authorize on-demand media downloads and camera-original comparisons."""
 
+import logging
 import os
 import posixpath
 import re
@@ -20,6 +21,7 @@ from validation_helpers import ValidationError, parse_json_body, require_string,
 from zip_helpers import get_album_record
 
 
+logger = logging.getLogger("photography_api.get_download_url")
 MEDIA_ID_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 SHARE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
@@ -50,7 +52,31 @@ def _audit(event, context, outcome, reason_code, *, actor_type=None, auth_method
     )
 
 
-from front_door import verify_front_door_request
+from front_door import prefetch_front_door_secret, verify_front_door_request
+
+
+def _prepare_first_request():
+    """Do the first request's one-time setup while Lambda initializes.
+
+    Opening a Before comparison after the site has been idle otherwise waits
+    for this setup inside the request. Each step is best effort and repeats on
+    demand if it fails here.
+    """
+    from media_access import get_dynamodb_resource
+    from original_comparison_access import _get_s3_client
+    from security_helpers import prepare_rate_limits
+
+    prefetch_front_door_secret()
+    prepare_rate_limits()
+    for create_client in (get_dynamodb_resource, _get_s3_client):
+        try:
+            create_client()
+        except Exception as error:
+            logger.warning("client_prepare_failed error_type=%s", type(error).__name__)
+
+
+if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+    _prepare_first_request()
 
 
 def handler(event, context):

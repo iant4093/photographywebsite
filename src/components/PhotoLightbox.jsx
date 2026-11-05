@@ -307,6 +307,12 @@ function PhotoLightbox({
         }
     }
 
+    // Pointing at or focusing the button usually precedes a click. Look up the
+    // original now so an idle server starts while the visitor is still aiming.
+    const handleBeforeIntent = (event) => {
+        if (!comparisonRequested && before?.status === 'unresolved') void refreshOriginal(event)
+    }
+
     const handleBeforeLoad = (event) => afterImageDecode(event.currentTarget, () => {
         setComparison((current) => (
             current.id === activeId && current.attempt === comparison.attempt
@@ -504,6 +510,8 @@ function PhotoLightbox({
                                 <button
                                     type="button"
                                     onClick={handleBeforeToggle}
+                                    onPointerEnter={handleBeforeIntent}
+                                    onFocus={handleBeforeIntent}
                                     className="linen-lightbox-before inline-flex items-center gap-2 rounded-full border border-white/30 px-4 py-2.5 text-sm text-white/80 transition-colors hover:border-white/60 hover:bg-white/10 hover:text-white active:scale-[0.98] cursor-pointer touch-manipulation"
                                     aria-label={beforeButtonLabel}
                                     aria-pressed={showingBefore}

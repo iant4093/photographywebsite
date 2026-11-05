@@ -105,7 +105,7 @@
     {"logicalId": "DeleteImagesFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "Tags"], "allowNoDetails": false},
     {"logicalId": "TagMediaObjectFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "Tags"], "allowNoDetails": false},
     {"logicalId": "TagMediaObjectFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies", "Tags"], "allowNoDetails": false, "allowProtectedModify": true},
-    {"logicalId": "GetDownloadUrlFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "Tags"], "allowNoDetails": false},
+    {"logicalId": "GetDownloadUrlFunction", "resourceType": "AWS::Lambda::Function", "action": "Modify", "propertyPaths": ["Code", "Environment", "MemorySize", "Tags"], "allowNoDetails": false},
     {"logicalId": "GetDownloadUrlFunctionRole", "resourceType": "AWS::IAM::Role", "action": "Modify", "propertyPaths": ["Policies", "Tags"], "allowNoDetails": false, "allowProtectedModify": true},
     {"logicalId": "GetDownloadUrlFunctionAlbumOriginalComparisonPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},
     {"logicalId": "GetDownloadUrlFunctionSharedOriginalComparisonPermission", "resourceType": "AWS::Lambda::Permission", "action": "Add", "propertyPaths": [], "allowNoDetails": true},

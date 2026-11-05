@@ -44,6 +44,11 @@ export default function ExplorerPhotoLightbox(props) {
     const beforeMessage = comparisonRequested && !showingBefore
         ? unavailable ? 'Unable to locate original' : image?.before?.status === 'failed' ? 'Original could not be loaded.' : 'Loading original…'
         : ''
+    // Pointing at or focusing the button usually precedes a click, so the
+    // lookup starts early; the refresh hook shares one request per photo.
+    const lookUpOriginal = event => {
+        if (!comparisonRequested && image.before.status === 'unresolved') void Promise.resolve(props.onBeforeRefresh?.(event, image)).catch(() => {})
+    }
 
     useEffect(() => {
         if (!preview.outgoing) return undefined
@@ -217,10 +222,12 @@ export default function ExplorerPhotoLightbox(props) {
                     <div className="linen-lightbox-action-buttons flex items-center justify-center gap-2">
                         {hasComparison && <button type="button" className={`linen-lightbox-before ${ACTION_CLASS} cursor-pointer touch-manipulation`}
                             aria-label={comparisonRequested ? showingBefore ? 'Show edited photo' : unavailable ? 'Unable to locate original' : 'Cancel loading original' : 'Show original photo'} aria-pressed={showingBefore}
+                            onPointerEnter={lookUpOriginal}
+                            onFocus={lookUpOriginal}
                             onClick={event => {
                                 event.stopPropagation()
                                 setComparison(current => ({ ...current, id: imageId, requested: !comparisonRequested }))
-                                if (!comparisonRequested && image.before.status === 'unresolved') void Promise.resolve(props.onBeforeRefresh?.(event, image)).catch(() => {})
+                                lookUpOriginal(event)
                             }}>
                             <svg className="linen-lightbox-before-indicator h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v18M9 5H5a2 2 0 00-2 2v10a2 2 0 002 2h4m6-14h4a2 2 0 012 2v10a2 2 0 01-2 2h-4M3 16l4-4 2 2m6-3 6 6" /></svg>
                             <span className="linen-lightbox-before-label" aria-hidden="true"><span className="linen-lightbox-before-word" data-label="Before"><span className={showingBefore ? 'is-active' : ''}>Before</span></span><span>/</span><span className="linen-lightbox-before-word" data-label="After"><span className={!showingBefore ? 'is-active' : ''}>After</span></span></span>

@@ -305,7 +305,7 @@ class ReleaseIntentTests(unittest.TestCase):
             expected_paths = ["Code", "Environment"]
             if rule["logicalId"] == "GetPhotographyStatsFunction":
                 expected_paths.append("ReservedConcurrentExecutions")
-            if rule["logicalId"] in {"GetPublicAlbumFunction", "GetPublicAlbumsFunction"}:
+            if rule["logicalId"] in {"GetPublicAlbumFunction", "GetPublicAlbumsFunction", "GetDownloadUrlFunction"}:
                 expected_paths.append("MemorySize")
             if rule["logicalId"] == "GoogleDriveBackupFunction":
                 expected_paths.append("EphemeralStorage")

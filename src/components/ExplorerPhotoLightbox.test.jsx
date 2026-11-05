@@ -99,6 +99,26 @@ it('keeps zoom, download and print available before the viewer code arrives', as
     expect(screen.getByRole('button', { name: /zoom/i })).toBeEnabled()
 })
 
+it('looks up an unresolved original on hover or focus before the click', async () => {
+    const onBeforeRefresh = vi.fn().mockResolvedValue(undefined)
+    const image = { ...props.images[0], before: { status: 'unresolved' } }
+    const view = render(<ExplorerPhotoLightbox {...props} images={[image]} onBeforeRefresh={onBeforeRefresh} />)
+    const toggle = screen.getByRole('button', { name: 'Show original photo' })
+    fireEvent.pointerEnter(toggle)
+    fireEvent.focus(toggle)
+    expect(onBeforeRefresh).toHaveBeenCalledTimes(2)
+    expect(onBeforeRefresh).toHaveBeenNthCalledWith(1, expect.objectContaining({ type: 'pointerenter' }), image)
+    fireEvent.click(toggle)
+    expect(onBeforeRefresh).toHaveBeenCalledTimes(3)
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Cancel loading original' }))
+    expect(onBeforeRefresh).toHaveBeenCalledTimes(3)
+
+    view.rerender(<ExplorerPhotoLightbox {...props} images={[{ ...image, before: { status: 'pending' } }]} onBeforeRefresh={onBeforeRefresh} />)
+    fireEvent.pointerEnter(screen.getAllByRole('button', { name: /original photo|loading original/ })[0])
+    expect(onBeforeRefresh).toHaveBeenCalledTimes(3)
+    await act(async () => {})
+})
+
 it('preserves an original comparison opened while the viewer code is delayed', async () => {
     const image = { ...props.images[0], before: { status: 'ready', url: '/before.webp', width: 1200, height: 800 } }
     render(<ExplorerPhotoLightbox {...props} images={[image]} onDownload={vi.fn()} onPrint={vi.fn()} />)

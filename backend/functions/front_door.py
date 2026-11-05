@@ -157,6 +157,20 @@ def verify_front_door_request(event, _context=None):
     return _deny("verification_invalid")
 
 
+def prefetch_front_door_secret():
+    """Read the origin secret into the cache before the first request.
+
+    Best effort: on failure, verification reads it on demand as before.
+    """
+    parameter_name = os.environ.get("FRONT_DOOR_CONFIG_PARAMETER", "").strip()
+    if _enforcement_enabled() is not True or not parameter_name:
+        return
+    try:
+        _secret_values(parameter_name)
+    except Exception:
+        logger.warning("front_door_prefetch_failed")
+
+
 def reset_front_door_cache_for_tests():
     """Clear process-local state without returning or logging cached values."""
     global _ssm_client
