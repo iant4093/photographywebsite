@@ -1,5 +1,5 @@
-// Shared by the Utilities landing page, coming-soon pages, and navbar dropdown.
-export const UTILITY_MODULES = Object.freeze([
+// Shared by the Apps landing page, coming-soon pages, and navbar dropdown.
+export const APP_MODULES = Object.freeze([
     {
         id: 'web-editor',
         path: '/editor',
@@ -9,7 +9,7 @@ export const UTILITY_MODULES = Object.freeze([
     },
     {
         id: 'truongroom',
-        path: '/utilities/truongroom',
+        path: '/apps/truongroom',
         title: 'TruongRoom',
         detail: 'In development.',
         summary: 'Coming soon',
@@ -17,21 +17,21 @@ export const UTILITY_MODULES = Object.freeze([
     },
     {
         id: 'truongcam',
-        path: '/utilities/truongcam',
+        path: '/apps/truongcam',
         title: 'TruongCam',
         detail: 'An iPhone camera app with Bayer RAW capture and manual controls.',
         summary: 'RAW camera for iPhone',
     },
     {
         id: 'truongnoiser',
-        path: '/utilities/truongnoiser',
+        path: '/apps/truongnoiser',
         title: 'TruongNoiser',
         detail: 'Denoise photos locally on your iPhone.',
         summary: 'Photo denoising for iPhone',
     },
     {
         id: 'truongscaler',
-        path: '/utilities/truongscaler',
+        path: '/apps/truongscaler',
         title: 'TruongScaler',
         detail: 'Upscale photos to 2× locally on your iPhone.',
         summary: '2× photo upscaling for iPhone',

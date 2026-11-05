@@ -24,7 +24,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
     const videoActive = pathname === '/videos' || pathname.startsWith('/video/') || pathname.startsWith('/sections/video/')
     const searchActive = pathname === '/search'
     const exploreActive = pathname === '/explore' || pathname.startsWith('/explore/')
-    const utilitiesActive = pathname === '/editor' || pathname === '/utilities' || pathname.startsWith('/utilities/')
+    const appsActive = pathname === '/editor' || pathname === '/apps' || pathname.startsWith('/apps/')
     const statsActive = pathname === '/stats'
     const sharedActive = pathname.startsWith('/sharedalbum')
     const contactActive = pathname === '/contact'
@@ -40,7 +40,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
             <Link to="/" {...activeAttributes(photoActive)}>Photographs</Link>
             <Link to="/videos" {...activeAttributes(videoActive)}>Videos</Link>
             <Link to="/explore" {...activeAttributes(exploreActive)}>Explore</Link>
-            <Link to="/utilities" {...activeAttributes(utilitiesActive)}>Utilities</Link>
+            <Link to="/apps" {...activeAttributes(appsActive)}>Apps</Link>
         </>
     )
 
@@ -179,7 +179,7 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         <div className="linen-desktop-links hidden" aria-label="Primary navigation">
                             {hoverDropdowns ? (
                                 <Suspense fallback={primaryLinks}>
-                                    <NavDropdowns pathname={pathname} photoActive={photoActive} videoActive={videoActive} exploreActive={exploreActive} utilitiesActive={utilitiesActive} />
+                                    <NavDropdowns pathname={pathname} photoActive={photoActive} videoActive={videoActive} exploreActive={exploreActive} appsActive={appsActive} />
                                 </Suspense>
                             ) : primaryLinks}
                             <Link to="/stats" {...activeAttributes(statsActive)}>Stats</Link>
@@ -240,8 +240,8 @@ function Navbar({ theme = 'light', onToggleTheme = () => {}, showThemeToggle = t
                         Explore
                     </Link>
 
-                    <Link to="/utilities" onClick={closeMenu} className={menuLinkClass(utilitiesActive)} aria-current={utilitiesActive ? 'page' : undefined}>
-                        Utilities
+                    <Link to="/apps" onClick={closeMenu} className={menuLinkClass(appsActive)} aria-current={appsActive ? 'page' : undefined}>
+                        Apps
                     </Link>
 
                     <Link to="/stats" onClick={closeMenu} className={menuLinkClass(statsActive)} aria-current={statsActive ? 'page' : undefined}>

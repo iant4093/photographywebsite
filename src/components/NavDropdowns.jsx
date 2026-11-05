@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import useNavSections from '../hooks/useNavSections'
 import { EXPLORE_MODULES } from '../utils/exploreModules'
-import { UTILITY_MODULES } from '../utils/utilityModules'
+import { APP_MODULES } from '../utils/appModules'
 import NavDropdown from './NavDropdown'
 import './NavDropdowns.css'
 
@@ -40,7 +40,7 @@ function SectionLinks({ mediaType, sections, failed, pathname }) {
 
 // Hover dropdowns for the desktop masthead. Loaded on its own only where a
 // hover-capable desktop layout can use it, keeping the entry bundle lean.
-export default function NavDropdowns({ pathname, photoActive, videoActive, exploreActive, utilitiesActive }) {
+export default function NavDropdowns({ pathname, photoActive, videoActive, exploreActive, appsActive }) {
     const [dropdown, setDropdown] = useState(null)
     const photoSections = useNavSections('photo')
     const videoSections = useNavSections('video')
@@ -84,13 +84,13 @@ export default function NavDropdowns({ pathname, photoActive, videoActive, explo
                     })}
                 </ul>
             </NavDropdown>
-            <NavDropdown {...dropdownProps('utilities')} label="Utilities" to="/utilities" active={utilitiesActive}>
+            <NavDropdown {...dropdownProps('apps')} label="Apps" to="/apps" active={appsActive}>
                 <div className="linen-nav-dropdown-head">
-                    <span>Utilities modules</span>
-                    <Link to="/utilities">All modules →</Link>
+                    <span>Apps</span>
+                    <Link to="/apps">All apps →</Link>
                 </div>
-                <ul className="linen-nav-dropdown-list linen-nav-dropdown-list--utilities">
-                    {UTILITY_MODULES.map(module => {
+                <ul className="linen-nav-dropdown-list linen-nav-dropdown-list--apps">
+                    {APP_MODULES.map(module => {
                         const current = pathname === module.path
                         return (
                             <li key={module.id}>

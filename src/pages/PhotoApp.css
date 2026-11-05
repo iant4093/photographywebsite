@@ -1,0 +1,9 @@
+.linen-site .photo-app-page .cam-gallery { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; }
+.linen-site .photo-app-page .cam-screen-mat { padding: 1.25rem; }
+.linen-site .app-screenshot-note, .linen-site .app-storage-note, .linen-site .app-companion { color: var(--color-warm-gray); font-size: .8rem; line-height: 1.8; }
+.linen-site .app-screenshot-note { margin-top: 1.5rem; }
+.linen-site .app-screenshot-note a, .linen-site .app-companion a { color: var(--color-charcoal); text-decoration: underline; text-underline-offset: 4px; }
+.linen-site .app-storage-note { margin-bottom: 1rem; }
+.linen-site .app-companion { margin-top: 1.5rem; }
+@media (max-width: 1000px) { .linen-site .photo-app-page .cam-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); } .linen-site .photo-app-page .cam-screen-mat { padding: 2rem; } }
+@media (max-width: 650px) { .linen-site .photo-app-page .cam-gallery { grid-template-columns: 1fr; gap: 2.5rem; } }

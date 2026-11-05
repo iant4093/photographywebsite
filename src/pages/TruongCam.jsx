@@ -1,11 +1,11 @@
 import { Link } from 'react-router'
 import './Explore.css'
-import './Utilities.css'
+import './Apps.css'
 import './TruongCam.css'
 
 const REPOSITORY = 'https://github.com/iant4093/TruongCam'
 const DOWNLOAD = `${REPOSITORY}/releases/latest/download/TruongCam.ipa`
-const ASSETS = '/utilities/truongcam'
+const ASSETS = '/apps/truongcam'
 
 const features = [
     'Bayer RAW (DNG) and JPEG capture, with physical lens selection.',
@@ -22,9 +22,9 @@ const screens = [
 
 export default function TruongCam() {
     return (
-        <div className="explore-page utilities-page truongcam-page animate-fade-in pt-[74px]">
+        <div className="explore-page apps-page truongcam-page animate-fade-in pt-[74px]">
             <div className="cam-shell">
-                <Link to="/utilities" className="explore-back">← All Utilities modules</Link>
+                <Link to="/apps" className="explore-back">← All apps</Link>
                 <header className="cam-hero">
                     <div className="cam-hero-copy">
                         <div className="cam-title"><img src={`${ASSETS}/icon.png`} alt="" width="56" height="56" /><h1>TruongCam</h1></div>

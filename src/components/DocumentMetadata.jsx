@@ -4,11 +4,11 @@ import { useLocation } from 'react-router'
 const SITE_ORIGIN = 'https://iantruongphotography.com'
 const PAGE_TITLES = {
     '/editor': 'Photo Editor',
-    '/utilities': 'Utilities',
-    '/utilities/truongroom': 'TruongRoom — Coming Soon',
-    '/utilities/truongcam': 'TruongCam — RAW Camera for iPhone',
-    '/utilities/truongnoiser': 'TruongNoiser — Photo Denoising for iPhone',
-    '/utilities/truongscaler': 'TruongScaler — 2× Photo Upscaling for iPhone',
+    '/apps': 'Apps',
+    '/apps/truongroom': 'TruongRoom — Coming Soon',
+    '/apps/truongcam': 'TruongCam — RAW Camera for iPhone',
+    '/apps/truongnoiser': 'TruongNoiser — Photo Denoising for iPhone',
+    '/apps/truongscaler': 'TruongScaler — 2× Photo Upscaling for iPhone',
     '/privacy': 'Privacy Notice',
     '/terms': 'Terms & Photo Use',
     '/print-policy': 'Print Orders & Returns',

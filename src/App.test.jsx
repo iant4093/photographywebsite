@@ -25,10 +25,10 @@ vi.mock('./pages/Search', () => ({ default: () => <h1>Search route</h1> }))
 vi.mock('./pages/Explore', () => ({ default: () => <h1>Explore route</h1> }))
 vi.mock('./pages/Editor', () => ({ default: () => <h1>Editor route</h1> }))
 vi.mock('./pages/TruongCam', () => ({ default: () => <h1>TruongCam launch route</h1> }))
-vi.mock('./pages/PhotoUtilityApp', () => ({ default: ({ moduleId }) => <h1>{moduleId} launch route</h1> }))
-vi.mock('./pages/Utilities', () => ({
-  default: () => <h1>Utilities route</h1>,
-  UtilityComingSoon: ({ moduleId }) => <h1>{moduleId} coming soon route</h1>,
+vi.mock('./pages/PhotoApp', () => ({ default: ({ moduleId }) => <h1>{moduleId} launch route</h1> }))
+vi.mock('./pages/Apps', () => ({
+  default: () => <h1>Apps route</h1>,
+  AppComingSoon: ({ moduleId }) => <h1>{moduleId} coming soon route</h1>,
 }))
 vi.mock('./pages/Stats', () => ({ default: () => <h1>Stats route</h1> }))
 vi.mock('./pages/SharedAlbum', () => ({ default: () => <h1>Shared route</h1> }))
@@ -166,7 +166,7 @@ describe('App routing shell', () => {
     ['/sections/photo/Hikes', 'Section albums route'], ['/sections/video/Films', 'Section albums route'], ['/album/id', 'Album route'], ['/video/id', 'Video route'], ['/sharedalbum/code', 'Shared route'],
     ['/contact', 'Contact route'], ['/privacy', 'Privacy route'], ['/login', 'Login route'],
     ['/search', 'Search route'], ['/explore', 'Explore route'], ['/editor', 'Editor route'], ['/stats', 'Stats route'],
-    ['/utilities', 'Utilities route'], ['/utilities/truongroom', 'truongroom coming soon route'], ['/utilities/truongcam', 'TruongCam launch route'], ['/utilities/truongnoiser', 'truongnoiser launch route'], ['/utilities/truongscaler', 'truongscaler launch route'],
+    ['/apps', 'Apps route'], ['/apps/truongroom', 'truongroom coming soon route'], ['/apps/truongcam', 'TruongCam launch route'], ['/apps/truongnoiser', 'truongnoiser launch route'], ['/apps/truongscaler', 'truongscaler launch route'],
     ['/admin', 'Admin route'], ['/admin/security', 'Admin security route'], ['/admin/costs', 'AWS costs route'], ['/admin/analytics', 'Website analytics route'], ['/admin/drive-usage', 'Google Drive usage route'], ['/admin/raw-photos', 'Raw photo viewer route'], ['/admin/github-analytics', 'GitHub analytics route'], ['/admin/site-health', 'Site health route'], ['/admin/audit-log', 'Audit log route'],
     ['/admin/upload', 'Upload route'], ['/admin/upload-video', 'Upload video route'],
     ['/admin/hero', 'Hero route'], ['/admin/favorites', 'Swipe favorites route'], ['/admin/recently-deleted', 'Recently deleted route'], ['/tv', 'TV mode route'],

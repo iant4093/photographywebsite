@@ -204,7 +204,7 @@ describe('navigation and metadata', () => {
     [/Ian Truong/, '/'],
     ['Find Album', '/sharedalbum'],
     ['Explore', '/explore'],
-    ['Utilities', '/utilities'],
+    ['Apps', '/apps'],
     ['Stats', '/stats'],
     ['Contact', '/contact'],
     ['Sign In', '/login'],

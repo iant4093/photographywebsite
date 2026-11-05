@@ -24,9 +24,9 @@ const TvMode = lazy(() => import('./pages/TvMode'))
 const Explore = lazy(() => import('./pages/Explore'))
 const Editor = lazy(() => import('./pages/Editor'))
 const TruongCam = lazy(() => import('./pages/TruongCam'))
-const PhotoUtilityApp = lazy(() => import('./pages/PhotoUtilityApp'))
-const Utilities = lazy(() => import('./pages/Utilities'))
-const UtilityComingSoon = lazy(() => import('./pages/Utilities').then(module => ({ default: module.UtilityComingSoon })))
+const PhotoApp = lazy(() => import('./pages/PhotoApp'))
+const Apps = lazy(() => import('./pages/Apps'))
+const AppComingSoon = lazy(() => import('./pages/Apps').then(module => ({ default: module.AppComingSoon })))
 const Stats = lazy(() => import('./pages/Stats'))
 const SharedAlbum = lazy(() => import('./pages/SharedAlbum'))
 const Contact = lazy(() => import('./pages/Contact'))
@@ -118,11 +118,11 @@ function App() {
                         <Route path="/tv" element={<TvMode />} />
                         <Route path="/explore/*" element={<Explore />} />
                         <Route path="/editor" element={<Editor />} />
-                        <Route path="/utilities" element={<Utilities />} />
-                        <Route path="/utilities/truongroom" element={<UtilityComingSoon moduleId="truongroom" />} />
-                        <Route path="/utilities/truongcam" element={<TruongCam />} />
-                        <Route path="/utilities/truongnoiser" element={<PhotoUtilityApp moduleId="truongnoiser" />} />
-                        <Route path="/utilities/truongscaler" element={<PhotoUtilityApp moduleId="truongscaler" />} />
+                        <Route path="/apps" element={<Apps />} />
+                        <Route path="/apps/truongroom" element={<AppComingSoon moduleId="truongroom" />} />
+                        <Route path="/apps/truongcam" element={<TruongCam />} />
+                        <Route path="/apps/truongnoiser" element={<PhotoApp moduleId="truongnoiser" />} />
+                        <Route path="/apps/truongscaler" element={<PhotoApp moduleId="truongscaler" />} />
                         <Route path="/stats" element={<Stats />} />
                         <Route path="/album/:albumId" element={<AlbumGallery />} />
                         <Route path="/video/:albumId" element={<VideoGallery />} />

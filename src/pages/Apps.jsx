@@ -1,11 +1,11 @@
 import { Link } from 'react-router'
-import { UTILITY_MODULES } from '../utils/utilityModules'
+import { APP_MODULES } from '../utils/appModules'
 import './Explore.css'
-import './Utilities.css'
+import './Apps.css'
 
-function UtilityArt({ id }) {
+function AppArt({ id }) {
     return (
-        <div className={`utility-module-art utility-module-art--${id}`} aria-hidden="true">
+        <div className={`app-module-art app-module-art--${id}`} aria-hidden="true">
             {id === 'web-editor' ? (
                 <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
                     <rect x="24" y="20" width="192" height="120" rx="2" />
@@ -43,41 +43,41 @@ function UtilityArt({ id }) {
     )
 }
 
-export function UtilityComingSoon({ moduleId }) {
-    const module = UTILITY_MODULES.find(candidate => candidate.id === moduleId)
+export function AppComingSoon({ moduleId }) {
+    const module = APP_MODULES.find(candidate => candidate.id === moduleId)
     return (
-        <div className="explore-page utilities-page animate-fade-in pt-[74px]">
-            <section className="utility-coming-soon max-w-7xl mx-auto px-6 py-20 md:py-28" aria-labelledby="utility-title">
-                <Link to="/utilities" className="explore-back">← All Utilities modules</Link>
-                <div className="utility-coming-soon-content">
-                    <UtilityArt id={module.id} />
-                    <span className="utility-status">Coming soon</span>
-                    <h1 id="utility-title" className="font-serif text-4xl md:text-6xl text-charcoal">{module.title}</h1>
+        <div className="explore-page apps-page animate-fade-in pt-[74px]">
+            <section className="app-coming-soon max-w-7xl mx-auto px-6 py-20 md:py-28" aria-labelledby="app-title">
+                <Link to="/apps" className="explore-back">← All apps</Link>
+                <div className="app-coming-soon-content">
+                    <AppArt id={module.id} />
+                    <span className="app-status">Coming soon</span>
+                    <h1 id="app-title" className="font-serif text-4xl md:text-6xl text-charcoal">{module.title}</h1>
                     <p>{module.detail}</p>
-                    <Link to="/editor" className="utility-editor-link">Try Web Editor →</Link>
+                    <Link to="/editor" className="app-editor-link">Try Web Editor →</Link>
                 </div>
             </section>
         </div>
     )
 }
 
-export default function Utilities() {
+export default function Apps() {
     return (
-        <div className="explore-page utilities-page animate-fade-in pt-[74px]">
+        <div className="explore-page apps-page animate-fade-in pt-[74px]">
             <header className="explore-header max-w-7xl mx-auto px-6 pt-14 pb-8 md:pt-20 md:pb-12">
                 <div className="linen-section-heading editorial-motion-frame">
                     <span>Photography tools</span>
-                    <h1 className="font-serif text-4xl md:text-6xl font-normal text-charcoal">Utilities</h1>
+                    <h1 className="font-serif text-4xl md:text-6xl font-normal text-charcoal">Apps</h1>
                     <p>Photo apps and browser tools.</p>
                 </div>
             </header>
-            <section className="explore-modules utility-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Utilities modules">
-                {UTILITY_MODULES.map((module, index) => (
+            <section className="explore-modules app-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Apps">
+                {APP_MODULES.map((module, index) => (
                     <Link key={module.id} to={module.path} className="explore-module-card editorial-motion-media">
                         <span className="explore-module-number">{String(index + 1).padStart(2, '0')}</span>
-                        <UtilityArt id={module.id} />
+                        <AppArt id={module.id} />
                         <div>
-                            <span className="utility-status">{module.comingSoon ? 'Coming soon' : 'Available now'}</span>
+                            <span className="app-status">{module.comingSoon ? 'Coming soon' : 'Available now'}</span>
                             <h2>{module.title}</h2>
                             <p>{module.detail}</p>
                         </div>

@@ -1,8 +1,8 @@
 import { Link } from 'react-router'
 import './Explore.css'
-import './Utilities.css'
+import './Apps.css'
 import './TruongCam.css'
-import './PhotoUtilityApp.css'
+import './PhotoApp.css'
 
 const APPS = {
     truongnoiser: {
@@ -41,10 +41,10 @@ const sharedFeatures = [
     'Original-file sharing and a recoverable Recently Deleted collection for saved results.',
 ]
 
-export default function PhotoUtilityApp({ moduleId }) {
+export default function PhotoApp({ moduleId }) {
     const app = APPS[moduleId]
     const repository = `https://github.com/iant4093/${app.title}`
-    const assets = `/utilities/${moduleId}`
+    const assets = `/apps/${moduleId}`
     const screens = [
         ['input-library', 'Input library', 'Input library with photos from the selected Files folder'],
         ['output-library', 'Output library', 'Output library with saved processed photos'],
@@ -53,9 +53,9 @@ export default function PhotoUtilityApp({ moduleId }) {
     ]
 
     return (
-        <div className="explore-page utilities-page photo-utility-page animate-fade-in pt-[74px]">
+        <div className="explore-page apps-page photo-app-page animate-fade-in pt-[74px]">
             <div className="cam-shell">
-                <Link to="/utilities" className="explore-back">← All Utilities modules</Link>
+                <Link to="/apps" className="explore-back">← All apps</Link>
                 <header className="cam-hero">
                     <div className="cam-hero-copy">
                         <div className="cam-title"><img src={`${assets}/icon.png`} alt="" width="56" height="56" /><h1>{app.title}</h1></div>
@@ -90,7 +90,7 @@ export default function PhotoUtilityApp({ moduleId }) {
                         </ol>
                         <p className="app-storage-note">Choose folders outside the app’s own container to keep them when removing the app. Keep the output folder’s originals, metadata, and comparison-originals folders together to preserve saved results and before/after comparisons.</p>
                         <a className="cam-guide" href={`${repository}#install`} target="_blank" rel="noreferrer">Full installation guide ↗</a>
-                        <p className="app-companion">Also in Utilities: <Link to={`/utilities/${app.companion.toLowerCase()}`}>{app.companion} →</Link></p>
+                        <p className="app-companion">Also in Apps: <Link to={`/apps/${app.companion.toLowerCase()}`}>{app.companion} →</Link></p>
                     </div>
                 </section>
             </div>
