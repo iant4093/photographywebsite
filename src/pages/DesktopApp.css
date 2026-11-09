@@ -1,0 +1,23 @@
+.linen-site .desktop-app-page .cam-hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
+.linen-site .desktop-app-page .cam-title h1 { font-size: clamp(2.5rem, 5vw, 4.5rem); }
+.linen-site .desktop-app-page .cam-hero-visual { padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2rem) 1.1rem; }
+.linen-site .desktop-app-hero-image { display: block; width: 100%; height: auto; border-radius: 6px; box-shadow: 5px 10px 20px #0003; }
+.linen-site .desktop-app-page .cam-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.linen-site .desktop-app-page .cam-screen-mat { padding: clamp(.75rem, 2vw, 1.5rem); }
+.linen-site .desktop-app-page .cam-screen-mat img { width: 100%; align-self: center; border: 0; border-radius: 5px; }
+.linen-site .desktop-app-availability { margin-top: 1rem; color: var(--color-charcoal); font-size: .9rem; }
+.linen-site .desktop-app-note { color: var(--color-warm-gray); font-size: .8rem; line-height: 1.8; }
+.linen-site .cam-screenshots .desktop-app-note { margin-top: 1.5rem; }
+.linen-site .desktop-app-note a { color: var(--color-charcoal); text-decoration: underline; text-underline-offset: 4px; }
+.linen-site .desktop-app-instructions { display: grid; justify-items: start; gap: 1.25rem; }
+.linen-site .desktop-app-instructions h3 { margin-bottom: .3rem; color: var(--color-charcoal); font-weight: 600; }
+.linen-site .desktop-app-instructions p:not(.desktop-app-note) { color: var(--color-warm-gray); font-size: .9rem; line-height: 1.8; }
+.linen-site .desktop-app-instructions section > p + p { margin-top: .45rem; }
+
+@media (max-width: 800px) {
+    .linen-site .desktop-app-page .cam-hero { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 650px) {
+    .linen-site .desktop-app-page .cam-gallery { grid-template-columns: 1fr; }
+}

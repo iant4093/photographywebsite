@@ -36,4 +36,18 @@ export const APP_MODULES = Object.freeze([
         detail: 'Upscale photos to 2× locally on your iPhone.',
         summary: '2× photo upscaling for iPhone',
     },
+    {
+        id: 'truongflix',
+        path: '/apps/truongflix',
+        title: 'TruongFlix',
+        detail: 'Organize and watch your own movies and shows on Mac or Windows.',
+        summary: 'Local media center for Mac and Windows',
+    },
+    {
+        id: 'truongcleaner',
+        path: '/apps/truongcleaner',
+        title: 'TruongCleaner',
+        detail: 'See what takes up space on your Mac and review what you can clean.',
+        summary: 'Storage cleaner for Mac',
+    },
 ])

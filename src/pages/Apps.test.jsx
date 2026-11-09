@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import TruongCam from './TruongCam'
 import PhotoApp from './PhotoApp'
+import DesktopApp from './DesktopApp'
 import Apps, { AppComingSoon } from './Apps'
 import DocumentMetadata from '../components/DocumentMetadata'
 
@@ -17,6 +18,8 @@ function renderApps(path = '/apps') {
                 <Route path="/apps/truongcam" element={<TruongCam />} />
                 <Route path="/apps/truongnoiser" element={<PhotoApp moduleId="truongnoiser" />} />
                 <Route path="/apps/truongscaler" element={<PhotoApp moduleId="truongscaler" />} />
+                <Route path="/apps/truongflix" element={<DesktopApp moduleId="truongflix" />} />
+                <Route path="/apps/truongcleaner" element={<DesktopApp moduleId="truongcleaner" />} />
             </Routes>
         </MemoryRouter>,
     )
@@ -37,7 +40,7 @@ describe('Apps navigation', () => {
         renderApps()
         expect(screen.getByRole('heading', { name: 'Apps' })).toBeInTheDocument()
         const modules = screen.getByRole('region', { name: 'Apps' })
-        expect(within(modules).getAllByRole('link')).toHaveLength(5)
+        expect(within(modules).getAllByRole('link')).toHaveLength(7)
         fireEvent.click(within(modules).getByRole('link', { name: /Web Editor/ }))
         expect(screen.getByRole('heading', { name: 'Existing photo editor' })).toBeInTheDocument()
     })
@@ -91,5 +94,47 @@ describe('Apps navigation', () => {
         expect(document.title).toContain('2× Photo Upscaling')
         fireEvent.click(screen.getByRole('link', { name: 'TruongNoiser →' }))
         expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('TruongNoiser')
+    })
+})
+
+describe('Desktop app downloads', () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    it.each([
+        ['TruongFlix', 'MacIntel', undefined, 'macOS', 'TruongFlix-macOS.dmg'],
+        ['TruongFlix', 'Win32', undefined, 'Windows', 'TruongFlix-Windows-Setup.exe'],
+        ['TruongFlix', 'Linux x86_64', { platform: 'Windows', mobile: false }, 'Windows', 'TruongFlix-Windows-Setup.exe'],
+        ['TruongCleaner', 'MacIntel', undefined, 'macOS', 'TruongCleaner.dmg'],
+    ])('selects the primary installer for %s on %s', (title, platform, userAgentData, label, file) => {
+        vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform, userAgentData })
+        renderApps()
+        fireEvent.click(screen.getByRole('link', { name: new RegExp(title) }))
+        expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(title)
+        expect(screen.getByRole('link', { name: `Download for ${label}` })).toHaveAttribute('href', `https://github.com/iant4093/${title}/releases/latest/download/${file}`)
+        expect(screen.getAllByRole('link', { name: /Download for/ })).toHaveLength(1)
+        expect(screen.getAllByRole('img')).toHaveLength(5)
+        expect(document.title).toContain(title)
+    })
+
+    it.each([
+        ['truongflix', { platform: 'iPhone' }, /Visit this page on your Mac or Windows computer/],
+        ['truongflix', { platform: 'MacIntel', maxTouchPoints: 5 }, /Visit this page on your Mac or Windows computer/],
+        ['truongcleaner', { platform: 'Linux armv8l', userAgent: 'Mozilla/5.0 (Linux; Android 14)' }, /Visit this page on your Mac/],
+    ])('shows desktop guidance for %s on mobile (%j)', (moduleId, device, message) => {
+        vi.spyOn(window, 'navigator', 'get').mockReturnValue(device)
+        renderApps(`/apps/${moduleId}`)
+        expect(screen.getByText(message)).toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: /Download for|installer/i })).not.toBeInTheDocument()
+    })
+
+    it.each([
+        ['truongcleaner', 'Win32', /Available for Mac\./, ['macOS installer']],
+        ['truongflix', 'Linux x86_64', /Available for Mac and Windows\./, ['macOS installer', 'Windows installer']],
+    ])('shows supported systems for %s on %s and lets visitors choose an installer', (moduleId, platform, message, installers) => {
+        vi.spyOn(window, 'navigator', 'get').mockReturnValue({ platform })
+        renderApps(`/apps/${moduleId}`)
+        expect(screen.getByText(message)).toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: /Download for/ })).not.toBeInTheDocument()
+        expect(screen.getAllByRole('link', { name: /installer/ }).map(link => link.textContent)).toEqual(installers)
     })
 })

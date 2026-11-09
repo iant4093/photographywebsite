@@ -9,6 +9,8 @@ const PAGE_TITLES = {
     '/apps/truongcam': 'TruongCam — RAW Camera for iPhone',
     '/apps/truongnoiser': 'TruongNoiser — Photo Denoising for iPhone',
     '/apps/truongscaler': 'TruongScaler — 2× Photo Upscaling for iPhone',
+    '/apps/truongflix': 'TruongFlix — Local Media Center for Mac and Windows',
+    '/apps/truongcleaner': 'TruongCleaner — Storage Cleaner for Mac',
     '/privacy': 'Privacy Notice',
     '/terms': 'Terms & Photo Use',
     '/print-policy': 'Print Orders & Returns',

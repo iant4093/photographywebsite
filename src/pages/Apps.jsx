@@ -32,6 +32,17 @@ function AppArt({ id }) {
                     <path d="m32 121 21-21 17 14 13-10 19 17M124 28h84v84m-84 0 84-84M167 28h41v41" />
                     <circle cx="81" cy="91" r="6" />
                 </svg>
+            ) : id === 'truongflix' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <rect x="32" y="30" width="176" height="100" rx="2" />
+                    <path d="m107 61 32 19-32 19V61ZM44 116h152" />
+                    <circle cx="76" cy="116" r="3" fill="currentColor" />
+                </svg>
+            ) : id === 'truongcleaner' ? (
+                <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
+                    <circle cx="92" cy="80" r="49" />
+                    <path d="M92 31v49l-34 35m34-35h49M108 47a36 36 0 0 1 20 19M156 54h46m-46 26h36m-36 26h46" />
+                </svg>
             ) : (
                 <svg viewBox="0 0 240 160" fill="none" stroke="currentColor">
                     <path d="M34 53h42l12-19h64l12 19h42v79H34V53Z" />
@@ -66,9 +77,9 @@ export default function Apps() {
         <div className="explore-page apps-page animate-fade-in pt-[74px]">
             <header className="explore-header max-w-7xl mx-auto px-6 pt-14 pb-8 md:pt-20 md:pb-12">
                 <div className="linen-section-heading editorial-motion-frame">
-                    <span>Photography tools</span>
+                    <span>Apps & tools</span>
                     <h1 className="font-serif text-4xl md:text-6xl font-normal text-charcoal">Apps</h1>
-                    <p>Photo apps and browser tools.</p>
+                    <p>Photography, media, and desktop tools.</p>
                 </div>
             </header>
             <section className="explore-modules app-modules max-w-7xl mx-auto px-6 pb-20 md:pb-28" aria-label="Apps">

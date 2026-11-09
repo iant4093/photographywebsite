@@ -189,7 +189,7 @@ describe('desktop navigation dropdowns', () => {
     expect(explore).toHaveFocus()
   })
 
-  it.each(['/editor', '/apps/truongroom', '/apps/truongcam', '/apps/truongnoiser', '/apps/truongscaler'])('opens Apps on %s with all five modules', async path => {
+  it.each(['/editor', '/apps/truongroom', '/apps/truongcam', '/apps/truongnoiser', '/apps/truongscaler', '/apps/truongflix', '/apps/truongcleaner'])('opens Apps on %s with all seven modules', async path => {
     const { container } = await routed(path)
     const apps = trigger(container, 'Apps')
     expect(apps).toHaveAttribute('href', '/apps')
@@ -204,6 +204,8 @@ describe('desktop navigation dropdowns', () => {
     expect(within(panel).getByRole('link', { name: /TruongCam RAW camera for iPhone/ })).toHaveAttribute('href', '/apps/truongcam')
     expect(within(panel).getByRole('link', { name: /TruongNoiser Photo denoising for iPhone/ })).toHaveAttribute('href', '/apps/truongnoiser')
     expect(within(panel).getByRole('link', { name: /TruongScaler 2× photo upscaling for iPhone/ })).toHaveAttribute('href', '/apps/truongscaler')
+    expect(within(panel).getByRole('link', { name: /TruongFlix Local media center for Mac and Windows/ })).toHaveAttribute('href', '/apps/truongflix')
+    expect(within(panel).getByRole('link', { name: /TruongCleaner Storage cleaner for Mac/ })).toHaveAttribute('href', '/apps/truongcleaner')
     expect(panel.querySelector('[aria-current="page"]')).toHaveAttribute('href', path)
     fireEvent.keyDown(document.activeElement, { key: 'Escape' })
     expect(apps).toHaveAttribute('aria-expanded', 'false')
