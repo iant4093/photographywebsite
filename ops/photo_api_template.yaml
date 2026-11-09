@@ -298,8 +298,8 @@ Resources:
       Architectures: [arm64]
       Handler: photo_api_publisher.handler
       Role: !GetAtt PublisherRole.Arn
-      MemorySize: 256
-      Timeout: 300
+      MemorySize: 512
+      Timeout: 600
       ReservedConcurrentExecutions: 1
       Code:
         S3Bucket: !Ref CatalogBucket
